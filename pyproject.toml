@@ -1,0 +1,22 @@
+[project]
+name = "security_camera_project"
+version = "0.1.0"
+description = "A security camera system with motion detection and video analytics."
+
+# Specify Python version requirement
+requires-python = ">=3.12"
+
+# List your dependencies here
+dependencies = [
+    "opencv-python",
+    "numpy",
+    "pillow",
+    "torch",
+    "ultralytics",
+    "openai",
+    "python-dotenv",
+    "lap==0.5.12",
+    "transformers>=4.57.3",
+    "num2words>=0.5.14",
+    "av>=16.0.1",
+]
