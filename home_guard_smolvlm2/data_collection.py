@@ -112,19 +112,19 @@ class Config:
 
     def __post_init__(self):
         if self.CAMERAS is None:
-            # self.CAMERAS = {
-            #     "main_door": "rtsp://admin:amer1967%40@192.168.68.110:554/unicast/c6/s1/live",
-            #     "back_door": "rtsp://admin:amer1967%40@192.168.68.110:554/unicast/c1/s1/live",
-            #     "left_side_1": "rtsp://admin:amer1967%40@192.168.68.110:554/unicast/c2/s1/live",
-            #     "front_side": "rtsp://admin:amer1967%40@192.168.68.110:554/unicast/c3/s1/live",
-            #     "left_side_2": "rtsp://admin:amer1967%40@192.168.68.110:554/unicast/c5/s1/live",
-            #     "right_side": "rtsp://admin:amer1967%40@192.168.68.110:554/unicast/c8/s1/live",
-            # }
             self.CAMERAS = {
-                "main_door": "rtsp://admin:Aa123123%40@192.168.68.103:554/unicast/c2/s1/live",
-                "back_door": "rtsp://admin:Aa123123%40@192.168.68.103:554/unicast/c1/s1/live",
-                "right_side": "rtsp://admin:Aa123123%40@192.168.68.103:554/unicast/c3/s1/live",
+                "main_door": "rtsp://admin:amer1967%40@192.168.68.110:554/unicast/c6/s1/live",
+                "back_door": "rtsp://admin:amer1967%40@192.168.68.110:554/unicast/c1/s1/live",
+                "left_side_1": "rtsp://admin:amer1967%40@192.168.68.110:554/unicast/c2/s1/live",
+                "front_side": "rtsp://admin:amer1967%40@192.168.68.110:554/unicast/c3/s1/live",
+                "left_side_2": "rtsp://admin:amer1967%40@192.168.68.110:554/unicast/c5/s1/live",
+                "right_side": "rtsp://admin:amer1967%40@192.168.68.110:554/unicast/c8/s1/live",
             }
+            # self.CAMERAS = {
+            #     "main_door": "rtsp://admin:Aa123123%40@192.168.68.103:554/unicast/c2/s1/live",
+            #     "back_door": "rtsp://admin:Aa123123%40@192.168.68.103:554/unicast/c1/s1/live",
+            #     "right_side": "rtsp://admin:Aa123123%40@192.168.68.103:554/unicast/c3/s1/live",
+            # }
 
 
 # =========================

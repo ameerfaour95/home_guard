@@ -21,6 +21,9 @@ venv/
 dataset_multi/
 captures/
 frames/
+clips_output/
+ShanghaiTech/
+StreetScene/
 
 logs/
 tmp/
