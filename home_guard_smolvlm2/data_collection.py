@@ -38,8 +38,8 @@ Alert policy:
 
 Output format:
 {{
-  "summary": "<one sentence describing the whole clip>",
-  "alert_reason": "<short reason>",
+  "summary": "<long summary of the video explaining what is happening in detail>",
+  "alert_reason": "<reason what alert_command you chose and why>",
   "alert_command": "[none] or [send_message] or [call_owner]"
 }}
 """.strip()
@@ -69,8 +69,9 @@ class Config:
     CLIP_SECONDS: float = 10.0
 
     # Critical performance knobs
-    STORE_FPS: float = 8.0                   # how many frames/sec we KEEP per camera
-    STORE_SIZE: Tuple[int, int] = (640, 360) # resize stored frames to this (w, h)
+    STORE_FPS: float = 10.0                   # how many frames/sec we KEEP per camera
+    # STORE_SIZE: Tuple[int, int] = (640, 360)
+    STORE_SIZE: Tuple[int, int] = (960, 540)
 
     # Trigger hysteresis (time-based)
     SCORE_MAX: float = 10.0       # points needed to trigger
@@ -111,13 +112,18 @@ class Config:
 
     def __post_init__(self):
         if self.CAMERAS is None:
+            # self.CAMERAS = {
+            #     "main_door": "rtsp://admin:amer1967%40@192.168.68.110:554/unicast/c6/s1/live",
+            #     "back_door": "rtsp://admin:amer1967%40@192.168.68.110:554/unicast/c1/s1/live",
+            #     "left_side_1": "rtsp://admin:amer1967%40@192.168.68.110:554/unicast/c2/s1/live",
+            #     "front_side": "rtsp://admin:amer1967%40@192.168.68.110:554/unicast/c3/s1/live",
+            #     "left_side_2": "rtsp://admin:amer1967%40@192.168.68.110:554/unicast/c5/s1/live",
+            #     "right_side": "rtsp://admin:amer1967%40@192.168.68.110:554/unicast/c8/s1/live",
+            # }
             self.CAMERAS = {
-                "main_door": "rtsp://admin:amer1967%40@192.168.68.110:554/unicast/c6/s1/live",
-                "back_door": "rtsp://admin:amer1967%40@192.168.68.110:554/unicast/c1/s1/live",
-                "left_side_1": "rtsp://admin:amer1967%40@192.168.68.110:554/unicast/c2/s1/live",
-                "front_side": "rtsp://admin:amer1967%40@192.168.68.110:554/unicast/c3/s1/live",
-                "left_side_2": "rtsp://admin:amer1967%40@192.168.68.110:554/unicast/c5/s1/live",
-                "right_side": "rtsp://admin:amer1967%40@192.168.68.110:554/unicast/c8/s1/live",
+                "main_door": "rtsp://admin:Aa123123%40@192.168.68.103:554/unicast/c2/s1/live",
+                "back_door": "rtsp://admin:Aa123123%40@192.168.68.103:554/unicast/c1/s1/live",
+                "right_side": "rtsp://admin:Aa123123%40@192.168.68.103:554/unicast/c3/s1/live",
             }
 
 
