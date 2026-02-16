@@ -19,4 +19,6 @@ dependencies = [
     "transformers>=4.57.3",
     "num2words>=0.5.14",
     "av>=16.0.1",
+    "label-studio-sdk",
+    "label-studio",
 ]

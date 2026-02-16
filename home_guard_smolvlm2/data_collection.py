@@ -24,24 +24,7 @@ from transformers import AutoProcessor, AutoModelForImageTextToText
 # 0) PROMPT
 # =========================
 PROMPT_TEMPLATE = """
-You are a security camera assistant.
-
-Camera name: {camera_name}
-
-Task:
 Describe what happens in the video
-
-Alert policy:
-- If no person is visible: alert_command = "[none]"
-- If any person is visible: alert_command = "[send_message]"
-- If suspicious behavior is visible alert_command = "[call_owner]"
-
-Output format:
-{{
-  "summary": "<long summary of the video explaining what is happening in detail>",
-  "alert_reason": "<reason what alert_command you chose and why>",
-  "alert_command": "[none] or [send_message] or [call_owner]"
-}}
 """.strip()
 
 
@@ -80,7 +63,7 @@ class Config:
     COOLDOWN_TRIGGER_SEC: float = 5.0
 
     # Random sampling
-    RANDOM_CLIP_INTERVAL_SEC: float = 1800.0
+    RANDOM_CLIP_INTERVAL_SEC: float = 3600.0
     RANDOM_JITTER_FRAC: float = 0.25
     RANDOM_ALLOW_PERSON: bool = True
 
@@ -107,18 +90,19 @@ class Config:
 
     # Performance
     YOLO_EVERY_N_FRAMES_CPU: int = 6
+    YOLO_TRIGGER_CONF: float = 0.5  # Confidence threshold for triggering clip saves
     SHOW_WINDOWS: bool = True
     SHOW_PLOTTED_BOXES: bool = False
 
     def __post_init__(self):
         if self.CAMERAS is None:
             self.CAMERAS = {
-                "main_door": "rtsp://admin:amer1967%40@192.168.68.110:554/unicast/c6/s1/live",
-                "back_door": "rtsp://admin:amer1967%40@192.168.68.110:554/unicast/c1/s1/live",
-                "left_side_1": "rtsp://admin:amer1967%40@192.168.68.110:554/unicast/c2/s1/live",
-                "front_side": "rtsp://admin:amer1967%40@192.168.68.110:554/unicast/c3/s1/live",
-                "left_side_2": "rtsp://admin:amer1967%40@192.168.68.110:554/unicast/c5/s1/live",
-                "right_side": "rtsp://admin:amer1967%40@192.168.68.110:554/unicast/c8/s1/live",
+                "main_door": "rtsp://admin:amer1967%40@192.168.68.106:554/unicast/c6/s1/live",
+                "back_door": "rtsp://admin:amer1967%40@192.168.68.106:554/unicast/c1/s1/live",
+                "left_side_1": "rtsp://admin:amer1967%40@192.168.68.106:554/unicast/c2/s1/live",
+                "front_side": "rtsp://admin:amer1967%40@192.168.68.106:554/unicast/c3/s1/live",
+                "left_side_2": "rtsp://admin:amer1967%40@192.168.68.106:554/unicast/c5/s1/live",
+                "right_side": "rtsp://admin:amer1967%40@192.168.68.106:554/unicast/c8/s1/live",
             }
             # self.CAMERAS = {
             #     "main_door": "rtsp://admin:Aa123123%40@192.168.68.103:554/unicast/c2/s1/live",
@@ -532,7 +516,7 @@ class SmolVLM2Worker:
                 if hasattr(v, "is_floating_point") and v.is_floating_point():
                     inputs[k] = v.to(self.cfg.DTYPE)
 
-        gen = self.model.generate(**inputs, max_new_tokens=220, do_sample=False)
+        gen = self.model.generate(**inputs, max_new_tokens=512, do_sample=False)
 
         prompt_len = inputs["input_ids"].shape[1]
         out_text = self.processor.batch_decode(gen[:, prompt_len:], skip_special_tokens=True)[0].strip()
@@ -760,7 +744,7 @@ def main():
                     run_yolo = (st.frame_i % cfg.YOLO_EVERY_N_FRAMES_CPU == 0)
 
                 if run_yolo:
-                    results = detector(frame, verbose=False)
+                    results = detector(frame, verbose=False, conf=cfg.YOLO_TRIGGER_CONF)
                     st.last_yolo = results
                     st.yolo_class_counts, st.yolo_class_max_conf = summarize_yolo(results)
 
