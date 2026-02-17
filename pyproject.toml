@@ -21,4 +21,6 @@ dependencies = [
     "av>=16.0.1",
     "label-studio-sdk",
     "label-studio",
+    "tqdm",
+    "pyyaml",
 ]

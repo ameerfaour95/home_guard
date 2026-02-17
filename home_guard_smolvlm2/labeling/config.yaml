@@ -1,0 +1,27 @@
+# ──────────────────────────────────────────────────────────────────────────────
+#  Label Studio annotation pipeline configuration
+# ──────────────────────────────────────────────────────────────────────────────
+
+label_studio:
+  port: 8080
+  email: "ameerfaour95@gmail.com"
+  password: "Amer1967"
+  project_name: "Security Camera Annotations"
+
+file_server:
+  port: 8081
+
+# COCO class-id -> label name (subset relevant for security cameras)
+coco_labels:
+  0: "person"
+  1: "bicycle"
+  2: "car"
+  3: "motorcycle"
+  5: "bus"
+  7: "truck"
+  14: "bird"
+  15: "cat"
+  16: "dog"
+
+# Default dataset directory (relative to project root)
+dataset_dir: "./dataset_multi"

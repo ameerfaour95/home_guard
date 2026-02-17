@@ -29,7 +29,14 @@ logs/
 tmp/
 *.logs
 
+# Label Studio generated artifacts
+label_studio_tasks.json
+label_studio_config.xml
+.ls_session.json
+.ls_export_backup.json
+
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
+.cursor/
