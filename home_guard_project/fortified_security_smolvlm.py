@@ -1,10 +1,10 @@
 """
-Fortified Security (SmolVLM2) — FULL SCRIPT (10s clip via real MP4, “as-trained” style)
+Fortified Security (VLM) — FULL SCRIPT (10s clip via real MP4, “as-trained” style)
 
 Goal (Option 1):
 - Buffer the last 10 seconds from RTSP
 - When triggered, write those frames to a temporary .mp4
-- Feed the MP4 path to the SmolVLM2 processor: videos=[clip_path]
+- Feed the MP4 path to the VLM processor: videos=[clip_path]
   (no custom frame sampling, no frames_indices / video_metadata)
 
 Stability:
@@ -314,7 +314,7 @@ class VideoCaptureThread:
 
 
 # ==========================================================
-# 4) SMART SECURITY AGENT (SmolVLM2, MP4-path input)
+# 4) SMART SECURITY AGENT (VLM, MP4-path input)
 # ==========================================================
 class SmartSecurityAgent:
     def __init__(self):

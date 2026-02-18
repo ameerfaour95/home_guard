@@ -2,11 +2,13 @@
 CLI entry point for the labeling pipeline.
 
 Usage:
-    python -m home_guard_smolvlm2.labeling
-    python -m home_guard_smolvlm2.labeling --dataset-dir ./dataset_multi --limit 50
-    python -m home_guard_smolvlm2.labeling --reencode
-    python -m home_guard_smolvlm2.labeling --serve
-    python -m home_guard_smolvlm2.labeling --merge exported.json
+    python -m home_guard_project.labeling
+    python -m home_guard_project.labeling --dataset-dir ./dataset_multi --limit 50
+    python -m home_guard_project.labeling --reencode
+    python -m home_guard_project.labeling --serve
+    python -m home_guard_project.labeling --merge exported.json
+    python -m home_guard_project.labeling --cleanup-only
+    python -m home_guard_project.labeling --cleanup-only --dry-run
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ from .tasks import (
     tasks_are_fresh,
     write_config,
 )
+from .utils.cleanup import cleanup_orphans
 from .utils.ffmpeg import reencode_videos
 from .utils.file_server import start_file_server
 from .utils.merge import merge_annotations
@@ -114,6 +117,21 @@ def main() -> None:
              "generated tasks file.",
     )
     parser.add_argument(
+        "--no-cleanup",
+        action="store_true",
+        help="Skip orphan cleanup (removal of meta/yolo files with no matching clip)",
+    )
+    parser.add_argument(
+        "--cleanup-only",
+        action="store_true",
+        help="Only run orphan cleanup, then exit",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="With --cleanup-only: show what would be removed without deleting",
+    )
+    parser.add_argument(
         "-v", "--verbose",
         action="store_true",
         help="Enable debug-level logging",
@@ -131,6 +149,19 @@ def main() -> None:
     # --serve: start the file server and block
     if args.serve:
         start_file_server(dataset_dir, port=args.port, background=False)
+        return
+
+    # --cleanup-only: run orphan cleanup and exit
+    if args.cleanup_only:
+        stats = cleanup_orphans(dataset_dir, dry_run=args.dry_run)
+        print()
+        print(stats.summary())
+        if stats.total_removed == 0:
+            log.info("Dataset is clean — no orphans found.")
+        elif args.dry_run:
+            log.info("Re-run without --dry-run to delete %d orphan files.", stats.total_removed)
+        else:
+            log.info("Removed %d orphan files in %.1fs", stats.total_removed, time.monotonic() - t_start)
         return
 
     # --merge only (no generation): merge and exit
@@ -157,7 +188,13 @@ def main() -> None:
 
     video_base_url = f"http://localhost:{args.port}"
 
-    # Step 0: Check if tasks are already up-to-date
+    # Step 0a: Orphan cleanup (remove meta/response/yolo for deleted clips)
+    if not args.no_cleanup:
+        stats = cleanup_orphans(dataset_dir)
+        if stats.total_removed > 0:
+            log.info("Cleanup: removed %d orphan files", stats.total_removed)
+
+    # Step 0b: Check if tasks are already up-to-date
     if not args.force and not args.limit and tasks_are_fresh(dataset_dir):
         log.info("Nothing to do (%.1fs). Use --force to rebuild anyway.",
                  time.monotonic() - t_start)

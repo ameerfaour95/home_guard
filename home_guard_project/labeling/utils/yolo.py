@@ -91,11 +91,35 @@ def build_predictions(
                 rect = yolo_to_ls_rect(det["xc"], det["yc"], det["w"], det["h"])
                 video_frame = frame_index + 1
                 time_offset = ef.get("approx_time_offset_sec", 0.0)
+                region_id = f"bbox_{result_idx}"
 
+                # VideoRectangle result (box coordinates)
                 results.append({
-                    "id": f"bbox_{result_idx}",
+                    "id": region_id,
                     "type": "videorectangle",
                     "from_name": "bbox",
+                    "to_name": "video",
+                    "value": {
+                        "sequence": [
+                            {
+                                "frame": video_frame,
+                                "x": round(rect["x"], 4),
+                                "y": round(rect["y"], 4),
+                                "width": round(rect["width"], 4),
+                                "height": round(rect["height"], 4),
+                                "time": round(time_offset, 4),
+                                "enabled": True,
+                                "rotation": 0,
+                            }
+                        ],
+                    },
+                })
+
+                # Labels result (linked to the same region)
+                results.append({
+                    "id": f"label_{result_idx}",
+                    "type": "labels",
+                    "from_name": "label",
                     "to_name": "video",
                     "value": {
                         "labels": [label_name],

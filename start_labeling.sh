@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
 # ============================================================================
-#  start.sh — One-command annotation launcher
+#  start_labeling.sh — One-command annotation launcher
 #
-#  Lives in:  home_guard_smolvlm2/labeling/start.sh
+#  Lives in:  home_guard_project/start_labeling.sh
 #
 #  Usage:
-#      ./home_guard_smolvlm2/labeling/start.sh [DATASET_DIR] [--force]
+#      ./home_guard_project/start_labeling.sh [DATASET_DIR]
 #
-#  Examples:
-#      ./home_guard_smolvlm2/labeling/start.sh ./dataset_multi
-#      ./home_guard_smolvlm2/labeling/start.sh ./dataset_multi --force
+#  Example:
+#      ./home_guard_project2/start_labeling.sh ./dataset_multi
 #
 #  What it does:
 #    1. Verifies Python >= 3.12 and installs uv if missing
@@ -28,51 +27,16 @@ set -euo pipefail
 
 # ── Always run from the project root (where pyproject.toml lives) ─────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$PROJECT_ROOT"
 
-# ── Configuration from config.yaml ─────────────────────────────────────────
-CONFIG_YAML="${SCRIPT_DIR}/config.yaml"
-if [[ ! -f "$CONFIG_YAML" ]]; then
-    echo "[ERROR] config.yaml not found at: $CONFIG_YAML" >&2
-    exit 1
-fi
-
-# Read simple YAML values using sed (no Python or pyyaml dependency needed)
-# Handles: key: value  /  key: "value"  /  key: 'value'
-yaml_val() {
-    local key="$1"
-    local raw
-    raw=$(grep -E "^\s*${key}:" "$CONFIG_YAML" | head -1 | sed 's/^[^:]*:\s*//')
-    # Strip surrounding quotes
-    raw="${raw%\"}" ; raw="${raw#\"}"
-    raw="${raw%\'}" ; raw="${raw#\'}"
-    # Trim trailing whitespace
-    echo "$raw" | sed 's/[[:space:]]*$//'
-}
-
-# Parse CLI args
-FORCE_REBUILD=false
-POSITIONAL_ARGS=()
-for arg in "$@"; do
-    case "$arg" in
-        --force) FORCE_REBUILD=true ;;
-        *)       POSITIONAL_ARGS+=("$arg") ;;
-    esac
-done
-
-# Read config values (dataset_dir can be overridden by first positional arg)
-DATASET_DIR="${POSITIONAL_ARGS[0]:-$(yaml_val dataset_dir)}"
-
-# label_studio.port — grep the one directly under label_studio:
-LS_PORT=$(sed -n '/^label_studio:/,/^[a-z]/{ /^\s*port:/p }' "$CONFIG_YAML" | head -1 | sed 's/^[^:]*:\s*//' | tr -d '[:space:]')
-LS_EMAIL="$(yaml_val email)"
-LS_PASSWORD="$(yaml_val password)"
-PROJECT_NAME="$(yaml_val project_name)"
-
-# file_server.port
-FILE_SERVER_PORT=$(sed -n '/^file_server:/,/^[a-z]/{ /^\s*port:/p }' "$CONFIG_YAML" | head -1 | sed 's/^[^:]*:\s*//' | tr -d '[:space:]')
-
+# ── Configuration ───────────────────────────────────────────────────────────
+DATASET_DIR="${1:-./dataset_multi}"
+LS_PORT=8080
+FILE_SERVER_PORT=8081
+PROJECT_NAME="Security Camera Annotations"
+LS_EMAIL="admin@localhost"
+LS_PASSWORD="admin12345678"
 LS_BASE="http://localhost:${LS_PORT}"
 SESSION_FILE="${DATASET_DIR}/.ls_session.json"
 
@@ -104,8 +68,6 @@ cleanup() {
     if [[ -n "$LABEL_STUDIO_PID" ]]; then
         kill "$LABEL_STUDIO_PID" 2>/dev/null && info "Label Studio stopped." || true
     fi
-    # Clean up temp cookie jar
-    [[ -n "${COOKIE_JAR:-}" ]] && rm -f "$COOKIE_JAR" 2>/dev/null || true
     ok "All services stopped. Goodbye."
 }
 trap cleanup EXIT INT TERM
@@ -188,7 +150,7 @@ step "Verifying dataset"
 
 if [[ ! -d "$DATASET_DIR" ]]; then
     err "Dataset directory not found: $DATASET_DIR"
-    err "Pass the correct path:  ./home_guard_smolvlm2/labeling/start.sh /path/to/dataset_multi"
+    err "Pass the correct path:  ./start_labeling.sh /path/to/dataset_multi"
     exit 1
 fi
 
@@ -208,12 +170,9 @@ step "Re-encoding clips & generating tasks"
 info "This re-encodes mp4v clips to H.264 (already-encoded clips are skipped)."
 info "Then generates Label Studio config + tasks JSON..."
 
-LABELING_ARGS=(--dataset-dir "$DATASET_DIR" --reencode)
-if [[ "$FORCE_REBUILD" == "true" ]]; then
-    LABELING_ARGS+=(--force)
-fi
-
-$UVRUN python -m home_guard_smolvlm2.labeling "${LABELING_ARGS[@]}"
+$UVRUN python -m home_guard_project.label_studio_setup \
+    --dataset-dir "$DATASET_DIR" \
+    --reencode
 
 ok "Tasks generated at ${DATASET_DIR}/label_studio_tasks.json"
 
@@ -222,7 +181,7 @@ ok "Tasks generated at ${DATASET_DIR}/label_studio_tasks.json"
 # ============================================================================
 step "Starting file server (port ${FILE_SERVER_PORT})"
 
-$UVRUN python -m home_guard_smolvlm2.labeling \
+$UVRUN python -m home_guard_project.label_studio_setup \
     --serve \
     --dataset-dir "$DATASET_DIR" \
     --port "$FILE_SERVER_PORT" &
@@ -240,13 +199,6 @@ fi
 #  STEP 7: Start Label Studio (background)
 # ============================================================================
 step "Starting Label Studio (port ${LS_PORT})"
-
-# LS manages its own SECRET_KEY in $LOCALAPPDATA/label-studio/.env.
-# Do NOT override it — that would invalidate existing user passwords.
-
-# Auto-provision the admin account on first launch (when no users exist yet).
-export LABEL_STUDIO_USERNAME="${LS_EMAIL}"
-export LABEL_STUDIO_PASSWORD="${LS_PASSWORD}"
 
 $UVRUN label-studio start \
     --port "$LS_PORT" \
@@ -279,83 +231,61 @@ ok "Label Studio ready (PID ${LABEL_STUDIO_PID})"
 # ============================================================================
 step "Configuring Label Studio project via API"
 
+# Helper: JSON value extraction (pure bash, no jq dependency)
+json_val() {
+    # Usage: json_val '"key"' < json_string
+    # Simple grep-based extraction — works for flat JSON responses
+    $PYTHON -c "import sys,json; d=json.load(sys.stdin); print(d.get($1, ''))"
+}
+
 # ── Check if session exists from a previous run ────────────────────────────
+TOKEN=""
 PROJECT_ID=""
 
 if [[ -f "$SESSION_FILE" ]]; then
+    TOKEN=$($PYTHON -c "import json; d=json.load(open('$SESSION_FILE')); print(d.get('token',''))" 2>/dev/null || echo "")
     PROJECT_ID=$($PYTHON -c "import json; d=json.load(open('$SESSION_FILE')); print(d.get('project_id',''))" 2>/dev/null || echo "")
 fi
 
 # ── Sign up (first run) or log in ──────────────────────────────────────────
-# Label Studio 1.22+ disabled legacy token auth.
-# All API calls use session cookies + CSRF tokens instead.
-COOKIE_JAR=$(mktemp)
-AUTHENTICATED=false
+if [[ -z "$TOKEN" ]]; then
+    info "Creating admin account..."
+    # Try signup first (will fail if user already exists)
+    SIGNUP_RESP=$(curl -sf -X POST "${LS_BASE}/api/auth/signup" \
+        -H "Content-Type: application/json" \
+        -d "{\"email\":\"${LS_EMAIL}\",\"password\":\"${LS_PASSWORD}\"}" 2>/dev/null || echo "{}")
 
-_get_csrf() {
-    # Fetch a page to get a CSRF cookie, then extract the token value
-    curl -s -c "$COOKIE_JAR" "${LS_BASE}${1}" > /dev/null 2>&1
-    grep csrftoken "$COOKIE_JAR" | awk '{print $NF}'
-}
+    TOKEN=$(echo "$SIGNUP_RESP" | $PYTHON -c "import sys,json; d=json.load(sys.stdin); print(d.get('token',''))" 2>/dev/null || echo "")
 
-_is_authed() {
-    # Check if the session cookie gives us a valid API response
-    local resp
-    resp=$(curl -s -b "$COOKIE_JAR" "${LS_BASE}/api/current-user/whoami" 2>/dev/null)
-    echo "$resp" | $PYTHON -c "import sys,json; d=json.load(sys.stdin); sys.exit(0 if d.get('email') else 1)" 2>/dev/null
-}
+    # If signup failed (user exists), try login
+    if [[ -z "$TOKEN" ]]; then
+        info "User already exists, logging in..."
+        LOGIN_RESP=$(curl -sf -X POST "${LS_BASE}/api/auth/login" \
+            -H "Content-Type: application/json" \
+            -d "{\"email\":\"${LS_EMAIL}\",\"password\":\"${LS_PASSWORD}\"}" 2>/dev/null || echo "{}")
 
-# Helper: authenticated curl using the session cookie jar + CSRF
-_api() {
-    # Usage: _api METHOD /api/endpoint [extra curl args...]
-    local method="$1"; shift
-    local endpoint="$1"; shift
-    local csrf
-    csrf=$(grep csrftoken "$COOKIE_JAR" 2>/dev/null | awk '{print $NF}')
-    curl -s -b "$COOKIE_JAR" -c "$COOKIE_JAR" \
-        -X "$method" "${LS_BASE}${endpoint}" \
-        -H "X-CSRFToken: ${csrf}" \
-        -H "Referer: ${LS_BASE}${endpoint}" \
-        "$@"
-}
+        # Login returns session cookie; get token from user/token endpoint
+        SESSION_COOKIE=$(echo "$LOGIN_RESP" | $PYTHON -c "
+import sys,json
+d=json.load(sys.stdin)
+print(d.get('token','') or d.get('sessionid',''))
+" 2>/dev/null || echo "")
 
-info "Signing up / logging in..."
-CSRF=$(_get_csrf "/user/signup")
-
-# Try signup first (form-based POST with CSRF)
-curl -s -o /dev/null \
-    -b "$COOKIE_JAR" -c "$COOKIE_JAR" \
-    -X POST "${LS_BASE}/user/signup" \
-    -H "X-CSRFToken: ${CSRF}" \
-    -H "Referer: ${LS_BASE}/user/signup" \
-    -d "email=${LS_EMAIL}&password=${LS_PASSWORD}&csrfmiddlewaretoken=${CSRF}" \
-    2>/dev/null || true
-
-if _is_authed; then
-    AUTHENTICATED=true
-fi
-
-# If signup didn't authenticate (user already exists), try login
-if [[ "$AUTHENTICATED" == "false" ]]; then
-    info "User exists, logging in..."
-    CSRF=$(_get_csrf "/user/login")
-
-    curl -s -o /dev/null \
-        -b "$COOKIE_JAR" -c "$COOKIE_JAR" \
-        -X POST "${LS_BASE}/user/login" \
-        -H "X-CSRFToken: ${CSRF}" \
-        -H "Referer: ${LS_BASE}/user/login" \
-        -d "email=${LS_EMAIL}&password=${LS_PASSWORD}&csrfmiddlewaretoken=${CSRF}" \
-        2>/dev/null || true
-
-    if _is_authed; then
-        AUTHENTICATED=true
+        if [[ -n "$SESSION_COOKIE" ]]; then
+            TOKEN="$SESSION_COOKIE"
+        else
+            # Try getting token from /api/current-user/token
+            TOKEN=$(curl -sf "${LS_BASE}/api/current-user/token" \
+                -H "Content-Type: application/json" \
+                -b <(echo "$LOGIN_RESP") 2>/dev/null \
+                | $PYTHON -c "import sys,json; print(json.load(sys.stdin).get('token',''))" 2>/dev/null || echo "")
+        fi
     fi
 fi
 
-if [[ "$AUTHENTICATED" == "false" ]]; then
-    warn "Could not authenticate with Label Studio."
-    warn "Please log in manually at ${LS_BASE} and create a project."
+if [[ -z "$TOKEN" ]]; then
+    warn "Could not obtain API token automatically."
+    warn "Please log in manually at ${LS_BASE} and import tasks from the UI."
     warn "  Email: ${LS_EMAIL}  Password: ${LS_PASSWORD}"
     open_browser "${LS_BASE}"
     info "Servers are running. Press Ctrl+C to stop."
@@ -363,18 +293,22 @@ if [[ "$AUTHENTICATED" == "false" ]]; then
     exit 0
 fi
 
-ok "Authenticated as ${LS_EMAIL}"
+ok "Authenticated (token: ${TOKEN:0:8}...)"
+
+AUTH_HEADER="Authorization: Token ${TOKEN}"
 
 # ── Create or reuse project ────────────────────────────────────────────────
+LABEL_CONFIG=$(cat "${DATASET_DIR}/label_studio_config.xml")
 IS_RERUN=false
 
 if [[ -z "$PROJECT_ID" ]]; then
     info "Creating project: ${PROJECT_NAME}"
 
-    CREATE_RESP=$(_api POST "/api/projects" \
+    CREATE_RESP=$(curl -sf -X POST "${LS_BASE}/api/projects" \
+        -H "$AUTH_HEADER" \
         -H "Content-Type: application/json" \
         -d "$($PYTHON -c "
-import json
+import json, sys
 config = open('${DATASET_DIR}/label_studio_config.xml').read()
 print(json.dumps({
     'title': '${PROJECT_NAME}',
@@ -398,7 +332,8 @@ else
     info "Reusing existing project (ID: ${PROJECT_ID})"
 
     # Update the labeling config in case it changed
-    _api PATCH "/api/projects/${PROJECT_ID}" \
+    curl -sf -X PATCH "${LS_BASE}/api/projects/${PROJECT_ID}" \
+        -H "$AUTH_HEADER" \
         -H "Content-Type: application/json" \
         -d "$($PYTHON -c "
 import json
@@ -412,7 +347,7 @@ fi
 # ── Save session for re-runs ───────────────────────────────────────────────
 $PYTHON -c "
 import json
-json.dump({'project_id': ${PROJECT_ID}}, open('${SESSION_FILE}', 'w'), indent=2)
+json.dump({'token': '${TOKEN}', 'project_id': ${PROJECT_ID}}, open('${SESSION_FILE}', 'w'), indent=2)
 "
 ok "Session saved to ${SESSION_FILE}"
 
@@ -423,8 +358,9 @@ EXPORT_BACKUP="${DATASET_DIR}/.ls_export_backup.json"
 if [[ "$IS_RERUN" == "true" ]]; then
     info "Exporting existing annotations from project ${PROJECT_ID}..."
 
-    EXPORT_STATUS=$(_api GET "/api/projects/${PROJECT_ID}/export?exportType=JSON" \
-        -w "%{http_code}" -o "$EXPORT_BACKUP" 2>/dev/null || echo "000")
+    EXPORT_STATUS=$(curl -sf -w "%{http_code}" -o "$EXPORT_BACKUP" \
+        -X GET "${LS_BASE}/api/projects/${PROJECT_ID}/export?exportType=JSON" \
+        -H "$AUTH_HEADER" 2>/dev/null || echo "000")
 
     if [[ "$EXPORT_STATUS" == "200" && -s "$EXPORT_BACKUP" ]]; then
         EXPORTED_COUNT=$($PYTHON -c "
@@ -438,7 +374,7 @@ print(f'{len(tasks)} tasks, {annotated} with annotations')
         # Merge annotations into the regenerated tasks
         if [[ -f "$TASKS_FILE" ]]; then
             info "Merging annotations into new tasks..."
-            $UVRUN python -m home_guard_smolvlm2.labeling \
+            $PYTHON -m home_guard_project.label_studio_setup \
                 --merge "$EXPORT_BACKUP" \
                 --dataset-dir "$DATASET_DIR"
             ok "Annotations merged."
@@ -446,13 +382,15 @@ print(f'{len(tasks)} tasks, {annotated} with annotations')
 
         # Delete all existing tasks in the project before reimport
         info "Clearing existing tasks from project ${PROJECT_ID}..."
-        _api POST "/api/dm/actions?id=delete_tasks&project=${PROJECT_ID}" \
+        curl -sf -X POST "${LS_BASE}/api/dm/actions?id=delete_tasks&project=${PROJECT_ID}" \
+            -H "$AUTH_HEADER" \
             -H "Content-Type: application/json" \
             -d '{"selectedItems": {"all": true, "excluded": []}}' \
             > /dev/null 2>&1 || true
         ok "Existing tasks cleared."
     else
         warn "Could not export annotations (HTTP ${EXPORT_STATUS}). Proceeding without merge."
+        # Clean up empty/failed export file
         rm -f "$EXPORT_BACKUP" 2>/dev/null || true
     fi
 fi
@@ -461,7 +399,8 @@ fi
 if [[ -f "$TASKS_FILE" ]]; then
     info "Importing tasks into project ${PROJECT_ID}..."
 
-    IMPORT_RESP=$(_api POST "/api/projects/${PROJECT_ID}/import" \
+    IMPORT_RESP=$(curl -sf -X POST "${LS_BASE}/api/projects/${PROJECT_ID}/import" \
+        -H "$AUTH_HEADER" \
         -H "Content-Type: application/json" \
         -d @"$TASKS_FILE" 2>/dev/null || echo "{}")
 

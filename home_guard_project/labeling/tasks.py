@@ -65,13 +65,13 @@ def tasks_are_fresh(dataset_dir: str) -> bool:
 _LABEL_CONFIG_XML = """\
 <View>
   <Header value="$header_info"/>
-  <Video name="video" value="$video_url" frameRate="$fps"/>
 
-  <VideoRectangle name="bbox" toName="video">
-    <Labels name="label" toName="bbox">
+  <Labels name="label" toName="video">
 {label_tags}
-    </Labels>
-  </VideoRectangle>
+  </Labels>
+
+  <Video name="video" value="$video_url" frameRate="$fps"/>
+  <VideoRectangle name="bbox" toName="video"/>
 
   <Header value="Scene Description (for VLM training)"/>
   <TextArea name="vlm_description" toName="video"

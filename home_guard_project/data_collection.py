@@ -452,7 +452,7 @@ class ClipJob:
     meta: Dict[str, Any]
 
 
-class SmolVLM2Worker:
+class VLMWorker:
     def __init__(self, cfg: Config):
         self.cfg = cfg
         self.processor = AutoProcessor.from_pretrained(cfg.VLM_MODEL_ID, use_fast=False)
@@ -627,7 +627,7 @@ def main():
         return
 
     detector = YOLO(cfg.YOLO_MODEL)
-    vlm = SmolVLM2Worker(cfg) if cfg.RUN_VLM_ON_SAVED_CLIPS else None
+    vlm = VLMWorker(cfg) if cfg.RUN_VLM_ON_SAVED_CLIPS else None
 
     if cfg.SHOW_WINDOWS:
         for name in cameras.keys():
