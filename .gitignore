@@ -35,6 +35,10 @@ label_studio_config.xml
 .ls_session.json
 .ls_export_backup.json
 
+# Camera credentials (RTSP URLs) and deployment-specific zones
+cameras.yaml
+zones.yaml
+
 .DS_Store
 Thumbs.db
 .vscode/

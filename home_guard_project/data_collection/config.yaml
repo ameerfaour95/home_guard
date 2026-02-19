@@ -1,0 +1,66 @@
+# ──────────────────────────────────────────────────────────────────────────────
+#  Home Guard — data collection pipeline configuration
+# ──────────────────────────────────────────────────────────────────────────────
+
+output_dir: "./dataset_multi"
+
+# ── Models ────────────────────────────────────────────────────────────────────
+models:
+  yolo: "yolov8n.pt"
+  vlm: "HuggingFaceTB/SmolVLM2-500M-Video-Instruct"
+
+# ── Clip & buffer ─────────────────────────────────────────────────────────────
+clip:
+  seconds: 10.0
+  store_fps: 10.0
+  # store_size: null = native camera resolution.  Set e.g. [1920, 1080] to cap.
+  store_size: null
+  yolo_input_size: [960, 544]
+
+# ── Trigger hysteresis ────────────────────────────────────────────────────────
+trigger:
+  score_max: 6.0
+  score_reward: 3.0       # points/sec while person present
+  score_penalty: 2.0      # points/sec while absent
+  cooldown_sec: 5.0
+  post_roll_sec: 5.0    # seconds to keep recording after trigger fires
+
+# ── Random sampling ───────────────────────────────────────────────────────────
+random_clip:
+  enabled: false
+  interval_sec: 3600.0
+  jitter_frac: 0.25
+  allow_person: false
+
+# ── VLM ───────────────────────────────────────────────────────────────────────
+vlm:
+  enabled: false
+  sample_fps: 2
+  prompt: "Describe what happens in the video"
+
+# ── YOLO export (weak labels for training) ────────────────────────────────────
+yolo_export:
+  enabled: true
+  fps: 2.0
+  confidence: 0.25
+  jpeg_quality: 90
+  subdir: "yolo"
+
+# ── RTSP stability ────────────────────────────────────────────────────────────
+rtsp:
+  ffmpeg_options: "rtsp_transport;tcp|stimeout;5000000|max_delay;500000|fflags;nobuffer"
+  open_timeout_ms: 5000
+  read_timeout_ms: 5000
+  freeze_reconnect_sec: 3.0
+  reconnect_backoff_start: 1.0
+  reconnect_backoff_max: 10.0
+
+# ── Detection & display ──────────────────────────────────────────────────────
+detection:
+  yolo_trigger_confidence: 0.5
+  yolo_every_n_frames_cpu: 6
+
+display:
+  show_windows: true
+  show_plotted_boxes: true
+  save_with_plotted_boxes: false
