@@ -45,3 +45,4 @@ Thumbs.db
 .idea/
 .cursor/
 home_guard_project/data_collection/config.yaml
+config.yaml

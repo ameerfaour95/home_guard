@@ -31,7 +31,7 @@ import numpy as np
 import torch
 from ultralytics import YOLO
 
-from config import Config, load_config
+from config import COCO_NAMES, Config, load_config
 
 log = logging.getLogger(__name__)
 
@@ -147,14 +147,15 @@ def _norm_polygon_to_px(
 
 
 def _any_center_in_polygon(
-    boxes: Any, class_id: int, polygon: np.ndarray,
+    boxes: Any, class_ids: List[int], polygon: np.ndarray,
 ) -> bool:
-    """True if any bbox of *class_id* has its centre inside *polygon*."""
+    """True if any bbox whose class is in *class_ids* has its centre inside *polygon*."""
     if boxes is None or len(boxes) == 0:
         return False
+    id_set = set(class_ids)
     for b in boxes:
         cid = int(b.cls.item()) if hasattr(b.cls, "item") else int(b.cls)
-        if cid != class_id:
+        if cid not in id_set:
             continue
         xyxy = b.xyxy[0].tolist()
         cx = (xyxy[0] + xyxy[2]) / 2.0
@@ -484,10 +485,8 @@ class CameraState:
     next_random_time: float
     frame_i: int
     last_yolo: Any
-    last_person: bool
-    last_car: bool
-    last_person_conf: float
-    last_car_conf: float
+    trigger_detected: bool
+    trigger_max_conf: float
     yolo_class_counts: Dict[int, int]
     yolo_class_max_conf: Dict[int, float]
     is_recording: bool
@@ -563,12 +562,20 @@ def _save_clip(
         },
 
         "yolo": {
-            "class_counts": st.yolo_class_counts,
-            "class_max_conf": st.yolo_class_max_conf,
-            "person_detected": bool(st.last_person),
-            "car_detected": bool(st.last_car),
-            "person_conf_max": float(st.last_person_conf),
-            "car_conf_max": float(st.last_car_conf),
+            "class_counts": {
+                COCO_NAMES[cid] if cid < len(COCO_NAMES) else str(cid): cnt
+                for cid, cnt in st.yolo_class_counts.items()
+            },
+            "class_max_conf": {
+                COCO_NAMES[cid] if cid < len(COCO_NAMES) else str(cid): conf
+                for cid, conf in st.yolo_class_max_conf.items()
+            },
+            "trigger_classes": [
+                COCO_NAMES[cid] for cid in cfg.TRIGGER_CLASS_IDS
+                if cid < len(COCO_NAMES)
+            ],
+            "trigger_detected": bool(st.trigger_detected),
+            "trigger_conf_max": float(st.trigger_max_conf),
             "detection_score": float(st.detection_score),
         },
 
@@ -639,6 +646,8 @@ def main() -> None:
     _ensure_dirs(cfg)
 
     log.info("Device=%s  dtype=%s", cfg.DEVICE, cfg.DTYPE)
+    trigger_names = [COCO_NAMES[i] for i in cfg.TRIGGER_CLASS_IDS if i < len(COCO_NAMES)]
+    log.info("Trigger classes: %s", ", ".join(trigger_names) or "(none)")
 
     if not cfg.CAMERAS:
         log.error("No cameras configured in cameras.yaml — exiting.")
@@ -660,8 +669,7 @@ def main() -> None:
                 cfg.RANDOM_CLIP_INTERVAL_SEC, cfg.RANDOM_JITTER_FRAC,
             ),
             frame_i=0, last_yolo=None,
-            last_person=False, last_car=False,
-            last_person_conf=0.0, last_car_conf=0.0,
+            trigger_detected=False, trigger_max_conf=0.0,
             yolo_class_counts={}, yolo_class_max_conf={},
             is_recording=False, trigger_ts=0.0,
             roi_polygon=None,
@@ -726,20 +734,22 @@ def main() -> None:
                     )
                     st.last_yolo = results
                     st.yolo_class_counts, st.yolo_class_max_conf = _summarize_yolo(results)
-                    st.last_person = 0 in st.yolo_class_counts
-                    st.last_car = 2 in st.yolo_class_counts
-                    st.last_person_conf = float(st.yolo_class_max_conf.get(0, 0.0))
-                    st.last_car_conf = float(st.yolo_class_max_conf.get(2, 0.0))
+
+                    st.trigger_detected = any(
+                        cid in st.yolo_class_counts for cid in cfg.TRIGGER_CLASS_IDS
+                    )
+                    st.trigger_max_conf = max(
+                        (st.yolo_class_max_conf.get(cid, 0.0) for cid in cfg.TRIGGER_CLASS_IDS),
+                        default=0.0,
+                    )
 
                     if st.roi_norm is not None:
                         if st.roi_polygon is None:
                             fh, fw = frame.shape[:2]
                             st.roi_polygon = _norm_polygon_to_px(st.roi_norm, fw, fh)
-                        st.last_person = _any_center_in_polygon(
-                            results[0].boxes, class_id=0, polygon=st.roi_polygon,
-                        )
-                        st.last_car = _any_center_in_polygon(
-                            results[0].boxes, class_id=2, polygon=st.roi_polygon,
+                        st.trigger_detected = _any_center_in_polygon(
+                            results[0].boxes, class_ids=cfg.TRIGGER_CLASS_IDS,
+                            polygon=st.roi_polygon,
                         )
                 else:
                     results = st.last_yolo
@@ -747,7 +757,7 @@ def main() -> None:
                 # ── Hysteresis score ─────────────────────────────────
                 dt = max(0.0, now - st.last_score_ts)
                 st.last_score_ts = now
-                if st.last_person:
+                if st.trigger_detected:
                     st.detection_score = min(
                         st.detection_score + cfg.SCORE_REWARD * dt, cfg.SCORE_MAX,
                     )
@@ -788,7 +798,7 @@ def main() -> None:
                     has_full_clip = len(clip_frames) >= int(
                         cfg.CLIP_SECONDS * cfg.STORE_FPS * 0.7,
                     )
-                    if has_full_clip and (cfg.RANDOM_ALLOW_PERSON or not st.last_person):
+                    if has_full_clip and (cfg.RANDOM_ALLOW_PERSON or not st.trigger_detected):
                         _save_clip(cfg, detector, vlm, st, "random",
                                    clip_frames, start_ts, end_ts, write_fps)
                     st.next_random_time = now + _jittered_interval(

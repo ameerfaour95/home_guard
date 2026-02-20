@@ -18,6 +18,36 @@ _CAMERAS_PATH = os.path.join(_DIR, "cameras.yaml")
 _ZONES_PATH = os.path.join(_DIR, "zones.yaml")
 
 
+COCO_NAMES: List[str] = [
+    "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train",
+    "truck", "boat", "traffic_light", "fire_hydrant", "stop_sign",
+    "parking_meter", "bench", "bird", "cat", "dog", "horse", "sheep", "cow",
+    "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag",
+    "tie", "suitcase", "frisbee", "skis", "snowboard", "sports_ball", "kite",
+    "baseball_bat", "baseball_glove", "skateboard", "surfboard",
+    "tennis_racket", "bottle", "wine_glass", "cup", "fork", "knife", "spoon",
+    "bowl", "banana", "apple", "sandwich", "orange", "broccoli", "carrot",
+    "hot_dog", "pizza", "donut", "cake", "chair", "couch", "potted_plant",
+    "bed", "dining_table", "toilet", "tv", "laptop", "mouse", "remote",
+    "keyboard", "cell_phone", "microwave", "oven", "toaster", "sink",
+    "refrigerator", "book", "clock", "vase", "scissors", "teddy_bear",
+    "hair_drier", "toothbrush",
+]
+COCO_NAME_TO_ID: Dict[str, int] = {n: i for i, n in enumerate(COCO_NAMES)}
+
+
+def _resolve_class_names(names: List[str]) -> List[int]:
+    """Convert a list of COCO class names to integer IDs."""
+    ids: List[int] = []
+    for name in names:
+        key = name.strip().lower().replace(" ", "_")
+        if key in COCO_NAME_TO_ID:
+            ids.append(COCO_NAME_TO_ID[key])
+        else:
+            log.warning("Unknown YOLO class name '%s' — skipping", name)
+    return sorted(set(ids))
+
+
 def _deep_get(d: Dict[str, Any], *keys: str, default: Any = None) -> Any:
     for k in keys:
         if not isinstance(d, dict):
@@ -92,6 +122,7 @@ class Config:
     ROI_ZONES: Dict[str, List[Tuple[float, float]]] = field(default_factory=dict)
 
     # ── Detection & display ───────────────────────────────────────────────
+    TRIGGER_CLASS_IDS: List[int] = field(default_factory=lambda: [0])
     YOLO_TRIGGER_CONF: float = 0.5
     YOLO_EVERY_N_FRAMES_CPU: int = 6
     SHOW_WINDOWS: bool = True
@@ -202,6 +233,9 @@ def load_config(
 
         ROI_ZONES=roi_zones,
 
+        TRIGGER_CLASS_IDS=_resolve_class_names(
+            _deep_get(cfg_data, "detection", "trigger_classes", default=["person"]) or ["person"]
+        ),
         YOLO_TRIGGER_CONF=float(_deep_get(cfg_data, "detection", "yolo_trigger_confidence", default=0.5)),
         YOLO_EVERY_N_FRAMES_CPU=int(_deep_get(cfg_data, "detection", "yolo_every_n_frames_cpu", default=6)),
         SHOW_WINDOWS=bool(_deep_get(cfg_data, "display", "show_windows", default=True)),
