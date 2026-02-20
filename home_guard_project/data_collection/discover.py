@@ -3,8 +3,9 @@ Camera discovery module — find RTSP cameras on the local network.
 
 Strategies (tried in order):
   1. ONVIF WS-Discovery  →  ONVIF Media service  →  RTSP URIs
-  2. Subnet port scan    →  credentials + channel probing
-  3. Manual entry
+  2. ARP table scan       →  port 554 check on known hosts
+  3. Subnet port scan     →  credentials + channel probing
+  4. Manual entry
 
 Runnable standalone:  py home_guard_project/data_collection/discover.py
 """
@@ -13,8 +14,10 @@ from __future__ import annotations
 
 import logging
 import os
+import platform
 import re
 import socket
+import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -62,6 +65,20 @@ def _subnet_from_ip(ip: str) -> str:
     return f"{parts[0]}.0/24"
 
 
+def _os_open(path: str) -> None:
+    """Open a file with the default OS application."""
+    system = platform.system().lower()
+    try:
+        if system == "windows":
+            os.startfile(path)  # type: ignore[attr-defined]
+        elif system == "darwin":
+            subprocess.Popen(["open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            subprocess.Popen(["xdg-open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
+
 def _tcp_open(ip: str, port: int, timeout: float = 1.0) -> bool:
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -71,6 +88,101 @@ def _tcp_open(ip: str, port: int, timeout: float = 1.0) -> bool:
         return True
     except Exception:
         return False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Strategy 1.5: ARP table scan
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _ping_sweep(subnet_base: str, workers: int = 128) -> None:
+    """Fire-and-forget pings to populate the ARP table.
+
+    Sends a single ping to every host in the /24 subnet. We don't care about
+    the result — the OS ARP table gets populated as a side effect.
+    """
+    is_win = platform.system().lower() == "windows"
+    flag = "-n" if is_win else "-c"
+    timeout_flag = "-w" if is_win else "-W"
+    timeout_val = "200" if is_win else "1"
+
+    def _ping_one(ip: str) -> None:
+        try:
+            subprocess.run(
+                ["ping", flag, "1", timeout_flag, timeout_val, ip],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=2,
+            )
+        except Exception:
+            pass
+
+    targets = [f"{subnet_base}.{i}" for i in range(1, 255)]
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        list(pool.map(_ping_one, targets))
+
+
+def arp_scan(local_ip: Optional[str] = None) -> List[str]:
+    """Read the OS ARP table and return IPs on the same /24 subnet.
+
+    On Windows: ``arp -a``
+    On Linux/macOS: ``arp -a`` or ``ip neigh``
+
+    Returns a sorted list of IPs (excluding the local machine and broadcast).
+    """
+    if local_ip is None:
+        local_ip = _get_local_ip()
+    if local_ip is None:
+        return []
+
+    subnet_base = local_ip.rsplit(".", 1)[0]
+
+    # Ping sweep to populate the ARP table with fresh entries
+    log.info("Ping sweep on %s.0/24 to populate ARP table...", subnet_base)
+    _ping_sweep(subnet_base)
+
+    # Read ARP table
+    try:
+        out = subprocess.check_output(
+            ["arp", "-a"], text=True, timeout=10,
+        )
+    except Exception:
+        log.warning("arp -a failed")
+        return []
+
+    # Parse IPs — works for both Windows and Unix output formats
+    # Windows: "  192.168.68.106     xx-xx-xx  dynamic"
+    # Unix:    "? (192.168.68.106) at xx:xx:xx [ether] on eth0"
+    ips: List[str] = []
+    for m in re.finditer(r"(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})", out):
+        ip = m.group(1)
+        if ip.startswith(subnet_base + ".") and ip != local_ip and not ip.endswith(".255"):
+            ips.append(ip)
+
+    # Deduplicate and sort
+    ips = sorted(set(ips), key=lambda ip: list(map(int, ip.split("."))))
+    return ips
+
+
+def arp_rtsp_scan(local_ip: Optional[str] = None, port: int = 554) -> List[str]:
+    """Discover RTSP hosts by combining ARP table with port 554 check.
+
+    Much faster than a blind subnet scan because it only tests hosts that
+    actually exist on the network (according to the ARP table).
+    """
+    candidates = arp_scan(local_ip)
+    if not candidates:
+        return []
+
+    log.info("ARP found %d host(s), checking port %d...", len(candidates), port)
+    found: List[str] = []
+    with ThreadPoolExecutor(max_workers=32) as pool:
+        futs = {pool.submit(_tcp_open, ip, port, 1.5): ip for ip in candidates}
+        for fut in as_completed(futs):
+            if fut.result():
+                found.append(futs[fut])
+
+    found.sort(key=lambda ip: list(map(int, ip.split("."))))
+    return found
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -249,9 +361,13 @@ def probe_rtsp_channels(
     max_channels: int = 16,
     stream: int = 1,
     timeout: float = 5.0,
+    consecutive_fail_stop: int = 2,
 ) -> List[Dict[str, Any]]:
     """
     Probe common RTSP URL patterns on *ip* for channels 1..*max_channels*.
+
+    Stops early after *consecutive_fail_stop* consecutive failures to avoid
+    wasting time on non-existent channels.
 
     Returns list of {"channel": int, "url": str, "pattern": str, "w": int, "h": int}
     for every working stream.
@@ -259,7 +375,6 @@ def probe_rtsp_channels(
     cred = f"{urlquote(user, safe='')}:{urlquote(password, safe='')}@"
     found: List[Dict[str, Any]] = []
 
-    # First, detect which pattern works by testing channel 1 against all patterns
     working_pattern = None
     for pat in _RTSP_PATTERNS:
         path = pat["tpl"].format(
@@ -281,7 +396,7 @@ def probe_rtsp_channels(
         log.warning("No working RTSP pattern found for %s:%d", ip, port)
         return []
 
-    # Probe remaining channels with the working pattern
+    fails = 0
     for ch in range(2, max_channels + 1):
         path = working_pattern["tpl"].format(
             ch=ch, stream=stream, stream_0=stream - 1,
@@ -294,10 +409,120 @@ def probe_rtsp_channels(
                 "channel": ch, "url": url,
                 "pattern": working_pattern["name"], "w": w, "h": h,
             })
+            fails = 0
         else:
             log.info("  Channel %d: no stream", ch)
+            fails += 1
+            if fails >= consecutive_fail_stop:
+                log.info("  %d consecutive failures — stopping probe.", fails)
+                break
 
     return found
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Live preview
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _has_gui() -> bool:
+    """Check if OpenCV was built with GUI (highgui) support."""
+    try:
+        cv2.namedWindow("__test__", cv2.WINDOW_NORMAL)
+        cv2.destroyWindow("__test__")
+        cv2.waitKey(1)
+        return True
+    except cv2.error:
+        return False
+
+
+_GUI_AVAILABLE: Optional[bool] = None
+
+
+def _preview_stream(url: str, title: str = "Preview", timeout: float = 8.0) -> None:
+    """Show a live preview of an RTSP stream.
+
+    Tries the OpenCV GUI first. If the build lacks highgui support, falls
+    back to saving a snapshot and opening it with the OS image viewer.
+    """
+    global _GUI_AVAILABLE
+    if _GUI_AVAILABLE is None:
+        _GUI_AVAILABLE = _has_gui()
+
+    os.environ.setdefault(
+        "OPENCV_FFMPEG_CAPTURE_OPTIONS",
+        "rtsp_transport;tcp|stimeout;5000000",
+    )
+    cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
+    try:
+        cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, int(timeout * 1000))
+    except Exception:
+        pass
+
+    if _GUI_AVAILABLE:
+        cv2.namedWindow(title, cv2.WINDOW_NORMAL)
+        deadline = time.time() + timeout
+        shown = False
+        while time.time() < deadline:
+            ret, frame = cap.read()
+            if ret and frame is not None:
+                if max(frame.shape[:2]) > 720:
+                    scale = 720.0 / max(frame.shape[:2])
+                    frame = cv2.resize(frame, None, fx=scale, fy=scale,
+                                       interpolation=cv2.INTER_AREA)
+                cv2.imshow(title, frame)
+                shown = True
+                deadline = time.time() + 30
+            key = cv2.waitKey(30) & 0xFF
+            if key != 255 and shown:
+                break
+        cap.release()
+        cv2.destroyWindow(title)
+        cv2.waitKey(1)
+    else:
+        # Fallback: grab one frame, save as temp image, open with OS viewer
+        frame = None
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            ret, f = cap.read()
+            if ret and f is not None:
+                frame = f
+                break
+            time.sleep(0.1)
+        cap.release()
+
+        if frame is None:
+            print("    (could not grab a preview frame)")
+            return
+
+        import tempfile
+        fd, img_path = tempfile.mkstemp(suffix=".jpg")
+        os.close(fd)
+        cv2.imwrite(img_path, frame)
+        print(f"    Snapshot saved: {img_path}")
+
+        _os_open(img_path)
+        _prompt("    Press Enter here when done viewing...")
+
+
+def _select_streams(streams: List[Dict[str, Any]]) -> Dict[str, str]:
+    """Walk through discovered streams, preview each one, and let the user
+    name the ones they want to keep."""
+    cameras: Dict[str, str] = {}
+    for s in streams:
+        ch = s["channel"]
+        url = s["url"]
+        print(f"\n  Previewing channel {ch} ({s['w']}x{s['h']})...")
+        print("  >> Press any key in the preview window to continue.")
+        _preview_stream(url, title=f"Channel {ch} — press any key")
+
+        if _prompt_yn(f"  Include channel {ch}?"):
+            name = _prompt(
+                f"    Friendly name for channel {ch}",
+                f"camera_{ch}",
+            )
+            name = re.sub(r"[^a-zA-Z0-9_]", "_", name).lower()
+            cameras[name] = url
+    return cameras
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -343,6 +568,25 @@ def _prompt_yn(msg: str, default: bool = True) -> bool:
     return val.lower().startswith("y")
 
 
+def _load_discovery_config() -> Dict[str, Any]:
+    """Load discovery-related settings from config.yaml (best-effort)."""
+    config_path = os.path.join(_DIR, "config.yaml")
+    defaults = {"max_channels": 16, "consecutive_fail_stop": 2, "probe_timeout_sec": 5.0}
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        disc = data.get("discovery", {})
+        if isinstance(disc, dict):
+            return {
+                "max_channels": int(disc.get("max_channels", defaults["max_channels"])),
+                "consecutive_fail_stop": int(disc.get("consecutive_fail_stop", defaults["consecutive_fail_stop"])),
+                "probe_timeout_sec": float(disc.get("probe_timeout_sec", defaults["probe_timeout_sec"])),
+            }
+    except Exception:
+        pass
+    return defaults
+
+
 def interactive_discover() -> Dict[str, str]:
     """Run the full interactive camera discovery flow. Returns name→url map."""
     cameras: Dict[str, str] = {}
@@ -365,6 +609,7 @@ def interactive_discover() -> Dict[str, str]:
 
 def _auto_discover_flow() -> Dict[str, str]:
     cameras: Dict[str, str] = {}
+    disc = _load_discovery_config()
 
     # Phase 1: ONVIF
     print("\n── ONVIF Discovery ──")
@@ -397,16 +642,26 @@ def _auto_discover_flow() -> Dict[str, str]:
                 print("  No streams returned. Will try port scanning...")
 
     if not cameras:
-        # Phase 2: Subnet scan
-        print("\n── Network Scan ──")
+        # Phase 2: ARP table scan (fast — only tests known devices)
+        print("\n── ARP Network Scan ──")
         local_ip = _get_local_ip()
         if local_ip:
-            subnet = _subnet_from_ip(local_ip)
-            print(f"Local IP: {local_ip}  →  scanning {subnet} for RTSP (port 554)...")
+            print(f"Local IP: {local_ip}")
+            print("Pinging subnet + reading ARP table to find devices...")
+            hosts = arp_rtsp_scan(local_ip, port=554)
         else:
-            subnet = _prompt("Enter subnet to scan (e.g. 192.168.1.0/24)")
+            hosts = []
 
-        hosts = subnet_scan(subnet=subnet, port=554)
+        # Phase 3: Fall back to full subnet TCP scan
+        if not hosts:
+            print("ARP scan found no RTSP hosts. Trying full subnet scan...")
+            if local_ip:
+                subnet = _subnet_from_ip(local_ip)
+                print(f"Scanning {subnet} for port 554 (this may take a moment)...")
+            else:
+                subnet = _prompt("Enter subnet to scan (e.g. 192.168.1.0/24)")
+            hosts = subnet_scan(subnet=subnet, port=554)
+
         if not hosts:
             print("No hosts with port 554 found.")
             print("Falling back to manual entry.\n")
@@ -430,7 +685,12 @@ def _auto_discover_flow() -> Dict[str, str]:
 
         for ip in selected:
             print(f"\nProbing RTSP channels on {ip}...")
-            streams = probe_rtsp_channels(ip, 554, user, password)
+            streams = probe_rtsp_channels(
+                ip, 554, user, password,
+                max_channels=disc["max_channels"],
+                timeout=disc["probe_timeout_sec"],
+                consecutive_fail_stop=disc["consecutive_fail_stop"],
+            )
             if not streams:
                 print(f"  No working channels found on {ip}")
                 continue
@@ -438,20 +698,14 @@ def _auto_discover_flow() -> Dict[str, str]:
             for s in streams:
                 print(f"    Channel {s['channel']}: {s['w']}x{s['h']}  ({s['pattern']})")
 
-            for s in streams:
-                if _prompt_yn(f"  Include channel {s['channel']}?"):
-                    name = _prompt(
-                        f"    Friendly name for channel {s['channel']}",
-                        f"camera_{s['channel']}",
-                    )
-                    name = re.sub(r"[^a-zA-Z0-9_]", "_", name).lower()
-                    cameras[name] = s["url"]
+            cameras.update(_select_streams(streams))
 
     return cameras
 
 
 def _manual_flow() -> Dict[str, str]:
     cameras: Dict[str, str] = {}
+    disc = _load_discovery_config()
     print("\n── Manual Camera Entry ──")
     print("Enter full RTSP URLs, or provide NVR details to auto-probe channels.\n")
 
@@ -464,18 +718,17 @@ def _manual_flow() -> Dict[str, str]:
         password = _prompt("Password")
 
         print(f"\nProbing channels on {ip}:{port}...")
-        streams = probe_rtsp_channels(ip, port, user, password)
+        streams = probe_rtsp_channels(
+            ip, port, user, password,
+            max_channels=disc["max_channels"],
+            timeout=disc["probe_timeout_sec"],
+            consecutive_fail_stop=disc["consecutive_fail_stop"],
+        )
         if streams:
             print(f"Found {len(streams)} channel(s):")
             for s in streams:
                 print(f"  Channel {s['channel']}: {s['w']}x{s['h']}  ({s['pattern']})")
-            for s in streams:
-                if _prompt_yn(f"  Include channel {s['channel']}?"):
-                    name = _prompt(
-                        f"    Friendly name", f"camera_{s['channel']}",
-                    )
-                    name = re.sub(r"[^a-zA-Z0-9_]", "_", name).lower()
-                    cameras[name] = s["url"]
+            cameras.update(_select_streams(streams))
         else:
             print("No channels found. Enter URLs manually.")
             mode = "2"

@@ -6,7 +6,7 @@ output_dir: "./dataset_multi"
 
 # ── Models ────────────────────────────────────────────────────────────────────
 models:
-  yolo: "yolov8n.pt"
+  yolo: "yolo11s.pt"
   vlm: "HuggingFaceTB/SmolVLM2-500M-Video-Instruct"
 
 # ── Clip & buffer ─────────────────────────────────────────────────────────────
@@ -15,13 +15,15 @@ clip:
   store_fps: 10.0
   # store_size: null = native camera resolution.  Set e.g. [1920, 1080] to cap.
   store_size: null
-  yolo_input_size: [960, 544]
+  # YOLO inference resolution (longer side in px).  Higher = better detection,
+  # slower on CPU.  640 = YOLO default, 960 = balanced, 1280 = high quality.
+  yolo_imgsz: 960
 
 # ── Trigger hysteresis ────────────────────────────────────────────────────────
 trigger:
-  score_max: 6.0
-  score_reward: 3.0       # points/sec while person present
-  score_penalty: 2.0      # points/sec while absent
+  score_max: 4.0
+  score_reward: 2.0       # points/sec while person present
+  score_penalty: 1.0      # points/sec while absent
   cooldown_sec: 5.0
   post_roll_sec: 5.0    # seconds to keep recording after trigger fires
 
@@ -55,10 +57,16 @@ rtsp:
   reconnect_backoff_start: 1.0
   reconnect_backoff_max: 10.0
 
+# ── Camera discovery ─────────────────────────────────────────────────────────
+discovery:
+  max_channels: 3            # max channel number to probe per NVR
+  consecutive_fail_stop: 2    # stop probing after this many consecutive failures
+  probe_timeout_sec: 5.0      # RTSP timeout per channel probe
+
 # ── Detection & display ──────────────────────────────────────────────────────
 detection:
   yolo_trigger_confidence: 0.5
-  yolo_every_n_frames_cpu: 6
+  yolo_every_n_frames_cpu: 3
 
 display:
   show_windows: true

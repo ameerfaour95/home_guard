@@ -26,3 +26,10 @@ dependencies = [
     "onvif-zeep==0.2.12",
     "WSDiscovery==2.1.2",
 ]
+
+[tool.uv]
+# ultralytics pulls opencv-python-headless which overwrites the GUI build.
+# Redirect it to the GUI version so cv2.imshow / cv2.namedWindow work.
+override-dependencies = [
+    "opencv-python-headless==4.11.0.86",
+]

@@ -10,12 +10,14 @@ Configuration lives in config.yaml + cameras.yaml (loaded by config.py).
 
 from __future__ import annotations
 
+import io
 import json
 import logging
 import os
 import queue
 import random
 import shutil
+import sys
 import tempfile
 import threading
 import time
@@ -32,6 +34,27 @@ from ultralytics import YOLO
 from config import Config, load_config
 
 log = logging.getLogger(__name__)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Suppress FFmpeg stderr noise
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _silence_ffmpeg_stderr() -> None:
+    """Redirect C-level stderr (fd 2) to devnull, silencing FFmpeg warnings.
+
+    Python's sys.stderr is re-pointed to a dup of the original fd so that
+    logging and tracebacks still print normally.
+    """
+    real_stderr_fd = os.dup(2)
+    devnull_fd = os.open(os.devnull, os.O_WRONLY)
+    os.dup2(devnull_fd, 2)
+    os.close(devnull_fd)
+    sys.stderr = io.TextIOWrapper(
+        io.FileIO(real_stderr_fd, closefd=False),
+        encoding="utf-8",
+        errors="replace",
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -180,7 +203,7 @@ def _export_yolo_frames(
         if not cv2.imwrite(img_path, frame, jpeg_params):
             continue
 
-        results = detector(frame, verbose=False, conf=float(cfg.YOLO_EXPORT_CONF))
+        results = detector(frame, verbose=False, conf=float(cfg.YOLO_EXPORT_CONF), imgsz=cfg.YOLO_IMGSZ)
         lines: List[str] = []
         boxes = results[0].boxes
         if boxes is not None and len(boxes) > 0:
@@ -506,7 +529,7 @@ def _save_clip(
         for f in frames:
             if f is None:
                 continue
-            res = detector(f, verbose=False, conf=cfg.YOLO_TRIGGER_CONF)
+            res = detector(f, verbose=False, conf=cfg.YOLO_TRIGGER_CONF, imgsz=cfg.YOLO_IMGSZ)
             plotted.append(res[0].plot())
         tmp = _write_mp4_clip(plotted, fps=fps)
     else:
@@ -604,6 +627,8 @@ def _save_clip(
 # ─────────────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    _silence_ffmpeg_stderr()
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s  %(levelname)-7s  %(message)s",
@@ -626,11 +651,7 @@ def main() -> None:
         cap = VideoCaptureThread(cfg, rtsp)
         norm_pts = cfg.ROI_ZONES.get(name)
         if norm_pts:
-            yolo_w, yolo_h = cfg.YOLO_INPUT_SIZE
-            roi_poly = _norm_polygon_to_px(norm_pts, yolo_w, yolo_h)
             log.info("%s: ROI zone active (%d vertices)", name, len(norm_pts))
-        else:
-            roi_poly = None
         cameras[name] = CameraState(
             name=name, rtsp=rtsp, cap=cap,
             detection_score=0.0, last_score_ts=now,
@@ -643,7 +664,7 @@ def main() -> None:
             last_person_conf=0.0, last_car_conf=0.0,
             yolo_class_counts={}, yolo_class_max_conf={},
             is_recording=False, trigger_ts=0.0,
-            roi_polygon=roi_poly,
+            roi_polygon=None,
             roi_norm=list(norm_pts) if norm_pts else None,
         )
 
@@ -672,10 +693,17 @@ def main() -> None:
     vlm: Optional[VLMWorker] = VLMWorker(cfg) if cfg.RUN_VLM_ON_SAVED_CLIPS else None
 
     if cfg.SHOW_WINDOWS:
-        for name in cameras:
-            cv2.namedWindow(name, cv2.WINDOW_NORMAL)
+        try:
+            cv2.namedWindow("__gui_test__", cv2.WINDOW_NORMAL)
+            cv2.destroyWindow("__gui_test__")
+            cv2.waitKey(1)
+            for name in cameras:
+                cv2.namedWindow(name, cv2.WINDOW_NORMAL)
+        except cv2.error:
+            log.warning("OpenCV GUI not available (headless build). Disabling display windows.")
+            cfg.SHOW_WINDOWS = False
 
-    log.info("Running. Press 'q' in any window to quit.")
+    log.info("Running.%s", " Press 'q' in any window to quit." if cfg.SHOW_WINDOWS else " Press Ctrl+C to stop.")
     try:
         while True:
             now = time.time()
@@ -685,16 +713,17 @@ def main() -> None:
                     continue
                 st.frame_i += 1
 
-                # ── YOLO detection (on downscaled frame) ─────────────
+                # ── YOLO detection ────────────────────────────────────
                 run_yolo = True
                 if cfg.DEVICE == "cpu" and cfg.YOLO_EVERY_N_FRAMES_CPU > 1:
                     run_yolo = st.frame_i % cfg.YOLO_EVERY_N_FRAMES_CPU == 0
 
                 if run_yolo:
-                    yolo_frame = cv2.resize(
-                        frame, cfg.YOLO_INPUT_SIZE, interpolation=cv2.INTER_AREA,
+                    results = detector(
+                        frame, verbose=False,
+                        conf=cfg.YOLO_TRIGGER_CONF,
+                        imgsz=cfg.YOLO_IMGSZ,
                     )
-                    results = detector(yolo_frame, verbose=False, conf=cfg.YOLO_TRIGGER_CONF)
                     st.last_yolo = results
                     st.yolo_class_counts, st.yolo_class_max_conf = _summarize_yolo(results)
                     st.last_person = 0 in st.yolo_class_counts
@@ -702,7 +731,10 @@ def main() -> None:
                     st.last_person_conf = float(st.yolo_class_max_conf.get(0, 0.0))
                     st.last_car_conf = float(st.yolo_class_max_conf.get(2, 0.0))
 
-                    if st.roi_polygon is not None:
+                    if st.roi_norm is not None:
+                        if st.roi_polygon is None:
+                            fh, fw = frame.shape[:2]
+                            st.roi_polygon = _norm_polygon_to_px(st.roi_norm, fw, fh)
                         st.last_person = _any_center_in_polygon(
                             results[0].boxes, class_id=0, polygon=st.roi_polygon,
                         )

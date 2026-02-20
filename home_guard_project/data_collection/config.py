@@ -46,7 +46,7 @@ class Config:
     CLIP_SECONDS: float = 10.0
     STORE_FPS: float = 10.0
     STORE_SIZE: Optional[Tuple[int, int]] = None
-    YOLO_INPUT_SIZE: Tuple[int, int] = (960, 540)
+    YOLO_IMGSZ: int = 640
 
     # ── Trigger hysteresis ────────────────────────────────────────────────
     SCORE_MAX: float = 10.0
@@ -82,6 +82,11 @@ class Config:
     FREEZE_RECONNECT_AFTER_SEC: float = 3.0
     RECONNECT_BACKOFF_START: float = 1.0
     RECONNECT_BACKOFF_MAX: float = 10.0
+
+    # ── Camera discovery ──────────────────────────────────────────────────
+    DISCOVERY_MAX_CHANNELS: int = 16
+    DISCOVERY_CONSECUTIVE_FAIL_STOP: int = 2
+    DISCOVERY_PROBE_TIMEOUT: float = 5.0
 
     # ── ROI zones (normalised polygons per camera) ─────────────────────────
     ROI_ZONES: Dict[str, List[Tuple[float, float]]] = field(default_factory=dict)
@@ -149,8 +154,6 @@ def load_config(
     cameras = {str(k): str(v) for k, v in cameras_raw.items()} if cameras_raw else {}
 
     store_size = _parse_size(_deep_get(cfg_data, "clip", "store_size"))
-    yolo_input_raw = _deep_get(cfg_data, "clip", "yolo_input_size", default=[960, 540])
-    yolo_input_size = (int(yolo_input_raw[0]), int(yolo_input_raw[1]))
 
     return Config(
         OUT_DIR=cfg_data.get("output_dir", "./dataset_multi"),
@@ -162,7 +165,7 @@ def load_config(
         CLIP_SECONDS=float(_deep_get(cfg_data, "clip", "seconds", default=10.0)),
         STORE_FPS=float(_deep_get(cfg_data, "clip", "store_fps", default=10.0)),
         STORE_SIZE=store_size,
-        YOLO_INPUT_SIZE=yolo_input_size,
+        YOLO_IMGSZ=int(_deep_get(cfg_data, "clip", "yolo_imgsz", default=640)),
 
         SCORE_MAX=float(_deep_get(cfg_data, "trigger", "score_max", default=10.0)),
         SCORE_REWARD=float(_deep_get(cfg_data, "trigger", "score_reward", default=3.0)),
@@ -192,6 +195,10 @@ def load_config(
         FREEZE_RECONNECT_AFTER_SEC=float(_deep_get(cfg_data, "rtsp", "freeze_reconnect_sec", default=3.0)),
         RECONNECT_BACKOFF_START=float(_deep_get(cfg_data, "rtsp", "reconnect_backoff_start", default=1.0)),
         RECONNECT_BACKOFF_MAX=float(_deep_get(cfg_data, "rtsp", "reconnect_backoff_max", default=10.0)),
+
+        DISCOVERY_MAX_CHANNELS=int(_deep_get(cfg_data, "discovery", "max_channels", default=16)),
+        DISCOVERY_CONSECUTIVE_FAIL_STOP=int(_deep_get(cfg_data, "discovery", "consecutive_fail_stop", default=2)),
+        DISCOVERY_PROBE_TIMEOUT=float(_deep_get(cfg_data, "discovery", "probe_timeout_sec", default=5.0)),
 
         ROI_ZONES=roi_zones,
 
