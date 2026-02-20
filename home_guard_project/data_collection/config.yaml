@@ -63,7 +63,7 @@ discovery:
   consecutive_fail_stop: 2    # stop probing after this many consecutive failures
   probe_timeout_sec: 5.0      # RTSP timeout per channel probe
   # "main" = high-res main stream (s0, 1080p), "sub" = low-res sub stream (s1, D1)
-  stream_type: "main"
+  stream_type: "sub"
 
 # ── Detection & display ──────────────────────────────────────────────────────
 detection:
