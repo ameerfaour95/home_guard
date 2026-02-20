@@ -17,7 +17,7 @@ clip:
   store_size: null
   # YOLO inference resolution (longer side in px).  Higher = better detection,
   # slower on CPU.  640 = YOLO default, 960 = balanced, 1280 = high quality.
-  yolo_imgsz: 960
+  yolo_imgsz: 740
 
 # ── Trigger hysteresis ────────────────────────────────────────────────────────
 trigger:
@@ -43,7 +43,7 @@ vlm:
 # ── YOLO export (weak labels for training) ────────────────────────────────────
 yolo_export:
   enabled: true
-  fps: 2.0
+  fps: 3.0
   confidence: 0.25
   jpeg_quality: 90
   subdir: "yolo"
@@ -59,9 +59,11 @@ rtsp:
 
 # ── Camera discovery ─────────────────────────────────────────────────────────
 discovery:
-  max_channels: 3            # max channel number to probe per NVR
+  max_channels: 10            # max channel number to probe per NVR
   consecutive_fail_stop: 2    # stop probing after this many consecutive failures
   probe_timeout_sec: 5.0      # RTSP timeout per channel probe
+  # "main" = high-res main stream (s0, 1080p), "sub" = low-res sub stream (s1, D1)
+  stream_type: "main"
 
 # ── Detection & display ──────────────────────────────────────────────────────
 detection:

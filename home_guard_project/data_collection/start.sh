@@ -8,7 +8,7 @@
 #      ./home_guard_project/data_collection/start.sh [--discover]
 #
 #  What it does:
-#    1. Verifies Python >= 3.12, installs uv if missing, runs uv sync
+#    1. Installs uv if missing, ensures Python 3.12 (installs via uv), runs uv sync
 #    2. Verifies config.yaml exists
 #    3. Checks cameras.yaml — if missing or --discover, runs interactive
 #       camera discovery (ONVIF / network scan / manual)
@@ -62,61 +62,44 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# ── Detect OS ───────────────────────────────────────────────────────────────
-detect_os() {
-    case "$(uname -s)" in
-        MINGW*|MSYS*|CYGWIN*) echo "windows" ;;
-        Darwin*)               echo "macos"   ;;
-        *)                     echo "linux"   ;;
-    esac
-}
-OS="$(detect_os)"
-
-# ── Find Python ─────────────────────────────────────────────────────────────
-find_python() {
-    if command -v py &>/dev/null; then
-        echo "py"
-        return
-    fi
-    for candidate in python3 python; do
-        if command -v "$candidate" &>/dev/null; then
-            local ver
-            ver="$("$candidate" --version 2>&1)" || continue
-            if [[ "$ver" == Python\ 3.* ]]; then
-                echo "$candidate"
-                return
-            fi
-        fi
-    done
-    return 1
-}
-
 # ============================================================================
-#  STEP 1: Verify Python
-# ============================================================================
-step "Checking Python"
-
-PYTHON="$(find_python)" || { err "Python >= 3.12 not found. Install it first."; exit 1; }
-PY_VER="$($PYTHON --version 2>&1)"
-ok "Found $PY_VER  ($PYTHON)"
-
-# ============================================================================
-#  STEP 2: Ensure uv is installed
+#  STEP 1: Ensure uv is installed
 # ============================================================================
 step "Checking uv"
 
 if ! command -v uv &>/dev/null; then
     info "uv not found — installing..."
-    $PYTHON -m pip install --quiet uv
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    # Add uv to PATH for this session
+    export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+    if ! command -v uv &>/dev/null; then
+        err "Failed to install uv. Install it manually: https://docs.astral.sh/uv/"
+        exit 1
+    fi
 fi
-ok "uv $(uv --version 2>&1 | head -1)"
+ok "$(uv --version 2>&1)"
+
+# ============================================================================
+#  STEP 2: Ensure Python 3.12
+# ============================================================================
+step "Checking Python 3.12"
+
+REQUIRED_PY="3.12"
+
+uv python install "$REQUIRED_PY" 2>/dev/null || true
+
+ACTUAL_VER="$(uv run --python "$REQUIRED_PY" python --version 2>&1)" || {
+    err "Python $REQUIRED_PY could not be installed. Install it manually."
+    exit 1
+}
+ok "$ACTUAL_VER (managed by uv)"
 
 # ============================================================================
 #  STEP 3: Install dependencies
 # ============================================================================
 step "Installing dependencies (uv sync)"
 
-uv sync --quiet
+uv sync --python "$REQUIRED_PY" --quiet
 ok "All dependencies installed."
 
 UVRUN="uv run"

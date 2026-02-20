@@ -359,7 +359,7 @@ def probe_rtsp_channels(
     user: str,
     password: str,
     max_channels: int = 16,
-    stream: int = 1,
+    stream: int = 0,
     timeout: float = 5.0,
     consecutive_fail_stop: int = 2,
 ) -> List[Dict[str, Any]]:
@@ -571,16 +571,23 @@ def _prompt_yn(msg: str, default: bool = True) -> bool:
 def _load_discovery_config() -> Dict[str, Any]:
     """Load discovery-related settings from config.yaml (best-effort)."""
     config_path = os.path.join(_DIR, "config.yaml")
-    defaults = {"max_channels": 16, "consecutive_fail_stop": 2, "probe_timeout_sec": 5.0}
+    defaults = {
+        "max_channels": 16,
+        "consecutive_fail_stop": 2,
+        "probe_timeout_sec": 5.0,
+        "stream": 0,
+    }
     try:
         with open(config_path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
         disc = data.get("discovery", {})
         if isinstance(disc, dict):
+            st = str(disc.get("stream_type", "main")).strip().lower()
             return {
                 "max_channels": int(disc.get("max_channels", defaults["max_channels"])),
                 "consecutive_fail_stop": int(disc.get("consecutive_fail_stop", defaults["consecutive_fail_stop"])),
                 "probe_timeout_sec": float(disc.get("probe_timeout_sec", defaults["probe_timeout_sec"])),
+                "stream": 0 if st == "main" else 1,
             }
     except Exception:
         pass
@@ -688,6 +695,7 @@ def _auto_discover_flow() -> Dict[str, str]:
             streams = probe_rtsp_channels(
                 ip, 554, user, password,
                 max_channels=disc["max_channels"],
+                stream=disc["stream"],
                 timeout=disc["probe_timeout_sec"],
                 consecutive_fail_stop=disc["consecutive_fail_stop"],
             )
@@ -721,6 +729,7 @@ def _manual_flow() -> Dict[str, str]:
         streams = probe_rtsp_channels(
             ip, port, user, password,
             max_channels=disc["max_channels"],
+            stream=disc["stream"],
             timeout=disc["probe_timeout_sec"],
             consecutive_fail_stop=disc["consecutive_fail_stop"],
         )
