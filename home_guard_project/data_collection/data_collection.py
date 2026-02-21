@@ -65,6 +65,8 @@ def _ensure_dirs(cfg: Config) -> None:
     root = cfg.OUT_DIR
     for sub in ("clips", "meta", "responses"):
         os.makedirs(os.path.join(root, sub), exist_ok=True)
+    if cfg.MAIN_STREAM_ENABLED:
+        os.makedirs(os.path.join(root, "vlm_crops"), exist_ok=True)
     if cfg.EXPORT_YOLO_TRAINING_DATA:
         base = os.path.join(root, cfg.YOLO_EXPORT_SUBDIR)
         os.makedirs(os.path.join(base, "images"), exist_ok=True)
@@ -166,6 +168,123 @@ def _any_center_in_polygon(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Trigger-class crop helpers (for VLM main-stream clips)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _scale_boxes(
+    boxes: Any,
+    trigger_class_ids: List[int],
+    src_h: int, src_w: int,
+    dst_h: int, dst_w: int,
+) -> List[Tuple[float, float, float, float]]:
+    """Extract trigger-class xyxy boxes and scale from src to dst resolution."""
+    if boxes is None or len(boxes) == 0:
+        return []
+    id_set = set(trigger_class_ids)
+    sx = dst_w / max(1, src_w)
+    sy = dst_h / max(1, src_h)
+    scaled: List[Tuple[float, float, float, float]] = []
+    for b in boxes:
+        cid = int(b.cls.item()) if hasattr(b.cls, "item") else int(b.cls)
+        if cid not in id_set:
+            continue
+        x1, y1, x2, y2 = b.xyxy[0].tolist()
+        scaled.append((x1 * sx, y1 * sy, x2 * sx, y2 * sy))
+    return scaled
+
+
+def _compute_trigger_crop(
+    boxes_xyxy: List[Tuple[float, float, float, float]],
+    frame_h: int,
+    frame_w: int,
+    padding: float = 0.3,
+    min_size: int = 384,
+) -> Optional[Tuple[int, int, int, int]]:
+    """
+    Compute a square crop region around the union of trigger-class bboxes.
+
+    Returns (x1, y1, x2, y2) in pixel coordinates, or None if no boxes.
+    """
+    if not boxes_xyxy:
+        return None
+
+    ux1 = min(b[0] for b in boxes_xyxy)
+    uy1 = min(b[1] for b in boxes_xyxy)
+    ux2 = max(b[2] for b in boxes_xyxy)
+    uy2 = max(b[3] for b in boxes_xyxy)
+
+    bw = ux2 - ux1
+    bh = uy2 - uy1
+    pad_x = bw * padding
+    pad_y = bh * padding
+
+    cx1 = ux1 - pad_x
+    cy1 = uy1 - pad_y
+    cx2 = ux2 + pad_x
+    cy2 = uy2 + pad_y
+
+    cw = cx2 - cx1
+    ch = cy2 - cy1
+    side = max(cw, ch, float(min_size))
+
+    center_x = (cx1 + cx2) / 2.0
+    center_y = (cy1 + cy2) / 2.0
+
+    cx1 = center_x - side / 2.0
+    cy1 = center_y - side / 2.0
+    cx2 = center_x + side / 2.0
+    cy2 = center_y + side / 2.0
+
+    if cx1 < 0:
+        cx2 -= cx1
+        cx1 = 0
+    if cy1 < 0:
+        cy2 -= cy1
+        cy1 = 0
+    if cx2 > frame_w:
+        cx1 -= (cx2 - frame_w)
+        cx2 = frame_w
+    if cy2 > frame_h:
+        cy1 -= (cy2 - frame_h)
+        cy2 = frame_h
+
+    cx1 = max(0, int(cx1))
+    cy1 = max(0, int(cy1))
+    cx2 = min(frame_w, int(cx2))
+    cy2 = min(frame_h, int(cy2))
+
+    if cx2 - cx1 < 2 or cy2 - cy1 < 2:
+        return None
+    return (cx1, cy1, cx2, cy2)
+
+
+def _smooth_crops(
+    crops: List[Optional[Tuple[int, int, int, int]]],
+    alpha: float,
+) -> List[Optional[Tuple[int, int, int, int]]]:
+    """Apply EMA smoothing to a sequence of crop regions for temporal stability."""
+    if not crops:
+        return []
+    smoothed: List[Optional[Tuple[int, int, int, int]]] = []
+    prev: Optional[Tuple[float, float, float, float]] = None
+    for crop in crops:
+        if crop is None:
+            smoothed.append(prev if prev else None)
+            continue
+        if prev is None:
+            prev = tuple(float(v) for v in crop)  # type: ignore[assignment]
+            smoothed.append(crop)
+        else:
+            s = tuple(
+                alpha * float(c) + (1.0 - alpha) * p
+                for c, p in zip(crop, prev)
+            )
+            prev = s
+            smoothed.append((int(s[0]), int(s[1]), int(s[2]), int(s[3])))
+    return smoothed
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # YOLO weak-label export
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -228,16 +347,21 @@ def _export_yolo_frames(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Threaded RTSP capture (per camera)
+# Threaded RTSP capture — sub-stream (raw numpy buffer for YOLO)
 # ─────────────────────────────────────────────────────────────────────────────
 
-class VideoCaptureThread:
+class SubStreamThread:
     """
-    Read RTSP continuously, keep frames at STORE_FPS in a rolling buffer.
+    Read sub-stream RTSP continuously, keep JPEG-compressed frames at
+    STORE_FPS in a rolling buffer.  ``latest_frame`` is kept as raw numpy
+    for YOLO detection; the buffer stores JPEG bytes to save ~10-20x RAM
+    compared to raw ndarrays.
 
     If ``cfg.STORE_SIZE`` is *None* the native camera resolution is kept;
     otherwise frames are resized before buffering.
     """
+
+    _BUF_JPEG_QUALITY = 92
 
     def __init__(self, cfg: Config, src: str):
         os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", cfg.OPENCV_FFMPEG_CAPTURE_OPTIONS)
@@ -245,7 +369,7 @@ class VideoCaptureThread:
         self.src = src
         self.capture: Optional[cv2.VideoCapture] = None
         self.lock = threading.Lock()
-        self.buf: deque[Tuple[float, np.ndarray]] = deque()
+        self.buf: deque[Tuple[float, bytes]] = deque()
         self.buf_lock = threading.Lock()
         self.latest_frame: Optional[np.ndarray] = None
         self.running = True
@@ -254,6 +378,7 @@ class VideoCaptureThread:
         self.store_interval = 1.0 / max(1e-6, float(cfg.STORE_FPS))
         self.last_store_ts = 0.0
         self.keep_seconds = float(cfg.CLIP_SECONDS) + float(cfg.POST_ROLL_SEC) + 2.0
+        self._jpeg_params = [int(cv2.IMWRITE_JPEG_QUALITY), self._BUF_JPEG_QUALITY]
         self._open_capture()
         self.thread = threading.Thread(target=self._reader, daemon=True)
         self.thread.start()
@@ -318,9 +443,15 @@ class VideoCaptureThread:
                 frame = cv2.resize(frame, store_size, interpolation=cv2.INTER_AREA)
 
             self.latest_frame = frame
+
+            ok, encoded = cv2.imencode(".jpg", frame, self._jpeg_params)
+            if not ok:
+                continue
+            jpeg_bytes = encoded.tobytes()
+
             cutoff = now - self.keep_seconds
             with self.buf_lock:
-                self.buf.append((now, frame))
+                self.buf.append((now, jpeg_bytes))
                 while self.buf and self.buf[0][0] < cutoff:
                     self.buf.popleft()
 
@@ -334,17 +465,175 @@ class VideoCaptureThread:
     def get_clip_last_seconds(
         self, clip_seconds: float,
     ) -> Tuple[List[np.ndarray], float, float, float]:
+        """Decompress JPEG buffer and return frames for the last N seconds."""
         now = time.time()
         cutoff = now - float(clip_seconds)
         with self.buf_lock:
-            items = [(t, f) for (t, f) in self.buf if t >= cutoff]
+            items = [(t, b) for (t, b) in self.buf if t >= cutoff]
         if len(items) < 2:
             return [], now, now, float(self.cfg.STORE_FPS)
+        frames = []
+        for _, jpeg_bytes in items:
+            arr = np.frombuffer(jpeg_bytes, dtype=np.uint8)
+            frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if frame is not None:
+                frames.append(frame)
+        if len(frames) < 2:
+            return [], now, now, float(self.cfg.STORE_FPS)
         return (
-            [f for _, f in items],
+            frames,
             items[0][0],
             items[-1][0],
             float(self.cfg.STORE_FPS),
+        )
+
+    def is_opened(self) -> bool:
+        with self.lock:
+            return self.capture is not None and self.capture.isOpened()
+
+    def release(self) -> None:
+        self.running = False
+        try:
+            self.thread.join(timeout=2)
+        except Exception:
+            pass
+        with self.lock:
+            if self.capture is not None:
+                try:
+                    self.capture.release()
+                except Exception:
+                    pass
+                self.capture = None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Threaded RTSP capture — main-stream (JPEG-compressed buffer for VLM crops)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class MainStreamThread:
+    """
+    Read main-stream RTSP continuously, store JPEG-compressed frames in a
+    rolling buffer.  Decompression only happens at save time, keeping memory
+    usage ~30-60x lower than raw numpy buffers for high-res streams.
+    """
+
+    def __init__(self, cfg: Config, src: str):
+        os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", cfg.OPENCV_FFMPEG_CAPTURE_OPTIONS)
+        self.cfg = cfg
+        self.src = src
+        self.capture: Optional[cv2.VideoCapture] = None
+        self.lock = threading.Lock()
+        self.buf: deque[Tuple[float, bytes]] = deque()
+        self.buf_lock = threading.Lock()
+        self.running = True
+        self.last_frame_ts = 0.0
+        self.reconnect_backoff = float(cfg.RECONNECT_BACKOFF_START)
+        self.store_interval = 1.0 / max(1e-6, float(cfg.MAIN_STORE_FPS))
+        self.last_store_ts = 0.0
+        self.keep_seconds = float(cfg.CLIP_SECONDS) + float(cfg.POST_ROLL_SEC) + 2.0
+        self._jpeg_params = [int(cv2.IMWRITE_JPEG_QUALITY), int(cfg.MAIN_JPEG_QUALITY)]
+        self._frame_shape: Optional[Tuple[int, int]] = None
+        self._open_capture()
+        self.thread = threading.Thread(target=self._reader, daemon=True)
+        self.thread.start()
+
+    # ── internal ──────────────────────────────────────────────────────────
+
+    def _open_capture(self) -> None:
+        with self.lock:
+            if self.capture is not None:
+                try:
+                    self.capture.release()
+                except Exception:
+                    pass
+            cap = cv2.VideoCapture(self.src, cv2.CAP_FFMPEG)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 2)
+            try:
+                cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, int(self.cfg.OPEN_TIMEOUT_MSEC))
+            except Exception:
+                pass
+            try:
+                cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, int(self.cfg.READ_TIMEOUT_MSEC))
+            except Exception:
+                pass
+            self.capture = cap
+            self.last_frame_ts = time.time()
+
+    def _reconnect(self) -> None:
+        time.sleep(self.reconnect_backoff)
+        self.reconnect_backoff = min(
+            self.reconnect_backoff * 1.5,
+            float(self.cfg.RECONNECT_BACKOFF_MAX),
+        )
+        self._open_capture()
+
+    def _reader(self) -> None:
+        while self.running:
+            with self.lock:
+                cap = self.capture
+            if cap is None or not cap.isOpened():
+                self._reconnect()
+                continue
+
+            ret, frame = cap.read()
+            now = time.time()
+
+            if not ret or frame is None:
+                if now - self.last_frame_ts > float(self.cfg.FREEZE_RECONNECT_AFTER_SEC):
+                    self._reconnect()
+                else:
+                    time.sleep(0.01)
+                continue
+
+            self.last_frame_ts = now
+            self.reconnect_backoff = float(self.cfg.RECONNECT_BACKOFF_START)
+
+            if (now - self.last_store_ts) < self.store_interval:
+                continue
+            self.last_store_ts = now
+
+            self._frame_shape = (frame.shape[0], frame.shape[1])
+            ok, encoded = cv2.imencode(".jpg", frame, self._jpeg_params)
+            if not ok:
+                continue
+            jpeg_bytes = encoded.tobytes()
+
+            cutoff = now - self.keep_seconds
+            with self.buf_lock:
+                self.buf.append((now, jpeg_bytes))
+                while self.buf and self.buf[0][0] < cutoff:
+                    self.buf.popleft()
+
+    # ── public API ────────────────────────────────────────────────────────
+
+    @property
+    def frame_shape(self) -> Optional[Tuple[int, int]]:
+        """(height, width) of the native main-stream frames, or None."""
+        return self._frame_shape
+
+    def get_clip_frames(
+        self, clip_seconds: float,
+    ) -> Tuple[List[np.ndarray], float, float, float]:
+        """Decompress JPEG buffer and return frames for the last N seconds."""
+        now = time.time()
+        cutoff = now - float(clip_seconds)
+        with self.buf_lock:
+            items = [(t, b) for (t, b) in self.buf if t >= cutoff]
+        if len(items) < 2:
+            return [], now, now, float(self.cfg.MAIN_STORE_FPS)
+        frames = []
+        for _, jpeg_bytes in items:
+            arr = np.frombuffer(jpeg_bytes, dtype=np.uint8)
+            frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if frame is not None:
+                frames.append(frame)
+        if len(frames) < 2:
+            return [], now, now, float(self.cfg.MAIN_STORE_FPS)
+        return (
+            frames,
+            items[0][0],
+            items[-1][0],
+            float(self.cfg.MAIN_STORE_FPS),
         )
 
     def is_opened(self) -> bool:
@@ -478,7 +767,9 @@ class VLMWorker:
 class CameraState:
     name: str
     rtsp: str
-    cap: VideoCaptureThread
+    rtsp_main: str
+    cap: SubStreamThread
+    main_cap: Optional[MainStreamThread]
     detection_score: float
     last_score_ts: float
     last_trigger_time: float
@@ -491,6 +782,7 @@ class CameraState:
     yolo_class_max_conf: Dict[int, float]
     is_recording: bool
     trigger_ts: float
+    main_connect_ts: float
     roi_polygon: Optional[np.ndarray]
     roi_norm: Optional[List[Tuple[float, float]]]
 
@@ -498,6 +790,106 @@ class CameraState:
 # ─────────────────────────────────────────────────────────────────────────────
 # Clip saving
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _save_vlm_crop_clip(
+    cfg: Config,
+    detector: YOLO,
+    st: CameraState,
+    sub_frames: List[np.ndarray],
+    day: str,
+    clip_id: str,
+) -> Optional[Dict[str, Any]]:
+    """Extract main-stream frames, crop around trigger-class detections, save.
+
+    YOLO runs on the lightweight *sub_frames* (already in memory from the
+    sub-stream clip save) and the detections are scaled to main-stream
+    coordinates.  This avoids running YOLO on high-res frames entirely.
+    """
+    if not cfg.MAIN_STREAM_ENABLED or st.main_cap is None:
+        return None
+
+    main_frames, m_start, m_end, m_fps = st.main_cap.get_clip_frames(cfg.CLIP_SECONDS)
+    if len(main_frames) < 2:
+        log.warning("[%s] main-stream had too few frames for VLM crop", st.name)
+        return None
+
+    mh, mw = main_frames[0].shape[:2]
+
+    # --- Compute a single stable crop from sampled sub-stream frames --------
+    # Only use the SECOND HALF of sub-stream frames — that portion overlaps
+    # with the main-stream time window (post-roll).  Using the first half
+    # would base the crop on where the person WAS before the main-stream
+    # connected, causing the person to appear outside the crop region.
+    half = len(sub_frames) // 2
+    post_roll_sub = sub_frames[half:]
+    if not post_roll_sub:
+        post_roll_sub = sub_frames
+
+    n_samples = min(5, len(post_roll_sub))
+    step = max(1, len(post_roll_sub) // n_samples)
+    all_boxes_main: List[Tuple[float, float, float, float]] = []
+
+    for i in range(0, len(post_roll_sub), step):
+        sf = post_roll_sub[i]
+        if sf is None:
+            continue
+        sh, sw = sf.shape[:2]
+        results = detector(
+            sf, verbose=False,
+            conf=cfg.YOLO_TRIGGER_CONF,
+            imgsz=cfg.YOLO_IMGSZ,
+        )
+        scaled = _scale_boxes(
+            results[0].boxes, cfg.TRIGGER_CLASS_IDS,
+            src_h=sh, src_w=sw, dst_h=mh, dst_w=mw,
+        )
+        all_boxes_main.extend(scaled)
+
+    crop = _compute_trigger_crop(
+        all_boxes_main, mh, mw,
+        padding=cfg.CROP_PADDING,
+        min_size=cfg.CROP_MIN_SIZE,
+    )
+    if crop is None:
+        log.warning("[%s] no trigger-class detections for VLM crop", st.name)
+        return None
+
+    x1, y1, x2, y2 = crop
+
+    # --- Crop every main-stream frame with the same region ------------------
+    cropped_frames: List[np.ndarray] = []
+    for frame in main_frames:
+        cropped = frame[y1:y2, x1:x2]
+        if cropped.size == 0:
+            continue
+        cropped_frames.append(cropped)
+
+    if len(cropped_frames) < 2:
+        log.warning("[%s] no usable cropped frames for VLM clip", st.name)
+        return None
+
+    vlm_dir = os.path.join(cfg.OUT_DIR, "vlm_crops", st.name, day)
+    os.makedirs(vlm_dir, exist_ok=True)
+    tmp = _write_mp4_clip(cropped_frames, fps=m_fps)
+    vlm_mp4 = os.path.join(vlm_dir, f"{clip_id}.mp4")
+    shutil.move(tmp, vlm_mp4)
+
+    crop_h, crop_w = cropped_frames[0].shape[:2]
+    log.info("[%s] VLM crop saved: %s (%dx%d, %d frames)",
+             st.name, vlm_mp4, crop_w, crop_h, len(cropped_frames))
+
+    return {
+        "enabled": True,
+        "vlm_crop_path": os.path.relpath(vlm_mp4, start=cfg.OUT_DIR),
+        "crop_padding": cfg.CROP_PADDING,
+        "crop_min_size": cfg.CROP_MIN_SIZE,
+        "source_resolution": [mw, mh],
+        "crop_region": [x1, y1, x2, y2],
+        "crop_resolution": [crop_w, crop_h],
+        "frames_written": len(cropped_frames),
+        "fps": float(m_fps),
+    }
+
 
 def _save_clip(
     cfg: Config,
@@ -608,6 +1000,13 @@ def _save_clip(
             "exported_frames": exported,
         }
 
+    vlm_crop_meta = _save_vlm_crop_clip(
+        cfg=cfg, detector=detector, st=st, sub_frames=frames,
+        day=day, clip_id=clip_id,
+    )
+    if vlm_crop_meta is not None:
+        meta["vlm_crop"] = vlm_crop_meta
+
     if vlm is None:
         with open(meta_path, "w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False, indent=2)
@@ -653,16 +1052,21 @@ def main() -> None:
         log.error("No cameras configured in cameras.yaml — exiting.")
         return
 
-    log.info("Starting %d camera threads...", len(cfg.CAMERAS))
+    log.info("Starting %d camera threads (sub-stream)...", len(cfg.CAMERAS))
+    if cfg.MAIN_STREAM_ENABLED:
+        log.info("Main-stream VLM crops enabled (on-demand, %.0f fps, q=%d)",
+                 cfg.MAIN_STORE_FPS, cfg.MAIN_JPEG_QUALITY)
     cameras: Dict[str, CameraState] = {}
     now = time.time()
-    for name, rtsp in cfg.CAMERAS.items():
-        cap = VideoCaptureThread(cfg, rtsp)
+    for name, rtsp_sub in cfg.CAMERAS.items():
+        rtsp_main = cfg.CAMERAS_MAIN.get(name, "")
+        cap = SubStreamThread(cfg, rtsp_sub)
         norm_pts = cfg.ROI_ZONES.get(name)
         if norm_pts:
             log.info("%s: ROI zone active (%d vertices)", name, len(norm_pts))
         cameras[name] = CameraState(
-            name=name, rtsp=rtsp, cap=cap,
+            name=name, rtsp=rtsp_sub, rtsp_main=rtsp_main,
+            cap=cap, main_cap=None,
             detection_score=0.0, last_score_ts=now,
             last_trigger_time=0.0,
             next_random_time=now + _jittered_interval(
@@ -671,7 +1075,7 @@ def main() -> None:
             frame_i=0, last_yolo=None,
             trigger_detected=False, trigger_max_conf=0.0,
             yolo_class_counts={}, yolo_class_max_conf={},
-            is_recording=False, trigger_ts=0.0,
+            is_recording=False, trigger_ts=0.0, main_connect_ts=0.0,
             roi_polygon=None,
             roi_norm=list(norm_pts) if norm_pts else None,
         )
@@ -687,9 +1091,9 @@ def main() -> None:
             time.sleep(0.2)
         if ok and st.cap.is_opened():
             ready += 1
-            log.info("%s: connected", name)
+            log.info("%s: sub-stream connected", name)
         else:
-            log.error("%s: could not read frames (check RTSP)", name)
+            log.error("%s: could not read sub-stream frames (check RTSP)", name)
 
     if ready == 0:
         log.error("No cameras producing frames — exiting.")
@@ -773,17 +1177,50 @@ def main() -> None:
                     and now - st.last_trigger_time > cfg.COOLDOWN_TRIGGER_SEC
                 ):
                     st.is_recording = True
-                    st.trigger_ts = now
-                    log.info("[%s] Trigger armed, recording post-roll...", st.name)
+                    st.trigger_ts = 0.0
+                    st.main_connect_ts = 0.0
+                    if cfg.MAIN_STREAM_ENABLED and st.rtsp_main and st.main_cap is None:
+                        st.main_cap = MainStreamThread(cfg, st.rtsp_main)
+                        st.main_connect_ts = now
+                        log.info("[%s] Trigger armed — main-stream connecting...", st.name)
+                    else:
+                        st.trigger_ts = now
+                        log.info("[%s] Trigger armed, recording post-roll...", st.name)
+
+                # Wait for main-stream to deliver its first frame
+                # before starting the post-roll timer.  Give up after
+                # OPEN_TIMEOUT_MSEC + 2s so we don't block forever.
+                if (
+                    st.is_recording
+                    and st.trigger_ts == 0.0
+                    and st.main_cap is not None
+                    and st.main_connect_ts > 0.0
+                ):
+                    if st.main_cap.is_opened() and st.main_cap.frame_shape is not None:
+                        st.trigger_ts = now
+                        log.info("[%s] Main-stream connected, recording post-roll...", st.name)
+                    elif now - st.main_connect_ts > cfg.OPEN_TIMEOUT_MSEC / 1000.0 + 2.0:
+                        log.warning("[%s] Main-stream failed to connect — saving without VLM crop", st.name)
+                        st.main_cap.release()
+                        st.main_cap = None
+                        st.trigger_ts = now
 
                 # ── Trigger: save after post-roll ────────────────────
-                if st.is_recording and (now - st.trigger_ts >= cfg.POST_ROLL_SEC):
+                post_roll_ready = (
+                    st.is_recording
+                    and st.trigger_ts > 0.0
+                    and (now - st.trigger_ts >= cfg.POST_ROLL_SEC)
+                )
+                if post_roll_ready:
                     clip_frames, start_ts, end_ts, write_fps = (
                         st.cap.get_clip_last_seconds(cfg.CLIP_SECONDS)
                     )
                     if clip_frames:
                         _save_clip(cfg, detector, vlm, st, "trigger",
                                    clip_frames, start_ts, end_ts, write_fps)
+                    if st.main_cap is not None:
+                        st.main_cap.release()
+                        st.main_cap = None
                     st.is_recording = False
                     st.last_trigger_time = now
 
@@ -832,6 +1269,8 @@ def main() -> None:
     finally:
         for st in cameras.values():
             st.cap.release()
+            if st.main_cap is not None:
+                st.main_cap.release()
         if cfg.SHOW_WINDOWS:
             cv2.destroyAllWindows()
         if vlm is not None:

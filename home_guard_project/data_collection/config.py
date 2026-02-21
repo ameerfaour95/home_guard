@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -62,7 +63,8 @@ class Config:
     OUT_DIR: str = "./dataset_multi"
 
     # ── Cameras ───────────────────────────────────────────────────────────
-    CAMERAS: Dict[str, str] = field(default_factory=dict)
+    CAMERAS: Dict[str, str] = field(default_factory=dict)       # sub-stream URLs
+    CAMERAS_MAIN: Dict[str, str] = field(default_factory=dict)  # main-stream URLs
 
     # ── Models ────────────────────────────────────────────────────────────
     YOLO_MODEL: str = "yolov8n.pt"
@@ -72,11 +74,19 @@ class Config:
     DEVICE: str = field(default_factory=lambda: "cuda" if torch.cuda.is_available() else "cpu")
     DTYPE: torch.dtype = field(default_factory=lambda: torch.bfloat16 if torch.cuda.is_available() else torch.float32)
 
-    # ── Clip & buffer ─────────────────────────────────────────────────────
+    # ── Clip & buffer (sub-stream) ────────────────────────────────────────
     CLIP_SECONDS: float = 10.0
     STORE_FPS: float = 10.0
     STORE_SIZE: Optional[Tuple[int, int]] = None
     YOLO_IMGSZ: int = 640
+
+    # ── Main stream (high-res VLM crops) ───────────────────────────────
+    MAIN_STREAM_ENABLED: bool = True
+    MAIN_STORE_FPS: float = 5.0
+    MAIN_JPEG_QUALITY: int = 85
+    CROP_PADDING: float = 0.3
+    CROP_MIN_SIZE: int = 384
+    CROP_EMA_ALPHA: float = 0.3
 
     # ── Trigger hysteresis ────────────────────────────────────────────────
     SCORE_MAX: float = 10.0
@@ -128,6 +138,14 @@ class Config:
     SHOW_WINDOWS: bool = True
     SHOW_PLOTTED_BOXES: bool = False
     SAVE_WITH_PLOTTED_BOXES: bool = False
+
+
+def _derive_sub_url(main_url: str) -> str:
+    """Derive sub-stream URL from main-stream URL (/s0/ -> /s1/)."""
+    sub = re.sub(r"/s0/", "/s1/", main_url, count=1)
+    if sub == main_url:
+        log.warning("Could not derive sub-stream URL from %s — using as-is", main_url)
+    return sub
 
 
 def _parse_size(raw: Any) -> Optional[Tuple[int, int]]:
@@ -182,13 +200,15 @@ def load_config(
         log.info("Loaded ROI zones for %d camera(s)", len(roi_zones))
 
     cameras_raw = cam_data.get("cameras", {})
-    cameras = {str(k): str(v) for k, v in cameras_raw.items()} if cameras_raw else {}
+    cameras_main = {str(k): str(v) for k, v in cameras_raw.items()} if cameras_raw else {}
+    cameras_sub = {name: _derive_sub_url(url) for name, url in cameras_main.items()}
 
     store_size = _parse_size(_deep_get(cfg_data, "clip", "store_size"))
 
     return Config(
         OUT_DIR=cfg_data.get("output_dir", "./dataset_multi"),
-        CAMERAS=cameras,
+        CAMERAS=cameras_sub,
+        CAMERAS_MAIN=cameras_main,
 
         YOLO_MODEL=_deep_get(cfg_data, "models", "yolo", default="yolov8n.pt"),
         VLM_MODEL_ID=_deep_get(cfg_data, "models", "vlm", default="HuggingFaceTB/SmolVLM2-500M-Video-Instruct"),
@@ -197,6 +217,13 @@ def load_config(
         STORE_FPS=float(_deep_get(cfg_data, "clip", "store_fps", default=10.0)),
         STORE_SIZE=store_size,
         YOLO_IMGSZ=int(_deep_get(cfg_data, "clip", "yolo_imgsz", default=640)),
+
+        MAIN_STREAM_ENABLED=bool(_deep_get(cfg_data, "main_stream", "enabled", default=True)),
+        MAIN_STORE_FPS=float(_deep_get(cfg_data, "main_stream", "store_fps", default=5.0)),
+        MAIN_JPEG_QUALITY=int(_deep_get(cfg_data, "main_stream", "jpeg_quality", default=85)),
+        CROP_PADDING=float(_deep_get(cfg_data, "main_stream", "crop_padding", default=0.3)),
+        CROP_MIN_SIZE=int(_deep_get(cfg_data, "main_stream", "crop_min_size", default=384)),
+        CROP_EMA_ALPHA=float(_deep_get(cfg_data, "main_stream", "crop_ema_alpha", default=0.3)),
 
         SCORE_MAX=float(_deep_get(cfg_data, "trigger", "score_max", default=10.0)),
         SCORE_REWARD=float(_deep_get(cfg_data, "trigger", "score_reward", default=3.0)),
