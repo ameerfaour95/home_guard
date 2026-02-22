@@ -636,6 +636,13 @@ class MainStreamThread:
             float(self.cfg.MAIN_STORE_FPS),
         )
 
+    def buffer_duration(self) -> float:
+        """Return the time span (seconds) currently held in the buffer."""
+        with self.buf_lock:
+            if len(self.buf) < 2:
+                return 0.0
+            return self.buf[-1][0] - self.buf[0][0]
+
     def is_opened(self) -> bool:
         with self.lock:
             return self.capture is not None and self.capture.isOpened()
@@ -796,6 +803,9 @@ def _save_vlm_crop_clip(
     detector: YOLO,
     st: CameraState,
     sub_frames: List[np.ndarray],
+    sub_start_ts: float,
+    sub_end_ts: float,
+    main_clip_data: Optional[Tuple[List[np.ndarray], float, float, float]],
     day: str,
     clip_id: str,
 ) -> Optional[Dict[str, Any]]:
@@ -804,33 +814,42 @@ def _save_vlm_crop_clip(
     YOLO runs on the lightweight *sub_frames* (already in memory from the
     sub-stream clip save) and the detections are scaled to main-stream
     coordinates.  This avoids running YOLO on high-res frames entirely.
+
+    *main_clip_data* must be pre-fetched by the caller at the moment the
+    save decision is made, before any expensive I/O.  This prevents the
+    rolling buffer's time window from shifting past the event.
     """
-    if not cfg.MAIN_STREAM_ENABLED or st.main_cap is None:
+    if not cfg.MAIN_STREAM_ENABLED or main_clip_data is None:
         return None
 
-    main_frames, m_start, m_end, m_fps = st.main_cap.get_clip_frames(cfg.CLIP_SECONDS)
+    main_frames, m_start, m_end, m_fps = main_clip_data
     if len(main_frames) < 2:
         log.warning("[%s] main-stream had too few frames for VLM crop", st.name)
         return None
 
     mh, mw = main_frames[0].shape[:2]
 
-    # --- Compute a single stable crop from sampled sub-stream frames --------
-    # Only use the SECOND HALF of sub-stream frames — that portion overlaps
-    # with the main-stream time window (post-roll).  Using the first half
-    # would base the crop on where the person WAS before the main-stream
-    # connected, causing the person to appear outside the crop region.
-    half = len(sub_frames) // 2
-    post_roll_sub = sub_frames[half:]
-    if not post_roll_sub:
-        post_roll_sub = sub_frames
+    # --- Align sub-stream frames to the main-stream time window ------------
+    # The main-stream may cover a shorter (or equal) window than the sub-
+    # stream.  Only use the sub-stream frames whose interpolated timestamps
+    # fall within [m_start, m_end] so the crop matches what is actually
+    # visible in the main-stream footage.
+    sub_dur = sub_end_ts - sub_start_ts
+    if sub_dur > 0 and m_start > sub_start_ts:
+        overlap_ratio = (m_start - sub_start_ts) / sub_dur
+        skip = int(overlap_ratio * len(sub_frames))
+        aligned_sub = sub_frames[skip:]
+    else:
+        aligned_sub = sub_frames
+    if not aligned_sub:
+        aligned_sub = sub_frames
 
-    n_samples = min(5, len(post_roll_sub))
-    step = max(1, len(post_roll_sub) // n_samples)
+    n_samples = min(5, len(aligned_sub))
+    step = max(1, len(aligned_sub) // n_samples)
     all_boxes_main: List[Tuple[float, float, float, float]] = []
 
-    for i in range(0, len(post_roll_sub), step):
-        sf = post_roll_sub[i]
+    for i in range(0, len(aligned_sub), step):
+        sf = aligned_sub[i]
         if sf is None:
             continue
         sh, sw = sf.shape[:2]
@@ -901,6 +920,7 @@ def _save_clip(
     start_ts: float,
     end_ts: float,
     fps: float,
+    main_clip_data: Optional[Tuple[List[np.ndarray], float, float, float]] = None,
 ) -> None:
     if not frames:
         return
@@ -1002,6 +1022,8 @@ def _save_clip(
 
     vlm_crop_meta = _save_vlm_crop_clip(
         cfg=cfg, detector=detector, st=st, sub_frames=frames,
+        sub_start_ts=start_ts, sub_end_ts=end_ts,
+        main_clip_data=main_clip_data,
         day=day, clip_id=clip_id,
     )
     if vlm_crop_meta is not None:
@@ -1170,6 +1192,34 @@ def main() -> None:
                         st.detection_score - cfg.SCORE_PENALTY * dt, 0.0,
                     )
 
+                # ── Main-stream pre-connect ───────────────────────────
+                # Start the main-stream RTSP as soon as the first
+                # detection appears so it accumulates a full
+                # CLIP_SECONDS of footage by save time.
+                if (
+                    cfg.MAIN_STREAM_ENABLED
+                    and st.rtsp_main
+                    and st.main_cap is None
+                    and not st.is_recording
+                    and st.trigger_detected
+                    and st.detection_score > 0
+                ):
+                    st.main_cap = MainStreamThread(cfg, st.rtsp_main)
+                    st.main_connect_ts = now
+                    log.info("[%s] Pre-connecting main-stream (score=%.1f)",
+                             st.name, st.detection_score)
+
+                # Release pre-connected main-stream if detection fades
+                if (
+                    st.main_cap is not None
+                    and not st.is_recording
+                    and st.detection_score <= 0
+                ):
+                    st.main_cap.release()
+                    st.main_cap = None
+                    st.main_connect_ts = 0.0
+                    log.debug("[%s] Released idle main-stream", st.name)
+
                 # ── Trigger: arm ──────────────────────────────────────
                 if (
                     not st.is_recording
@@ -1178,11 +1228,17 @@ def main() -> None:
                 ):
                     st.is_recording = True
                     st.trigger_ts = 0.0
-                    st.main_connect_ts = 0.0
-                    if cfg.MAIN_STREAM_ENABLED and st.rtsp_main and st.main_cap is None:
-                        st.main_cap = MainStreamThread(cfg, st.rtsp_main)
-                        st.main_connect_ts = now
-                        log.info("[%s] Trigger armed — main-stream connecting...", st.name)
+                    if cfg.MAIN_STREAM_ENABLED and st.rtsp_main:
+                        if st.main_cap is None:
+                            st.main_cap = MainStreamThread(cfg, st.rtsp_main)
+                            st.main_connect_ts = now
+                        if st.main_cap.frame_shape is not None:
+                            st.trigger_ts = now
+                            log.info("[%s] Trigger armed (main-stream already connected)",
+                                     st.name)
+                        else:
+                            log.info("[%s] Trigger armed — waiting for main-stream...",
+                                     st.name)
                     else:
                         st.trigger_ts = now
                         log.info("[%s] Trigger armed, recording post-roll...", st.name)
@@ -1206,23 +1262,39 @@ def main() -> None:
                         st.trigger_ts = now
 
                 # ── Trigger: save after post-roll ────────────────────
-                post_roll_ready = (
+                post_roll_elapsed = (
                     st.is_recording
                     and st.trigger_ts > 0.0
                     and (now - st.trigger_ts >= cfg.POST_ROLL_SEC)
                 )
-                if post_roll_ready:
-                    clip_frames, start_ts, end_ts, write_fps = (
-                        st.cap.get_clip_last_seconds(cfg.CLIP_SECONDS)
-                    )
-                    if clip_frames:
-                        _save_clip(cfg, detector, vlm, st, "trigger",
-                                   clip_frames, start_ts, end_ts, write_fps)
+                if post_roll_elapsed:
+                    main_ready = True
                     if st.main_cap is not None:
-                        st.main_cap.release()
-                        st.main_cap = None
-                    st.is_recording = False
-                    st.last_trigger_time = now
+                        buf_dur = st.main_cap.buffer_duration()
+                        max_extra = cfg.CLIP_SECONDS
+                        if (
+                            buf_dur < cfg.CLIP_SECONDS
+                            and now - st.trigger_ts < cfg.POST_ROLL_SEC + max_extra
+                        ):
+                            main_ready = False
+                    if main_ready:
+                        main_clip_data = None
+                        if st.main_cap is not None:
+                            main_clip_data = st.main_cap.get_clip_frames(cfg.CLIP_SECONDS)
+                            if len(main_clip_data[0]) < 2:
+                                main_clip_data = None
+                        clip_frames, start_ts, end_ts, write_fps = (
+                            st.cap.get_clip_last_seconds(cfg.CLIP_SECONDS)
+                        )
+                        if clip_frames:
+                            _save_clip(cfg, detector, vlm, st, "trigger",
+                                       clip_frames, start_ts, end_ts, write_fps,
+                                       main_clip_data=main_clip_data)
+                        if st.main_cap is not None:
+                            st.main_cap.release()
+                            st.main_cap = None
+                        st.is_recording = False
+                        st.last_trigger_time = now
 
                 # ── Random save ──────────────────────────────────────
                 if (
