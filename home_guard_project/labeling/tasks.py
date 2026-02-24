@@ -65,18 +65,24 @@ def tasks_are_fresh(dataset_dir: str) -> bool:
 _LABEL_CONFIG_XML = """\
 <View>
   <Header value="$header_info"/>
-
-  <Labels name="label" toName="video">
+  <View style="display:flex; gap:16px;">
+    <View style="flex:1;">
+      <Header value="Full Frame — YOLO Re-tagging"/>
+      <Labels name="label" toName="video_full">
 {label_tags}
-  </Labels>
-
-  <Video name="video" value="$video_url" frameRate="$fps"/>
-  <VideoRectangle name="bbox" toName="video"/>
-
-  <Header value="Scene Description (for VLM training)"/>
-  <TextArea name="vlm_description" toName="video"
-            rows="4" editable="true"
-            placeholder="Describe what happens in the video..."/>
+      </Labels>
+      <Video name="video_full" value="$video_url" frameRate="$fps"/>
+      <VideoRectangle name="bbox" toName="video_full"/>
+    </View>
+    <View style="flex:1;">
+      <Header value="$vlm_crop_header"/>
+      <Video name="video_crop" value="$vlm_crop_url" frameRate="$vlm_fps"/>
+      <Header value="Scene Description (for VLM training)"/>
+      <TextArea name="vlm_description" toName="video_crop"
+                rows="4" editable="true"
+                placeholder="Describe what happens in the video..."/>
+    </View>
+  </View>
 </View>
 """
 
@@ -168,6 +174,35 @@ def collect_clip_paths(
     return clips
 
 
+def collect_vlm_crop_paths(
+    dataset_dir: str,
+    *,
+    cameras: Optional[List[str]] = None,
+    kinds: Optional[List[str]] = None,
+    limit: Optional[int] = None,
+) -> List[str]:
+    """
+    Collect VLM crop video absolute paths for the subset implied by
+    *cameras*/*kinds*/*limit*.  Only returns paths that exist on disk.
+
+    Falls back to inferring the VLM crop path from ``clip_path``
+    (``clips/`` -> ``vlm_crops/``) when ``vlm_crop_path`` is absent.
+    """
+    paths: List[str] = []
+    for _mp, meta in iter_meta_entries(dataset_dir, cameras=cameras, kinds=kinds, limit=limit):
+        vlm_rel = meta.get("vlm_crop_path", "").replace("\\", "/")
+        if not vlm_rel:
+            clip_rel = meta.get("clip_path", "").replace("\\", "/")
+            if clip_rel.startswith("clips/"):
+                vlm_rel = "vlm_crops/" + clip_rel[len("clips/"):]
+        if not vlm_rel:
+            continue
+        vlm_abs = os.path.join(dataset_dir, vlm_rel)
+        if os.path.isfile(vlm_abs):
+            paths.append(vlm_abs)
+    return paths
+
+
 # ---------------------------------------------------------------------------
 # Single-task builder (thread-safe)
 # ---------------------------------------------------------------------------
@@ -202,11 +237,41 @@ def _build_single_task(
     end_display = end_local.split(" ")[-1] if " " in end_local else end_local
     header = f"{camera_name} | {kind} | {start_local} - {end_display}"
 
+    # VLM crop video (main-stream, high-res) — may be absent for random clips.
+    # Try explicit meta field first; fall back to inferring from clip_path
+    # (clips/... → vlm_crops/...) for datasets collected before dual-stream
+    # added vlm_crop_path to meta.
+    vlm_crop_rel = meta.get("vlm_crop_path", "").replace("\\", "/")
+    if not vlm_crop_rel and clip_rel.startswith("clips/"):
+        vlm_crop_rel = "vlm_crops/" + clip_rel[len("clips/"):]
+    has_vlm_crop = bool(vlm_crop_rel) and os.path.isfile(
+        os.path.join(dataset_dir, vlm_crop_rel)
+    )
+    if has_vlm_crop and video_base_url:
+        vlm_abs = os.path.join(dataset_dir, vlm_crop_rel)
+        mtime = int(os.path.getmtime(vlm_abs))
+        vlm_crop_url = f"{video_base_url.rstrip('/')}/{vlm_crop_rel}?v={mtime}"
+    else:
+        vlm_crop_url = video_url
+
+    vlm_fps = meta.get("main_stream", {}).get("store_fps",
+              meta.get("vlm_crop", {}).get("fps", fps))
+
+    vlm_crop_header = (
+        "VLM Crop (high-res)"
+        if has_vlm_crop
+        else "No VLM Crop \u2014 showing full frame"
+    )
+
     task: Dict[str, Any] = {
         "data": {
             "video_url": video_url,
+            "vlm_crop_url": vlm_crop_url,
             "fps": fps,
+            "vlm_fps": vlm_fps,
             "header_info": header,
+            "vlm_crop_header": vlm_crop_header,
+            "has_vlm_crop": has_vlm_crop,
             "camera_name": camera_name,
             "kind": kind,
             "clip_start_local": start_local,

@@ -98,7 +98,7 @@ def build_predictions(
                     "id": region_id,
                     "type": "videorectangle",
                     "from_name": "bbox",
-                    "to_name": "video",
+                    "to_name": "video_full",
                     "value": {
                         "sequence": [
                             {
@@ -120,7 +120,7 @@ def build_predictions(
                     "id": f"label_{result_idx}",
                     "type": "labels",
                     "from_name": "label",
-                    "to_name": "video",
+                    "to_name": "video_full",
                     "value": {
                         "labels": [label_name],
                         "sequence": [
@@ -146,7 +146,7 @@ def build_predictions(
             "id": f"vlm_text_{result_idx}",
             "type": "textarea",
             "from_name": "vlm_description",
-            "to_name": "video",
+            "to_name": "video_crop",
             "value": {
                 "text": [vlm_text],
             },

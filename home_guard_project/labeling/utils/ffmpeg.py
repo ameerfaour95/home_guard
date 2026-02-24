@@ -125,6 +125,7 @@ def _reencode_one(
     cmd = [
         ffmpeg, "-y", "-i", src,
         "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+        "-movflags", "+faststart",
         "-an",
         tmp,
     ]

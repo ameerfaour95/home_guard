@@ -23,6 +23,7 @@ from typing import List, Optional
 from .config import get_default_dataset_dir, get_file_server_port
 from .tasks import (
     collect_clip_paths,
+    collect_vlm_crop_paths,
     export_tasks,
     scan_and_build_tasks,
     tasks_are_fresh,
@@ -204,7 +205,7 @@ def main() -> None:
     config_path = os.path.join(dataset_dir, "label_studio_config.xml")
     write_config(config_path)
 
-    # Step 2: Optionally re-encode videos
+    # Step 2: Optionally re-encode videos (clips + VLM crops)
     if args.reencode:
         clips = collect_clip_paths(
             dataset_dir,
@@ -212,8 +213,14 @@ def main() -> None:
             kinds=kind_filter,
             limit=args.limit,
         )
+        vlm_crops = collect_vlm_crop_paths(
+            dataset_dir,
+            cameras=camera_filter,
+            kinds=kind_filter,
+            limit=args.limit,
+        )
         reencode_videos(
-            clips,
+            clips + vlm_crops,
             ffmpeg_path=args.ffmpeg,
             workers=args.workers,
         )

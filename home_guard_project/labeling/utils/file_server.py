@@ -16,8 +16,10 @@ class _CORSRequestHandler(http.server.SimpleHTTPRequestHandler):
 
     def end_headers(self) -> None:
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Range")
+        self.send_header("Access-Control-Expose-Headers", "Content-Range, Accept-Ranges, Content-Length")
+        self.send_header("Cache-Control", "no-cache, must-revalidate")
         super().end_headers()
 
     def do_OPTIONS(self) -> None:  # noqa: N802

@@ -15,9 +15,9 @@
 #    1. Verifies Python >= 3.12 and installs uv if missing
 #    2. Runs uv sync to install all dependencies (incl. label-studio)
 #    3. Verifies dataset directory
-#    4. Checks for orphaned metadata (interactive: delete / list / skip)
-#    5. Re-encodes video clips to H.264 (skips already-encoded)
-#    6. Generates Label Studio config + tasks JSON
+#    4. Auto-syncs vlm_crops/ ↔ clips/ (cascade deletes, orphan removal)
+#    5. Re-encodes video clips + VLM crops to H.264 (skips already-encoded)
+#    6. Always regenerates Label Studio config + tasks JSON
 #    7. Starts file server (port 8081) and Label Studio (port 8080)
 #    8. Auto-creates a Label Studio project via the API
 #    9. On re-run: exports existing annotations, merges into new tasks,
@@ -202,64 +202,42 @@ CLIP_COUNT=$(find "${DATASET_DIR}/clips" -name "*.mp4" 2>/dev/null | wc -l || ec
 ok "Dataset: ${DATASET_DIR}  (${CLIP_COUNT} clips found)"
 
 # ============================================================================
-#  STEP 5: Check for orphaned metadata
+#  STEP 5: Cleanup — sync vlm_crops ↔ clips, remove orphans
 # ============================================================================
-step "Checking for orphaned metadata"
+step "Synchronising dataset (cleanup)"
 
-ORPHAN_OUTPUT=$($UVRUN python -m home_guard_project.labeling \
-    --cleanup-only --dry-run --dataset-dir "$DATASET_DIR" 2>/dev/null || echo "")
+info "Aligning vlm_crops/ and clips/ — cascade-deleting mismatches..."
 
-# Parse orphan counts from the summary output
-ORPHAN_META=$(echo "$ORPHAN_OUTPUT" | grep "Orphan meta removed" | grep -oE '[0-9]+' || echo "0")
-ORPHAN_RESP=$(echo "$ORPHAN_OUTPUT" | grep "Orphan resp removed" | grep -oE '[0-9]+' || echo "0")
-ORPHAN_YOLO_IMG=$(echo "$ORPHAN_OUTPUT" | grep "Orphan YOLO imgs" | grep -oE '[0-9]+' || echo "0")
-ORPHAN_YOLO_LBL=$(echo "$ORPHAN_OUTPUT" | grep "Orphan YOLO lbls" | grep -oE '[0-9]+' || echo "0")
-ORPHAN_TOTAL=$(( ORPHAN_META + ORPHAN_RESP + ORPHAN_YOLO_IMG + ORPHAN_YOLO_LBL ))
+CLEANUP_OUTPUT=$($UVRUN python -m home_guard_project.labeling \
+    --cleanup-only --dataset-dir "$DATASET_DIR" 2>&1 || echo "")
 
-if (( ORPHAN_TOTAL > 0 )); then
-    echo ""
-    warn "Found ${ORPHAN_TOTAL} orphaned files (metadata/responses/YOLO with no matching clip):"
-    echo -e "    Meta files   : ${ORPHAN_META}"
-    echo -e "    Response files: ${ORPHAN_RESP}"
-    echo -e "    YOLO images  : ${ORPHAN_YOLO_IMG}"
-    echo -e "    YOLO labels  : ${ORPHAN_YOLO_LBL}"
-    echo ""
-    echo -e "  ${BOLD}delete${NC}  — Remove all orphaned files and continue the pipeline"
-    echo -e "  ${BOLD}list${NC}    — Print orphaned files, then stop (so you can review)"
-    echo -e "  ${BOLD}skip${NC}    — Ignore orphans and continue the pipeline"
-    echo ""
-    read -rp "  Your choice [delete/list/skip]: " ORPHAN_CHOICE
+# Parse counts from the summary
+CLEANUP_CASCADE=$(echo "$CLEANUP_OUTPUT" | grep "Cascade clip deletes" | grep -oE '[0-9]+' || echo "0")
+CLEANUP_META=$(echo "$CLEANUP_OUTPUT" | grep "Orphan meta removed" | grep -oE '[0-9]+' || echo "0")
+CLEANUP_RESP=$(echo "$CLEANUP_OUTPUT" | grep "Orphan resp removed" | grep -oE '[0-9]+' || echo "0")
+CLEANUP_YOLO_IMG=$(echo "$CLEANUP_OUTPUT" | grep "Orphan YOLO imgs" | grep -oE '[0-9]+' || echo "0")
+CLEANUP_YOLO_LBL=$(echo "$CLEANUP_OUTPUT" | grep "Orphan YOLO lbls" | grep -oE '[0-9]+' || echo "0")
+CLEANUP_VLM=$(echo "$CLEANUP_OUTPUT" | grep "Orphan VLM crops" | grep -oE '[0-9]+' || echo "0")
+CLEANUP_TOTAL=$(( CLEANUP_CASCADE + CLEANUP_META + CLEANUP_RESP + CLEANUP_YOLO_IMG + CLEANUP_YOLO_LBL + CLEANUP_VLM ))
 
-    case "${ORPHAN_CHOICE,,}" in
-        delete|d)
-            info "Deleting ${ORPHAN_TOTAL} orphaned files..."
-            $UVRUN python -m home_guard_project.labeling \
-                --cleanup-only --dataset-dir "$DATASET_DIR" 2>&1 || true
-            ok "Orphan cleanup complete."
-            ;;
-        list|l|print|p)
-            info "Orphaned files (no matching clip exists):"
-            echo ""
-            $UVRUN python -m home_guard_project.labeling \
-                --cleanup-only --dry-run --dataset-dir "$DATASET_DIR" -v 2>&1 \
-                | grep -E "\[DRY-RUN\]" | sed 's/.*Would remove: /  /' || true
-            echo ""
-            warn "Pipeline stopped. Each .meta.json must have a matching .mp4 clip."
-            warn "Delete the orphans (re-run and choose 'delete') or restore the missing clips."
-            info "Servers were not started. Exiting."
-            exit 0
-            ;;
-        skip|s|"")
-            info "Skipping orphan cleanup."
-            ;;
-        *)
-            warn "Unknown choice '${ORPHAN_CHOICE}'. Skipping orphan cleanup."
-            ;;
-    esac
-    echo ""
+if (( CLEANUP_TOTAL > 0 )); then
+    info "Cleaned up ${CLEANUP_TOTAL} files:"
+    (( CLEANUP_CASCADE > 0 )) && echo -e "    Cascade clip deletes: ${CLEANUP_CASCADE}"
+    (( CLEANUP_META > 0 ))    && echo -e "    Orphan meta files   : ${CLEANUP_META}"
+    (( CLEANUP_RESP > 0 ))    && echo -e "    Orphan responses    : ${CLEANUP_RESP}"
+    (( CLEANUP_YOLO_IMG > 0 )) && echo -e "    Orphan YOLO images  : ${CLEANUP_YOLO_IMG}"
+    (( CLEANUP_YOLO_LBL > 0 )) && echo -e "    Orphan YOLO labels  : ${CLEANUP_YOLO_LBL}"
+    (( CLEANUP_VLM > 0 ))     && echo -e "    Orphan VLM crops    : ${CLEANUP_VLM}"
+    # Force task rebuild so Label Studio reflects the new state
+    FORCE_REBUILD=true
 else
-    ok "No orphaned metadata found — dataset is clean."
+    ok "Dataset is clean — vlm_crops/ and clips/ are in sync."
 fi
+
+# Show final counts
+CLIP_COUNT=$(find "${DATASET_DIR}/clips" -name "*.mp4" 2>/dev/null | wc -l || echo "0")
+VLM_COUNT=$(find "${DATASET_DIR}/vlm_crops" -name "*.mp4" 2>/dev/null | wc -l || echo "0")
+ok "Clips: ${CLIP_COUNT}  |  VLM crops: ${VLM_COUNT}"
 
 # ============================================================================
 #  STEP 6: Re-encode clips to H.264 + generate tasks
@@ -269,10 +247,7 @@ step "Re-encoding clips & generating tasks"
 info "This re-encodes mp4v clips to H.264 (already-encoded clips are skipped)."
 info "Then generates Label Studio config + tasks JSON..."
 
-LABELING_ARGS=(--dataset-dir "$DATASET_DIR" --reencode --no-cleanup)
-if [[ "$FORCE_REBUILD" == "true" ]]; then
-    LABELING_ARGS+=(--force)
-fi
+LABELING_ARGS=(--dataset-dir "$DATASET_DIR" --reencode --no-cleanup --force)
 
 $UVRUN python -m home_guard_project.labeling "${LABELING_ARGS[@]}"
 
