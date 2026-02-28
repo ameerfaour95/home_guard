@@ -10,6 +10,17 @@ from typing import Any, Dict, List, Optional
 log = logging.getLogger("labeling.merge")
 
 
+def _task_key(task: Dict[str, Any]) -> str:
+    """Return a stable merge key for a task.
+
+    Prefers ``data.meta_path`` (storage-mode agnostic) and falls back to
+    ``data.video_url`` for backward compatibility with older exports that
+    lack the ``meta_path`` field.
+    """
+    data = task.get("data", {})
+    return data.get("meta_path", "") or data.get("video_url", "")
+
+
 def merge_annotations(
     new_tasks_path: str,
     exported_path: str,
@@ -18,9 +29,10 @@ def merge_annotations(
     """
     Merge annotations from a Label Studio JSON export into regenerated tasks.
 
-    Matches tasks by ``data.video_url`` -- the deterministic key derived from
-    the clip path.  Exported annotations are attached to the matching new
-    task so that a clear-and-reimport cycle preserves all human work.
+    Matches tasks by ``data.meta_path`` (stable across storage modes) with
+    a fallback to ``data.video_url`` for older exports.  Exported annotations
+    are attached to the matching new task so that a clear-and-reimport cycle
+    preserves all human work.
 
     Args:
         new_tasks_path: Path to the regenerated ``label_studio_tasks.json``.
@@ -45,10 +57,10 @@ def merge_annotations(
 
     annotation_lookup: Dict[str, List[Dict[str, Any]]] = {}
     for task in exported:
-        video_url = task.get("data", {}).get("video_url", "")
+        key = _task_key(task)
         annotations = task.get("annotations", [])
-        if video_url and annotations:
-            annotation_lookup[video_url] = annotations
+        if key and annotations:
+            annotation_lookup[key] = annotations
 
     log.info(
         "Export contains %d tasks (%d with annotations)",
@@ -57,9 +69,9 @@ def merge_annotations(
 
     with_annotations = 0
     for task in new_tasks:
-        video_url = task.get("data", {}).get("video_url", "")
-        if video_url in annotation_lookup:
-            task["annotations"] = annotation_lookup[video_url]
+        key = _task_key(task)
+        if key in annotation_lookup:
+            task["annotations"] = annotation_lookup[key]
             with_annotations += 1
 
     new_count = len(new_tasks) - with_annotations

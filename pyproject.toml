@@ -25,6 +25,7 @@ dependencies = [
     "pyyaml==6.0.3",
     "onvif-zeep==0.2.12",
     "WSDiscovery==2.1.2",
+    "boto3>=1.36.0",
 ]
 
 [tool.uv]

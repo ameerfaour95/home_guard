@@ -5,11 +5,12 @@
 #  Lives in:  home_guard_project/labeling/start.sh
 #
 #  Usage:
-#      ./home_guard_project/labeling/start.sh [DATASET_DIR] [--force]
+#      ./home_guard_project/labeling/start.sh [DATASET_DIR] [--force] [--share]
 #
 #  Examples:
 #      ./home_guard_project/labeling/start.sh ./dataset_multi
 #      ./home_guard_project/labeling/start.sh ./dataset_multi --force
+#      ./home_guard_project/labeling/start.sh ./dataset_multi --share
 #
 #  What it does:
 #    1. Verifies Python >= 3.12 and installs uv if missing
@@ -22,8 +23,10 @@
 #    8. Auto-creates a Label Studio project via the API
 #    9. On re-run: exports existing annotations, merges into new tasks,
 #       clears old tasks, then reimports (preserves all human annotations)
-#   10. Imports tasks via the API, opens the browser
-#   11. Ctrl+C cleanly shuts everything down
+#   10. Auto-creates annotator accounts from config.yaml (idempotent)
+#   11. Imports tasks via the API, opens the browser
+#   12. (--share) Launches an ngrok tunnel so annotators can access remotely
+#   13. Ctrl+C cleanly shuts everything down
 # ============================================================================
 set -euo pipefail
 
@@ -54,10 +57,12 @@ yaml_val() {
 
 # Parse CLI args
 FORCE_REBUILD=false
+SHARE_MODE=false
 POSITIONAL_ARGS=()
 for arg in "$@"; do
     case "$arg" in
         --force) FORCE_REBUILD=true ;;
+        --share) SHARE_MODE=true ;;
         *)       POSITIONAL_ARGS+=("$arg") ;;
     esac
 done
@@ -74,12 +79,17 @@ PROJECT_NAME="$(yaml_val project_name)"
 # file_server.port
 FILE_SERVER_PORT=$(sed -n '/^file_server:/,/^[a-z]/{ /^\s*port:/p }' "$CONFIG_YAML" | head -1 | sed 's/^[^:]*:\s*//' | tr -d '[:space:]')
 
+# storage.mode (local or s3)
+STORAGE_MODE="$(yaml_val mode)"
+STORAGE_MODE="${STORAGE_MODE:-local}"
+
 LS_BASE="http://localhost:${LS_PORT}"
 SESSION_FILE="${DATASET_DIR}/.ls_session.json"
 
 # PIDs for cleanup
 FILE_SERVER_PID=""
 LABEL_STUDIO_PID=""
+NGROK_PID=""
 
 # ── Colors ──────────────────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -99,6 +109,9 @@ step()  { echo -e "\n${BOLD}── $* ──${NC}"; }
 cleanup() {
     echo ""
     info "Shutting down..."
+    if [[ -n "$NGROK_PID" ]]; then
+        kill "$NGROK_PID" 2>/dev/null && info "ngrok stopped." || true
+    fi
     if [[ -n "$FILE_SERVER_PID" ]]; then
         kill "$FILE_SERVER_PID" 2>/dev/null && info "File server stopped." || true
     fi
@@ -187,93 +200,187 @@ UVRUN="uv run"
 # ============================================================================
 step "Verifying dataset"
 
-if [[ ! -d "$DATASET_DIR" ]]; then
-    err "Dataset directory not found: $DATASET_DIR"
-    err "Pass the correct path:  ./home_guard_project/labeling/start.sh /path/to/dataset_multi"
-    exit 1
-fi
+info "Storage mode: ${STORAGE_MODE}"
 
-if [[ ! -d "${DATASET_DIR}/meta" ]]; then
-    err "No 'meta/' subdirectory in ${DATASET_DIR}. Is this a valid dataset_multi directory?"
-    exit 1
-fi
-
-CLIP_COUNT=$(find "${DATASET_DIR}/clips" -name "*.mp4" 2>/dev/null | wc -l || echo "0")
-ok "Dataset: ${DATASET_DIR}  (${CLIP_COUNT} clips found)"
-
-# ============================================================================
-#  STEP 5: Cleanup — sync vlm_crops ↔ clips, remove orphans
-# ============================================================================
-step "Synchronising dataset (cleanup)"
-
-info "Aligning vlm_crops/ and clips/ — cascade-deleting mismatches..."
-
-CLEANUP_OUTPUT=$($UVRUN python -m home_guard_project.labeling \
-    --cleanup-only --dataset-dir "$DATASET_DIR" 2>&1 || echo "")
-
-# Parse counts from the summary
-CLEANUP_CASCADE=$(echo "$CLEANUP_OUTPUT" | grep "Cascade clip deletes" | grep -oE '[0-9]+' || echo "0")
-CLEANUP_META=$(echo "$CLEANUP_OUTPUT" | grep "Orphan meta removed" | grep -oE '[0-9]+' || echo "0")
-CLEANUP_RESP=$(echo "$CLEANUP_OUTPUT" | grep "Orphan resp removed" | grep -oE '[0-9]+' || echo "0")
-CLEANUP_YOLO_IMG=$(echo "$CLEANUP_OUTPUT" | grep "Orphan YOLO imgs" | grep -oE '[0-9]+' || echo "0")
-CLEANUP_YOLO_LBL=$(echo "$CLEANUP_OUTPUT" | grep "Orphan YOLO lbls" | grep -oE '[0-9]+' || echo "0")
-CLEANUP_VLM=$(echo "$CLEANUP_OUTPUT" | grep "Orphan VLM crops" | grep -oE '[0-9]+' || echo "0")
-CLEANUP_TOTAL=$(( CLEANUP_CASCADE + CLEANUP_META + CLEANUP_RESP + CLEANUP_YOLO_IMG + CLEANUP_YOLO_LBL + CLEANUP_VLM ))
-
-if (( CLEANUP_TOTAL > 0 )); then
-    info "Cleaned up ${CLEANUP_TOTAL} files:"
-    (( CLEANUP_CASCADE > 0 )) && echo -e "    Cascade clip deletes: ${CLEANUP_CASCADE}"
-    (( CLEANUP_META > 0 ))    && echo -e "    Orphan meta files   : ${CLEANUP_META}"
-    (( CLEANUP_RESP > 0 ))    && echo -e "    Orphan responses    : ${CLEANUP_RESP}"
-    (( CLEANUP_YOLO_IMG > 0 )) && echo -e "    Orphan YOLO images  : ${CLEANUP_YOLO_IMG}"
-    (( CLEANUP_YOLO_LBL > 0 )) && echo -e "    Orphan YOLO labels  : ${CLEANUP_YOLO_LBL}"
-    (( CLEANUP_VLM > 0 ))     && echo -e "    Orphan VLM crops    : ${CLEANUP_VLM}"
-    # Force task rebuild so Label Studio reflects the new state
-    FORCE_REBUILD=true
+if [[ "$STORAGE_MODE" == "s3" ]]; then
+    # In S3 mode, the Python module syncs meta/ from S3 automatically.
+    # Just ensure the directory exists (it will be populated by the sync).
+    mkdir -p "$DATASET_DIR"
+    ok "S3 mode — metadata will be synced from S3."
 else
-    ok "Dataset is clean — vlm_crops/ and clips/ are in sync."
+    if [[ ! -d "$DATASET_DIR" ]]; then
+        err "Dataset directory not found: $DATASET_DIR"
+        err "Pass the correct path:  ./home_guard_project/labeling/start.sh /path/to/dataset_multi"
+        exit 1
+    fi
+
+    if [[ ! -d "${DATASET_DIR}/meta" ]]; then
+        err "No 'meta/' subdirectory in ${DATASET_DIR}. Is this a valid dataset_multi directory?"
+        exit 1
+    fi
+
+    CLIP_COUNT=$(find "${DATASET_DIR}/clips" -name "*.mp4" 2>/dev/null | wc -l || echo "0")
+    ok "Dataset: ${DATASET_DIR}  (${CLIP_COUNT} clips found)"
 fi
 
-# Show final counts
-CLIP_COUNT=$(find "${DATASET_DIR}/clips" -name "*.mp4" 2>/dev/null | wc -l || echo "0")
-VLM_COUNT=$(find "${DATASET_DIR}/vlm_crops" -name "*.mp4" 2>/dev/null | wc -l || echo "0")
-ok "Clips: ${CLIP_COUNT}  |  VLM crops: ${VLM_COUNT}"
+# ============================================================================
+#  STEP 5: Cleanup — sync vlm_crops ↔ clips, remove orphans (local only)
+# ============================================================================
+if [[ "$STORAGE_MODE" != "s3" ]]; then
+    step "Synchronising dataset (cleanup)"
+
+    info "Aligning vlm_crops/ and clips/ — cascade-deleting mismatches..."
+
+    CLEANUP_OUTPUT=$($UVRUN python -m home_guard_project.labeling \
+        --cleanup-only --dataset-dir "$DATASET_DIR" 2>&1 || echo "")
+
+    # Parse counts from the summary
+    CLEANUP_CASCADE=$(echo "$CLEANUP_OUTPUT" | grep "Cascade clip deletes" | grep -oE '[0-9]+' || echo "0")
+    CLEANUP_META=$(echo "$CLEANUP_OUTPUT" | grep "Orphan meta removed" | grep -oE '[0-9]+' || echo "0")
+    CLEANUP_RESP=$(echo "$CLEANUP_OUTPUT" | grep "Orphan resp removed" | grep -oE '[0-9]+' || echo "0")
+    CLEANUP_YOLO_IMG=$(echo "$CLEANUP_OUTPUT" | grep "Orphan YOLO imgs" | grep -oE '[0-9]+' || echo "0")
+    CLEANUP_YOLO_LBL=$(echo "$CLEANUP_OUTPUT" | grep "Orphan YOLO lbls" | grep -oE '[0-9]+' || echo "0")
+    CLEANUP_VLM=$(echo "$CLEANUP_OUTPUT" | grep "Orphan VLM crops" | grep -oE '[0-9]+' || echo "0")
+    CLEANUP_TOTAL=$(( CLEANUP_CASCADE + CLEANUP_META + CLEANUP_RESP + CLEANUP_YOLO_IMG + CLEANUP_YOLO_LBL + CLEANUP_VLM ))
+
+    if (( CLEANUP_TOTAL > 0 )); then
+        info "Cleaned up ${CLEANUP_TOTAL} files:"
+        (( CLEANUP_CASCADE > 0 )) && echo -e "    Cascade clip deletes: ${CLEANUP_CASCADE}"
+        (( CLEANUP_META > 0 ))    && echo -e "    Orphan meta files   : ${CLEANUP_META}"
+        (( CLEANUP_RESP > 0 ))    && echo -e "    Orphan responses    : ${CLEANUP_RESP}"
+        (( CLEANUP_YOLO_IMG > 0 )) && echo -e "    Orphan YOLO images  : ${CLEANUP_YOLO_IMG}"
+        (( CLEANUP_YOLO_LBL > 0 )) && echo -e "    Orphan YOLO labels  : ${CLEANUP_YOLO_LBL}"
+        (( CLEANUP_VLM > 0 ))     && echo -e "    Orphan VLM crops    : ${CLEANUP_VLM}"
+        FORCE_REBUILD=true
+    else
+        ok "Dataset is clean — vlm_crops/ and clips/ are in sync."
+    fi
+
+    # Show final counts
+    CLIP_COUNT=$(find "${DATASET_DIR}/clips" -name "*.mp4" 2>/dev/null | wc -l || echo "0")
+    VLM_COUNT=$(find "${DATASET_DIR}/vlm_crops" -name "*.mp4" 2>/dev/null | wc -l || echo "0")
+    ok "Clips: ${CLIP_COUNT}  |  VLM crops: ${VLM_COUNT}"
+fi
 
 # ============================================================================
-#  STEP 6: Re-encode clips to H.264 + generate tasks
+#  STEP 6: Re-encode clips + generate tasks  (S3: generate only, no re-encode)
 # ============================================================================
-step "Re-encoding clips & generating tasks"
+step "Generating tasks"
 
-info "This re-encodes mp4v clips to H.264 (already-encoded clips are skipped)."
-info "Then generates Label Studio config + tasks JSON..."
-
-LABELING_ARGS=(--dataset-dir "$DATASET_DIR" --reencode --no-cleanup --force)
+if [[ "$STORAGE_MODE" == "s3" ]]; then
+    info "S3 mode — syncing metadata from S3 and generating tasks with pre-signed URLs..."
+    LABELING_ARGS=(--dataset-dir "$DATASET_DIR" --no-cleanup --force)
+else
+    info "Re-encoding mp4v clips to H.264 (already-encoded clips are skipped)."
+    info "Then generating Label Studio config + tasks JSON..."
+    LABELING_ARGS=(--dataset-dir "$DATASET_DIR" --reencode --no-cleanup --force)
+fi
 
 $UVRUN python -m home_guard_project.labeling "${LABELING_ARGS[@]}"
 
 ok "Tasks generated at ${DATASET_DIR}/label_studio_tasks.json"
 
 # ============================================================================
-#  STEP 7: Start file server (background)
+#  STEP 7: Start file server (local mode only)
 # ============================================================================
-step "Starting file server (port ${FILE_SERVER_PORT})"
+if [[ "$STORAGE_MODE" != "s3" ]]; then
+    step "Starting file server (port ${FILE_SERVER_PORT})"
 
-$UVRUN python -m home_guard_project.labeling \
-    --serve \
-    --dataset-dir "$DATASET_DIR" \
-    --port "$FILE_SERVER_PORT" &
-FILE_SERVER_PID=$!
+    $UVRUN python -m home_guard_project.labeling \
+        --serve \
+        --dataset-dir "$DATASET_DIR" \
+        --port "$FILE_SERVER_PORT" &
+    FILE_SERVER_PID=$!
 
-sleep 1
-if kill -0 "$FILE_SERVER_PID" 2>/dev/null; then
-    ok "File server running (PID ${FILE_SERVER_PID})"
+    sleep 1
+    if kill -0 "$FILE_SERVER_PID" 2>/dev/null; then
+        ok "File server running (PID ${FILE_SERVER_PID})"
+    else
+        err "File server failed to start."
+        exit 1
+    fi
 else
-    err "File server failed to start."
-    exit 1
+    info "S3 mode — file server not needed (videos served via pre-signed S3 URLs)."
 fi
 
 # ============================================================================
-#  STEP 8: Start Label Studio (background)
+#  STEP 8: Start ngrok BEFORE Label Studio (--share only)
+#           ngrok tunnels to the port even before LS is listening.
+#           We need the public URL so we can set LABEL_STUDIO_HOST for CSRF.
+# ============================================================================
+SHARE_URL=""
+
+if [[ "$SHARE_MODE" == "true" ]]; then
+    step "Starting ngrok tunnel"
+
+    # Find ngrok — may not be in Git Bash's PATH on Windows
+    NGROK_BIN=""
+    if command -v ngrok &>/dev/null; then
+        NGROK_BIN="ngrok"
+    elif [[ "$OS" == "windows" ]]; then
+        for p in \
+            "${LOCALAPPDATA:-}/Programs/ngrok.exe" \
+            "${LOCALAPPDATA:-}/ngrok/ngrok.exe" \
+            "${PROGRAMDATA:-}/ngrok/ngrok.exe" \
+            "/c/Users/${USERNAME:-$USER}/AppData/Local/Programs/ngrok.exe"; do
+            if [[ -x "$p" ]]; then
+                NGROK_BIN="$p"
+                break
+            fi
+        done
+    fi
+
+    if [[ -z "$NGROK_BIN" ]]; then
+        err "ngrok is not installed."
+        echo ""
+        echo -e "  Install ngrok:"
+        echo -e "    ${BOLD}Windows:${NC}  winget install ngrok.ngrok"
+        echo -e "    ${BOLD}macOS:${NC}    brew install ngrok"
+        echo -e "    ${BOLD}Linux:${NC}    snap install ngrok"
+        echo -e "    ${BOLD}Or:${NC}       https://ngrok.com/download"
+        echo ""
+        echo -e "  Then run:  ${BOLD}ngrok config add-authtoken YOUR_TOKEN${NC}"
+        echo ""
+        warn "Continuing without tunnel — Label Studio is only available locally."
+    else
+        "$NGROK_BIN" http "$LS_PORT" --log=stdout > /dev/null 2>&1 &
+        NGROK_PID=$!
+
+        info "Waiting for ngrok tunnel..."
+        NGROK_WAIT=0
+        while (( NGROK_WAIT < 15 )); do
+            sleep 1
+            NGROK_WAIT=$((NGROK_WAIT + 1))
+            SHARE_URL=$(curl -s http://127.0.0.1:4040/api/tunnels 2>/dev/null \
+                | $PYTHON -c "
+import sys, json
+try:
+    tunnels = json.load(sys.stdin).get('tunnels', [])
+    for t in tunnels:
+        url = t.get('public_url', '')
+        if url.startswith('https://'):
+            print(url)
+            break
+except Exception:
+    pass
+" 2>/dev/null || echo "")
+
+            if [[ -n "$SHARE_URL" ]]; then
+                break
+            fi
+        done
+
+        if [[ -n "$SHARE_URL" ]]; then
+            ok "ngrok tunnel active (PID ${NGROK_PID}): ${SHARE_URL}"
+        else
+            warn "Could not detect ngrok tunnel URL. Check 'ngrok' logs."
+            warn "You may need to run 'ngrok config add-authtoken YOUR_TOKEN' first."
+        fi
+    fi
+fi
+
+# ============================================================================
+#  STEP 9: Start Label Studio (background)
 # ============================================================================
 step "Starting Label Studio (port ${LS_PORT})"
 
@@ -283,6 +390,13 @@ step "Starting Label Studio (port ${LS_PORT})"
 # Auto-provision the admin account on first launch (when no users exist yet).
 export LABEL_STUDIO_USERNAME="${LS_EMAIL}"
 export LABEL_STUDIO_PASSWORD="${LS_PASSWORD}"
+
+# Tell Label Studio about the public hostname so Django CSRF trusts it.
+if [[ -n "$SHARE_URL" ]]; then
+    export LABEL_STUDIO_HOST="${SHARE_URL}"
+    export LABEL_STUDIO_PROXY="true"
+    export CSRF_TRUSTED_ORIGINS="${SHARE_URL}"
+fi
 
 $UVRUN label-studio start \
     --port "$LS_PORT" \
@@ -505,6 +619,46 @@ print(f'{len(tasks)} tasks, {annotated} with annotations')
     fi
 fi
 
+# ── Create annotator accounts (idempotent) ────────────────────────────────
+ANNOTATOR_LIST=$($UVRUN python -c "
+import yaml, json, sys
+with open('${CONFIG_YAML}') as f:
+    cfg = yaml.safe_load(f)
+annotators = cfg.get('annotators') or []
+json.dump(annotators, sys.stdout)
+" 2>/dev/null || echo "[]")
+
+ANNOTATOR_COUNT=$($PYTHON -c "import json,sys; print(len(json.loads(sys.argv[1])))" "$ANNOTATOR_LIST" 2>/dev/null || echo "0")
+
+if (( ANNOTATOR_COUNT > 0 )); then
+    info "Creating ${ANNOTATOR_COUNT} annotator account(s)..."
+
+    $PYTHON -c "
+import json, sys
+annotators = json.loads(sys.argv[1])
+for a in annotators:
+    print(json.dumps(a))
+" "$ANNOTATOR_LIST" | while IFS= read -r line; do
+        ANN_EMAIL=$($PYTHON -c "import json,sys; print(json.loads(sys.argv[1])['email'])" "$line")
+        ANN_PASS=$($PYTHON -c "import json,sys; print(json.loads(sys.argv[1])['password'])" "$line")
+
+        # Try to create the user; LS returns 201 on success, 400 if exists
+        CREATE_RESP=$(_api POST "/api/users/" \
+            -H "Content-Type: application/json" \
+            -d "{\"email\": \"${ANN_EMAIL}\", \"username\": \"${ANN_EMAIL}\", \"password\": \"${ANN_PASS}\"}" \
+            -w "\n%{http_code}" 2>/dev/null || echo -e "\n000")
+
+        HTTP_CODE=$(echo "$CREATE_RESP" | tail -1)
+        if [[ "$HTTP_CODE" == "201" ]]; then
+            ok "  Created: ${ANN_EMAIL}"
+        else
+            info "  Exists:  ${ANN_EMAIL} (skipped)"
+        fi
+    done
+else
+    info "No annotators configured in config.yaml — skipping account creation."
+fi
+
 # ── Import tasks ───────────────────────────────────────────────────────────
 if [[ -f "$TASKS_FILE" ]]; then
     info "Importing tasks into project ${PROJECT_ID}..."
@@ -525,20 +679,46 @@ else
 fi
 
 # ============================================================================
-#  STEP 10: Open browser
+#  STEP 12: Open browser
 # ============================================================================
 step "Ready!"
 
 PROJECT_URL="${LS_BASE}/projects/${PROJECT_ID}"
 echo ""
 echo -e "  ${BOLD}Label Studio:${NC}   ${PROJECT_URL}"
-echo -e "  ${BOLD}File Server:${NC}    http://localhost:${FILE_SERVER_PORT}"
+if [[ -n "$SHARE_URL" ]]; then
+    echo -e "  ${BOLD}Public URL:${NC}     ${SHARE_URL}/projects/${PROJECT_ID}"
+fi
+if [[ "$STORAGE_MODE" != "s3" ]]; then
+    echo -e "  ${BOLD}File Server:${NC}    http://localhost:${FILE_SERVER_PORT}"
+else
+    echo -e "  ${BOLD}Storage:${NC}        S3 (pre-signed URLs)"
+fi
 echo -e "  ${BOLD}Login:${NC}          ${LS_EMAIL} / ${LS_PASSWORD}"
+
+# Print annotator credentials if any
+if (( ANNOTATOR_COUNT > 0 )); then
+    echo ""
+    echo -e "  ${BOLD}Annotator accounts:${NC}"
+    $PYTHON -c "
+import json, sys
+annotators = json.loads(sys.argv[1])
+for a in annotators:
+    print(f\"    {a['email']}  /  {a['password']}\")
+" "$ANNOTATOR_LIST" 2>/dev/null || true
+fi
+
 echo ""
+
+if [[ -n "$SHARE_URL" ]]; then
+    echo -e "  ${YELLOW}Share this URL with your annotators:${NC}"
+    echo -e "  ${BOLD}${SHARE_URL}${NC}"
+    echo ""
+fi
 
 open_browser "$PROJECT_URL"
 
-ok "Browser opened. Press Ctrl+C to stop all services."
+ok "Press Ctrl+C to stop all services."
 
 # Keep the script alive until interrupted
 wait

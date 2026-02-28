@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from tqdm import tqdm
 
-from .config import get_all_label_names
+from .config import S3StorageConfig, get_all_label_names
 from .utils.yolo import build_predictions
 
 log = logging.getLogger("labeling.tasks")
@@ -213,6 +213,7 @@ def _build_single_task(
     dataset_dir: str,
     include_predictions: bool,
     video_base_url: Optional[str],
+    s3_config: Optional[S3StorageConfig] = None,
 ) -> Optional[Dict[str, Any]]:
     """Build one Label Studio task dict from a single meta entry."""
     camera_name: str = meta.get("camera_name", "unknown")
@@ -222,11 +223,19 @@ def _build_single_task(
     if not clip_rel:
         return None
 
-    clip_abs = os.path.join(dataset_dir, clip_rel)
-    if not os.path.isfile(clip_abs):
-        return None
+    if s3_config is None:
+        clip_abs = os.path.join(dataset_dir, clip_rel)
+        if not os.path.isfile(clip_abs):
+            return None
 
-    if video_base_url:
+    if s3_config is not None:
+        from .utils.s3 import presigned_url
+        clip_key = f"{s3_config.prefix}/{clip_rel}"
+        video_url = presigned_url(
+            s3_config.bucket, clip_key,
+            region=s3_config.region, expiry=s3_config.url_expiry_sec,
+        )
+    elif video_base_url:
         video_url = f"{video_base_url.rstrip('/')}/{clip_rel}"
     else:
         video_url = f"/data/local-files/?d={clip_rel}"
@@ -237,20 +246,31 @@ def _build_single_task(
     end_display = end_local.split(" ")[-1] if " " in end_local else end_local
     header = f"{camera_name} | {kind} | {start_local} - {end_display}"
 
-    # VLM crop video (main-stream, high-res) — may be absent for random clips.
-    # Try explicit meta field first; fall back to inferring from clip_path
-    # (clips/... → vlm_crops/...) for datasets collected before dual-stream
-    # added vlm_crop_path to meta.
     vlm_crop_rel = meta.get("vlm_crop_path", "").replace("\\", "/")
     if not vlm_crop_rel and clip_rel.startswith("clips/"):
         vlm_crop_rel = "vlm_crops/" + clip_rel[len("clips/"):]
-    has_vlm_crop = bool(vlm_crop_rel) and os.path.isfile(
-        os.path.join(dataset_dir, vlm_crop_rel)
-    )
-    if has_vlm_crop and video_base_url:
-        vlm_abs = os.path.join(dataset_dir, vlm_crop_rel)
-        mtime = int(os.path.getmtime(vlm_abs))
-        vlm_crop_url = f"{video_base_url.rstrip('/')}/{vlm_crop_rel}?v={mtime}"
+
+    if s3_config is not None:
+        has_vlm_crop = bool(vlm_crop_rel)
+    else:
+        has_vlm_crop = bool(vlm_crop_rel) and os.path.isfile(
+            os.path.join(dataset_dir, vlm_crop_rel)
+        )
+
+    if has_vlm_crop:
+        if s3_config is not None:
+            from .utils.s3 import presigned_url
+            vlm_key = f"{s3_config.prefix}/{vlm_crop_rel}"
+            vlm_crop_url = presigned_url(
+                s3_config.bucket, vlm_key,
+                region=s3_config.region, expiry=s3_config.url_expiry_sec,
+            )
+        elif video_base_url:
+            vlm_abs = os.path.join(dataset_dir, vlm_crop_rel)
+            mtime = int(os.path.getmtime(vlm_abs))
+            vlm_crop_url = f"{video_base_url.rstrip('/')}/{vlm_crop_rel}?v={mtime}"
+        else:
+            vlm_crop_url = video_url
     else:
         vlm_crop_url = video_url
 
@@ -306,10 +326,14 @@ def scan_and_build_tasks(
     limit: Optional[int] = None,
     include_predictions: bool = True,
     video_base_url: Optional[str] = None,
+    s3_config: Optional[S3StorageConfig] = None,
     workers: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     """
     Walk ``dataset_dir/meta/`` and build Label Studio tasks in parallel.
+
+    When *s3_config* is provided, video URLs are S3 pre-signed URLs
+    instead of local file-server URLs.
 
     Returns a list of task dicts ready for JSON export.
     """
@@ -337,6 +361,7 @@ def scan_and_build_tasks(
             pool.submit(
                 _build_single_task,
                 mp, m, dataset_dir, include_predictions, video_base_url,
+                s3_config,
             ): mp
             for mp, m in entries
         }

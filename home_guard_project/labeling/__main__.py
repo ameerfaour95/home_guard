@@ -20,7 +20,7 @@ import sys
 import time
 from typing import List, Optional
 
-from .config import get_default_dataset_dir, get_file_server_port
+from .config import get_default_dataset_dir, get_file_server_port, get_s3_config, get_storage_mode
 from .tasks import (
     collect_clip_paths,
     collect_vlm_crop_paths,
@@ -143,17 +143,45 @@ def main() -> None:
     t_start = time.monotonic()
 
     dataset_dir: str = args.dataset_dir
+    storage_mode = get_storage_mode()
+    s3_cfg = get_s3_config()
+    is_s3 = storage_mode == "s3" and s3_cfg is not None
+
+    if is_s3:
+        log.info("Storage mode: S3  (s3://%s/%s)", s3_cfg.bucket, s3_cfg.prefix)
+    else:
+        log.info("Storage mode: local")
+
+    # In S3 mode, sync metadata first so dataset_dir has meta/ and yolo/labels/
+    if is_s3:
+        from .utils.s3 import sync_metadata_from_s3
+
+        os.makedirs(dataset_dir, exist_ok=True)
+        downloaded, skipped = sync_metadata_from_s3(
+            bucket=s3_cfg.bucket,
+            prefix=s3_cfg.prefix,
+            local_dir=dataset_dir,
+            region=s3_cfg.region,
+        )
+        log.info("S3 metadata sync: %d downloaded, %d up-to-date", downloaded, skipped)
+
     if not os.path.isdir(dataset_dir):
         log.error("Dataset directory not found: %s", dataset_dir)
         sys.exit(1)
 
-    # --serve: start the file server and block
+    # --serve: start the file server and block (local mode only)
     if args.serve:
+        if is_s3:
+            log.info("S3 mode — file server is not needed. Exiting.")
+            return
         start_file_server(dataset_dir, port=args.port, background=False)
         return
 
-    # --cleanup-only: run orphan cleanup and exit
+    # --cleanup-only: run orphan cleanup and exit (local mode only)
     if args.cleanup_only:
+        if is_s3:
+            log.info("S3 mode — orphan cleanup is not applicable. Exiting.")
+            return
         stats = cleanup_orphans(dataset_dir, dry_run=args.dry_run)
         print()
         print(stats.summary())
@@ -187,10 +215,10 @@ def main() -> None:
     if args.kinds:
         kind_filter = [k.strip() for k in args.kinds.split(",") if k.strip()]
 
-    video_base_url = f"http://localhost:{args.port}"
+    video_base_url: Optional[str] = None if is_s3 else f"http://localhost:{args.port}"
 
-    # Step 0a: Orphan cleanup (remove meta/response/yolo for deleted clips)
-    if not args.no_cleanup:
+    # Step 0a: Orphan cleanup (local mode only)
+    if not is_s3 and not args.no_cleanup:
         stats = cleanup_orphans(dataset_dir)
         if stats.total_removed > 0:
             log.info("Cleanup: removed %d orphan files", stats.total_removed)
@@ -205,8 +233,8 @@ def main() -> None:
     config_path = os.path.join(dataset_dir, "label_studio_config.xml")
     write_config(config_path)
 
-    # Step 2: Optionally re-encode videos (clips + VLM crops)
-    if args.reencode:
+    # Step 2: Optionally re-encode videos (local mode only — S3 clips are remote)
+    if args.reencode and not is_s3:
         clips = collect_clip_paths(
             dataset_dir,
             cameras=camera_filter,
@@ -224,6 +252,8 @@ def main() -> None:
             ffmpeg_path=args.ffmpeg,
             workers=args.workers,
         )
+    elif args.reencode and is_s3:
+        log.info("S3 mode — skipping re-encode (clips are remote).")
 
     # Step 3: Scan and build tasks
     tasks = scan_and_build_tasks(
@@ -233,6 +263,7 @@ def main() -> None:
         limit=args.limit,
         include_predictions=not args.no_predictions,
         video_base_url=video_base_url,
+        s3_config=s3_cfg if is_s3 else None,
         workers=args.workers,
     )
     log.info("Built %d tasks", len(tasks))
