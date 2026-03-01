@@ -766,6 +766,88 @@ class VLMWorker:
             pass
 
 
+@dataclass
+class _VlmCropJob:
+    cfg: Config
+    detector: YOLO
+    st_name: str
+    sub_frames: List[np.ndarray]
+    sub_start_ts: float
+    sub_end_ts: float
+    main_clip_data: Tuple[List[np.ndarray], float, float, float]
+    day: str
+    clip_id: str
+    meta_path: str
+    meta: Dict[str, Any]
+
+
+class _VlmCropWorker:
+    """Background thread that generates VLM crop clips without blocking the
+    detection loop.  Follows the same queue pattern as ``VLMWorker``."""
+
+    def __init__(self) -> None:
+        self.q: queue.Queue[_VlmCropJob] = queue.Queue(maxsize=50)
+        self.running = True
+        self.thread = threading.Thread(target=self._loop, daemon=True, name="vlm-crop")
+        self.thread.start()
+
+    def submit(self, job: _VlmCropJob) -> bool:
+        try:
+            self.q.put_nowait(job)
+            return True
+        except queue.Full:
+            log.warning("VLM-crop queue full; skipping crop for %s", job.clip_id)
+            return False
+
+    def _loop(self) -> None:
+        while self.running:
+            try:
+                job = self.q.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            try:
+                self._process(job)
+            except Exception:
+                log.exception("VLM crop job failed for %s", job.clip_id)
+            finally:
+                self.q.task_done()
+
+    def _process(self, job: _VlmCropJob) -> None:
+        # Build a minimal CameraState-like object for the existing function
+        # signature — we only need `.name`.
+        class _Stub:
+            pass
+        stub = _Stub()
+        stub.name = job.st_name  # type: ignore[attr-defined]
+
+        vlm_crop_meta = _save_vlm_crop_clip(
+            cfg=job.cfg,
+            detector=job.detector,
+            st=stub,  # type: ignore[arg-type]
+            sub_frames=job.sub_frames,
+            sub_start_ts=job.sub_start_ts,
+            sub_end_ts=job.sub_end_ts,
+            main_clip_data=job.main_clip_data,
+            day=job.day,
+            clip_id=job.clip_id,
+        )
+        if vlm_crop_meta is not None:
+            job.meta["vlm_crop"] = vlm_crop_meta
+            with open(job.meta_path, "w", encoding="utf-8") as f:
+                json.dump(job.meta, f, ensure_ascii=False, indent=2)
+
+    def stop(self) -> None:
+        self.running = False
+        try:
+            self.q.join()
+        except Exception:
+            pass
+        try:
+            self.thread.join(timeout=5)
+        except Exception:
+            pass
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Per-camera runtime state
 # ─────────────────────────────────────────────────────────────────────────────
@@ -844,11 +926,18 @@ def _save_vlm_crop_clip(
     if not aligned_sub:
         aligned_sub = sub_frames
 
-    n_samples = min(5, len(aligned_sub))
-    step = max(1, len(aligned_sub) // n_samples)
-    all_boxes_main: List[Tuple[float, float, float, float]] = []
+    # --- Sampled detection → interpolate → EMA smooth -----------------------
+    # Run YOLO on ~2 fps worth of sub-stream frames (not every frame) to
+    # keep processing fast for the live pipeline.  Crops for intermediate
+    # frames are linearly interpolated, then the whole sequence is
+    # EMA-smoothed for temporal stability.
+    n_sub = len(aligned_sub)
+    n_main = len(main_frames)
 
-    for i in range(0, len(aligned_sub), step):
+    sample_step = max(1, int(round(cfg.STORE_FPS / 2.0)))
+    sampled_crops: Dict[int, Tuple[int, int, int, int]] = {}
+
+    for i in range(0, n_sub, sample_step):
         sf = aligned_sub[i]
         if sf is None:
             continue
@@ -862,25 +951,75 @@ def _save_vlm_crop_clip(
             results[0].boxes, cfg.TRIGGER_CLASS_IDS,
             src_h=sh, src_w=sw, dst_h=mh, dst_w=mw,
         )
-        all_boxes_main.extend(scaled)
+        crop = _compute_trigger_crop(
+            scaled, mh, mw,
+            padding=cfg.CROP_PADDING,
+            min_size=cfg.CROP_MIN_SIZE,
+        )
+        if crop is not None:
+            sampled_crops[i] = crop
 
-    crop = _compute_trigger_crop(
-        all_boxes_main, mh, mw,
-        padding=cfg.CROP_PADDING,
-        min_size=cfg.CROP_MIN_SIZE,
-    )
-    if crop is None:
+    if not sampled_crops:
         log.warning("[%s] no trigger-class detections for VLM crop", st.name)
         return None
 
-    x1, y1, x2, y2 = crop
+    # Linear interpolation to fill every sub-stream frame
+    sorted_keys = sorted(sampled_crops.keys())
+    raw_crops: List[Optional[Tuple[int, int, int, int]]] = []
+    for i in range(n_sub):
+        if i in sampled_crops:
+            raw_crops.append(sampled_crops[i])
+            continue
+        prev_k = max((k for k in sorted_keys if k <= i), default=None)
+        next_k = min((k for k in sorted_keys if k >= i), default=None)
+        if prev_k is not None and next_k is not None and prev_k != next_k:
+            t = (i - prev_k) / (next_k - prev_k)
+            a, b = sampled_crops[prev_k], sampled_crops[next_k]
+            raw_crops.append((
+                int(a[0] + t * (b[0] - a[0])),
+                int(a[1] + t * (b[1] - a[1])),
+                int(a[2] + t * (b[2] - a[2])),
+                int(a[3] + t * (b[3] - a[3])),
+            ))
+        elif prev_k is not None:
+            raw_crops.append(sampled_crops[prev_k])
+        elif next_k is not None:
+            raw_crops.append(sampled_crops[next_k])
+        else:
+            raw_crops.append(None)
 
-    # --- Crop every main-stream frame with the same region ------------------
+    smoothed_sub = _smooth_crops(raw_crops, alpha=cfg.CROP_EMA_ALPHA)
+
+    # Map sub-stream crops to main-stream frame count
+    smoothed_main: List[Optional[Tuple[int, int, int, int]]] = []
+    for mi in range(n_main):
+        si = min(int(mi * n_sub / max(1, n_main)), n_sub - 1)
+        smoothed_main.append(smoothed_sub[si])
+
+    # Uniform output size from the median of smoothed crop dimensions
+    valid_sizes = [
+        (c[2] - c[0], c[3] - c[1])
+        for c in smoothed_main if c is not None
+    ]
+    if not valid_sizes:
+        log.warning("[%s] no usable smoothed crops for VLM clip", st.name)
+        return None
+    valid_sizes.sort()
+    median_w, median_h = valid_sizes[len(valid_sizes) // 2]
+    if median_w < 2 or median_h < 2:
+        return None
+
+    # --- Crop each main-stream frame with its own smoothed region -----------
     cropped_frames: List[np.ndarray] = []
-    for frame in main_frames:
+    for frame, crop in zip(main_frames, smoothed_main):
+        if crop is None:
+            continue
+        x1, y1, x2, y2 = crop
         cropped = frame[y1:y2, x1:x2]
         if cropped.size == 0:
             continue
+        if cropped.shape[1] != median_w or cropped.shape[0] != median_h:
+            cropped = cv2.resize(cropped, (median_w, median_h))
         cropped_frames.append(cropped)
 
     if len(cropped_frames) < 2:
@@ -893,9 +1032,11 @@ def _save_vlm_crop_clip(
     vlm_mp4 = os.path.join(vlm_dir, f"{clip_id}.mp4")
     shutil.move(tmp, vlm_mp4)
 
-    crop_h, crop_w = cropped_frames[0].shape[:2]
-    log.info("[%s] VLM crop saved: %s (%dx%d, %d frames)",
-             st.name, vlm_mp4, crop_w, crop_h, len(cropped_frames))
+    first_crop = next(c for c in smoothed_main if c is not None)
+    x1, y1, x2, y2 = first_crop
+
+    log.info("[%s] VLM crop saved: %s (%dx%d, %d frames, per-frame tracking)",
+             st.name, vlm_mp4, median_w, median_h, len(cropped_frames))
 
     return {
         "enabled": True,
@@ -904,9 +1045,10 @@ def _save_vlm_crop_clip(
         "crop_min_size": cfg.CROP_MIN_SIZE,
         "source_resolution": [mw, mh],
         "crop_region": [x1, y1, x2, y2],
-        "crop_resolution": [crop_w, crop_h],
+        "crop_resolution": [median_w, median_h],
         "frames_written": len(cropped_frames),
         "fps": float(m_fps),
+        "per_frame_tracking": True,
     }
 
 
@@ -921,6 +1063,7 @@ def _save_clip(
     end_ts: float,
     fps: float,
     main_clip_data: Optional[Tuple[List[np.ndarray], float, float, float]] = None,
+    vlm_crop_worker: Optional[_VlmCropWorker] = None,
 ) -> None:
     if not frames:
         return
@@ -1020,16 +1163,19 @@ def _save_clip(
             "exported_frames": exported,
         }
 
-    vlm_crop_meta = _save_vlm_crop_clip(
-        cfg=cfg, detector=detector, st=st, sub_frames=frames,
-        sub_start_ts=start_ts, sub_end_ts=end_ts,
-        main_clip_data=main_clip_data,
-        day=day, clip_id=clip_id,
-    )
-    if vlm_crop_meta is not None:
-        meta["vlm_crop"] = vlm_crop_meta
+    # Offload VLM crop to background thread so the detection loop isn't blocked
+    if vlm_crop_worker is not None and main_clip_data is not None:
+        crop_job = _VlmCropJob(
+            cfg=cfg, detector=detector, st_name=st.name,
+            sub_frames=list(frames), sub_start_ts=start_ts, sub_end_ts=end_ts,
+            main_clip_data=main_clip_data,
+            day=day, clip_id=clip_id,
+            meta_path=meta_path, meta=meta,
+        )
+        vlm_crop_worker.submit(crop_job)
 
     if vlm is None:
+        # Write meta now; the crop worker will re-write it with vlm_crop when done.
         with open(meta_path, "w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False, indent=2)
         log.info("[%s] %s saved: %s (no VLM)", st.name, kind, final_mp4)
@@ -1125,6 +1271,7 @@ def main() -> None:
 
     detector = YOLO(cfg.YOLO_MODEL)
     vlm: Optional[VLMWorker] = VLMWorker(cfg) if cfg.RUN_VLM_ON_SAVED_CLIPS else None
+    crop_worker: Optional[_VlmCropWorker] = _VlmCropWorker() if cfg.MAIN_STREAM_ENABLED else None
 
     if cfg.SHOW_WINDOWS:
         try:
@@ -1289,7 +1436,8 @@ def main() -> None:
                         if clip_frames:
                             _save_clip(cfg, detector, vlm, st, "trigger",
                                        clip_frames, start_ts, end_ts, write_fps,
-                                       main_clip_data=main_clip_data)
+                                       main_clip_data=main_clip_data,
+                                       vlm_crop_worker=crop_worker)
                         if st.main_cap is not None:
                             st.main_cap.release()
                             st.main_cap = None
@@ -1309,7 +1457,8 @@ def main() -> None:
                     )
                     if has_full_clip and (cfg.RANDOM_ALLOW_PERSON or not st.trigger_detected):
                         _save_clip(cfg, detector, vlm, st, "random",
-                                   clip_frames, start_ts, end_ts, write_fps)
+                                   clip_frames, start_ts, end_ts, write_fps,
+                                   vlm_crop_worker=crop_worker)
                     st.next_random_time = now + _jittered_interval(
                         cfg.RANDOM_CLIP_INTERVAL_SEC, cfg.RANDOM_JITTER_FRAC,
                     )
@@ -1345,6 +1494,8 @@ def main() -> None:
                 st.main_cap.release()
         if cfg.SHOW_WINDOWS:
             cv2.destroyAllWindows()
+        if crop_worker is not None:
+            crop_worker.stop()
         if vlm is not None:
             vlm.stop()
         log.info("Stopped.")
