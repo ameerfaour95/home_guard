@@ -28,6 +28,7 @@ StreetScene/
 logs/
 tmp/
 *.logs
+analysis_output/
 
 # Label Studio generated artifacts
 label_studio_tasks.json

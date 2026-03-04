@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
-from typing import Any, Dict
+from dataclasses import dataclass, field
+from typing import Any, Dict, FrozenSet
 
 import yaml
 
@@ -19,6 +19,10 @@ class S3Config:
     region: str
     workers: int
     dataset_dir: str
+    skip_reencode: bool
+    cleanup: bool
+    force: bool
+    allowed_labels: FrozenSet[str] = field(default_factory=frozenset)
 
 
 def load_config(path: str = _CONFIG_PATH) -> S3Config:
@@ -31,10 +35,17 @@ def load_config(path: str = _CONFIG_PATH) -> S3Config:
     ds_rel = raw.get("dataset_dir", "./dataset_multi")
     dataset_dir = os.path.normpath(os.path.join(project_root, ds_rel))
 
+    coco_raw = raw.get("coco_labels", {})
+    allowed_labels = frozenset(str(v) for v in coco_raw.values()) if coco_raw else frozenset()
+
     return S3Config(
         bucket=s3.get("bucket", "security-camera-project-v1"),
         prefix=s3.get("prefix", "dataset_multi"),
         region=s3.get("region", "us-east-1"),
         workers=int(s3.get("workers", 4)),
         dataset_dir=dataset_dir,
+        skip_reencode=bool(raw.get("skip_reencode", False)),
+        cleanup=bool(raw.get("cleanup", True)),
+        force=bool(raw.get("force", False)),
+        allowed_labels=allowed_labels,
     )

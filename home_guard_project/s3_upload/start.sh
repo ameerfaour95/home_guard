@@ -5,14 +5,16 @@
 #  Lives in:  home_guard_project/s3_upload/start.sh
 #
 #  Usage:
-#      ./home_guard_project/s3_upload/start.sh [DATASET_DIR] [--skip-reencode] [--dry-run]
+#      ./home_guard_project/s3_upload/start.sh [DATASET_DIR] [--skip-reencode] [--dry-run] [--no-cleanup]
 #
 #  What it does:
 #    1. Verifies Python >= 3.12 and installs uv if missing
 #    2. Runs uv sync to install all dependencies (incl. boto3)
-#    3. Verifies AWS credentials exist at ~/.aws/credentials
-#    4. Re-encodes MP4 clips to H.264 (skips already-encoded)
-#    5. Uploads all files to S3 (skips files with matching size)
+#    3. Verifies dataset directory
+#    4. Auto-syncs vlm_crops/ ↔ clips/ (cascade deletes, orphan removal)
+#    5. Verifies AWS credentials exist at ~/.aws/credentials
+#    6. Re-encodes MP4 clips to H.264 (skips already-encoded)
+#    7. Uploads all files to S3 (skips files with matching size)
 # ============================================================================
 set -euo pipefail
 
@@ -39,10 +41,16 @@ S3_REGION="$(yaml_val region)"
 S3_WORKERS="$(yaml_val workers)"
 DEFAULT_DATASET="$(yaml_val dataset_dir)"
 
-# ── Parse CLI args ────────────────────────────────────────────────────────
-SKIP_REENCODE=false
+# Read pipeline behaviour defaults from config.yaml
+CFG_SKIP_REENCODE="$(yaml_val skip_reencode)"
+CFG_CLEANUP="$(yaml_val cleanup)"
+CFG_FORCE="$(yaml_val force)"
+
+# ── Parse CLI args (override config.yaml defaults) ────────────────────────
+SKIP_REENCODE=$([[ "$CFG_SKIP_REENCODE" == "true" ]] && echo true || echo false)
 DRY_RUN=false
-FORCE=false
+FORCE=$([[ "$CFG_FORCE" == "true" ]] && echo true || echo false)
+NO_CLEANUP=$([[ "$CFG_CLEANUP" == "false" ]] && echo true || echo false)
 POSITIONAL_ARGS=()
 
 for arg in "$@"; do
@@ -50,13 +58,15 @@ for arg in "$@"; do
         --skip-reencode) SKIP_REENCODE=true ;;
         --dry-run)       DRY_RUN=true ;;
         --force)         FORCE=true ;;
+        --no-cleanup)    NO_CLEANUP=true ;;
         -h|--help)
-            echo "Usage: $0 [DATASET_DIR] [--skip-reencode] [--dry-run] [--force]"
+            echo "Usage: $0 [DATASET_DIR] [--skip-reencode] [--dry-run] [--force] [--no-cleanup]"
             echo ""
             echo "  DATASET_DIR      Path to the dataset directory (default: ${DEFAULT_DATASET})"
-            echo "  --skip-reencode  Skip H.264 re-encoding step"
+            echo "  --skip-reencode  Skip H.264 re-encoding step (config: skip_reencode=${CFG_SKIP_REENCODE})"
             echo "  --dry-run        Show what would be uploaded without uploading"
-            echo "  --force          Re-upload all files even if they already exist on S3"
+            echo "  --force          Re-upload all files even if they already exist on S3 (config: force=${CFG_FORCE})"
+            echo "  --no-cleanup     Skip orphan cleanup (config: cleanup=${CFG_CLEANUP})"
             exit 0 ;;
         *)  POSITIONAL_ARGS+=("$arg") ;;
     esac
@@ -134,7 +144,45 @@ VLM_COUNT=$(find "${DATASET_DIR}/vlm_crops" -name "*.mp4" 2>/dev/null | wc -l ||
 ok "Dataset: ${DATASET_DIR}  (${CLIP_COUNT} clips, ${VLM_COUNT} VLM crops)"
 
 # ============================================================================
-#  STEP 5: AWS credentials
+#  STEP 5: Cleanup — sync vlm_crops ↔ clips, remove orphans
+# ============================================================================
+if [[ "$NO_CLEANUP" == "true" ]]; then
+    info "Skipping orphan cleanup (--no-cleanup)."
+else
+    step "Synchronising dataset (cleanup)"
+
+    info "Aligning vlm_crops/ and clips/ — cascade-deleting mismatches..."
+
+    CLEANUP_OUTPUT=$($UVRUN python -m home_guard_project.labeling.utils.cleanup \
+        "$DATASET_DIR" 2>&1 || echo "")
+
+    CLEANUP_CASCADE=$(echo "$CLEANUP_OUTPUT" | grep "Cascade clip deletes" | grep -oE '[0-9]+' || echo "0")
+    CLEANUP_META=$(echo "$CLEANUP_OUTPUT" | grep "Orphan meta removed" | grep -oE '[0-9]+' || echo "0")
+    CLEANUP_RESP=$(echo "$CLEANUP_OUTPUT" | grep "Orphan resp removed" | grep -oE '[0-9]+' || echo "0")
+    CLEANUP_YOLO_IMG=$(echo "$CLEANUP_OUTPUT" | grep "Orphan YOLO imgs" | grep -oE '[0-9]+' || echo "0")
+    CLEANUP_YOLO_LBL=$(echo "$CLEANUP_OUTPUT" | grep "Orphan YOLO lbls" | grep -oE '[0-9]+' || echo "0")
+    CLEANUP_VLM=$(echo "$CLEANUP_OUTPUT" | grep "Orphan VLM crops" | grep -oE '[0-9]+' || echo "0")
+    CLEANUP_TOTAL=$(( CLEANUP_CASCADE + CLEANUP_META + CLEANUP_RESP + CLEANUP_YOLO_IMG + CLEANUP_YOLO_LBL + CLEANUP_VLM ))
+
+    if (( CLEANUP_TOTAL > 0 )); then
+        info "Cleaned up ${CLEANUP_TOTAL} files:"
+        (( CLEANUP_CASCADE > 0 )) && echo -e "    Cascade clip deletes: ${CLEANUP_CASCADE}"
+        (( CLEANUP_META > 0 ))    && echo -e "    Orphan meta files   : ${CLEANUP_META}"
+        (( CLEANUP_RESP > 0 ))    && echo -e "    Orphan responses    : ${CLEANUP_RESP}"
+        (( CLEANUP_YOLO_IMG > 0 )) && echo -e "    Orphan YOLO images  : ${CLEANUP_YOLO_IMG}"
+        (( CLEANUP_YOLO_LBL > 0 )) && echo -e "    Orphan YOLO labels  : ${CLEANUP_YOLO_LBL}"
+        (( CLEANUP_VLM > 0 ))     && echo -e "    Orphan VLM crops    : ${CLEANUP_VLM}"
+    else
+        ok "Dataset is clean — vlm_crops/ and clips/ are in sync."
+    fi
+
+    CLIP_COUNT=$(find "${DATASET_DIR}/clips" -name "*.mp4" 2>/dev/null | wc -l || echo "0")
+    VLM_COUNT=$(find "${DATASET_DIR}/vlm_crops" -name "*.mp4" 2>/dev/null | wc -l || echo "0")
+    ok "Post-cleanup: ${CLIP_COUNT} clips, ${VLM_COUNT} VLM crops"
+fi
+
+# ============================================================================
+#  STEP 6: AWS credentials (renumbered from 5)
 # ============================================================================
 step "Checking AWS credentials"
 
@@ -167,11 +215,11 @@ else
 fi
 
 # ============================================================================
-#  STEP 6: Run the upload pipeline
+#  STEP 7: Run the upload pipeline
 # ============================================================================
 step "Starting S3 upload"
 
-UPLOAD_ARGS=("$DATASET_DIR" --bucket "$S3_BUCKET" --prefix "$S3_PREFIX" --workers "$S3_WORKERS")
+UPLOAD_ARGS=("$DATASET_DIR" --bucket "$S3_BUCKET" --prefix "$S3_PREFIX" --workers "$S3_WORKERS" --no-cleanup)
 
 if [[ "$SKIP_REENCODE" == "true" ]]; then
     UPLOAD_ARGS+=(--skip-reencode)

@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from tqdm import tqdm
 
-from .config import S3StorageConfig, get_all_label_names
+from .config import S3StorageConfig, get_all_label_names, get_coco_labels
 from .utils.yolo import build_predictions
 
 log = logging.getLogger("labeling.tasks")
@@ -214,6 +214,7 @@ def _build_single_task(
     include_predictions: bool,
     video_base_url: Optional[str],
     s3_config: Optional[S3StorageConfig] = None,
+    s3_vlm_keys: Optional[set] = None,
 ) -> Optional[Dict[str, Any]]:
     """Build one Label Studio task dict from a single meta entry."""
     camera_name: str = meta.get("camera_name", "unknown")
@@ -221,6 +222,11 @@ def _build_single_task(
 
     clip_rel = meta.get("clip_path", "").replace("\\", "/")
     if not clip_rel:
+        return None
+
+    allowed_names = set(get_coco_labels().values())
+    meta_classes = set(meta.get("yolo", {}).get("class_counts", {}).keys())
+    if meta_classes and not (meta_classes & allowed_names):
         return None
 
     if s3_config is None:
@@ -251,7 +257,10 @@ def _build_single_task(
         vlm_crop_rel = "vlm_crops/" + clip_rel[len("clips/"):]
 
     if s3_config is not None:
-        has_vlm_crop = bool(vlm_crop_rel)
+        vlm_key = f"{s3_config.prefix}/{vlm_crop_rel}" if vlm_crop_rel else ""
+        has_vlm_crop = bool(vlm_key) and (
+            s3_vlm_keys is None or vlm_key in s3_vlm_keys
+        )
     else:
         has_vlm_crop = bool(vlm_crop_rel) and os.path.isfile(
             os.path.join(dataset_dir, vlm_crop_rel)
@@ -352,6 +361,16 @@ def scan_and_build_tasks(
         return []
 
     max_workers = workers or min(os.cpu_count() or 4, 8)
+
+    s3_vlm_keys: Optional[set] = None
+    if s3_config is not None:
+        from .utils.s3 import list_s3_keys
+        vlm_prefix = f"{s3_config.prefix}/vlm_crops/"
+        s3_vlm_keys = set(list_s3_keys(
+            s3_config.bucket, vlm_prefix, region=s3_config.region,
+        ))
+        log.info("Found %d VLM crop files on S3", len(s3_vlm_keys))
+
     log.info("Building %d tasks (%d workers)", total, max_workers)
 
     tasks: List[Dict[str, Any]] = []
@@ -361,7 +380,7 @@ def scan_and_build_tasks(
             pool.submit(
                 _build_single_task,
                 mp, m, dataset_dir, include_predictions, video_base_url,
-                s3_config,
+                s3_config, s3_vlm_keys,
             ): mp
             for mp, m in entries
         }
@@ -377,6 +396,14 @@ def scan_and_build_tasks(
                 continue
             if task is not None:
                 tasks.append(task)
+
+    skipped = total - len(tasks)
+    if skipped:
+        log.info(
+            "Skipped %d clips with no relevant detections (allowed: %s)",
+            skipped,
+            ", ".join(sorted(set(get_coco_labels().values()))),
+        )
 
     return tasks
 

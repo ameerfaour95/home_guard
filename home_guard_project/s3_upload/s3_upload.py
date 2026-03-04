@@ -1,18 +1,20 @@
-"""Core logic: re-encode clips to H.264, then incrementally upload to S3."""
+"""Core logic: clean up orphans, re-encode clips to H.264, then incrementally upload to S3."""
 
 from __future__ import annotations
 
+import json
 import logging
 import mimetypes
 import os
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, FrozenSet, List, Optional, Set, Tuple
 
 import boto3
 from botocore.exceptions import ClientError
 from tqdm import tqdm
 
+from home_guard_project.labeling.utils.cleanup import cleanup_orphans
 from home_guard_project.labeling.utils.ffmpeg import reencode_videos
 
 log = logging.getLogger("s3_upload")
@@ -55,6 +57,87 @@ def _collect_all_files(dataset_dir: str) -> List[str]:
                 continue
             files.append(os.path.join(dirpath, f))
     return files
+
+
+# ---------------------------------------------------------------------------
+# Label-based relevance filtering
+# ---------------------------------------------------------------------------
+
+_CLIP_SUBDIRS = frozenset({"clips", "meta", "responses", "yolo", "vlm_crops"})
+
+
+def _find_irrelevant_clip_stems(
+    dataset_dir: str,
+    allowed_labels: FrozenSet[str],
+) -> Set[str]:
+    """Return clip stems whose metadata contains ONLY classes outside *allowed_labels*."""
+    irrelevant: Set[str] = set()
+    meta_root = os.path.join(dataset_dir, "meta")
+    if not os.path.isdir(meta_root):
+        return irrelevant
+
+    for dirpath, _, filenames in os.walk(meta_root):
+        for fname in filenames:
+            if not fname.endswith(".meta.json"):
+                continue
+            try:
+                with open(os.path.join(dirpath, fname), "r", encoding="utf-8") as fh:
+                    meta = json.load(fh)
+            except (json.JSONDecodeError, OSError):
+                continue
+
+            class_counts = meta.get("yolo", {}).get("class_counts", {})
+            if class_counts and not (set(class_counts.keys()) & allowed_labels):
+                stem = fname[: -len(".meta.json")]
+                irrelevant.add(stem)
+
+    return irrelevant
+
+
+def _clip_stem_from_filename(filename: str) -> str:
+    """Extract the clip stem from a dataset filename.
+
+    Handles double-extension (``.meta.json``), YOLO frame files
+    (``clip_id_f0001.jpg``), and normal single-extension files.
+    """
+    if filename.endswith(".meta.json"):
+        return filename[: -len(".meta.json")]
+
+    name_no_ext = os.path.splitext(filename)[0]
+
+    # YOLO frame files: *_fNNNN -> strip the suffix
+    idx = name_no_ext.rfind("_f")
+    if idx > 0 and name_no_ext[idx + 2 :].isdigit():
+        return name_no_ext[:idx]
+
+    return name_no_ext
+
+
+def _filter_relevant_files(
+    all_files: List[str],
+    dataset_dir: str,
+    irrelevant_stems: Set[str],
+) -> List[str]:
+    """Remove files belonging to irrelevant clips from *all_files*."""
+    if not irrelevant_stems:
+        return all_files
+
+    kept: List[str] = []
+    for fp in all_files:
+        rel = os.path.relpath(fp, dataset_dir).replace("\\", "/")
+        top_dir = rel.split("/", 1)[0]
+
+        if top_dir not in _CLIP_SUBDIRS:
+            kept.append(fp)
+            continue
+
+        stem = _clip_stem_from_filename(os.path.basename(fp))
+        if stem in irrelevant_stems:
+            continue
+
+        kept.append(fp)
+
+    return kept
 
 
 # ---------------------------------------------------------------------------
@@ -127,12 +210,48 @@ def run(
     skip_reencode: bool = False,
     dry_run: bool = False,
     force: bool = False,
+    no_cleanup: bool = False,
+    allowed_labels: FrozenSet[str] = frozenset(),
 ) -> None:
     dataset_dir = os.path.abspath(dataset_dir)
 
     if not os.path.isdir(dataset_dir):
         log.error("Dataset directory does not exist: %s", dataset_dir)
         sys.exit(1)
+
+    # -- Label-based relevance filter ------------------------------------
+    irrelevant_stems: Set[str] = set()
+    if allowed_labels:
+        irrelevant_stems = _find_irrelevant_clip_stems(dataset_dir, allowed_labels)
+        if irrelevant_stems:
+            log.info(
+                "Skipping %d clips with no relevant detections (allowed: %s)",
+                len(irrelevant_stems),
+                ", ".join(sorted(allowed_labels)),
+            )
+        else:
+            log.info("All clips have at least one relevant detection.")
+
+    # -- Orphan cleanup ---------------------------------------------------
+    if not no_cleanup:
+        log.info("Running orphan cleanup (clips/ is source of truth)...")
+        stats = cleanup_orphans(dataset_dir)
+        if stats.total_removed > 0:
+            log.info(
+                "Cleanup done: %d files removed (%d cascade clips, "
+                "%d meta, %d responses, %d YOLO imgs, %d YOLO lbls, %d VLM crops)",
+                stats.total_removed,
+                stats.cascade_clips_removed,
+                stats.meta_orphans,
+                stats.response_orphans,
+                stats.yolo_image_orphans,
+                stats.yolo_label_orphans,
+                stats.vlm_crop_orphans,
+            )
+        else:
+            log.info("Dataset is clean — no orphans found.")
+    else:
+        log.info("Skipping orphan cleanup (--no-cleanup).")
 
     # -- Re-encode --------------------------------------------------------
     if not skip_reencode:
@@ -154,6 +273,11 @@ def run(
     if not all_files:
         log.warning("No files found in %s. Nothing to upload.", dataset_dir)
         return
+
+    if irrelevant_stems:
+        before = len(all_files)
+        all_files = _filter_relevant_files(all_files, dataset_dir, irrelevant_stems)
+        log.info("Label filter: %d -> %d files (removed %d)", before, len(all_files), before - len(all_files))
 
     log.info("Found %d files to sync to s3://%s/%s", len(all_files), bucket, prefix)
 

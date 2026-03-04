@@ -48,6 +48,23 @@ def presigned_url(
 
 
 # ---------------------------------------------------------------------------
+# Key listing
+# ---------------------------------------------------------------------------
+
+def list_s3_keys(
+    bucket: str,
+    prefix: str,
+    region: str = "us-east-1",
+) -> List[str]:
+    """Return all object keys under *prefix* (skipping directory markers)."""
+    client = _get_client(region)
+    keys: List[str] = []
+    for key, _size in _list_objects(client, bucket, prefix):
+        keys.append(key)
+    return keys
+
+
+# ---------------------------------------------------------------------------
 # Metadata sync: download meta/ and yolo/labels/ from S3
 # ---------------------------------------------------------------------------
 

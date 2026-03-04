@@ -25,7 +25,7 @@
 #       clears old tasks, then reimports (preserves all human annotations)
 #   10. Auto-creates annotator accounts from config.yaml (idempotent)
 #   11. Imports tasks via the API, opens the browser
-#   12. (--share) Launches an ngrok tunnel so annotators can access remotely
+#   12. (--share) Launches a Cloudflare tunnel so annotators can access remotely
 #   13. Ctrl+C cleanly shuts everything down
 # ============================================================================
 set -euo pipefail
@@ -83,13 +83,19 @@ FILE_SERVER_PORT=$(sed -n '/^file_server:/,/^[a-z]/{ /^\s*port:/p }' "$CONFIG_YA
 STORAGE_MODE="$(yaml_val mode)"
 STORAGE_MODE="${STORAGE_MODE:-local}"
 
+# share.enabled — default share mode from config (--share CLI flag overrides)
+SHARE_ENABLED=$(sed -n '/^share:/,/^[a-z]/{ /^\s*enabled:/p }' "$CONFIG_YAML" | head -1 | sed 's/^[^:]*:\s*//' | tr -d '[:space:]')
+if [[ "$SHARE_ENABLED" == "true" ]]; then
+    SHARE_MODE=true
+fi
+
 LS_BASE="http://localhost:${LS_PORT}"
 SESSION_FILE="${DATASET_DIR}/.ls_session.json"
 
 # PIDs for cleanup
 FILE_SERVER_PID=""
 LABEL_STUDIO_PID=""
-NGROK_PID=""
+TUNNEL_PID=""
 
 # ── Colors ──────────────────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -109,8 +115,8 @@ step()  { echo -e "\n${BOLD}── $* ──${NC}"; }
 cleanup() {
     echo ""
     info "Shutting down..."
-    if [[ -n "$NGROK_PID" ]]; then
-        kill "$NGROK_PID" 2>/dev/null && info "ngrok stopped." || true
+    if [[ -n "$TUNNEL_PID" ]]; then
+        kill "$TUNNEL_PID" 2>/dev/null && info "Cloudflare tunnel stopped." || true
     fi
     if [[ -n "$FILE_SERVER_PID" ]]; then
         kill "$FILE_SERVER_PID" 2>/dev/null && info "File server stopped." || true
@@ -118,8 +124,9 @@ cleanup() {
     if [[ -n "$LABEL_STUDIO_PID" ]]; then
         kill "$LABEL_STUDIO_PID" 2>/dev/null && info "Label Studio stopped." || true
     fi
-    # Clean up temp cookie jar
+    # Clean up temp files
     [[ -n "${COOKIE_JAR:-}" ]] && rm -f "$COOKIE_JAR" 2>/dev/null || true
+    [[ -n "${TUNNEL_LOG:-}" ]] && rm -f "$TUNNEL_LOG" 2>/dev/null || true
     ok "All services stopped. Goodbye."
 }
 trap cleanup EXIT INT TERM
@@ -191,6 +198,21 @@ step "Installing dependencies (uv sync)"
 
 uv sync --quiet
 ok "All dependencies installed."
+
+# ── Patch Label Studio: re-enable /api/dm/tasks/ endpoint ─────────────────
+# LS 1.22.0 ships with the Data Manager tasks endpoint commented out,
+# causing "Unexpected token '<', DOCTYPE … is not valid JSON" in the browser.
+LS_DM_URLS=$($PYTHON -c "
+import label_studio.data_manager as dm; import os
+print(os.path.join(os.path.dirname(dm.__file__), 'urls.py'))
+" 2>/dev/null || echo "")
+
+if [[ -n "$LS_DM_URLS" && -f "$LS_DM_URLS" ]]; then
+    if grep -q '# *path("api/dm/tasks/"' "$LS_DM_URLS" 2>/dev/null; then
+        sed -i 's|# *path("api/dm/tasks/", api\.TaskListAPI\.as_view())|    path("api/dm/tasks/", api.TaskListAPI.as_view())|' "$LS_DM_URLS"
+        ok "Patched Label Studio: /api/dm/tasks/ endpoint enabled."
+    fi
+fi
 
 # ── Resolve the uv-managed python for running commands ──────────────────────
 UVRUN="uv run"
@@ -304,77 +326,65 @@ else
 fi
 
 # ============================================================================
-#  STEP 8: Start ngrok BEFORE Label Studio (--share only)
-#           ngrok tunnels to the port even before LS is listening.
+#  STEP 8: Start Cloudflare Tunnel BEFORE Label Studio (--share only)
+#           The tunnel proxies traffic even before LS is listening.
 #           We need the public URL so we can set LABEL_STUDIO_HOST for CSRF.
 # ============================================================================
 SHARE_URL=""
+TUNNEL_LOG=""
 
 if [[ "$SHARE_MODE" == "true" ]]; then
-    step "Starting ngrok tunnel"
+    step "Starting Cloudflare tunnel"
 
-    # Find ngrok — may not be in Git Bash's PATH on Windows
-    NGROK_BIN=""
-    if command -v ngrok &>/dev/null; then
-        NGROK_BIN="ngrok"
+    # Find cloudflared — may not be in Git Bash's PATH on Windows
+    CF_BIN=""
+    if command -v cloudflared &>/dev/null; then
+        CF_BIN="cloudflared"
     elif [[ "$OS" == "windows" ]]; then
         for p in \
-            "${LOCALAPPDATA:-}/Programs/ngrok.exe" \
-            "${LOCALAPPDATA:-}/ngrok/ngrok.exe" \
-            "${PROGRAMDATA:-}/ngrok/ngrok.exe" \
-            "/c/Users/${USERNAME:-$USER}/AppData/Local/Programs/ngrok.exe"; do
+            "/c/Program Files (x86)/cloudflared/cloudflared.exe" \
+            "/c/Program Files/cloudflared/cloudflared.exe" \
+            "${LOCALAPPDATA:-}/Programs/cloudflared/cloudflared.exe" \
+            "${PROGRAMFILES:-}/cloudflared/cloudflared.exe" \
+            "${PROGRAMDATA:-}/cloudflared/cloudflared.exe" \
+            "/c/Users/${USERNAME:-$USER}/AppData/Local/Programs/cloudflared/cloudflared.exe"; do
             if [[ -x "$p" ]]; then
-                NGROK_BIN="$p"
+                CF_BIN="$p"
                 break
             fi
         done
     fi
 
-    if [[ -z "$NGROK_BIN" ]]; then
-        err "ngrok is not installed."
+    if [[ -z "$CF_BIN" ]]; then
+        err "cloudflared is not installed."
         echo ""
-        echo -e "  Install ngrok:"
-        echo -e "    ${BOLD}Windows:${NC}  winget install ngrok.ngrok"
-        echo -e "    ${BOLD}macOS:${NC}    brew install ngrok"
-        echo -e "    ${BOLD}Linux:${NC}    snap install ngrok"
-        echo -e "    ${BOLD}Or:${NC}       https://ngrok.com/download"
-        echo ""
-        echo -e "  Then run:  ${BOLD}ngrok config add-authtoken YOUR_TOKEN${NC}"
+        echo -e "  Install cloudflared:"
+        echo -e "    ${BOLD}Windows:${NC}  winget install cloudflare.cloudflared"
+        echo -e "    ${BOLD}macOS:${NC}    brew install cloudflared"
+        echo -e "    ${BOLD}Linux:${NC}    See https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/"
         echo ""
         warn "Continuing without tunnel — Label Studio is only available locally."
     else
-        "$NGROK_BIN" http "$LS_PORT" --log=stdout > /dev/null 2>&1 &
-        NGROK_PID=$!
+        TUNNEL_LOG=$(mktemp)
+        "$CF_BIN" tunnel --url "http://localhost:${LS_PORT}" > "$TUNNEL_LOG" 2>&1 &
+        TUNNEL_PID=$!
 
-        info "Waiting for ngrok tunnel..."
-        NGROK_WAIT=0
-        while (( NGROK_WAIT < 15 )); do
+        info "Waiting for Cloudflare tunnel..."
+        CF_WAIT=0
+        while (( CF_WAIT < 30 )); do
             sleep 1
-            NGROK_WAIT=$((NGROK_WAIT + 1))
-            SHARE_URL=$(curl -s http://127.0.0.1:4040/api/tunnels 2>/dev/null \
-                | $PYTHON -c "
-import sys, json
-try:
-    tunnels = json.load(sys.stdin).get('tunnels', [])
-    for t in tunnels:
-        url = t.get('public_url', '')
-        if url.startswith('https://'):
-            print(url)
-            break
-except Exception:
-    pass
-" 2>/dev/null || echo "")
-
+            CF_WAIT=$((CF_WAIT + 1))
+            SHARE_URL=$(grep -oE 'https://[a-zA-Z0-9_-]+\.trycloudflare\.com' "$TUNNEL_LOG" 2>/dev/null | head -1 || echo "")
             if [[ -n "$SHARE_URL" ]]; then
                 break
             fi
         done
 
         if [[ -n "$SHARE_URL" ]]; then
-            ok "ngrok tunnel active (PID ${NGROK_PID}): ${SHARE_URL}"
+            ok "Cloudflare tunnel active (PID ${TUNNEL_PID}): ${SHARE_URL}"
         else
-            warn "Could not detect ngrok tunnel URL. Check 'ngrok' logs."
-            warn "You may need to run 'ngrok config add-authtoken YOUR_TOKEN' first."
+            warn "Could not detect Cloudflare tunnel URL. Check log: ${TUNNEL_LOG}"
+            warn "Make sure cloudflared is installed correctly."
         fi
     fi
 fi
@@ -683,11 +693,16 @@ fi
 # ============================================================================
 step "Ready!"
 
-PROJECT_URL="${LS_BASE}/projects/${PROJECT_ID}"
+if [[ -n "$SHARE_URL" ]]; then
+    PROJECT_URL="${SHARE_URL}/projects/${PROJECT_ID}"
+else
+    PROJECT_URL="${LS_BASE}/projects/${PROJECT_ID}"
+fi
+
 echo ""
 echo -e "  ${BOLD}Label Studio:${NC}   ${PROJECT_URL}"
 if [[ -n "$SHARE_URL" ]]; then
-    echo -e "  ${BOLD}Public URL:${NC}     ${SHARE_URL}/projects/${PROJECT_ID}"
+    echo -e "  ${BOLD}Local URL:${NC}      ${LS_BASE}/projects/${PROJECT_ID}"
 fi
 if [[ "$STORAGE_MODE" != "s3" ]]; then
     echo -e "  ${BOLD}File Server:${NC}    http://localhost:${FILE_SERVER_PORT}"
@@ -712,7 +727,7 @@ echo ""
 
 if [[ -n "$SHARE_URL" ]]; then
     echo -e "  ${YELLOW}Share this URL with your annotators:${NC}"
-    echo -e "  ${BOLD}${SHARE_URL}${NC}"
+    echo -e "  ${BOLD}${SHARE_URL}/projects/${PROJECT_ID}${NC}"
     echo ""
 fi
 

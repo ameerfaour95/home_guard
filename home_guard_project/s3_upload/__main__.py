@@ -19,7 +19,7 @@ def main() -> None:
     cfg = load_config()
 
     parser = argparse.ArgumentParser(
-        description="Re-encode clips to H.264 and upload dataset to S3.",
+        description="Clean up orphans, re-encode clips to H.264, and upload dataset to S3.",
     )
     parser.add_argument(
         "dataset_dir",
@@ -46,7 +46,8 @@ def main() -> None:
     parser.add_argument(
         "--skip-reencode",
         action="store_true",
-        help="Skip the H.264 re-encoding step.",
+        default=cfg.skip_reencode,
+        help=f"Skip the H.264 re-encoding step (config default: {cfg.skip_reencode}).",
     )
     parser.add_argument(
         "--dry-run",
@@ -56,7 +57,14 @@ def main() -> None:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Re-upload all files even if they already exist on S3 with the same size.",
+        default=cfg.force,
+        help=f"Re-upload all files even if they already exist on S3 (config default: {cfg.force}).",
+    )
+    parser.add_argument(
+        "--no-cleanup",
+        action="store_true",
+        default=not cfg.cleanup,
+        help=f"Skip orphan cleanup (config default: cleanup={cfg.cleanup}).",
     )
 
     args = parser.parse_args()
@@ -75,6 +83,8 @@ def main() -> None:
         skip_reencode=args.skip_reencode,
         dry_run=args.dry_run,
         force=args.force,
+        no_cleanup=args.no_cleanup,
+        allowed_labels=cfg.allowed_labels,
     )
 
 
