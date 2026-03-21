@@ -157,6 +157,21 @@ def _s3_key(local_path: str, dataset_dir: str, prefix: str) -> str:
     return f"{prefix}/{rel}".replace("\\", "/")
 
 
+def _list_remote_objects(
+    s3_client: "boto3.client",
+    bucket: str,
+    prefix: str,
+) -> Dict[str, int]:
+    """Batch-list all S3 objects under *prefix* and return ``{key: size}``."""
+    inventory: Dict[str, int] = {}
+    paginator = s3_client.get_paginator("list_objects_v2")
+    pages = paginator.paginate(Bucket=bucket, Prefix=prefix + "/")
+    for page in tqdm(pages, desc="Listing S3 objects", unit="page"):
+        for obj in page.get("Contents", []):
+            inventory[obj["Key"]] = obj["Size"]
+    return inventory
+
+
 def _remote_size(
     s3_client: "boto3.client",
     bucket: str,
@@ -176,16 +191,8 @@ def _upload_one(
     local_path: str,
     key: str,
     dry_run: bool,
-    force: bool = False,
 ) -> str:
-    """Upload a single file. Returns 'uploaded', 'skipped', or 'failed'."""
-    if not force:
-        local_size = os.path.getsize(local_path)
-        remote = _remote_size(s3_client, bucket, key)
-
-        if remote is not None and remote == local_size:
-            return "skipped"
-
+    """Upload a single file. Returns 'uploaded' or 'failed'."""
     if dry_run:
         return "uploaded"
 
@@ -196,6 +203,25 @@ def _upload_one(
     except Exception as exc:
         log.warning("Failed to upload %s: %s", key, exc)
         return "failed"
+
+
+# ---------------------------------------------------------------------------
+# Local cleanup
+# ---------------------------------------------------------------------------
+
+def _prune_empty_dirs(root: str) -> int:
+    """Walk bottom-up and remove empty directories. Returns count removed."""
+    removed = 0
+    for dirpath, dirnames, filenames in os.walk(root, topdown=False):
+        if dirpath == root:
+            continue
+        if not os.listdir(dirpath):
+            try:
+                os.rmdir(dirpath)
+                removed += 1
+            except OSError:
+                pass
+    return removed
 
 
 # ---------------------------------------------------------------------------
@@ -212,6 +238,7 @@ def run(
     force: bool = False,
     no_cleanup: bool = False,
     allowed_labels: FrozenSet[str] = frozenset(),
+    delete_local: bool = False,
 ) -> None:
     dataset_dir = os.path.abspath(dataset_dir)
 
@@ -294,31 +321,90 @@ def run(
     # -- Upload -----------------------------------------------------------
     s3 = boto3.client("s3")
 
-    uploaded = skipped = failed = 0
+    # Batch-list remote objects once instead of per-file head_object calls.
+    skipped = 0
+    if not force:
+        log.info("Listing existing objects on s3://%s/%s/ ...", bucket, prefix)
+        remote_inventory = _list_remote_objects(s3, bucket, prefix)
+        log.info("Found %d existing objects on S3.", len(remote_inventory))
 
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {
-            pool.submit(_upload_one, s3, bucket, lp, key, dry_run, force): key
-            for lp, key in pairs
-        }
-        pbar = tqdm(
-            as_completed(futures),
-            total=len(futures),
-            desc="Dry-run check" if dry_run else "Uploading",
-            unit="file",
-        )
-        for fut in pbar:
-            result = fut.result()
-            if result == "uploaded":
-                uploaded += 1
-            elif result == "skipped":
+        to_upload: List[Tuple[str, str]] = []
+        for lp, key in pairs:
+            remote = remote_inventory.get(key)
+            if remote is not None and remote == os.path.getsize(lp):
                 skipped += 1
             else:
-                failed += 1
-            pbar.set_postfix(uploaded=uploaded, skipped=skipped, failed=failed)
+                to_upload.append((lp, key))
+        log.info(
+            "Pre-check: %d to upload, %d already on S3 (same size)",
+            len(to_upload), skipped,
+        )
+    else:
+        log.info("FORCE mode — skipping remote inventory, uploading all files.")
+        to_upload = pairs
+
+    uploaded = failed = 0
+
+    if to_upload:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {
+                pool.submit(_upload_one, s3, bucket, lp, key, dry_run): key
+                for lp, key in to_upload
+            }
+            pbar = tqdm(
+                as_completed(futures),
+                total=len(futures),
+                desc="Dry-run check" if dry_run else "Uploading",
+                unit="file",
+            )
+            for fut in pbar:
+                result = fut.result()
+                if result == "uploaded":
+                    uploaded += 1
+                else:
+                    failed += 1
+                pbar.set_postfix(uploaded=uploaded, failed=failed, skipped=skipped)
+    else:
+        log.info("All files already on S3 — nothing to upload.")
 
     verb = "Would upload" if dry_run else "Uploaded"
     log.info(
         "Done. %s: %d  |  Skipped (same size): %d  |  Failed: %d",
         verb, uploaded, skipped, failed,
     )
+
+    # -- Delete local files confirmed on S3 --------------------------------
+    if delete_local and not dry_run and failed == 0:
+        log.info("Verifying uploads and deleting local files...")
+        remote_final = _list_remote_objects(s3, bucket, prefix)
+        deleted = 0
+        delete_failed = 0
+        for fp in tqdm(all_files, desc="Deleting local files", unit="file"):
+            key = _s3_key(fp, dataset_dir, prefix)
+            remote_size = remote_final.get(key)
+            local_size = os.path.getsize(fp)
+            if remote_size is not None and remote_size == local_size:
+                try:
+                    os.remove(fp)
+                    deleted += 1
+                except OSError as exc:
+                    log.warning("Failed to delete %s: %s", fp, exc)
+                    delete_failed += 1
+            else:
+                log.warning(
+                    "Skipping delete — not confirmed on S3: %s (local=%d, remote=%s)",
+                    fp, local_size, remote_size,
+                )
+                delete_failed += 1
+
+        _prune_empty_dirs(dataset_dir)
+        log.info(
+            "Local cleanup: %d deleted  |  %d skipped/failed",
+            deleted, delete_failed,
+        )
+    elif delete_local and dry_run:
+        log.info("DRY RUN — would delete %d local files after upload.", len(all_files))
+    elif delete_local and failed > 0:
+        log.warning(
+            "Skipping local deletion — %d uploads failed. Fix and re-run.", failed,
+        )

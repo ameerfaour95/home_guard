@@ -55,7 +55,7 @@ def interpolate_keyframes(
             nxt = sorted_kfs[i + 1]
             end_frame = int(nxt["frame"])
         else:
-            end_frame = frame
+            end_frame = frames_count
 
         for f in range(frame, end_frame + 1):
             if f > frames_count:

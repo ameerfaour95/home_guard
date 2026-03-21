@@ -66,6 +66,11 @@ def main() -> None:
         default=not cfg.cleanup,
         help=f"Skip orphan cleanup (config default: cleanup={cfg.cleanup}).",
     )
+    parser.add_argument(
+        "--delete-local",
+        action="store_true",
+        help="Delete local files after confirming they exist on S3 with matching size.",
+    )
 
     args = parser.parse_args()
 
@@ -85,6 +90,7 @@ def main() -> None:
         force=args.force,
         no_cleanup=args.no_cleanup,
         allowed_labels=cfg.allowed_labels,
+        delete_local=args.delete_local,
     )
 
 

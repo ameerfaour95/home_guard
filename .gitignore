@@ -19,6 +19,8 @@ venv/
 *.jpg
 *.jpeg
 dataset_multi/
+dataset_uca/
+dataset_uca_test/
 captures/
 frames/
 clips_output/
@@ -33,7 +35,7 @@ analysis_output/
 # Label Studio generated artifacts
 label_studio_tasks.json
 label_studio_config.xml
-.ls_session.json
+.ls_session*.json
 .ls_export_backup.json
 
 # Camera credentials (RTSP URLs) and deployment-specific zones
@@ -46,3 +48,4 @@ Thumbs.db
 .idea/
 .cursor/
 config.yaml
+api_key.env

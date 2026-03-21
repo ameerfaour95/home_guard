@@ -6,13 +6,26 @@
 #
 #  Usage:
 #      ./home_guard_project/labeling/start.sh [DATASET_DIR] [--force] [--share]
+#      ./home_guard_project/labeling/start.sh [DATASET_DIR] --attach
 #
 #  Examples:
 #      ./home_guard_project/labeling/start.sh ./dataset_multi
 #      ./home_guard_project/labeling/start.sh ./dataset_multi --force
 #      ./home_guard_project/labeling/start.sh ./dataset_multi --share
 #
-#  What it does:
+#      # Add a second project to an already-running Label Studio:
+#      # 1. Edit config.yaml: set project_name and storage.s3.uri
+#      # 2. Run with --attach:
+#      ./home_guard_project/labeling/start.sh ./dataset_uca --attach
+#
+#  Flags:
+#    --force   Force task regeneration even if tasks are up-to-date
+#    --share   Launch a Cloudflare tunnel for remote annotator access
+#    --attach  Skip starting LS/file-server/tunnel (assumes already running).
+#              Creates a new project and imports tasks into the running LS.
+#              Edit config.yaml (project_name, storage.s3.uri) before using.
+#
+#  What it does (normal mode):
 #    1. Verifies Python >= 3.12 and installs uv if missing
 #    2. Runs uv sync to install all dependencies (incl. label-studio)
 #    3. Verifies dataset directory
@@ -27,6 +40,12 @@
 #   11. Imports tasks via the API, opens the browser
 #   12. (--share) Launches a Cloudflare tunnel so annotators can access remotely
 #   13. Ctrl+C cleanly shuts everything down
+#
+#  What it does (--attach mode):
+#    1. Finds Python, verifies LS is already running
+#    2. Generates tasks (syncs S3 metadata if in S3 mode)
+#    3. Creates or reuses a project (by project_name in config.yaml)
+#    4. Imports tasks, then exits
 # ============================================================================
 set -euo pipefail
 
@@ -58,12 +77,14 @@ yaml_val() {
 # Parse CLI args
 FORCE_REBUILD=false
 SHARE_MODE=false
+ATTACH_MODE=false
 POSITIONAL_ARGS=()
 for arg in "$@"; do
     case "$arg" in
-        --force) FORCE_REBUILD=true ;;
-        --share) SHARE_MODE=true ;;
-        *)       POSITIONAL_ARGS+=("$arg") ;;
+        --force)  FORCE_REBUILD=true ;;
+        --share)  SHARE_MODE=true ;;
+        --attach) ATTACH_MODE=true ;;
+        *)        POSITIONAL_ARGS+=("$arg") ;;
     esac
 done
 
@@ -90,12 +111,25 @@ if [[ "$SHARE_ENABLED" == "true" ]]; then
 fi
 
 LS_BASE="http://localhost:${LS_PORT}"
-SESSION_FILE="${DATASET_DIR}/.ls_session.json"
+
+# Project-specific session file (allows multiple projects on the same dataset dir)
+PROJECT_SLUG=$(echo "$PROJECT_NAME" | tr '[:upper:]' '[:lower:]' | tr -c '[:alnum:]' '_' | sed 's/__*/_/g; s/^_//; s/_$//')
+SESSION_FILE="${DATASET_DIR}/.ls_session_${PROJECT_SLUG}.json"
+
+# Migrate from the old non-project-specific session file if present
+OLD_SESSION="${DATASET_DIR}/.ls_session.json"
+if [[ ! -f "$SESSION_FILE" && -f "$OLD_SESSION" ]]; then
+    cp "$OLD_SESSION" "$SESSION_FILE"
+fi
 
 # PIDs for cleanup
 FILE_SERVER_PID=""
 LABEL_STUDIO_PID=""
 TUNNEL_PID=""
+
+# Initialized early so both normal and --attach paths can reference them
+SHARE_URL=""
+TUNNEL_LOG=""
 
 # ── Colors ──────────────────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -171,6 +205,7 @@ find_python() {
     return 1
 }
 
+if [[ "$ATTACH_MODE" != "true" ]]; then
 # ============================================================================
 #  STEP 1: Verify Python
 # ============================================================================
@@ -284,6 +319,24 @@ if [[ "$STORAGE_MODE" != "s3" ]]; then
     ok "Clips: ${CLIP_COUNT}  |  VLM crops: ${VLM_COUNT}"
 fi
 
+else
+# ── Attach mode: lightweight pre-flight ──────────────────────────────────
+step "Attach mode — connecting to running Label Studio"
+
+PYTHON="$(find_python)" || { err "Python >= 3.12 not found."; exit 1; }
+UVRUN="uv run"
+
+if ! curl -sf "${LS_BASE}/api/version" > /dev/null 2>&1; then
+    err "Label Studio is not running at ${LS_BASE}."
+    err "Start it first:  ./home_guard_project/labeling/start.sh"
+    exit 1
+fi
+ok "Label Studio is running at ${LS_BASE}"
+
+mkdir -p "$DATASET_DIR"
+
+fi  # end ATTACH_MODE check
+
 # ============================================================================
 #  STEP 6: Re-encode clips + generate tasks  (S3: generate only, no re-encode)
 # ============================================================================
@@ -302,6 +355,7 @@ $UVRUN python -m home_guard_project.labeling "${LABELING_ARGS[@]}"
 
 ok "Tasks generated at ${DATASET_DIR}/label_studio_tasks.json"
 
+if [[ "$ATTACH_MODE" != "true" ]]; then
 # ============================================================================
 #  STEP 7: Start file server (local mode only)
 # ============================================================================
@@ -330,9 +384,6 @@ fi
 #           The tunnel proxies traffic even before LS is listening.
 #           We need the public URL so we can set LABEL_STUDIO_HOST for CSRF.
 # ============================================================================
-SHARE_URL=""
-TUNNEL_LOG=""
-
 if [[ "$SHARE_MODE" == "true" ]]; then
     step "Starting Cloudflare tunnel"
 
@@ -401,6 +452,10 @@ step "Starting Label Studio (port ${LS_PORT})"
 export LABEL_STUDIO_USERNAME="${LS_EMAIL}"
 export LABEL_STUDIO_PASSWORD="${LS_PASSWORD}"
 
+# Windows cp1255/cp1252 consoles choke on LS's Unicode output (→ arrow in
+# version-check message).  Force UTF-8 so the print() call doesn't crash.
+export PYTHONIOENCODING="utf-8"
+
 # Tell Label Studio about the public hostname so Django CSRF trusts it.
 if [[ -n "$SHARE_URL" ]]; then
     export LABEL_STUDIO_HOST="${SHARE_URL}"
@@ -433,6 +488,8 @@ if (( WAITED >= MAX_WAIT )); then
     exit 1
 fi
 ok "Label Studio ready (PID ${LABEL_STUDIO_PID})"
+
+fi  # end !ATTACH_MODE (skip service startup)
 
 # ============================================================================
 #  STEP 9: Auto-create user / project / import tasks via API
@@ -669,19 +726,84 @@ else
     info "No annotators configured in config.yaml — skipping account creation."
 fi
 
-# ── Import tasks ───────────────────────────────────────────────────────────
+# ── Import tasks (chunked for large files) ─────────────────────────────────
 if [[ -f "$TASKS_FILE" ]]; then
     info "Importing tasks into project ${PROJECT_ID}..."
 
-    IMPORT_RESP=$(_api POST "/api/projects/${PROJECT_ID}/import" \
-        -H "Content-Type: application/json" \
-        -d @"$TASKS_FILE" 2>/dev/null || echo "{}")
+    CSRF_TOKEN=$(grep csrftoken "$COOKIE_JAR" 2>/dev/null | awk '{print $NF}')
+    IMPORT_RESULT_FILE=$(mktemp)
+    $UVRUN $PYTHON -c "
+import json, sys, urllib.request, http.cookiejar, ijson
+from decimal import Decimal
 
-    TASK_COUNT=$(echo "$IMPORT_RESP" | $PYTHON -c "
-import sys, json
-d = json.load(sys.stdin)
-print(d.get('task_count', d.get('total', '?')))
-" 2>/dev/null || echo "?")
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, o):
+        if isinstance(o, Decimal):
+            return float(o)
+        return super().default(o)
+
+tasks_file  = sys.argv[1]
+base_url    = sys.argv[2]
+project_id  = sys.argv[3]
+cookie_jar  = sys.argv[4]
+csrf_token  = sys.argv[5]
+result_file = sys.argv[6]
+BATCH_SIZE  = 200
+
+cj = http.cookiejar.MozillaCookieJar(cookie_jar)
+cj.load(ignore_discard=True, ignore_expires=True)
+opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+
+imported = 0
+errors   = 0
+batch    = []
+batch_num = 0
+
+with open(tasks_file, 'rb') as f:
+    for task in ijson.items(f, 'item'):
+        batch.append(task)
+        if len(batch) >= BATCH_SIZE:
+            batch_num += 1
+            payload = json.dumps(batch, cls=DecimalEncoder).encode('utf-8')
+            url = f'{base_url}/api/projects/{project_id}/import'
+            req = urllib.request.Request(url, data=payload, method='POST')
+            req.add_header('Content-Type', 'application/json')
+            req.add_header('X-CSRFToken', csrf_token)
+            req.add_header('Referer', url)
+            try:
+                resp = opener.open(req, timeout=300)
+                body = json.loads(resp.read().decode('utf-8'))
+                imported += body.get('task_count', len(batch))
+            except Exception as e:
+                errors += 1
+                print(f'  Error batch {batch_num}: {e}', flush=True)
+            print(f'  Importing: batch {batch_num} — {imported} tasks', flush=True)
+            batch = []
+
+if batch:
+    batch_num += 1
+    payload = json.dumps(batch, cls=DecimalEncoder).encode('utf-8')
+    url = f'{base_url}/api/projects/{project_id}/import'
+    req = urllib.request.Request(url, data=payload, method='POST')
+    req.add_header('Content-Type', 'application/json')
+    req.add_header('X-CSRFToken', csrf_token)
+    req.add_header('Referer', url)
+    try:
+        resp = opener.open(req, timeout=300)
+        body = json.loads(resp.read().decode('utf-8'))
+        imported += body.get('task_count', len(batch))
+    except Exception as e:
+        errors += 1
+        print(f'  Error batch {batch_num}: {e}', flush=True)
+
+if errors:
+    print(f'  Warning: {errors} batch(es) had errors.')
+
+open(result_file, 'w').write(str(imported))
+" "$TASKS_FILE" "$LS_BASE" "$PROJECT_ID" "$COOKIE_JAR" "$CSRF_TOKEN" "$IMPORT_RESULT_FILE"
+
+    TASK_COUNT=$(cat "$IMPORT_RESULT_FILE" 2>/dev/null || echo "?")
+    rm -f "$IMPORT_RESULT_FILE"
 
     ok "Imported ${TASK_COUNT} tasks."
 else
@@ -733,7 +855,10 @@ fi
 
 open_browser "$PROJECT_URL"
 
-ok "Press Ctrl+C to stop all services."
-
-# Keep the script alive until interrupted
-wait
+if [[ "$ATTACH_MODE" == "true" ]]; then
+    ok "Project attached. You can close this terminal."
+else
+    ok "Press Ctrl+C to stop all services."
+    # Keep the script alive until interrupted
+    wait
+fi
