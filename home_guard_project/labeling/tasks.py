@@ -246,7 +246,8 @@ def _build_single_task(
     else:
         video_url = f"/data/local-files/?d={clip_rel}"
 
-    fps = meta.get("fps_estimated", meta.get("buffer", {}).get("store_fps", 10.0))
+    fps_raw = meta.get("fps_estimated", meta.get("buffer", {}).get("store_fps", 10.0))
+    fps = min(fps_raw, 10.0)
     start_local = meta.get("clip_start_local", "?")
     end_local = meta.get("clip_end_local", "?")
     end_display = end_local.split(" ")[-1] if " " in end_local else end_local

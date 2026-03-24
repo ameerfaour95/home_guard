@@ -78,13 +78,15 @@ yaml_val() {
 FORCE_REBUILD=false
 SHARE_MODE=false
 ATTACH_MODE=false
+SKIP_GENERATE=false
 POSITIONAL_ARGS=()
 for arg in "$@"; do
     case "$arg" in
-        --force)  FORCE_REBUILD=true ;;
-        --share)  SHARE_MODE=true ;;
-        --attach) ATTACH_MODE=true ;;
-        *)        POSITIONAL_ARGS+=("$arg") ;;
+        --force)          FORCE_REBUILD=true ;;
+        --share)          SHARE_MODE=true ;;
+        --attach)         ATTACH_MODE=true ;;
+        --skip-generate)  SKIP_GENERATE=true ;;
+        *)                POSITIONAL_ARGS+=("$arg") ;;
     esac
 done
 
@@ -340,20 +342,34 @@ fi  # end ATTACH_MODE check
 # ============================================================================
 #  STEP 6: Re-encode clips + generate tasks  (S3: generate only, no re-encode)
 # ============================================================================
-step "Generating tasks"
+if [[ "$SKIP_GENERATE" == "true" && -f "${DATASET_DIR}/label_studio_tasks.json" ]]; then
+    step "Skipping task generation (--skip-generate)"
+    info "Using existing ${DATASET_DIR}/label_studio_tasks.json"
 
-if [[ "$STORAGE_MODE" == "s3" ]]; then
-    info "S3 mode — syncing metadata from S3 and generating tasks with pre-signed URLs..."
-    LABELING_ARGS=(--dataset-dir "$DATASET_DIR" --no-cleanup --force)
+    # Still need the label config XML for project creation
+    if [[ ! -f "${DATASET_DIR}/label_studio_config.xml" ]]; then
+        $UVRUN python -c "
+from home_guard_project.labeling.tasks import build_label_config, write_label_config
+write_label_config('${DATASET_DIR}')
+"
+    fi
+    ok "Tasks file found — skipping S3 sync and task generation."
 else
-    info "Re-encoding mp4v clips to H.264 (already-encoded clips are skipped)."
-    info "Then generating Label Studio config + tasks JSON..."
-    LABELING_ARGS=(--dataset-dir "$DATASET_DIR" --reencode --no-cleanup --force)
+    step "Generating tasks"
+
+    if [[ "$STORAGE_MODE" == "s3" ]]; then
+        info "S3 mode — syncing metadata from S3 and generating tasks with pre-signed URLs..."
+        LABELING_ARGS=(--dataset-dir "$DATASET_DIR" --no-cleanup --force)
+    else
+        info "Re-encoding mp4v clips to H.264 (already-encoded clips are skipped)."
+        info "Then generating Label Studio config + tasks JSON..."
+        LABELING_ARGS=(--dataset-dir "$DATASET_DIR" --reencode --no-cleanup --force)
+    fi
+
+    $UVRUN python -m home_guard_project.labeling "${LABELING_ARGS[@]}"
+
+    ok "Tasks generated at ${DATASET_DIR}/label_studio_tasks.json"
 fi
-
-$UVRUN python -m home_guard_project.labeling "${LABELING_ARGS[@]}"
-
-ok "Tasks generated at ${DATASET_DIR}/label_studio_tasks.json"
 
 if [[ "$ATTACH_MODE" != "true" ]]; then
 # ============================================================================
@@ -656,21 +672,26 @@ if [[ "$IS_RERUN" == "true" ]]; then
         -w "%{http_code}" -o "$EXPORT_BACKUP" 2>/dev/null || echo "000")
 
     if [[ "$EXPORT_STATUS" == "200" && -s "$EXPORT_BACKUP" ]]; then
-        EXPORTED_COUNT=$($PYTHON -c "
+        ANNOTATED_COUNT=$($PYTHON -c "
 import json
 tasks = json.load(open('${EXPORT_BACKUP}'))
 annotated = sum(1 for t in tasks if t.get('annotations'))
-print(f'{len(tasks)} tasks, {annotated} with annotations')
-" 2>/dev/null || echo "unknown")
-        ok "Exported: ${EXPORTED_COUNT}"
+print(annotated)
+" 2>/dev/null || echo "0")
+        TOTAL_EXPORTED=$($PYTHON -c "
+import json; print(len(json.load(open('${EXPORT_BACKUP}'))))
+" 2>/dev/null || echo "0")
+        ok "Exported: ${TOTAL_EXPORTED} tasks, ${ANNOTATED_COUNT} with annotations"
 
-        # Merge annotations into the regenerated tasks
-        if [[ -f "$TASKS_FILE" ]]; then
-            info "Merging annotations into new tasks..."
+        # Only merge if there are actual human annotations to preserve
+        if [[ "$ANNOTATED_COUNT" -gt 0 && -f "$TASKS_FILE" ]]; then
+            info "Merging ${ANNOTATED_COUNT} annotations into new tasks..."
             $UVRUN python -m home_guard_project.labeling \
                 --merge "$EXPORT_BACKUP" \
                 --dataset-dir "$DATASET_DIR"
             ok "Annotations merged."
+        elif [[ "$ANNOTATED_COUNT" == "0" ]]; then
+            info "No annotations to merge — skipping merge step."
         fi
 
         # Delete all existing tasks in the project before reimport
@@ -730,10 +751,9 @@ fi
 if [[ -f "$TASKS_FILE" ]]; then
     info "Importing tasks into project ${PROJECT_ID}..."
 
-    CSRF_TOKEN=$(grep csrftoken "$COOKIE_JAR" 2>/dev/null | awk '{print $NF}')
     IMPORT_RESULT_FILE=$(mktemp)
     $UVRUN $PYTHON -c "
-import json, sys, urllib.request, http.cookiejar, ijson
+import json, sys, urllib.request, http.cookiejar, ijson, re
 from decimal import Decimal
 
 class DecimalEncoder(json.JSONEncoder):
@@ -745,14 +765,50 @@ class DecimalEncoder(json.JSONEncoder):
 tasks_file  = sys.argv[1]
 base_url    = sys.argv[2]
 project_id  = sys.argv[3]
-cookie_jar  = sys.argv[4]
-csrf_token  = sys.argv[5]
+email       = sys.argv[4]
+password    = sys.argv[5]
 result_file = sys.argv[6]
 BATCH_SIZE  = 200
 
-cj = http.cookiejar.MozillaCookieJar(cookie_jar)
-cj.load(ignore_discard=True, ignore_expires=True)
+cj = http.cookiejar.CookieJar()
 opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+
+def get_csrf():
+    for c in cj:
+        if c.name == 'csrftoken':
+            return c.value
+    return ''
+
+def login():
+    resp = opener.open(urllib.request.Request(f'{base_url}/user/signup'))
+    resp.read()
+    csrf = get_csrf()
+    data = f'email={email}&password={password}&csrfmiddlewaretoken={csrf}'.encode()
+    req = urllib.request.Request(f'{base_url}/user/login', data=data, method='POST')
+    req.add_header('Content-Type', 'application/x-www-form-urlencoded')
+    req.add_header('X-CSRFToken', csrf)
+    req.add_header('Referer', f'{base_url}/user/login')
+    try:
+        opener.open(req)
+    except urllib.error.HTTPError:
+        pass
+    whoami = json.loads(opener.open(urllib.request.Request(
+        f'{base_url}/api/current-user/whoami',
+        headers={'X-CSRFToken': get_csrf()},
+    )).read())
+    print(f'  Authenticated as: {whoami.get(\"email\", \"?\")}', flush=True)
+
+login()
+
+def do_import(payload, batch_num):
+    csrf = get_csrf()
+    url = f'{base_url}/api/projects/{project_id}/import'
+    req = urllib.request.Request(url, data=payload, method='POST')
+    req.add_header('Content-Type', 'application/json')
+    req.add_header('X-CSRFToken', csrf)
+    req.add_header('Referer', url)
+    resp = opener.open(req, timeout=300)
+    return json.loads(resp.read().decode('utf-8'))
 
 imported = 0
 errors   = 0
@@ -765,15 +821,22 @@ with open(tasks_file, 'rb') as f:
         if len(batch) >= BATCH_SIZE:
             batch_num += 1
             payload = json.dumps(batch, cls=DecimalEncoder).encode('utf-8')
-            url = f'{base_url}/api/projects/{project_id}/import'
-            req = urllib.request.Request(url, data=payload, method='POST')
-            req.add_header('Content-Type', 'application/json')
-            req.add_header('X-CSRFToken', csrf_token)
-            req.add_header('Referer', url)
             try:
-                resp = opener.open(req, timeout=300)
-                body = json.loads(resp.read().decode('utf-8'))
+                body = do_import(payload, batch_num)
                 imported += body.get('task_count', len(batch))
+            except urllib.error.HTTPError as e:
+                if e.code == 401:
+                    print(f'  Session expired at batch {batch_num}, re-authenticating...', flush=True)
+                    login()
+                    try:
+                        body = do_import(payload, batch_num)
+                        imported += body.get('task_count', len(batch))
+                    except Exception as e2:
+                        errors += 1
+                        print(f'  Error batch {batch_num} (after re-auth): {e2}', flush=True)
+                else:
+                    errors += 1
+                    print(f'  Error batch {batch_num}: {e}', flush=True)
             except Exception as e:
                 errors += 1
                 print(f'  Error batch {batch_num}: {e}', flush=True)
@@ -783,15 +846,22 @@ with open(tasks_file, 'rb') as f:
 if batch:
     batch_num += 1
     payload = json.dumps(batch, cls=DecimalEncoder).encode('utf-8')
-    url = f'{base_url}/api/projects/{project_id}/import'
-    req = urllib.request.Request(url, data=payload, method='POST')
-    req.add_header('Content-Type', 'application/json')
-    req.add_header('X-CSRFToken', csrf_token)
-    req.add_header('Referer', url)
     try:
-        resp = opener.open(req, timeout=300)
-        body = json.loads(resp.read().decode('utf-8'))
+        body = do_import(payload, batch_num)
         imported += body.get('task_count', len(batch))
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            print(f'  Session expired at batch {batch_num}, re-authenticating...', flush=True)
+            login()
+            try:
+                body = do_import(payload, batch_num)
+                imported += body.get('task_count', len(batch))
+            except Exception as e2:
+                errors += 1
+                print(f'  Error batch {batch_num} (after re-auth): {e2}', flush=True)
+        else:
+            errors += 1
+            print(f'  Error batch {batch_num}: {e}', flush=True)
     except Exception as e:
         errors += 1
         print(f'  Error batch {batch_num}: {e}', flush=True)
@@ -800,7 +870,7 @@ if errors:
     print(f'  Warning: {errors} batch(es) had errors.')
 
 open(result_file, 'w').write(str(imported))
-" "$TASKS_FILE" "$LS_BASE" "$PROJECT_ID" "$COOKIE_JAR" "$CSRF_TOKEN" "$IMPORT_RESULT_FILE"
+" "$TASKS_FILE" "$LS_BASE" "$PROJECT_ID" "$LS_EMAIL" "$LS_PASSWORD" "$IMPORT_RESULT_FILE"
 
     TASK_COUNT=$(cat "$IMPORT_RESULT_FILE" 2>/dev/null || echo "?")
     rm -f "$IMPORT_RESULT_FILE"

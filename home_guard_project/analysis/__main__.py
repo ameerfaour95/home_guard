@@ -53,6 +53,14 @@ def main() -> None:
         action="store_true",
         help="Skip VLM fine-tuning JSONL export.",
     )
+    parser.add_argument(
+        "--dataset-dir",
+        default=None,
+        help=(
+            "Path to the dataset directory (for local file deletion of "
+            "[delete]-marked tasks). If omitted, only S3 objects are removed."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -66,6 +74,7 @@ def main() -> None:
         export_path=args.export_path,
         cfg=cfg,
         output_dir=args.output_dir,
+        dataset_dir=args.dataset_dir,
         skip_report=args.no_report,
         skip_excel=args.no_excel,
         skip_yolo=args.no_yolo,

@@ -5,13 +5,15 @@ Excel workbook, YOLO training labels, and VLM fine-tuning JSONL.
 
 from __future__ import annotations
 
+import glob as globmod
 import json
 import logging
 import os
+import re
 import statistics
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .config import AnalysisConfig
 from .utils.ls_convert import interpolate_keyframes, ls_rect_to_yolo
@@ -23,6 +25,8 @@ from .utils.s3 import (
 )
 
 log = logging.getLogger("analysis")
+
+DELETE_MARKER = "[delete]"
 
 
 # ---------------------------------------------------------------------------
@@ -186,10 +190,151 @@ def parse_export(
 
 
 # ---------------------------------------------------------------------------
+# [delete] marker filtering
+# ---------------------------------------------------------------------------
+
+def _is_delete_marker(description: str) -> bool:
+    return description.strip().lower() == DELETE_MARKER
+
+
+def _derive_s3_keys(meta_path: str, prefix: str) -> List[str]:
+    """Derive all known S3 keys for a clip from its meta_path."""
+    rel = meta_path.replace("\\", "/")
+    camera_date = "/".join(rel.split("/")[1:3])  # e.g. "main_door/2026-03-02"
+    clip_id = re.sub(r"\.meta\.json$", "", os.path.basename(rel))
+
+    keys = [
+        f"{prefix}/clips/{camera_date}/{clip_id}.mp4",
+        f"{prefix}/meta/{camera_date}/{clip_id}.meta.json",
+        f"{prefix}/vlm_crops/{camera_date}/{clip_id}.mp4",
+        f"{prefix}/responses/{camera_date}/{clip_id}.model_raw.txt",
+    ]
+    return keys
+
+
+def _delete_s3_objects(
+    bucket: str, prefix: str, tasks: List[ParsedTask],
+) -> int:
+    """Delete all S3 objects associated with *tasks*. Returns count deleted."""
+    try:
+        import boto3
+    except ImportError:
+        log.warning("boto3 not installed — skipping S3 deletion.")
+        return 0
+
+    s3 = boto3.client("s3")
+    all_keys: List[str] = []
+
+    for pt in tasks:
+        all_keys.extend(_derive_s3_keys(pt.meta_path, prefix))
+
+        rel = pt.meta_path.replace("\\", "/")
+        camera_date = "/".join(rel.split("/")[1:3])
+        paginator = s3.get_paginator("list_objects_v2")
+        for subdir in ("yolo/images", "yolo/labels"):
+            yolo_prefix = f"{prefix}/{subdir}/{camera_date}/{pt.clip_id}_f"
+            for page in paginator.paginate(Bucket=bucket, Prefix=yolo_prefix):
+                for obj in page.get("Contents", []):
+                    all_keys.append(obj["Key"])
+
+    all_keys = list(set(all_keys))
+    if not all_keys:
+        return 0
+
+    log.info("Deleting %d S3 objects for %d marked tasks...", len(all_keys), len(tasks))
+    deleted = 0
+    batch_size = 1000
+    for i in range(0, len(all_keys), batch_size):
+        batch = all_keys[i : i + batch_size]
+        objects = [{"Key": k} for k in batch]
+        resp = s3.delete_objects(Bucket=bucket, Delete={"Objects": objects, "Quiet": True})
+        deleted += len(batch) - len(resp.get("Errors", []))
+        for err in resp.get("Errors", []):
+            log.warning("S3 delete error: %s — %s", err["Key"], err["Message"])
+
+    return deleted
+
+
+def _delete_local_files(dataset_dir: str, tasks: List[ParsedTask]) -> int:
+    """Delete local files associated with *tasks*. Returns count deleted."""
+    if not dataset_dir or not os.path.isdir(dataset_dir):
+        return 0
+
+    deleted = 0
+    for pt in tasks:
+        rel = pt.meta_path.replace("\\", "/")
+        camera_date = "/".join(rel.split("/")[1:3])
+        clip_id = pt.clip_id
+
+        candidates = [
+            os.path.join(dataset_dir, "clips", camera_date, f"{clip_id}.mp4"),
+            os.path.join(dataset_dir, "meta", camera_date, f"{clip_id}.meta.json"),
+            os.path.join(dataset_dir, "vlm_crops", camera_date, f"{clip_id}.mp4"),
+            os.path.join(dataset_dir, "responses", camera_date, f"{clip_id}.model_raw.txt"),
+        ]
+
+        for subdir in ("yolo/images", "yolo/labels"):
+            pattern = os.path.join(dataset_dir, subdir, camera_date, f"{clip_id}_f*")
+            candidates.extend(globmod.glob(pattern))
+
+        for fp in candidates:
+            if os.path.isfile(fp):
+                try:
+                    os.remove(fp)
+                    deleted += 1
+                except OSError as exc:
+                    log.warning("Failed to delete %s: %s", fp, exc)
+
+    return deleted
+
+
+def filter_deleted_tasks(
+    tasks: List[ParsedTask],
+    cfg: AnalysisConfig,
+    dataset_dir: Optional[str] = None,
+) -> Tuple[List[ParsedTask], List[ParsedTask]]:
+    """
+    Partition *tasks* into (keep, deleted) based on the ``[delete]`` VLM marker.
+
+    For deleted tasks: removes associated files from S3 and local disk.
+    """
+    keep: List[ParsedTask] = []
+    deleted: List[ParsedTask] = []
+
+    for pt in tasks:
+        if _is_delete_marker(pt.vlm_description):
+            deleted.append(pt)
+        else:
+            keep.append(pt)
+
+    if not deleted:
+        log.info("No tasks marked %s.", DELETE_MARKER)
+        return keep, deleted
+
+    log.info(
+        "Found %d tasks marked %s (keeping %d).",
+        len(deleted), DELETE_MARKER, len(keep),
+    )
+
+    s3_deleted = _delete_s3_objects(cfg.s3_bucket, cfg.s3_prefix, deleted)
+    log.info("Deleted %d S3 objects for %d marked tasks.", s3_deleted, len(deleted))
+
+    local_deleted = _delete_local_files(dataset_dir, deleted) if dataset_dir else 0
+    if local_deleted:
+        log.info("Deleted %d local files for %d marked tasks.", local_deleted, len(deleted))
+
+    return keep, deleted
+
+
+# ---------------------------------------------------------------------------
 # Summary report
 # ---------------------------------------------------------------------------
 
-def build_summary_report(tasks: List[ParsedTask], cfg: AnalysisConfig) -> str:
+def build_summary_report(
+    tasks: List[ParsedTask],
+    cfg: AnalysisConfig,
+    deleted_tasks: Optional[List[ParsedTask]] = None,
+) -> str:
     """Generate a markdown summary report string."""
     lines: List[str] = []
 
@@ -317,14 +462,30 @@ def build_summary_report(tasks: List[ParsedTask], cfg: AnalysisConfig) -> str:
         lines.append(f"  - Multi-annotator task IDs: {[p.task_id for p in multi_ann]}")
     lines.append("")
 
+    # --- Deleted tasks ---
+    if deleted_tasks:
+        h2(f"Deleted Tasks ({DELETE_MARKER} marker)")
+        row("Total deleted", len(deleted_tasks))
+        del_cams: Dict[str, int] = Counter(p.camera_name for p in deleted_tasks)
+        row("By camera", dict(del_cams))
+        lines.append("")
+        lines.append("| Task ID | Camera | Clip ID |")
+        lines.append("|---------|--------|---------|")
+        for p in deleted_tasks:
+            lines.append(f"| {p.task_id} | {p.camera_name} | {p.clip_id} |")
+        lines.append("")
+
     return "\n".join(lines)
 
 
 def write_summary_report(
-    tasks: List[ParsedTask], cfg: AnalysisConfig, output_dir: str,
+    tasks: List[ParsedTask],
+    cfg: AnalysisConfig,
+    output_dir: str,
+    deleted_tasks: Optional[List[ParsedTask]] = None,
 ) -> str:
     """Build summary, print to console, save to file. Returns the report text."""
-    report = build_summary_report(tasks, cfg)
+    report = build_summary_report(tasks, cfg, deleted_tasks=deleted_tasks)
     print(report)
 
     os.makedirs(output_dir, exist_ok=True)
@@ -585,6 +746,7 @@ def run(
     cfg: AnalysisConfig,
     output_dir: str,
     *,
+    dataset_dir: Optional[str] = None,
     skip_report: bool = False,
     skip_excel: bool = False,
     skip_yolo: bool = False,
@@ -597,8 +759,14 @@ def run(
         log.warning("No tasks found in export file.")
         return
 
+    tasks, deleted_tasks = filter_deleted_tasks(tasks, cfg, dataset_dir)
+
+    if not tasks:
+        log.warning("All tasks were marked %s. Nothing to analyze.", DELETE_MARKER)
+        return
+
     if not skip_report:
-        write_summary_report(tasks, cfg, output_dir)
+        write_summary_report(tasks, cfg, output_dir, deleted_tasks=deleted_tasks)
 
     if not skip_excel:
         write_excel(tasks, cfg, output_dir)

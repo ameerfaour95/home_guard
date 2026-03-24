@@ -228,6 +228,28 @@ Open http://localhost:8080, create a project, paste the XML config, and import t
 
 ---
 
+## Marking Clips for Deletion (`[delete]`)
+
+During labeling, if a clip is irrelevant, corrupted, or otherwise unwanted, write
+**`[delete]`** (case-insensitive) in the VLM description text field and submit.
+
+When the analysis pipeline processes the Label Studio export, it automatically:
+
+1. Identifies all tasks where the VLM description is `[delete]`
+2. **Excludes** them from all analysis outputs (report, Excel, YOLO labels, VLM JSONL)
+3. **Deletes** all associated files from S3 and local disk:
+   - `clips/` (.mp4), `meta/` (.meta.json), `vlm_crops/` (.mp4)
+   - `responses/` (.model_raw.txt)
+   - `yolo/images/` (.jpg) and `yolo/labels/` (.txt) for all sampled frames
+4. Lists the deleted tasks in the summary report for audit
+
+```bash
+# The analysis pipeline handles [delete] automatically:
+py -m home_guard_project.analysis export.json --dataset-dir ./dataset_multi
+```
+
+---
+
 ## Exporting Annotations
 
 In the Label Studio UI:
