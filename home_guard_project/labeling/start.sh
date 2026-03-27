@@ -128,6 +128,7 @@ fi
 FILE_SERVER_PID=""
 LABEL_STUDIO_PID=""
 TUNNEL_PID=""
+IMPORT_PID=""
 
 # Initialized early so both normal and --attach paths can reference them
 SHARE_URL=""
@@ -151,6 +152,10 @@ step()  { echo -e "\n${BOLD}── $* ──${NC}"; }
 cleanup() {
     echo ""
     info "Shutting down..."
+    if [[ -n "$IMPORT_PID" ]]; then
+        kill "$IMPORT_PID" 2>/dev/null && info "Import process stopped." || true
+        wait "$IMPORT_PID" 2>/dev/null || true
+    fi
     if [[ -n "$TUNNEL_PID" ]]; then
         kill "$TUNNEL_PID" 2>/dev/null && info "Cloudflare tunnel stopped." || true
     fi
@@ -753,8 +758,11 @@ if [[ -f "$TASKS_FILE" ]]; then
 
     IMPORT_RESULT_FILE=$(mktemp)
     $UVRUN $PYTHON -c "
-import json, sys, urllib.request, http.cookiejar, ijson, re
+import json, sys, urllib.request, http.cookiejar, ijson, re, signal
 from decimal import Decimal
+
+signal.signal(signal.SIGINT, lambda *_: sys.exit(130))
+signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
 
 class DecimalEncoder(json.JSONEncoder):
     def default(self, o):
@@ -870,7 +878,16 @@ if errors:
     print(f'  Warning: {errors} batch(es) had errors.')
 
 open(result_file, 'w').write(str(imported))
-" "$TASKS_FILE" "$LS_BASE" "$PROJECT_ID" "$LS_EMAIL" "$LS_PASSWORD" "$IMPORT_RESULT_FILE"
+" "$TASKS_FILE" "$LS_BASE" "$PROJECT_ID" "$LS_EMAIL" "$LS_PASSWORD" "$IMPORT_RESULT_FILE" &
+    IMPORT_PID=$!
+
+    wait "$IMPORT_PID" 2>/dev/null
+    IMPORT_EXIT=$?
+    IMPORT_PID=""
+
+    if [[ "$IMPORT_EXIT" -ne 0 && "$IMPORT_EXIT" -ne 130 && "$IMPORT_EXIT" -ne 143 ]]; then
+        warn "Import process exited with code ${IMPORT_EXIT}"
+    fi
 
     TASK_COUNT=$(cat "$IMPORT_RESULT_FILE" 2>/dev/null || echo "?")
     rm -f "$IMPORT_RESULT_FILE"
