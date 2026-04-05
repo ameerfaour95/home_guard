@@ -429,10 +429,12 @@ h  = height / 100.0
 
 The project has a built-in **analysis pipeline** (`home_guard_project/analysis/`)
 that converts a Label Studio JSON export into ready-to-use YOLO training labels
-and VLM fine-tuning data. The first batch is already processed and stored at:
+and VLM fine-tuning data. Processed batches are stored at:
 
 ```
-s3://security-camera-project-v1/tagging/ameer_house_batch_1/
+s3://security-camera-project-v1/tagging/ameer_house_batch_1/   # 74 tasks, dataset_multi
+s3://security-camera-project-v1/tagging/ameer_house_batch_2/   # 147 tasks, dataset_multi
+s3://security-camera-project-v1/tagging/uca_dataset_batch/     # 43 tasks, dataset_uca
 ```
 
 ### 8a. Existing exported data on S3
@@ -470,6 +472,17 @@ s3://security-camera-project-v1/tagging/ameer_house_batch_1/
 | Total video time | 728s (12.1 min) |
 | Cameras | front_side (57 tasks), main_door (17 tasks) |
 | Annotators | 3 |
+
+**UCA batch stats** (from `summary_report.md`):
+
+| Metric | Value |
+|--------|-------|
+| Total tasks | 43 (280 exported, 237 marked `[delete]`) |
+| Bounding-box tracks | 162 (126 person, 24 car, 12 other) |
+| VLM descriptions | 43 (all filled, from UCA annotations) |
+| Total video time | 430s (7.2 min) |
+| Categories | Abuse (11), Robbery (16), Stealing (10), Fighting (5), Shooting (1) |
+| YOLO label files | 3,772 (8,914 total boxes) |
 
 ### 8b. The analysis pipeline (`home_guard_project/analysis/`)
 
@@ -1134,9 +1147,10 @@ uv run python -m home_guard_project.labeling --dataset-dir ./dataset_uca --no-pr
 3. Label in LS      ->  ./home_guard_project/labeling/start.sh ./dataset_multi
 4. Export from LS   ->  (UI: Export -> JSON)
 5. Convert to       ->  py -m home_guard_project.analysis export.json
-   training data
-6. Upload batch     ->  aws s3 sync ./analysis_output s3://bucket/tagging/batch_N/
-   to S3
+   training data         (handles [delete] marker cleanup from S3/local)
+6. Upload batch     ->  ./home_guard_project/s3_upload/upload_batch.sh \
+   to S3                   --batch NAME --export EXPORT.json --analysis-dir DIR
+                          (add --selective for large source prefixes like dataset_uca)
 7. Train YOLO       ->  yolo detect train data=analysis_output/yolo/data.yaml ...
 8. Train VLM        ->  llamafactory-cli train config.yaml
 ```

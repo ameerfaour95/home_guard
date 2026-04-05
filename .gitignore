@@ -21,6 +21,8 @@ venv/
 dataset_multi/
 dataset_uca/
 dataset_uca_test/
+dataset_review/
+review_exports/
 captures/
 frames/
 clips_output/

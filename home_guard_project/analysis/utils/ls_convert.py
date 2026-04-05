@@ -69,9 +69,8 @@ def interpolate_keyframes(
             if i + 1 < len(sorted_kfs):
                 nxt = sorted_kfs[i + 1]
                 if not nxt.get("enabled", True):
-                    if f != frame:
-                        continue
-                    t = 0.0
+                    if f >= end_frame:
+                        break
                     box = {
                         "x": kf["x"],
                         "y": kf["y"],
