@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from typing import Any, Dict, List, Optional
 
@@ -34,6 +35,9 @@ def merge_annotations(
     are attached to the matching new task so that a clear-and-reimport cycle
     preserves all human work.
 
+    Uses streaming JSON (ijson) to read the large tasks file so it works
+    even when the file is multiple GB.
+
     Args:
         new_tasks_path: Path to the regenerated ``label_studio_tasks.json``.
         exported_path:  Path to the Label Studio JSON export.
@@ -43,14 +47,14 @@ def merge_annotations(
     Returns:
         A stats dict ``{total, with_annotations, new}``.
     """
+    import ijson
+    from decimal import Decimal
+
     if output_path is None:
         output_path = new_tasks_path
 
     log.info("Merging annotations from %s into %s", exported_path, new_tasks_path)
     t0 = time.monotonic()
-
-    with open(new_tasks_path, "r", encoding="utf-8") as f:
-        new_tasks: List[Dict[str, Any]] = json.load(f)
 
     with open(exported_path, "r", encoding="utf-8") as f:
         exported: List[Dict[str, Any]] = json.load(f)
@@ -66,23 +70,43 @@ def merge_annotations(
         "Export contains %d tasks (%d with annotations)",
         len(exported), len(annotation_lookup),
     )
+    del exported
 
+    tmp_path = output_path + ".tmp"
+    total = 0
     with_annotations = 0
-    for task in new_tasks:
-        key = _task_key(task)
-        if key in annotation_lookup:
-            task["annotations"] = annotation_lookup[key]
-            with_annotations += 1
 
-    new_count = len(new_tasks) - with_annotations
+    class _Encoder(json.JSONEncoder):
+        def default(self, o: Any) -> Any:
+            if isinstance(o, Decimal):
+                return float(o)
+            return super().default(o)
+
+    with open(new_tasks_path, "rb") as fin, \
+         open(tmp_path, "w", encoding="utf-8") as fout:
+        fout.write("[\n")
+        first = True
+        for task in ijson.items(fin, "item"):
+            key = _task_key(task)
+            if key in annotation_lookup:
+                task["annotations"] = annotation_lookup[key]
+                with_annotations += 1
+
+            if not first:
+                fout.write(",\n")
+            first = False
+            json.dump(task, fout, ensure_ascii=False, cls=_Encoder)
+            total += 1
+
+        fout.write("\n]\n")
+
+    os.replace(tmp_path, output_path)
+
     stats = {
-        "total": len(new_tasks),
+        "total": total,
         "with_annotations": with_annotations,
-        "new": new_count,
+        "new": total - with_annotations,
     }
-
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(new_tasks, f, ensure_ascii=False, indent=2)
 
     elapsed = time.monotonic() - t0
     log.info(

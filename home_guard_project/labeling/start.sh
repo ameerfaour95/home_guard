@@ -699,12 +699,67 @@ import json; print(len(json.load(open('${EXPORT_BACKUP}'))))
             info "No annotations to merge — skipping merge step."
         fi
 
-        # Delete all existing tasks in the project before reimport
+        # Delete all existing tasks in the project before reimport.
+        # The LS "/api/dm/actions?id=delete_tasks" with {"all": true} fails
+        # with "too many SQL variables" on large projects.  Delete in batches.
         info "Clearing existing tasks from project ${PROJECT_ID}..."
-        _api POST "/api/dm/actions?id=delete_tasks&project=${PROJECT_ID}" \
-            -H "Content-Type: application/json" \
-            -d '{"selectedItems": {"all": true, "excluded": []}}' \
-            > /dev/null 2>&1 || true
+        $UVRUN $PYTHON -c "
+import urllib.request, http.cookiejar, json, sys, time
+
+base_url    = sys.argv[1]
+project_id  = sys.argv[2]
+email       = sys.argv[3]
+password    = sys.argv[4]
+BATCH       = 500
+
+cj = http.cookiejar.CookieJar()
+opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+
+def csrf():
+    for c in cj:
+        if c.name == 'csrftoken':
+            return c.value
+    return ''
+
+def login():
+    opener.open(urllib.request.Request(f'{base_url}/user/signup')).read()
+    cs = csrf()
+    data = f'email={email}&password={password}&csrfmiddlewaretoken={cs}'.encode()
+    req = urllib.request.Request(f'{base_url}/user/login', data=data, method='POST')
+    req.add_header('Content-Type', 'application/x-www-form-urlencoded')
+    req.add_header('X-CSRFToken', cs)
+    req.add_header('Referer', f'{base_url}/user/login')
+    try: opener.open(req)
+    except: pass
+
+login()
+
+deleted_total = 0
+while True:
+    url = f'{base_url}/api/tasks?project={project_id}&page_size={BATCH}&page=1'
+    req = urllib.request.Request(url)
+    req.add_header('X-CSRFToken', csrf())
+    resp = json.loads(opener.open(req).read())
+    tasks = resp if isinstance(resp, list) else resp.get('tasks', resp.get('results', []))
+    if not tasks:
+        break
+    ids = [t['id'] for t in tasks]
+    payload = json.dumps({'selectedItems': {'all': False, 'included': ids}}).encode()
+    del_url = f'{base_url}/api/dm/actions?id=delete_tasks&project={project_id}'
+    req = urllib.request.Request(del_url, data=payload, method='POST')
+    req.add_header('Content-Type', 'application/json')
+    req.add_header('X-CSRFToken', csrf())
+    req.add_header('Referer', del_url)
+    try:
+        opener.open(req, timeout=120)
+        deleted_total += len(ids)
+        print(f'  Deleted {deleted_total} tasks...', flush=True)
+    except Exception as e:
+        print(f'  Delete batch error: {e}', file=sys.stderr, flush=True)
+        break
+
+print(f'  Total deleted: {deleted_total}', flush=True)
+" "$LS_BASE" "$PROJECT_ID" "$LS_EMAIL" "$LS_PASSWORD"
         ok "Existing tasks cleared."
     else
         warn "Could not export annotations (HTTP ${EXPORT_STATUS}). Proceeding without merge."
