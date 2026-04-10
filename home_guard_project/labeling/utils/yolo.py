@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from ..config import get_coco_labels, get_tracking_config
 
@@ -115,6 +115,7 @@ def _track_detections(
     frame_detections: List[Tuple[int, float, List[Dict[str, Any]]]],
     coco_labels: Dict[int, str],
     iou_threshold: float,
+    all_processed_frames: Optional[Dict[int, float]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Group per-frame YOLO detections into tracked objects using greedy IoU
@@ -130,6 +131,11 @@ def _track_detections(
         COCO class-id -> label name mapping.
     iou_threshold
         Minimum IoU to match a detection to an existing track.
+    all_processed_frames
+        Optional mapping of ``{video_frame: time_offset}`` for ALL frames
+        that were processed by YOLO (including those with zero detections).
+        When provided, tracks that end before the last processed frame get
+        an ``enabled=False`` keyframe so the box disappears in Label Studio.
 
     Returns
     -------
@@ -182,6 +188,28 @@ def _track_detections(
                 "keyframes": [kf],
             })
 
+    # Add disabled keyframes so boxes disappear when the object leaves.
+    if all_processed_frames and tracks:
+        sorted_all = sorted(all_processed_frames.keys())
+        max_frame = sorted_all[-1]
+        for trk in tracks:
+            last_kf = trk["keyframes"][-1]
+            if last_kf["frame"] >= max_frame:
+                continue
+            next_frames = [f for f in sorted_all if f > last_kf["frame"]]
+            if next_frames:
+                disable_frame = next_frames[0]
+                trk["keyframes"].append({
+                    "frame": disable_frame,
+                    "x": last_kf["x"],
+                    "y": last_kf["y"],
+                    "width": last_kf["width"],
+                    "height": last_kf["height"],
+                    "time": round(all_processed_frames[disable_frame], 4),
+                    "enabled": False,
+                    "rotation": 0,
+                })
+
     return tracks
 
 
@@ -214,9 +242,24 @@ def build_predictions(
     if yolo_export and yolo_export.get("enabled"):
         exported_frames: List[Dict[str, Any]] = yolo_export.get("exported_frames", [])
 
+        # Label Studio caps frameRate at 10 (see tasks.py).  YOLO frame_index
+        # values reference the video's native FPS, so we must re-map them to
+        # the LS frame space to keep keyframes synchronised with playback.
+        native_fps = meta.get(
+            "fps_estimated",
+            meta.get("buffer", {}).get("store_fps", 10.0),
+        )
+        ls_fps = min(native_fps, 10.0)
+        fps_ratio = ls_fps / max(native_fps, 1e-6)
+
+        all_processed_frames: Dict[int, float] = {}
         frame_detections: List[Tuple[int, float, List[Dict[str, Any]]]] = []
         for ef in exported_frames:
             frame_index: int = ef.get("frame_index", 0)
+            video_frame = round(frame_index * fps_ratio) + 1
+            time_offset = ef.get("approx_time_offset_sec", 0.0)
+            all_processed_frames[video_frame] = time_offset
+
             label_rel: str = ef.get("label_path", "")
             if not label_rel:
                 continue
@@ -227,13 +270,12 @@ def build_predictions(
                 if d["class_id"] in coco_labels
             ]
             if detections:
-                video_frame = frame_index + 1
-                time_offset = ef.get("approx_time_offset_sec", 0.0)
                 frame_detections.append((video_frame, time_offset, detections))
 
         if tracking_enabled:
             tracks = _track_detections(
                 frame_detections, coco_labels, iou_threshold,
+                all_processed_frames=all_processed_frames,
             )
             for trk in tracks:
                 region_id = f"bbox_{result_idx}"

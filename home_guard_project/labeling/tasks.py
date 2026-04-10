@@ -313,6 +313,17 @@ def _build_single_task(
 
     if include_predictions:
         preds = build_predictions(meta, dataset_dir)
+
+        vlm_text = meta.get("model_response", "")
+        if vlm_text:
+            preds = preds or []
+            preds.append({
+                "from_name": "vlm_description",
+                "to_name": "video_crop",
+                "type": "textarea",
+                "value": {"text": [vlm_text]},
+            })
+
         if preds:
             task["predictions"] = [
                 {

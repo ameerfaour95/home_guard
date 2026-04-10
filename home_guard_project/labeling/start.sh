@@ -165,6 +165,12 @@ cleanup() {
     if [[ -n "$LABEL_STUDIO_PID" ]]; then
         kill "$LABEL_STUDIO_PID" 2>/dev/null && info "Label Studio stopped." || true
     fi
+    # On Windows, killing uv doesn't kill the child python/label-studio process.
+    # Kill whatever is still on the LS port to prevent stale processes.
+    _stale=$(netstat -ano 2>/dev/null | grep ":${LS_PORT} " | grep "LISTENING" | awk '{print $NF}' || true)
+    if [[ -n "$_stale" && "$_stale" != "0" ]]; then
+        taskkill //F //PID "$_stale" 2>/dev/null || kill "$_stale" 2>/dev/null || true
+    fi
     # Clean up temp files
     [[ -n "${COOKIE_JAR:-}" ]] && rm -f "$COOKIE_JAR" 2>/dev/null || true
     [[ -n "${TUNNEL_LOG:-}" ]] && rm -f "$TUNNEL_LOG" 2>/dev/null || true
@@ -446,7 +452,8 @@ if [[ "$SHARE_MODE" == "true" ]]; then
         while (( CF_WAIT < 30 )); do
             sleep 1
             CF_WAIT=$((CF_WAIT + 1))
-            SHARE_URL=$(grep -oE 'https://[a-zA-Z0-9_-]+\.trycloudflare\.com' "$TUNNEL_LOG" 2>/dev/null | head -1 || echo "")
+            SHARE_URL=$(grep -oE 'https://[a-zA-Z0-9_-]+\.trycloudflare\.com' "$TUNNEL_LOG" 2>/dev/null || true)
+            SHARE_URL="${SHARE_URL%%$'\n'*}"
             if [[ -n "$SHARE_URL" ]]; then
                 break
             fi
@@ -476,6 +483,16 @@ export LABEL_STUDIO_PASSWORD="${LS_PASSWORD}"
 # Windows cp1255/cp1252 consoles choke on LS's Unicode output (→ arrow in
 # version-check message).  Force UTF-8 so the print() call doesn't crash.
 export PYTHONIOENCODING="utf-8"
+
+# Kill any stale Label Studio process on the target port.
+# On Windows, killing the parent (uv) doesn't kill the child (python/label-studio),
+# so a previous run's LS can survive and block the port.
+STALE_PID=$(netstat -ano 2>/dev/null | grep ":${LS_PORT} " | grep "LISTENING" | awk '{print $NF}' | head -1 || true)
+if [[ -n "$STALE_PID" && "$STALE_PID" != "0" ]]; then
+    warn "Port ${LS_PORT} already in use by PID ${STALE_PID} — killing stale process."
+    taskkill //F //PID "$STALE_PID" 2>/dev/null || kill "$STALE_PID" 2>/dev/null || true
+    sleep 2
+fi
 
 # Tell Label Studio about the public hostname so Django CSRF trusts it.
 if [[ -n "$SHARE_URL" ]]; then
