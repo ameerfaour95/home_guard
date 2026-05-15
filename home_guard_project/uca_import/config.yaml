@@ -1,0 +1,47 @@
+# ──────────────────────────────────────────────────────────────────────────────
+#  UCA (UCF Crime Annotation) dataset import configuration
+# ──────────────────────────────────────────────────────────────────────────────
+
+# How to derive camera_name from each video:
+#   "category" → crime category (Abuse, Arson, …)
+#   "uca"      → flat, all clips share camera_name "uca"
+camera_name_from: "category"
+
+kind: "uca_import"
+
+# Annotation splits to import (files inside the zip root)
+splits:
+  - "UCFCrime_Train"
+  - "UCFCrime_Test"
+  - "UCFCrime_Val"
+
+yolo_export:
+  enabled: true
+  fps: 3.0                   # frame sampling rate for YOLO label export
+  confidence: 0.25
+  jpeg_quality: 95            # higher default — preserve low-quality originals
+  model: "yolo11s.pt"
+  imgsz: 640
+  trigger_classes:
+    - "person"
+
+vlm_crop:
+  enabled: false              # no VLM cropping for this dataset
+
+# Fixed-duration windowing: split each source video into non-overlapping windows.
+# The last window slides back to ensure a full window_size_sec clip.
+# Videos shorter than window_size_sec become a single clip.
+windowing:
+  window_size_sec: 10.0
+
+# Skip videos whose category matches these names (case-insensitive).
+# The category is extracted from the video filename (e.g. "Normal_Videos633" → "Normal").
+# Leave empty to process all categories.
+exclude_categories:
+  - "Normal"
+
+# false → ffmpeg stream copy (zero quality loss, keyframe-aligned cuts)
+# true  → re-encode to H.264 CRF 18 (frame-accurate cuts, perceptually lossless)
+reencode: false
+
+output_dir: "./dataset_uca"

@@ -1,0 +1,51 @@
+# ──────────────────────────────────────────────────────────────────────────────
+#  SmartHome-Bench dataset import configuration
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Categories to include (case-insensitive match).
+# Multi-category entries (e.g. "Wildlife, Pet Monitoring") match if ANY
+# selected category appears.
+categories:
+  - "Security"
+  - "Package Monitoring"
+  - "Visitor & Social Interaction"
+  - "Household Appliance Monitoring"
+
+# How to derive camera_name from each video:
+#   "category" → sanitised category (e.g. Package_Monitoring)
+#   "smarthome" → flat, all clips share camera_name "smarthome"
+camera_name_from: "category"
+
+kind: "smarthome_import"
+
+# Fixed-duration windowing: split each source video into non-overlapping
+# windows.  The last window slides back to ensure a full window_size_sec clip.
+# Videos shorter than window_size_sec become a single clip.
+windowing:
+  window_size_sec: 10.0
+
+yolo_export:
+  enabled: true
+  fps: 3.0                   # frame sampling rate for YOLO label export
+  confidence: 0.25
+  jpeg_quality: 95            # preserve quality
+  model: "yolo11s.pt"
+  imgsz: 640
+  trigger_classes:
+    - "person"
+
+vlm_crop:
+  enabled: false              # no VLM cropping for this dataset
+
+# false → ffmpeg stream copy (zero quality loss, keyframe-aligned cuts)
+# true  → re-encode to H.264 CRF 18 (frame-accurate cuts)
+reencode: false
+
+# yt-dlp download settings
+download:
+  max_workers: 4              # concurrent YouTube downloads
+  format: "best[ext=mp4]/best"
+  retries: 3
+  timeout_sec: 1800           # 30 min per video
+
+output_dir: "./dataset_smarthome"

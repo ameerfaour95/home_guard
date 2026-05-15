@@ -1,0 +1,108 @@
+# ──────────────────────────────────────────────────────────────────────────────
+#  Home Guard — data collection pipeline configuration
+# ──────────────────────────────────────────────────────────────────────────────
+
+output_dir: "./dataset_multi"
+
+# ── Models ────────────────────────────────────────────────────────────────────
+models:
+  yolo: "yolo11s.pt"
+  vlm: "HuggingFaceTB/SmolVLM2-500M-Video-Instruct"
+
+# ── Clip & buffer (sub-stream) ────────────────────────────────────────────────
+clip:
+  seconds: 10.0
+  store_fps: 7.0            # sub-stream buffer FPS (7 = good balance for CPU)
+  # store_size: null = native camera resolution.  Set e.g. [1920, 1080] to cap.
+  store_size: null
+  # YOLO inference resolution (longer side in px).  Sub-stream is ~704px wide,
+  # so 640 is a good match.  640 = YOLO default, 960 = balanced, 1280 = high.
+  yolo_imgsz: 640
+
+# ── Main stream (high-res for VLM crop clips) ────────────────────────────────
+# The main-stream RTSP is connected ON-DEMAND only when a trigger fires, so it
+# uses zero CPU/RAM during idle periods.  The post-roll window (5s) gives the
+# connection time to start and accumulate frames.
+main_stream:
+  enabled: true
+  store_fps: 5.0            # buffer FPS (5 fps = smooth enough for VLM video clips)
+  jpeg_quality: 85          # JPEG quality for in-memory buffer (85 = ~150 KB/frame)
+  crop_padding: 0.3         # padding around trigger-class union bbox (fraction of bbox dims)
+  crop_min_size: 384        # minimum crop dimension in pixels
+  crop_ema_alpha: 0.3       # temporal smoothing factor for stable crops across frames
+
+# ── Trigger hysteresis ────────────────────────────────────────────────────────
+trigger:
+  score_max: 4.0
+  score_reward: 2.0       # points/sec while person present
+  score_penalty: 1.0      # points/sec while absent
+  cooldown_sec: 5.0
+  post_roll_sec: 5.0    # seconds to keep recording after trigger fires
+
+# ── Random sampling ───────────────────────────────────────────────────────────
+random_clip:
+  enabled: false
+  interval_sec: 3600.0
+  jitter_frac: 0.25
+  allow_person: false
+
+# ── VLM ───────────────────────────────────────────────────────────────────────
+vlm:
+  enabled: false
+  sample_fps: 2
+  prompt: "Describe what happens in the video"
+
+# ── YOLO export (weak labels for training) ────────────────────────────────────
+yolo_export:
+  enabled: true
+  fps: 3.0
+  confidence: 0.25
+  jpeg_quality: 90
+  subdir: "yolo"
+
+# ── RTSP stability ────────────────────────────────────────────────────────────
+rtsp:
+  ffmpeg_options: "rtsp_transport;tcp|stimeout;5000000|max_delay;500000|fflags;nobuffer"
+  open_timeout_ms: 5000
+  read_timeout_ms: 5000
+  freeze_reconnect_sec: 3.0
+  reconnect_backoff_start: 1.0
+  reconnect_backoff_max: 10.0
+
+# ── Camera discovery ─────────────────────────────────────────────────────────
+discovery:
+  max_channels: 10            # max channel number to probe per NVR
+  consecutive_fail_stop: 2    # stop probing after this many consecutive failures
+  probe_timeout_sec: 5.0      # RTSP timeout per channel probe
+  # "main" = high-res main stream (s0, 1080p), "sub" = low-res sub stream (s1, D1)
+  stream_type: "main"
+
+# ── Detection & display ──────────────────────────────────────────────────────
+detection:
+  yolo_trigger_confidence: 0.5
+  yolo_every_n_frames_cpu: 5
+  # YOLO class names that trigger clip saving.  Any detection of these classes
+  # drives the hysteresis score.
+  # Common security classes: person, bicycle, car, motorcycle, bus, truck,
+  #   dog, cat, backpack, suitcase
+  # Full COCO list: person, bicycle, car, motorcycle, airplane, bus, train,
+  #   truck, boat, traffic_light, fire_hydrant, stop_sign, parking_meter,
+  #   bench, bird, cat, dog, horse, sheep, cow, elephant, bear, zebra,
+  #   giraffe, backpack, umbrella, handbag, tie, suitcase, frisbee, skis,
+  #   snowboard, sports_ball, kite, baseball_bat, baseball_glove, skateboard,
+  #   surfboard, tennis_racket, bottle, wine_glass, cup, fork, knife, spoon,
+  #   bowl, banana, apple, sandwich, orange, broccoli, carrot, hot_dog,
+  #   pizza, donut, cake, chair, couch, potted_plant, bed, dining_table,
+  #   toilet, tv, laptop, mouse, remote, keyboard, cell_phone, microwave,
+  #   oven, toaster, sink, refrigerator, book, clock, vase, scissors,
+  #   teddy_bear, hair_drier, toothbrush
+  trigger_classes:
+    - person
+    - cat
+    - dog
+  
+
+display:
+  show_windows: false        # disable to save CPU (each window copies + resizes frames)
+  show_plotted_boxes: false
+  save_with_plotted_boxes: false

@@ -1,0 +1,32 @@
+# ──────────────────────────────────────────────────────────────────────────────
+#  External video import pipeline configuration
+#
+#  Defaults mirror data_collection settings so imported clips are
+#  indistinguishable from RTSP-captured clips in the dataset.
+# ──────────────────────────────────────────────────────────────────────────────
+
+camera_name: "external"
+kind: "import"
+
+clip:
+  seconds: 10.0            # split long videos into chunks of this length
+  store_fps: 7.0           # output FPS (matches data_collection default)
+
+yolo_export:
+  enabled: true
+  fps: 5.0                 # frame sampling rate for YOLO label export
+  confidence: 0.25
+  jpeg_quality: 90
+  model: "yolo11s.pt"
+  imgsz: 640
+  trigger_classes:         # classes used for VLM crop and yolo summary
+    - "person"
+
+vlm_crop:
+  enabled: true            # set false to skip VLM crop generation
+  padding: 0.3             # adaptive padding around person union bbox
+  min_size: 384            # minimum crop dimension (px)
+  ema_alpha: 0.3           # temporal smoothing factor for crop regions
+
+# Default dataset directory (relative to project root)
+output_dir: "./dataset_multi"

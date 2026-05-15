@@ -1,0 +1,62 @@
+# ──────────────────────────────────────────────────────────────────────────────
+#  Label Studio annotation pipeline configuration
+# ──────────────────────────────────────────────────────────────────────────────
+
+label_studio:
+  port: 8080
+  email: "ameerfaour95@gmail.com"
+  password: "Amer1967"
+  # project_name: "Security Camera Annotations Batch 2"
+  # project_name: "UCA Dataset Batch"
+  project_name: "SmartHome-Bench Dataset Batch"
+
+file_server:
+  port: 8081
+
+# COCO class-id -> label name (subset relevant for security cameras)
+coco_labels:
+  0: "person"
+  1: "bicycle"
+  2: "car"
+  3: "motorcycle"
+  5: "bus"
+  7: "truck"
+  14: "bird"
+  15: "cat"
+  16: "dog"
+
+# Pre-annotation tracking: merge per-frame YOLO detections into tracked objects
+# so each object gets one bounding box with keyframes instead of N separate boxes.
+tracking:
+  enabled: true
+  iou_threshold: 0.2
+
+# Default dataset directory (relative to project root)
+dataset_dir: "./dataset_smarthome"
+
+# ── Storage: where Label Studio loads video files from ───────────────────────
+# mode: "local" — serve clips via the built-in file server (default)
+# mode: "s3"   — generate pre-signed S3 URLs (no file server needed)
+storage:
+  mode: "s3"
+  s3:
+    uri: "s3://security-camera-project-v1/dataset_smarthome"
+    region: "us-east-1"
+    url_expiry_sec: 604800    # pre-signed URL lifetime (7 days)
+
+# ── Sharing: expose Label Studio via Cloudflare tunnel for remote annotators ──
+# enabled: true  — auto-launch cloudflared tunnel on every start.sh run
+# enabled: false — localhost only (use --share flag to override)
+share:
+  enabled: true
+
+# ── Annotators: accounts auto-created on start.sh launch ────────────────────
+# Add entries here for each person who will label data.
+# Accounts are created idempotently — existing users are skipped.
+annotators:
+  - email: "ameerfaour95@gmail.com"
+    password: "Amer1967"
+  - email: "salmanmdah08@gmail.com"
+    password: "salmanmdah1223"
+  - email: "naif3o5@icloud.com"
+    password: "naif123456"

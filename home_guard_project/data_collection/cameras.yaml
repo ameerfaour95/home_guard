@@ -1,0 +1,10 @@
+# ──────────────────────────────────────────────────────────────────────────────
+#  Camera RTSP streams — DO NOT COMMIT (contains credentials)
+# ──────────────────────────────────────────────────────────────────────────────
+
+cameras:
+  front_side: rtsp://admin:amer1967%40@192.168.68.106:554/unicast/c3/s0/live
+  left_side_1: rtsp://admin:amer1967%40@192.168.68.106:554/unicast/c2/s0/live
+  left_side_2: rtsp://admin:amer1967%40@192.168.68.106:554/unicast/c5/s0/live
+  main_door: rtsp://admin:amer1967%40@192.168.68.106:554/unicast/c6/s0/live
+  right_side: rtsp://admin:amer1967%40@192.168.68.106:554/unicast/c8/s0/live
