@@ -288,42 +288,55 @@ def _delete_local_files(dataset_dir: str, tasks: List[ParsedTask]) -> int:
     return deleted
 
 
+def _is_untagged(pt: ParsedTask) -> bool:
+    """A task is untagged when no annotator has saved a non-cancelled annotation."""
+    return pt.annotator_id is None
+
+
 def filter_deleted_tasks(
     tasks: List[ParsedTask],
     cfg: AnalysisConfig,
     dataset_dir: Optional[str] = None,
-) -> Tuple[List[ParsedTask], List[ParsedTask]]:
+) -> Tuple[List[ParsedTask], List[ParsedTask], List[ParsedTask]]:
     """
-    Partition *tasks* into (keep, deleted) based on the ``[delete]`` VLM marker.
+    Partition *tasks* into (keep, deleted, untagged):
+      - deleted  : VLM description equals ``[delete]``
+      - untagged : no annotator touched the task
+      - keep     : everything else
 
-    For deleted tasks: removes associated files from S3 and local disk.
+    For dropped tasks (deleted + untagged): removes associated files from S3
+    and local disk.
     """
     keep: List[ParsedTask] = []
     deleted: List[ParsedTask] = []
+    untagged: List[ParsedTask] = []
 
     for pt in tasks:
         if _is_delete_marker(pt.vlm_description):
             deleted.append(pt)
+        elif _is_untagged(pt):
+            untagged.append(pt)
         else:
             keep.append(pt)
 
-    if not deleted:
-        log.info("No tasks marked %s.", DELETE_MARKER)
-        return keep, deleted
+    dropped = deleted + untagged
+    if not dropped:
+        log.info("No tasks marked %s and no untagged tasks.", DELETE_MARKER)
+        return keep, deleted, untagged
 
     log.info(
-        "Found %d tasks marked %s (keeping %d).",
-        len(deleted), DELETE_MARKER, len(keep),
+        "Dropping %d tasks (%d marked %s, %d untagged); keeping %d.",
+        len(dropped), len(deleted), DELETE_MARKER, len(untagged), len(keep),
     )
 
-    s3_deleted = _delete_s3_objects(cfg.s3_bucket, cfg.s3_prefix, deleted)
-    log.info("Deleted %d S3 objects for %d marked tasks.", s3_deleted, len(deleted))
+    s3_deleted = _delete_s3_objects(cfg.s3_bucket, cfg.s3_prefix, dropped)
+    log.info("Deleted %d S3 objects for %d dropped tasks.", s3_deleted, len(dropped))
 
-    local_deleted = _delete_local_files(dataset_dir, deleted) if dataset_dir else 0
+    local_deleted = _delete_local_files(dataset_dir, dropped) if dataset_dir else 0
     if local_deleted:
-        log.info("Deleted %d local files for %d marked tasks.", local_deleted, len(deleted))
+        log.info("Deleted %d local files for %d dropped tasks.", local_deleted, len(dropped))
 
-    return keep, deleted
+    return keep, deleted, untagged
 
 
 # ---------------------------------------------------------------------------
@@ -334,6 +347,7 @@ def build_summary_report(
     tasks: List[ParsedTask],
     cfg: AnalysisConfig,
     deleted_tasks: Optional[List[ParsedTask]] = None,
+    untagged_tasks: Optional[List[ParsedTask]] = None,
 ) -> str:
     """Generate a markdown summary report string."""
     lines: List[str] = []
@@ -475,6 +489,19 @@ def build_summary_report(
             lines.append(f"| {p.task_id} | {p.camera_name} | {p.clip_id} |")
         lines.append("")
 
+    # --- Untagged tasks ---
+    if untagged_tasks:
+        h2("Untagged Tasks (no annotator)")
+        row("Total untagged", len(untagged_tasks))
+        unt_cams: Dict[str, int] = Counter(p.camera_name for p in untagged_tasks)
+        row("By camera", dict(unt_cams))
+        lines.append("")
+        lines.append("| Task ID | Camera | Clip ID |")
+        lines.append("|---------|--------|---------|")
+        for p in untagged_tasks:
+            lines.append(f"| {p.task_id} | {p.camera_name} | {p.clip_id} |")
+        lines.append("")
+
     return "\n".join(lines)
 
 
@@ -483,9 +510,14 @@ def write_summary_report(
     cfg: AnalysisConfig,
     output_dir: str,
     deleted_tasks: Optional[List[ParsedTask]] = None,
+    untagged_tasks: Optional[List[ParsedTask]] = None,
 ) -> str:
     """Build summary, print to console, save to file. Returns the report text."""
-    report = build_summary_report(tasks, cfg, deleted_tasks=deleted_tasks)
+    report = build_summary_report(
+        tasks, cfg,
+        deleted_tasks=deleted_tasks,
+        untagged_tasks=untagged_tasks,
+    )
     print(report)
 
     os.makedirs(output_dir, exist_ok=True)
@@ -759,14 +791,20 @@ def run(
         log.warning("No tasks found in export file.")
         return
 
-    tasks, deleted_tasks = filter_deleted_tasks(tasks, cfg, dataset_dir)
+    tasks, deleted_tasks, untagged_tasks = filter_deleted_tasks(
+        tasks, cfg, dataset_dir,
+    )
 
     if not tasks:
-        log.warning("All tasks were marked %s. Nothing to analyze.", DELETE_MARKER)
+        log.warning("All tasks were dropped (deleted or untagged). Nothing to analyze.")
         return
 
     if not skip_report:
-        write_summary_report(tasks, cfg, output_dir, deleted_tasks=deleted_tasks)
+        write_summary_report(
+            tasks, cfg, output_dir,
+            deleted_tasks=deleted_tasks,
+            untagged_tasks=untagged_tasks,
+        )
 
     if not skip_excel:
         write_excel(tasks, cfg, output_dir)
