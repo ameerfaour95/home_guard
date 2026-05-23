@@ -41,25 +41,14 @@ log = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _silence_ffmpeg_stderr() -> None:
-    """Redirect C-level stderr (fd 2) to devnull, silencing FFmpeg warnings.
+    """No-op kept for backward compatibility.
 
-    Python's sys.stderr is re-pointed to a dup of the original fd so that
-    logging and tracebacks still print normally.
-
-    Skipped when stderr is not a terminal (piped/redirected), because the
-    fd-shuffling breaks output capture under `uv run`, CI, and tee.
+    Previously redirected fd 2 to /dev/null to suppress FFmpeg warnings, but
+    that broke output capture under Git Bash + uv run + redirection and twice
+    masked real crashes (torchvision::nms NotImplementedError, etc.) by eating
+    Python tracebacks. FFmpeg's stderr noise is harmless; leave it visible.
     """
-    if not (hasattr(sys.stderr, "isatty") and sys.stderr.isatty()):
-        return
-    real_stderr_fd = os.dup(2)
-    devnull_fd = os.open(os.devnull, os.O_WRONLY)
-    os.dup2(devnull_fd, 2)
-    os.close(devnull_fd)
-    sys.stderr = io.TextIOWrapper(
-        io.FileIO(real_stderr_fd, closefd=False),
-        encoding="utf-8",
-        errors="replace",
-    )
+    return
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1210,11 +1199,18 @@ def _save_clip(
 def main() -> None:
     _silence_ffmpeg_stderr()
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s  %(levelname)-7s  %(message)s",
+    # Force logging to stdout (line-buffered under `python -u`) instead of the
+    # default stderr, which Git Bash + mintty block-buffer unpredictably.
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except (AttributeError, io.UnsupportedOperation):
+        pass
+    _stdout_handler = logging.StreamHandler(sys.stdout)
+    _stdout_handler.setFormatter(logging.Formatter(
+        fmt="%(asctime)s  %(levelname)-7s  %(message)s",
         datefmt="%H:%M:%S",
-    )
+    ))
+    logging.basicConfig(level=logging.INFO, handlers=[_stdout_handler], force=True)
 
     cfg = load_config()
     _ensure_dirs(cfg)
