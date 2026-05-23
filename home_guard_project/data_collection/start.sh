@@ -223,8 +223,6 @@ step "Starting data collection"
 info "Launching data_collection.py..."
 info "Press Ctrl+C to stop.\n"
 
-$UVRUN python home_guard_project/data_collection/data_collection.py &
-COLLECTOR_PID=$!
-
-wait "$COLLECTOR_PID" 2>/dev/null || true
-COLLECTOR_PID=""
+# Run in the foreground with unbuffered stdout so logs stream live in Git Bash.
+# Backgrounding (&) caused log lines to block-buffer and never appear.
+PYTHONUNBUFFERED=1 $UVRUN python -u home_guard_project/data_collection/data_collection.py

@@ -45,7 +45,12 @@ def _silence_ffmpeg_stderr() -> None:
 
     Python's sys.stderr is re-pointed to a dup of the original fd so that
     logging and tracebacks still print normally.
+
+    Skipped when stderr is not a terminal (piped/redirected), because the
+    fd-shuffling breaks output capture under `uv run`, CI, and tee.
     """
+    if not (hasattr(sys.stderr, "isatty") and sys.stderr.isatty()):
+        return
     real_stderr_fd = os.dup(2)
     devnull_fd = os.open(os.devnull, os.O_WRONLY)
     os.dup2(devnull_fd, 2)
@@ -755,6 +760,7 @@ class VLMWorker:
             json.dump(job.meta, f, ensure_ascii=False, indent=2)
 
         log.info("VLM done: %s -> %s", job.camera_name, os.path.basename(job.clip_path))
+        log.info("VLM response [%s]: %s", job.camera_name, out_text)
         if self.cfg.DEVICE == "cuda":
             torch.cuda.empty_cache()
 
@@ -874,6 +880,7 @@ class CameraState:
     main_connect_ts: float
     roi_polygon: Optional[np.ndarray]
     roi_norm: Optional[List[Tuple[float, float]]]
+    last_score_log: float = 0.0
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1338,6 +1345,16 @@ def main() -> None:
                     st.detection_score = max(
                         st.detection_score - cfg.SCORE_PENALTY * dt, 0.0,
                     )
+
+                if st.trigger_detected and now - st.last_score_log > 1.0:
+                    counts = ", ".join(
+                        f"{COCO_NAMES[cid]}x{n}"
+                        for cid, n in st.yolo_class_counts.items()
+                        if cid in cfg.TRIGGER_CLASS_IDS and n > 0
+                    ) or "?"
+                    log.info("[%s] detecting %s — score=%.1f/%.1f",
+                             st.name, counts, st.detection_score, cfg.SCORE_MAX)
+                    st.last_score_log = now
 
                 # ── Main-stream pre-connect ───────────────────────────
                 # Start the main-stream RTSP as soon as the first

@@ -197,7 +197,7 @@ def onvif_discover(timeout: float = 5.0) -> List[Dict[str, Any]]:
     Returns empty list if the WSDiscovery library is not installed.
     """
     try:
-        from WSDiscovery import WSDiscovery  # type: ignore[import-untyped]
+        from wsdiscovery import WSDiscovery  # type: ignore[import-untyped]
     except ImportError:
         log.warning("WSDiscovery not installed — skipping ONVIF discovery")
         return []
@@ -614,6 +614,83 @@ def interactive_discover() -> Dict[str, str]:
     return cameras
 
 
+_TIER_LABEL = {0: "high", 1: "medium", 2: "low"}
+_LABEL_TIER = {v: k for k, v in _TIER_LABEL.items()}
+
+
+def _parse_channel_and_tier(uri: str) -> Optional[Tuple[str, int]]:
+    """Extract (channel_id, tier) from a Hikvision-style unicast URI.
+
+    Example: rtsp://.../unicast/c3/s0/live -> ("c3", 0)
+    Returns None if the URI doesn't match (e.g. NVR mosaic/oddball streams).
+    """
+    m = re.search(r"/unicast/c(\d+)/s([0-2])/", uri)
+    if not m:
+        return None
+    return f"c{m.group(1)}", int(m.group(2))
+
+
+def _group_streams_by_channel(
+    uris: List[Dict[str, Any]],
+) -> Dict[str, Dict[int, Dict[str, Any]]]:
+    """Group ONVIF stream URIs by physical channel and quality tier.
+
+    Returns {channel_id: {tier: stream_dict}}. Streams that don't match the
+    unicast/c<N>/s<T> pattern are skipped (e.g. NVR mosaic on c0).
+    """
+    grouped: Dict[str, Dict[int, Dict[str, Any]]] = {}
+    for u in uris:
+        parsed = _parse_channel_and_tier(u["uri"])
+        if parsed is None:
+            continue
+        ch, tier = parsed
+        if ch == "c0":
+            continue
+        grouped.setdefault(ch, {})[tier] = u
+    return grouped
+
+
+def _pick_stream_for_channel(
+    tiers: Dict[int, Dict[str, Any]], requested_tier: int,
+) -> Dict[str, Any]:
+    """Pick one stream for a channel given the user's requested tier.
+
+    Prefers the highest-quality tier that is <= requested (smaller tier number
+    = higher quality). If none qualify, falls back upward to the closest
+    available tier above the request so no camera is dropped.
+    """
+    candidates_at_or_below = [t for t in tiers if t >= requested_tier]
+    if candidates_at_or_below:
+        return tiers[min(candidates_at_or_below)]
+    return tiers[max(tiers)]
+
+
+def _ask_quality_tier(
+    grouped: Dict[str, Dict[int, Dict[str, Any]]],
+) -> int:
+    """Show which tiers are available across all channels and ask the user."""
+    available: Dict[int, int] = {}
+    for ch_tiers in grouped.values():
+        for tier in ch_tiers:
+            available[tier] = available.get(tier, 0) + 1
+
+    if not available:
+        return 0
+
+    print("\n  Available quality tiers:")
+    tier_order = sorted(available.keys())
+    for tier in tier_order:
+        label = _TIER_LABEL.get(tier, f"s{tier}")
+        print(f"    {label:<6} (s{tier}) — on {available[tier]} channel(s)")
+
+    default_label = _TIER_LABEL.get(tier_order[0], f"s{tier_order[0]}")
+    choice = _prompt(
+        f"  Choose quality ({'/'.join(_TIER_LABEL[t] for t in tier_order)})",
+        default_label,
+    ).strip().lower()
+    return _LABEL_TIER.get(choice, tier_order[0])
+
+
 def _auto_discover_flow() -> Dict[str, str]:
     cameras: Dict[str, str] = {}
     disc = _load_discovery_config()
@@ -634,19 +711,56 @@ def _auto_discover_flow() -> Dict[str, str]:
         for d in devices:
             print(f"\nQuerying ONVIF media on {d['ip']}...")
             uris = onvif_get_rtsp_uris(d["ip"], d["port"], user, password)
-            if uris:
-                print(f"  Found {len(uris)} stream(s):")
-                for j, u in enumerate(uris, 1):
-                    res = f"{u['resolution'][0]}x{u['resolution'][1]}" if u["resolution"][0] else "?"
-                    print(f"    [{j}] {u['name']}  ({res})  {u['uri'][:80]}...")
+            if not uris:
+                print("  No streams returned. Will try port scanning...")
+                continue
 
+            grouped = _group_streams_by_channel(uris)
+            if not grouped:
+                print(
+                    "  No streams matched the unicast/c<N>/s<T> pattern. "
+                    "Falling back to per-stream prompt."
+                )
                 for j, u in enumerate(uris, 1):
                     if _prompt_yn(f"  Include stream [{j}] {u['name']}?"):
                         name = _prompt(f"    Friendly name for [{j}]", u["name"])
                         name = re.sub(r"[^a-zA-Z0-9_]", "_", name).lower()
                         cameras[name] = u["uri"]
-            else:
-                print("  No streams returned. Will try port scanning...")
+                continue
+
+            print(
+                f"  Found {sum(len(t) for t in grouped.values())} stream(s) "
+                f"across {len(grouped)} physical camera(s)."
+            )
+            requested_tier = _ask_quality_tier(grouped)
+
+            for ch in sorted(grouped.keys(), key=lambda c: int(c[1:])):
+                stream = _pick_stream_for_channel(grouped[ch], requested_tier)
+                w, h = stream["resolution"]
+                actual_tier = _parse_channel_and_tier(stream["uri"])[1]
+                tier_note = ""
+                if actual_tier != requested_tier:
+                    tier_note = (
+                        f"  [only {_TIER_LABEL.get(actual_tier, f's{actual_tier}')} "
+                        f"available]"
+                    )
+                res = f"{w}x{h}" if w else "?"
+                print(f"\n  {ch}: picked s{actual_tier} ({res}){tier_note}")
+                # Preview low-quality (medium/low tier) for naming, even if the
+                # user picked high — high-bitrate streams take longer to open
+                # and the preview is just for identification.
+                preview_uri = stream["uri"]
+                preview_tier = grouped[ch].get(2) or grouped[ch].get(1) or stream
+                preview_uri = preview_tier["uri"]
+                print(f"    Opening preview for {ch}...")
+                print("    >> Press any key in the preview window to continue.")
+                _preview_stream(preview_uri, title=f"{ch} — press any key")
+                default_name = f"camera_{ch}"
+                name = _prompt(
+                    f"    Friendly name for {ch}", default_name,
+                )
+                name = re.sub(r"[^a-zA-Z0-9_]", "_", name).lower()
+                cameras[name] = stream["uri"]
 
     if not cameras:
         # Phase 2: ARP table scan (fast — only tests known devices)

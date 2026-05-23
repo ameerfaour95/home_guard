@@ -198,13 +198,20 @@ When `random_clip.enabled` is true, the pipeline saves a clip at random interval
 
 ## Camera Discovery
 
-Three strategies, tried in order:
+Four strategies, tried in order:
 
-| Strategy | How it works |
-|----------|-------------|
-| **ONVIF WS-Discovery** | Multicast probe finds ONVIF devices, queries Media service for RTSP URIs |
-| **Subnet port scan** | Scans /24 for hosts with port 554 open, then probes common RTSP URL patterns |
-| **Manual entry** | User provides NVR IP (channels auto-probed) or pastes full RTSP URLs |
+| Strategy | How it works | Needs password? |
+|----------|--------------|-----------------|
+| **ONVIF WS-Discovery** | Multicast UDP probe to `239.255.255.250:3702`. ONVIF-compliant cameras/NVRs respond with their service address. | No (probe). Yes for the follow-up `GetStreamUri` call. |
+| **ARP table scan** | Ping-sweeps the /24 subnet to populate the OS ARP table, then TCP-checks port 554 on each known host. | No |
+| **Subnet port scan** | Blind /24 TCP scan of port 554 on every `.1`–`.254`. Slow fallback. | No |
+| **Manual entry** | User provides NVR IP (channels auto-probed) or pastes full RTSP URLs. | Yes if probing |
+
+### Authentication
+
+- Discovery itself (finding the IPs) is **passwordless**. You will be prompted for `username` (default `admin`) and `password` only when the script needs to (a) call ONVIF `GetStreamUri`, (b) probe RTSP channels on the NVR, or (c) open the RTSP stream to validate it.
+- Credentials are URL-encoded and **embedded in plaintext** into the RTSP URLs that get written to `cameras.yaml` (e.g. `rtsp://admin:pass@192.168.x.y:554/...`). Treat that file as a secret — it is gitignored.
+- If you don't know the camera password, check the NVR's web UI (default user `admin`) or the sticker on the device.
 
 Run standalone:
 
@@ -264,6 +271,45 @@ Press **q** in any window to quit.
 
 ---
 
+## What you'll see in the terminal
+
+Once `data_collection.py` is running, every meaningful event prints one log line. Typical sequence for a person walking into frame:
+
+```
+HH:MM:SS  INFO  Device=cuda  dtype=torch.bfloat16
+HH:MM:SS  INFO  Trigger classes: person, cat, dog
+HH:MM:SS  INFO  Starting 6 camera threads (sub-stream)...
+HH:MM:SS  INFO  Main-stream VLM crops enabled (on-demand, 5 fps, q=85)
+HH:MM:SS  INFO  main_door: sub-stream connected
+HH:MM:SS  INFO  VLM loaded: HuggingFaceTB/SmolVLM2-500M-Video-Instruct on cuda (torch.bfloat16)
+HH:MM:SS  INFO  Running. Press 'q' in any window to quit.
+
+# Detection starts climbing (logged once per second while a trigger class is visible):
+HH:MM:SS  INFO  [main_door] detecting personx1 — score=1.8/4.0
+HH:MM:SS  INFO  [main_door] detecting personx1 — score=3.6/4.0
+
+# Score crossed threshold:
+HH:MM:SS  INFO  [main_door] Pre-connecting main-stream (score=4.0)
+HH:MM:SS  INFO  [main_door] Trigger armed (main-stream already connected)
+
+# Clip saved + VLM kicked off in background:
+HH:MM:SS  INFO  [main_door] trigger saved: dataset_multi/clips/main_door/2026-05-23/main_door_1748039130_trigger.mp4 (VLM queued)
+
+# A few seconds later, the VLM finishes (and now also prints its answer):
+HH:MM:SS  INFO  VLM done: main_door -> main_door_1748039130_trigger.mp4
+HH:MM:SS  INFO  VLM response [main_door]: A person wearing a dark jacket walks up to the front porch and rings the doorbell.
+```
+
+**If you see `Running.` but never `detecting`, no trigger-class object is being seen.** Either nothing has walked past, the classes in `detection.trigger_classes` don't match what's in frame, or the camera view is dark/blocked.
+
+**If you see `detecting` but the score never reaches `SCORE_MAX`**, the object is appearing only briefly. Lower `trigger.score_max` or raise `trigger.score_reward` in `config.yaml`.
+
+The VLM response is also written to disk in two places per clip:
+- `dataset_multi/responses/<camera>/<date>/<clip_id>.txt` — raw text output.
+- `dataset_multi/meta/<camera>/<date>/<clip_id>.meta.json` — under the `model_response` key.
+
+---
+
 ## Troubleshooting
 
 | Problem | Solution |
@@ -275,3 +321,8 @@ Press **q** in any window to quit.
 | High CPU usage | Increase `detection.yolo_every_n_frames_cpu`, reduce number of cameras |
 | Buffer too short | Increase `clip.seconds` or `trigger.post_roll_sec` in config.yaml |
 | ROI editor won't open | Needs a display (X11/Windows). Won't work over headless SSH |
+| **`./start.sh` exits silently after `Press Ctrl+C to stop.`** | `_silence_ffmpeg_stderr` used to eat all output when stderr wasn't a TTY. Fixed in [data_collection.py](data_collection.py) — silencer now no-ops when stderr is not a terminal. If you still see it, run `uv run python -u home_guard_project/data_collection/data_collection.py` directly to see the traceback. |
+| **Pipeline starts but `cv2.imshow` windows never appear** | OpenCV GUI build got clobbered by `opencv-python-headless` (ultralytics drags it in). Fixed via `[tool.uv] override-dependencies` in `pyproject.toml`. If you see this again, run `uv pip install --python .venv/Scripts/python.exe --force-reinstall --no-deps opencv-python==4.11.0.86` and check `cv2.getBuildInformation()` reports `GUI: WIN32UI` (not `GUI: NONE`). |
+| **YOLO inference crashes with `NotImplementedError: torchvision::nms` on CUDA** | `torch` is the CUDA build but `torchvision` is the CPU build. Both must be pinned to the same CUDA index in `pyproject.toml`. Verify with `python -c "import torch, torchvision; print(torch.__version__, torchvision.__version__)"` — both should end in `+cu128`. |
+| **ONVIF discovery silently skipped** ("WSDiscovery not installed" in logs) | Likely a case-sensitive import bug — the package is `wsdiscovery` (lowercase), not `WSDiscovery`. The fixed import is at [discover.py:200](discover.py#L200). |
+| **`uv sync` reports "All dependencies installed" but a module is still missing** | The `VIRTUAL_ENV` env var (often pointing at another Python from a previous shell) makes `uv` target the wrong env. Run `unset VIRTUAL_ENV` before `uv sync`, or pass `--python .venv/Scripts/python.exe` explicitly. |
