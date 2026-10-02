@@ -4,7 +4,7 @@ import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from PySide6.QtCore import Qt, QTimer, QSize
+from PySide6.QtCore import Qt, QTimer, QSize, Signal
 from PySide6.QtGui import QColor, QPainter, QPen, QPixmap, QFont, QLinearGradient
 from PySide6.QtWidgets import (
     QMainWindow,
@@ -121,6 +121,7 @@ def demo_picture(number):
 
 
 class CameraTile(QFrame):
+    clicked = Signal()
     def __init__(self, name):
         super().__init__()
         self.setObjectName("card")
@@ -138,6 +139,11 @@ class CameraTile(QFrame):
         self.setMinimumSize(180, 140)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
     def update_picture(self, pix):
         self.picture = pix if pix and not pix.isNull() else None
         self.status.setText(tr("stopped") if self.stopped else tr("live") if self.picture else tr("offline"))
@@ -152,9 +158,10 @@ class CameraTile(QFrame):
         if self.picture:
             scaled = self.picture.scaled(
                 area.size(),
-                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
                 Qt.TransformationMode.SmoothTransformation,
             )
+            p.setClipRect(area)
             p.drawPixmap(
                 area.center().x() - scaled.width() // 2,
                 area.center().y() - scaled.height() // 2,
@@ -275,12 +282,17 @@ class Window(QMainWindow):
         leftlay = layout_for(left, 0)
         self.camera_heading = label(tr("cameras"), "section")
         leftlay.addWidget(self.camera_heading)
+        leftlay.addWidget(label(tr("enlarge_hint"),"muted"))
         self.camera_stack = QStackedWidget()
         self.grid_widget = QWidget()
         self.grid = QGridLayout(self.grid_widget)
         self.grid.setContentsMargins(0, 0, 0, 0)
         self.grid.setSpacing(14)
-        self.camera_stack.addWidget(self.grid_widget)
+        self.grid_scroll = QScrollArea()
+        self.grid_scroll.setWidgetResizable(True)
+        self.grid_scroll.setWidget(self.grid_widget)
+        self.camera_stack.addWidget(self.grid_scroll)
+        self.expanded_tile = None
         self.message = card()
         ml = layout_for(self.message, 32)
         ml.addStretch()
@@ -505,6 +517,9 @@ class Window(QMainWindow):
             while self.grid.count():
                 self.grid.takeAt(0).widget().deleteLater()
             self.tiles = [CameraTile(name) for name in state.cameras]
+            self.expanded_tile = None
+            for tile in self.tiles:
+                tile.clicked.connect(lambda tile=tile: self.toggle_tile(tile))
             self.arrange_tiles()
         for tile in self.tiles:
             tile.stopped = stopped
@@ -570,17 +585,37 @@ class Window(QMainWindow):
             except OSError:
                 self.control_note.setText(tr("control_error"))
 
+    def toggle_tile(self, tile):
+        self.expanded_tile = None if self.expanded_tile is tile else tile
+        self.arrange_tiles()
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape and getattr(self, "expanded_tile", None):
+            self.expanded_tile = None
+            self.arrange_tiles()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
+
     def arrange_tiles(self):
-        if not self.tiles:
+        while self.grid.count():
+            self.grid.takeAt(0)
+        for index in range(3):
+            self.grid.setRowStretch(index,0)
+            self.grid.setColumnStretch(index,0)
+        if self.expanded_tile:
+            for tile in self.tiles:
+                tile.setVisible(tile is self.expanded_tile)
+            self.grid.addWidget(self.expanded_tile,0,0)
+            self.grid.setRowStretch(0,1)
+            self.grid.setColumnStretch(0,1)
             return
         columns = 1 if len(self.tiles) == 1 else 2 if len(self.tiles) <= 4 else 3
         for i, tile in enumerate(self.tiles):
-            self.grid.addWidget(tile, i // columns, i % columns)
-        for i in range(3):
-            self.grid.setRowStretch(
-                i, 1 if i < math.ceil(len(self.tiles) / columns) else 0
-            )
-            self.grid.setColumnStretch(i, 1 if i < columns else 0)
+            tile.show()
+            self.grid.addWidget(tile,i//columns,i%columns)
+            self.grid.setRowStretch(i//columns,1)
+            self.grid.setColumnStretch(i%columns,1)
 
     def render_activity(self):
         while self.activity_layout.count():
@@ -633,7 +668,13 @@ class Window(QMainWindow):
             lay.addWidget(title_widget)
             lay.addWidget(label(tr(hint), "muted"))
             self.page_layouts.append(lay)
-            self.pages.addWidget(panel)
+            if title == "summary_title":
+                summary_scroll = QScrollArea()
+                summary_scroll.setWidgetResizable(True)
+                summary_scroll.setWidget(panel)
+                self.pages.addWidget(summary_scroll)
+            else:
+                self.pages.addWidget(panel)
         self.add_input(0, "address", tr("address"))
         self.network = QComboBox()
         self.network.addItems([tr("ethernet"), tr("wifi")])
@@ -677,6 +718,8 @@ class Window(QMainWindow):
             row.addWidget(status, 3)
             self.page_layouts[4].addLayout(row)
             self.step_rows.append(status)
+        self.summary_house = label("", "section")
+        self.page_layouts[5].addWidget(self.summary_house)
         summary_columns = QHBoxLayout()
         summary_columns.setSpacing(28)
         summary_left = QWidget()
@@ -690,7 +733,7 @@ class Window(QMainWindow):
             sl.addWidget(item)
         sl.addWidget(label(tr("manual"), "section"))
         manual = label(tr("manual_items"))
-        manual.setMinimumHeight(105)
+        manual.setMinimumHeight(210)
         sl.addWidget(manual)
         self.later = label(tr("camera_later"), "accent")
         sl.addWidget(self.later)
@@ -779,6 +822,8 @@ class Window(QMainWindow):
 
     def set_page(self, index):
         self.pages.setCurrentIndex(index)
+        if index == 5:
+            self.summary_house.setText(tr("summary_house", house=self.inputs["house"].text()))
         self.validation.setText("")
         self.back.setVisible(0 < index < 4)
         self.next.setVisible(index != 4)
@@ -806,9 +851,7 @@ class Window(QMainWindow):
     def next_page(self):
         index = self.pages.currentIndex()
         if index == 5:
-            for key in ("wifi_password", "camera_password"):
-                self.inputs[key].clear()
-            self.set_page(0)
+            self.close()
             return
         if not self.valid_page(index):
             keys = {

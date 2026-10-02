@@ -1,6 +1,9 @@
 """All visible application copy; keys remain stable for translation."""
 
 TEXT = {
+    "summary_house": "Home: {house}",
+    "enlarge_hint": "Click a camera to enlarge it. Click again or press Esc to return.",
+
     "stopped_banner": "Home Guard is stopped. Your home is not being watched.",
     "close_stopped": "Home Guard is stopped. Start it to watch your home again.",
     "close_starting": "Home Guard is starting. Watching has not resumed yet.",
@@ -98,7 +101,7 @@ TEXT = {
     "next": "Continue",
     "back": "Back",
     "start": "Start practice setup",
-    "finish": "Start again",
+    "finish": "Done",
     "retry": "Try again",
     "validation": "Check the highlighted information before continuing.",
     "address_title": "Let's connect your box",
@@ -142,7 +145,7 @@ TEXT = {
     "found": "3 cameras found",
     "skipped": "Find cameras later at the customer's home",
     "ready": "Collector and online folder are ready",
-    "summary_title": "Ready for the next step",
+    "summary_title": "Setup finished",
     "summary_hint": "Practice complete. Nothing was changed on a real box.",
     "failed_title": "Setup needs your attention",
     "manual": "Before you leave",
