@@ -347,37 +347,42 @@ if ($DoCameras) {
         if ($DryRun) {
             Step-Ok 'cameras' 'dry run'
         } else {
-            try {
-                $j = ($out | Out-String | ConvertFrom-Json)
-                $CamerasFound = @($j.cameras).Count
-                $refused = @(); if ($j.login_refused) { $refused = @($j.login_refused) }
-                $devices = $j.devices_found
-                if ($null -eq $devices) { $devices = $CamerasFound + $refused.Count }
-                if ($CamerasFound -gt 0) {
-                    Ok "cameras found: $CamerasFound"
-                    foreach ($c in $j.cameras) {
-                        Write-Host ("        {0,-24} {1}x{2}" -f $c.name, $c.width, $c.height)
-                        Emit "@@camera $($c.name) $($c.width)x$($c.height)"
-                    }
-                    if ($refused.Count -gt 0) {
-                        Note "  ($($refused.Count) of $devices device(s) refused this login and were skipped.)"
-                        Step-Ok 'cameras' "$CamerasFound found; $($refused.Count) refused the login"
-                    } else {
-                        Step-Ok 'cameras' "$CamerasFound found"
-                    }
-                } elseif ($refused.Count -gt 0) {
-                    # Devices are there, the login is wrong - the most common real cause, and NOT a network fault.
-                    $msg = "$($refused.Count) of $devices cameras answered but refused this login. Use the cameras' own user name and password."
-                    Bad $msg
-                    Step-Fail 'cameras' $msg
-                } else {
-                    Bad 'cameras found: 0. Check that the box is on the same network as the cameras.'
-                    Step-Warn 'cameras' 'none found - the box may not be on the cameras network'
+            $j = $null
+            try { $j = ($out | Out-String | ConvertFrom-Json) } catch { $j = $null }
+            # Zero cameras is a hard failure, for any reason: never configure a box with no cameras,
+            # and never move on to readiness (the user: "if the camera didnt succes dont move to ready").
+            # Step-Fail lets the GUI offer Try-again on the camera-login page; the throw stops the run.
+            if ($null -eq $j) {
+                $msg = 'could not read the camera result from the box.'
+                Bad $msg; Write-Host ($out | Out-String)
+                Step-Fail 'cameras' $msg
+                throw "Camera setup failed: $msg"
+            }
+            $CamerasFound = @($j.cameras).Count
+            $refused = @(); if ($j.login_refused) { $refused = @($j.login_refused) }
+            $devices = $j.devices_found
+            if ($null -eq $devices) { $devices = $CamerasFound + $refused.Count }
+            if ($CamerasFound -gt 0) {
+                Ok "cameras found: $CamerasFound"
+                foreach ($c in $j.cameras) {
+                    Write-Host ("        {0,-24} {1}x{2}" -f $c.name, $c.width, $c.height)
+                    Emit "@@camera $($c.name) $($c.width)x$($c.height)"
                 }
-            } catch {
-                Bad 'Could not read the camera result. What the box answered:'
-                Write-Host ($out | Out-String)
-                Step-Warn 'cameras' 'could not read the camera result'
+                if ($refused.Count -gt 0) {
+                    Note "  ($($refused.Count) of $devices device(s) refused this login and were skipped.)"
+                    Step-Ok 'cameras' "$CamerasFound found; $($refused.Count) refused the login"
+                } else {
+                    Step-Ok 'cameras' "$CamerasFound found"
+                }
+            } else {
+                if ($refused.Count -gt 0) {
+                    $msg = "$($refused.Count) of $devices cameras answered but refused this login. Use the cameras' own user name and password."
+                } else {
+                    $msg = 'no cameras were found. Check the camera login, and that the box is on the same network as the cameras.'
+                }
+                Bad $msg
+                Step-Fail 'cameras' $msg
+                throw "Camera setup failed: $msg"
             }
         }
     } finally {
