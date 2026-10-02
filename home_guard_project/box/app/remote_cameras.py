@@ -51,7 +51,9 @@ class RemoteCameras:
         return Path(self.directory.name)
     def command(self,args,allow_failed=False):
         if self.cancelled: raise RuntimeError('Cancelled')
+        self.diagnostic_output=""
         result=self.runner.run(args)
+        self.diagnostic_output=result.stdout
         if result.returncode and not allow_failed: raise RuntimeError('Camera command failed')
         return result
     def ssh(self,operation):

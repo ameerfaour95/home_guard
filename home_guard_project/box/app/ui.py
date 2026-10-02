@@ -748,6 +748,12 @@ class Window(QMainWindow):
         self.page_layouts[0].addWidget(self.box_user)
         self.page_layouts[0].addWidget(label(tr("box_user_help"), "muted"))
         self.page_layouts[0].addWidget(self.field_guidance["address"])
+        self.only_cameras = QPushButton(tr("only_check_cameras"))
+        self.page_layouts[0].setSpacing(8)
+        self.only_cameras.setMinimumHeight(44)
+        self.only_cameras.setObjectName("secondary")
+        self.only_cameras.clicked.connect(self.check_only)
+        self.page_layouts[0].addWidget(self.only_cameras)
         self.box_picker.currentIndexChanged.connect(self.choose_box)
         self.box_address.textChanged.connect(self.compose_box_target)
         self.box_user.textChanged.connect(self.compose_box_target)
@@ -1036,13 +1042,17 @@ class Window(QMainWindow):
             self.close()
             return
         if index == 7:
+            if self.wizard_cameras.check_state.photo_failed:
+                self.skip_camera_check()
+                return
             if not self.wizard_cameras.loaded or self.wizard_cameras.future is not None:
                 self.validation.setText(tr("camera_check_pending"))
                 return
             if self.wizard_cameras.rows and not self.wizard_cameras.saved:
                 self.validation.setText(tr("camera_check_unsaved"))
                 return
-            self.set_page(5)
+            if getattr(self,"camera_check_only",False): self.close()
+            else: self.set_page(5)
             return
         if index == 6:
             self.begin_setup()
@@ -1086,6 +1096,8 @@ class Window(QMainWindow):
     def begin_setup(self,instant=False):
         import queue
         from .engine_backend import EngineBackend,DemoEngine
+        self.camera_check_only=False
+        self.setup_completed=False
         self.progress_title.setText(tr("progress_title"))
         self.progress_hint.setStyleSheet("")
         self.run_answers = self.camera_retry.retry(self.inputs["camera_user"].text().strip(), self.inputs["camera_password"].text()) if self.camera_retry.pending else self.collect_answers()
@@ -1191,7 +1203,25 @@ class Window(QMainWindow):
         self.setup_success()
 
     def setup_success(self):
+        self.setup_completed=True
         self.open_camera_check()
+
+    def check_only(self):
+        self.compose_box_target()
+        if self.errors_for_page(0):
+            self.field_guidance["address"].setText(tr("box_target_error"))
+            self.field_guidance["address"].show()
+            return
+        self.camera_check_only=True
+        self.setup_completed=False
+        self.run_answers=Answers(address=self.inputs["address"].text())
+        self.engine_cameras=[]
+        self.open_camera_check()
+
+    def skip_camera_check(self):
+        self.wizard_cameras.close()
+        if getattr(self,"camera_check_only",False): self.close()
+        else: self.set_page(5)
 
     def open_camera_check(self):
         from .camera_ui import CameraPage
@@ -1207,7 +1237,9 @@ class Window(QMainWindow):
         else:
             from .remote_cameras import RemoteCameras
             controls=RemoteCameras(self.run_answers.address,self.engine_cameras)
-        self.wizard_cameras=CameraPage(controls,lambda:self.validation.clear(),wizard=True)
+        from .camera_check_state import CameraCheckState
+        state=CameraCheckState(setup_finished=getattr(self,"setup_completed",False),house=self.run_answers.house,cameras=tuple(self.engine_cameras))
+        self.wizard_cameras=CameraPage(controls,lambda:self.validation.clear(),wizard=True,check_state=state,skip=self.skip_camera_check)
         self.pages.addWidget(self.wizard_cameras.widget)
         self.set_page(7)
         self.wizard_cameras.open()
