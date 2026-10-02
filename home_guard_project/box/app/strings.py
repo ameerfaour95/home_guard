@@ -396,5 +396,7 @@ TEXT.update({
 
 TEXT.update(ready_for_cameras="Ready for your cameras", finishing_without_cameras="Finishing setup without cameras. Confirming the earlier steps, then checking that the box is ready.")
 
+TEXT.update(details_steps="Setup steps", hide_details="Hide details", details_working_time="Working · {seconds} s", details_finished="Finished", details_finished_warning="Finished", details_failed="Failed", details_skipped="Skipped")
+
 def tr(key, **values):
     return TEXT[key].format(**values)
