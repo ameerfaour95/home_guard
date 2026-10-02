@@ -152,9 +152,11 @@ class _Status:
     def __init__(self) -> None:
         self.decisions: list = []
 
-    def decision(self, camera, labels, summary, command, sent, false_positive=False, muted=False, error=""):
+    def decision(self, camera, labels, summary, command, sent, false_positive=False, muted=False, error="",
+                 label=""):
         self.decisions.append({"camera": camera, "labels": labels, "summary": summary, "command": command,
-                               "sent": sent, "false_positive": false_positive, "muted": muted, "error": error})
+                               "sent": sent, "false_positive": false_positive, "muted": muted, "error": error,
+                               "label": label})
 
 
 class _Backend:
@@ -183,6 +185,21 @@ class WorkerReportsTest(unittest.TestCase):
                         {"channel": "telegram", "telegram": {"telegram": {"sent": True}}})
         self.assertEqual((got["summary"], got["command"], got["sent"], got["error"], got["labels"]),
                          ("A person is walking in the driveway.", "[send_message]", True, "", ["person"]))
+        self.assertEqual(got["label"], "normal")                      # no label given: normal
+
+    def test_the_models_label_decides_how_loud_the_alert_is(self) -> None:
+        with mock.patch.object(inf, "frame_to_jpeg_bytes", return_value=b"jpg"):
+            for label, command, prefix in (("normal", "[send_message]", "door: Someone"),
+                                           ("suspicious", "[send_message]", "door: Suspicious: Someone"),
+                                           ("escalation", "[call_owner]", "door: Escalation: Someone")):
+                status = _Status()
+                job = inf.AlertJob(camera="door", stem="door_100_alert", ts=100.0, labels=["person"])
+                with mock.patch.object(inf, "dispatch_alert", return_value={"telegram": {"telegram": {"sent": True}}}) as d:
+                    inf._worker(_Backend({"summary": "Someone is trying the gate.", "label": label, "people": 1}),
+                                {"alert_channel": "telegram"}, {}, AlertSettings(), "door", [object()], None, job, status)
+                self.assertEqual(d.call_args[0][2], command, label)
+                self.assertTrue(d.call_args[0][3].startswith(prefix), (label, d.call_args[0][3]))
+                self.assertEqual((status.decisions[0]["label"], job.alert["label"]), (label, label))
 
     def test_a_refused_alert_carries_the_reason(self) -> None:
         got = self._run({"summary": "A person is walking in the driveway.", "people": 1},

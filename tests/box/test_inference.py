@@ -176,7 +176,7 @@ class WorkerWithAssistantTest(unittest.TestCase):
         job = self._run(assistant)
 
         (sent,) = assistant.sent
-        self.assertEqual(sent["alert"], {"alert_id": "front_door_100_alert", "camera": "front_door",
+        self.assertEqual(sent["alert"], {"alert_id": "front_door_100_alert", "camera": "front_door", "label": "normal",
                                          "summary": "a person at the door", "ts": 100.0})
         self.assertIn("front_door: a person at the door", sent["text"])
         self.assertEqual(sent["image"], b"jpg")

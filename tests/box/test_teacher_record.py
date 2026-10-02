@@ -13,7 +13,7 @@ from home_guard_project.box.alert_clips import encode_frame, write_alert_clip
 from home_guard_project.box.inference import PROMPT_VERSION, VLM_RESPONSE_FORMAT, VLM_SCHEMA, AlertSettings
 
 NOW = 1_800_000_000.0
-ANSWER = {"summary": "A person is walking to the door.", "people": 1, "vehicle_moving": False}
+ANSWER = {"summary": "A person is walking to the door.", "label": "normal", "people": 1, "vehicle_moving": False}
 
 
 class _TeachingBackend:
@@ -34,11 +34,20 @@ def _metas(root):
 class TeacherRecordTest(unittest.TestCase):
     """Every answer of the big model is kept with exactly what it saw, so a small model can learn it."""
 
-    def test_the_answer_must_be_json_with_the_three_fields(self) -> None:
+    def test_the_answer_must_be_json_with_a_summary_and_one_of_three_labels(self) -> None:
         self.assertEqual(VLM_RESPONSE_FORMAT["type"], "json_schema")
         self.assertTrue(VLM_RESPONSE_FORMAT["json_schema"]["strict"])
-        self.assertEqual(set(VLM_SCHEMA["required"]), {"summary", "people", "vehicle_moving"})
+        self.assertEqual(set(VLM_SCHEMA["required"]), {"summary", "label", "people", "vehicle_moving"})
+        self.assertEqual(VLM_SCHEMA["properties"]["label"]["enum"], ["normal", "suspicious", "escalation"])
         self.assertFalse(VLM_SCHEMA["additionalProperties"])
+        prompt = inf.build_prompt("door", 0, "01:00:00", 0, 0)
+        for word in ("normal", "suspicious", "escalation", '"label"'):
+            self.assertIn(word, prompt)
+        self.assertEqual(inf.LABEL_COMMANDS, {"normal": "[send_message]", "suspicious": "[send_message]",
+                                              "escalation": "[call_owner]"})
+        self.assertEqual(inf.label_of({"label": "Escalation"}), "escalation")
+        self.assertEqual(inf.label_of({"label": "weird"}), "normal")
+        self.assertEqual(inf.label_of(None), "normal")
 
     def test_the_worker_keeps_the_pictures_the_question_and_the_answer(self) -> None:
         frames = [np.zeros((48, 64, 3), dtype=np.uint8) for _ in range(3)]

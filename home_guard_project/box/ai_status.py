@@ -10,7 +10,7 @@ they share ``logs/ai_status.json``:
      "thinking": {"camera": "...", "labels": ["person"], "ts": <epoch>} or null,  # the AI is looking now
      "settings": {"conf": 0.4, "alert_start_hour": 0, "alert_end_hour": 0, "cooldown_sec": 120.0},  # in force now
      "decisions": [{"ts": <epoch>, "camera": "...", "labels": ["person"],
-                    "summary": "A person is walking in the driveway.",
+                    "summary": "A person is walking in the driveway.", "label": "normal",   # or suspicious / escalation
                     "command": "[send_message]", "sent": true, "false_positive": false,
                     "muted": false, "error": ""}]}                            # newest last
 
@@ -88,14 +88,18 @@ class AiStatus:
 
     def decision(self, camera: str, labels: List[str], summary: str, command: str, sent: bool,
                  false_positive: bool = False, muted: bool = False, error: str = "",
-                 now: Optional[float] = None) -> None:
-        """Record what the AI said about one trigger, and what happened to the alert."""
+                 now: Optional[float] = None, label: str = "") -> None:
+        """Record what the AI said about one trigger, and what happened to the alert.
+
+        *label* is the AI's own label for the scene: normal, suspicious or escalation.
+        """
         now = time.time() if now is None else now
         with self._lock:
             self._thinking = None
             self._decisions.append({
                 "ts": now, "camera": camera, "labels": list(labels), "summary": summary, "command": command,
-                "sent": bool(sent), "false_positive": bool(false_positive), "muted": bool(muted), "error": error,
+                "label": label, "sent": bool(sent), "false_positive": bool(false_positive), "muted": bool(muted),
+                "error": error,
             })
             self._decisions = self._decisions[-KEEP_DECISIONS:]
             self._write(now, force=True)

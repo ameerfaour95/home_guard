@@ -87,19 +87,43 @@ def apply_policy_override(parsed: Dict[str, Any], in_window: bool, person: bool,
 
 
 # Bumped whenever the prompt or the answer's schema changes, so training records can be told apart.
-PROMPT_VERSION = "2026-10-02.summary-people-vehicle"
+PROMPT_VERSION = "2026-10-03.summary-label"
+
+# The three labels the model gives a scene, and what the box does with each. The owner
+# chose them (this is also what a student model will be trained to answer):
+#   normal      ordinary activity -> a message
+#   suspicious  worth a look      -> a message marked suspicious (more may follow later)
+#   escalation  danger or a crime -> the urgent alert
+LABELS = ("normal", "suspicious", "escalation")
+LABEL_COMMANDS = {"normal": "[send_message]", "suspicious": "[send_message]", "escalation": "[call_owner]"}
 
 # The answer's shape, enforced on the model (structured output) and checked on the way back.
 VLM_SCHEMA: Dict[str, Any] = {
     "type": "object",
     "properties": {
         "summary": {"type": "string"},
+        "label": {"type": "string", "enum": list(LABELS)},
         "people": {"type": "integer"},
         "vehicle_moving": {"type": "boolean"},
     },
-    "required": ["summary", "people", "vehicle_moving"],
+    "required": ["summary", "label", "people", "vehicle_moving"],
     "additionalProperties": False,
 }
+
+
+def label_of(parsed: Optional[Dict[str, Any]]) -> str:
+    """The scene's label from the model's answer; ``normal`` when it gave none or an unknown one."""
+    label = str((parsed or {}).get("label") or "").strip().lower()
+    return label if label in LABELS else "normal"
+
+
+def alert_summary(label: str, summary: str) -> str:
+    """The sentence the owner reads: a suspicious or escalated scene says so first."""
+    if label == "suspicious":
+        return f"Suspicious: {summary}"
+    if label == "escalation":
+        return f"Escalation: {summary}"
+    return summary
 VLM_RESPONSE_FORMAT: Dict[str, Any] = {
     "type": "json_schema",
     "json_schema": {"name": "camera_report", "strict": True, "schema": VLM_SCHEMA},
@@ -107,9 +131,9 @@ VLM_RESPONSE_FORMAT: Dict[str, Any] = {
 
 
 def build_prompt(camera_name: str, t_sec: int, local_time_str: str, start_hour: int, end_hour: int) -> str:
-    # Purely descriptive, so the model does not treat this as surveillance/threat
-    # judgement of people (which it refuses). The alert decision is made in code
-    # from the YOLO gate; a future fine-tuned model may also return alert_command.
+    # Descriptive first (a model refuses to judge people, not activity), then one label
+    # for the activity. The label decides what the box does (LABEL_COMMANDS); the two
+    # counts behind it decide whether anything is sent at all (vlm_confirms).
     return f"""
 You are helping a homeowner by describing what their own home security camera "{camera_name}" sees.
 Look at these sequential frames (about 5 seconds, one short clip) and reply with ONE short, factual
@@ -118,8 +142,18 @@ sentence describing what is happening - for example "a person is walking toward 
 Do not identify anyone and do not describe a person's personal or physical characteristics; describe
 only the activity.
 
+Then give the activity ONE label:
+- "normal": everyday activity - people walking by or coming to the door, a delivery, a car parking
+  or leaving, pets, or nothing notable.
+- "suspicious": something the homeowner would want to look at - a person lingering or loitering,
+  looking into windows or cars, trying doors or gates, walking around the property at night, hiding,
+  or a vehicle stopping and waiting with no clear purpose.
+- "escalation": clear danger or a crime in progress - forced entry, a broken window or door, someone
+  climbing a fence or wall into the property, a fight or an attack, fire or smoke, a weapon, a crash.
+
 Reply with EXACTLY ONE strict JSON object and nothing else:
 {{"summary": "<one short sentence>",
+  "label": "normal" | "suspicious" | "escalation",
   "people": <how many people are visible in the frames, as a number; 0 if none>,
   "vehicle_moving": <true if a vehicle is driving, arriving or leaving; false if vehicles are only parked or there are none>}}
 """.strip()
@@ -628,16 +662,14 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                 "parsed": parsed,
             }
         summary = ""
-        backend_cmd = None
         if parsed:
             summary = str(parsed.get("summary", "")).strip()
-            backend_cmd = parsed.get("alert_command")
         else:
             log.warning("[%s] VLM returned no usable output: %s", camera_name, (raw or "")[:200])
-        # The YOLO gate already confirmed a person/vehicle inside the window, so this
-        # is at least a [send_message]. A backend that returns its own alert_command
-        # (e.g. a future fine-tuned VLM) can raise it to [call_owner].
-        cmd = backend_cmd if backend_cmd in ("[send_message]", "[call_owner]") else "[send_message]"
+        # The YOLO gate already confirmed a person/vehicle inside the window, so this is
+        # at least a [send_message]; the model's label can raise it (LABEL_COMMANDS).
+        label = label_of(parsed)
+        cmd = LABEL_COMMANDS[label]
         if not summary:
             summary = "a person or vehicle was detected"
         reason = str(parsed.get("alert_reason", "")) if parsed else ""
@@ -647,13 +679,13 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
             log.info("[%s] no alert: the VLM saw nobody and nothing moving (%s)", camera_name, summary)
             if job is not None:
                 job.false_positive = True
-                job.alert = {"summary": summary, "alert_command": "[none]", "alert_reason": "",
+                job.alert = {"summary": summary, "label": label, "alert_command": "[none]", "alert_reason": "",
                              "labels": job.labels, "false_positive": True,
                              "vlm": {"people": parsed.get("people"), "vehicle_moving": parsed.get("vehicle_moving")}}
             if status is not None:
-                status.decision(camera_name, labels, summary, "[none]", sent=False, false_positive=True)
+                status.decision(camera_name, labels, summary, "[none]", sent=False, false_positive=True, label=label)
             return
-        log.info("[%s] alert=%s summary=%s", camera_name, cmd, summary)
+        log.info("[%s] alert=%s label=%s summary=%s", camera_name, cmd, label, summary)
         # Attach the most recent frame of the clip as the alert snapshot.
         image = b""
         try:
@@ -667,15 +699,16 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
         else:
             alert_ref = None
             if job is not None:
-                alert_ref = {"alert_id": job.stem, "camera": camera_name, "summary": summary, "ts": job.ts}
-            res = dispatch_alert(box_settings, env, cmd, f"{camera_name}: {summary}", reason,
+                alert_ref = {"alert_id": job.stem, "camera": camera_name, "summary": summary, "label": label,
+                             "ts": job.ts}
+            res = dispatch_alert(box_settings, env, cmd, f"{camera_name}: {alert_summary(label, summary)}", reason,
                                  image=image or None, assistant=assistant, alert=alert_ref)
             log.info("[%s] alert dispatched: %s", camera_name, res)
         if status is not None:
             sent, why_not = delivery(res)
-            status.decision(camera_name, labels, summary, cmd, sent=sent, muted=muted, error=why_not)
+            status.decision(camera_name, labels, summary, cmd, sent=sent, muted=muted, error=why_not, label=label)
         if job is not None:
-            job.alert = {"summary": summary, "alert_command": cmd, "alert_reason": reason,
+            job.alert = {"summary": summary, "label": label, "alert_command": cmd, "alert_reason": reason,
                          "labels": job.labels, "muted": muted, "dispatch": res}
     except Exception as exc:  # noqa: BLE001
         log.warning("[%s] worker error: %s", camera_name, exc)
