@@ -40,8 +40,19 @@ if ($WithBundle) {
 
 $src = Join-Path $BoxDir 'setup_customer.ps1'
 $exe = Join-Path $DistDir 'HomeGuardSetup.exe'
+$icon = Join-Path $BoxDir 'assets\logo.ico'
 Write-Host "Compiling $src -> $exe" -ForegroundColor Cyan
-Invoke-ps2exe -inputFile $src -outputFile $exe -title 'Home Guard Setup' -product 'Home Guard' -company 'Home Guard' -noConsole:$false
+$ps2exeArgs = @{
+    inputFile  = $src
+    outputFile = $exe
+    title      = 'Home Guard Setup'
+    product    = 'Home Guard'
+    company    = 'Home Guard'
+    noConsole  = $false
+}
+if (Test-Path $icon) { $ps2exeArgs.iconFile = $icon; Write-Host "  using icon $icon" -ForegroundColor DarkGray }
+else { Write-Host "  (no assets\logo.ico found; building without a custom icon)" -ForegroundColor Yellow }
+Invoke-ps2exe @ps2exeArgs
 
 if (Test-Path $exe) {
     Write-Host "[OK] Built $exe" -ForegroundColor Green
