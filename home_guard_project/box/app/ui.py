@@ -880,7 +880,7 @@ class Window(QMainWindow):
             ]
         )
         self.fail = QCheckBox(tr("failure"))
-        self.fail.setChecked(self.args.fail)
+        self.fail.setChecked(bool(self.args.fail))
         self.fail.setVisible(self.args.demo)
         self.page_layouts[3].addWidget(self.fail)
         self.step_rows = []
@@ -915,6 +915,24 @@ class Window(QMainWindow):
         self.setup_cancel.setObjectName("secondary")
         self.setup_cancel.clicked.connect(self.cancel_setup)
         self.page_layouts[4].addWidget(self.setup_cancel)
+        self.failure_actions = QWidget()
+        actions = QHBoxLayout(self.failure_actions)
+        actions.setContentsMargins(0,0,0,0)
+        self.failure_retry = QPushButton(tr("search_again"))
+        self.failure_retry.clicked.connect(self.replay_setup)
+        actions.addWidget(self.failure_retry)
+        self.failure_login = QPushButton(tr("change_camera_login"))
+        self.failure_login.setObjectName("secondary")
+        self.failure_login.clicked.connect(self.retry_setup)
+        actions.addWidget(self.failure_login)
+        self.failure_finish = QPushButton(tr("finish_without_cameras"))
+        self.failure_finish.setObjectName("secondary")
+        self.failure_finish.clicked.connect(self.finish_without_cameras)
+        actions.addWidget(self.failure_finish)
+        actions.addStretch()
+        self.failure_actions.hide()
+        self.page_layouts[4].insertWidget(2,self.failure_actions)
+        self.setup_details_toggle.setText(tr("show_readable_details"))
         self.summary_house = label("", "section")
         self.page_layouts[5].addWidget(self.summary_house)
         summary_columns = QHBoxLayout()
@@ -1175,7 +1193,7 @@ class Window(QMainWindow):
         a=self.collect_answers()
         self.review_text.setText(tr("review_text",target=a.address,network=tr("wifi")+" - "+a.ssid if a.network=="wifi" else tr("ethernet"),house=a.house,alerts=tr("alerts_on_review",hours=hours_description(a.start_hour,a.end_hour),minutes=a.cooldown_sec/60) if a.alerts else tr("alerts_off_review"),cameras=tr("cameras_find_review") if a.find_cameras else tr("cameras_later_review")))
 
-    def begin_setup(self,instant=False):
+    def begin_setup(self,instant=False,answers_override=None):
         import queue
         from .engine_backend import EngineBackend,DemoEngine
         self.camera_check_only=False
@@ -1183,9 +1201,17 @@ class Window(QMainWindow):
         self.progress_title.setText(tr("progress_title"))
         self.progress_hint.setStyleSheet("")
         self.run_answers = self.camera_retry.retry(self.inputs["camera_user"].text().strip(), self.inputs["camera_password"].text()) if self.camera_retry.pending else self.collect_answers()
+        from dataclasses import replace
+        if answers_override is not None: self.run_answers=replace(answers_override)
+        self.saved_run_answers=replace(self.run_answers)
+        from .setup_failure import FailureFacts
+        self.failure_facts=FailureFacts(network=self.run_answers.ssid if self.run_answers.network=="wifi" else "")
+        self.failure_actions.hide()
+        self.setup_cancel.show()
+        self.setup_details_toggle.setChecked(False)
         self.camera_retry.capture(self.run_answers)
         self.progress_hint.setText(tr("retry_confirming") if self.camera_retry.pending else tr("progress_hint"))
-        self.engine_backend=DemoEngine(self.fail.isChecked() or self.args.page=="failure") if self.args.demo else EngineBackend()
+        self.engine_backend=DemoEngine(self.args.fail or self.fail.isChecked() or self.args.page=="failure") if self.args.demo else EngineBackend()
         self.engine_events=queue.Queue()
         self.engine_checks=[];self.engine_cameras=[];self.engine_failed_step=None;self.running_step=None
         from .search_progress import CameraSearch
@@ -1222,6 +1248,7 @@ class Window(QMainWindow):
         while True:
             try: event=self.engine_events.get_nowait()
             except queue.Empty: break
+            self.failure_facts.feed(event)
             self.setup_details.feed(event)
             if event.kind == "detail": self.camera_search.feed(event.text)
             if event.kind=="step":
@@ -1250,7 +1277,7 @@ class Window(QMainWindow):
                             self.progress_hint.setText(event.text + "\n" + tr("camera_login_help"))
                             self.progress_hint.setStyleSheet("color: " + ERROR)
                             row.setText(tr("FAIL"))
-                        self.setup_details_toggle.setChecked(True)
+                        self.setup_details_toggle.setChecked(False)
             elif event.kind=="check": self.engine_checks.append(event)
             elif event.kind=="camera": self.engine_cameras.append(event.name)
             elif event.kind=="rescue":
@@ -1282,9 +1309,25 @@ class Window(QMainWindow):
         if not success:
             from .engine_backend import OWNERS
             self.update_step_bar(OWNERS.get(self.engine_failed_step,0))
-            self.progress_title.setText(tr("failed_title"))
+            title,explanation=self.failure_facts.content(self.engine_failed_step)
+            self.progress_title.setObjectName("headline")
+            self.progress_title.setText(title)
+            self.progress_hint.setObjectName("")
+            self.progress_hint.setStyleSheet("")
+            self.progress_hint.setText(explanation)
+            self.setup_cancel.hide()
+            self.failure_actions.show()
+            cameras=self.engine_failed_step=="cameras"
+            self.failure_retry.setText(tr("search_again" if cameras else "retry_setup_action"))
+            self.failure_login.setVisible(cameras)
+            self.failure_finish.setVisible(cameras)
+            self.setup_details_toggle.setChecked(False)
+            from .engine_backend import ENGINE_STEPS
+            for step,row in zip(ENGINE_STEPS,self.step_rows):
+                group=self.setup_details.model.groups[step]
+                row.setText(tr("FAIL") if group.status=="fail" else tr("PASS") if group.status=="ok" else tr("pending") if group.status in ("pending","start") else group.status.upper())
             if self.engine_backend.cancelled.is_set(): self.validation.setText(tr("setup_cancelled"))
-            self.next.setText(tr("retry"));self.next.show()
+            self.next.setText(tr("retry"));self.next.hide()
             self.next.clicked.disconnect();self.next.clicked.connect(self.retry_setup)
             return
         for i,event in enumerate(self.engine_checks):
@@ -1341,6 +1384,16 @@ class Window(QMainWindow):
         self.pages.addWidget(self.wizard_cameras.widget)
         self.set_page(7)
         self.wizard_cameras.open()
+
+    def replay_setup(self):
+        self.next.clicked.disconnect();self.next.clicked.connect(self.next_page)
+        self.begin_setup(answers_override=self.saved_run_answers)
+        self.progress_hint.setText(tr("retry_confirming"))
+
+    def finish_without_cameras(self):
+        self.engine_cameras=[]
+        self.setup_completed=True
+        self.set_page(5)
 
     def retry_setup(self):
         from .engine_backend import OWNERS

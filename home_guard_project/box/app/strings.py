@@ -358,5 +358,25 @@ TEXT = {
 }
 
 
+TEXT.update({
+ "failure_cameras_title": "No cameras found",
+ "failure_login_title": "This login was refused by {count} of {total} devices",
+ "failure_location": "The box is on the Wi-Fi {network} ({address})",
+ "failure_location_unknown": "Nothing on the box's network answers as a camera",
+ "failure_cameras_body": "{location}. Usually the recorder is off or plugged into a different router. Check its power and that it shares the box's home network, then search again.",
+ "failure_network_title": "The box did not come back on {network}",
+ "failure_home_network": "the home network",
+ "failure_network_body": "The box may still be joining the network. Check the Wi-Fi name and password, and keep the box powered on. If it stays offline, use the rescue Wi-Fi to reconnect.",
+ "failure_connect_title": "The box did not answer",
+ "failure_connect_body": "Check that the box is powered on and connected to the internet. Open Tailscale on this computer and the box, then check the address and Windows user name.",
+ "failure_update_title": "The box software could not be updated",
+ "failure_update_body": "The box needs an internet connection to download its software. Check the connection, then try again. Your answers are kept.",
+ "failure_other_title": "Setup needs your attention",
+ "failure_other_body": "Check the box's connection, then try again. Your answers are kept.",
+ "search_again": "Search again", "change_camera_login": "Change the camera login",
+ "finish_without_cameras": "Finish without cameras", "show_readable_details": "Show details",
+ "retry_setup_action": "Try again",
+})
+
 def tr(key, **values):
     return TEXT[key].format(**values)
