@@ -11,3 +11,13 @@ class TimelineTests(unittest.TestCase):
         self.assertIsNone(image_path(Path('images'),'../secret.jpg'));self.assertEqual(image_path(Path('images'),'door_123.jpg'),Path('images/door_123.jpg'))
         data={'thinking':{'camera':'front_door','ts':100}}
         self.assertEqual(thinking_camera(data,150),'Front Door');self.assertEqual(thinking_camera(data,161),'')
+
+    def test_recorded_feed_preserves_hebrew_and_survives_partial_line(self):
+        import json,tempfile
+        from home_guard_project.box.chat_feed import read_feed
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'telegram_chat.jsonl'
+            row={'ts':100,'who':'owner','name':'Maya','kind':'message','text':'\u05d0\u05e0\u05d9 \u05d1\u05d1\u05d9\u05ea','delivered':True}
+            path.write_text(json.dumps(row,ensure_ascii=False)+'\n{"ts":',encoding='utf-8')
+            merged=merge_timeline({},read_feed(str(path)))
+            self.assertEqual(len(merged),1);self.assertEqual(merged[0].text,row['text'])

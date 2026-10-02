@@ -35,40 +35,8 @@ from .. import boxconfig as bc
 
 from .theme import ACTION, OK, WARNING, ERROR, MUTED
 ACCENT = ACTION
-STYLE = """
-QWidget { background: #10151d; color: #edf1f7; font-family: 'Segoe UI'; font-size: 15px; }
-QLabel { background: transparent; }
-QLabel#title { font-size: 29px; font-weight: 600; }
-QLabel#section { font-size: 20px; font-weight: 600; }
-QLabel#muted { color: @muted; }
-QLabel#accent { color: @action; font-weight: 600; }
-QFrame#card { background: #1a222e; border: 1px solid #2c3745; border-radius: 12px; }
-QPushButton { background: @action; color: #111722; border: 2px solid transparent; border-radius: 7px; padding: 10px 22px; font-weight: 600; }
-QPushButton#secondary { background: #263344; color: #edf1f7; }
-QPushButton:disabled { background: #263344; color: #8793a4; }
-QPushButton:hover { background: #77ddf2; }
-QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox { background: #151e2a; border: 1px solid #435063; border-radius: 7px; padding: 10px; min-height: 23px; }
-QLineEdit:focus { border: 1px solid @action; }
-QCheckBox { spacing: 12px; background: transparent; padding: 6px 0; }
-QCheckBox::indicator { width: 21px; height: 21px; border: 1px solid #526179; border-radius: 4px; background: #151e2a; }
-QCheckBox::indicator:checked { background: @action; border: 1px solid @action; }
-QScrollArea { border: none; background: transparent; }
-"""
-for token, colour in (("@action",ACTION),("@muted",MUTED)):
-    STYLE = STYLE.replace(token,colour)
-STYLE += f"""
-QLabel#ok {{ color: {OK}; }}
-QLabel#warning {{ color: {WARNING}; }}
-QLabel#error {{ color: {ERROR}; }}
-QPushButton:focus {{ border: 2px solid #edf1f7; }}
-QCheckBox:focus {{ border: 1px solid {ACTION}; border-radius: 4px; }}
-QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {{ border: 2px solid {ACTION}; }}
-QCheckBox::indicator:checked {{ background: {OK}; border: 1px solid {OK}; image: url("{(Path(__file__).parent / 'check.svg').as_posix()}"); }}
-QScrollBar:vertical {{ background: #10151d; width: 9px; }}
-QScrollBar::handle:vertical {{ background: #435063; min-height: 30px; border-radius: 4px; }}
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0px; }}
-"""
-
+from .theme import stylesheet
+STYLE = stylesheet()
 
 
 def label(text, role=None):
@@ -89,7 +57,7 @@ def card():
 def layout_for(widget, margin=22):
     layout = QVBoxLayout(widget)
     layout.setContentsMargins(margin, margin, margin, margin)
-    layout.setSpacing(14)
+    layout.setSpacing(16)
     return layout
 
 
@@ -112,10 +80,12 @@ class CameraTile(QFrame):
         self.detections = ()
         self.detector_enabled = False
         self.detector_note = label("", "muted")
-        self.detector_note.setStyleSheet("font-size: 14px; color: " + MUTED)
+        self.detector_note.setObjectName("cameraDetection")
         self.detector_note.hide()
         self.status = label(tr("offline"), "muted")
-        self.caption = label(name.replace("_", " "))
+        self.status.hide()
+        self.caption = label(name.replace("_", " ").title())
+        self.caption.setObjectName("cameraCaption")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 8, 16, 8)
         layout.addStretch()
@@ -124,6 +94,7 @@ class CameraTile(QFrame):
         footer.addStretch()
         footer.addWidget(self.status)
         layout.addLayout(footer)
+        self.detector_note.setContentsMargins(16,0,0,8)
         layout.addWidget(self.detector_note)
         layout.setSpacing(3)
         self.setMinimumSize(180, 140)
@@ -139,9 +110,9 @@ class CameraTile(QFrame):
 
     def update_picture(self, pix):
         self.picture = pix if pix and not pix.isNull() else None
-        self.status.setText(tr("stopped") if self.stopped else tr("live") if self.picture else tr("offline"))
+        self.status.setText(tr("stopped") if self.stopped else tr("premium_live") if self.picture else tr("offline"))
         self.status.setObjectName("ok" if self.picture else "muted")
-        self.status.setStyleSheet("color: " + (OK if self.picture else MUTED))
+        self.status.setStyleSheet("")
         self.update()
 
     def paintEvent(self, event):
@@ -152,14 +123,15 @@ class CameraTile(QFrame):
             from .detector_view import box_rect,picture_rect
             x,y,w,h=picture_rect((area.x(),area.y(),area.width(),area.height()),(self.picture.width(),self.picture.height()),self.devicePixelRatioF())
             p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-            p.setClipRect(area)
+            from PySide6.QtGui import QPainterPath
+            clip=QPainterPath();clip.addRoundedRect(QRectF(area),16,16);p.setClipPath(clip)
             p.drawPixmap(QRectF(x,y,w,h),self.picture,QRectF(self.picture.rect()))
             if not self.stopped:
                 p.setOpacity(self.box_opacity)
-                p.setFont(QFont("Segoe UI",11 if self.hero else 10))
+                p.setFont(QFont("Segoe UI",11))
                 for detection in self.detections:
                     rect=QRectF(*box_rect(detection.box,(x,y,w,h)))
-                    p.setPen(QPen(QColor(detection.color),3 if self.hero else 2))
+                    p.setPen(QPen(QColor(detection.color),(3 if self.hero else 2) if detection.width>1 else 1))
                     length=min(24,rect.width()/3,rect.height()/3)
                     for cx,cy,sx,sy in ((rect.left(),rect.top(),1,1),(rect.right(),rect.top(),-1,1),(rect.left(),rect.bottom(),1,-1),(rect.right(),rect.bottom(),-1,-1)):
                         from PySide6.QtCore import QLineF
@@ -170,8 +142,12 @@ class CameraTile(QFrame):
                     tag=QRectF(tx,ty,metrics.horizontalAdvance(text)+16,metrics.height()+8)
                     p.fillRect(tag,QColor("#101a21"));p.drawText(tag.adjusted(8,0,-8,0),Qt.AlignmentFlag.AlignVCenter,text)
                 p.setOpacity(1)
-            footer=QRectF(area.left()+16,area.bottom()-76,min(area.width()-32,580),60)
-            p.fillRect(footer,QColor(12,22,28,235))
+            p.setFont(QFont("Segoe UI",11))
+            chip_width=min(area.width()-32,max(260,p.fontMetrics().horizontalAdvance(self.detector_note.text())+48))
+            footer=QRectF(area.left()+16,area.bottom()-76,chip_width,60)
+            p.setPen(Qt.PenStyle.NoPen);p.setBrush(QColor(12,22,28,235));p.drawRoundedRect(footer,8,8)
+            p.setBrush(QColor(OK if self.picture else MUTED));p.drawEllipse(QRectF(footer.right()-64,footer.top()+15,6,6))
+            p.setPen(QColor('#c5e4dc'));p.setFont(QFont('Segoe UI',10));p.drawText(QRectF(footer.right()-52,footer.top()+5,44,24),Qt.AlignmentFlag.AlignVCenter,self.status.text())
         else:
             p.setPen(QColor("#98a6ba"))
             p.setFont(QFont("Segoe UI", 14))
@@ -190,10 +166,11 @@ class Window(QMainWindow):
         self.setWindowIcon(QIcon(str(Path(__file__).parents[1] / "assets" / "home_guard.ico")))
         self.resize(*map(int, args.size.split("x")))
         self.setMinimumSize(1000, 650)
-        self.setStyleSheet(STYLE)
+        self.setStyleSheet(stylesheet(getattr(args,"theme","dark")))
         self.root = QWidget()
         self.setCentralWidget(self.root)
-        self.outer = layout_for(self.root, 28)
+        self.outer = layout_for(self.root, 24)
+        self.outer.setSpacing(16)
         header = QHBoxLayout()
         logo = QLabel()
         pix = QPixmap(str(Path(__file__).parents[1] / "assets" / "logo.png"))
@@ -207,17 +184,25 @@ class Window(QMainWindow):
                     Qt.TransformationMode.SmoothTransformation,
                 )
             )
+        if not args.setup:
+            from .ai_activity_ui import icon
+            logo.setPixmap(icon("shield").pixmap(40,40))
         header.addWidget(logo)
         header.addSpacing(20)
         titles = QVBoxLayout()
         self.house_label = label(tr("setup_window_title") if args.setup else tr("home"), "title")
+        if not args.setup:
+            self.house_label.setObjectName("house")
+
         titles.addWidget(self.house_label)
         self.header_hint = label(tr("simulation") if args.setup and args.demo else tr("setup_live_hint") if args.setup else tr("close_hint"), "muted")
+        if not args.setup: self.header_hint.setObjectName("headline")
         titles.addWidget(self.header_hint)
         header.addLayout(titles, 1)
         header.addStretch()
         if args.demo:
             header.addWidget(label(tr("demo"), "muted"))
+        self.top_header=header
         self.outer.addLayout(header)
         if args.setup:
             self.build_setup()
@@ -226,14 +211,14 @@ class Window(QMainWindow):
 
     def build_dashboard(self):
         self.delivery_banner=QFrame()
-        self.delivery_banner.setStyleSheet("QFrame { background: #442225; border: 2px solid "+ERROR+"; border-radius: 8px; } QLabel { border: none; background: transparent; color: "+ERROR+"; }")
+        self.delivery_banner.setObjectName("deliveryBanner")
         delivery_layout=layout_for(self.delivery_banner,16)
         delivery_layout.setSpacing(6)
         delivery_layout.addWidget(label(tr("ai_delivery_banner"),"section"))
         self.delivery_error=label("")
         self.delivery_error.setTextFormat(Qt.TextFormat.PlainText)
         delivery_layout.addWidget(self.delivery_error)
-        self.outer.insertWidget(0,self.delivery_banner)
+        self.outer.insertWidget(1,self.delivery_banner)
         self.delivery_banner.hide()
         control_row = QHBoxLayout()
         self.control_note = label("", "warning")
@@ -253,7 +238,11 @@ class Window(QMainWindow):
         self.run_button = QPushButton(tr("stop_box"))
         self.run_button.clicked.connect(self.toggle_running)
         control_row.addWidget(self.run_button)
-        self.outer.addLayout(control_row)
+        self.top_header.addWidget(self.control_note)
+        from .ai_activity_ui import icon
+        for button,name in ((overview_button,"shield"),(cameras_button,"camera"),(settings_button,"settings")):
+            button.setToolTip(button.text());button.setAccessibleName(button.text());button.setText("");button.setIcon(icon(name));button.setIconSize(QSize(22,22));button.setObjectName("iconButton");self.top_header.addWidget(button)
+        self.top_header.addWidget(self.run_button)
         self.stop_banner = QFrame()
         self.stop_banner.setStyleSheet(f"QFrame {{ background: #493b20; border-radius: 8px; }} QLabel {{ color: {WARNING}; }}")
         banner_layout = QHBoxLayout(self.stop_banner)
@@ -278,21 +267,22 @@ class Window(QMainWindow):
         self.stats = []
         for key in ("collecting", "upload", "waiting", "disk"):
             panel = card()
-            lay = layout_for(panel, 16)
-            value = label(tr("loading"), "section")
+            lay = QHBoxLayout(panel)
+            lay.setContentsMargins(16,8,16,8)
+            value = label(tr("loading"))
             hint = label(tr(key), "muted")
             lay.addWidget(value)
             lay.addWidget(hint)
             stats.addWidget(panel)
             self.stats.append((value, hint))
-        overview_layout.addLayout(stats)
+        self.stats_layout=stats
         pause_row = QHBoxLayout()
         self.pause_label = label("", "warning")
         self.resume_button = QPushButton(tr("resume_alerts"))
         self.resume_button.clicked.connect(self.resume_alerts)
         pause_row.addWidget(self.pause_label,1)
         pause_row.addWidget(self.resume_button)
-        overview_layout.addLayout(pause_row)
+        self.pause_row=pause_row
         self.pause_label.hide()
         self.resume_button.hide()
         body = QHBoxLayout()
@@ -300,7 +290,8 @@ class Window(QMainWindow):
         leftlay = layout_for(left, 0)
         self.camera_heading = label(tr("cameras"), "section")
         leftlay.addWidget(self.camera_heading)
-        leftlay.addWidget(label(tr("enlarge_hint"),"muted"))
+        leftlay.addLayout(self.pause_row)
+
         self.camera_stack = QStackedWidget()
         self.grid_widget = QWidget()
         self.grid = QGridLayout(self.grid_widget)
@@ -308,6 +299,7 @@ class Window(QMainWindow):
         self.grid.setSpacing(14)
         self.grid_scroll = QScrollArea()
         self.grid_scroll.setWidgetResizable(True)
+        self.grid_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.grid_scroll.setWidget(self.grid_widget)
         self.camera_stack.addWidget(self.grid_scroll)
         self.expanded_tile = None
@@ -321,7 +313,8 @@ class Window(QMainWindow):
         ml.addStretch()
         self.camera_stack.addWidget(self.message)
         leftlay.addWidget(self.camera_stack, 1)
-        body.addWidget(left, 4)
+        leftlay.addLayout(self.stats_layout)
+        body.addWidget(left, 2)
         panel = card()
         panel.setMinimumWidth(275)
         panel.setMaximumWidth(360)
@@ -341,7 +334,7 @@ class Window(QMainWindow):
         body.addWidget(panel, 1)
         from .ai_activity_ui import AiActivity
         self.ai_panel=AiActivity()
-        body.addWidget(self.ai_panel,2)
+        body.addWidget(self.ai_panel,1)
         self.ai_panel.hide()
         overview_layout.addLayout(body, 1)
         self.tiles = []
@@ -366,7 +359,8 @@ class Window(QMainWindow):
         self.details.setChecked(self.args.details)
         from .settings_ui import SettingsPage
         self.settings_page = SettingsPage(self.box_controls, self.settings_changed)
-        self.content_stack.addWidget(self.settings_page.widget)
+        settings_scroll=QScrollArea();settings_scroll.setWidgetResizable(True);settings_scroll.setWidget(self.settings_page.widget)
+        self.content_stack.addWidget(settings_scroll)
         from .camera_ui import CameraPage
         self.cameras_page = CameraPage(self.camera_controls, self.settings_changed)
         self.content_stack.addWidget(self.cameras_page.widget)
@@ -489,6 +483,7 @@ class Window(QMainWindow):
         failed=undelivered_alert(self.ai_data) if inference else None
         self.delivery_banner.setVisible(failed is not None)
         self.delivery_error.setText((failed.error or tr("ai_no_error")) if failed else "")
+        if failed: self.header_hint.setText(tr("ai_delivery_banner"))
         self.ai_panel.setVisible(inference)
         self.log_panel.setVisible(not inference)
         if not hasattr(self,'chat_data'): self.chat_data=[]
@@ -503,7 +498,8 @@ class Window(QMainWindow):
         else:
             from ..chat_feed import read_feed
             if time.monotonic()-getattr(self,'last_chat_poll',-10)>=1:
-                self.chat_data=read_feed(str(Path(bc.LOG_DIR)/'telegram_chat.jsonl'),limit=200)
+                try: self.chat_data=read_feed(str(Path(bc.LOG_DIR)/'telegram_chat.jsonl'),limit=200)
+                except (OSError,UnicodeError,ValueError): pass
                 self.last_chat_poll=time.monotonic()
             image_dir=Path(bc.LOG_DIR)/'chat_images'
         if inference:
@@ -517,6 +513,8 @@ class Window(QMainWindow):
             tile.detector_enabled=inference
             tile.detector_note.setVisible(inference)
             tile.detections,text=camera_view(self.ai_data,tile.name,now,stopped) if inference else ((),"")
+            tile.detector_note.setToolTip(text)
+            if not tile.hero: text=tile.detector_note.fontMetrics().elidedText(text,Qt.TextElideMode.ElideRight,max(120,tile.width()-48))
             tile.detector_note.setText(text)
             from .detector_view import fade_opacity
             entries=self.ai_data.get("cameras",{})
@@ -533,17 +531,19 @@ class Window(QMainWindow):
             self.start_requested = False
         if state.collecting:
             self.start_requested = False
-        self.stop_banner.setVisible(stopped)
-        self.run_button.setVisible(not stopped)
-        self.header_hint.setText(tr("close_stopped") if stopped else tr("close_hint") if state.collecting else tr("close_starting"))
+        self.stop_banner.hide()
+        self.run_button.show()
+        self.header_hint.setText(tr("stopped") if stopped else tr("premium_protecting") if state.collecting and state.mode=="inference" else tr("premium_collecting") if state.collecting else tr("close_starting"))
         self.run_button.setText(tr("start_box") if stopped else tr("stop_box"))
         self.run_button.setEnabled(not self.start_requested)
         self.control_note.setText("" if stopped else tr("applying") if phase == "restarting" else tr("start_pending") if self.start_requested else "")
-        self.run_button.setStyleSheet(f"background: {ERROR};" if not stopped else "")
+        self.run_button.setObjectName("primary" if stopped else "stopAction")
+        self.run_button.setStyleSheet("")
+        self.run_button.style().unpolish(self.run_button);self.run_button.style().polish(self.run_button)
         if self.events != events:
             self.events = events
             self.render_activity()
-        self.house_label.setText(state.site or tr("home"))
+        self.house_label.setText(tr("premium_home",house=state.site or tr("home")))
         values = [
             tr("restarting") if phase == "restarting" else tr("watching" if state.mode == "inference" else "collecting") if state.collecting else tr("stopped"),
             state.upload or tr("never"),
@@ -559,7 +559,7 @@ class Window(QMainWindow):
         self.pause_label.setText(paused)
         self.pause_label.setVisible(bool(paused) and not stopped)
         self.resume_button.setVisible(bool(paused) and not stopped)
-        self.stats[0][1].setText(hours_description(settings.alert_start_hour,settings.alert_end_hour) if state.mode == "inference" else tr("collection"))
+        self.stats[0][1].setText(tr("close_stopped") if stopped else hours_description(settings.alert_start_hour,settings.alert_end_hour) if state.mode == "inference" else tr("collection"))
         self.camera_heading.setText(
             tr("cameras")
             + tr("separator")
@@ -684,7 +684,7 @@ class Window(QMainWindow):
         lay.addWidget(clone);clone.clicked.connect(dialog.close)
         timer=QTimer(dialog)
         def refresh():
-            clone.stopped=tile.stopped;clone.detections=tile.detections;clone.box_opacity=tile.box_opacity;clone.update_picture(tile.picture)
+            clone.stopped=tile.stopped;clone.detections=tile.detections;clone.box_opacity=tile.box_opacity;clone.detector_note.setText(tile.detector_note.text());clone.update_picture(tile.picture)
         timer.timeout.connect(refresh);timer.start(166)
         dialog.showFullScreen();dialog.exec()
 
@@ -696,17 +696,22 @@ class Window(QMainWindow):
 
     def arrange_tiles(self):
         while self.grid.count(): self.grid.takeAt(0)
+        for tile in self.tiles: tile.setParent(self.grid_widget)
+        old=getattr(self,'thumbnail_scroll',None)
+        if old:
+            old.setParent(None);old.deleteLater()
         if not self.tiles: return
         if self.expanded_tile not in self.tiles: self.expanded_tile=self.tiles[0]
-        for i in range(10): self.grid.setColumnStretch(i,0);self.grid.setRowStretch(i,0)
-        others=[tile for tile in self.tiles if tile is not self.expanded_tile]
-        count=max(1,len(others))
-        self.grid.addWidget(self.expanded_tile,0,0,1,count)
-        self.expanded_tile.hero=True;self.expanded_tile.setMinimumHeight(260);self.expanded_tile.setMaximumHeight(16777215)
-        self.grid.setRowStretch(0,1)
-        for i,tile in enumerate(others):
-            tile.hero=False;tile.setMinimumHeight(144);tile.setMaximumHeight(160)
-            self.grid.addWidget(tile,1,i);self.grid.setColumnStretch(i,1)
+        hero=self.expanded_tile;hero.hero=True;hero.setMinimumSize(180,260);hero.setMaximumSize(16777215,16777215)
+        self.grid.addWidget(hero,0,0);self.grid.setRowStretch(0,1);self.grid.setColumnStretch(0,1)
+        others=[tile for tile in self.tiles if tile is not hero]
+        if others:
+            self.thumbnail_scroll=QScrollArea();self.thumbnail_scroll.setWidgetResizable(True);self.thumbnail_scroll.setFixedHeight(176);self.thumbnail_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            holder=QWidget();strip=QHBoxLayout(holder);strip.setContentsMargins(0,0,0,0);strip.setSpacing(16)
+            for tile in others:
+                tile.hero=False;tile.setFixedSize(280,160);strip.addWidget(tile)
+            strip.addStretch();self.thumbnail_scroll.setWidget(holder);self.grid.addWidget(self.thumbnail_scroll,1,0)
+        else: self.thumbnail_scroll=None
         for tile in self.tiles: tile.show();tile.update()
 
     def render_activity(self):

@@ -1,4 +1,4 @@
-import tempfile,time,unittest
+import os,tempfile,time,unittest
 from pathlib import Path
 import cv2
 import numpy as np
@@ -8,8 +8,9 @@ from home_guard_project.box.app.detector_view import picture_rect,box_rect,fade_
 class PremiumPreviewTests(unittest.TestCase):
     def test_hero_rate_and_thumbnail_rate(self):
         with tempfile.TemporaryDirectory() as directory:
-            now=[time.time()]
+            now=[1000.0]
             reader=PreviewReader(directory);reader.touch('front_door')
+            os.utime(Path(directory)/'viewer.alive',(now[0],now[0]))
             writer=PreviewWriter(directory,enabled=True,clock=lambda:now[0])
             frame=np.zeros((720,1280,3),dtype=np.uint8)
             self.assertTrue(writer.publish('front_door',frame))
@@ -34,4 +35,4 @@ class PremiumPreviewTests(unittest.TestCase):
             for i in range(12):
                 start=time.perf_counter();self.assertTrue(writer.publish('camera_'+str(i),frame));costs.append((time.perf_counter()-start)*1000)
             print('1280x720 JPEG 88 publish: mean %.2f ms, max %.2f ms'%(sum(costs)/len(costs),max(costs)))
-            self.assertLess(sum(costs)/len(costs),40)
+            self.assertLess(max(costs),40)

@@ -119,7 +119,7 @@ class CollectorPreviewTest(unittest.TestCase):
                         decoded = cv2.imdecode(
                             np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR
                         )
-                        self.assertEqual(max(decoded.shape[:2]), 720)
+                        self.assertEqual(max(decoded.shape[:2]), 1200)
                         self.assertGreater(
                             decoded.mean(), 200
                         )  # annotated image, not raw

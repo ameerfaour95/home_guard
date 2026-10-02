@@ -4,7 +4,7 @@ from .strings import tr
 def demo_status(names,now,state):
     data={'updated':now,'cameras':{},'decisions':[]}
     for i,name in enumerate(names):
-        data['cameras'][name]={'checked_ts':now if i!=2 else now-20,'ts':now if i==0 else now-30,'objects':[{'label':'person','conf':.71,'box':[.1,.3,.18,.75]},{'label':'car','conf':.92,'box':[.41,.22,.60,.43]}]}
+        data['cameras'][name]={'checked_ts':now if i!=2 else now-20,'ts':now if i==0 else now-30,'objects':[{'label':'person','conf':.71,'box':[.1,.3,.18,.75]},{'label':'car','conf':.92,'box':[.41,.42,.61,.62]}]}
     if state!='ai-empty' and names:
         samples=[(15,'person','demo_ai_person','[send_message]',True,False,False,''),(75,'car','demo_ai_cars','[none]',False,True,False,''),(150,'person','demo_ai_paused','[send_message]',False,False,True,''),(240,'person','demo_ai_urgent','[call_owner]',True,False,False,'')]
         if state=='ai-urgent': samples[0]=(15,'person','demo_ai_urgent','[call_owner]',True,False,False,'')

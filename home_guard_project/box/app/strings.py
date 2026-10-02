@@ -1,6 +1,15 @@
 """All visible application copy; keys remain stable for translation."""
 
 TEXT = {
+    "chat_image_unavailable": "Picture unavailable",
+    "premium_security": "Security & notifications",
+    "premium_viewing": "Camera viewing",
+    "premium_view_hint": "Hide the camera pictures on this screen while Home Guard keeps watching your home.",
+
+    "premium_live": "LIVE",
+    "premium_home": "HOME GUARD / {house}",
+    "premium_protecting": "Protecting the house",
+    "premium_collecting": "Recording the house",
     "ai_assistant": "AI assistant",
     "ai_thinking": "AI is looking at {camera}\u2026",
     "ai_watching": "Watching {count} cameras",
@@ -148,7 +157,7 @@ TEXT = {
     "time_unavailable": "Time unavailable",
 
     "summary_house": "Home: {house}",
-    "enlarge_hint": "Click a camera to enlarge it. Click again or press Esc to return.",
+    "enlarge_hint": "Choose a camera below. Double-click the main picture for full screen.",
 
     "stopped_banner": "Home Guard is stopped. Your home is not being watched.",
     "close_stopped": "Home Guard is stopped. Start it to watch your home again.",

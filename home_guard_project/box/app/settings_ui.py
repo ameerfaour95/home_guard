@@ -8,43 +8,26 @@ from .ui import card, label, layout_for
 
 class SettingsPage:
     def __init__(self, box, changed):
-        self.box, self.changed = box, changed
-        self.widget = card()
-        layout = layout_for(self.widget, 24)
-        layout.setSpacing(10)
-        layout.addWidget(label(tr("settings_title"), "title"))
-        layout.addWidget(label(tr("settings_hint"), "muted"))
-        self.alerts = QCheckBox(tr("security_alerts"))
-        layout.addWidget(self.alerts)
-        layout.addWidget(label(tr("security_alerts_hint"), "muted"))
+        from PySide6.QtWidgets import QWidget
+        self.box,self.changed=box,changed
+        self.widget=QWidget();layout=layout_for(self.widget,0);layout.setSpacing(24)
+        layout.addWidget(label(tr("settings_title"),"title"));layout.addWidget(label(tr("settings_hint"),"muted"))
+        columns=QHBoxLayout();columns.setSpacing(24)
+        security=card();form=layout_for(security,24);form.setSpacing(16)
+        form.addWidget(label(tr("premium_security"),"section"))
+        self.alerts=QCheckBox(tr("security_alerts"));form.addWidget(self.alerts)
+        form.addWidget(label(tr("security_alerts_hint"),"muted"))
         from .alert_hours import AlertHours
-        self.hours = AlertHours()
-        self.start, self.end = self.hours.start, self.hours.end
-        layout.addWidget(self.hours)
-        layout.addWidget(label(tr("cooldown")))
-        self.cooldown = QDoubleSpinBox()
-        self.cooldown.setDecimals(2)
-        self.cooldown.setRange(0.17, 1440)
-        self.cooldown.setSingleStep(1)
-        self.cooldown.setSuffix(tr("minutes_suffix"))
-        self.cooldown.setMaximumWidth(500)
-        layout.addWidget(self.cooldown)
-        layout.addWidget(label(tr("cooldown_hint"), "muted"))
-        self.pictures = QCheckBox(tr("show"))
-        layout.addWidget(self.pictures)
-        self.note = label("", "muted")
-        layout.addWidget(self.note)
-        layout.addStretch()
-        row = QHBoxLayout()
-        row.addStretch()
-        self.save = QPushButton(tr("save_settings"))
-        self.save.clicked.connect(self.save_clicked)
-        row.addWidget(self.save)
-        layout.addLayout(row)
-        self.waiting = False
-        self.timer = QTimer(self.widget)
-        self.timer.timeout.connect(self.check_applied)
-        self.timer.start(250)
+        self.hours=AlertHours();self.start,self.end=self.hours.start,self.hours.end;form.addWidget(self.hours)
+        form.addWidget(label(tr("cooldown")))
+        self.cooldown=QDoubleSpinBox();self.cooldown.setDecimals(2);self.cooldown.setRange(.17,1440);self.cooldown.setSingleStep(1);self.cooldown.setSuffix(tr("minutes_suffix"));self.cooldown.setMaximumWidth(500);form.addWidget(self.cooldown)
+        form.addWidget(label(tr("cooldown_hint"),"muted"));form.addStretch()
+        viewing=card();view=layout_for(viewing,24);view.setSpacing(16)
+        view.addWidget(label(tr("premium_viewing"),"section"));self.pictures=QCheckBox(tr("show"));view.addWidget(self.pictures);view.addWidget(label(tr("premium_view_hint"),"muted"));view.addStretch()
+        columns.addWidget(security,2);columns.addWidget(viewing,1);layout.addLayout(columns,1)
+        footer=QHBoxLayout();self.note=label("","muted");footer.addWidget(self.note,1)
+        self.save=QPushButton(tr("save_settings"));self.save.clicked.connect(self.save_clicked);footer.addWidget(self.save);layout.addLayout(footer)
+        self.waiting=False;self.timer=QTimer(self.widget);self.timer.timeout.connect(self.check_applied);self.timer.start(250)
 
     def reload(self):
         try:
