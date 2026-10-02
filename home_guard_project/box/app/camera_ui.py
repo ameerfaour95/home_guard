@@ -3,6 +3,7 @@ from PySide6.QtCore import QTimer, QRegularExpression, Qt
 from PySide6.QtGui import QPixmap, QRegularExpressionValidator
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QScrollArea, QPushButton, QLineEdit, QCheckBox, QLabel, QProgressBar
 from .strings import tr
+from .theme import OK, ERROR, MUTED
 from .camera_controls import changes_payload
 
 class CameraPage:
@@ -57,6 +58,7 @@ class CameraPage:
             field.setEnabled(False)
             enabled.setEnabled(False)
         self.progress.show()
+        self.note.setStyleSheet(f"color: {MUTED};")
         self.note.setText(tr("camera_working"))
         self.future = self.pool.submit(task)
 
@@ -74,6 +76,7 @@ class CameraPage:
             records = future.result()
             self.render(records)
             self.loaded = True
+            self.note.setStyleSheet(f"color: {OK if getattr(self, 'saving', False) else MUTED};")
             self.note.setText((tr("saved_stopped") if self.controls.box.is_stopped() else tr("camera_saved")) if getattr(self, "saving", False) else tr("camera_ready"))
             if getattr(self, "saving", False):
                 self.changed()
@@ -82,6 +85,7 @@ class CameraPage:
                 field.setEnabled(True)
                 enabled.setEnabled(True)
             self.validate()
+            self.note.setStyleSheet(f"color: {ERROR};")
             self.note.setText(tr("camera_error"))
         self.saving = False
 
@@ -131,6 +135,7 @@ class CameraPage:
             valid = False
         self.save.setEnabled(valid and self.future is None)
         if self.rows and not valid:
+            self.note.setStyleSheet(f"color: {ERROR};")
             self.note.setText(tr("camera_names_invalid"))
 
     def changes(self):

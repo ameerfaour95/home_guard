@@ -5,7 +5,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 from PySide6.QtCore import Qt, QTimer, QSize, Signal
-from PySide6.QtGui import QColor, QPainter, QPen, QPixmap, QFont, QLinearGradient
+from PySide6.QtGui import QColor, QPainter, QPen, QPixmap, QFont, QLinearGradient, QIcon, QShortcut, QKeySequence
 from PySide6.QtWidgets import (
     QMainWindow,
     QWidget,
@@ -31,26 +31,42 @@ from .backend import Answers, SimulatedBackend, Sequence, STEPS
 from ..preview import PreviewReader
 from .. import boxconfig as bc
 
-ACCENT = "#39c6e5"
+from .theme import ACTION, OK, WARNING, ERROR, MUTED
+ACCENT = ACTION
 STYLE = """
 QWidget { background: #10151d; color: #edf1f7; font-family: 'Segoe UI'; font-size: 15px; }
 QLabel { background: transparent; }
 QLabel#title { font-size: 29px; font-weight: 600; }
 QLabel#section { font-size: 20px; font-weight: 600; }
-QLabel#muted { color: #98a6ba; }
-QLabel#accent { color: #39c6e5; font-weight: 600; }
+QLabel#muted { color: @muted; }
+QLabel#accent { color: @action; font-weight: 600; }
 QFrame#card { background: #1a222e; border: 1px solid #2c3745; border-radius: 12px; }
-QPushButton { background: #39c6e5; color: #111722; border: none; border-radius: 7px; padding: 12px 24px; font-weight: 600; }
+QPushButton { background: @action; color: #111722; border: 2px solid transparent; border-radius: 7px; padding: 10px 22px; font-weight: 600; }
 QPushButton#secondary { background: #263344; color: #edf1f7; }
 QPushButton:disabled { background: #263344; color: #8793a4; }
 QPushButton:hover { background: #77ddf2; }
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox { background: #151e2a; border: 1px solid #435063; border-radius: 7px; padding: 10px; min-height: 23px; }
-QLineEdit:focus { border: 1px solid #39c6e5; }
+QLineEdit:focus { border: 1px solid @action; }
 QCheckBox { spacing: 12px; background: transparent; padding: 6px 0; }
 QCheckBox::indicator { width: 21px; height: 21px; border: 1px solid #526179; border-radius: 4px; background: #151e2a; }
-QCheckBox::indicator:checked { background: #39c6e5; border: 1px solid #39c6e5; }
+QCheckBox::indicator:checked { background: @action; border: 1px solid @action; }
 QScrollArea { border: none; background: transparent; }
 """
+for token, colour in (("@action",ACTION),("@muted",MUTED)):
+    STYLE = STYLE.replace(token,colour)
+STYLE += f"""
+QLabel#ok {{ color: {OK}; }}
+QLabel#warning {{ color: {WARNING}; }}
+QLabel#error {{ color: {ERROR}; }}
+QPushButton:focus {{ border: 2px solid #edf1f7; }}
+QCheckBox:focus {{ border: 1px solid {ACTION}; border-radius: 4px; }}
+QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {{ border: 2px solid {ACTION}; }}
+QCheckBox::indicator:checked {{ background: {OK}; border: 1px solid {OK}; image: url("{(Path(__file__).parent / 'check.svg').as_posix()}"); }}
+QScrollBar:vertical {{ background: #10151d; width: 9px; }}
+QScrollBar::handle:vertical {{ background: #435063; min-height: 30px; border-radius: 4px; }}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0px; }}
+"""
+
 
 
 def label(text, role=None):
@@ -147,8 +163,8 @@ class CameraTile(QFrame):
     def update_picture(self, pix):
         self.picture = pix if pix and not pix.isNull() else None
         self.status.setText(tr("stopped") if self.stopped else tr("live") if self.picture else tr("offline"))
-        self.status.setObjectName("accent" if self.picture else "muted")
-        self.status.setStyleSheet("color: " + (ACCENT if self.picture else "#98a6ba"))
+        self.status.setObjectName("ok" if self.picture else "muted")
+        self.status.setStyleSheet("color: " + (OK if self.picture else MUTED))
         self.update()
 
     def paintEvent(self, event):
@@ -182,6 +198,7 @@ class Window(QMainWindow):
         self.box_controls = BoxControls(demo=args.demo, stopped=args.state == "stopped", settings=Settings(mode="inference" if args.state == "inference" else "data_collection", show_cameras=args.state != "hidden"))
         self.start_requested = False
         self.setWindowTitle(tr("brand"))
+        self.setWindowIcon(QIcon(str(Path(__file__).parents[1] / "assets" / "logo.ico")))
         self.resize(*map(int, args.size.split("x")))
         self.setMinimumSize(1000, 650)
         self.setStyleSheet(STYLE)
@@ -209,7 +226,7 @@ class Window(QMainWindow):
         header.addLayout(titles, 1)
         header.addStretch()
         if args.demo or args.setup:
-            header.addWidget(label(tr("demo"), "accent"))
+            header.addWidget(label(tr("demo"), "muted"))
         self.outer.addLayout(header)
         if args.setup:
             self.build_setup()
@@ -218,7 +235,7 @@ class Window(QMainWindow):
 
     def build_dashboard(self):
         control_row = QHBoxLayout()
-        self.control_note = label("", "accent")
+        self.control_note = label("", "warning")
         overview_button = QPushButton(tr("overview"))
         overview_button.setObjectName("secondary")
         overview_button.clicked.connect(lambda: self.content_stack.setCurrentIndex(0))
@@ -237,7 +254,7 @@ class Window(QMainWindow):
         control_row.addWidget(self.run_button)
         self.outer.addLayout(control_row)
         self.stop_banner = QFrame()
-        self.stop_banner.setStyleSheet("QFrame { background: #493b20; border-radius: 8px; } QLabel { color: #ffd27d; }")
+        self.stop_banner.setStyleSheet(f"QFrame {{ background: #493b20; border-radius: 8px; }} QLabel {{ color: {WARNING}; }}")
         banner_layout = QHBoxLayout(self.stop_banner)
         banner_layout.setContentsMargins(18,12,18,12)
         banner_layout.addWidget(label(tr("stopped_banner")),1)
@@ -453,8 +470,8 @@ class Window(QMainWindow):
         self.header_hint.setText(tr("close_stopped") if stopped else tr("close_hint") if state.collecting else tr("close_starting"))
         self.run_button.setText(tr("start_box") if stopped else tr("stop_box"))
         self.run_button.setEnabled(not self.start_requested)
-        self.control_note.setText(tr("stopped_hint") if stopped else tr("applying") if phase == "restarting" else tr("start_pending") if self.start_requested else "")
-        self.run_button.setStyleSheet("background: #f27d7d;" if not stopped else "")
+        self.control_note.setText("" if stopped else tr("applying") if phase == "restarting" else tr("start_pending") if self.start_requested else "")
+        self.run_button.setStyleSheet(f"background: {ERROR};" if not stopped else "")
         if self.events != events:
             self.events = events
             self.render_activity()
@@ -474,7 +491,7 @@ class Window(QMainWindow):
         self.pause_label.setText(paused)
         self.pause_label.setVisible(bool(paused) and not stopped)
         self.resume_button.setVisible(bool(paused) and not stopped)
-        self.stats[0][1].setText(paused or hours_description(settings.alert_start_hour,settings.alert_end_hour) if state.mode == "inference" else tr("collection"))
+        self.stats[0][1].setText(hours_description(settings.alert_start_hour,settings.alert_end_hour) if state.mode == "inference" else tr("collection"))
         self.camera_heading.setText(
             tr("cameras")
             + tr("separator")
@@ -571,7 +588,7 @@ class Window(QMainWindow):
         cancel.setObjectName("secondary")
         cancel.clicked.connect(dialog.reject)
         stop = QPushButton(tr("stop_box"))
-        stop.setStyleSheet("background: #f27d7d;")
+        stop.setStyleSheet(f"background: {ERROR};")
         stop.clicked.connect(dialog.accept)
         row.addWidget(cancel); row.addWidget(stop)
         lay.addLayout(row)
@@ -623,7 +640,7 @@ class Window(QMainWindow):
             if item.widget():
                 item.widget().deleteLater()
         for event in self.events:
-            self.activity_layout.addWidget(label(tr("bullet") + event.text))
+            self.activity_layout.addWidget(label(tr("event_line",time=event.time,text=event.text)))
             if self.details.isChecked():
                 self.activity_layout.addWidget(label(event.detail, "muted"))
             divider = QFrame()
@@ -646,10 +663,33 @@ class Window(QMainWindow):
         super().closeEvent(event)
 
     def build_setup(self):
-        self.outer.addWidget(label(tr("steps"), "accent"))
+        step_bar = QHBoxLayout()
+        self.step_labels = []
+        self.step_icons = []
+        done_icon = QPixmap(18,18)
+        done_icon.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(done_icon)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(QColor(OK),2.5))
+        painter.drawLine(2,9,7,14)
+        painter.drawLine(7,14,16,3)
+        painter.end()
+        for name in TEXT["step_names"]:
+            item = label(name,"muted")
+            step = QHBoxLayout()
+            icon = QLabel()
+            icon.setPixmap(done_icon)
+            icon.setFixedSize(18,18)
+            step.addWidget(icon)
+            step.addWidget(item,1)
+            step_bar.addLayout(step,1)
+            self.step_icons.append(icon)
+            self.step_labels.append(item)
+        self.outer.addLayout(step_bar)
         self.pages = QStackedWidget()
         self.outer.addWidget(self.pages, 1)
         self.inputs = {}
+        self.field_guidance = {}
         titles = [
             ("address_title", "address_hint"),
             ("network_title", "network_hint"),
@@ -733,9 +773,10 @@ class Window(QMainWindow):
             sl.addWidget(item)
         sl.addWidget(label(tr("manual"), "section"))
         manual = label(tr("manual_items"))
-        manual.setMinimumHeight(210)
+        manual.setMinimumHeight(180)
+        manual.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         sl.addWidget(manual)
-        self.later = label(tr("camera_later"), "accent")
+        self.later = label(tr("camera_later"), "warning")
         sl.addWidget(self.later)
         sl.addStretch()
         summary_right = QWidget()
@@ -743,7 +784,7 @@ class Window(QMainWindow):
         sr = layout_for(summary_right, 0)
         sr.addWidget(label(tr("rescue"), "section"))
         sr.addWidget(label(tr("rescue_hint"), "muted"))
-        sr.addWidget(label(tr("rescue_demo"), "accent"))
+        sr.addWidget(label(tr("rescue_demo"), "muted"))
         self.rescue_labels = {}
         for key in ("rescue_name", "rescue_password"):
             item = label(tr(key) + ": " + tr("service_pending"), "muted")
@@ -755,7 +796,7 @@ class Window(QMainWindow):
         self.page_layouts[5].addLayout(summary_columns)
         for lay in self.page_layouts:
             lay.addStretch()
-        self.validation = label("", "accent")
+        self.validation = label("", "error")
         self.outer.addWidget(self.validation)
         nav = QHBoxLayout()
         self.back = QPushButton(tr("back"))
@@ -766,9 +807,15 @@ class Window(QMainWindow):
         nav.addWidget(self.back)
         nav.addStretch()
         self.next = QPushButton(tr("next"))
+        self.next.setDefault(True)
         self.next.clicked.connect(self.next_page)
         nav.addWidget(self.next)
         self.outer.addLayout(nav)
+        self.enter_shortcuts = []
+        for key in (Qt.Key.Key_Return,Qt.Key.Key_Enter):
+            shortcut = QShortcut(QKeySequence(key),self)
+            shortcut.activated.connect(lambda: self.next.click() if self.next.isVisible() and self.next.isEnabled() else None)
+            self.enter_shortcuts.append(shortcut)
         if self.args.demo:
             self.inputs["address"].setText(tr("demo_address"))
             self.inputs["house"].setText(tr("demo_site"))
@@ -815,6 +862,11 @@ class Window(QMainWindow):
         field.setMaximumWidth(700)
         self.page_layouts[page].addWidget(field)
         self.inputs[key] = field
+        guidance = label("", "error")
+        guidance.hide()
+        self.page_layouts[page].addWidget(guidance)
+        self.field_guidance[key] = guidance
+        field.textChanged.connect(lambda: guidance.hide())
 
     def network_changed(self, index):
         for key in ("ssid", "wifi_password"):
@@ -825,45 +877,40 @@ class Window(QMainWindow):
         if index == 5:
             self.summary_house.setText(tr("summary_house", house=self.inputs["house"].text()))
         self.validation.setText("")
+        self.update_step_bar(index)
         self.back.setVisible(0 < index < 4)
         self.next.setVisible(index != 4)
         self.next.setText(
             tr("start") if index == 3 else tr("finish") if index == 5 else tr("next")
         )
 
-    def valid_page(self, index):
-        values = {key: w.text().strip() for key, w in self.inputs.items()}
-        if index == 0:
-            return bool(re.fullmatch(r"[^@\s]+@[^@\s]+", values["address"]))
-        if index == 1 and self.network.currentIndex() == 1:
-            return (
-                bool(values["ssid"])
-                and 8 <= len(self.inputs["wifi_password"].text()) <= 63
-            )
-        if index == 2:
-            return bool(re.fullmatch(r"[a-z0-9_]+", values["house"]))
-        if index == 3 and self.find.isChecked():
-            return bool(
-                re.fullmatch(r"[A-Za-z0-9._@-]+", values["camera_user"])
-            ) and bool(self.inputs["camera_password"].text())
-        return True
+    def update_step_bar(self,index):
+        current = min(index,4)
+        for i,(item,name) in enumerate(zip(self.step_labels,TEXT["step_names"])):
+            done = i < current or index == 5
+            self.step_icons[i].setVisible(done)
+            item.setText(name if done else tr("step_number",number=i+1,name=name))
+            item.setStyleSheet(f"color: {OK if done else '#edf1f7' if i == current else MUTED}; padding: 8px; border-bottom: 2px solid {'#edf1f7' if i == current and index != 5 else 'transparent'};")
+
+    def errors_for_page(self,index):
+        from .guidance import field_errors
+        return field_errors(index,{key:w.text() for key,w in self.inputs.items()},wifi=self.network.currentIndex()==1,find=self.find.isChecked())
+
+    def valid_page(self,index):
+        return not self.errors_for_page(index)
 
     def next_page(self):
         index = self.pages.currentIndex()
         if index == 5:
             self.close()
             return
-        if not self.valid_page(index):
-            keys = {
-                0: ("address",),
-                1: ("ssid", "wifi_password"),
-                2: ("house",),
-                3: ("camera_user", "camera_password"),
-            }[index]
-            for key in keys:
-                self.inputs[key].setStyleSheet("border: 1px solid #f27d7d;")
-            self.inputs[keys[0]].setFocus()
-            self.validation.setText(tr("validation"))
+        errors = self.errors_for_page(index)
+        if errors:
+            for key,message in errors.items():
+                self.inputs[key].setStyleSheet(f"border: 1px solid {ERROR};")
+                self.field_guidance[key].setText(tr(message))
+                self.field_guidance[key].show()
+            self.inputs[next(iter(errors))].setFocus()
             return
         if index == 3:
             self.begin_setup()
@@ -919,9 +966,9 @@ class Window(QMainWindow):
             row.setStyleSheet(
                 "color: "
                 + (
-                    "#f27d7d"
+                    ERROR
                     if result.status == "FAIL"
-                    else ACCENT if result.status == "WARN" else "#81d3b0"
+                    else WARNING if result.status == "WARN" else OK
                 )
             )
         if self.sequence.done:
@@ -933,7 +980,9 @@ class Window(QMainWindow):
                 self.inputs[key].clear()
             if self.sequence.failed:
                 self.progress_title.setText(tr("failed_title"))
-                self.validation.setText(tr(result.message_key))
+                from .guidance import retry_page
+                self.update_step_bar(4 if result.step == "readiness" else retry_page(result.step))
+                self.validation.setText("")
                 self.next.setText(tr("retry"))
                 self.next.setVisible(True)
                 try:
@@ -947,7 +996,7 @@ class Window(QMainWindow):
                         tr(check.status) + tr("separator") + tr(check.message_key)
                     )
                     widget.setStyleSheet(
-                        "color: " + (ACCENT if check.status == "WARN" else "#81d3b0")
+                        "color: " + (WARNING if check.status == "WARN" else ERROR if check.status == "FAIL" else OK)
                     )
                 for key, widget in self.rescue_labels.items():
                     widget.setText(
@@ -961,4 +1010,5 @@ class Window(QMainWindow):
     def retry_setup(self):
         self.next.clicked.disconnect()
         self.next.clicked.connect(self.next_page)
-        self.set_page(1)
+        from .guidance import retry_page
+        self.set_page(retry_page(self.sequence.results[-1].step))

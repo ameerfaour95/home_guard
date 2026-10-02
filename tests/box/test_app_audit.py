@@ -42,3 +42,25 @@ class TruthTests(unittest.TestCase):
             with patch.object(bc,'load_box_settings',return_value={'site':'home'}),patch.object(bc,'get_option',side_effect=lambda key:mode if key=='mode' else False),patch('home_guard_project.box.heartbeat.build_heartbeat',return_value={}) as build:
                 Window.fetch(fake)
                 self.assertEqual(build.call_args.args[1:3],dirs)
+
+class GuidanceTests(unittest.TestCase):
+    def test_field_guidance_and_valid_values(self):
+        from home_guard_project.box.app.guidance import field_errors
+        self.assertEqual(field_errors(0,{'address':'wrong'}),{'address':'address_error'})
+        self.assertEqual(field_errors(0,{'address':'installer@box.example'}),{})
+        self.assertEqual(field_errors(1,{},wifi=True),{'ssid':'ssid_error','wifi_password':'wifi_password_error'})
+        self.assertEqual(field_errors(1,{},wifi=False),{})
+        self.assertEqual(field_errors(2,{'house':'Cedar House'}),{'house':'house_error'})
+        self.assertEqual(field_errors(2,{'house':'cedar_house'}),{})
+        self.assertEqual(field_errors(3,{},find=False),{})
+        self.assertEqual(field_errors(3,{},find=True),{'camera_user':'camera_user_error','camera_password':'camera_password_error'})
+    def test_retry_routes_to_step_owner(self):
+        from home_guard_project.box.app.guidance import retry_page
+        self.assertEqual([retry_page(step) for step in ('update','name_step','network_step','camera_step','readiness')],[0,2,1,3,0])
+    def test_activity_clock_and_plain_words(self):
+        from home_guard_project.box.app.model import parse_activity, Activity
+        event=parse_activity('2026-10-02 14:31:02 INFO Done. Uploaded: 5 | Failed: 0')
+        self.assertEqual(event.time,'14:31')
+        self.assertEqual(event.text,'5 clips sent')
+        self.assertEqual(parse_activity('14:29:00 Starting inference').text,'Home Guard restarted')
+        self.assertEqual(Activity('event','undated').time,'Time unavailable')

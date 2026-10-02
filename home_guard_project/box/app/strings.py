@@ -1,6 +1,18 @@
 """All visible application copy; keys remain stable for translation."""
 
 TEXT = {
+    "address_error": "Enter a box address like installer@box.example.",
+    "ssid_error": "Enter the home Wi-Fi network name.",
+    "wifi_password_error": "Enter a network password with 8 to 63 characters.",
+    "house_error": "Use lowercase letters, numbers and underscores, like cedar_house.",
+    "camera_user_error": "Enter the login name used by the cameras.",
+    "camera_password_error": "Enter the password used by the cameras.",
+    "step_names": ["Connect", "Network", "Home", "Cameras", "Ready"],
+    "step_number": "{number}. {name}",
+    "step_done": "\u2713 {name}",
+    "event_line": "{time}  {text}",
+    "time_unavailable": "Time unavailable",
+
     "summary_house": "Home: {house}",
     "enlarge_hint": "Click a camera to enlarge it. Click again or press Esc to return.",
 
@@ -90,9 +102,9 @@ TEXT = {
     "details": "Show details",
     "close_hint": "Closing this window keeps your home protected.",
     "saved": "Clip saved from {camera}",
-    "sent": "{count} files sent to the online folder",
+    "sent": "{count} clips sent",
     "moved": "{count} clips ready for the online folder",
-    "restart": "Collector restarted",
+    "restart": "Home Guard restarted",
     "upload_error": "The online folder needs attention",
     "warning": "Your box needs attention",
     "reconnect": "Camera is reconnecting",
@@ -174,8 +186,8 @@ TEXT = {
     ],
     "demo_events": [
         "Clip saved from front door",
-        "13 files sent to the online folder",
-        "Collector restarted",
+        "13 clips sent",
+        "Home Guard restarted",
     ],
     "demo_details": [
         "14:32:10 INFO [front_door] trigger saved: local clip",
