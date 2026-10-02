@@ -34,7 +34,7 @@ import re
 import socket
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 from urllib.parse import quote as urlquote
 
 import yaml
@@ -239,26 +239,47 @@ def _rtsp_describe(host: str, port: int, uri: str, authorization: str = "", time
         return conn.recv(2048).decode("latin-1", "replace")
 
 
-def rtsp_login_check(host: str, port: int, user: str, password: str, timeout: float = 3.0) -> str:
+def rtsp_login_check(host: str, port: int, user: str, password: str, timeout: float = 3.0,
+                     paths: Sequence[str] = ()) -> str:
     """Does the device accept this login? ``accepted``, ``refused``, ``silent`` (no answer) or
     ``unknown`` (it answers, but asks for a kind of login this does not speak).
 
-    One or two quick requests, before the slow search for the device's stream
-    address. A camera checks the login before it looks at the address, so a
-    made-up address is enough: 401 with our login means the login is wrong.
+    A few quick requests, before the slow search for the device's stream
+    address. Most cameras check the login before they look at the address, so
+    a made-up address is enough: 401 with our login means the login is wrong.
+    Some recorders answer 401 to any address they do not serve, even with the
+    right login (the owner's own recorder does); a refusal therefore counts
+    only once real stream addresses (*paths*) are refused as well.
     """
-    uri = f"rtsp://{host}:{port}/"
     try:
-        reply = _rtsp_describe(host, port, uri, timeout=timeout)
-        if " 401 " not in reply.splitlines()[0]:
-            return "accepted"                      # it asks for no login at all
-        authorization = _authorization(reply, user, password, uri)
-        if not authorization:
-            return "unknown"
-        reply = _rtsp_describe(host, port, uri, authorization, timeout=timeout)
-        return "refused" if " 401 " in reply.splitlines()[0] else "accepted"
+        state = _login_state(host, port, user, password, f"rtsp://{host}:{port}/", timeout)
+        if state != "refused":
+            return state
+        for path in paths:
+            if _login_state(host, port, user, password, f"rtsp://{host}:{port}{path}", timeout) == "accepted":
+                return "accepted"
+        return "refused"
     except (OSError, IndexError):
         return "silent"
+
+
+def _login_state(host: str, port: int, user: str, password: str, uri: str, timeout: float) -> str:
+    """One DESCRIBE of *uri*, answering the device's login challenge: accepted, refused or unknown."""
+    reply = _rtsp_describe(host, port, uri, timeout=timeout)
+    if " 401 " not in reply.splitlines()[0]:
+        return "accepted"                      # it asks for no login at all, or serves the address
+    authorization = _authorization(reply, user, password, uri)
+    if not authorization:
+        return "unknown"
+    reply = _rtsp_describe(host, port, uri, authorization, timeout=timeout)
+    return "refused" if " 401 " in reply.splitlines()[0] else "accepted"
+
+
+def first_stream_paths() -> List[str]:
+    """One real stream address per known recorder family (channel 1, main stream), for the login check."""
+    from home_guard_project.data_collection import discover
+
+    return [pattern["tpl"].format(ch=1, stream=0, stream_0=0) for pattern in discover._RTSP_PATTERNS]
 
 
 def _authorization(challenge: str, user: str, password: str, uri: str) -> str:
@@ -542,10 +563,11 @@ def search(user: str, password: str) -> Tuple[Found, Dict[str, Any]]:
         return {}, {"local_ip": discover._get_local_ip(), "hosts_tried": [], "devices_found": 0,
                     "login_refused": [], "no_answer": []}
 
+    paths = first_stream_paths()
     with ThreadPoolExecutor(max_workers=min(8, len(targets))) as pool:
         states = dict(zip(
             (host for host, _ in targets),
-            pool.map(lambda target: rtsp_login_check(target[0], target[1], user, password), targets),
+            pool.map(lambda target: rtsp_login_check(target[0], target[1], user, password, paths=paths), targets),
         ))
     refused = [host for host, _ in targets if states[host] == "refused"]
     silent = [host for host, _ in targets if states[host] == "silent"]

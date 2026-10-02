@@ -80,6 +80,36 @@ class LoginCheckTest(unittest.TestCase):
         with mock.patch.object(find_cameras, "_rtsp_describe", side_effect=fake):
             return find_cameras.rtsp_login_check("192.168.0.108", 554, "admin", "secret"), sent
 
+    def test_a_recorder_that_refuses_unknown_addresses_is_accepted_on_a_real_one(self) -> None:
+        """The owner's recorder answers 401 to every address it does not serve, right login or not."""
+        from unittest import mock
+
+        from home_guard_project.box import find_cameras
+
+        asked = []
+
+        def fake(host, port, uri, authorization="", timeout=5.0):
+            asked.append(uri)
+            if uri.endswith("/unicast/c1/s0/live") and authorization:
+                return "RTSP/1.0 200 OK\r\n\r\n"
+            return self.UNAUTHORIZED
+
+        paths = ["/Streaming/Channels/101", "/unicast/c1/s0/live", "/cam/realmonitor?channel=1&subtype=0"]
+        with mock.patch.object(find_cameras, "_rtsp_describe", side_effect=fake):
+            self.assertEqual(find_cameras.rtsp_login_check("10.0.0.9", 554, "admin", "secret", paths=paths), "accepted")
+        self.assertTrue(asked[-1].endswith("/unicast/c1/s0/live"))   # it stopped at the first address that worked
+
+        with mock.patch.object(find_cameras, "_rtsp_describe", return_value=self.UNAUTHORIZED):
+            self.assertEqual(find_cameras.rtsp_login_check("10.0.0.9", 554, "admin", "wrong", paths=paths), "refused")
+
+    def test_the_real_addresses_tried_cover_every_known_recorder_family(self) -> None:
+        from home_guard_project.box import find_cameras
+
+        paths = find_cameras.first_stream_paths()
+        self.assertIn("/unicast/c1/s0/live", paths)
+        self.assertIn("/Streaming/Channels/101", paths)
+        self.assertTrue(all(path.startswith("/") and "{" not in path for path in paths))
+
     def test_digest_response_matches_the_rfc_2069_example(self) -> None:
         from home_guard_project.box.find_cameras import digest_response
 

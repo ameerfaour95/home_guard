@@ -20,7 +20,7 @@ class SearchTest(unittest.TestCase):
 
         with mock.patch.object(find_cameras, "rtsp_hosts", return_value=hosts), \
                 mock.patch.object(find_cameras, "rtsp_login_check",
-                                  side_effect=lambda host, port, user, password: logins[host]), \
+                                  side_effect=lambda host, port, user, password, paths=(): logins[host]), \
                 mock.patch.object(find_cameras, "_probe_host", side_effect=probe):
             found, extra = find_cameras.search("admin", "x")
         return found, extra, probed
