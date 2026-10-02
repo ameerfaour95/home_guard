@@ -49,9 +49,11 @@ def validate_points(points: Any) -> List[Point]:
         raise ValueError(f"a zone needs {MIN_POINTS} to {MAX_POINTS} corners (got {len(points)})")
     out: List[Point] = []
     for p in points:
+        if not isinstance(p, (list, tuple)) or len(p) != 2:
+            raise ValueError("every corner must be two numbers, x and y")
         try:
             x, y = float(p[0]), float(p[1])
-        except (TypeError, ValueError, IndexError, KeyError):
+        except Exception:  # noqa: BLE001 - anything that is not two finite numbers is one error for the owner
             raise ValueError("every corner must be two numbers, x and y") from None
         if not (0.0 <= x <= 1.0 and 0.0 <= y <= 1.0):
             raise ValueError("every corner must lie inside the picture (0 to 1)")
@@ -146,6 +148,11 @@ def rename_zone(old: str, new: str, path: str = ZONES_PATH) -> bool:
     """Carry a zone along when its camera is renamed. True if there was one to move."""
     zones: Dict[str, Any] = dict(_read_raw(path))
     if str(old) not in zones or old == new:
+        return False
+    try:
+        validate_points(zones[str(old)])
+    except ValueError:
+        log.warning("Zone for %s is damaged and was not renamed", old)
         return False
     zones[str(new)] = zones.pop(str(old))
     save_zones(zones, path)

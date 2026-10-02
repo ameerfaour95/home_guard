@@ -90,6 +90,24 @@ class ZoneFileTest(unittest.TestCase):
             f.write("zones:\n  yard: [{a: 1}, [0, 0], [1, 1]]\n  gate: [[0, 0], [1, 0], [1, 1]]\n")
         self.assertEqual(z.load_zones(self.path), {"gate": [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)]})
 
+    def test_a_number_too_large_for_a_float_does_not_crash_the_loader(self) -> None:
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write("zones:\n  yard: [[0, 0], [1, 0], [" + "9" * 400 + ", 1]]\n  gate: [[0, 0], [1, 0], [1, 1]]\n")
+        self.assertEqual(z.load_zones(self.path), {"gate": [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)]})
+
+    def test_a_corner_must_be_exactly_two_numbers(self) -> None:
+        with self.assertRaises(ValueError):
+            z.validate_points(["01", "01", "01"])
+        with self.assertRaises(ValueError):
+            z.validate_points([(0, 0, 5), (1, 0), (1, 1)])
+
+    def test_renaming_a_damaged_zone_reports_false_and_leaves_the_file_alone(self) -> None:
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write("zones:\n  bad: 5\n  gate: [[0, 0], [1, 0], [1, 1]]\n")
+        before = open(self.path, encoding="utf-8").read()
+        self.assertFalse(z.rename_zone("bad", "good", self.path))
+        self.assertEqual(open(self.path, encoding="utf-8").read(), before)
+
     def test_a_file_that_is_not_utf8_loads_as_no_zones(self) -> None:
         with open(self.path, "wb") as f:
             f.write(b"zones:\n  yard: \xff\xfe\n")
