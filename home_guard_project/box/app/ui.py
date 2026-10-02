@@ -76,6 +76,8 @@ class CameraTile(QFrame):
         self.name = name
         self.picture = None
         self.stopped = False
+        self.off = False
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.hero = False
         self.box_opacity = 1
         self.detections = ()
@@ -92,6 +94,7 @@ class CameraTile(QFrame):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 8, 16, 8)
         layout.addStretch()
+        self.turn_on=QPushButton('Turn on');self.turn_on.setMaximumWidth(140);self.turn_on.hide();layout.addWidget(self.turn_on,0,Qt.AlignmentFlag.AlignCenter)
         footer=QHBoxLayout()
         footer.addWidget(self.caption)
         footer.addStretch()
@@ -114,7 +117,7 @@ class CameraTile(QFrame):
     def update_picture(self, pix):
         self.picture = pix if pix and not pix.isNull() else None
         self._ambient_key=None
-        self.status.setText(tr("stopped") if self.stopped else tr("premium_live") if self.picture else tr("offline"))
+        self.status.setText("Off" if self.off else tr("stopped") if self.stopped else tr("premium_live") if self.picture else tr("offline"))
         self.status.setObjectName("ok" if self.picture else "muted")
         self.status.setStyleSheet("")
         self.update()
@@ -138,7 +141,7 @@ class CameraTile(QFrame):
                 p.drawPixmap(QRectF(area),self._ambient,QRectF(self._ambient.rect()))
                 p.fillRect(area,QColor(0,0,0,165))
             p.drawPixmap(QRectF(x,y,w,h),self.picture,QRectF(self.picture.rect()))
-            if not self.stopped and self.show_detections:
+            if not self.off and not self.stopped and self.show_detections:
                 p.setOpacity(self.box_opacity)
                 p.setFont(QFont("Segoe UI",11))
                 for detection in self.detections:
@@ -156,6 +159,9 @@ class CameraTile(QFrame):
                     tag=QRectF(tx,ty,metrics.horizontalAdvance(text)+16,metrics.height()+8)
                     p.fillRect(tag,QColor("#101a21"));p.drawText(tag.adjusted(8,0,-8,0),Qt.AlignmentFlag.AlignVCenter,text)
                 p.setOpacity(1)
+            if self.off:
+                p.fillRect(area,QColor(0,0,0,155))
+                p.save();p.translate(area.right()-35,35);p.rotate(45);p.fillRect(QRectF(-80,-15,160,30),QColor('#293945'));p.setPen(QColor('#edf4f6'));p.drawText(QRectF(-60,-15,120,30),Qt.AlignmentFlag.AlignCenter,'Off');p.restore()
             p.setFont(QFont("Segoe UI",11))
             visible=QRectF(x,y,w,h).intersected(QRectF(area))
             if self.hero:
@@ -169,12 +175,12 @@ class CameraTile(QFrame):
             p.setFont(QFont('Segoe UI',10));p.setPen(QColor('#bfccd3'))
             note=p.fontMetrics().elidedText(self.detector_note.text(),Qt.TextElideMode.ElideRight,max(1,int(footer.width()-24)))
             p.drawText(footer.adjusted(12,28,-12,0),Qt.AlignmentFlag.AlignVCenter,note)
-            p.setBrush(QColor(OK));p.setPen(Qt.PenStyle.NoPen);p.drawEllipse(QRectF(footer.right()-61,footer.top()+13,5,5))
+            p.setBrush(QColor(OK));p.setPen(Qt.PenStyle.NoPen);p.drawEllipse(QRectF(footer.right()-61,footer.top()+13,5,5)) if not self.off and not self.stopped else None
             p.setPen(QColor('#c5e4dc'));p.drawText(QRectF(footer.right()-50,footer.top(),46,30),Qt.AlignmentFlag.AlignVCenter,self.status.text())
         else:
             p.setPen(QColor("#98a6ba"))
             p.setFont(QFont("Segoe UI", 14))
-            p.drawText(area, Qt.AlignmentFlag.AlignCenter, tr("stopped") if self.stopped else tr("offline_hint"))
+            p.drawText(area, Qt.AlignmentFlag.AlignCenter, "Off" if self.off else tr("stopped") if self.stopped else tr("offline_hint"))
         p.end()
 
 
@@ -412,6 +418,9 @@ class Window(QMainWindow):
         self.current_state = None
         from .camera_controls import CameraControls
         self.camera_controls = CameraControls(self.box_controls, TEXT["demo_names"][:self.args.cameras] if self.args.state not in ("empty","no-cameras","box-unreachable") else ())
+        if self.args.demo and self.args.state=='off-camera' and self.camera_controls.records:
+            from dataclasses import replace
+            self.camera_controls.records[-1]=replace(self.camera_controls.records[-1],enabled=False)
         self.tick()
         self.details.setChecked(self.args.details)
         from .settings_ui import SettingsPage
@@ -436,9 +445,10 @@ class Window(QMainWindow):
         payload = build_heartbeat(str(settings.get("site", "")), *_clip_dirs(mode), bc.ALIVE_FILE, mode=mode)
         # Read only names, never retain or display camera URLs.
         from .camera_presentation import active_names
-        names = active_names(self.reader.names(),list(payload.get("cameras", {})))
+        records=self.camera_controls.load()
+        names = [c.name for c in records]
         return (
-            State.from_heartbeat(payload, cameras=names, upload=upload),
+            State.from_heartbeat(payload, cameras=names, disabled=[c.name for c in records if not c.enabled], upload=upload),
             bool(bc.get_option("show_cameras")),
             events,
         )
@@ -450,7 +460,7 @@ class Window(QMainWindow):
             return
         if self.args.demo:
             scenario = self.args.state
-            names = [c.name for c in self.camera_controls.records if c.enabled]
+            names = [c.name for c in self.camera_controls.records]
             state = State(
                 tr("demo_house"),
                 scenario != "stopped",
@@ -461,6 +471,7 @@ class Window(QMainWindow):
                 names,
                 error=scenario == "error",
             )
+            state.disabled=[c.name for c in self.camera_controls.records if not c.enabled]
             if scenario == "empty":
                 state.cameras = []
             demo_settings = self.box_controls.load_settings()
@@ -514,6 +525,7 @@ class Window(QMainWindow):
             try:
                 self.reader.touch(self.expanded_tile.name if self.expanded_tile else (self.tiles[0].name if self.tiles else None))
                 for tile in self.tiles:
+                    if tile.off: continue
                     data = self.reader.read(tile.name)
                     pix = QPixmap()
                     if data:
@@ -578,7 +590,7 @@ class Window(QMainWindow):
             until,some=self.alert_pause.status(self.current_state.cameras)
             self.ai_panel.render(self.ai_data,now,stopped,self.chat_data,image_dir,until,len(self.tiles),failed is not None)
             if self.box_unreachable: self.ai_panel.note.setText(tr('box_unreachable'))
-            latest=next((d for d in reversed(self.ai_data.get('decisions',[])) if isinstance(d,dict) and d.get('camera') in (self.names or [])),None)
+            latest=next((d for d in reversed(self.ai_data.get('decisions',[])) if isinstance(d,dict) and d.get('camera') in (self.names or []) and d.get('camera') not in self.current_state.disabled),None)
             if latest and latest.get('ts')!=getattr(self,'hero_event_ts',None):
                 self.hero_event_ts=latest.get('ts')
                 self.expanded_tile=next(t for t in self.tiles if t.name==latest['camera']);self.arrange_tiles()
@@ -587,7 +599,7 @@ class Window(QMainWindow):
             tile.detection_labels=self.viewer_settings.detection_labels
             tile.detector_enabled=inference
             tile.detector_note.hide()
-            tile.detections,text=camera_view(self.ai_data,tile.name,now,stopped)
+            tile.detections,text=camera_view(self.ai_data,tile.name,now,stopped or tile.off)
             tile.detector_note.setToolTip(text)
             if not tile.hero: text=tile.detector_note.fontMetrics().elidedText(text,Qt.TextElideMode.ElideRight,max(120,tile.width()-48))
             tile.detector_note.setText(text)
@@ -660,7 +672,6 @@ class Window(QMainWindow):
         empty_state=stage_state(reachable=not self.box_unreachable,cameras=state.cameras,pictures=show)
         message = (
             empty_state if empty_state in ("box_unreachable","no_cameras") else
-            "applying" if phase == "restarting" else
             "loading"
             if scenario == "loading"
             else (
@@ -699,12 +710,17 @@ class Window(QMainWindow):
             self.tiles = [CameraTile(name) for name in state.cameras]
             self.expanded_tile = None
             for tile in self.tiles:
+                tile.off=tile.name in state.disabled
+                tile.turn_on.clicked.connect(lambda checked=False,tile=tile:self.cameras_page.set_camera_enabled(tile.name,True))
                 tile.clicked.connect(lambda tile=tile: self.toggle_tile(tile))
                 tile.double_clicked.connect(lambda tile=tile: self.fullscreen_camera(tile))
             self.arrange_tiles()
         for tile in self.tiles:
+            tile.off=tile.name in state.disabled
+            tile.turn_on.setVisible(tile.off)
             tile.stopped = stopped
             if stopped: tile.update_picture(None)
+        if self.expanded_tile and self.expanded_tile.off: self.expanded_tile=None;self.arrange_tiles()
 
     def resume_alerts(self):
         try:
@@ -798,6 +814,7 @@ class Window(QMainWindow):
                 self.control_note.setText(tr("control_error"))
 
     def toggle_tile(self, tile):
+        if tile.off: return
         self.expanded_tile=tile
         self.arrange_tiles()
 
@@ -827,7 +844,12 @@ class Window(QMainWindow):
         if old:
             old.setParent(None);old.deleteLater()
         if not self.tiles: return
-        if self.expanded_tile not in self.tiles: self.expanded_tile=self.tiles[0]
+        if self.expanded_tile not in self.tiles or self.expanded_tile.off: self.expanded_tile=next((t for t in self.tiles if not t.off),None)
+        if self.expanded_tile is None:
+            self.thumbnail_scroll=None
+            for i,tile in enumerate(self.tiles):
+                tile.hero=False;tile.setMinimumSize(180,144);tile.setMaximumSize(16777215,16777215);self.grid.addWidget(tile,i//2,i%2);tile.show()
+            return
         hero=self.expanded_tile;hero.hero=True;hero.setMinimumSize(180,260);hero.setMaximumSize(16777215,16777215)
         self.grid.addWidget(hero,0,0);self.grid.setRowStretch(0,1);self.grid.setColumnStretch(0,1)
         others=[tile for tile in self.tiles if tile is not hero]

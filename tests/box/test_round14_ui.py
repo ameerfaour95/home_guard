@@ -40,3 +40,34 @@ class RecordedDetectionTests(unittest.TestCase):
         self.assertFalse(w.detection_hint.isHidden())
         self.assertTrue(all(not t.detections for t in w.tiles))
         w.close()
+
+
+class OffCameraTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls): cls.app=QApplication.instance() or QApplication([])
+    def test_disabled_camera_stays_and_switch_applies_without_login(self):
+        w=Window(args(state='off-camera'));w.show();self.app.processEvents()
+        off=next(t for t in w.tiles if t.off)
+        self.assertIsNot(w.expanded_tile,off)
+        self.assertFalse(off.turn_on.isHidden())
+        page=w.cameras_page;page.render(w.camera_controls.records)
+        from PySide6.QtWidgets import QWidget
+        slots=page.widget.findChildren(QWidget,'cameraActionSlot')
+        self.assertEqual(len(slots),3)
+        self.assertTrue(all(slot.layout().count()==0 for slot in slots))
+        off.turn_on.click()
+        self.assertTrue(all(c.enabled for c in w.camera_controls.records))
+        page.future.result();page.poll()
+        self.assertEqual(len(w.tiles),3)
+        self.assertTrue(all(not t.off for t in w.tiles))
+        w.close()
+    def test_failed_toggle_rolls_back(self):
+        from concurrent.futures import Future
+        w=Window(args(state='off-camera'));page=w.cameras_page;page.render(w.camera_controls.records)
+        failed=Future();failed.set_exception(ValueError('recorded failure'))
+        with patch.object(page.pool,'submit',return_value=failed):
+            page.set_camera_enabled(w.camera_controls.records[-1].name,True)
+        page.poll()
+        self.assertFalse(w.camera_controls.records[-1].enabled)
+        self.assertTrue(w.tiles[-1].off)
+        w.close()

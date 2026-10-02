@@ -78,6 +78,7 @@ class CameraPage:
         self.pool = ThreadPoolExecutor(max_workers=1)
         self.future = None
         self.rows = []
+        self.row_busy={}
         self.loaded = False
         self.timer = QTimer(self.widget)
         self.timer.timeout.connect(self.poll)
@@ -138,6 +139,8 @@ class CameraPage:
                 except (OSError,ValueError,TypeError): pass
         if self.future is None or not self.future.done():
             return
+        if getattr(self,'toggle_before',None) is not None:
+            self.finish_toggle();return
         future, self.future = self.future, None
         self.progress.hide()
         self.refresh.setEnabled(True)
@@ -194,6 +197,9 @@ class CameraPage:
                 photo=label(tr("camera_snapshot_failed" if self.wizard else "camera_no_photo"),"muted")
                 photo.setMinimumHeight(180)
             layout.addWidget(photo)
+            # Reserved for the next camera action and one status line. Keep empty.
+            slot=QWidget();slot.setObjectName('cameraActionSlot');slot.setFixedHeight(36)
+            QHBoxLayout(slot).setContentsMargins(0,0,0,0);layout.addWidget(slot)
             line = QHBoxLayout()
             name = QLineEdit(camera.name)
             name.setAccessibleName(tr("camera_name"))
@@ -202,6 +208,8 @@ class CameraPage:
             enabled = QCheckBox(tr("camera_enabled" if camera.enabled else "camera_off"))
             enabled.setChecked(camera.enabled)
             enabled.toggled.connect(self.validate)
+            if not self.wizard: enabled.toggled.connect(lambda checked,n=camera.name:self.set_camera_enabled(n,checked))
+            busy=QProgressBar();busy.setRange(0,0);busy.setTextVisible(False);busy.setFixedSize(24,3);busy.hide();line.addWidget(busy);self.row_busy[camera.name]=busy
             line.addWidget(name, 1)
             line.addWidget(enabled)
             layout.addLayout(line)
@@ -210,6 +218,35 @@ class CameraPage:
         grid.setRowStretch((len(records)+1)//2, 1)
         self.scroll.setWidget(content)
         self.validate()
+
+    def set_camera_enabled(self,name,enabled):
+        if self.future is not None: return
+        from dataclasses import replace
+        self.toggle_before=list(self.controls.records)
+        changes=[(c.name,c.name,enabled if c.name==name else c.enabled) for c in self.controls.records]
+        self.controls.records=[replace(c,enabled=enabled) if c.name==name else c for c in self.controls.records]
+        for old,field,switch in self.rows:
+            switch.setEnabled(False)
+            if old==name:
+                switch.blockSignals(True);switch.setChecked(enabled);switch.setText(tr('camera_enabled' if enabled else 'camera_off'));switch.blockSignals(False)
+        if name in self.row_busy: self.row_busy[name].show()
+        self.save.setEnabled(False)
+        self.future=self.pool.submit(lambda:self.controls.save(changes))
+        self.changed()
+
+    def finish_toggle(self):
+        future,self.future=self.future,None
+        try:
+            records=future.result()
+            self.note.setText(tr('camera_saved'))
+        except Exception:
+            self.controls.records=self.toggle_before
+            records=self.toggle_before
+            self.note.setText(tr('camera_error'))
+            from .motion import toast
+            toast(self.widget.window(),tr('camera_error'))
+        self.toggle_before=None
+        self.render(records);self.changed()
 
     def validate(self):
         self.saved = False
