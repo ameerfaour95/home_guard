@@ -97,8 +97,27 @@ Do not identify anyone and do not describe a person's personal or physical chara
 only the activity.
 
 Reply with EXACTLY ONE strict JSON object and nothing else:
-{{"summary": "<one short sentence>"}}
+{{"summary": "<one short sentence>",
+  "people": <how many people are visible in the frames, as a number; 0 if none>,
+  "vehicle_moving": <true if a vehicle is driving, arriving or leaving; false if vehicles are only parked or there are none>}}
 """.strip()
+
+
+def vlm_confirms(parsed: Optional[Dict[str, Any]]) -> Optional[bool]:
+    """What the VLM saw, for the decision to alert.
+
+    True: a person, or a vehicle on the move. False: it looked and saw neither,
+    so the detector's trigger was a false positive. None: it did not say (no
+    answer, or an answer without these fields); the caller then trusts the
+    detector, because a missed alert is worse than a needless one.
+    """
+    if not parsed or ("people" not in parsed and "vehicle_moving" not in parsed):
+        return None
+    try:
+        people = int(parsed.get("people") or 0)
+    except (TypeError, ValueError):
+        return None
+    return people > 0 or parsed.get("vehicle_moving") is True
 
 
 @dataclass(frozen=True)
@@ -283,13 +302,19 @@ def detect_trigger(result) -> Tuple[bool, bool, List[str]]:
 # Runtime
 # ----------------------------------------------------------------------------
 class _Stream:
-    """Threaded RTSP reader keeping only the latest frame (drops stale frames)."""
+    """Threaded RTSP reader keeping only the latest frame (drops stale frames).
 
-    def __init__(self, name: str, url: str) -> None:
+    With a *ring* (alert_clips.ClipRing) it also keeps the last seconds for the
+    alert clip. That happens here, at the camera's own pace: the detection loop
+    visits a camera only every second or two, too rarely for a video.
+    """
+
+    def __init__(self, name: str, url: str, ring: Any = None) -> None:
         import cv2  # noqa: PLC0415
 
         self.name = name
         self.url = url
+        self._ring = ring
         self._cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
         self._frame = None
         self._lock = threading.Lock()
@@ -309,6 +334,12 @@ class _Stream:
                 continue
             with self._lock:
                 self._frame = frame
+            if self._ring is not None:
+                now = time.time()
+                if self._ring.wants(now):
+                    from .alert_clips import encode_frame  # noqa: PLC0415
+
+                    self._ring.add(now, encode_frame(frame))
 
     def read(self):
         with self._lock:
@@ -324,6 +355,7 @@ class AlertJob:
     ts: float                        # when the gate opened
     labels: List[str] = field(default_factory=list)
     alert: Dict[str, Any] = field(default_factory=dict)
+    false_positive: bool = False     # the VLM saw nothing: not sent, saved for training instead
     ready: threading.Event = field(default_factory=threading.Event)
 
 
@@ -356,6 +388,16 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
         if not summary:
             summary = "a person or vehicle was detected"
         reason = str(parsed.get("alert_reason", "")) if parsed else ""
+        if vlm_confirms(parsed) is False:
+            # The detector fired, the VLM looked and saw no person and nothing moving: no
+            # message to the owner. The clip is kept as a false positive, for training.
+            log.info("[%s] no alert: the VLM saw nobody and nothing moving (%s)", camera_name, summary)
+            if job is not None:
+                job.false_positive = True
+                job.alert = {"summary": summary, "alert_command": "[none]", "alert_reason": "",
+                             "labels": job.labels, "false_positive": True,
+                             "vlm": {"people": parsed.get("people"), "vehicle_moving": parsed.get("vehicle_moving")}}
+            return
         log.info("[%s] alert=%s summary=%s", camera_name, cmd, summary)
         # Attach the most recent frame of the clip as the alert snapshot.
         image = b""
@@ -384,16 +426,25 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
             job.ready.set()
 
 
-def _save_clip(job: AlertJob, frames: List[Any], root_dir: str) -> None:
-    """Write the alert's clip once the worker has decided what the alert was. Never raises out."""
+def _save_clip(job: AlertJob, frames: List[Any], production_dir: str, training_dir: str) -> None:
+    """Write the alert's clip once the worker has decided what the alert was. Never raises out.
+
+    A real alert goes to *production_dir* (kept two weeks, where the owner can
+    ask for it). A false positive goes to *training_dir*, the collector's own
+    dataset folder, and is uploaded with the clips for tagging.
+    """
     try:
-        from .alert_clips import write_alert_clip  # noqa: PLC0415
+        from .alert_clips import false_positive_stem, write_alert_clip  # noqa: PLC0415
 
         job.ready.wait(timeout=90)
         alert = job.alert or {"summary": "", "alert_command": "[none]", "alert_reason": "", "labels": job.labels}
-        meta = write_alert_clip(root_dir, job.camera, job.stem, frames, alert)
+        if job.false_positive:
+            meta = write_alert_clip(training_dir, job.camera, false_positive_stem(job.camera, job.ts), frames,
+                                    alert, kind="false_positive")
+        else:
+            meta = write_alert_clip(production_dir, job.camera, job.stem, frames, alert)
         if meta:
-            log.info("[%s] clip saved: %s (%d frames)", job.camera, job.stem, len(frames))
+            log.info("[%s] clip saved: %s (%d frames)", job.camera, os.path.basename(meta), len(frames))
     except Exception as exc:  # noqa: BLE001
         log.warning("[%s] could not save the clip %s: %s", job.camera, job.stem, exc)
 
@@ -439,18 +490,17 @@ def run() -> int:
     if not cameras:
         log.error("No cameras configured (cameras.yaml). Nothing to watch; exiting.")
         return 1
-    streams = {name: _Stream(name, url) for name, url in cameras.items()}
+    # Every alert is saved as a clip (the seconds around it) in the production folder,
+    # and the owner can answer it in Telegram. Neither may stop the alerts themselves.
+    from .alert_clips import POST_SECONDS, PRE_SECONDS, ClipRing, alert_stem  # noqa: PLC0415
+    from .boxconfig import LIVE_DIR, PRODUCTION_LIVE_DIR  # noqa: PLC0415
+
+    rings: Dict[str, ClipRing] = {name: ClipRing() for name in cameras}
+    streams = {name: _Stream(name, url, ring=rings[name]) for name, url in cameras.items()}
     buffers: Dict[str, deque] = {name: deque(maxlen=settings.clip_frames) for name in cameras}
     last_buf_ts: Dict[str, float] = {name: 0.0 for name in cameras}
     last_alert_ts: Dict[str, float] = {name: 0.0 for name in cameras}
     worker = {"t": None}  # single in-flight VLM call across cameras (N150 budget)
-
-    # Every alert is saved as a clip (the seconds around it) in the production folder,
-    # and the owner can answer it in Telegram. Neither may stop the alerts themselves.
-    from .alert_clips import POST_SECONDS, PRE_SECONDS, ClipRing, alert_stem, encode_frame  # noqa: PLC0415
-    from .boxconfig import PRODUCTION_LIVE_DIR  # noqa: PLC0415
-
-    rings: Dict[str, ClipRing] = {name: ClipRing() for name in cameras}
     pending: List[AlertJob] = []
     assistant = None
     try:
@@ -466,7 +516,7 @@ def run() -> int:
         for job in [j for j in pending if now_ts >= j.ts + POST_SECONDS]:
             pending.remove(job)
             clip = rings[job.camera].between(job.ts - PRE_SECONDS, job.ts + POST_SECONDS)
-            threading.Thread(target=_save_clip, args=(job, clip, PRODUCTION_LIVE_DIR), daemon=True).start()
+            threading.Thread(target=_save_clip, args=(job, clip, PRODUCTION_LIVE_DIR, LIVE_DIR), daemon=True).start()
         for name in cameras:
             frame = streams[name].read()
             if frame is None:
@@ -475,8 +525,6 @@ def run() -> int:
             if now_ts - last_buf_ts[name] >= settings.frame_interval_sec:
                 buffers[name].append(frame)
                 last_buf_ts[name] = now_ts
-            if rings[name].wants(now_ts):
-                rings[name].add(now_ts, encode_frame(frame))
 
             if now_ts - last_alert_ts[name] < settings.cooldown_sec:
                 continue

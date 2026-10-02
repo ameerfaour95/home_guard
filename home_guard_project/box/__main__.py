@@ -164,6 +164,8 @@ def _status(cfg: BoxConfig) -> dict:
     """The status report: the heartbeat, plus whether the box was stopped on purpose."""
     status = build_heartbeat(cfg.site, *_clip_dirs(cfg.mode), ALIVE_FILE, mode=cfg.mode)
     status["stopped"] = control.is_stopped()
+    if status["stopped"]:
+        status["collector_running"] = False   # the alive file can be up to three minutes behind
     return status
 
 

@@ -63,6 +63,11 @@ def alert_stem(camera: str, ts: float) -> str:
     return f"{camera}_{int(ts)}_alert"
 
 
+def false_positive_stem(camera: str, ts: float) -> str:
+    """The file stem of a clip the VLM dismissed: the detector fired, nobody and nothing moving was there."""
+    return f"{camera}_{int(ts)}_fp"
+
+
 def _to_h264(path: str) -> bool:
     """Re-encode *path* in place with the pipeline's own ffmpeg helper. False if ffmpeg is missing or fails."""
     try:
@@ -82,6 +87,7 @@ def write_alert_clip(
     frames: List[Tuple[float, bytes]],
     alert: Dict[str, Any],
     h264: bool = True,
+    kind: str = "alert",
 ) -> Optional[str]:
     """Write the clip and then its meta under *root_dir*. Returns the meta path, or None with no frames.
 
@@ -128,7 +134,7 @@ def write_alert_clip(
     local = lambda ts: dt.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")  # noqa: E731
     meta = {
         "camera_name": camera,
-        "kind": "alert",
+        "kind": kind,
         "clip_path": clip_rel.replace("/", "\\"),
         "clip_start_ts": start_ts,
         "clip_end_ts": end_ts,
@@ -139,6 +145,9 @@ def write_alert_clip(
         "fps_estimated": fps,
         "codec": codec,
         "buffer": {"store_fps": fps, "store_size": [width, height]},
+        # What the detector fired on, in the shape the tagging tools read.
+        "yolo": {"class_counts": {label: 1 for label in alert.get("labels", [])},
+                 "trigger_classes": list(alert.get("labels", [])), "trigger_detected": True},
         "alert": alert,
     }
     tmp = f"{meta_path}.tmp"

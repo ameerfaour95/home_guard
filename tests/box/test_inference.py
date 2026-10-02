@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import os
 import unittest
 from unittest import mock
 
@@ -208,3 +210,68 @@ class WorkerWithAssistantTest(unittest.TestCase):
             inf._worker(_DescribingBackend(), self.BOX, {"TELEGRAM_BOT_TOKEN": "T"}, self.SETTINGS,
                         "front_door", [object()])
         notify.assert_called_once()
+
+
+class VlmFilterTest(unittest.TestCase):
+    def test_what_the_vlm_saw(self) -> None:
+        self.assertTrue(inf.vlm_confirms({"summary": "a person walks", "people": 1, "vehicle_moving": False}))
+        self.assertTrue(inf.vlm_confirms({"summary": "a car arrives", "people": 0, "vehicle_moving": True}))
+        self.assertTrue(inf.vlm_confirms({"summary": "two people", "people": "2"}))
+        self.assertFalse(inf.vlm_confirms({"summary": "a parked car", "people": 0, "vehicle_moving": False}))
+        self.assertFalse(inf.vlm_confirms({"summary": "nothing", "people": 0}))
+
+    def test_no_verdict_when_the_vlm_did_not_say(self) -> None:
+        self.assertIsNone(inf.vlm_confirms(None))
+        self.assertIsNone(inf.vlm_confirms({}))
+        self.assertIsNone(inf.vlm_confirms({"summary": "something"}))           # an older or other backend
+        self.assertIsNone(inf.vlm_confirms({"summary": "x", "people": "several"}))
+
+    def test_the_prompt_asks_for_the_facts_the_decision_needs(self) -> None:
+        prompt = inf.build_prompt("front_door", 0, "12:00:00", 22, 6)
+        self.assertIn('"people"', prompt)
+        self.assertIn('"vehicle_moving"', prompt)
+
+
+class _ParkedCarBackend:
+    def analyze(self, frames, camera_name, t_sec, start_hour, end_hour):
+        parsed = {"summary": "a car is parked in the driveway", "people": 0, "vehicle_moving": False}
+        return "{}", parsed
+
+
+class FalsePositiveTest(unittest.TestCase):
+    def test_nothing_is_sent_and_the_job_is_marked_for_training(self) -> None:
+        assistant = _FakeAssistant()
+        job = inf.AlertJob(camera="yard", stem="yard_100_alert", ts=100.0, labels=["car"])
+        with mock.patch.object(inf, "dispatch_alert") as dispatch:
+            inf._worker(_ParkedCarBackend(), {"alert_channel": "telegram"}, {}, AlertSettings(), "yard",
+                        [object()], assistant, job)
+        dispatch.assert_not_called()
+        self.assertEqual(assistant.sent, [])
+        self.assertTrue(job.false_positive)
+        self.assertTrue(job.ready.is_set())
+        self.assertEqual(job.alert["alert_command"], "[none]")
+        self.assertEqual(job.alert["vlm"], {"people": 0, "vehicle_moving": False})
+
+    def test_a_false_positive_clip_goes_to_the_training_folder_not_the_production_one(self) -> None:
+        import tempfile
+
+        import numpy as np
+
+        from home_guard_project.box.alert_clips import encode_frame
+
+        with tempfile.TemporaryDirectory() as tmp:
+            production, training = os.path.join(tmp, "production_multi"), os.path.join(tmp, "dataset_multi")
+            frames = [(100.0 + i * 0.2, encode_frame(np.zeros((48, 64, 3), dtype=np.uint8))) for i in range(5)]
+            job = inf.AlertJob(camera="yard", stem="yard_100_alert", ts=100.0, labels=["car"], false_positive=True,
+                               alert={"summary": "a parked car", "alert_command": "[none]", "labels": ["car"]})
+            job.ready.set()
+            with mock.patch("home_guard_project.box.alert_clips._to_h264", return_value=False):
+                inf._save_clip(job, frames, production, training)
+
+            self.assertFalse(os.path.exists(production))
+            metas = [os.path.join(d, n) for d, _, names in os.walk(training) for n in names if n.endswith(".meta.json")]
+            self.assertEqual([os.path.basename(m) for m in metas], ["yard_100_fp.meta.json"])
+            with open(metas[0], encoding="utf-8") as f:
+                meta = json.load(f)
+            self.assertEqual(meta["kind"], "false_positive")
+            self.assertEqual(meta["yolo"]["class_counts"], {"car": 1})
