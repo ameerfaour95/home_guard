@@ -45,5 +45,8 @@ $link = Get-NetIPConfiguration | Where-Object { $_.IPv4DefaultGateway -and $_.In
 if ($link) { Pass "Network link up ($($link[0].InterfaceAlias))" } else { Warn 'No non-Tailscale default route (box may be offline to the LAN)' }
 if (Test-Path 'C:\home_guard\home_guard_project\data_collection\cameras.yaml') { Pass 'cameras.yaml present' } else { Warn 'cameras.yaml missing (run camera discovery)' }
 
+# --- AWS upload key ---
+if (Test-Path (Join-Path $env:USERPROFILE '.aws\credentials')) { Pass 'AWS credentials present' } else { Warn 'AWS credentials missing (uploads fail; run make_box_key <site> and copy to .aws\credentials)' }
+
 Write-Host ''
 if ($script:fails -gt 0) { Write-Host "$script:fails essential check(s) FAILED" -ForegroundColor Red; exit 1 } else { Write-Host 'All essential checks passed' -ForegroundColor Green }
