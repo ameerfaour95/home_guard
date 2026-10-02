@@ -103,6 +103,8 @@ class CameraTile(QFrame):
         self.detector_note.setContentsMargins(16,0,0,8)
         layout.addWidget(self.detector_note)
         layout.setSpacing(3)
+        self.skeleton_timer=QTimer(self);self.skeleton_timer.setInterval(50);self.skeleton_timer.timeout.connect(self.update)
+        self.skeleton_timer.start()
         self.setMinimumSize(180, 140)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
@@ -116,6 +118,8 @@ class CameraTile(QFrame):
 
     def update_picture(self, pix):
         self.picture = pix if pix and not pix.isNull() else None
+        if self.picture or self.stopped or self.off: self.skeleton_timer.stop()
+        elif not self.skeleton_timer.isActive(): self.skeleton_timer.start()
         self._ambient_key=None
         self.status.setText("Off" if self.off else tr("stopped") if self.stopped else tr("premium_live") if self.picture else tr("offline"))
         self.status.setObjectName("ok" if self.picture else "muted")
@@ -178,6 +182,9 @@ class CameraTile(QFrame):
             p.setBrush(QColor(OK));p.setPen(Qt.PenStyle.NoPen);p.drawEllipse(QRectF(footer.right()-61,footer.top()+13,5,5)) if not self.off and not self.stopped else None
             p.setPen(QColor('#c5e4dc'));p.drawText(QRectF(footer.right()-50,footer.top(),46,30),Qt.AlignmentFlag.AlignVCenter,self.status.text())
         else:
+            if not self.off and not self.stopped:
+                gradient=QLinearGradient(0,0,area.width(),0);phase=(math.sin(time.monotonic()*2)+1)/2
+                gradient.setColorAt(0,QColor('#14212b'));gradient.setColorAt(max(.01,min(.99,phase)),QColor('#20333e'));gradient.setColorAt(1,QColor('#14212b'));p.fillRect(area,gradient)
             p.setPen(QColor("#98a6ba"))
             p.setFont(QFont("Segoe UI", 14))
             p.drawText(area, Qt.AlignmentFlag.AlignCenter, "Off" if self.off else tr("stopped") if self.stopped else tr("offline_hint"))
@@ -187,6 +194,8 @@ class CameraTile(QFrame):
 class Window(QMainWindow):
     def __init__(self, args):
         super().__init__()
+        from .motion import install
+        install()
         self.args = args
         from .preferences import ViewerPreference
         from dataclasses import replace
@@ -298,7 +307,8 @@ class Window(QMainWindow):
         if self.args.demo and self.args.state == "paused":
             self.box_controls._settings = __import__("dataclasses").replace(self.box_controls._settings,mode="inference")
             self.alert_pause.demo_until = time.time()+3600
-        self.content_stack = QStackedWidget()
+        from .motion import AnimatedStack
+        self.content_stack = AnimatedStack()
         overview = QWidget()
         overview_layout = layout_for(overview, 0)
         self.content_stack.addWidget(overview)
@@ -588,7 +598,7 @@ class Window(QMainWindow):
             image_dir=Path(bc.LOG_DIR)/'chat_images'
         if inference:
             until,some=self.alert_pause.status(self.current_state.cameras)
-            self.ai_panel.render(self.ai_data,now,stopped,self.chat_data,image_dir,until,len(self.tiles),failed is not None)
+            self.ai_panel.render(self.ai_data,now,stopped,self.chat_data,image_dir,until,sum(not t.off for t in self.tiles),failed is not None)
             if self.box_unreachable: self.ai_panel.note.setText(tr('box_unreachable'))
             latest=next((d for d in reversed(self.ai_data.get('decisions',[])) if isinstance(d,dict) and d.get('camera') in (self.names or []) and d.get('camera') not in self.current_state.disabled),None)
             if latest and latest.get('ts')!=getattr(self,'hero_event_ts',None):
@@ -600,6 +610,7 @@ class Window(QMainWindow):
             tile.detector_enabled=inference
             tile.detector_note.hide()
             tile.detections,text=camera_view(self.ai_data,tile.name,now,stopped or tile.off)
+            if tile.off: text="Off"
             tile.detector_note.setToolTip(text)
             if not tile.hero: text=tile.detector_note.fontMetrics().elidedText(text,Qt.TextElideMode.ElideRight,max(120,tile.width()-48))
             tile.detector_note.setText(text)
@@ -622,6 +633,8 @@ class Window(QMainWindow):
         self.run_button.show()
         self.header_hint.setText(tr("stopped") if stopped else tr("premium_protecting") if state.collecting and state.mode=="inference" else tr("premium_collecting") if state.collecting else tr("close_starting"))
         self.run_button.setText(tr("start_box") if stopped else tr("stop_box"))
+        from .motion import busy
+        busy(self.run_button,self.start_requested)
         self.run_button.setEnabled(not self.start_requested and not self.box_unreachable)
         self.run_button.setToolTip(tr("offline_controls") if self.box_unreachable else "")
         if self.box_unreachable: self.header_hint.setText(tr("box_unreachable"))
@@ -719,6 +732,7 @@ class Window(QMainWindow):
             tile.off=tile.name in state.disabled
             tile.turn_on.setVisible(tile.off)
             tile.stopped = stopped
+            tile.update_picture(tile.picture)
             if stopped: tile.update_picture(None)
         if self.expanded_tile and self.expanded_tile.off: self.expanded_tile=None;self.arrange_tiles()
 
@@ -771,6 +785,9 @@ class Window(QMainWindow):
 
     def settings_changed(self):
         self.last_poll = 0
+        if self.current_state and self.camera_controls.records:
+            self.current_state.cameras=[c.name for c in self.camera_controls.records]
+            self.current_state.disabled=[c.name for c in self.camera_controls.records if not c.enabled]
         if self.current_state:
             self.apply_state(self.current_state, self.box_controls.load_settings().show_cameras, self.events)
         self.tick()
@@ -838,6 +855,7 @@ class Window(QMainWindow):
         else: super().keyPressEvent(event)
 
     def arrange_tiles(self):
+        before=self.grid_widget.grab() if self.grid_widget.isVisible() else None
         while self.grid.count(): self.grid.takeAt(0)
         for tile in self.tiles: tile.setParent(self.grid_widget)
         old=getattr(self,'thumbnail_scroll',None)
@@ -864,6 +882,10 @@ class Window(QMainWindow):
             self.thumbnail_scroll.setWidget(holder);self.grid.addWidget(self.thumbnail_scroll,1,0)
         else: self.thumbnail_scroll=None
         for tile in self.tiles: tile.show();tile.update()
+        if before is not None:
+            self.grid.activate()
+            from .motion import Transition
+            self.rail_transition=Transition(self.grid_widget,before,self.grid_widget.grab(),self.grid_widget.rect())
 
     def render_activity(self):
         while self.activity_layout.count():
@@ -927,7 +949,8 @@ class Window(QMainWindow):
             self.step_icons.append(icon)
             self.step_labels.append(item)
         self.outer.addLayout(step_bar)
-        self.pages = QStackedWidget()
+        from .motion import AnimatedStack
+        self.pages = AnimatedStack()
         self.outer.addWidget(self.pages, 1)
         from .camera_retry import CameraRetry
         self.camera_retry = CameraRetry()

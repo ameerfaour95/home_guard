@@ -45,12 +45,14 @@ class CameraControls:
         return result.returncode, data
 
     def load(self):
-        if self.box.demo:
+        if self.box.demo or getattr(self,"toggle_pending",False):
             return list(self.records)
         from ..find_cameras import _read_cameras_raw
         raw = _read_cameras_raw()
         previous={camera.name:camera for camera in self.records}
         self.records = [replace(previous[name],enabled=enabled) if name in previous else Camera(name,enabled) for group, enabled in (("cameras", True), ("disabled", False)) for name in raw.get(group, {})]
+        order={name:i for i,name in enumerate(previous)}
+        self.records.sort(key=lambda c:order.get(c.name,len(order)))
         return list(self.records)
 
     def search(self, user, password):

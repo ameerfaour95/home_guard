@@ -41,12 +41,12 @@ QPushButton#stopAction { background: @raised; color: @error; border-color: @erro
 QPushButton#textAction { background: transparent; color: @secondary; border: none; padding: 4px; min-height: 20px; font-size: 14px; }
 QFrame#setupStep { border: 1px solid transparent; border-radius: 8px; background: transparent; }
 QFrame#setupStep[selected="true"] { background: @raised; border-color: @border; }
-QWidget#detailsTimelineRow,QWidget#summaryOverview,QWidget#setupWorkspaceContent,QWidget#timelineBody { background: transparent; }
+QWidget#cameraActionSlot,QWidget#detailsTimelineRow,QWidget#summaryOverview,QWidget#setupWorkspaceContent,QWidget#timelineBody { background: transparent; }
 QWidget#setupDetails { background: @raised; border: 1px solid @border; border-radius: 16px; }
 QPushButton:hover { border-color: @text; }
 QPushButton:disabled { background: @raised; color: @muted; border-color: @border; }
 QPushButton#stopAction:disabled { background: @raised; color: @muted; border-color: @border; }
-QPushButton:focus, QCheckBox:focus { border: 2px solid @action; }
+QPushButton:pressed { background: @border; }
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QTextEdit { background: @surface; color: @text; border: 1px solid @border; border-radius: 8px; padding: 12px; selection-background-color: @action; min-height: 22px; }
 QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus { border-color: @action; }
 QComboBox QAbstractItemView { background: @surface; color: @text; border: 1px solid @border; padding: 8px; selection-background-color: @raised; }
@@ -62,7 +62,8 @@ QCheckBox::indicator:checked { background: @action; image: url(@check); border-c
 QScrollArea { border: none; background: transparent; }
 QScrollBar:vertical { width: 6px; background: transparent; margin: 0; }
 QScrollBar:horizontal { height: 6px; background: transparent; margin: 0; }
-QScrollBar::handle { background: @border; border-radius: 3px; min-height: 24px; min-width: 24px; }
+QScrollBar::handle { background: transparent; border-radius: 3px; min-height: 24px; min-width: 24px; }
+QScrollArea:hover QScrollBar::handle, QScrollBar::handle:hover { background: @border; }
 QScrollBar::add-line,QScrollBar::sub-line { width: 0; height: 0; }
 QScrollBar::add-page,QScrollBar::sub-page { background: transparent; }
 QSlider::groove:horizontal { background: @border; height: 4px; border-radius: 2px; }

@@ -70,7 +70,8 @@ class SetupWorkspace(QScrollArea):
         from .ai_activity_ui import icon
         self.toggle.setText(tr('hide_details' if opened else 'show_readable_details'))
         self.toggle.setIcon(icon('chevron-up' if opened else 'chevron-down'))
-        self.details.setVisible(opened)
+        from .motion import reveal
+        reveal(self.details,opened)
         if self.fallback: self.fallback.setVisible(not opened)
         self.adapt()
     def adapt(self):

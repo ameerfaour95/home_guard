@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QWidget,QHBoxLayout,QScrollArea,QGraphicsOpacityEf
 from .ai_view import status_note
 from .timeline import merge_timeline,thinking_camera,image_path,group_quiet,QuietGroup,text_direction
 from .strings import tr
+from .theme import WARNING, ERROR
 
 def icon(name): return QIcon(str(Path(__file__).parent/'assets'/'icons'/(name+'.svg')))
 
@@ -13,7 +14,7 @@ class AlertPicture(QWidget):
     def __init__(self,path):
         super().__init__();self.pix=QPixmap(str(path)) if path else QPixmap();self.setMinimumHeight(120)
     def resizeEvent(self,event):
-        height=max(120,round(self.width()*9/16))
+        height=min(getattr(self,"height_limit",16777215),max(120,round(self.width()*9/16)))
         if self.height()!=height: self.setFixedHeight(height)
         super().resizeEvent(event)
     def paintEvent(self,event):
@@ -123,7 +124,7 @@ class AiActivity(QWidget):
                 meta.addWidget(label(name,'muted'),1)
             else: meta.addStretch()
             if record.label in ('suspicious','escalation'):
-                chip=label(record.label.capitalize(),'warning' if record.label=='suspicious' else 'error');chip.setObjectName('decisionChip');chip.setStyleSheet('color: '+(__import__('home_guard_project.box.app.theme',fromlist=['WARNING']).WARNING if record.label=='suspicious' else __import__('home_guard_project.box.app.theme',fromlist=['ERROR']).ERROR)+'; padding: 4px 8px; border-radius: 6px; background: #202c36;');meta.addWidget(chip)
+                chip=label(record.label.capitalize(),'warning' if record.label=='suspicious' else 'error');chip.setObjectName('decisionChip');chip.setStyleSheet('color: '+(WARNING if record.label=='suspicious' else ERROR)+'; padding: 4px 8px; border-radius: 6px; background: #202c36;');meta.addWidget(chip)
             meta.addWidget(label(stamp,'muted'));row.addLayout(meta)
             if record.who=='box' and record.image:
                 path=image_path(image_dir,record.image) if image_dir else None
