@@ -14,6 +14,7 @@ def demo_status(names,now,state):
         if state=='ai-delivered': samples.append((30,'person','demo_ai_person','[send_message]',False,False,False,tr('demo_ai_refused')))
         for age,label,summary,command,sent,training,muted,error in sorted(samples,key=lambda row:-row[0]):
             data['decisions'].append({'ts':now-age,'camera':names[0 if age==15 else min(1,len(names)-1)],'labels':[label],'summary':tr(summary),'command':command,'sent':sent,'false_positive':training,'muted':muted,'error':error})
+    data['thinking']={'camera':names[0],'labels':['person'],'ts':now} if state=='ai-thinking' and names else None
     if state=='ai-stale':
         data['updated']=now-30
         for camera in data['cameras'].values():

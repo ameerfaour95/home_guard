@@ -94,48 +94,8 @@ def layout_for(widget, margin=22):
 
 
 def demo_picture(number):
-    # Deliberately synthetic architectural views, no network or private imagery.
-    pix = QPixmap(960, 540)
-    painter = QPainter(pix)
-    gradient = QLinearGradient(0, 0, 0, 540)
-    gradient.setColorAt(0, QColor("#647a8d"))
-    gradient.setColorAt(1, QColor("#1c2935"))
-    painter.fillRect(pix.rect(), gradient)
-    painter.fillRect(0, 255, 960, 285, QColor("#43524b"))
-    painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(QColor("#c3b8a1"))
-    painter.drawRect(180 + number * 15, 130, 490, 230)
-    painter.setBrush(QColor("#38434b"))
-    painter.drawPolygon(
-        [
-            __import__("PySide6.QtCore", fromlist=["QPoint"]).QPoint(x, y)
-            for x, y in [
-                (140 + number * 15, 130),
-                (420 + number * 15, 30),
-                (710 + number * 15, 130),
-            ]
-        ]
-    )
-    painter.setBrush(QColor("#253b49"))
-    for x in (220, 520):
-        painter.drawRect(x + number * 15, 175, 100, 86)
-    painter.setBrush(QColor("#574f45"))
-    painter.drawRect(385 + number * 15, 218, 90, 142)
-    painter.setBrush(QColor("#8a8b83"))
-    painter.drawPolygon(
-        [
-            __import__("PySide6.QtCore", fromlist=["QPoint"]).QPoint(x, y)
-            for x, y in [(380, 360), (490, 360), (660, 540), (240, 540)]
-        ]
-    )
-    for x in (70, 800, 890):
-        painter.setBrush(QColor("#263c32"))
-        painter.drawEllipse(x - 40, 120 + number * 4, 110, 190)
-    painter.setPen(QPen(QColor(ACCENT), 3))
-    painter.setBrush(Qt.BrushStyle.NoBrush)
-    painter.drawRect(455, 280, 42, 110)
-    painter.end()
-    return pix
+    from .demo_media import picture
+    return picture(number)
 
 
 class CameraTile(QFrame):
@@ -397,7 +357,7 @@ class Window(QMainWindow):
         self.last_poll = 0
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.tick)
-        self.timer.start(500)
+        self.timer.start(166)
         self.camera_stack.setCurrentIndex(1)
         self.current_state = None
         from .camera_controls import CameraControls
@@ -516,6 +476,10 @@ class Window(QMainWindow):
             from .ai_demo import demo_status
             if not stopped or not self.ai_data:
                 self.ai_data=demo_status(self.names or [],now,self.args.state)
+                if getattr(self,"demo_history_state",None)!=self.args.state:
+                    self.demo_history_state=self.args.state
+                    self.demo_decisions=self.ai_data['decisions']
+                self.ai_data['decisions']=self.demo_decisions
         elif time.monotonic()-self.last_ai_poll>=1:
             data=read_status(str(Path(bc.LOG_DIR)/"ai_status.json"))
             if data: self.ai_data=data
@@ -527,7 +491,28 @@ class Window(QMainWindow):
         self.delivery_error.setText((failed.error or tr("ai_no_error")) if failed else "")
         self.ai_panel.setVisible(inference)
         self.log_panel.setVisible(not inference)
-        if inference: self.ai_panel.render(self.ai_data,now,stopped)
+        if not hasattr(self,'chat_data'): self.chat_data=[]
+        if self.args.demo:
+            if not hasattr(self,'demo_media_dir'):
+                import tempfile
+                self.demo_media_dir=tempfile.TemporaryDirectory(prefix='homeguard-demo-')
+                for i in range(3): demo_picture(i).save(str(Path(self.demo_media_dir.name)/('demo_'+str(i)+'.jpg')),'JPEG',88)
+            from .demo_chat import demo_feed
+            self.chat_data=demo_feed(self.demo_decisions if hasattr(self,'demo_decisions') else [])
+            image_dir=Path(self.demo_media_dir.name)
+        else:
+            from ..chat_feed import read_feed
+            if time.monotonic()-getattr(self,'last_chat_poll',-10)>=1:
+                self.chat_data=read_feed(str(Path(bc.LOG_DIR)/'telegram_chat.jsonl'),limit=200)
+                self.last_chat_poll=time.monotonic()
+            image_dir=Path(bc.LOG_DIR)/'chat_images'
+        if inference:
+            until,some=self.alert_pause.status(self.current_state.cameras)
+            self.ai_panel.render(self.ai_data,now,stopped,self.chat_data,image_dir,until,len(self.tiles),failed is not None)
+            latest=next((d for d in reversed(self.ai_data.get('decisions',[])) if isinstance(d,dict) and d.get('camera') in (self.names or [])),None)
+            if latest and latest.get('ts')!=getattr(self,'hero_event_ts',None):
+                self.hero_event_ts=latest.get('ts')
+                self.expanded_tile=next(t for t in self.tiles if t.name==latest['camera']);self.arrange_tiles()
         for tile in self.tiles:
             tile.detector_enabled=inference
             tile.detector_note.setVisible(inference)
@@ -742,6 +727,7 @@ class Window(QMainWindow):
         self.activity_layout.addStretch()
 
     def closeEvent(self, event):
+        if hasattr(self, "demo_media_dir"): self.demo_media_dir.cleanup()
         if hasattr(self, "camera_retry"): self.camera_retry.clear()
         if hasattr(self, "discovery_timer"): self.discovery_timer.stop()
         if hasattr(self, "discovery_pool"): self.discovery_pool.shutdown(wait=False, cancel_futures=True)

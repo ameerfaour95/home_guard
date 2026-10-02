@@ -1,6 +1,22 @@
 """All visible application copy; keys remain stable for translation."""
 
 TEXT = {
+    "ai_assistant": "AI assistant",
+    "ai_thinking": "AI is looking at {camera}\u2026",
+    "ai_watching": "Watching {count} cameras",
+    "ai_quiet_line": "AI checked {camera}: {text} - no alert",
+    "chat_button": "{name}: {text}",
+    "chat_meta": "{name}   {time}",
+    "chat_delivered": "Sent to the family",
+    "chat_refused": "NOT DELIVERED",
+    "demo_chat_alert": "A person is waiting at the front door. They appear to be carrying a delivery.",
+    "demo_chat_owner": "That's our delivery. Is anyone else outside?",
+    "demo_chat_answer": "I only see the delivery driver at the door. The driveway is clear.",
+    "demo_chat_hebrew": "\u05d0\u05e0\u05d9 \u05d1\u05d1\u05d9\u05ea, \u05d0\u05e4\u05ea\u05d7 \u05dc\u05d5 \u05d0\u05ea \u05d4\u05d3\u05dc\u05ea.",
+    "demo_chat_button": "False alarm",
+    "demo_chat_maya": "Please keep watching the garden while we have dinner.",
+    "demo_chat_answer2": "Of course. I'll keep watching the garden and let you know if someone approaches.",
+
     "ai_delivery_banner": "Alerts are NOT reaching Telegram",
     "ai_activity": "AI activity",
     "ai_sent": "Alert sent",
