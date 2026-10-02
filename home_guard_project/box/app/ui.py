@@ -361,7 +361,12 @@ class Window(QMainWindow):
         self.activity_layout = layout_for(self.activity_widget, 0)
         scroll.setWidget(self.activity_widget)
         al.addWidget(scroll, 1)
+        self.log_panel=panel
         body.addWidget(panel, 1)
+        from .ai_activity_ui import AiActivity
+        self.ai_panel=AiActivity()
+        body.addWidget(self.ai_panel,2)
+        self.ai_panel.hide()
         overview_layout.addLayout(body, 1)
         self.tiles = []
         self.events = []
@@ -499,6 +504,9 @@ class Window(QMainWindow):
             self.last_ai_poll=time.monotonic()
         inference=self.current_state is not None and self.current_state.mode=="inference"
         stopped=self.box_controls.is_stopped()
+        self.ai_panel.setVisible(inference)
+        self.log_panel.setVisible(not inference)
+        if inference: self.ai_panel.render(self.ai_data,now,stopped)
         for tile in self.tiles:
             tile.detector_enabled=inference
             tile.detector_note.setVisible(inference)
