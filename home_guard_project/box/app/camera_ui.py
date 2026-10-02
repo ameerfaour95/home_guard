@@ -43,7 +43,7 @@ class CameraPage:
         outer.addWidget(self.error_details)
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
-        self.scroll.setStyleSheet("QScrollArea { border: none; background: transparent; } QScrollBar:vertical { background: #10151d; width: 8px; } QScrollBar::handle:vertical { background: #334354; min-height: 30px; border-radius: 4px; } QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }")
+
         outer.addWidget(self.scroll, 1)
         bottom = QHBoxLayout()
         self.note = label("", "muted")
@@ -137,16 +137,12 @@ class CameraPage:
         for i, camera in enumerate(records):
             tile = card()
             layout = layout_for(tile, 16)
-            photo = QLabel()
-            photo.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            photo.setMinimumHeight(100)
-            photo.setMaximumHeight(120)
-            pix = demo_picture(i) if self.controls.box.demo and camera.ok else QPixmap(camera.file) if camera.ok else QPixmap()
-            if pix.isNull():
-                photo.setText(tr("camera_snapshot_failed" if self.wizard else "camera_no_photo"))
-                photo.setWordWrap(True)
-            else:
-                photo.setPixmap(pix.scaled(540, 120, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+            from .ai_activity_ui import AlertPicture
+            photo=AlertPicture(camera.file if camera.ok else None)
+            if self.controls.box.demo and camera.ok: photo.pix=demo_picture(i)
+            if photo.pix.isNull():
+                photo=label(tr("camera_snapshot_failed" if self.wizard else "camera_no_photo"),"muted")
+                photo.setMinimumHeight(180)
             layout.addWidget(photo)
             line = QHBoxLayout()
             name = QLineEdit(camera.name)

@@ -47,8 +47,8 @@ def adapt_stream(stream_class, writer):
                 import cv2
 
                 disp = frame
-                if max(frame.shape[:2]) > 720:
-                    scale = 720 / max(frame.shape[:2])
+                if max(frame.shape[:2]) > 1280:
+                    scale = 1280 / max(frame.shape[:2])
                     disp = cv2.resize(
                         frame, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA
                     )

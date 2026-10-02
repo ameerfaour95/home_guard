@@ -1,6 +1,31 @@
 """All visible application copy; keys remain stable for translation."""
 
 TEXT = {
+    "chat_image_unavailable": "Picture unavailable",
+    "premium_security": "Security & notifications",
+    "premium_viewing": "Camera viewing",
+    "premium_view_hint": "Hide the camera pictures on this screen while Home Guard keeps watching your home.",
+
+    "premium_live": "LIVE",
+    "premium_home": "HOME GUARD / {house}",
+    "premium_protecting": "Protecting the house",
+    "premium_collecting": "Recording the house",
+    "ai_assistant": "AI assistant",
+    "ai_thinking": "AI is looking at {camera}\u2026",
+    "ai_watching": "Watching {count} cameras",
+    "ai_quiet_line": "AI checked {camera}: {text} - no alert",
+    "chat_button": "{name}: {text}",
+    "chat_meta": "{name}   {time}",
+    "chat_delivered": "Sent to the family",
+    "chat_refused": "NOT DELIVERED",
+    "demo_chat_alert": "A person is waiting at the front door. They appear to be carrying a delivery.",
+    "demo_chat_owner": "That's our delivery. Is anyone else outside?",
+    "demo_chat_answer": "I only see the delivery driver at the door. The driveway is clear.",
+    "demo_chat_hebrew": "\u05d0\u05e0\u05d9 \u05d1\u05d1\u05d9\u05ea, \u05d0\u05e4\u05ea\u05d7 \u05dc\u05d5 \u05d0\u05ea \u05d4\u05d3\u05dc\u05ea.",
+    "demo_chat_button": "False alarm",
+    "demo_chat_maya": "Please keep watching the garden while we have dinner.",
+    "demo_chat_answer2": "Of course. I'll keep watching the garden and let you know if someone approaches.",
+
     "ai_delivery_banner": "Alerts are NOT reaching Telegram",
     "ai_activity": "AI activity",
     "ai_sent": "Alert sent",
@@ -20,7 +45,7 @@ TEXT = {
     "demo_ai_urgent": "Two people are trying to force the front door open.",
     "demo_ai_refused": "The bot is not a member of the group chat. Add the bot to the Telegram group again.",
 
-    "detection_label": "{label} {percent}%",
+    "detection_label": "{label} \u00b7 {percent}%",
     "detector_sees": "Sees: {objects}",
     "object_count": "{count} {label}",
     "object_person": "person", "object_person_plural": "people",
@@ -132,7 +157,7 @@ TEXT = {
     "time_unavailable": "Time unavailable",
 
     "summary_house": "Home: {house}",
-    "enlarge_hint": "Click a camera to enlarge it. Click again or press Esc to return.",
+    "enlarge_hint": "Choose a camera below. Double-click the main picture for full screen.",
 
     "stopped_banner": "Home Guard is stopped. Your home is not being watched.",
     "close_stopped": "Home Guard is stopped. Start it to watch your home again.",

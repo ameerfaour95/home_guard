@@ -24,6 +24,8 @@ class PreviewWriter:
         self.directory = Path(directory)
         self.enabled = enabled
         self.interval = 1 / max(0.1, fps)
+        self.hero = None
+        self.viewer_checked = float("-inf")
         self.clock = clock
         self.last = {}
         self.sources = {}
@@ -58,9 +60,16 @@ class PreviewWriter:
         try:
             timestamp = (self.directory / "viewer.alive").stat().st_mtime
             now = self.clock()
+            if now-self.viewer_checked>=.25:
+                self.viewer_checked=now
+                try:
+                    preference=json.loads((self.directory / "viewer.alive").read_text(encoding="utf-8"))
+                    self.hero=preference.get("hero") if isinstance(preference,dict) else None
+                except (OSError,ValueError): self.hero=None
+            interval=1/6 if camera==self.hero else self.interval
             return (
                 _fresh_timestamp(timestamp, now, 15)
-                and now - self.last.get(camera, float("-inf")) >= self.interval
+                and now - self.last.get(camera, float("-inf")) >= interval
             )
         except OSError:
             return False
@@ -77,7 +86,10 @@ class PreviewWriter:
         target = self.directory / (key + ".jpg")
         temp = self.directory / (key + "." + str(os.getpid()) + ".tmp")
         try:
-            ok, encoded = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
+            if max(frame.shape[:2])>1280:
+                scale=1280/max(frame.shape[:2])
+                frame=cv2.resize(frame,None,fx=scale,fy=scale,interpolation=cv2.INTER_AREA)
+            ok, encoded = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 88])
             if not ok:
                 return False
             temp.write_bytes(encoded.tobytes())
@@ -113,9 +125,20 @@ class PreviewReader:
         except (OSError, ValueError):
             return []
 
-    def touch(self):
+    def touch(self, hero=None):
         self.directory.mkdir(parents=True, exist_ok=True)
-        (self.directory / "viewer.alive").touch()
+        marker=self.directory / "viewer.alive"
+        if hero is None:
+            marker.touch()
+        else:
+            temporary=self.directory / ("viewer."+str(os.getpid())+".tmp")
+            try:
+                temporary.write_text(json.dumps({"hero":hero}),encoding="utf-8")
+                os.replace(temporary,marker)
+            except OSError:
+                marker.touch()
+            finally:
+                temporary.unlink(missing_ok=True)
 
     def read(self, camera):
         path = self.directory / (camera_key(camera) + ".jpg")

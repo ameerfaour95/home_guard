@@ -31,6 +31,7 @@ def main():
     _drop_own_console()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--demo", action="store_true")
+    parser.add_argument("--theme", choices=("dark","light"), default="dark")
     parser.add_argument("--panel", choices=("settings", "cameras"))
     parser.add_argument("--setup", action="store_true")
     parser.add_argument("--fail", action="store_true")
@@ -49,7 +50,7 @@ def main():
             "empty",
             "error",
             "loading",
-            "inference", "paused", "ai-stopped", "ai-stale", "ai-empty", "ai-refused", "ai-delivered", "ai-urgent", "ai-paused", "ai-training",
+            "inference", "paused", "ai-stopped", "ai-stale", "ai-empty", "ai-refused", "ai-delivered", "ai-urgent", "ai-paused", "ai-training", "ai-thinking",
             "quiet",
         ),
         default="mixed",
