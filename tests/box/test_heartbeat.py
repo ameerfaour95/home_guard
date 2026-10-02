@@ -70,6 +70,8 @@ class HeartbeatTest(unittest.TestCase):
             },
         )
         self.assertIsInstance(hb["host"], str)
+        self.assertIn("local_ip", hb)
+        self.assertTrue(hb["local_ip"] is None or hb["local_ip"].count(".") == 3)
         self.assertGreater(hb["disk_free_gb"], 0)
 
     def test_no_clips(self) -> None:

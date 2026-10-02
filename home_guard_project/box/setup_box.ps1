@@ -6,7 +6,7 @@
 #
 #  What it does (safe to re-run):
 #    1. Installs Git (for bash), uv, ffmpeg and Tailscale if missing
-#    2. Stops the PC from sleeping or hibernating
+#    2. Stops the PC from sleeping or hibernating, and from waiting at a recovery screen after a power cut
 #    3. Enables Remote Desktop (Windows Pro only)
 #    4. Writes box.yaml with the site name
 #    5. Installs the Python environment (uv sync)
@@ -107,6 +107,11 @@ powercfg /change hibernate-timeout-ac 0
 powercfg /change disk-timeout-ac 0
 powercfg /hibernate off
 Ok 'Sleep and hibernate disabled on AC power.'
+
+# After a power cut Windows can stop at a recovery screen and wait for a keyboard. The box has none.
+bcdedit /set '{current}' bootstatuspolicy ignoreallfailures | Out-Null
+bcdedit /set '{current}' recoveryenabled no | Out-Null
+Ok 'Windows will boot straight through after a power cut (no recovery screen).'
 
 # ----------------------------------------------------------------------------
 Step '3/6 Remote Desktop'

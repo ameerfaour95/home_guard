@@ -49,6 +49,16 @@ def _clip_times(dataset_dir: str) -> Dict[str, list[float]]:
     return times
 
 
+def _local_ip() -> Optional[str]:
+    """This machine's address on the house network (tells which network the box is on)."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))  # UDP connect sends nothing; it only picks the route
+            return s.getsockname()[0]
+    except OSError:
+        return None
+
+
 def _disk_free_gb(path: str) -> float:
     while not os.path.isdir(path):
         path = os.path.dirname(path)
@@ -75,6 +85,7 @@ def build_heartbeat(
     return {
         "site": site,
         "host": socket.gethostname(),
+        "local_ip": _local_ip(),
         "time_utc": _iso_utc(now),
         "collector_running": collector_alive(alive_path, now),
         "disk_free_gb": _disk_free_gb(live_dir),

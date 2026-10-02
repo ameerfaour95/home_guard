@@ -17,6 +17,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
 export HOME_GUARD_CONFIG_OVERLAY="${HOME_GUARD_CONFIG_OVERLAY:-$SCRIPT_DIR/config.box.yaml}"
 
+# Lines such as "[h264 @ 000001f0] error while decoding MB 59 17" from the video decoder.
+DECODER_NOISE='^\[[A-Za-z0-9_]+ @ [0-9a-fA-Fx]+\]'
+
 CAMERAS_YAML="$PROJECT_ROOT/home_guard_project/data_collection/cameras.yaml"
 ALIVE_FILE="$LOG_DIR/collector.alive"
 PID_FILE="$LOG_DIR/collector.winpid"
@@ -81,7 +84,10 @@ while true; do
 
     collector_log="$LOG_DIR/collector-$(date +%F).log"
     log "Starting collector (overlay: $HOME_GUARD_CONFIG_OVERLAY)" >> "$RUNNER_LOG"
-    "$PY" -u home_guard_project/data_collection/data_collection.py >> "$collector_log" 2>&1 &
+    # The video decoder prints a line for every damaged frame, which would bury
+    # the real log lines and grow the file without limit. Drop those lines.
+    "$PY" -u home_guard_project/data_collection/data_collection.py \
+        > >(grep --line-buffered -a -v -E "$DECODER_NOISE" >> "$collector_log") 2>&1 &
     child=$!
     cat "/proc/$child/winpid" > "$PID_FILE" 2>/dev/null || echo "$child" > "$PID_FILE"
 

@@ -93,18 +93,51 @@ and `C:\Users\<user>\.aws\config`:
 region = us-east-1
 ```
 
-### 5. Camera discovery (once per house)
+### 5. Connect the box to the house network: two options
 
-You need the camera or recorder username and password for that house. The box must be on the same network as the cameras or their recorder, preferably by Ethernet cable. On the box (at the box, or over SSH; Windows 11 Home has no Remote Desktop, so answer "no" to the preview), in Git Bash:
+The box only has to be on the same network as the cameras or their recorder. Everything else (finding cameras, collecting, uploading) is the same either way.
+
+| | Option A: Ethernet cable | Option B: Wi-Fi |
+|---|---|---|
+| Setup | None. Plug a cable from the box into the router, mesh unit or recorder switch | The box must know the Wi-Fi name and password (see below) |
+| Reliability | Best. Use this when a cable can reach | Works, but video arrives with more damaged frames and the link can drop |
+| When both are connected | Windows uses the cable | |
+
+For Wi-Fi, save the network on the box once. If you know the other house's Wi-Fi name and password, do it before moving the box:
+
+```
+powershell -ExecutionPolicy Bypass -File C:\home_guard\home_guard_project\box\add_wifi.ps1 -Ssid "HouseWifi" -Password "secret"
+```
+
+The box then joins that network by itself at boot, with nobody logged in. `-ConnectNow` switches immediately; `-Remove` forgets a network. If you do not know the Wi-Fi details in advance, connect the box by cable or with a monitor and keyboard at the house, then run the same command.
+
+If the house has more than one network (for example the internet provider's router and a separate mesh system), the box must be on the one the cameras use.
+
+### 6. Find the cameras (once per house)
+
+You need the camera or recorder username and password for that house.
+
+**Without prompts** (works over SSH, and on Windows 11 Home which has no Remote Desktop):
+
+```
+cd /d C:\home_guard
+.venv\Scripts\python.exe -m home_guard_project.box.find_cameras scan
+set HG_CAMERA_PASSWORD=...
+.venv\Scripts\python.exe -m home_guard_project.box.find_cameras probe --host <address from scan> --user admin --prefix house2 --write
+```
+
+`scan` needs no password and lists the devices that answer on the camera port. `probe` logs in, lists the channels, and with `--write` saves them as `house2_ch1`, `house2_ch2`, ... so clip names never collide between houses.
+
+**With prompts and a live preview** (needs a screen), in Git Bash:
 
 ```bash
 cd /c/home_guard
 uv run python home_guard_project/data_collection/discover.py
 ```
 
-Name each camera with the site in front, for example `house2_front_door`, so clip names never collide between houses. Leave out indoor cameras the household does not want recorded.
+Either way the result is `data_collection/cameras.yaml`. The collector task notices it within a minute and starts collecting; no restart is needed. Edit that file to remove indoor cameras the household does not want recorded.
 
-This writes `data_collection/cameras.yaml`. The collector task notices it within a minute and starts collecting; no restart is needed.
+A recorder's address can change when the router restarts. If the cameras stop connecting, run `scan` again and correct the address in `cameras.yaml`, or reserve the address in the router.
 
 ## Bench test before moving the box
 
