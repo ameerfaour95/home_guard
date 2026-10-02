@@ -3,12 +3,20 @@
 from pathlib import Path
 import hashlib
 import json
+import math
 import os
 import time
 
 
 def camera_key(name):
     return hashlib.sha256(name.encode("utf-8")).hexdigest()[:24]
+
+
+def _fresh_timestamp(timestamp, now, max_age):
+    # Windows file mtimes and time.time() can round the same FILETIME to
+    # adjacent floats. A just-written file may therefore be one ULP ahead.
+    # Accept only that representation error, not a clock-skew time window.
+    return timestamp <= math.nextafter(now, math.inf) and now - timestamp <= max_age
 
 
 class PreviewWriter:
@@ -47,11 +55,11 @@ class PreviewWriter:
             source is not None and self.sources.get(camera) is source
         ):
             return False
-        now = self.clock()
         try:
-            age = now - (self.directory / "viewer.alive").stat().st_mtime
+            timestamp = (self.directory / "viewer.alive").stat().st_mtime
+            now = self.clock()
             return (
-                0 <= age <= 15
+                _fresh_timestamp(timestamp, now, 15)
                 and now - self.last.get(camera, float("-inf")) >= self.interval
             )
         except OSError:
@@ -112,8 +120,8 @@ class PreviewReader:
     def read(self, camera):
         path = self.directory / (camera_key(camera) + ".jpg")
         try:
-            age = self.clock() - path.stat().st_mtime
-            if not 0 <= age <= self.stale_seconds:
+            timestamp = path.stat().st_mtime
+            if not _fresh_timestamp(timestamp, self.clock(), self.stale_seconds):
                 return None
             return path.read_bytes()  # closes before Qt decodes, important on Windows
         except OSError:
