@@ -103,6 +103,7 @@ detection:
   
 
 display:
+  preview_enabled: false
   show_windows: true        # disable to save CPU (each window copies + resizes frames)
   show_plotted_boxes: true
   save_with_plotted_boxes: false

@@ -149,6 +149,7 @@ class Config:
     TRIGGER_CLASS_IDS: List[int] = field(default_factory=lambda: [0])
     YOLO_TRIGGER_CONF: float = 0.5
     YOLO_EVERY_N_FRAMES_CPU: int = 6
+    PREVIEW_ENABLED: bool = False
     SHOW_WINDOWS: bool = True
     SHOW_PLOTTED_BOXES: bool = False
     SAVE_WITH_PLOTTED_BOXES: bool = False
@@ -285,6 +286,7 @@ def load_config(
         ),
         YOLO_TRIGGER_CONF=float(_deep_get(cfg_data, "detection", "yolo_trigger_confidence", default=0.5)),
         YOLO_EVERY_N_FRAMES_CPU=int(_deep_get(cfg_data, "detection", "yolo_every_n_frames_cpu", default=6)),
+        PREVIEW_ENABLED=bool(_deep_get(cfg_data, "display", "preview_enabled", default=False)),
         SHOW_WINDOWS=bool(_deep_get(cfg_data, "display", "show_windows", default=True)),
         SHOW_PLOTTED_BOXES=bool(_deep_get(cfg_data, "display", "show_plotted_boxes", default=False)),
         SAVE_WITH_PLOTTED_BOXES=bool(_deep_get(cfg_data, "display", "save_with_plotted_boxes", default=False)),

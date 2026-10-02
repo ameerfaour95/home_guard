@@ -275,3 +275,23 @@ class FalsePositiveTest(unittest.TestCase):
                 meta = json.load(f)
             self.assertEqual(meta["kind"], "false_positive")
             self.assertEqual(meta["yolo"]["class_counts"], {"car": 1})
+
+
+class PreviewAdapterTest(unittest.TestCase):
+    def test_the_preview_stream_accepts_what_inference_passes_to_its_reader(self) -> None:
+        from home_guard_project.box.inference_preview import adapt_stream
+
+        class Reader:
+            def __init__(self, name, url, ring=None):
+                self.name, self.url, self.ring = name, url, ring
+
+        class Writer:
+            enabled = True
+
+            def set_cameras(self, names):
+                self.names = list(names)
+
+        writer = Writer()
+        stream = adapt_stream(Reader, writer)("front_door", "rtsp://x", ring="RING")
+        self.assertEqual((stream.name, stream.ring), ("front_door", "RING"))
+        self.assertEqual(writer.names, ["front_door"])
