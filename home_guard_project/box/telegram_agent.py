@@ -27,6 +27,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from . import telegram_notify
 from .agent import UNAVAILABLE_REPLY, AgentContext, OwnerAgent, make_chat_model
+from .chat_feed import ChatFeed
 from .boxconfig import LOG_DIR, PRODUCTION_ARCHIVE_DIR, PRODUCTION_LIVE_DIR, PRODUCTION_RETENTION_DAYS
 from .feedback import (
     FEEDBACK_BUTTONS,
@@ -48,6 +49,9 @@ CAPTION_LIMIT = 1024  # Telegram's limit for a photo caption
 Post = Callable[..., Dict[str, Any]]
 
 
+BUTTON_LABELS = {code: label for row in FEEDBACK_BUTTONS for label, code in row}
+
+
 def feedback_keyboard() -> str:
     """The buttons under an alert, as Telegram's ``reply_markup`` JSON."""
     return json.dumps({"inline_keyboard": [
@@ -63,11 +67,13 @@ def send_alert(
     image: Optional[bytes] = None,
     post: Post = telegram_notify._http_post,
     post_multipart: Post = telegram_notify._http_post_multipart,
+    feed: Optional[ChatFeed] = None,
 ) -> Dict[str, Any]:
     """Send one alert to every chat, with the feedback question and buttons. Never raises.
 
     *alert* is what an answer will be filed under: ``{"alert_id", "camera",
-    "summary", "ts"}``. Each chat's message id is stored in *index*.
+    "summary", "ts"}``. Each chat's message id is stored in *index*. With a
+    *feed*, the alert also appears in the box's window, delivered or not.
     """
     if cfg.dry_run or not cfg.enabled:
         reason = "dry_run" if cfg.dry_run else "not_configured"
@@ -97,7 +103,12 @@ def send_alert(
             reason = telegram_error(exc)
             log.warning("Telegram alert failed for %s: %s", chat_id, reason)
             results.append({"chat_id": chat_id, "ok": False, "error": reason})
-    return {"sent": any(r["ok"] for r in results), "results": results}
+    sent = any(r["ok"] for r in results)
+    if feed is not None:
+        errors = [str(r.get("error") or "") for r in results if not r["ok"]]
+        feed.add("box", "alert", text, camera=str(alert.get("camera") or ""), alert_id=str(alert.get("alert_id") or ""),
+                 image=image, delivered=sent, error="" if sent else next((e for e in errors if e), "not delivered"))
+    return {"sent": sent, "results": results}
 
 
 def telegram_error(exc: BaseException) -> str:
@@ -126,6 +137,7 @@ def send_clip(
     alert_id: str,
     clip_path: str,
     post_multipart: Post = telegram_notify._http_post_multipart,
+    feed: Optional[ChatFeed] = None,
 ) -> Dict[str, Any]:
     """Send an alert's video as a reply under the alert it belongs to, in every chat that got the alert. Never raises."""
     if cfg.dry_run or not cfg.enabled:
@@ -156,7 +168,12 @@ def send_clip(
             reason = telegram_error(exc)
             log.warning("Telegram video failed for %s: %s", chat_id, reason)
             results.append({"chat_id": chat_id, "ok": False, "error": reason})
-    return {"sent": any(r["ok"] for r in results), "results": results}
+    sent = any(r["ok"] for r in results)
+    if feed is not None:
+        errors = [str(r.get("error") or "") for r in results if not r["ok"]]
+        feed.add("box", "video", "Video of the alert", alert_id=alert_id, delivered=sent,
+                 error="" if sent else next((e for e in errors if e), "not delivered"))
+    return {"sent": sent, "results": results}
 
 
 @dataclass
@@ -168,16 +185,17 @@ class OwnerAssistant:
     mute: MuteState
     inbox: "TelegramInbox"
     thread: Optional[threading.Thread] = None
+    feed: Optional[ChatFeed] = None
 
     def is_muted(self, camera: str) -> bool:
         return self.mute.is_muted(time.time(), camera)
 
     def send_alert(self, alert: Dict[str, Any], text: str, image: Optional[bytes] = None) -> Dict[str, Any]:
-        return send_alert(self.cfg, self.index, alert, text, image)
+        return send_alert(self.cfg, self.index, alert, text, image, feed=self.feed)
 
     def send_clip(self, alert_id: str, clip_path: str) -> Dict[str, Any]:
         """The alert's video, as a reply under the alert. Call it once the clip has been written."""
-        return send_clip(self.cfg, self.index, alert_id, clip_path)
+        return send_clip(self.cfg, self.index, alert_id, clip_path, feed=self.feed)
 
 
 def alert_roots(live_dir: str = PRODUCTION_LIVE_DIR, archive_dir: str = PRODUCTION_ARCHIVE_DIR) -> List[str]:
@@ -213,8 +231,9 @@ def start(
             ))
     except Exception as exc:  # noqa: BLE001 - a missing library must not stop the alerts
         log.warning("Owner agent not available (%s); buttons still work.", exc)
-    inbox = TelegramInbox(cfg, agent, index, mute, live_dir, os.path.join(log_dir, "telegram_offset.json"))
-    assistant = OwnerAssistant(cfg=cfg, index=index, mute=mute, inbox=inbox)
+    feed = ChatFeed(os.path.join(log_dir, "telegram_chat.jsonl"))
+    inbox = TelegramInbox(cfg, agent, index, mute, live_dir, os.path.join(log_dir, "telegram_offset.json"), feed=feed)
+    assistant = OwnerAssistant(cfg=cfg, index=index, mute=mute, inbox=inbox, feed=feed)
     if cfg.enabled and not cfg.dry_run:
         assistant.thread = threading.Thread(target=inbox.run, name="telegram-inbox", daemon=True)
         assistant.thread.start()
@@ -240,7 +259,9 @@ class TelegramInbox:
         post: Post = telegram_notify._http_post,
         post_multipart: Post = telegram_notify._http_post_multipart,
         now: Callable[[], float] = time.time,
+        feed: Optional[ChatFeed] = None,
     ) -> None:
+        self.feed = feed
         self.cfg, self.agent, self.index, self.mute = cfg, agent, index, mute
         self.feedback_dir, self.offset_path = feedback_dir, offset_path
         self._post, self._post_multipart, self._now = post, post_multipart, now
@@ -268,6 +289,14 @@ class TelegramInbox:
             fields["reply_to_message_id"] = str(reply_to)
             fields["allow_sending_without_reply"] = "true"
         self._post(self.cfg.bot_token, "sendMessage", fields)
+        self._note("assistant", "answer", text)
+
+    def _note(self, who: str, kind: str, text: str, name: str = "", alert: Optional[Dict[str, Any]] = None) -> None:
+        """Add a line to the conversation the box's window shows."""
+        if self.feed is not None:
+            alert = alert or {}
+            self.feed.add(who, kind, text, name=name, camera=str(alert.get("camera") or ""),
+                          alert_id=str(alert.get("alert_id") or ""), now=self._now())
 
     def _send_clip(self, chat_id: str, path: str) -> None:
         with open(path, "rb") as f:
@@ -284,10 +313,13 @@ class TelegramInbox:
         chat_id = str((message.get("chat") or {}).get("id"))
         if not self._allowed(chat_id):
             return
-        feedback = button_feedback(str(query.get("data") or ""), self._now())
+        code = str(query.get("data") or "")
+        feedback = button_feedback(code, self._now())
         answer = confirmation_text(feedback) if feedback else "That button is no longer in use."
+        tapped_alert = self.index.lookup(chat_id, message.get("message_id"))
+        self._note("owner", "button", BUTTON_LABELS.get(code, code), _who(query.get("from") or {})["name"], tapped_alert)
         if feedback:
-            alert = self.index.lookup(chat_id, message.get("message_id"))
+            alert = tapped_alert
             self.mute.apply(feedback, self._now())
             save_feedback(self.feedback_dir, alert, feedback, "", _who(query.get("from") or {}), chat_id, self._now())
         # Stops the button's spinner, then leaves a visible line in the chat.
@@ -304,6 +336,7 @@ class TelegramInbox:
         alert = self.index.lookup(chat_id, replied) if replied is not None else None
         if alert is None:
             alert = self.index.latest(chat_id, self._now())
+        self._note("owner", "message", text, _who(sender)["name"], alert)
         if self.agent is None:
             save_feedback(self.feedback_dir, alert, Feedback(), text, _who(sender), chat_id, self._now())
             self._say(chat_id, UNAVAILABLE_REPLY, reply_to=message.get("message_id"))
