@@ -37,7 +37,7 @@ Spec: `docs/superpowers/specs/2026-10-03-camera-watch-zones-design.md`.
 | `tests/box/test_zones.py` (new) | Unit tests for `zones.py`. |
 | `tests/box/test_find_zones.py` (new) | Unit tests for the CLI handlers. |
 | `tests/box/test_inference.py` (modify) | `_Stream._ingest` masks before `read()` and before the ring. |
-| `C:\Users\ameer\Ameer\home_guard_ui\CODEX_BRIEF_ZONES.md` (new, UI worktree) | The brief for Codex: the drawing dialog. |
+| `docs/superpowers/plans/2026-10-03-codex-brief-watch-zone-dialog.md` (committed), copied to `C:\Users\ameer\Ameer\home_guard_ui\CODEX_BRIEF_ZONES.md` | The brief for Codex (gpt-6-astra): the premium drawing dialog. |
 
 ---
 
@@ -1020,7 +1020,7 @@ git commit -m "Box: zones / set-zone / clear-zone camera commands; a rename carr
 ### Task 5: Push and hand the dialog to Codex
 
 **Files:**
-- Create: `C:\Users\ameer\Ameer\home_guard_ui\CODEX_BRIEF_ZONES.md` (the UI worktree, branch `box-app-ui`; Codex edits `home_guard_project/box/app/` there — we do not).
+- Copy: `docs/superpowers/plans/2026-10-03-codex-brief-watch-zone-dialog.md` to `C:\Users\ameer\Ameer\home_guard_ui\CODEX_BRIEF_ZONES.md` (the UI worktree, branch `box-app-ui`; Codex edits `home_guard_project/box/app/` there — we do not).
 
 **Interfaces:**
 - Consumes: the CLI contract from Task 4 (`zones`, `set-zone --camera --points`, `clear-zone --camera`; JSON shapes above).
@@ -1032,107 +1032,28 @@ git fetch origin beelink-collector-box && git push origin beelink-collector-box
 ```
 Expected: fast-forward push. If it is refused, another session pushed first: `git pull --rebase origin beelink-collector-box` is NOT safe in the shared tree; instead tell the user and the other session and let them push, or retry after they confirm the tree is quiet.
 
-- [ ] **Step 2: Write the Codex brief**
+- [ ] **Step 2: Put the brief in the UI worktree**
 
-Create `C:\Users\ameer\Ameer\home_guard_ui\CODEX_BRIEF_ZONES.md` with exactly this content:
+The brief is already written and committed: `docs/superpowers/plans/2026-10-03-codex-brief-watch-zone-dialog.md` (premium-quality requirements: split layout, nested enclosures, ambient fill, live dimming with eased motion, every state built, tile preview, tests, screenshots and a look pass). Copy it into the Codex worktree under the name its rounds use:
 
-````markdown
-# Brief: "Set the area to watch" — zone drawing dialog on the camera page
-
-Branch for this work: `box-app-ui` (this worktree). Engine side is already on
-`beelink-collector-box`; merge it in first (`git merge origin/beelink-collector-box`) so the
-`find_cameras` zone commands exist here. Edit only `home_guard_project/box/app/` and
-`tests/box/test_app_*.py`.
-
-## What the user sees
-
-On the camera page (both the laptop wizard and the box window), under every camera photo, a
-button **"Set the area to watch"**. Next to it a one-line status: **"Watching: the whole picture"**
-or **"Watching: the area you drew"**.
-
-The button opens a dialog with the camera's photo large (the raw snapshot the page already has —
-it is NOT masked, so the street stays visible to draw around):
-
-- Left-click adds a corner. Dragging a corner moves it. Right-click, or the **Undo** button,
-  removes the last corner. **Clear** removes all corners (= watch the whole picture).
-- While drawing, everything outside the polygon is darkened live (semi-transparent black,
-  ~65 %), with the polygon outline and its corners drawn on top, so the user sees exactly what
-  the AI will ignore. With fewer than 3 corners nothing is darkened.
-- A warning line appears when the polygon covers under 5 % of the picture: "This area is very
-  small; the camera will see almost nothing." Save still works.
-- **Save** stores the zone (or clears it when there are fewer than 3 corners) and closes.
-  **Cancel** discards.
-- Corners are stored as picture fractions 0–1 relative to the photo's own pixel size, 4 decimals,
-  independent of the dialog's size.
-- Demo mode (`box.demo`): the dialog works on the demo picture and Save keeps the zone only in
-  memory for the session.
-
-## How it talks to the box
-
-Reuse the existing camera controls; do not add a new transport.
-
-- Local (box window): `CameraControls.command(...)` runs
-  `python -m home_guard_project.box.find_cameras --json <args>`.
-- Remote (wizard over SSH): `RemoteCameraControls.ssh('<operation>')` builds the command; it
-  refuses quotes, and the points format needs none.
-
-Add to both control classes (same method names, same return shapes):
-
-```python
-def zones(self):            # -> {name: [[x, y], ...]}  (empty list = whole picture)
-def set_zone(self, name, points):   # points: list of (x, y) fractions; -> stored [[x, y], ...]
-def clear_zone(self, name): # -> []
+```bash
+cp docs/superpowers/plans/2026-10-03-codex-brief-watch-zone-dialog.md /c/Users/ameer/Ameer/home_guard_ui/CODEX_BRIEF_ZONES.md
+cd /c/Users/ameer/Ameer/home_guard_ui && git status --short | head -3 && git log --oneline -1
 ```
+Expected: the worktree is clean (nothing but the new untracked brief) and at `f78b1dc` or later on `box-app-ui`.
 
-Commands and their JSON (all under `--json`):
+- [ ] **Step 3: Launch Codex with the gpt-6-astra model, unattended, in the background**
 
-| Command | Output |
-|---|---|
-| `zones` | `{"cameras": [{"name": "yard", "points": [[0.1, 0.2], ...]}, ...]}` — every camera, `points` `[]` when none |
-| `set-zone --camera yard --points 0.1,0.2;0.9,0.2;0.5,0.9` | `{"camera": "yard", "points": [[0.1, 0.2], [0.9, 0.2], [0.5, 0.9]]}` |
-| `clear-zone --camera yard` | `{"camera": "yard", "points": []}` |
-| any error | `{"error": "<plain message>"}`, exit code 1 |
+One round at a time in that worktree (agreed with session home-guard-fa). Start a NEW Codex session (never `codex resume`):
 
-Points on the command line: `x,y;x,y;x,y`, no spaces, no quotes, 3 to 32 corners. Build it with
-`";".join(f"{x:.4f},{y:.4f}" for x, y in points)`.
+```bash
+cd /c/Users/ameer/Ameer/home_guard_ui && env -u VIRTUAL_ENV codex exec -C /c/Users/ameer/Ameer/home_guard_ui -m gpt-6-astra --color never -o /c/Users/ameer/Ameer/home_guard_ui/codex_zones_last.md - < CODEX_BRIEF_ZONES.md > codex_zones_run.log 2>&1
+```
+Run it with `run_in_background: true` (it takes about an hour). Do not start a second one. When it finishes, read `codex_zones_last.md` (its final message) and the tail of `codex_zones_run.log`, then in the worktree check `git log --oneline f78b1dc..HEAD` for its three commits and run `.venv/Scripts/python.exe -m unittest discover -s tests/box` there. Open its screenshots under `docs/ui/screenshots/` and look at them yourself; if something is clearly off, start ONE follow-up round with a short brief naming exactly what to fix.
 
-`set-zone` / `clear-zone` already ask the running mode to restart on the box. The remote
-`parse(result, key)` helper needs a list under `key`: use `key='cameras'` for `zones` and
-`key='points'` for set/clear.
+- [ ] **Step 4: Tell the user and the other sessions**
 
-Load the zones once when the camera page renders (after snapshots) and update the per-tile status
-line from the result; after Save, update that tile's status from the command's reply.
-
-## Strings
-
-Add to `strings.py` (every language the file carries), keys:
-`camera_zone_button` ("Set the area to watch"), `camera_zone_whole` ("Watching: the whole
-picture"), `camera_zone_drawn` ("Watching: the area you drew"), `camera_zone_title`
-("Draw the area to watch — {camera}"), `camera_zone_help` ("Click the corners of the area the
-camera should watch. Everything outside it is ignored."), `camera_zone_small` ("This area is very
-small; the camera will see almost nothing."), `camera_zone_undo` ("Undo"), `camera_zone_clear`
-("Clear"), `camera_zone_save` ("Save"), `camera_zone_cancel` ("Cancel"),
-`camera_zone_save_failed` ("The area could not be saved. Try again.").
-
-## Tests (unittest, same style as tests/box/test_app_cameras.py, offscreen Qt)
-
-- The dialog converts clicks to fractions of the photo's pixel size and back (a 4:3 photo shown
-  in a wider dialog: a click at the photo's centre is (0.5, 0.5)).
-- Undo removes the last corner; Clear empties; fewer than 3 corners → Save calls `clear_zone`.
-- Save with 3+ corners calls `set_zone(name, points)` with 4-decimal fractions; the tile's status
-  line flips to "Watching: the area you drew".
-- The small-area warning appears for a polygon under 5 % and not for one over it.
-- A failed save shows `camera_zone_save_failed` and keeps the dialog open.
-- `RemoteCameraControls.set_zone` builds an ssh command containing
-  `set-zone --camera yard --points 0.1000,0.2000;0.9000,0.2000;0.5000,0.9000` and no quotes.
-
-Run: `.venv/Scripts/python.exe -m unittest discover -s tests/box`. Commit on `box-app-ui` with a
-one-line message in the style of the branch's history.
-````
-
-- [ ] **Step 3: Tell the user and the other sessions**
-
-Report: engine commits (hashes), test count, the brief's path, and that Codex can start once its current round is done. Message `home-guard-fa` that the collector/inference masking is pushed and that `find_cameras.py` gained zone commands.
+Report: engine commits (hashes), test count, Codex's commits and screenshot paths. Message `home-guard-fa` that the collector/inference masking is pushed, that `find_cameras.py` gained zone commands, and that the Codex round on `box-app-ui` is done so it can merge it into `beelink-collector-box`, run the full suite and update the box.
 
 ---
 
