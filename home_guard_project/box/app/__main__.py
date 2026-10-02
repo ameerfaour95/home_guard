@@ -6,7 +6,29 @@ import sys
 from pathlib import Path
 
 
+def _drop_own_console():
+    """Close the terminal window Windows opened only for this program.
+
+    Started from a shortcut, a console Python gets a terminal window of its
+    own. If this process is the only one attached to its console, nobody ran
+    it from a terminal, so the window is let go. Run from a terminal, the
+    console is shared and stays.
+    """
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        attached = (ctypes.c_uint32 * 2)()
+        if kernel32.GetConsoleProcessList(attached, 2) == 1:
+            kernel32.FreeConsole()
+    except Exception:  # never worth failing the app over
+        pass
+
+
 def main():
+    _drop_own_console()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--demo", action="store_true")
     parser.add_argument("--panel", choices=("settings", "cameras"))

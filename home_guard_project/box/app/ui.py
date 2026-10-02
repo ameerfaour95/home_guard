@@ -200,7 +200,7 @@ class Window(QMainWindow):
         self.box_controls = BoxControls(demo=args.demo, stopped=args.state == "stopped", settings=Settings(mode="inference" if args.state == "inference" else "data_collection", show_cameras=args.state != "hidden"))
         self.start_requested = False
         self.setWindowTitle(tr("setup_window_title") if args.setup else tr("brand"))
-        self.setWindowIcon(QIcon(str(Path(__file__).parents[1] / "assets" / "logo.ico")))
+        self.setWindowIcon(QIcon(str(Path(__file__).parents[1] / "assets" / "home_guard.ico")))
         self.resize(*map(int, args.size.split("x")))
         self.setMinimumSize(1000, 650)
         self.setStyleSheet(STYLE)
@@ -210,14 +210,16 @@ class Window(QMainWindow):
         header = QHBoxLayout()
         logo = QLabel()
         pix = QPixmap(str(Path(__file__).parents[1] / "assets" / "logo.png"))
-        logo.setPixmap(
-            pix.scaled(
-                130,
-                60,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
+        # The logo can be unreadable (an antivirus sandbox hides files): run without it.
+        if not pix.isNull():
+            logo.setPixmap(
+                pix.scaled(
+                    130,
+                    60,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
             )
-        )
         header.addWidget(logo)
         header.addSpacing(20)
         titles = QVBoxLayout()
