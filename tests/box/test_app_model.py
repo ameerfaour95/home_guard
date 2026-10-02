@@ -2,6 +2,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from home_guard_project.box.app.model import (
+    ActivityFeed,
     State,
     parse_activity,
     read_activity,
@@ -66,6 +67,11 @@ class AppModelTest(unittest.TestCase):
         self.assertIsNone(parse_activity("Completed 1.5 MiB/9.0 MiB (15 MiB/s)"))
 
     def test_redaction_applies_to_details(self):
+        self.assertEqual(parse_activity("ERROR camera stopped").text, tr("warning"))
+        self.assertEqual(
+            parse_activity("ERROR send failed", "upload-2026-10-02.log").text,
+            tr("upload_error"),
+        )
         value = redact("ERROR rtsp://example.invalid/path password=sample token=sample")
         self.assertNotIn("example.invalid", value)
         self.assertNotIn("sample", value)
@@ -98,6 +104,35 @@ class AppModelTest(unittest.TestCase):
             self.assertEqual(tail(path), [])
             path.write_text("x" * 100 + "\nlast line\n")
             self.assertEqual(tail(path, 20), ["last line"])
+
+    def test_last_upload_survives_offline_days_and_progress_logs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            older = root / "upload-2026-09-20.log"
+            older.write_text("2026-09-20 12:00:00 Done. Uploaded: 3 | Failed: 0")
+            for day in ("01", "02", "03"):
+                (root / f"upload-2026-10-{day}.log").write_text("progress only")
+            feed = ActivityFeed(root)
+            self.assertEqual(feed.read()[1], "2026-09-20 12:00:00")
+            older.write_text("progress only")
+            self.assertEqual(feed.read()[1], "2026-09-20 12:00:00")
+
+    def test_upload_time_is_found_before_a_large_progress_tail(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            log = root / "upload-2026-10-02.log"
+            log.write_text(
+                "2026-10-02 12:00:00 Done. Uploaded: 3 | Failed: 0\n"
+                + "progress\n" * 20000
+            )
+            feed = ActivityFeed(root)
+            self.assertEqual(feed.read()[1], "2026-10-02 12:00:00")
+            with log.open("a") as stream:
+                stream.write(
+                    "2026-10-02 13:00:00 Done. Uploaded: 4 | Failed: 0\n"
+                    + "progress\n" * 20000
+                )
+            self.assertEqual(feed.read()[1], "2026-10-02 13:00:00")
 
 
 class WizardSequenceTest(unittest.TestCase):

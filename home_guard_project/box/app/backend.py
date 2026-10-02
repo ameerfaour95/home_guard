@@ -34,6 +34,8 @@ class Result:
     status: str
     message_key: str
     checks: tuple[Check, ...] = ()
+    rescue_name: str = ""
+    rescue_password: str = field(default="", repr=False)
 
 
 class Backend(Protocol):
@@ -52,7 +54,11 @@ class SimulatedBackend:
 
     def execute(self, step, answers):
         if step == "network_step" and self.failure:
-            return Result(step, "FAIL", "network_fail")
+            return Result(
+                step,
+                "FAIL",
+                "network_fail" if answers.network == "wifi" else "network_cable_fail",
+            )
         if step == "camera_step" and not answers.find_cameras:
             return Result(step, "WARN", "skipped")
         if step == "readiness":

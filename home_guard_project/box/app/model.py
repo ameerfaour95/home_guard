@@ -46,7 +46,7 @@ def redact(line):
     )[:500]
 
 
-def parse_activity(line):
+def parse_activity(line, source=""):
     detail = redact(line)
     match = re.search(r"\[([^\]]+)\] (?:trigger|random) saved:", line)
     if match:
@@ -68,7 +68,9 @@ def parse_activity(line):
     ):
         return Activity(tr("restart"), detail)
     if "ERROR" in line:
-        return Activity(tr("upload_error"), detail)
+        return Activity(
+            tr("upload_error" if source.startswith("upload-") else "warning"), detail
+        )
     if "WARNING" in line:
         return Activity(tr("warning"), detail)
     if "reconnect" in line.lower():
@@ -95,6 +97,8 @@ class ActivityFeed:
     def __init__(self, directory):
         self.directory = Path(directory)
         self.cache = {}
+        self.last_upload = ""
+        self.upload_cache = {}
 
     def _events(self, path):
         try:
@@ -107,7 +111,7 @@ class ActivityFeed:
             return cached[1]
         events = []
         for line in tail(path):
-            event = parse_activity(line)
+            event = parse_activity(line, path.name)
             if event is None:
                 continue
             stamp = re.search(r"\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}", line)
@@ -122,6 +126,55 @@ class ActivityFeed:
         self.cache[path] = (fingerprint, events)
         return events
 
+    def _last_success(self, path):
+        try:
+            stat = path.stat()
+            fingerprint = (stat.st_size, stat.st_mtime_ns, stat.st_ino)
+            cached = self.upload_cache.get(path)
+            if cached and cached[0] == fingerprint:
+                return cached[1]
+            previous = cached[1] if cached else ""
+            # After the first scan, search only newly appended bytes. Include
+            # a small overlap for a log line split across the old file end.
+            floor = (
+                max(0, cached[0][0] - 4096)
+                if cached
+                and stat.st_size > cached[0][0]
+                and stat.st_ino == cached[0][2]
+                else 0
+            )
+            found = ""
+            with path.open("rb") as stream:
+                end = stat.st_size
+                carry = b""
+                while end > floor and not found:
+                    start = max(floor, end - 65536)
+                    stream.seek(start)
+                    data = stream.read(end - start) + carry
+                    lines = data.splitlines()
+                    if start and lines:
+                        carry = lines[0][-4096:]
+                        lines = lines[1:]
+                    else:
+                        carry = b""
+                    for raw in reversed(lines):
+                        line = raw.decode("utf-8", errors="replace")
+                        if "Done. Uploaded:" not in line:
+                            continue
+                        event = parse_activity(line, path.name)
+                        stamp = re.search(
+                            r"\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}", line
+                        )
+                        if event and event.upload and stamp:
+                            found = stamp.group().replace("T", " ")
+                            break
+                    end = start
+            result = found or previous
+            self.upload_cache[path] = (fingerprint, result)
+            return result
+        except OSError:
+            return ""
+
     def read(self):
         uploads = sorted(self.directory.glob("upload-*.log"))
         paths = [self.directory / "runner.log"]
@@ -131,12 +184,12 @@ class ActivityFeed:
         upload = ""
         # Last upload remains useful even after several offline days.
         for path in reversed(uploads):
-            times = [stamp for stamp, event in self._events(path) if event.upload]
-            if times:
-                upload = max(times)
+            upload = self._last_success(path)
+            if upload:
                 break
         events.sort(key=lambda item: item[0], reverse=True)
-        return [event for _, event in events[:12]], upload
+        self.last_upload = max(self.last_upload, upload)
+        return [event for _, event in events[:12]], self.last_upload
 
 
 def read_activity(directory):

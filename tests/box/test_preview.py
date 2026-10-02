@@ -138,3 +138,28 @@ class PreviewTest(unittest.TestCase):
         with mock.patch.object(self.writer, "publish") as publish:
             stream.read()
             publish.assert_not_called()
+
+    def test_manifest_retries_after_a_sharing_failure(self):
+        self.reader.touch()
+        with mock.patch(
+            "home_guard_project.box.preview.os.replace", side_effect=PermissionError
+        ):
+            self.assertFalse(self.writer.set_cameras(["front"]))
+        self.assertTrue(self.writer.publish("front", self.frame))
+        self.assertEqual(self.reader.names(), ["front"])
+
+    def test_adapter_uses_actual_inference_read_without_opening_camera(self):
+        import threading
+        from home_guard_project.box import inference
+
+        self.reader.touch()
+        adapter = adapt_stream(inference._Stream, self.writer)
+        stream = object.__new__(adapter)
+        stream.name = "front"
+        stream._frame = self.frame
+        stream._lock = threading.Lock()
+        with mock.patch(
+            "cv2.VideoCapture", side_effect=AssertionError("camera access forbidden")
+        ):
+            np.testing.assert_array_equal(stream.read(), self.frame)
+        self.assertIsNotNone(self.reader.read("front"))

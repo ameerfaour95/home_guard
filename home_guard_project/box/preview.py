@@ -19,8 +19,11 @@ class PreviewWriter:
         self.clock = clock
         self.last = {}
         self.sources = {}
+        self.camera_names = []
+        self.manifest_pending = False
 
     def set_cameras(self, names):
+        self.camera_names = list(names)
         if not self.enabled:
             return False
         temp = self.directory / ("cameras." + str(os.getpid()) + ".tmp")
@@ -28,8 +31,10 @@ class PreviewWriter:
             self.directory.mkdir(parents=True, exist_ok=True)
             temp.write_text(json.dumps(list(names)), encoding="utf-8")
             os.replace(temp, self.directory / "cameras.json")
+            self.manifest_pending = False
             return True
         except OSError:
+            self.manifest_pending = True
             return False
         finally:
             try:
@@ -55,6 +60,8 @@ class PreviewWriter:
     def publish(self, camera, frame, source=None):
         if not self.wanted(camera, source):
             return False
+        if self.manifest_pending:
+            self.set_cameras(self.camera_names)
         self.last[camera] = self.clock()  # throttle failed writes too
         import cv2
 

@@ -259,6 +259,7 @@ class Window(QMainWindow):
         self.outer.addLayout(body, 1)
         self.tiles = []
         self.events = []
+        self.render_activity()
         self.names = None
         self.reader = PreviewReader(Path(bc.LOG_DIR) / "preview")
         self.activity_feed = ActivityFeed(bc.LOG_DIR)
@@ -315,7 +316,10 @@ class Window(QMainWindow):
                 (
                     []
                     if scenario in ("quiet", "empty", "loading")
-                    else [Activity(e, e) for e in TEXT["demo_events"]]
+                    else [
+                        Activity(e, d)
+                        for e, d in zip(TEXT["demo_events"], TEXT["demo_details"])
+                    ]
                 ),
             )
             for i, tile in enumerate(self.tiles):
@@ -337,7 +341,10 @@ class Window(QMainWindow):
             self.future = self.pool.submit(self.fetch)
             self.last_poll = now
         # Re-read permission at each viewer tick. Never touch the marker when hidden.
-        allowed = bool(bc.get_option("show_cameras"))
+        try:
+            allowed = bool(bc.get_option("show_cameras"))
+        except Exception:
+            allowed = False
         if self.current_state is not None and allowed != self.current_show:
             self.apply_state(self.current_state, allowed, self.events)
         if allowed:
@@ -376,6 +383,9 @@ class Window(QMainWindow):
             + tr("camera_count", count=len(state.cameras))
         )
         scenario = self.args.state if self.args.demo else ""
+        if scenario == "loading":
+            for value, _ in self.stats:
+                value.setText(tr("loading"))
         message = (
             "loading"
             if scenario == "loading"
@@ -463,7 +473,10 @@ class Window(QMainWindow):
         for title, hint in titles:
             panel = card()
             lay = layout_for(panel, 30)
-            lay.addWidget(label(tr(title), "title"))
+            title_widget = label(tr(title), "title")
+            if title == "progress_title":
+                self.progress_title = title_widget
+            lay.addWidget(title_widget)
             lay.addWidget(label(tr(hint), "muted"))
             self.page_layouts.append(lay)
             self.pages.addWidget(panel)
@@ -543,8 +556,11 @@ class Window(QMainWindow):
         sr.addWidget(label(tr("rescue"), "section"))
         sr.addWidget(label(tr("rescue_hint"), "muted"))
         sr.addWidget(label(tr("rescue_demo"), "accent"))
+        self.rescue_labels = {}
         for key in ("rescue_name", "rescue_password"):
-            sr.addWidget(label(tr(key) + ": " + tr("service_pending"), "muted"))
+            item = label(tr(key) + ": " + tr("service_pending"), "muted")
+            self.rescue_labels[key] = item
+            sr.addWidget(item)
         sr.addStretch()
         summary_columns.addWidget(summary_left, 3)
         summary_columns.addWidget(summary_right, 2)
@@ -605,6 +621,7 @@ class Window(QMainWindow):
     def add_input(self, page, key, caption, secret=False):
         self.page_layouts[page].addWidget(label(caption))
         field = QLineEdit()
+        field.textChanged.connect(lambda: field.setStyleSheet(""))
         if secret:
             field.setEchoMode(QLineEdit.EchoMode.Password)
         field.setMaximumWidth(700)
@@ -649,6 +666,15 @@ class Window(QMainWindow):
             self.set_page(0)
             return
         if not self.valid_page(index):
+            keys = {
+                0: ("address",),
+                1: ("ssid", "wifi_password"),
+                2: ("house",),
+                3: ("camera_user", "camera_password"),
+            }[index]
+            for key in keys:
+                self.inputs[key].setStyleSheet("border: 1px solid #f27d7d;")
+            self.inputs[keys[0]].setFocus()
             self.validation.setText(tr("validation"))
             return
         if index == 3:
@@ -657,6 +683,7 @@ class Window(QMainWindow):
             self.set_page(index + 1)
 
     def begin_setup(self):
+        self.progress_title.setText(tr("progress_title"))
         answers = Answers(
             **{key: w.text() for key, w in self.inputs.items()},
             network="wifi" if self.network.currentIndex() else "ethernet",
@@ -717,7 +744,8 @@ class Window(QMainWindow):
             for key in ("wifi_password", "camera_password"):
                 self.inputs[key].clear()
             if self.sequence.failed:
-                self.validation.setText(tr("network_fail"))
+                self.progress_title.setText(tr("failed_title"))
+                self.validation.setText(tr(result.message_key))
                 self.next.setText(tr("retry"))
                 self.next.setVisible(True)
                 try:
@@ -732,6 +760,10 @@ class Window(QMainWindow):
                     )
                     widget.setStyleSheet(
                         "color: " + (ACCENT if check.status == "WARN" else "#81d3b0")
+                    )
+                for key, widget in self.rescue_labels.items():
+                    widget.setText(
+                        tr(key) + ": " + (getattr(result, key) or tr("service_pending"))
                     )
                 self.later.setVisible(not self.sequence.answers.find_cameras)
                 self.set_page(5)
