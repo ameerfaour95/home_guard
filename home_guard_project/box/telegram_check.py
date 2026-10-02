@@ -40,13 +40,15 @@ def main() -> int:
         print("NOT_READY: Telegram bot token or chat id is missing - set them in setup")
         return 1
 
-    result = check_group_readiness(token, chat_ids[0])
-    bot = result.get("bot") or "bot"
-    if result.get("ready"):
-        print(f"READY: @{bot} can read the owner's messages ({result.get('reason')})")
-        return 0
-    print(f"NOT_READY: @{bot} - {result.get('reason')}")
-    return 1
+    bot = "bot"
+    for chat in chat_ids:
+        result = check_group_readiness(token, chat)
+        bot = result.get("bot") or bot
+        if not result.get("ready"):
+            print(f"NOT_READY: @{bot} in {chat} - {result.get('reason')}")
+            return 1
+    print(f"READY: @{bot} can read the owner's messages in {len(chat_ids)} chat(s)")
+    return 0
 
 
 if __name__ == "__main__":
