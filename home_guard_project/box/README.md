@@ -158,7 +158,7 @@ or, without the compiled program:
 powershell -ExecutionPolicy Bypass -File home_guard_project\box\setup_customer.ps1 -Target <user>@<box-tailscale-ip>
 ```
 
-It asks whether the box will use Ethernet or Wi-Fi, for Wi-Fi the customer's network name and password, and optionally the camera login. Then it:
+It asks whether the box will use Ethernet or Wi-Fi (and for Wi-Fi the customer's network name and password), the house name, whether to show the cameras on the box's own screen, whether to turn on AI alerts (and during which hours), and optionally the camera login. Then it:
 
 1. Updates the box's software (`update.sh`).
 2. Configures the network on the box (`setup_network.ps1`).
@@ -175,6 +175,34 @@ It asks whether the box will use Ethernet or Wi-Fi, for Wi-Fi the customer's net
 Passwords are sent in a temporary file that is deleted from the box afterwards. The rescue hotspot name and password are kept on the laptop in `~/.homeguard/rescue_wifi.txt`.
 
 Build the program with `powershell -ExecutionPolicy Bypass -File home_guard_project\box\build_exe.ps1` (writes `dist\HomeGuardSetup.exe`).
+
+## Telegram alerts for a new customer
+
+AI alerts are delivered over Telegram: it is free, and one message reaches a whole family group (so every family member is covered at no extra cost). **One bot serves every box; each customer gets their own group.**
+
+Set up once on the laptop (already done for the founder — kept in `~/.homeguard/telegram.env`): a bot created with [@BotFather](https://t.me/BotFather) (`/newbot`). Its token is the `TELEGRAM_BOT_TOKEN` line in that file. The OpenAI key (for the AI descriptions) is in `~/.homeguard/openai.env`.
+
+For each new customer:
+
+1. **Create a Telegram group** for that home (for example "Cohen — Home Guard") and **add the bot to it** (search the bot's username, e.g. `@homeshield_ameer_bot`, → Add to group). Put the whole family in the group — everyone then gets the alerts.
+2. **Send any message in the group** so the bot can see it.
+3. **Find the group's chat id.** Open this in a browser, replacing `<TOKEN>` with the bot token from `~/.homeguard/telegram.env`:
+   ```
+   https://api.telegram.org/bot<TOKEN>/getUpdates
+   ```
+   Look for `"chat":{"id":-100...}` — a group id is a **negative** number.
+4. **Point this box at that group.** Either edit `TELEGRAM_CHAT_IDS=` in `~/.homeguard/telegram.env` before running the wizard, or set it on the box afterwards:
+   ```
+   ssh -i ~/.ssh/homeguard_box <user>@<box-ip> "cd /d C:\home_guard && .venv\Scripts\python.exe -m home_guard_project.box set-option telegram_chat_ids=<id>"
+   ```
+   For several recipients, use comma-separated ids with no spaces (e.g. `-1001111,-1002222`).
+5. **Turn alerts on in the wizard:** answer **y** to "Turn on AI alerts?" and give the hours. The wizard pushes the bot token and the OpenAI key onto the box (into `api_key.env`) and switches it to inference mode.
+
+**Test it:** during the alert hours, have someone walk in front of a camera — a Telegram message with a photo should arrive in the group within a few seconds. Everything the AI sees is also written to the box's log.
+
+A customer who wants their **own** bot (not the shared one) creates one with @BotFather and you use that token for their box instead.
+
+> Note: inference (AI) mode and data-collection mode are mutually exclusive — a box with AI alerts on does not also save training clips.
 
 ## Bench test before moving the box
 
