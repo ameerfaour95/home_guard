@@ -26,10 +26,12 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import json
 import logging
 import os
 import re
+import socket
 import sys
 from typing import Any, Dict, List
 
@@ -201,6 +203,51 @@ def _scan() -> Dict[str, Any]:
     }
 
 
+def digest_response(user: str, realm: str, password: str, method: str, uri: str, nonce: str) -> str:
+    """The ``response`` value of HTTP/RTSP Digest authentication (RFC 2069, no qop)."""
+    md5 = lambda text: hashlib.md5(text.encode("utf-8")).hexdigest()  # noqa: E731, S324 - the protocol's own hash
+    return md5(f"{md5(f'{user}:{realm}:{password}')}:{nonce}:{md5(f'{method}:{uri}')}")
+
+
+def _rtsp_describe(host: str, port: int, uri: str, authorization: str = "", timeout: float = 5.0) -> str:
+    request = f"DESCRIBE {uri} RTSP/1.0\r\nCSeq: 1\r\nAccept: application/sdp\r\n"
+    if authorization:
+        request += f"Authorization: {authorization}\r\n"
+    with socket.create_connection((host, port), timeout=timeout) as conn:
+        conn.settimeout(timeout)
+        conn.sendall((request + "\r\n").encode("utf-8"))
+        return conn.recv(2048).decode("latin-1", "replace")
+
+
+def rtsp_login_check(host: str, port: int, user: str, password: str, timeout: float = 5.0) -> str:
+    """Does the device accept this login? ``accepted``, ``refused`` or ``unknown``.
+
+    One or two quick requests, before the slow search for the device's stream
+    address. A camera checks the login before it looks at the address, so a
+    made-up address is enough: 401 with our login means the login is wrong.
+    """
+    uri = f"rtsp://{host}:{port}/"
+    try:
+        reply = _rtsp_describe(host, port, uri, timeout=timeout)
+        if " 401 " not in reply.splitlines()[0]:
+            return "accepted"                      # it asks for no login at all
+        digest = re.search(r'WWW-Authenticate:\s*Digest\s+(.*)', reply, re.IGNORECASE)
+        if digest:
+            fields = dict(re.findall(r'(\w+)="([^"]*)"', digest.group(1)))
+            realm, nonce = fields.get("realm", ""), fields.get("nonce", "")
+            answer = digest_response(user, realm, password, "DESCRIBE", uri, nonce)
+            authorization = (f'Digest username="{user}", realm="{realm}", nonce="{nonce}", '
+                             f'uri="{uri}", response="{answer}"')
+        elif re.search(r"WWW-Authenticate:\s*Basic", reply, re.IGNORECASE):
+            authorization = "Basic " + base64.b64encode(f"{user}:{password}".encode("utf-8")).decode("ascii")
+        else:
+            return "unknown"
+        reply = _rtsp_describe(host, port, uri, authorization, timeout=timeout)
+        return "refused" if " 401 " in reply.splitlines()[0] else "accepted"
+    except (OSError, IndexError):
+        return "unknown"
+
+
 def _probe_host(host: str, port: int, user: str, password: str) -> List[Dict[str, Any]]:
     from home_guard_project.data_collection import discover
 
@@ -247,7 +294,12 @@ def _finish(found: Found, args: argparse.Namespace, extra: Dict[str, Any]) -> No
     if args.json:
         print(json.dumps({**extra, "cameras": rows, "saved": saved}, indent=2))
     elif not rows:
-        print("No working stream found. Check the login, and that RTSP is enabled on the device.")
+        refused = extra.get("login_refused") or []
+        if refused:
+            print(f"{len(refused)} device(s) answered but refused this login: {', '.join(refused)}. "
+                  "Use the cameras' own user name and password.")
+        else:
+            print("No working stream found. Check the login, and that RTSP is enabled on the device.")
     else:
         for r in rows:
             print(f"  {r['name']:<22} {r['host']:<16} {r['width']}x{r['height']}")
@@ -349,8 +401,18 @@ def main() -> None:
     targets = [(host, int(port)) for port, hosts in scan["rtsp_hosts"].items() for host in hosts]
     if not targets:
         log.warning("No device answers on the camera port. Is the box on the cameras' network?")
-    found = {host: _probe_host(host, port, args.user, password) for host, port in targets}
-    _finish(found, args, {"local_ip": scan["local_ip"], "hosts_tried": [h for h, _ in targets]})
+    # A device that refuses the login would cost half a minute of trying stream
+    # addresses that can never work, and the reason would be lost in the noise.
+    refused = [host for host, port in targets if rtsp_login_check(host, port, args.user, password) == "refused"]
+    if refused:
+        log.warning("%d of %d device(s) refused this login: %s", len(refused), len(targets), ", ".join(refused))
+    found = {host: _probe_host(host, port, args.user, password) for host, port in targets if host not in refused}
+    _finish(found, args, {
+        "local_ip": scan["local_ip"],
+        "hosts_tried": [h for h, _ in targets],
+        "devices_found": len(targets),
+        "login_refused": refused,
+    })
 
 
 if __name__ == "__main__":
