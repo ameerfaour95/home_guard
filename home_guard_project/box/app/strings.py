@@ -1,6 +1,18 @@
 """All visible application copy; keys remain stable for translation."""
 
 TEXT = {
+    "technical_log": "Technical log",
+    "copy_log": "Copy",
+    "details_empty": "No additional notes for this step yet.",
+    "detail_login_refused": "A camera refused this login. Check its user name and password.",
+    "detail_timeout": "A camera did not send a picture in time. Check its power and connection.",
+    "detail_no_stream": "No working picture address was found for a camera.",
+    "detail_try_stream": "Trying another picture address for a camera.",
+    "detail_find_cameras": "Looking for cameras on the home network.",
+    "detail_update": "Updating the software on the box.",
+    "detail_copy": "Copying setup files to the box.",
+    "detail_command": "Running a setup command on the box.",
+
     "camera_check_pending": "Finish loading the camera check before continuing. If it failed, refresh the photos and try again.",
 
     "setup_window_title": "Home Guard Setup",

@@ -766,24 +766,28 @@ class Window(QMainWindow):
         self.fail.setVisible(self.args.demo)
         self.page_layouts[3].addWidget(self.fail)
         self.step_rows = []
+        progress_body = QHBoxLayout()
+        progress_steps = QVBoxLayout()
         from .engine_backend import ENGINE_STEPS
         for step in ENGINE_STEPS:
             row = QHBoxLayout()
             name = label(tr("step_"+step))
-            name.setMinimumWidth(300)
+            name.setMinimumWidth(190)
             status = label(tr("pending"), "muted")
             row.addWidget(name, 2)
             row.addWidget(status, 3)
-            self.page_layouts[4].addLayout(row)
+            progress_steps.addLayout(row)
             self.step_rows.append(status)
+        progress_steps.addStretch()
+        progress_body.addLayout(progress_steps,1)
         self.setup_details_toggle = QCheckBox(tr("details"))
-        self.setup_details = QTextEdit()
-        self.setup_details.setReadOnly(True)
-        self.setup_details.setMaximumHeight(100)
+        from .setup_details_ui import DetailsPanel
+        self.setup_details = DetailsPanel()
         self.setup_details.hide()
         self.setup_details_toggle.toggled.connect(self.setup_details.setVisible)
         self.page_layouts[4].addWidget(self.setup_details_toggle)
-        self.page_layouts[4].addWidget(self.setup_details)
+        progress_body.addWidget(self.setup_details,1)
+        self.page_layouts[4].addLayout(progress_body,1)
         self.setup_cancel = QPushButton(tr("cancel_setup"))
         self.setup_cancel.setObjectName("secondary")
         self.setup_cancel.clicked.connect(self.cancel_setup)
@@ -1002,7 +1006,7 @@ class Window(QMainWindow):
         self.engine_backend=DemoEngine(self.fail.isChecked() or self.args.page=="failure") if self.args.demo else EngineBackend()
         self.engine_events=queue.Queue()
         self.engine_checks=[];self.engine_cameras=[];self.engine_failed_step=None;self.running_step=None
-        self.setup_details.clear()
+        self.setup_details.reset()
         for row in self.step_rows:
             row.setText(tr("pending"));row.setStyleSheet("")
         for item in self.check_labels: item.clear()
@@ -1033,6 +1037,7 @@ class Window(QMainWindow):
         while True:
             try: event=self.engine_events.get_nowait()
             except queue.Empty: break
+            self.setup_details.feed(event)
             if event.kind=="step":
                 index=ENGINE_STEPS.index(event.step)
                 row=self.step_rows[index]
@@ -1045,14 +1050,15 @@ class Window(QMainWindow):
                     status={"ok":"PASS","warn":"WARN","fail":"FAIL","skip":"step_skip"}[event.status]
                     row.setText(tr(status)+tr("separator")+event.text)
                     row.setStyleSheet("color: "+(ERROR if event.status=="fail" else WARNING if event.status in ("warn","skip") else OK))
-                    if event.status=="fail": self.engine_failed_step=event.step
+                    if event.status=="fail":
+                        self.engine_failed_step=event.step
+                        self.setup_details_toggle.setChecked(True)
             elif event.kind=="check": self.engine_checks.append(event)
             elif event.kind=="camera": self.engine_cameras.append(event.name)
             elif event.kind=="rescue":
                 self.rescue_labels["rescue_name"].setText(tr("rescue_name")+": "+event.name)
                 self.rescue_labels["rescue_password"].setText(tr("rescue_password")+": "+event.password)
-            elif event.kind=="detail":
-                self.setup_details.setPlainText((self.setup_details.toPlainText()+"\n"+event.text)[-12000:])
+
         if self.running_step is not None:
             self.step_rows[self.running_step].setText(tr("setup_elapsed",seconds=int(time.monotonic()-self.running_since)))
 
