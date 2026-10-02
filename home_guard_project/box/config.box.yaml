@@ -4,8 +4,9 @@
 # ──────────────────────────────────────────────────────────────────────────────
 
 display:
+  preview_enabled: true
   show_windows: false       # no monitor attached
-  show_plotted_boxes: false
+  show_plotted_boxes: true
 
 vlm:
   enabled: false            # descriptions are written by annotators

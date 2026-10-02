@@ -1213,6 +1213,16 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, handlers=[_stdout_handler], force=True)
 
     cfg = load_config()
+    preview = None
+    if cfg.PREVIEW_ENABLED:
+        # The legacy entry point is a script, so only its own directory is on
+        # sys.path. Add the checkout root for the optional box bridge.
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        if project_root not in sys.path:
+            sys.path.insert(0, project_root)
+        from home_guard_project.box.preview import PreviewWriter
+        preview = PreviewWriter(os.path.join(project_root, "logs", "preview"), enabled=True)
+        preview.set_cameras(cfg.CAMERAS)
     _ensure_dirs(cfg)
 
     log.info("Device=%s  dtype=%s", cfg.DEVICE, cfg.DTYPE)
@@ -1477,7 +1487,7 @@ def main() -> None:
                     )
 
                 # ── Display ──────────────────────────────────────────
-                if cfg.SHOW_WINDOWS:
+                if cfg.SHOW_WINDOWS or (preview is not None and preview.wanted(st.name)):
                     if results is not None and cfg.SHOW_PLOTTED_BOXES:
                         disp = results[0].plot()
                     else:
@@ -1495,7 +1505,10 @@ def main() -> None:
                         cv2.fillPoly(overlay, [roi_disp], (0, 255, 0))
                         cv2.addWeighted(overlay, 0.15, disp, 0.85, 0, disp)
                         cv2.polylines(disp, [roi_disp], True, (0, 255, 0), 2)
-                    cv2.imshow(st.name, disp)
+                    if preview is not None:
+                        preview.publish(st.name, disp)
+                    if cfg.SHOW_WINDOWS:
+                        cv2.imshow(st.name, disp)
 
             if cfg.SHOW_WINDOWS and (cv2.waitKey(1) & 0xFF == ord("q")):
                 break
