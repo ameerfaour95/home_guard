@@ -7,9 +7,11 @@ JPEG encoding, frame plotting/resizing, viewer gating and disk transport are rea
 from contextlib import ExitStack
 import importlib.util
 import logging
+import math
 from pathlib import Path
 import sys
 import tempfile
+import time
 from types import SimpleNamespace
 import unittest
 from unittest import mock
@@ -22,9 +24,12 @@ from home_guard_project.box import preview
 
 class CollectorPreviewTest(unittest.TestCase):
     def test_real_main_loop_publishes_only_for_viewer_and_new_capture(self):
-        for enabled, viewer in ((True, True), (True, False), (False, True)):
+        for enabled, viewer, rounded_clock in (
+            (True, True, False), (True, False, False), (False, True, False),
+            (True, True, True),
+        ):
             with (
-                self.subTest(enabled=enabled, viewer=viewer),
+                self.subTest(enabled=enabled, viewer=viewer, rounded_clock=rounded_clock),
                 tempfile.TemporaryDirectory() as directory,
             ):
                 root = Path(directory)
@@ -61,8 +66,16 @@ class CollectorPreviewTest(unittest.TestCase):
                 source = Path(config.__file__).with_name("data_collection.py")
                 spec = importlib.util.spec_from_file_location(name, source)
                 module = importlib.util.module_from_spec(spec)
-                writer = preview.PreviewWriter(root / "preview", enabled=enabled)
-                reader = preview.PreviewReader(root / "preview")
+                def one_ulp_behind_file():
+                    # Deterministically reproduce Windows FILETIME conversion:
+                    # first the viewer marker, then the just-published JPEG.
+                    image = root / "preview" / (preview.camera_key("front") + ".jpg")
+                    path = image if image.exists() else root / "preview" / "viewer.alive"
+                    return math.nextafter(path.stat().st_mtime, -math.inf)
+
+                clock = one_ulp_behind_file if rounded_clock else time.time
+                writer = preview.PreviewWriter(root / "preview", enabled=enabled, clock=clock)
+                reader = preview.PreviewReader(root / "preview", clock=clock)
                 if viewer:
                     reader.touch()
                 old_handlers = list(logging.getLogger().handlers)
@@ -95,6 +108,9 @@ class CollectorPreviewTest(unittest.TestCase):
                         )
                         with self.assertRaises(KeyboardInterrupt):
                             module.main()
+                    if enabled and viewer:
+                        # Distinguish failure to publish from rejection by the reader.
+                        self.assertTrue((root / "preview" / (preview.camera_key("front") + ".jpg")).exists())
                     data = reader.read("front")
                     self.assertEqual(data is not None, enabled and viewer)
                     if data:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 import os
+import math
 from pathlib import Path
 import tempfile
 import time
@@ -21,6 +22,28 @@ class PreviewTest(unittest.TestCase):
         self.writer = PreviewWriter(self.path, enabled=True, clock=lambda: self.now)
         self.reader = PreviewReader(self.path, clock=lambda: self.now)
         self.frame = np.full((80, 120, 3), 150, np.uint8)
+
+    def test_timestamp_rounding_has_exactly_one_ulp_allowance(self):
+        from home_guard_project.box.preview import _fresh_timestamp
+
+        now = 1800000000.0
+        adjacent = math.nextafter(now, math.inf)
+        future = math.nextafter(adjacent, math.inf)
+        self.assertTrue(_fresh_timestamp(now, now, 12))
+        self.assertTrue(_fresh_timestamp(adjacent, now, 12))
+        self.assertFalse(_fresh_timestamp(future, now, 12))
+        self.assertTrue(_fresh_timestamp(now - 12, now, 12))
+        self.assertFalse(_fresh_timestamp(math.nextafter(now - 12, -math.inf), now, 12))
+
+    def test_both_gates_reject_more_than_one_ulp_in_the_future(self):
+        self.reader.touch()
+        self.assertTrue(self.writer.publish("front", self.frame))
+        marker = self.path / "viewer.alive"
+        picture = self.path / (camera_key("front") + ".jpg")
+        self.writer.clock = lambda: math.nextafter(math.nextafter(marker.stat().st_mtime, -math.inf), -math.inf)
+        self.reader.clock = lambda: math.nextafter(math.nextafter(picture.stat().st_mtime, -math.inf), -math.inf)
+        self.assertFalse(self.writer.wanted("front"))
+        self.assertIsNone(self.reader.read("front"))
 
     def test_viewer_gate_and_disabled_writer_do_not_encode(self):
         with mock.patch("cv2.imencode") as encode:
