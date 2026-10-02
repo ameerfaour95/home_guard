@@ -1,6 +1,13 @@
 """All visible application copy; keys remain stable for translation."""
 
 TEXT = {
+    "detail_camera_refused_count": "{count} of {total} cameras refused the login.",
+    "detail_recorder_answers": "{count} cameras answer on the recorder.",
+    "detail_channel_ok": "Camera {channel} sent a picture ({size}).",
+    "detail_channel_no_picture": "Camera {channel} answers, but no picture arrived.",
+    "detail_device_skipped": "A device did not answer and was skipped.",
+    "detail_camera_found": "Camera found: {name} ({size}).",
+
     "demo_box_name": "Home Guard box",
     "box_label": "The box",
     "box_loading": "Looking for Windows boxes on this laptop's Tailscale network...",
