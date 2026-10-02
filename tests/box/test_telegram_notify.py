@@ -153,5 +153,58 @@ class DiscoverChatsTest(unittest.TestCase):
         self.assertEqual(ids, {"-100", "55"})
 
 
+class GroupReadinessTest(unittest.TestCase):
+    """check_group_readiness: can the bot read the owner's typed messages (getMe + getChatMember only)?"""
+
+    @staticmethod
+    def _get(responses):
+        calls = []
+
+        def get(token, method, params=None, timeout=15.0):
+            calls.append((method, params))
+            value = responses[method]
+            if isinstance(value, Exception):
+                raise value
+            return value
+
+        get.calls = calls
+        return get
+
+    def test_ready_when_privacy_is_off_without_checking_membership(self) -> None:
+        get = self._get({"getMe": {"result": {"username": "hg_bot", "id": 1, "can_read_all_group_messages": True}}})
+        result = tg.check_group_readiness("tok", "-100", get=get)
+        self.assertTrue(result["ready"])
+        self.assertEqual([m for m, _ in get.calls], ["getMe"])  # no getChatMember needed
+
+    def test_ready_when_the_bot_is_a_group_admin(self) -> None:
+        get = self._get({
+            "getMe": {"result": {"username": "hg_bot", "id": 1, "can_read_all_group_messages": False}},
+            "getChatMember": {"result": {"status": "administrator"}},
+        })
+        self.assertTrue(tg.check_group_readiness("tok", "-100", get=get)["ready"])
+
+    def test_not_ready_when_privacy_on_and_only_a_member(self) -> None:
+        get = self._get({
+            "getMe": {"result": {"username": "hg_bot", "id": 1, "can_read_all_group_messages": False}},
+            "getChatMember": {"result": {"status": "member"}},
+        })
+        result = tg.check_group_readiness("tok", "-100", get=get)
+        self.assertFalse(result["ready"])
+        self.assertIn("admin", result["reason"])
+
+    def test_not_ready_when_the_bot_is_not_in_the_chat(self) -> None:
+        get = self._get({
+            "getMe": {"result": {"username": "hg_bot", "id": 1, "can_read_all_group_messages": False}},
+            "getChatMember": {"result": {"status": "left"}},
+        })
+        self.assertFalse(tg.check_group_readiness("tok", "-100", get=get)["ready"])
+
+    def test_not_ready_and_never_raises_when_telegram_is_unreachable(self) -> None:
+        get = self._get({"getMe": OSError("boom")})
+        result = tg.check_group_readiness("tok", "-100", get=get)
+        self.assertFalse(result["ready"])
+        self.assertIn("cannot reach", result["reason"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -191,3 +191,43 @@ def discover_chats(token: str) -> List[Dict[str, str]]:
         ) or chat.get("username") or ""
         seen[str(cid)] = {"id": str(cid), "type": chat.get("type", ""), "title": title}
     return list(seen.values())
+
+
+def _api_get(token: str, method: str, params: Optional[Dict[str, Any]] = None, timeout: float = 15.0) -> Dict[str, Any]:
+    """GET a Bot API method, with optional query params. Isolated for testing."""
+    url = _API.format(token=token, method=method)
+    if params:
+        url += "?" + urllib.parse.urlencode(params)
+    with urllib.request.urlopen(url, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8", errors="replace"))
+
+
+def check_group_readiness(token: str, chat_id: str, get: Any = _api_get) -> Dict[str, Any]:
+    """Whether the bot can actually read the owner's typed messages in *chat_id*.
+
+    In a group a bot reads typed messages only if its privacy mode is off
+    (``can_read_all_group_messages``) or it is a group administrator; otherwise
+    it receives only button taps, replies to its own messages and @mentions.
+    Uses getMe and getChatMember only - never getUpdates - so it never disturbs
+    a running poller. Returns ``{"ready", "reason", "bot", "status"}``; never raises.
+    """
+    try:
+        me = (get(token, "getMe") or {}).get("result") or {}
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        return {"ready": False, "reason": f"cannot reach Telegram ({exc})", "bot": "", "status": ""}
+    bot = me.get("username") or ""
+    if me.get("can_read_all_group_messages"):
+        return {"ready": True, "reason": "privacy mode is off", "bot": bot, "status": "privacy_off"}
+    try:
+        member = (get(token, "getChatMember", {"chat_id": chat_id, "user_id": me.get("id")}) or {}).get("result") or {}
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        return {"ready": False, "reason": f"cannot check the bot's membership ({exc})", "bot": bot, "status": ""}
+    status = str(member.get("status") or "")
+    if status in ("administrator", "creator"):
+        return {"ready": True, "reason": "the bot is a group admin", "bot": bot, "status": status}
+    if status in ("", "left", "kicked"):
+        return {"ready": False, "reason": f"the bot is not in the chat (status={status or 'unknown'})",
+                "bot": bot, "status": status}
+    return {"ready": False, "bot": bot, "status": status,
+            "reason": "privacy mode is on and the bot is not an admin, so typed messages will not reach it - "
+                      "make the bot a group admin, or disable privacy in BotFather and re-add it"}

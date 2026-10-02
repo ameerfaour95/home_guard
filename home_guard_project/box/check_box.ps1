@@ -48,5 +48,18 @@ if (Test-Path 'C:\home_guard\home_guard_project\data_collection\cameras.yaml') {
 # --- AWS upload key ---
 if (Test-Path (Join-Path $env:USERPROFILE '.aws\credentials')) { Pass 'AWS credentials present' } else { Warn 'AWS credentials missing (uploads fail; run make_box_key <site> and copy to .aws\credentials)' }
 
+# --- Telegram assistant can hear the owner (inference mode) ---
+$py = 'C:\home_guard\.venv\Scripts\python.exe'
+if (Test-Path $py) {
+    Push-Location 'C:\home_guard'
+    $tg = (& $py -m home_guard_project.box.telegram_check 2>$null | Out-String).Trim()
+    Pop-Location
+    if ($tg -match '^READY' -or $tg -match '^SKIP') { Pass "Telegram: $tg" }
+    elseif ($tg -ne '') { Warn "Telegram: $tg" }
+    else { Warn 'Telegram readiness check could not run' }
+} else {
+    Warn 'Telegram readiness check skipped (.venv python not found)'
+}
+
 Write-Host ''
 if ($script:fails -gt 0) { Write-Host "$script:fails essential check(s) FAILED" -ForegroundColor Red; exit 1 } else { Write-Host 'All essential checks passed' -ForegroundColor Green }

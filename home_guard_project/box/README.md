@@ -205,20 +205,23 @@ Set up once on the laptop (already done for the founder — kept in `~/.homeguar
 For each new customer:
 
 1. **Create a Telegram group** for that home (for example "Cohen — Home Guard") and **add the bot to it** (search the bot's username, e.g. `@homeshield_ameer_bot`, → Add to group). Put the whole family in the group — everyone then gets the alerts.
-2. **Send any message in the group** so the bot can see it.
-3. **Find the group's chat id.** Open this in a browser, replacing `<TOKEN>` with the bot token from `~/.homeguard/telegram.env`:
+2. **Make the bot a group admin.** ⚠️ **Required for the assistant to work.** Group info → **Administrators → Add Admin → pick the bot** (default rights are fine). Telegram's privacy rule hides ordinary group messages from a bot, so without this the family can tap the alert buttons and *reply* to an alert, but a **plain message they type won't reach the assistant at all** (no reply, no feedback saved). Making the bot an admin lets it read every message in the group. (Alternative: in [@BotFather](https://t.me/BotFather), `/mybots` → the bot → Bot Settings → Group Privacy → **Turn off**, then remove and re-add the bot — admin is the one-step way.)
+3. **Send any message in the group** so the bot can see it.
+4. **Find the group's chat id.** Open this in a browser, replacing `<TOKEN>` with the bot token from `~/.homeguard/telegram.env`:
    ```
    https://api.telegram.org/bot<TOKEN>/getUpdates
    ```
    Look for `"chat":{"id":-100...}` — a group id is a **negative** number.
-4. **Point this box at that group.** Either edit `TELEGRAM_CHAT_IDS=` in `~/.homeguard/telegram.env` before running the wizard, or set it on the box afterwards:
+5. **Point this box at that group.** Either edit `TELEGRAM_CHAT_IDS=` in `~/.homeguard/telegram.env` before running the wizard, or set it on the box afterwards:
    ```
    ssh -i ~/.ssh/homeguard_box <user>@<box-ip> "cd /d C:\home_guard && .venv\Scripts\python.exe -m home_guard_project.box set-option telegram_chat_ids=<id>"
    ```
    For several recipients, use comma-separated ids with no spaces (e.g. `-1001111,-1002222`).
-5. **Turn alerts on in the wizard:** answer **y** to "Turn on AI alerts?" and give the hours. The wizard pushes the bot token and the OpenAI key onto the box (into `api_key.env`) and switches it to inference mode.
+6. **Turn alerts on in the wizard:** answer **y** to "Turn on AI alerts?" and give the hours. The wizard pushes the bot token and the OpenAI key onto the box (into `api_key.env`) and switches it to inference mode.
 
-**Test it:** during the alert hours, have someone walk in front of a camera — a Telegram message with a photo should arrive in the group within a few seconds. Everything the AI sees is also written to the box's log.
+**Test it:** during the alert hours, have someone walk in front of a camera — a Telegram message with a photo should arrive in the group within a few seconds. Then have the family **type a message in the group** ("was that the mailman?") and check the assistant answers — if it doesn't, the bot isn't an admin (step 2). Everything the AI sees is also written to the box's log.
+
+**Verify it without waiting:** `check_box.ps1` includes a Telegram row that confirms the bot can actually read messages (it calls `telegram_check`, which checks privacy/admin status — never `getUpdates`, so it won't disturb the live poller). A `[WARN] Telegram: NOT_READY` line means the bot still needs to be made an admin.
 
 A customer who wants their **own** bot (not the shared one) creates one with @BotFather and you use that token for their box instead.
 
