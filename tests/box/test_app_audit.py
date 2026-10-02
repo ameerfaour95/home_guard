@@ -61,6 +61,6 @@ class GuidanceTests(unittest.TestCase):
         from home_guard_project.box.app.model import parse_activity, Activity
         event=parse_activity('2026-10-02 14:31:02 INFO Done. Uploaded: 5 | Failed: 0')
         self.assertEqual(event.time,'14:31')
-        self.assertEqual(event.text,'5 clips sent')
+        self.assertEqual(event.text,'5 files sent to the online folder')
         self.assertEqual(parse_activity('14:29:00 Starting inference').text,'Home Guard restarted')
         self.assertEqual(Activity('event','undated').time,'Time unavailable')
