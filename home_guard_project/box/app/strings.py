@@ -1,6 +1,15 @@
 """All visible application copy; keys remain stable for translation."""
 
 TEXT = {
+    "stop_box": "Stop Home Guard",
+    "start_box": "Start Home Guard",
+    "stop_confirm": "Stop protecting this home?",
+    "stop_explanation": "Camera recording and security alerts will stop. Home Guard stays stopped, even after a restart, until you choose Start Home Guard.",
+    "keep_running": "Keep running",
+    "stopped_title": "Home Guard is stopped",
+    "stopped_hint": "Recording and alerts are off. Choose Start Home Guard to protect this home again.",
+    "start_pending": "Starting Home Guard...",
+    "control_error": "The change could not be saved. Please try again.",
     "step_error": "This step could not finish. Check the box and try again.",
     "date_format": "%d %b, %H:%M",
     "brand": "HOME GUARD",

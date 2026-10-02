@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QScrollArea,
     QSizePolicy,
+    QDialog,
 )
 
 from .strings import tr, TEXT
@@ -169,6 +170,9 @@ class Window(QMainWindow):
     def __init__(self, args):
         super().__init__()
         self.args = args
+        from .box_controls import BoxControls
+        self.box_controls = BoxControls(demo=args.demo, stopped=args.state == "stopped")
+        self.start_requested = False
         self.setWindowTitle(tr("brand"))
         self.resize(*map(int, args.size.split("x")))
         self.setMinimumSize(1000, 650)
@@ -206,6 +210,13 @@ class Window(QMainWindow):
             self.build_dashboard()
 
     def build_dashboard(self):
+        control_row = QHBoxLayout()
+        self.control_note = label("", "accent")
+        control_row.addWidget(self.control_note, 1)
+        self.run_button = QPushButton(tr("stop_box"))
+        self.run_button.clicked.connect(self.toggle_running)
+        control_row.addWidget(self.run_button)
+        self.outer.addLayout(control_row)
         stats = QHBoxLayout()
         self.stats = []
         for key in ("collecting", "upload", "waiting", "disk"):
@@ -310,6 +321,7 @@ class Window(QMainWindow):
             )
             if scenario == "empty":
                 state.cameras = []
+            state.collecting = not self.box_controls.is_stopped()
             self.apply_state(
                 state,
                 scenario != "hidden",
@@ -325,7 +337,7 @@ class Window(QMainWindow):
             for i, tile in enumerate(self.tiles):
                 tile.update_picture(
                     None
-                    if scenario in ("offline", "stopped")
+                    if scenario == "offline" or self.box_controls.is_stopped()
                     or (scenario == "mixed" and i == len(self.tiles) - 1)
                     else demo_picture(i)
                 )
@@ -340,6 +352,8 @@ class Window(QMainWindow):
         if not self.future and now - self.last_poll >= 5:
             self.future = self.pool.submit(self.fetch)
             self.last_poll = now
+        if self.current_state and self.box_controls.is_stopped() and self.current_state.collecting:
+            self.apply_state(self.current_state, self.current_show, self.events)
         # Re-read permission at each viewer tick. Never touch the marker when hidden.
         try:
             allowed = bool(bc.get_option("show_cameras"))
@@ -362,6 +376,16 @@ class Window(QMainWindow):
 
     def apply_state(self, state, show, events):
         self.current_state, self.current_show = state, show
+        stopped = self.box_controls.is_stopped()
+        if stopped:
+            state.collecting = False
+            self.start_requested = False
+        if state.collecting:
+            self.start_requested = False
+        self.run_button.setText(tr("start_box") if stopped else tr("stop_box"))
+        self.run_button.setEnabled(not self.start_requested)
+        self.control_note.setText(tr("stopped_hint") if stopped else tr("start_pending") if self.start_requested else "")
+        self.run_button.setStyleSheet("background: #f27d7d;" if not stopped else "")
         if self.events != events:
             self.events = events
             self.render_activity()
@@ -387,6 +411,7 @@ class Window(QMainWindow):
             for value, _ in self.stats:
                 value.setText(tr("loading"))
         message = (
+            "stopped_title" if stopped else
             "loading"
             if scenario == "loading"
             else (
@@ -403,6 +428,7 @@ class Window(QMainWindow):
             self.camera_stack.setCurrentIndex(1)
             self.message_title.setText(tr(message))
             hint = {
+                "stopped_title": "stopped_hint",
                 "loading": "",
                 "error": "error_hint",
                 "pictures_off": "pictures_hint",
@@ -417,6 +443,44 @@ class Window(QMainWindow):
                 self.grid.takeAt(0).widget().deleteLater()
             self.tiles = [CameraTile(name) for name in state.cameras]
             self.arrange_tiles()
+
+    def toggle_running(self):
+        if self.box_controls.is_stopped():
+            try:
+                self.box_controls.start()
+                self.start_requested = not self.args.demo
+                if self.current_state:
+                    self.current_state.collecting = False
+                    self.apply_state(self.current_state, self.current_show, self.events)
+                self.last_poll = 0
+                self.tick()
+            except OSError:
+                self.control_note.setText(tr("control_error"))
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle(tr("stop_confirm"))
+        dialog.setMinimumWidth(520)
+        lay = layout_for(dialog)
+        lay.addWidget(label(tr("stop_confirm"), "section"))
+        lay.addWidget(label(tr("stop_explanation")))
+        row = QHBoxLayout()
+        cancel = QPushButton(tr("keep_running"))
+        cancel.setObjectName("secondary")
+        cancel.clicked.connect(dialog.reject)
+        stop = QPushButton(tr("stop_box"))
+        stop.setStyleSheet("background: #f27d7d;")
+        stop.clicked.connect(dialog.accept)
+        row.addWidget(cancel); row.addWidget(stop)
+        lay.addLayout(row)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            try:
+                self.box_controls.stop()
+                self.last_poll = 0
+                if self.current_state:
+                    self.apply_state(self.current_state, self.current_show, self.events)
+                self.tick()
+            except OSError:
+                self.control_note.setText(tr("control_error"))
 
     def arrange_tiles(self):
         if not self.tiles:
