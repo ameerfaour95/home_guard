@@ -3,8 +3,10 @@ import re
 
 def field_errors(page, values, wifi=False, find=True):
     errors = {}
-    if page == 0 and not re.fullmatch(r"[^@\s]+@[^@\s]+",values.get("address", "").strip()):
-        errors["address"] = "address_error"
+    if page == 0:
+        from .remote_cameras import target_user
+        try: target_user(values.get("address", "").strip())
+        except ValueError: errors["address"] = "address_error"
     if page == 1 and wifi:
         if not values.get("ssid", "").strip(): errors["ssid"] = "ssid_error"
         if not 8 <= len(values.get("wifi_password", "")) <= 63: errors["wifi_password"] = "wifi_password_error"

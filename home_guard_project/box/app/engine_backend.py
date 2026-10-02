@@ -90,6 +90,7 @@ class EngineBackend:
                     def read_output():
                         try:
                             for line in process.stdout: lines.put(line)
+                        except (OSError,ValueError): pass
                         finally: lines.put(None)
                     thread=threading.Thread(target=read_output,daemon=True);thread.start()
                     failed=False;done=False;completed=[];running='connect'
@@ -108,11 +109,19 @@ class EngineBackend:
                                 if event.step not in completed: completed.append(event.step)
                             elif event.status=='fail': failed=True
                         if event.kind=='check' and event.status=='FAIL': failed=True
-                        if event.kind=='done': done=event.status=='ok';failed=failed or not done
+                        if event.kind=='done':
+                            done=event.status=='ok'
+                            if not done and not failed: emit(Event('step',running,'fail',tr('engine_incomplete')))
+                            failed=failed or not done
                         emit(event)
+                        if event.kind=="check" and event.status=="FAIL":
+                            emit(Event("step","readiness","fail",event.text))
                         if failed: break
                     if failed: self.runner.stop(process)
-                    code=process.wait()
+                    while True:
+                        if self.cancelled.is_set(): self.runner.stop(process);return False
+                        try: code=process.wait(timeout=.1);break
+                        except subprocess.TimeoutExpired: continue
                     if self.cancelled.is_set(): return False
                     if failed: return False
                     if code!=0 or not done or completed!=list(ENGINE_STEPS):

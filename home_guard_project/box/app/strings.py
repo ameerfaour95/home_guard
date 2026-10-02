@@ -1,6 +1,11 @@
 """All visible application copy; keys remain stable for translation."""
 
 TEXT = {
+    "camera_check_pending": "Finish loading the camera check before continuing. If it failed, refresh the photos and try again.",
+
+    "setup_window_title": "Home Guard Setup",
+    "address_not_remembered": "The box address could not be remembered. Enter it again next time.",
+
     "check_cameras_title": "Check the cameras",
     "check_cameras_hint": "Confirm the views, names and enabled cameras. Save your changes before finishing setup.",
     "camera_snapshot_failed": "Could not take a photo. Check camera power and connection, then refresh.",

@@ -40,6 +40,16 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(events[-1].status,'fail');self.assertFalse(runner.path.exists())
         self.assertFalse(any(e.step=='update' for e in events))
         self.assertGreater(runner.stops,0)
+    def test_failed_readiness_check_is_visible_and_owned(self):
+        runner=FakeRunner('@@check FAIL Check the box connection\n@@done ok\n');events=[]
+        with tempfile.TemporaryDirectory() as directory:
+            script=Path(directory)/'engine.ps1';script.touch()
+            self.assertFalse(EngineBackend(runner,script,'powershell').run(Answers(),events.append))
+        self.assertEqual(events[-1].kind,'step')
+        self.assertEqual(events[-1].step,'readiness')
+        self.assertEqual(events[-1].status,'fail')
+        self.assertFalse(runner.path.exists())
+
     def test_cancel_cleans_file_and_process(self):
         runner=FakeRunner(recording())
         with tempfile.TemporaryDirectory() as directory:
@@ -70,6 +80,15 @@ class EngineTests(unittest.TestCase):
             self.assertIn('PowerShell',events[-1].text)
             for lines,code in [('@@done ok\n',0),(recording(),1),('@@step update start\n',0)]:
                 self.assertFalse(EngineBackend(FakeRunner(lines,code),script,'powershell').run(Answers(),events.append))
+    def test_process_runner_clears_inherited_environment_and_hides_console(self):
+        import os
+        from home_guard_project.box.app.engine_backend import ProcessRunner
+        with patch.dict(os.environ,{'VIRTUAL_ENV':'wrong-checkout'}),patch('home_guard_project.box.app.engine_backend.subprocess.Popen') as spawn:
+            ProcessRunner().spawn(['powershell','-File','unused'])
+        self.assertNotIn('VIRTUAL_ENV',spawn.call_args.kwargs['env'])
+        import subprocess
+        self.assertEqual(spawn.call_args.kwargs['creationflags'],getattr(subprocess,'CREATE_NO_WINDOW',0))
+
     def test_parser_redacts_secrets_addresses_and_hides_rescue_repr(self):
         secret=secrets.token_hex(12);parser=OutputParser((secret,))
         event=parser.parse('ordinary installer@box.example password='+secret)

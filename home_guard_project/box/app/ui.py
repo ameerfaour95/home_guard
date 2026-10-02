@@ -199,7 +199,7 @@ class Window(QMainWindow):
         from .box_controls import BoxControls, Settings
         self.box_controls = BoxControls(demo=args.demo, stopped=args.state == "stopped", settings=Settings(mode="inference" if args.state == "inference" else "data_collection", show_cameras=args.state != "hidden"))
         self.start_requested = False
-        self.setWindowTitle(tr("brand"))
+        self.setWindowTitle(tr("setup_window_title") if args.setup else tr("brand"))
         self.setWindowIcon(QIcon(str(Path(__file__).parents[1] / "assets" / "logo.ico")))
         self.resize(*map(int, args.size.split("x")))
         self.setMinimumSize(1000, 650)
@@ -221,7 +221,7 @@ class Window(QMainWindow):
         header.addWidget(logo)
         header.addSpacing(20)
         titles = QVBoxLayout()
-        self.house_label = label(tr("setup") if args.setup else tr("home"), "title")
+        self.house_label = label(tr("setup_window_title") if args.setup else tr("home"), "title")
         titles.addWidget(self.house_label)
         self.header_hint = label(tr("simulation") if args.setup and args.demo else tr("setup_live_hint") if args.setup else tr("close_hint"), "muted")
         titles.addWidget(self.header_hint)
@@ -859,6 +859,10 @@ class Window(QMainWindow):
             self.inputs["ssid"].setText(tr("demo_ssid"))
             self.inputs["camera_user"].setText(tr("demo_user"))
             # No sample passwords, even masked, in screenshots or source.
+        if not self.args.demo:
+            from .preferences import AddressPreference
+            self.address_preference=AddressPreference()
+            self.inputs["address"].setText(self.address_preference.load())
         self.find.setChecked(not self.args.skip_cameras)
         self.alerts.setChecked(self.args.alerts)
         if self.args.wifi:
@@ -945,6 +949,9 @@ class Window(QMainWindow):
             self.close()
             return
         if index == 7:
+            if not self.wizard_cameras.loaded or self.wizard_cameras.future is not None:
+                self.validation.setText(tr("camera_check_pending"))
+                return
             if self.wizard_cameras.rows and not self.wizard_cameras.saved:
                 self.validation.setText(tr("camera_check_unsaved"))
                 return
@@ -961,6 +968,12 @@ class Window(QMainWindow):
                 self.field_guidance[key].show()
             self.inputs[next(iter(errors))].setFocus()
             return
+        if index == 0 and not self.args.demo:
+            try: self.address_preference.save(self.inputs["address"].text().strip())
+            except OSError:
+                self.set_page(1)
+                self.validation.setText(tr("address_not_remembered"))
+                return
         if index == 3:
             self.set_page(6)
         else:
@@ -968,7 +981,7 @@ class Window(QMainWindow):
 
     def collect_answers(self):
         from .box_controls import minutes_to_seconds
-        return Answers(**{key:w.text() for key,w in self.inputs.items()},
+        return Answers(**{key:w.text() if key.endswith("password") else w.text().strip() for key,w in self.inputs.items()},
             network="wifi" if self.network.currentIndex() else "ethernet",
             show_cameras=self.show_pictures.isChecked(), alerts=self.alerts.isChecked(),
             start_hour=self.wizard_hours.values()[0], end_hour=self.wizard_hours.values()[1],
@@ -1055,6 +1068,8 @@ class Window(QMainWindow):
         for key in ("wifi_password","camera_password"): self.inputs[key].clear()
         self.run_answers.wifi_password="";self.run_answers.camera_password=""
         if not success:
+            from .engine_backend import OWNERS
+            self.update_step_bar(OWNERS.get(self.engine_failed_step,0))
             self.progress_title.setText(tr("failed_title"))
             if self.engine_backend.cancelled.is_set(): self.validation.setText(tr("setup_cancelled"))
             self.next.setText(tr("retry"));self.next.show()
