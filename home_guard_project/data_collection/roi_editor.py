@@ -29,41 +29,12 @@ import yaml
 log = logging.getLogger(__name__)
 
 _DIR = os.path.dirname(os.path.abspath(__file__))
-_ZONES_PATH = os.path.join(_DIR, "zones.yaml")
 
-_HEADER = (
-    "# ──────────────────────────────────────────────────────────────────────────────\n"
-    "#  ROI zones — normalised polygon vertices per camera.\n"
-    "#  Cameras without entries use full-frame detection.\n"
-    "#  DO NOT COMMIT (deployment-specific)\n"
-    "# ──────────────────────────────────────────────────────────────────────────────\n\n"
-)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# YAML helpers
-# ─────────────────────────────────────────────────────────────────────────────
-
-def load_zones(path: str = _ZONES_PATH) -> Dict[str, List[List[float]]]:
-    """Load zones.yaml and return {camera_name: [[x,y], ...]}."""
-    if not os.path.isfile(path):
-        return {}
-    with open(path, "r", encoding="utf-8") as f:
-        data = yaml.safe_load(f) or {}
-    raw = data.get("zones", {})
-    if not isinstance(raw, dict):
-        return {}
-    return {str(k): v for k, v in raw.items() if isinstance(v, list)}
-
-
-def save_zones(
-    zones: Dict[str, List[List[float]]], path: str = _ZONES_PATH,
-) -> None:
-    """Write zones dict to zones.yaml."""
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(_HEADER)
-        yaml.dump({"zones": zones}, f, default_flow_style=None, allow_unicode=True)
-    log.info("Wrote %d zone(s) to %s", len(zones), path)
+try:  # run as a module
+    from .zones import ZONES_PATH as _ZONES_PATH, load_zones, save_zones  # noqa: F401
+except ImportError:  # run as a script: py home_guard_project/data_collection/roi_editor.py
+    sys.path.insert(0, _DIR)
+    from zones import ZONES_PATH as _ZONES_PATH, load_zones, save_zones  # type: ignore  # noqa: F401
 
 
 # ─────────────────────────────────────────────────────────────────────────────

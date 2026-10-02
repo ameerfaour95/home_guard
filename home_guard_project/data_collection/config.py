@@ -172,19 +172,10 @@ def _parse_size(raw: Any) -> Optional[Tuple[int, int]]:
 
 
 def _load_zones(path: str) -> Dict[str, List[Tuple[float, float]]]:
-    """Load normalised polygon zones from zones.yaml."""
-    if not os.path.isfile(path):
-        return {}
-    with open(path, "r", encoding="utf-8") as f:
-        data = yaml.safe_load(f) or {}
-    raw = data.get("zones", {})
-    if not isinstance(raw, dict):
-        return {}
-    zones: Dict[str, List[Tuple[float, float]]] = {}
-    for cam, pts in raw.items():
-        if isinstance(pts, list) and len(pts) >= 3:
-            zones[str(cam)] = [(float(p[0]), float(p[1])) for p in pts]
-    return zones
+    """Load the watch zones (normalised polygons) from zones.yaml; see zones.py."""
+    from .zones import load_zones  # noqa: PLC0415
+
+    return load_zones(path)
 
 
 def load_config(
