@@ -174,6 +174,15 @@ $Site = Read-NonEmpty 'House name, for example cohen_haifa' '[a-z0-9_]+'
 $ShowCameras = $false
 if ((Read-Host "Show the live camera pictures on the box's own screen? [y/N]") -match '^[Yy]') { $ShowCameras = $true }
 
+# AI alerts (inference mode). Off = the box just collects clips for tagging.
+$UseAI = $false; $AlertStart = 0; $AlertEnd = 0
+Info "`nAI alerts: when a person is seen during the chosen hours, the box sends a Telegram message with a photo and logs what the AI saw. (Turning this on stops saving training clips.)"
+if ((Read-Host 'Turn on AI alerts? [y/N]') -match '^[Yy]') {
+    $UseAI = $true
+    $AlertStart = [int](Read-NonEmpty 'Send alerts from which hour (0-23)?' '([0-9]|1[0-9]|2[0-3])')
+    $AlertEnd   = [int](Read-NonEmpty 'Send alerts until which hour (0-23)?' '([0-9]|1[0-9]|2[0-3])')
+}
+
 $DoCameras = $false; $CamUser = ''; $CamPass = ''
 if ((Read-Host 'Find cameras now? (needs the camera/recorder login) [y/N]') -match '^[Yy]') {
     $DoCameras = $true
@@ -208,6 +217,40 @@ Ok "Clips from this box are saved in the online folder dataset_$Site"
 $showVal = 'false'; if ($ShowCameras) { $showVal = 'true' }
 Invoke-Box "cd /d $InstallDir && $Python -m home_guard_project.box set-option show_cameras $showVal" | ForEach-Object { Note "    $_" }
 Ok "Camera windows on the box's own screen: $showVal"
+
+$SetOpt = "cd /d $InstallDir && $Python -m home_guard_project.box set-option"
+if ($UseAI) {
+    Info '    Turning on AI alerts...'
+    # Secrets come from this laptop's ~/.homeguard store; they go to the box's
+    # api_key.env as a file, never on a command line.
+    $oaiKey = ''; $tgTok = ''; $tgChats = ''
+    $oaiFile = Join-Path $HgDir 'openai.env'
+    $tgFile  = Join-Path $HgDir 'telegram.env'
+    if (Test-Path $oaiFile) { $m = Select-String '^OPENAI_API_KEY=(.+)$'    $oaiFile; if ($m) { $oaiKey  = $m.Matches[0].Groups[1].Value } }
+    if (Test-Path $tgFile)  { $m = Select-String '^TELEGRAM_BOT_TOKEN=(.+)$' $tgFile;  if ($m) { $tgTok   = $m.Matches[0].Groups[1].Value } }
+    if (Test-Path $tgFile)  { $m = Select-String '^TELEGRAM_CHAT_IDS=(.+)$'  $tgFile;  if ($m) { $tgChats = $m.Matches[0].Groups[1].Value } }
+    if (-not $oaiKey -or -not $tgTok -or -not $tgChats) {
+        Bad "AI alerts need OpenAI + Telegram configured on this laptop first (missing in $HgDir). Leaving the box in data-collection mode."
+        Invoke-Box "$SetOpt mode data_collection" | Out-Null
+    } else {
+        $apiLocal = [IO.Path]::GetTempFileName()
+        [IO.File]::WriteAllText($apiLocal, "OPENAI_API_KEY=$oaiKey`nTELEGRAM_BOT_TOKEN=$tgTok`n", (New-Object Text.UTF8Encoding($false)))
+        try { Copy-ToBox $apiLocal "$InstallDir\api_key.env" } finally { Remove-Item $apiLocal -ErrorAction SilentlyContinue }
+        Invoke-Box "$SetOpt mode inference"               | ForEach-Object { Note "    $_" }
+        Invoke-Box "$SetOpt alert_start_hour $AlertStart"  | Out-Null
+        Invoke-Box "$SetOpt alert_end_hour $AlertEnd"      | Out-Null
+        Invoke-Box "$SetOpt alert_channel telegram"        | Out-Null
+        Invoke-Box "$SetOpt notify_dry_run false"          | Out-Null
+        Invoke-Box "$SetOpt telegram_chat_ids=$tgChats"    | Out-Null
+        # Restart so run_collector.sh picks up inference mode.
+        Invoke-Box "$Bash -lc /c/home_guard/home_guard_project/box/stop_collector.sh" | Out-Null
+        Invoke-Box 'schtasks /Run /TN HomeGuard-Collector' | Out-Null
+        Ok "AI alerts ON: a person seen between ${AlertStart}:00 and ${AlertEnd}:00 sends a Telegram alert with a photo."
+    }
+} else {
+    Invoke-Box "$SetOpt mode data_collection" | ForEach-Object { Note "    $_" }
+    Ok 'AI alerts off: the box collects clips for tagging (data-collection mode).'
+}
 
 # ---- 3. network configuration ----------------------------------------------
 Info "`n[3] Configuring the network..."
