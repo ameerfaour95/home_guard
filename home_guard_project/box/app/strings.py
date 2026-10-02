@@ -1,6 +1,18 @@
 """All visible application copy; keys remain stable for translation."""
 
 TEXT = {
+    "detection_label": "{label} {percent}%",
+    "detector_sees": "Sees: {objects}",
+    "object_count": "{count} {label}",
+    "object_person": "person", "object_person_plural": "people",
+    "object_car": "car", "object_car_plural": "cars",
+    "object_truck": "truck", "object_truck_plural": "trucks",
+    "object_bus": "bus", "object_bus_plural": "buses",
+    "object_bicycle": "bicycle", "object_bicycle_plural": "bicycles",
+    "object_motorcycle": "motorcycle", "object_motorcycle_plural": "motorcycles",
+    "detector_nothing": "Nothing right now",
+    "detector_not_looking": "Detector is not looking at this camera",
+
     "camera_search_wait": "Looking for cameras. Some devices may take a few minutes to answer.",
     "camera_search_elapsed": "Searching - {minutes}m {seconds}s",
 

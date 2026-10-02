@@ -49,7 +49,7 @@ def main():
             "empty",
             "error",
             "loading",
-            "inference", "paused",
+            "inference", "paused", "ai-stopped", "ai-stale", "ai-empty", "ai-refused", "ai-delivered",
             "quiet",
         ),
         default="mixed",
