@@ -1,0 +1,31 @@
+# ──────────────────────────────────────────────────────────────────────────────
+#  S3 upload pipeline configuration
+# ──────────────────────────────────────────────────────────────────────────────
+
+s3:
+  bucket: "security-camera-project-v1"
+  prefix: "dataset_multi"
+  region: "us-east-1"
+  workers: 4
+
+# Default dataset directory (relative to project root)
+dataset_dir: "./dataset_multi"
+
+# Pipeline behaviour defaults (all overridable via CLI flags)
+skip_reencode: false    # --skip-reencode  : skip H.264 re-encoding step
+cleanup: true           # --no-cleanup     : set to false to skip orphan cleanup
+force: false            # --force          : re-upload even if same size on S3
+
+# COCO class-id -> label name (subset relevant for security cameras).
+# Clips whose metadata contains ONLY classes outside this set are skipped
+# during upload.  Remove this section (or set to empty) to upload everything.
+coco_labels:
+  0: "person"
+  1: "bicycle"
+  2: "car"
+  3: "motorcycle"
+  5: "bus"
+  7: "truck"
+  14: "bird"
+  15: "cat"
+  16: "dog"

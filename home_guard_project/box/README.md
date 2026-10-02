@@ -42,18 +42,20 @@ It prints the user name and IP. From then on the laptop can log in:
 ssh -i ~/.ssh/homeguard_box <user>@<box-tailscale-ip>
 ```
 
-### 3. Install the code and run setup (from the laptop)
+### 3. Install the code and run setup
 
-```bash
-uv run python -m home_guard_project.box.make_bundle                # writes dist/home_guard_box.zip
-scp -i ~/.ssh/homeguard_box dist/home_guard_box.zip <user>@<ip>:C:/home_guard_box.zip
-ssh -i ~/.ssh/homeguard_box <user>@<ip> "powershell -Command \"Expand-Archive -Force C:\home_guard_box.zip C:\home_guard\""
-ssh -i ~/.ssh/homeguard_box <user>@<ip> "powershell -ExecutionPolicy Bypass -File C:\home_guard\home_guard_project\box\setup_box.ps1 -Site house2"
+The install on the box is a git checkout, so later updates are a `git pull`. On the box, in an elevated PowerShell (or from the laptop over SSH):
+
+```
+git clone -b beelink-collector-box https://github.com/ameerfaour95/home_guard.git C:\Users\<user>\Desktop\home_guard
+powershell -ExecutionPolicy Bypass -File C:\Users\<user>\Desktop\home_guard\home_guard_project\box\setup_box.ps1 -Site house2
 ```
 
 `-Site` is the house name used in the S3 prefix: lowercase letters, digits and underscores only.
 
-The bundle contains only what the box needs. It never includes `cameras.yaml`, API keys, or scripts that hold camera passwords.
+**Updating a box later:** in Git Bash on the box, `./home_guard_project/box/update.sh` (stops the collector, pulls, refreshes the environment, starts it again). `cameras.yaml`, `box.yaml`, the datasets and the logs are not in git and are left alone.
+
+**Without git:** `uv run python -m home_guard_project.box.make_bundle` on the laptop writes `dist/home_guard_box.zip` with only what the box needs (never `cameras.yaml`, API keys, or scripts that hold camera passwords). Copy it to the box, unpack it, and run `setup_box.ps1` from there.
 
 ### 4. AWS key for the box
 
@@ -120,13 +122,14 @@ You need the camera or recorder username and password for that house.
 **Without prompts** (works over SSH, and on Windows 11 Home which has no Remote Desktop):
 
 ```
-cd /d C:\home_guard
-.venv\Scripts\python.exe -m home_guard_project.box.find_cameras scan
+cd /d <repo folder>
 set HG_CAMERA_PASSWORD=...
-.venv\Scripts\python.exe -m home_guard_project.box.find_cameras probe --host <address from scan> --user admin --prefix house2 --write
+.venv\Scripts\python.exe -m home_guard_project.box.find_cameras auto --user admin --prefix house2 --write
 ```
 
-`scan` needs no password and lists the devices that answer on the camera port. `probe` logs in, lists the channels, and with `--write` saves them as `house2_ch1`, `house2_ch2`, ... so clip names never collide between houses.
+`auto` scans the network, logs in to every camera device it finds with that one login, and with `--write` saves all channels as `house2_ch1`, `house2_ch2`, ... so clip names never collide between houses. `scan` alone needs no password and only lists the devices; `probe --host <address>` does one device. Add `--json` to any of them to get the result as JSON, for a setup program to read.
+
+`auto` knows the common recorder address formats. For a brand it does not recognise, use the interactive tool below, which can also ask the device itself (ONVIF).
 
 **With prompts and a live preview** (needs a screen), in Git Bash:
 

@@ -1,0 +1,2 @@
+# Shell scripts must keep LF endings so bash on a box accepts them after a clone.
+*.sh text eol=lf
