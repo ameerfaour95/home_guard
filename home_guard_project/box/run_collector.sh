@@ -20,6 +20,13 @@ source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
 export HOME_GUARD_CONFIG_OVERLAY="${HOME_GUARD_CONFIG_OVERLAY:-$SCRIPT_DIR/config.box.yaml}"
 
+# Leave one core for reading the camera streams. With detection on all 4 cores
+# of the N150 the stream readers starve and the video arrives damaged: measured
+# with 6 cameras, 114 damaged-frame messages a minute on 4 threads against 23 on 3.
+cores="$(nproc 2>/dev/null || echo 4)"
+export OMP_NUM_THREADS="${OMP_NUM_THREADS:-$(( cores > 1 ? cores - 1 : 1 ))}"
+export MKL_NUM_THREADS="${MKL_NUM_THREADS:-$OMP_NUM_THREADS}"
+
 # Lines such as "[h264 @ 000001f0] error while decoding MB 59 17" from the video decoder.
 DECODER_NOISE='^\[[A-Za-z0-9_]+ @ [0-9a-fA-Fx]+\]'
 

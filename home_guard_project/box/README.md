@@ -189,7 +189,17 @@ Run it at your own house for a day first:
 
 ## Measured on the Beelink N150 (2026-10-02)
 
-YOLO11s on the CPU takes about 327 ms per frame, so about 3 detections per second in total, shared between all cameras. That is comfortable for two or three cameras. With six or more, each camera is checked only about once every two seconds; switch to `yolo11n.pt` or raise `yolo_every_n_frames_cpu` (see Troubleshooting).
+YOLO11s on the CPU takes about 327 ms per frame, so about 3 detections per second in total, shared between all cameras. That is comfortable for two or three cameras. With six or more, each camera is checked only about once every two seconds.
+
+The collector uses the whole processor however many cameras there are. What matters is leaving room for reading the video. With 6 cameras over Wi-Fi, 150 seconds per setting, while Windows Update was also running:
+
+| Setting | Damaged-frame messages per minute |
+|---|---:|
+| YOLO11s, 4 threads | 114 |
+| YOLO11s, 3 threads (what the runner uses) | 23 |
+| YOLO11n, 3 threads | 0 |
+
+The runner therefore gives detection one core fewer than the machine has. If clips still show damaged frames, switch the box to the smaller model by adding `models: { yolo: "yolo11n.pt" }` to `config.box.yaml`; it finds people less reliably, so its boxes need more correcting when tagging.
 
 ## Checking the box from the laptop
 
