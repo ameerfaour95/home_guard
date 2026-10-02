@@ -25,7 +25,7 @@ import json
 import logging
 import os
 import sys
-from typing import Any, Callable, Sequence, Tuple
+from typing import Any, Callable, Optional, Sequence, Tuple
 
 from . import control
 from .archive import expire_old_files
@@ -120,11 +120,16 @@ def change_site(
     outbox_dir: str,
     box_yaml: str,
     also: Sequence[Tuple[str, str]] = (),
+    cameras_path: Optional[str] = None,
 ) -> Tuple[int, int]:
     """Rename the site. Clips already saved are set aside under the old name first.
 
     *also* lists further ``(live_dir, outbox_dir)`` pairs to set aside the same way.
     Returns the clips and files moved, over all pairs.
+
+    A different site is a different house: the cameras saved for the old one
+    (*cameras_path*, the collector's cameras.yaml) are removed with their
+    logins, and the new house's cameras are searched for afresh.
     """
     clips = files = 0
     try:
@@ -135,6 +140,9 @@ def change_site(
         for live, outbox in ((live_dir, outbox_dir), *also):
             moved = move_finished_clips(live, os.path.join(outbox, old_site), 0)
             clips, files = clips + moved[0], files + moved[1]
+        if cameras_path and os.path.isfile(cameras_path):
+            os.remove(cameras_path)
+            log.info("Removed the cameras saved for %s; search for this house's cameras.", old_site)
     set_site(new_site, box_yaml)
     return clips, files
 
@@ -225,9 +233,11 @@ def main() -> None:
         try:
             if not args.value:
                 raise BoxConfigError("set-site needs a site name, e.g. set-site house2")
+            from .find_cameras import CAMERAS_PATH
+
             clips, _ = change_site(
                 args.value, LIVE_DIR, OUTBOX_DIR, BOX_YAML,
-                also=[(PRODUCTION_LIVE_DIR, PRODUCTION_ARCHIVE_DIR)],
+                also=[(PRODUCTION_LIVE_DIR, PRODUCTION_ARCHIVE_DIR)], cameras_path=CAMERAS_PATH,
             )
         except BoxConfigError as exc:
             log.error("%s", exc)

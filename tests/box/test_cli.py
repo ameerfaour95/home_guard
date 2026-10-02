@@ -156,6 +156,19 @@ class BoxCliTest(unittest.TestCase):
             self.assertTrue(os.path.isfile(os.path.join(self.outbox, "old_house", rel)), rel)
             self.assertFalse(os.path.exists(os.path.join(self.live, rel)), rel)
 
+    def test_a_different_house_forgets_the_old_houses_cameras(self) -> None:
+        with open(self.box_yaml, "w", encoding="utf-8") as f:
+            f.write('site: "old_house"\n')
+        cameras = os.path.join(self.outbox, "cameras.yaml")
+        with open(cameras, "w", encoding="utf-8") as f:
+            f.write("old_house_ch2: rtsp://admin:secret@192.168.0.9:554/x\n")
+
+        change_site("old_house", self.live, self.outbox, self.box_yaml, cameras_path=cameras)
+        self.assertTrue(os.path.isfile(cameras))              # the same house keeps its cameras
+        change_site("new_house", self.live, self.outbox, self.box_yaml, cameras_path=cameras)
+        self.assertFalse(os.path.exists(cameras))             # a new house starts without any
+        change_site("third", self.live, self.outbox, self.box_yaml, cameras_path=cameras)   # nothing to remove
+
     def test_change_site_to_the_same_name_moves_nothing(self) -> None:
         with open(self.box_yaml, "w", encoding="utf-8") as f:
             f.write('site: "house2"\n')
