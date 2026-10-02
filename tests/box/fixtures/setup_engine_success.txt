@@ -1,0 +1,18 @@
+Home Guard setup
+@@step connect start
+@@step connect ok Finished
+@@step update start
+@@step update ok Finished
+@@step site start
+@@step site ok Finished
+@@step network start
+@@step network ok Finished
+@@step cameras start
+@@step cameras ok Finished
+@@camera front_door 1920x1080
+@@step alerts start
+@@step alerts ok Finished
+@@step readiness start
+@@step readiness ok Finished
+@@check WARN Check power settings
+@@done ok

@@ -15,6 +15,8 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QComboBox,
     QSpinBox,
+    QDoubleSpinBox,
+    QTextEdit,
     QVBoxLayout,
     QHBoxLayout,
     QGridLayout,
@@ -221,11 +223,11 @@ class Window(QMainWindow):
         titles = QVBoxLayout()
         self.house_label = label(tr("setup") if args.setup else tr("home"), "title")
         titles.addWidget(self.house_label)
-        self.header_hint = label(tr("simulation") if args.setup else tr("close_hint"), "muted")
+        self.header_hint = label(tr("simulation") if args.setup and args.demo else tr("setup_live_hint") if args.setup else tr("close_hint"), "muted")
         titles.addWidget(self.header_hint)
         header.addLayout(titles, 1)
         header.addStretch()
-        if args.demo or args.setup:
+        if args.demo:
             header.addWidget(label(tr("demo"), "muted"))
         self.outer.addLayout(header)
         if args.setup:
@@ -657,8 +659,10 @@ class Window(QMainWindow):
         if hasattr(self, "pool"):
             self.timer.stop()
             self.pool.shutdown(wait=False, cancel_futures=True)
+        if hasattr(self, "engine_backend"):
+            self.engine_backend.cancel()
         if hasattr(self, "setup_pool"):
-            self.step_timer.stop()
+            if hasattr(self,"step_timer"): self.step_timer.stop()
             self.setup_pool.shutdown(wait=False, cancel_futures=True)
         super().closeEvent(event)
 
@@ -706,7 +710,7 @@ class Window(QMainWindow):
             if title == "progress_title":
                 self.progress_title = title_widget
             lay.addWidget(title_widget)
-            lay.addWidget(label(tr(hint), "muted"))
+            lay.addWidget(label(tr("live_summary_hint") if hint == "summary_hint" and not self.args.demo else tr(hint), "muted"))
             self.page_layouts.append(lay)
             if title == "summary_title":
                 summary_scroll = QScrollArea()
@@ -731,7 +735,15 @@ class Window(QMainWindow):
         from .alert_hours import AlertHours
         self.wizard_hours = AlertHours()
         self.hour_start, self.hour_end = self.wizard_hours.start, self.wizard_hours.end
+        self.page_layouts[2].setSpacing(10)
         self.page_layouts[2].addWidget(self.wizard_hours)
+        self.page_layouts[2].addWidget(label(tr("cooldown")))
+        self.wizard_cooldown = QDoubleSpinBox()
+        self.wizard_cooldown.setDecimals(2)
+        self.wizard_cooldown.setRange(.17,1440)
+        self.wizard_cooldown.setValue(2)
+        self.wizard_cooldown.setSuffix(tr("minutes_suffix"))
+        self.page_layouts[2].addWidget(self.wizard_cooldown)
         self.alerts.toggled.connect(self.wizard_hours.setEnabled)
         self.wizard_hours.setEnabled(False)
         self.find = QCheckBox(tr("find"))
@@ -747,17 +759,31 @@ class Window(QMainWindow):
         )
         self.fail = QCheckBox(tr("failure"))
         self.fail.setChecked(self.args.fail)
+        self.fail.setVisible(self.args.demo)
         self.page_layouts[3].addWidget(self.fail)
         self.step_rows = []
-        for step in STEPS:
+        from .engine_backend import ENGINE_STEPS
+        for step in ENGINE_STEPS:
             row = QHBoxLayout()
-            name = label(tr(step))
+            name = label(tr("step_"+step))
             name.setMinimumWidth(300)
             status = label(tr("pending"), "muted")
             row.addWidget(name, 2)
             row.addWidget(status, 3)
             self.page_layouts[4].addLayout(row)
             self.step_rows.append(status)
+        self.setup_details_toggle = QCheckBox(tr("details"))
+        self.setup_details = QTextEdit()
+        self.setup_details.setReadOnly(True)
+        self.setup_details.setMaximumHeight(100)
+        self.setup_details.hide()
+        self.setup_details_toggle.toggled.connect(self.setup_details.setVisible)
+        self.page_layouts[4].addWidget(self.setup_details_toggle)
+        self.page_layouts[4].addWidget(self.setup_details)
+        self.setup_cancel = QPushButton(tr("cancel_setup"))
+        self.setup_cancel.setObjectName("secondary")
+        self.setup_cancel.clicked.connect(self.cancel_setup)
+        self.page_layouts[4].addWidget(self.setup_cancel)
         self.summary_house = label("", "section")
         self.page_layouts[5].addWidget(self.summary_house)
         summary_columns = QHBoxLayout()
@@ -784,7 +810,8 @@ class Window(QMainWindow):
         sr = layout_for(summary_right, 0)
         sr.addWidget(label(tr("rescue"), "section"))
         sr.addWidget(label(tr("rescue_hint"), "muted"))
-        sr.addWidget(label(tr("rescue_demo"), "muted"))
+        if self.args.demo:
+            sr.addWidget(label(tr("rescue_demo"), "muted"))
         self.rescue_labels = {}
         for key in ("rescue_name", "rescue_password"):
             item = label(tr(key) + ": " + tr("service_pending"), "muted")
@@ -796,13 +823,21 @@ class Window(QMainWindow):
         self.page_layouts[5].addLayout(summary_columns)
         for lay in self.page_layouts:
             lay.addStretch()
+        review = card()
+        review_layout = layout_for(review,30)
+        review_layout.addWidget(label(tr("review_title"),"title"))
+        review_layout.addWidget(label(tr("review_hint"),"muted"))
+        self.review_text = label("")
+        review_layout.addWidget(self.review_text)
+        review_layout.addStretch()
+        self.pages.addWidget(review)
         self.validation = label("", "error")
         self.outer.addWidget(self.validation)
         nav = QHBoxLayout()
         self.back = QPushButton(tr("back"))
         self.back.setObjectName("secondary")
         self.back.clicked.connect(
-            lambda: self.set_page(max(0, self.pages.currentIndex() - 1))
+            lambda: self.set_page(3 if self.pages.currentIndex()==6 else max(0, self.pages.currentIndex() - 1))
         )
         nav.addWidget(self.back)
         nav.addStretch()
@@ -837,21 +872,16 @@ class Window(QMainWindow):
                 "summary": 5,
                 "failure": 4,
                 "validation": 0,
+                "review": 6,
             }[self.args.page]
             self.set_page(index)
             if self.args.page == "validation":
                 self.inputs["address"].clear()
                 self.next_page()
-            if index >= 4:
-                self.begin_setup()
-                if self.args.page in ("summary", "failure"):
-                    self.step_timer.stop()
-                    if self.args.page == "failure":
-                        self.sequence.backend.failure = True
-                    while not self.sequence.done:
-                        self.advance_setup()
-                elif self.args.page == "progress":
-                    self.advance_setup()
+            if index in (4,5):
+                if not self.args.demo:
+                    return  # Render flags never launch a real setup process.
+                self.begin_setup(instant=True)
 
     def add_input(self, page, key, caption, secret=False):
         self.page_layouts[page].addWidget(label(caption))
@@ -878,14 +908,16 @@ class Window(QMainWindow):
             self.summary_house.setText(tr("summary_house", house=self.inputs["house"].text()))
         self.validation.setText("")
         self.update_step_bar(index)
-        self.back.setVisible(0 < index < 4)
+        if index == 6:
+            self.populate_review()
+        self.back.setVisible(0 < index < 4 or index == 6)
         self.next.setVisible(index != 4)
         self.next.setText(
-            tr("start") if index == 3 else tr("finish") if index == 5 else tr("next")
+            tr("start_setup") if index == 6 else tr("finish") if index == 5 else tr("next")
         )
 
     def update_step_bar(self,index):
-        current = min(index,4)
+        current = 3 if index == 6 else min(index,4)
         for i,(item,name) in enumerate(zip(self.step_labels,TEXT["step_names"])):
             done = i < current or index == 5
             self.step_icons[i].setVisible(done)
@@ -904,6 +936,9 @@ class Window(QMainWindow):
         if index == 5:
             self.close()
             return
+        if index == 6:
+            self.begin_setup()
+            return
         errors = self.errors_for_page(index)
         if errors:
             for key,message in errors.items():
@@ -913,102 +948,117 @@ class Window(QMainWindow):
             self.inputs[next(iter(errors))].setFocus()
             return
         if index == 3:
-            self.begin_setup()
+            self.set_page(6)
         else:
             self.set_page(index + 1)
 
-    def begin_setup(self):
-        self.progress_title.setText(tr("progress_title"))
-        answers = Answers(
-            **{key: w.text() for key, w in self.inputs.items()},
+    def collect_answers(self):
+        from .box_controls import minutes_to_seconds
+        return Answers(**{key:w.text() for key,w in self.inputs.items()},
             network="wifi" if self.network.currentIndex() else "ethernet",
-            show_cameras=self.show_pictures.isChecked(),
-            alerts=self.alerts.isChecked(),
-            start_hour=self.wizard_hours.values()[0],
-            end_hour=self.wizard_hours.values()[1],
-            find_cameras=self.find.isChecked(),
-        )
-        self.sequence = Sequence(SimulatedBackend(self.fail.isChecked()), answers)
+            show_cameras=self.show_pictures.isChecked(), alerts=self.alerts.isChecked(),
+            start_hour=self.wizard_hours.values()[0], end_hour=self.wizard_hours.values()[1],
+            cooldown_sec=minutes_to_seconds(self.wizard_cooldown.value()), find_cameras=self.find.isChecked())
+
+    def populate_review(self):
+        from .alert_hours import hours_description
+        a=self.collect_answers()
+        self.review_text.setText(tr("review_text",target=a.address,network=tr("wifi")+" - "+a.ssid if a.network=="wifi" else tr("ethernet"),house=a.house,alerts=tr("alerts_on_review",hours=hours_description(a.start_hour,a.end_hour),minutes=a.cooldown_sec/60) if a.alerts else tr("alerts_off_review"),cameras=tr("cameras_find_review") if a.find_cameras else tr("cameras_later_review")))
+
+    def begin_setup(self,instant=False):
+        import queue
+        from .engine_backend import EngineBackend,DemoEngine
+        self.progress_title.setText(tr("progress_title"))
+        self.run_answers=self.collect_answers()
+        self.engine_backend=DemoEngine(self.fail.isChecked() or self.args.page=="failure") if self.args.demo else EngineBackend()
+        self.engine_events=queue.Queue()
+        self.engine_checks=[];self.engine_cameras=[];self.engine_failed_step=None;self.running_step=None
+        self.setup_details.clear()
         for row in self.step_rows:
-            row.setText(tr("pending"))
-            row.setStyleSheet("")
+            row.setText(tr("pending"));row.setStyleSheet("")
+        for item in self.check_labels: item.clear()
+        self.setup_cancel.setEnabled(True)
         self.set_page(4)
-        self.step_rows[0].setText(tr("running"))
-        self.step_timer = QTimer(self)
-        if not hasattr(self, "setup_pool"):
-            self.setup_pool = ThreadPoolExecutor(max_workers=1)
-        self.step_timer.setSingleShot(True)
-        self.step_timer.timeout.connect(self.dispatch_setup)
-        self.step_timer.start(self.sequence.backend.delay_for(STEPS[0]))
-
-    def dispatch_setup(self):
-        self.setup_future = self.setup_pool.submit(self.sequence.advance)
-        QTimer.singleShot(50, self.check_setup)
-
-    def check_setup(self):
-        if not self.setup_future.done():
-            QTimer.singleShot(50, self.check_setup)
+        if not hasattr(self,"setup_pool"): self.setup_pool=ThreadPoolExecutor(max_workers=1)
+        if instant:
+            events=[]
+            self.engine_backend.run(self.run_answers,events.append,instant=True)
+            for event in events:
+                self.engine_events.put(event)
+                if self.args.page=="progress" and event.kind=="step" and event.step=="update" and event.status=="start": break
+            self.present_engine_events()
+            if self.args.page!="progress": self.finish_engine(not self.engine_failed_step)
             return
-        self.show_setup_result(self.setup_future.result())
-        if not self.sequence.done:
-            self.step_timer.start(
-                self.sequence.backend.delay_for(STEPS[self.sequence.index])
-            )
+        self.setup_future=self.setup_pool.submit(self.engine_backend.run,self.run_answers,self.engine_events.put)
+        self.step_timer=QTimer(self)
+        self.step_timer.timeout.connect(self.poll_engine)
+        self.step_timer.start(100)
 
-    def advance_setup(self):
-        # Deterministic screenshot path uses the same sequencer and presenter.
-        self.show_setup_result(self.sequence.advance())
+    def cancel_setup(self):
+        self.setup_cancel.setEnabled(False)
+        self.engine_backend.cancel()
 
-    def show_setup_result(self, result):
-        if result:
-            row = self.step_rows[self.sequence.index - 1]
-            row.setText(tr(result.status) + tr("separator") + tr(result.message_key))
-            row.setStyleSheet(
-                "color: "
-                + (
-                    ERROR
-                    if result.status == "FAIL"
-                    else WARNING if result.status == "WARN" else OK
-                )
-            )
-        if self.sequence.done:
+    def present_engine_events(self):
+        import queue
+        from .engine_backend import ENGINE_STEPS
+        while True:
+            try: event=self.engine_events.get_nowait()
+            except queue.Empty: break
+            if event.kind=="step":
+                index=ENGINE_STEPS.index(event.step)
+                row=self.step_rows[index]
+                if event.status=="start":
+                    self.running_step=index;self.running_since=time.monotonic()
+                    row.setText(tr("setup_elapsed",seconds=0))
+                    row.setStyleSheet("")
+                else:
+                    self.running_step=None
+                    status={"ok":"PASS","warn":"WARN","fail":"FAIL","skip":"step_skip"}[event.status]
+                    row.setText(tr(status)+tr("separator")+event.text)
+                    row.setStyleSheet("color: "+(ERROR if event.status=="fail" else WARNING if event.status in ("warn","skip") else OK))
+                    if event.status=="fail": self.engine_failed_step=event.step
+            elif event.kind=="check": self.engine_checks.append(event)
+            elif event.kind=="camera": self.engine_cameras.append(event.name)
+            elif event.kind=="rescue":
+                self.rescue_labels["rescue_name"].setText(tr("rescue_name")+": "+event.name)
+                self.rescue_labels["rescue_password"].setText(tr("rescue_password")+": "+event.password)
+            elif event.kind=="detail":
+                self.setup_details.setPlainText((self.setup_details.toPlainText()+"\n"+event.text)[-12000:])
+        if self.running_step is not None:
+            self.step_rows[self.running_step].setText(tr("setup_elapsed",seconds=int(time.monotonic()-self.running_since)))
+
+    def poll_engine(self):
+        self.present_engine_events()
+        if self.setup_future.done():
+            self.present_engine_events()
             self.step_timer.stop()
-            # Secrets remain only in form memory until completion, then are discarded.
-            self.sequence.answers.wifi_password = ""
-            self.sequence.answers.camera_password = ""
-            for key in ("wifi_password", "camera_password"):
-                self.inputs[key].clear()
-            if self.sequence.failed:
-                self.progress_title.setText(tr("failed_title"))
-                from .guidance import retry_page
-                self.update_step_bar(4 if result.step == "readiness" else retry_page(result.step))
-                self.validation.setText("")
-                self.next.setText(tr("retry"))
-                self.next.setVisible(True)
-                try:
-                    self.next.clicked.disconnect()
-                except RuntimeError:
-                    pass
-                self.next.clicked.connect(self.retry_setup)
-            else:
-                for widget, check in zip(self.check_labels, result.checks):
-                    widget.setText(
-                        tr(check.status) + tr("separator") + tr(check.message_key)
-                    )
-                    widget.setStyleSheet(
-                        "color: " + (WARNING if check.status == "WARN" else ERROR if check.status == "FAIL" else OK)
-                    )
-                for key, widget in self.rescue_labels.items():
-                    widget.setText(
-                        tr(key) + ": " + (getattr(result, key) or tr("service_pending"))
-                    )
-                self.later.setVisible(not self.sequence.answers.find_cameras)
-                self.set_page(5)
-        elif self.sequence.index < len(STEPS):
-            self.step_rows[self.sequence.index].setText(tr("running"))
+            try: success=self.setup_future.result()
+            except Exception: success=False
+            self.finish_engine(success)
+
+    def finish_engine(self,success):
+        self.setup_cancel.setEnabled(False)
+        for key in ("wifi_password","camera_password"): self.inputs[key].clear()
+        self.run_answers.wifi_password="";self.run_answers.camera_password=""
+        if not success:
+            self.progress_title.setText(tr("failed_title"))
+            if self.engine_backend.cancelled.is_set(): self.validation.setText(tr("setup_cancelled"))
+            self.next.setText(tr("retry"));self.next.show()
+            self.next.clicked.disconnect();self.next.clicked.connect(self.retry_setup)
+            return
+        for i,event in enumerate(self.engine_checks):
+            if i>=len(self.check_labels):
+                item=label("");self.check_labels.append(item)
+                self.check_labels[0].parentWidget().layout().insertWidget(i+1,item)
+            item=self.check_labels[i];item.setText(event.status+tr("separator")+event.text)
+            item.setStyleSheet("color: "+(ERROR if event.status=="FAIL" else WARNING if event.status=="WARN" else OK))
+        self.later.setVisible(not self.run_answers.find_cameras)
+        self.setup_success()
+
+    def setup_success(self):
+        self.set_page(5)
 
     def retry_setup(self):
-        self.next.clicked.disconnect()
-        self.next.clicked.connect(self.next_page)
-        from .guidance import retry_page
-        self.set_page(retry_page(self.sequence.results[-1].step))
+        from .engine_backend import OWNERS
+        self.next.clicked.disconnect();self.next.clicked.connect(self.next_page)
+        self.set_page(OWNERS.get(self.engine_failed_step,0))
