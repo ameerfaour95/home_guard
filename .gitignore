@@ -63,5 +63,6 @@ api_key.env
 
 # Collector box: per-machine settings, upload staging, built bundles
 home_guard_project/box/box.yaml
+home_guard_project/box/network.json
 dataset_outbox/
 dist/

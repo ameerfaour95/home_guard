@@ -18,6 +18,8 @@ MUST_INCLUDE = [
     "home_guard_project/labeling/utils/ffmpeg.py",
     "home_guard_project/box/run_collector.sh",
     "home_guard_project/box/setup_box.ps1",
+    "home_guard_project/box/setup_network.ps1",
+    "home_guard_project/box/check_box.ps1",
     "home_guard_project/box/config.box.yaml",
 ]
 
@@ -25,6 +27,7 @@ MUST_EXCLUDE_NAMES = {
     "cameras.yaml",
     "zones.yaml",
     "box.yaml",
+    "network.json",
     "api_key.env",
     "run_with_gpt.py",
     "open_camera.py",
