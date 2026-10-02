@@ -23,6 +23,13 @@ main() {
     "$SCRIPT_DIR/stop_collector.sh"
 
     log "Pulling..."
+    # A box that lost power in the middle of an update can be left with a
+    # half-written ORIG_HEAD, and git then refuses every pull. The file is only
+    # git's note of where the branch was before; a new pull writes it again.
+    if [[ -f .git/ORIG_HEAD ]] && ! git rev-parse -q --verify ORIG_HEAD &>/dev/null; then
+        log "Removing a damaged .git/ORIG_HEAD"
+        rm -f .git/ORIG_HEAD
+    fi
     if ! git pull --ff-only; then
         log "git pull failed - keeping the current code"
     fi
