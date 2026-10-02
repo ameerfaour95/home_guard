@@ -410,5 +410,7 @@ TEXT.update(show_detections="Show detections on the pictures",show_detections_to
 
 TEXT.update(live_applied="Applied",detection_group="Detection",sensitivity="Sensitivity",certainty_required="Needs to be {percent}% sure",more_alerts="More alerts",fewer_false_alarms="Fewer false alarms",reset_sensitivity="Reset to 40%",live_not_picked_up="The program has not picked this up yet",sensitivity_in_force="Sensitivity {percent}%")
 
+TEXT.update(camera_off="Off")
+
 def tr(key, **values):
     return TEXT[key].format(**values)

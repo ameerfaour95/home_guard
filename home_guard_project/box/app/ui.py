@@ -88,7 +88,7 @@ class CameraTile(QFrame):
         self.status = label(tr("offline"), "muted")
         self.status.hide()
         self.caption = label(name.replace("_", " ").title())
-        self.caption.setObjectName("cameraCaption")
+        self.caption.setObjectName("cameraCaption");self.caption.hide()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 8, 16, 8)
         layout.addStretch()
@@ -113,6 +113,7 @@ class CameraTile(QFrame):
 
     def update_picture(self, pix):
         self.picture = pix if pix and not pix.isNull() else None
+        self._ambient_key=None
         self.status.setText(tr("stopped") if self.stopped else tr("premium_live") if self.picture else tr("offline"))
         self.status.setObjectName("ok" if self.picture else "muted")
         self.status.setStyleSheet("")
@@ -124,10 +125,18 @@ class CameraTile(QFrame):
         area = self.rect().adjusted(1,1,-1,-1)
         if self.picture:
             from .detector_view import box_rect,picture_rect
-            x,y,w,h=picture_rect((area.x(),area.y(),area.width(),area.height()),(self.picture.width(),self.picture.height()),self.devicePixelRatioF())
+            from .camera_presentation import image_rect
+            x,y,w,h=image_rect((area.x(),area.y(),area.width(),area.height()),(self.picture.width(),self.picture.height()),self.hero,self.devicePixelRatioF())
             p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
             from PySide6.QtGui import QPainterPath
             clip=QPainterPath();clip.addRoundedRect(QRectF(area),16,16);p.setClipPath(clip)
+            if self.hero:
+                from .camera_presentation import ambient_picture
+                key=(self.picture.cacheKey(),area.width(),area.height())
+                if key!=getattr(self,'_ambient_key',None):
+                    self._ambient=ambient_picture(self.picture);self._ambient_key=key
+                p.drawPixmap(QRectF(area),self._ambient,QRectF(self._ambient.rect()))
+                p.fillRect(area,QColor(0,0,0,165))
             p.drawPixmap(QRectF(x,y,w,h),self.picture,QRectF(self.picture.rect()))
             if not self.stopped and self.show_detections:
                 p.setOpacity(self.box_opacity)
@@ -148,11 +157,20 @@ class CameraTile(QFrame):
                     p.fillRect(tag,QColor("#101a21"));p.drawText(tag.adjusted(8,0,-8,0),Qt.AlignmentFlag.AlignVCenter,text)
                 p.setOpacity(1)
             p.setFont(QFont("Segoe UI",11))
-            chip_width=min(area.width()-32,max(260,p.fontMetrics().horizontalAdvance(self.detector_note.text())+48))
-            footer=QRectF(area.left()+16,area.bottom()-76,chip_width,60)
-            p.setPen(Qt.PenStyle.NoPen);p.setBrush(QColor(12,22,28,235));p.drawRoundedRect(footer,8,8)
-            p.setBrush(QColor(OK if self.picture else MUTED));p.drawEllipse(QRectF(footer.right()-64,footer.top()+15,6,6))
-            p.setPen(QColor('#c5e4dc'));p.setFont(QFont('Segoe UI',10));p.drawText(QRectF(footer.right()-52,footer.top()+5,44,24),Qt.AlignmentFlag.AlignVCenter,self.status.text())
+            visible=QRectF(x,y,w,h).intersected(QRectF(area))
+            if self.hero:
+                footer=QRectF(visible.left()+16,visible.bottom()-76,min(visible.width()-32,340),60)
+                p.setPen(Qt.PenStyle.NoPen);p.setBrush(QColor(12,22,28,220));p.drawRoundedRect(footer,8,8)
+            else:
+                footer=QRectF(area.left()+12,area.bottom()-66,area.width()-24,56)
+                gradient=QLinearGradient(0,area.bottom()-area.height()*.45,0,area.bottom());gradient.setColorAt(0,QColor(0,0,0,0));gradient.setColorAt(1,QColor(0,0,0,225))
+                p.fillRect(QRectF(area.left(),area.bottom()-area.height()*.45,area.width(),area.height()*.45),gradient)
+            p.setPen(QColor('#edf4f6'));p.drawText(footer.adjusted(12,0,-72,-28),Qt.AlignmentFlag.AlignVCenter,self.caption.text())
+            p.setFont(QFont('Segoe UI',10));p.setPen(QColor('#bfccd3'))
+            note=p.fontMetrics().elidedText(self.detector_note.text(),Qt.TextElideMode.ElideRight,max(1,int(footer.width()-24)))
+            p.drawText(footer.adjusted(12,28,-12,0),Qt.AlignmentFlag.AlignVCenter,note)
+            p.setBrush(QColor(OK));p.setPen(Qt.PenStyle.NoPen);p.drawEllipse(QRectF(footer.right()-61,footer.top()+13,5,5))
+            p.setPen(QColor('#c5e4dc'));p.drawText(QRectF(footer.right()-50,footer.top(),46,30),Qt.AlignmentFlag.AlignVCenter,self.status.text())
         else:
             p.setPen(QColor("#98a6ba"))
             p.setFont(QFont("Segoe UI", 14))
@@ -409,7 +427,8 @@ class Window(QMainWindow):
         mode = bc.get_option("mode")
         payload = build_heartbeat(str(settings.get("site", "")), *_clip_dirs(mode), bc.ALIVE_FILE, mode=mode)
         # Read only names, never retain or display camera URLs.
-        names = self.reader.names() or list(payload.get("cameras", {}))
+        from .camera_presentation import active_names
+        names = active_names(self.reader.names(),list(payload.get("cameras", {})))
         return (
             State.from_heartbeat(payload, cameras=names, upload=upload),
             bool(bc.get_option("show_cameras")),
@@ -458,7 +477,7 @@ class Window(QMainWindow):
                     None
                     if scenario == "offline" or self.box_controls.is_stopped()
                     or (scenario == "mixed" and i == len(self.tiles) - 1)
-                    else demo_picture(i)
+                    else __import__("home_guard_project.box.app.demo_media",fromlist=["picture"]).picture(i,getattr(self.args,"aspect","16:9"))
                 )
             self.update_detector()
             return
@@ -552,7 +571,7 @@ class Window(QMainWindow):
             tile.show_detections=self.viewer_settings.detections
             tile.detection_labels=self.viewer_settings.detection_labels
             tile.detector_enabled=inference
-            tile.detector_note.setVisible(inference)
+            tile.detector_note.hide()
             tile.detections,text=camera_view(self.ai_data,tile.name,now,stopped) if inference else ((),"")
             tile.detector_note.setToolTip(text)
             if not tile.hero: text=tile.detector_note.fontMetrics().elidedText(text,Qt.TextElideMode.ElideRight,max(120,tile.width()-48))
@@ -790,10 +809,13 @@ class Window(QMainWindow):
         others=[tile for tile in self.tiles if tile is not hero]
         if others:
             self.thumbnail_scroll=QScrollArea();self.thumbnail_scroll.setWidgetResizable(True);self.thumbnail_scroll.setFixedHeight(176);self.thumbnail_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-            holder=QWidget();strip=QHBoxLayout(holder);strip.setContentsMargins(0,0,0,0);strip.setSpacing(16)
-            for tile in others:
-                tile.hero=False;tile.setFixedSize(280,160);strip.addWidget(tile)
-            strip.addStretch();self.thumbnail_scroll.setWidget(holder);self.grid.addWidget(self.thumbnail_scroll,1,0)
+            holder=QWidget();strip=QGridLayout(holder);strip.setContentsMargins(0,0,0,0);strip.setSpacing(12)
+            rows=1 if len(self.tiles)<=6 else 2
+            columns=math.ceil(len(others)/rows)
+            self.thumbnail_scroll.setFixedHeight(156*rows+12*(rows-1))
+            for i,tile in enumerate(others):
+                tile.hero=False;tile.setMinimumSize(80,144);tile.setMaximumSize(16777215,144);strip.addWidget(tile,i//columns,i%columns);strip.setColumnStretch(i%columns,1)
+            self.thumbnail_scroll.setWidget(holder);self.grid.addWidget(self.thumbnail_scroll,1,0)
         else: self.thumbnail_scroll=None
         for tile in self.tiles: tile.show();tile.update()
 

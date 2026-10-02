@@ -31,6 +31,7 @@ def main():
     _drop_own_console()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--demo", action="store_true")
+    parser.add_argument("--aspect",choices=("16:9","4:3"),default="16:9")
     parser.add_argument("--detections", action="store_true")
     parser.add_argument("--theme", choices=("dark","light"), default="dark")
     parser.add_argument("--panel", choices=("settings", "cameras"))

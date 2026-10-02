@@ -127,6 +127,15 @@ class CameraPage:
             self.begin(self.controls.snapshots if self.loaded else self.load_photos)
 
     def poll(self):
+        if self.future is None and not self.wizard and not self.controls.box.demo and self.widget.isVisible():
+            import time
+            if time.monotonic()-getattr(self,'last_names_poll',0)>=1:
+                self.last_names_poll=time.monotonic()
+                try:
+                    records=self.controls.load()
+                    signature=tuple((r.name,r.enabled) for r in records)
+                    if signature!=getattr(self,'record_signature',None): self.render(records)
+                except (OSError,ValueError,TypeError): pass
         if self.future is None or not self.future.done():
             return
         future, self.future = self.future, None
@@ -172,6 +181,7 @@ class CameraPage:
         grid.setContentsMargins(0, 0, 12, 0)
         grid.setSpacing(16)
         self.rows = []
+        self.record_signature=tuple((r.name,r.enabled) for r in records)
         if not records:
             grid.addWidget(label(tr("camera_empty"), "muted"), 0, 0)
         for i, camera in enumerate(records):
@@ -189,7 +199,7 @@ class CameraPage:
             name.setAccessibleName(tr("camera_name"))
             name.setValidator(QRegularExpressionValidator(QRegularExpression("[a-z0-9_]+"), name))
             name.textChanged.connect(self.validate)
-            enabled = QCheckBox(tr("camera_enabled"))
+            enabled = QCheckBox(tr("camera_enabled" if camera.enabled else "camera_off"))
             enabled.setChecked(camera.enabled)
             enabled.toggled.connect(self.validate)
             line.addWidget(name, 1)

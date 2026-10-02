@@ -2,9 +2,10 @@
 from PySide6.QtCore import Qt,QRectF
 from PySide6.QtGui import QPixmap,QPainter,QColor,QLinearGradient,QPen,QFont
 
-def picture(index=0):
-    pix=QPixmap(1280,720);p=QPainter(pix);p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    sky=QLinearGradient(0,0,0,720);sky.setColorAt(0,QColor('#182d3c'));sky.setColorAt(1,QColor('#53656a'));p.fillRect(pix.rect(),sky)
+def picture(index=0,aspect="16:9"):
+    pix=QPixmap(1280,960 if aspect=="4:3" else 720);p=QPainter(pix);p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    if aspect=="4:3": p.scale(1,4/3)
+    sky=QLinearGradient(0,0,0,720);sky.setColorAt(0,QColor('#182d3c'));sky.setColorAt(1,QColor('#53656a'));p.fillRect(QRectF(0,0,1280,720),sky)
     p.setPen(Qt.PenStyle.NoPen)
     for x,y,r in ((110,62,1),(920,100,2),(1040,44,1),(730,75,1),(290,112,2)):
         p.setBrush(QColor('#b1c2ca'));p.drawEllipse(x,y,r*2,r*2)
@@ -26,4 +27,5 @@ def picture(index=0):
     p.setPen(QPen(QColor('#1b2a32'),16));p.drawLine(x-10,390,x-20,518);p.drawLine(x+10,390,x+28,518)
     p.setPen(QPen(QColor('#2c5464'),12));p.drawLine(x-20,285,x-35,357);p.drawLine(x+20,285,x+45,350)
     p.setPen(QColor('#bdc9cf'));p.setFont(QFont('Segoe UI',14));p.drawText(32,42,'HOME GUARD / DEMONSTRATION')
-    p.end();return pix
+    p.end()
+    return pix
