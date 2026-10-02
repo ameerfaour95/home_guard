@@ -159,7 +159,7 @@ class BoxCliTest(unittest.TestCase):
     def test_a_different_house_forgets_the_old_houses_cameras(self) -> None:
         with open(self.box_yaml, "w", encoding="utf-8") as f:
             f.write('site: "old_house"\n')
-        cameras = os.path.join(self.outbox, "cameras.yaml")
+        cameras = os.path.join(os.path.dirname(self.box_yaml), "cameras.yaml")
         with open(cameras, "w", encoding="utf-8") as f:
             f.write("old_house_ch2: rtsp://admin:secret@192.168.0.9:554/x\n")
 
