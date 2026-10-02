@@ -349,8 +349,10 @@ def run() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", stream=sys.stdout)
     try:
         from dotenv import load_dotenv  # noqa: PLC0415
+        from .boxconfig import PROJECT_ROOT  # noqa: PLC0415
 
-        load_dotenv()  # api_key.env at the repo root
+        # Secrets live in api_key.env (NOT .env), at the repo root.
+        load_dotenv(os.path.join(PROJECT_ROOT, "api_key.env"))
     except Exception:  # noqa: BLE001
         pass
     env = dict(os.environ)
