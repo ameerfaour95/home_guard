@@ -656,6 +656,9 @@ class Window(QMainWindow):
         self.activity_layout.addStretch()
 
     def closeEvent(self, event):
+        if hasattr(self, "camera_retry"): self.camera_retry.clear()
+        if hasattr(self, "discovery_timer"): self.discovery_timer.stop()
+        if hasattr(self, "discovery_pool"): self.discovery_pool.shutdown(wait=False, cancel_futures=True)
         if hasattr(self, "cameras_page"):
             self.cameras_page.close()
         if hasattr(self,"wizard_cameras"):
@@ -696,6 +699,8 @@ class Window(QMainWindow):
         self.outer.addLayout(step_bar)
         self.pages = QStackedWidget()
         self.outer.addWidget(self.pages, 1)
+        from .camera_retry import CameraRetry
+        self.camera_retry = CameraRetry()
         self.inputs = {}
         self.field_guidance = {}
         titles = [
@@ -714,7 +719,9 @@ class Window(QMainWindow):
             if title == "progress_title":
                 self.progress_title = title_widget
             lay.addWidget(title_widget)
-            lay.addWidget(label(tr("live_summary_hint") if hint == "summary_hint" and not self.args.demo else tr(hint), "muted"))
+            hint_widget = label(tr("live_summary_hint") if hint == "summary_hint" and not self.args.demo else tr(hint), "muted")
+            lay.addWidget(hint_widget)
+            if hint == "progress_hint": self.progress_hint = hint_widget
             self.page_layouts.append(lay)
             if title == "summary_title":
                 summary_scroll = QScrollArea()
@@ -723,7 +730,27 @@ class Window(QMainWindow):
                 self.pages.addWidget(summary_scroll)
             else:
                 self.pages.addWidget(panel)
-        self.add_input(0, "address", tr("address"))
+        self.inputs["address"] = QLineEdit()
+        self.inputs["address"].hide()
+        self.field_guidance["address"] = label("")
+        self.field_guidance["address"].setStyleSheet("color: " + ERROR)
+        self.page_layouts[0].addWidget(label(tr("box_label")))
+        self.box_picker = QComboBox()
+        self.box_picker.addItem(tr("box_loading"), None)
+        self.page_layouts[0].addWidget(self.box_picker)
+        self.box_address = QLineEdit()
+        self.box_address.setPlaceholderText(tr("box_address_placeholder"))
+        self.page_layouts[0].addWidget(self.box_address)
+        self.box_hint = label(tr("box_loading"), "muted")
+        self.page_layouts[0].addWidget(self.box_hint)
+        self.page_layouts[0].addWidget(label(tr("box_user_label")))
+        self.box_user = QLineEdit()
+        self.page_layouts[0].addWidget(self.box_user)
+        self.page_layouts[0].addWidget(label(tr("box_user_help"), "muted"))
+        self.page_layouts[0].addWidget(self.field_guidance["address"])
+        self.box_picker.currentIndexChanged.connect(self.choose_box)
+        self.box_address.textChanged.connect(self.compose_box_target)
+        self.box_user.textChanged.connect(self.compose_box_target)
         self.network = QComboBox()
         self.network.addItems([tr("ethernet"), tr("wifi")])
         self.page_layouts[1].addWidget(self.network)
@@ -755,6 +782,14 @@ class Window(QMainWindow):
         self.page_layouts[3].addWidget(self.find)
         self.add_input(3, "camera_user", tr("camera_user"))
         self.add_input(3, "camera_password", tr("camera_password"), True)
+        self.camera_retry_message = label("")
+        self.camera_retry_message.setStyleSheet("color: " + ERROR)
+        self.page_layouts[3].addWidget(self.camera_retry_message)
+        self.page_layouts[3].addWidget(label(tr("camera_login_help"), "muted"))
+        self.camera_lock_warning = label(tr("camera_lock_warning"))
+        self.camera_lock_warning.setStyleSheet("color: " + WARNING)
+        self.camera_lock_warning.hide()
+        self.page_layouts[3].addWidget(self.camera_lock_warning)
         self.find.toggled.connect(
             lambda enabled: [
                 self.inputs[key].setEnabled(enabled)
@@ -766,24 +801,28 @@ class Window(QMainWindow):
         self.fail.setVisible(self.args.demo)
         self.page_layouts[3].addWidget(self.fail)
         self.step_rows = []
+        progress_body = QHBoxLayout()
+        progress_steps = QVBoxLayout()
         from .engine_backend import ENGINE_STEPS
         for step in ENGINE_STEPS:
             row = QHBoxLayout()
             name = label(tr("step_"+step))
-            name.setMinimumWidth(300)
+            name.setMinimumWidth(190)
             status = label(tr("pending"), "muted")
             row.addWidget(name, 2)
             row.addWidget(status, 3)
-            self.page_layouts[4].addLayout(row)
+            progress_steps.addLayout(row)
             self.step_rows.append(status)
+        progress_steps.addStretch()
+        progress_body.addLayout(progress_steps,1)
         self.setup_details_toggle = QCheckBox(tr("details"))
-        self.setup_details = QTextEdit()
-        self.setup_details.setReadOnly(True)
-        self.setup_details.setMaximumHeight(100)
+        from .setup_details_ui import DetailsPanel
+        self.setup_details = DetailsPanel()
         self.setup_details.hide()
         self.setup_details_toggle.toggled.connect(self.setup_details.setVisible)
         self.page_layouts[4].addWidget(self.setup_details_toggle)
-        self.page_layouts[4].addWidget(self.setup_details)
+        progress_body.addWidget(self.setup_details,1)
+        self.page_layouts[4].addLayout(progress_body,1)
         self.setup_cancel = QPushButton(tr("cancel_setup"))
         self.setup_cancel.setObjectName("secondary")
         self.setup_cancel.clicked.connect(self.cancel_setup)
@@ -865,6 +904,22 @@ class Window(QMainWindow):
             from .preferences import AddressPreference
             self.address_preference=AddressPreference()
             self.inputs["address"].setText(self.address_preference.load())
+        saved_target = self.inputs["address"].text()
+        if "@" in saved_target:
+            saved_user, saved_box = saved_target.split("@", 1)
+            if self.args.demo: self.box_user.setText(saved_user)
+            else: self.box_user.setText(self.address_preference.load_user())
+            self.box_address.setText(saved_box)
+        if self.args.demo:
+            from .box_discovery import Peer
+            self.populate_boxes([Peer(tr("demo_box_name"), "100.100.100.10", True)])
+        else:
+            from .box_discovery import discover
+            self.discovery_pool=ThreadPoolExecutor(max_workers=1)
+            self.discovery_future=self.discovery_pool.submit(discover)
+            self.discovery_timer=QTimer(self)
+            self.discovery_timer.timeout.connect(self.poll_boxes)
+            self.discovery_timer.start(100)
         self.find.setChecked(not self.args.skip_cameras)
         self.alerts.setChecked(self.args.alerts)
         if self.args.wifi:
@@ -945,6 +1000,36 @@ class Window(QMainWindow):
     def valid_page(self,index):
         return not self.errors_for_page(index)
 
+    def compose_box_target(self):
+        self.inputs["address"].setText(self.box_user.text().strip()+"@"+self.box_address.text().strip())
+
+    def choose_box(self, index):
+        address=self.box_picker.itemData(index)
+        self.box_address.setVisible(not bool(address))
+        if address: self.box_address.setText(address)
+
+    def populate_boxes(self, peers):
+        remembered=self.box_address.text()
+        self.box_picker.blockSignals(True)
+        self.box_picker.clear()
+        for peer in peers:
+            self.box_picker.addItem(tr("box_peer", name=peer.name, address=peer.address)+("" if peer.online else tr("box_offline")), peer.address)
+        self.box_picker.addItem(tr("box_manual"), None)
+        selection=next((i for i in range(self.box_picker.count()) if self.box_picker.itemData(i)==remembered), self.box_picker.count()-1 if remembered else 0)
+        self.box_picker.setCurrentIndex(selection)
+        self.box_picker.blockSignals(False)
+        self.box_picker.setVisible(bool(peers))
+        self.box_hint.setText(tr("box_pick_hint") if peers else tr("box_address_help"))
+        self.choose_box(selection)
+        self.compose_box_target()
+
+    def poll_boxes(self):
+        if self.discovery_future.done():
+            self.discovery_timer.stop()
+            try: peers=self.discovery_future.result()
+            except Exception: peers=[]
+            self.populate_boxes(peers)
+
     def next_page(self):
         index = self.pages.currentIndex()
         if index == 5:
@@ -962,13 +1047,14 @@ class Window(QMainWindow):
         if index == 6:
             self.begin_setup()
             return
+        if index == 0: self.compose_box_target()
         errors = self.errors_for_page(index)
         if errors:
             for key,message in errors.items():
                 self.inputs[key].setStyleSheet(f"border: 1px solid {ERROR};")
-                self.field_guidance[key].setText(tr(message))
+                self.field_guidance[key].setText(tr("box_target_error") if index == 0 and key == "address" else tr(message))
                 self.field_guidance[key].show()
-            self.inputs[next(iter(errors))].setFocus()
+            (self.box_user if not self.box_user.text().strip() else self.box_address).setFocus() if index == 0 else self.inputs[next(iter(errors))].setFocus()
             return
         if index == 0 and not self.args.demo:
             try: self.address_preference.save(self.inputs["address"].text().strip())
@@ -977,7 +1063,10 @@ class Window(QMainWindow):
                 self.validation.setText(tr("address_not_remembered"))
                 return
         if index == 3:
-            self.set_page(6)
+            if self.camera_retry.pending:
+                self.begin_setup()
+            else:
+                self.set_page(6)
         else:
             self.set_page(index + 1)
 
@@ -998,11 +1087,14 @@ class Window(QMainWindow):
         import queue
         from .engine_backend import EngineBackend,DemoEngine
         self.progress_title.setText(tr("progress_title"))
-        self.run_answers=self.collect_answers()
+        self.progress_hint.setStyleSheet("")
+        self.run_answers = self.camera_retry.retry(self.inputs["camera_user"].text().strip(), self.inputs["camera_password"].text()) if self.camera_retry.pending else self.collect_answers()
+        self.camera_retry.capture(self.run_answers)
+        self.progress_hint.setText(tr("retry_confirming") if self.camera_retry.pending else tr("progress_hint"))
         self.engine_backend=DemoEngine(self.fail.isChecked() or self.args.page=="failure") if self.args.demo else EngineBackend()
         self.engine_events=queue.Queue()
         self.engine_checks=[];self.engine_cameras=[];self.engine_failed_step=None;self.running_step=None
-        self.setup_details.clear()
+        self.setup_details.reset()
         for row in self.step_rows:
             row.setText(tr("pending"));row.setStyleSheet("")
         for item in self.check_labels: item.clear()
@@ -1033,10 +1125,12 @@ class Window(QMainWindow):
         while True:
             try: event=self.engine_events.get_nowait()
             except queue.Empty: break
+            self.setup_details.feed(event)
             if event.kind=="step":
                 index=ENGINE_STEPS.index(event.step)
                 row=self.step_rows[index]
                 if event.status=="start":
+                    if event.step == "cameras": self.camera_retry.started()
                     self.running_step=index;self.running_since=time.monotonic()
                     row.setText(tr("setup_elapsed",seconds=0))
                     row.setStyleSheet("")
@@ -1045,14 +1139,20 @@ class Window(QMainWindow):
                     status={"ok":"PASS","warn":"WARN","fail":"FAIL","skip":"step_skip"}[event.status]
                     row.setText(tr(status)+tr("separator")+event.text)
                     row.setStyleSheet("color: "+(ERROR if event.status=="fail" else WARNING if event.status in ("warn","skip") else OK))
-                    if event.status=="fail": self.engine_failed_step=event.step
+                    if event.status=="fail":
+                        self.engine_failed_step=event.step
+                        if event.step == "cameras":
+                            self.camera_retry.failed(event.text)
+                            self.progress_hint.setText(event.text + "\n" + tr("camera_login_help"))
+                            self.progress_hint.setStyleSheet("color: " + ERROR)
+                            row.setText(tr("FAIL"))
+                        self.setup_details_toggle.setChecked(True)
             elif event.kind=="check": self.engine_checks.append(event)
             elif event.kind=="camera": self.engine_cameras.append(event.name)
             elif event.kind=="rescue":
                 self.rescue_labels["rescue_name"].setText(tr("rescue_name")+": "+event.name)
                 self.rescue_labels["rescue_password"].setText(tr("rescue_password")+": "+event.password)
-            elif event.kind=="detail":
-                self.setup_details.setPlainText((self.setup_details.toPlainText()+"\n"+event.text)[-12000:])
+
         if self.running_step is not None:
             self.step_rows[self.running_step].setText(tr("setup_elapsed",seconds=int(time.monotonic()-self.running_since)))
 
@@ -1083,6 +1183,10 @@ class Window(QMainWindow):
                 self.check_labels[0].parentWidget().layout().insertWidget(i+1,item)
             item=self.check_labels[i];item.setText(event.status+tr("separator")+event.text)
             item.setStyleSheet("color: "+(ERROR if event.status=="FAIL" else WARNING if event.status=="WARN" else OK))
+        self.camera_retry.clear()
+        if not self.args.demo:
+            try: self.address_preference.save_success(self.run_answers.address)
+            except OSError: pass
         self.later.setVisible(not self.run_answers.find_cameras)
         self.setup_success()
 
@@ -1112,3 +1216,8 @@ class Window(QMainWindow):
         from .engine_backend import OWNERS
         self.next.clicked.disconnect();self.next.clicked.connect(self.next_page)
         self.set_page(OWNERS.get(self.engine_failed_step,0))
+        if self.engine_failed_step == "cameras":
+            self.camera_retry_message.setText(self.camera_retry.message)
+            self.camera_lock_warning.setVisible(self.camera_retry.lock_warning)
+            self.inputs["camera_password"].clear()
+            self.inputs["camera_password"].setFocus()

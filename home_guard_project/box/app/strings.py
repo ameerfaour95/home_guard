@@ -1,6 +1,34 @@
 """All visible application copy; keys remain stable for translation."""
 
 TEXT = {
+    "demo_box_name": "Home Guard box",
+    "box_label": "The box",
+    "box_loading": "Looking for Windows boxes on this laptop's Tailscale network...",
+    "box_address_placeholder": "Box address, for example 100.100.100.10",
+    "box_user_label": "Windows user name on the box",
+    "box_user_help": "The Windows account on the box. On the box, open Command Prompt and type whoami; it is the part after the backslash.",
+    "box_manual": "Type an address",
+    "box_peer": "{name} - {address}",
+    "box_offline": " (offline)",
+    "box_pick_hint": "Choose the customer's box by name, or type its address.",
+    "box_address_help": "On this laptop, open Tailscale and copy the address of the customer's box.",
+    "box_target_error": "Enter the box address and its Windows user name (letters, digits, underscores, dots or hyphens).",
+
+    "camera_login_help": "The user name is usually admin. Use the password set when the cameras were installed, the recorder's admin password, or the code on the camera label.",
+    "camera_lock_warning": "Before trying a third time: some cameras lock logins for a while after repeated failures. Check the password before continuing.",
+    "retry_confirming": "Confirming the earlier steps, then trying the new camera login.",
+    "technical_log": "Technical log",
+    "copy_log": "Copy",
+    "details_empty": "No additional notes for this step yet.",
+    "detail_login_refused": "A camera refused this login. Check its user name and password.",
+    "detail_timeout": "A camera did not send a picture in time. Check its power and connection.",
+    "detail_no_stream": "No working picture address was found for a camera.",
+    "detail_try_stream": "Trying another picture address for a camera.",
+    "detail_find_cameras": "Looking for cameras on the home network.",
+    "detail_update": "Updating the software on the box.",
+    "detail_copy": "Copying setup files to the box.",
+    "detail_command": "Running a setup command on the box.",
+
     "camera_check_pending": "Finish loading the camera check before continuing. If it failed, refresh the photos and try again.",
 
     "setup_window_title": "Home Guard Setup",
