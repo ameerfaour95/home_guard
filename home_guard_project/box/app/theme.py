@@ -33,6 +33,7 @@ QFrame#alertCard[urgent="true"] { border-left: 3px solid @error; }
 QPushButton { background: @action; color: @bg; border: 1px solid @action; border-radius: 8px; padding: 12px 24px; font-weight: 600; min-height: 20px; }
 QPushButton#secondary { background: @raised; color: @text; border-color: @border; }
 QPushButton#iconButton { background: transparent; color: @text; border-color: @border; padding: 10px; }
+QPushButton#iconButton:checked { background: @bubble; border-color: @action; }
 QPushButton#stopAction { background: @raised; color: @error; border-color: @error; }
 QPushButton#textAction { background: transparent; color: @secondary; border: none; padding: 4px; min-height: 20px; font-size: 14px; }
 QFrame#setupStep { border: 1px solid transparent; border-radius: 8px; background: transparent; }
@@ -61,6 +62,10 @@ QScrollBar:horizontal { height: 6px; background: transparent; margin: 0; }
 QScrollBar::handle { background: @border; border-radius: 3px; min-height: 24px; min-width: 24px; }
 QScrollBar::add-line,QScrollBar::sub-line { width: 0; height: 0; }
 QScrollBar::add-page,QScrollBar::sub-page { background: transparent; }
+QSlider::groove:horizontal { background: @border; height: 4px; border-radius: 2px; }
+QSlider::handle:horizontal { background: @action; width: 18px; height: 18px; margin: -7px 0; border-radius: 9px; }
+QSlider::sub-page:horizontal { background: @action; border-radius: 2px; }
+QSlider:focus { border: 1px solid @action; }
 QProgressBar { background: @raised; border: none; border-radius: 4px; height: 8px; text-align: center; }
 QProgressBar::chunk { background: @action; border-radius: 4px; }
 QToolTip { background: @raised; color: @text; border: 1px solid @border; padding: 8px; }

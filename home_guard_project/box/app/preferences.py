@@ -3,7 +3,31 @@ from pathlib import Path
 import json
 import os
 import tempfile
+from dataclasses import dataclass,asdict
 from .remote_cameras import target_user
+
+@dataclass(frozen=True)
+class ViewerSettings:
+    detections: bool = False
+    detection_labels: str = 'confidence'
+    def __post_init__(self):
+        if type(self.detections) is not bool or self.detection_labels not in ('confidence','name','none'):
+            raise ValueError('Invalid viewer settings')
+
+class ViewerPreference:
+    def __init__(self,path=None):
+        self.path=Path(path) if path else Path.home()/'.homeguard'/'viewer.json'
+    def load(self):
+        try: return ViewerSettings(**json.loads(self.path.read_text(encoding='utf-8')))
+        except (OSError,ValueError,TypeError): return ViewerSettings()
+    def save(self,settings):
+        self.path.parent.mkdir(parents=True,exist_ok=True)
+        descriptor,name=tempfile.mkstemp(prefix='viewer-',suffix='.tmp',dir=self.path.parent)
+        temporary=Path(name)
+        try:
+            with os.fdopen(descriptor,'w',encoding='utf-8') as stream: json.dump(asdict(settings),stream)
+            os.replace(temporary,self.path)
+        finally: temporary.unlink(missing_ok=True)
 
 class AddressPreference:
     def __init__(self,path=None):
