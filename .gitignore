@@ -60,3 +60,8 @@ api_key.env
 .claude/settings.json
 .claude/settings.local.json
 *.md
+
+# Collector box: per-machine settings, upload staging, built bundles
+home_guard_project/box/box.yaml
+dataset_outbox/
+dist/
