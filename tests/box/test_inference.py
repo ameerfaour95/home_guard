@@ -295,3 +295,108 @@ class PreviewAdapterTest(unittest.TestCase):
         stream = adapt_stream(Reader, writer)("front_door", "rtsp://x", ring="RING")
         self.assertEqual((stream.name, stream.ring), ("front_door", "RING"))
         self.assertEqual(writer.names, ["front_door"])
+
+
+# ---------------------------------------------------------------------------
+# Parked vehicles: a vehicle-only trigger escalates only when the vehicles moved
+# ---------------------------------------------------------------------------
+CAR = (0.50, 0.50, 0.70, 0.60)           # a parked car, normalised xyxy
+JITTER = (0.505, 0.502, 0.705, 0.603)    # the same car, the detector's box wobbling a little (IoU ~0.9)
+SHIFTED = (0.60, 0.50, 0.80, 0.60)       # the same car half a length further on (IoU ~0.33)
+OTHER = (0.10, 0.70, 0.30, 0.80)         # a second car elsewhere in the picture
+
+
+class _FakeVehicleBox:
+    def __init__(self, cls_id, xyxyn) -> None:
+        self.cls = [cls_id]
+        self.xyxyn = [list(xyxyn)]
+
+
+class VehicleBoxesTest(unittest.TestCase):
+    NAMES = {0: "person", 2: "car", 7: "truck", 15: "cat"}
+
+    def test_only_the_vehicles_boxes_are_kept(self) -> None:
+        result = _FakeResult([], self.NAMES)
+        result.boxes = [_FakeVehicleBox(0, (0.1, 0.1, 0.2, 0.3)),
+                        _FakeVehicleBox(2, CAR),
+                        _FakeVehicleBox(15, (0.0, 0.0, 0.1, 0.1)),
+                        _FakeVehicleBox(7, OTHER)]
+        self.assertEqual(inf.vehicle_boxes(result), [CAR, OTHER])
+
+    def test_no_boxes(self) -> None:
+        self.assertEqual(inf.vehicle_boxes(_FakeResult([], self.NAMES)), [])
+
+
+class VehiclesMovedTest(unittest.TestCase):
+    def test_the_first_look_counts_as_moved(self) -> None:
+        self.assertTrue(inf.vehicles_moved(None, [CAR]))
+
+    def test_the_same_boxes_have_not_moved(self) -> None:
+        self.assertFalse(inf.vehicles_moved([CAR], [CAR]))
+
+    def test_the_detectors_wobble_is_not_movement(self) -> None:
+        self.assertFalse(inf.vehicles_moved([CAR], [JITTER]))
+
+    def test_a_car_that_drove_on_has_moved(self) -> None:
+        self.assertTrue(inf.vehicles_moved([CAR], [SHIFTED]))
+
+    def test_a_car_arriving_is_movement(self) -> None:
+        self.assertTrue(inf.vehicles_moved([CAR], [CAR, OTHER]))
+        self.assertTrue(inf.vehicles_moved([], [CAR]))
+
+    def test_a_car_leaving_is_movement(self) -> None:
+        self.assertTrue(inf.vehicles_moved([CAR, OTHER], [CAR]))
+        self.assertTrue(inf.vehicles_moved([CAR], []))
+
+    def test_no_vehicles_either_time_is_not_movement(self) -> None:
+        self.assertFalse(inf.vehicles_moved([], []))
+
+    def test_the_order_of_the_boxes_does_not_matter(self) -> None:
+        self.assertFalse(inf.vehicles_moved([CAR, OTHER], [OTHER, CAR]))
+
+
+class VehicleMemoryTest(unittest.TestCase):
+    """One per camera: remembers where the vehicles were, across every look (cooldown looks too)."""
+
+    def test_a_parked_car_is_movement_on_the_first_look_and_never_again(self) -> None:
+        mem = inf.VehicleMemory()
+        self.assertTrue(mem.look([CAR]))
+        self.assertEqual([mem.look([b]) for b in (JITTER, CAR, JITTER, CAR)], [False] * 4)
+
+    def test_a_car_that_creeps_is_caught_against_where_it_was_parked(self) -> None:
+        # Each step on its own wobbles too little to count (IoU ~0.82 between neighbours),
+        # so comparing only with the previous look would never see this car move.
+        mem = inf.VehicleMemory()
+        mem.look([CAR])
+        steps = [(0.50 + 0.02 * i, 0.50, 0.70 + 0.02 * i, 0.60) for i in range(1, 8)]
+        moved = [mem.look([s]) for s in steps]
+        self.assertFalse(moved[0])
+        self.assertTrue(any(moved))
+
+    def test_a_car_that_arrives_and_parks_during_the_cooldown_is_quiet_afterwards(self) -> None:
+        mem = inf.VehicleMemory()
+        mem.look([])                                  # the empty driveway
+        self.assertTrue(mem.look([SHIFTED]))          # a car arrives (the trigger, then the cooldown)
+        self.assertTrue(mem.look([CAR]))              # still rolling, one second later
+        self.assertFalse(mem.look([CAR]))             # parked
+        self.assertFalse(mem.look([JITTER]))          # ... two minutes later: no new alert
+
+    def test_a_car_leaving_is_movement_and_the_empty_driveway_is_then_quiet(self) -> None:
+        mem = inf.VehicleMemory()
+        mem.look([CAR])
+        self.assertFalse(mem.look([CAR]))
+        self.assertTrue(mem.look([]))
+        self.assertFalse(mem.look([]))
+
+
+class EscalationTest(unittest.TestCase):
+    def test_a_person_always_escalates(self) -> None:
+        self.assertTrue(inf.should_escalate(person=True, vehicle=False, vehicles_moved=False))
+        self.assertTrue(inf.should_escalate(person=True, vehicle=True, vehicles_moved=False))
+
+    def test_a_vehicle_escalates_only_when_it_moved(self) -> None:
+        self.assertTrue(inf.should_escalate(person=False, vehicle=True, vehicles_moved=True))
+        self.assertFalse(inf.should_escalate(person=False, vehicle=True, vehicles_moved=False))
+
+    def test_nothing_in_view_does_not_escalate(self) -> None:
+        self.assertFalse(inf.should_escalate(person=False, vehicle=False, vehicles_moved=True))

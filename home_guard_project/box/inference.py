@@ -9,6 +9,8 @@ owner's alert time window, buffer a few frames -> a VLM backend (GPT-4V now,
 pluggable) returns {summary, alert_command, alert_reason} -> the alert is sent
 to the owner over the configured channel (Telegram by default). The VLM call
 runs off the capture loop, and a per-camera cooldown bounds cost and spam.
+A vehicle that has not moved since the camera's previous look does not open
+the gate (a parked car is not an event); a person always does.
 
 Design notes (N150): YOLO already saturates the CPU, so the gate uses a small
 model, the VLM runs in the cloud on a worker thread, and we send few frames.
@@ -29,7 +31,7 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 log = logging.getLogger("box.inference")
 
@@ -299,6 +301,86 @@ def detect_trigger(result) -> Tuple[bool, bool, List[str]]:
 
 
 # ----------------------------------------------------------------------------
+# Parked vehicles: a vehicle-only trigger is worth a VLM call only if it moved
+# ----------------------------------------------------------------------------
+Box = Tuple[float, float, float, float]   # normalised xyxy, as results[0].boxes.xyxyn gives it
+
+VEHICLE_SAME_PLACE_IOU = 0.7              # a vehicle box overlapping its old box this much has not moved
+
+
+def vehicle_boxes(result) -> List[Box]:
+    """Normalised xyxy boxes of the vehicles in a YOLO result, in detection order."""
+    boxes = getattr(result, "boxes", None)
+    if boxes is None or len(boxes) == 0:
+        return []
+    names = getattr(result, "names", {})
+    out: List[Box] = []
+    for b in boxes:
+        if names.get(int(b.cls[0]), "") not in VEHICLE_CLASSES:
+            continue
+        xyxyn = getattr(b, "xyxyn", None)
+        if xyxyn is None or len(xyxyn) == 0:
+            continue
+        x1, y1, x2, y2 = (float(v) for v in xyxyn[0])
+        out.append((x1, y1, x2, y2))
+    return out
+
+
+def _iou(a: Box, b: Box) -> float:
+    ix = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
+    iy = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+    inter = ix * iy
+    union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
+    return inter / union if union > 0 else 0.0
+
+
+def vehicles_moved(previous_boxes: Optional[Sequence[Box]], current_boxes: Sequence[Box],
+                   iou_threshold: float = VEHICLE_SAME_PLACE_IOU) -> bool:
+    """Did the vehicles in view change since *previous_boxes* was taken?
+
+    True on the first look (*previous_boxes* is None), when the number of
+    vehicles changed (one arrived or left), or when some vehicle has no old box
+    overlapping it with IoU >= *iou_threshold* (it drove on). The detector's box
+    wobbling on a parked car stays well above the threshold and does not count.
+
+    Policy: a moving vehicle inside the alert window is still at least
+    [send_message]; a parked one is nothing - no VLM call, no alert, no clip.
+    """
+    if previous_boxes is None:
+        return True
+    if len(previous_boxes) != len(current_boxes):
+        return True
+    return any(all(_iou(cur, old) < iou_threshold for old in previous_boxes) for cur in current_boxes)
+
+
+class VehicleMemory:
+    """Where a camera's vehicles were the last time they moved.
+
+    One per camera, fed on every look at the camera - the once-a-second looks
+    during the cooldown too - so a car that arrives and parks during a cooldown
+    is compared, two minutes later, with its own parked position and stays
+    quiet. The reference is replaced only when the vehicles moved: comparing
+    each look only with the one before would let a car creep in unnoticed, a
+    few centimetres per look.
+    """
+
+    def __init__(self) -> None:
+        self._reference: Optional[List[Box]] = None
+
+    def look(self, boxes: Sequence[Box]) -> bool:
+        """Record one look; True if the vehicles moved since the reference."""
+        moved = vehicles_moved(self._reference, boxes)
+        if moved:
+            self._reference = list(boxes)
+        return moved
+
+
+def should_escalate(person: bool, vehicle: bool, vehicles_moved: bool) -> bool:
+    """A person always goes to the VLM; a vehicle only when it moved since the camera's previous look."""
+    return person or (vehicle and vehicles_moved)
+
+
+# ----------------------------------------------------------------------------
 # Runtime
 # ----------------------------------------------------------------------------
 STATUS_LOOK_SEC = 1.0   # how often the detector looks at a camera that cannot alert right now
@@ -544,6 +626,8 @@ def run() -> int:
     last_buf_ts: Dict[str, float] = {name: 0.0 for name in cameras}
     last_alert_ts: Dict[str, float] = {name: 0.0 for name in cameras}
     last_look_ts: Dict[str, float] = {name: 0.0 for name in cameras}
+    vehicles: Dict[str, VehicleMemory] = {name: VehicleMemory() for name in cameras}
+    parked: Dict[str, bool] = {name: False for name in cameras}  # "have not moved" already logged
     status = AiStatus(os.path.join(LOG_DIR, "ai_status.json"))  # what the box's window shows
     worker = {"t": None}  # single in-flight VLM call across cameras (N150 budget)
     pending: List[AlertJob] = []
@@ -589,11 +673,22 @@ def run() -> int:
                 status.detection(name, objects_from_result(results[0]) if results else [], now=now_ts)
             except Exception as exc:  # noqa: BLE001 - what the window shows must never stop the alerts
                 log.debug("[%s] status not updated: %s", name, exc)
+            # Every look feeds the camera's vehicle memory - the once-a-second looks of the
+            # cooldown too - so a car that arrives and parks during the cooldown is compared
+            # with its own parked position afterwards, and stays quiet.
+            moved = vehicles[name].look(vehicle_boxes(results[0]) if results else [])
             if waiting:
                 continue
             person, vehicle, labels = detect_trigger(results[0]) if results else (False, False, [])
             if not (person or vehicle):
+                parked[name] = False
                 continue
+            if not should_escalate(person, vehicle, moved):
+                if not parked[name]:  # one line per parked spell, not one per look
+                    log.info("[%s] vehicles have not moved; no alert", name)
+                    parked[name] = True
+                continue
+            parked[name] = False
             if len(buffers[name]) == 0:
                 buffers[name].append(frame)
             frames = list(buffers[name])
