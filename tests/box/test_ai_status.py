@@ -71,6 +71,13 @@ class AiStatusTest(unittest.TestCase):
         self.assertTrue(first["false_positive"])
         self.assertEqual(second["error"], "Forbidden: bot was kicked from the group chat")
 
+    def test_the_ai_is_shown_thinking_until_it_decides(self) -> None:
+        status = AiStatus(self.path, min_interval=60)
+        status.thinking("door", ["person"], now=NOW)
+        self.assertEqual(read_status(self.path)["thinking"], {"camera": "door", "labels": ["person"], "ts": NOW})
+        status.decision("door", ["person"], "A person at the door.", "[send_message]", sent=True, now=NOW + 3)
+        self.assertIsNone(read_status(self.path)["thinking"])
+
     def test_a_missing_or_damaged_file_reads_as_empty(self) -> None:
         self.assertEqual(read_status(self.path), {})
         os.makedirs(os.path.dirname(self.path))

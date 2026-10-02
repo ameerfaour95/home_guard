@@ -7,6 +7,7 @@ they share ``logs/ai_status.json``:
      "cameras":   {"<camera>": {"checked_ts": <epoch>, "ts": <epoch of the last detection>,
                                 "objects": [{"label": "person", "conf": 0.71,
                                              "box": [x1, y1, x2, y2]}]}},     # box: 0..1 of the picture
+     "thinking": {"camera": "...", "labels": ["person"], "ts": <epoch>} or null,  # the AI is looking now
      "decisions": [{"ts": <epoch>, "camera": "...", "labels": ["person"],
                     "summary": "A person is walking in the driveway.",
                     "command": "[send_message]", "sent": true, "false_positive": false,
@@ -52,6 +53,7 @@ class AiStatus:
         self.min_interval = min_interval
         self._cameras: Dict[str, Dict[str, Any]] = {}
         self._decisions: List[Dict[str, Any]] = []
+        self._thinking: Optional[Dict[str, Any]] = None
         self._lock = threading.Lock()
         self._written = 0.0
 
@@ -65,12 +67,20 @@ class AiStatus:
                 entry["ts"], entry["objects"] = now, objects
             self._write(now, force=False)
 
+    def thinking(self, camera: str, labels: List[str], now: Optional[float] = None) -> None:
+        """The detector fired on *camera* and the AI is now looking at the clip; cleared by the decision."""
+        now = time.time() if now is None else now
+        with self._lock:
+            self._thinking = {"camera": camera, "labels": list(labels), "ts": now}
+            self._write(now, force=True)
+
     def decision(self, camera: str, labels: List[str], summary: str, command: str, sent: bool,
                  false_positive: bool = False, muted: bool = False, error: str = "",
                  now: Optional[float] = None) -> None:
         """Record what the AI said about one trigger, and what happened to the alert."""
         now = time.time() if now is None else now
         with self._lock:
+            self._thinking = None
             self._decisions.append({
                 "ts": now, "camera": camera, "labels": list(labels), "summary": summary, "command": command,
                 "sent": bool(sent), "false_positive": bool(false_positive), "muted": bool(muted), "error": error,
@@ -82,7 +92,7 @@ class AiStatus:
         if not force and now - self._written < self.min_interval:
             return
         self._written = now
-        data = {"updated": now, "cameras": self._cameras, "decisions": self._decisions}
+        data = {"updated": now, "cameras": self._cameras, "thinking": self._thinking, "decisions": self._decisions}
         try:
             os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
             tmp = f"{self.path}.{os.getpid()}.tmp"

@@ -599,6 +599,7 @@ def run() -> int:
             frames = list(buffers[name])
             last_alert_ts[name] = now_ts
             log.info("[%s] escalating (labels=%s), calling VLM", name, labels)
+            status.thinking(name, labels, now=now_ts)
             job = AlertJob(camera=name, stem=alert_stem(name, now_ts), ts=now_ts, labels=labels)
             pending.append(job)
             t = threading.Thread(target=_worker,
