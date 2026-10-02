@@ -16,6 +16,11 @@ source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
 ensure_venv || exit 1
 
+# A clean GUI close succeeds and never reaches the legacy collector controls.
+if [[ "${1:-}" != "--legacy" ]] && "$PY" -m home_guard_project.box.app; then
+    exit 0
+fi
+printf '%s\n' 'Home Guard app could not start; opening the legacy screen.'
 if [[ "$("$PY" -m home_guard_project.box get-option show_cameras 2>/dev/null)" == "true" ]]; then
     exec "$SCRIPT_DIR/watch_live.sh"
 else
