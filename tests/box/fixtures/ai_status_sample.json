@@ -1,0 +1,75 @@
+{
+  "updated": 1790972816.4,
+  "cameras": {
+    "bian_ch2": {
+      "checked_ts": 1790972816.4,
+      "ts": 1790972816.4,
+      "objects": [
+        {
+          "label": "car",
+          "conf": 0.92,
+          "box": [
+            0.41,
+            0.22,
+            0.6,
+            0.43
+          ]
+        },
+        {
+          "label": "person",
+          "conf": 0.71,
+          "box": [
+            0.1,
+            0.3,
+            0.18,
+            0.75
+          ]
+        }
+      ]
+    },
+    "bian_ch3": {
+      "checked_ts": 1790972814.6,
+      "ts": 1790972700.1,
+      "objects": [
+        {
+          "label": "potted plant",
+          "conf": 0.63,
+          "box": [
+            0.7,
+            0.5,
+            0.8,
+            0.7
+          ]
+        }
+      ]
+    }
+  },
+  "decisions": [
+    {
+      "ts": 1790972263.0,
+      "camera": "bian_ch3",
+      "labels": [
+        "person"
+      ],
+      "summary": "A person is walking in the driveway.",
+      "command": "[send_message]",
+      "sent": false,
+      "false_positive": false,
+      "muted": false,
+      "error": "Forbidden: bot is not a member of the group chat - add the bot to the Telegram group again"
+    },
+    {
+      "ts": 1790972773.0,
+      "camera": "bian_ch2",
+      "labels": [
+        "car"
+      ],
+      "summary": "Several cars are parked in the driveway.",
+      "command": "[none]",
+      "sent": false,
+      "false_positive": true,
+      "muted": false,
+      "error": ""
+    }
+  ]
+}

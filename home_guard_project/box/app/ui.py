@@ -4,7 +4,7 @@ import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from PySide6.QtCore import Qt, QTimer, QSize, Signal
+from PySide6.QtCore import Qt, QTimer, QSize, Signal, QRectF
 from PySide6.QtGui import QColor, QPainter, QPen, QPixmap, QFont, QLinearGradient, QIcon, QShortcut, QKeySequence
 from PySide6.QtWidgets import (
     QMainWindow,
@@ -146,14 +146,23 @@ class CameraTile(QFrame):
         self.name = name
         self.picture = None
         self.stopped = False
+        self.detections = ()
+        self.detector_enabled = False
+        self.detector_note = label("", "muted")
+        self.detector_note.setStyleSheet("font-size: 12px; color: " + MUTED)
+        self.detector_note.hide()
         self.status = label(tr("offline"), "muted")
         self.caption = label(name.replace("_", " "))
-        layout = QHBoxLayout(self)
+        layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 8, 16, 8)
-        layout.addWidget(self.caption)
         layout.addStretch()
-        layout.addWidget(self.status)
-        layout.setAlignment(Qt.AlignmentFlag.AlignBottom)
+        footer=QHBoxLayout()
+        footer.addWidget(self.caption)
+        footer.addStretch()
+        footer.addWidget(self.status)
+        layout.addLayout(footer)
+        layout.addWidget(self.detector_note)
+        layout.setSpacing(3)
         self.setMinimumSize(180, 140)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
@@ -172,7 +181,7 @@ class CameraTile(QFrame):
     def paintEvent(self, event):
         super().paintEvent(event)
         p = QPainter(self)
-        area = self.rect().adjusted(2, 2, -2, -42)
+        area = self.rect().adjusted(2, 2, -2, -64 if self.detector_enabled else -42)
         if self.picture:
             scaled = self.picture.scaled(
                 area.size(),
@@ -180,11 +189,23 @@ class CameraTile(QFrame):
                 Qt.TransformationMode.SmoothTransformation,
             )
             p.setClipRect(area)
-            p.drawPixmap(
-                area.center().x() - scaled.width() // 2,
-                area.center().y() - scaled.height() // 2,
-                scaled,
-            )
+            x=area.center().x()-scaled.width()//2
+            y=area.center().y()-scaled.height()//2
+            p.drawPixmap(x,y,scaled)
+            if not self.stopped:
+                from .detector_view import box_rect
+                p.setFont(QFont("Segoe UI",9))
+                for detection in self.detections:
+                    rect=QRectF(*box_rect(detection.box,(x,y,scaled.width(),scaled.height())))
+                    p.setPen(QPen(QColor(detection.color),detection.width))
+                    p.drawRect(rect)
+                    text=detection.caption()
+                    metrics=p.fontMetrics()
+                    tx=max(area.left(),min(rect.left(),area.right()-metrics.horizontalAdvance(text)-8))
+                    ty=max(area.top(),min(rect.top()-metrics.height()-4,area.bottom()-metrics.height()-4))
+                    tag=QRectF(tx,ty,metrics.horizontalAdvance(text)+8,metrics.height()+4)
+                    p.fillRect(tag,QColor("#10151d"))
+                    p.drawText(tag.adjusted(4,0,-4,0),Qt.AlignmentFlag.AlignVCenter,text)
         else:
             p.setPen(QColor("#98a6ba"))
             p.setFont(QFont("Segoe UI", 14))
@@ -197,7 +218,7 @@ class Window(QMainWindow):
         super().__init__()
         self.args = args
         from .box_controls import BoxControls, Settings
-        self.box_controls = BoxControls(demo=args.demo, stopped=args.state == "stopped", settings=Settings(mode="inference" if args.state == "inference" else "data_collection", show_cameras=args.state != "hidden"))
+        self.box_controls = BoxControls(demo=args.demo, stopped=args.state in ("stopped","ai-stopped"), settings=Settings(mode="inference" if (args.state == "inference" or args.state.startswith("ai-")) else "data_collection", show_cameras=args.state != "hidden"))
         self.start_requested = False
         self.setWindowTitle(tr("setup_window_title") if args.setup else tr("brand"))
         self.setWindowIcon(QIcon(str(Path(__file__).parents[1] / "assets" / "home_guard.ico")))
@@ -238,6 +259,16 @@ class Window(QMainWindow):
             self.build_dashboard()
 
     def build_dashboard(self):
+        self.delivery_banner=QFrame()
+        self.delivery_banner.setStyleSheet("QFrame { background: #442225; border: 2px solid "+ERROR+"; border-radius: 8px; } QLabel { border: none; background: transparent; color: "+ERROR+"; }")
+        delivery_layout=layout_for(self.delivery_banner,16)
+        delivery_layout.setSpacing(6)
+        delivery_layout.addWidget(label(tr("ai_delivery_banner"),"section"))
+        self.delivery_error=label("")
+        self.delivery_error.setTextFormat(Qt.TextFormat.PlainText)
+        delivery_layout.addWidget(self.delivery_error)
+        self.outer.insertWidget(0,self.delivery_banner)
+        self.delivery_banner.hide()
         control_row = QHBoxLayout()
         self.control_note = label("", "warning")
         overview_button = QPushButton(tr("overview"))
@@ -340,7 +371,12 @@ class Window(QMainWindow):
         self.activity_layout = layout_for(self.activity_widget, 0)
         scroll.setWidget(self.activity_widget)
         al.addWidget(scroll, 1)
+        self.log_panel=panel
         body.addWidget(panel, 1)
+        from .ai_activity_ui import AiActivity
+        self.ai_panel=AiActivity()
+        body.addWidget(self.ai_panel,2)
+        self.ai_panel.hide()
         overview_layout.addLayout(body, 1)
         self.tiles = []
         self.events = []
@@ -350,6 +386,8 @@ class Window(QMainWindow):
         self.activity_feed = ActivityFeed(bc.LOG_DIR)
         self.pool = ThreadPoolExecutor(max_workers=1)
         self.future = None
+        self.ai_data={}
+        self.last_ai_poll=-10
         self.last_poll = 0
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.tick)
@@ -425,6 +463,7 @@ class Window(QMainWindow):
                     or (scenario == "mixed" and i == len(self.tiles) - 1)
                     else demo_picture(i)
                 )
+            self.update_detector()
             return
         now = time.monotonic()
         if self.future and self.future.done():
@@ -459,6 +498,36 @@ class Window(QMainWindow):
             except OSError:
                 for tile in self.tiles:
                     tile.update_picture(None)
+
+        self.update_detector()
+
+    def update_detector(self):
+        from .detector_view import camera_view
+        from ..ai_status import read_status
+        now=time.time()
+        stopped=self.box_controls.is_stopped()
+        if self.args.demo:
+            from .ai_demo import demo_status
+            if not stopped or not self.ai_data:
+                self.ai_data=demo_status(self.names or [],now,self.args.state)
+        elif time.monotonic()-self.last_ai_poll>=1:
+            data=read_status(str(Path(bc.LOG_DIR)/"ai_status.json"))
+            if data: self.ai_data=data
+            self.last_ai_poll=time.monotonic()
+        inference=self.current_state is not None and self.current_state.mode=="inference"
+        from .ai_view import undelivered_alert
+        failed=undelivered_alert(self.ai_data) if inference else None
+        self.delivery_banner.setVisible(failed is not None)
+        self.delivery_error.setText((failed.error or tr("ai_no_error")) if failed else "")
+        self.ai_panel.setVisible(inference)
+        self.log_panel.setVisible(not inference)
+        if inference: self.ai_panel.render(self.ai_data,now,stopped)
+        for tile in self.tiles:
+            tile.detector_enabled=inference
+            tile.detector_note.setVisible(inference)
+            tile.detections,text=camera_view(self.ai_data,tile.name,now,stopped) if inference else ((),"")
+            tile.detector_note.setText(text)
+            tile.update()
 
     def apply_state(self, state, show, events):
         self.current_state, self.current_show = state, show

@@ -1,6 +1,37 @@
 """All visible application copy; keys remain stable for translation."""
 
 TEXT = {
+    "ai_delivery_banner": "Alerts are NOT reaching Telegram",
+    "ai_activity": "AI activity",
+    "ai_sent": "Alert sent",
+    "ai_urgent_sent": "Urgent alert sent",
+    "ai_training": "No alert - nothing happening (saved for training)",
+    "ai_muted": "Not sent - alerts are paused",
+    "ai_not_sent": "NOT SENT",
+    "ai_empty": "No activity yet. When a camera sees a person or a vehicle, the AI's answer appears here.",
+    "ai_stopped": "Home Guard is stopped",
+    "ai_not_updating": "The AI status is not updating",
+    "ai_record_meta": "{time} | {camera} | {labels}",
+    "ai_no_summary": "No description was recorded.",
+    "ai_no_error": "No delivery reason was recorded. Check the Telegram connection.",
+    "demo_ai_person": "A person is walking along the driveway toward the front door.",
+    "demo_ai_cars": "Several cars are parked in the driveway. Nothing is moving.",
+    "demo_ai_paused": "A person is standing beside the garden gate.",
+    "demo_ai_urgent": "Two people are trying to force the front door open.",
+    "demo_ai_refused": "The bot is not a member of the group chat. Add the bot to the Telegram group again.",
+
+    "detection_label": "{label} {percent}%",
+    "detector_sees": "Sees: {objects}",
+    "object_count": "{count} {label}",
+    "object_person": "person", "object_person_plural": "people",
+    "object_car": "car", "object_car_plural": "cars",
+    "object_truck": "truck", "object_truck_plural": "trucks",
+    "object_bus": "bus", "object_bus_plural": "buses",
+    "object_bicycle": "bicycle", "object_bicycle_plural": "bicycles",
+    "object_motorcycle": "motorcycle", "object_motorcycle_plural": "motorcycles",
+    "detector_nothing": "Nothing right now",
+    "detector_not_looking": "Detector is not looking at this camera",
+
     "camera_search_wait": "Looking for cameras. Some devices may take a few minutes to answer.",
     "camera_search_elapsed": "Searching - {minutes}m {seconds}s",
 
