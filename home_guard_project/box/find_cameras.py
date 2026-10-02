@@ -157,16 +157,34 @@ def apply_changes(changes: Dict[str, Any], path: str = CAMERAS_PATH) -> Dict[str
     return {"active": sorted(new_active), "disabled": sorted(new_disabled)}
 
 
-def _grab_snapshot(url: str, out_path: str, width: int = 960) -> bool:
+def looks_blank(frame: Any) -> bool:
+    """True for the flat grey picture a decoder shows before the stream's first full frame.
+
+    An H.265 stream opened mid-way has nothing to build its first pictures
+    from, and they come out as an even mid-grey with a few specks.
+    """
+    import numpy as np  # noqa: PLC0415
+
+    small = np.asarray(frame)[::8, ::8]
+    return float(small.std()) < 8.0 and 100.0 < float(small.mean()) < 156.0
+
+
+def _grab_snapshot(url: str, out_path: str, width: int = 960, wait_sec: float = 6.0) -> bool:
+    import time  # noqa: PLC0415
+
     import cv2  # noqa: PLC0415
 
     cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
     try:
         frame = None
-        for _ in range(6):  # a few reads to get past the stream's buffer
+        deadline = time.time() + wait_sec
+        # Read on until a real picture arrives: the first frames can be blank grey.
+        while time.time() < deadline:
             ok, f = cap.read()
-            if ok and f is not None:
-                frame = f
+            if not ok or f is None:
+                continue
+            frame = f
+            if not looks_blank(f):
                 break
         if frame is None:
             return False

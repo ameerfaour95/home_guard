@@ -61,10 +61,17 @@ class RemoteCameras:
     def scp(self,source,destination):
         return ['scp.exe','-i',str(self.key),'-o','LogLevel=ERROR',str(source),str(destination)]
     def parse(self,result,key):
-        # SSH can prefix the result with an ordinary setup message.
-        for line in reversed(result.stdout.splitlines()):
-            try: data=json.loads(line)
+        # The box prints its result as indented JSON over several lines, and the
+        # output can carry other lines before it (decoder messages, setup notes).
+        lines=result.stdout.splitlines()
+        starts=[i for i,line in enumerate(lines) if line.strip()=='{']
+        ends=[i for i,line in enumerate(lines) if line.strip()=='}']
+        candidates=['\n'.join(lines[s:e+1]) for s in reversed(starts) for e in reversed(ends) if e>s]
+        candidates+=list(reversed(lines))          # a result printed on one line
+        for text in candidates:
+            try: data=json.loads(text)
             except ValueError: continue
+            if not isinstance(data,dict): continue
             if 'error' in data: raise RuntimeError('Camera command failed')
             if isinstance(data.get(key),list): return data
         raise RuntimeError('Invalid camera result')
