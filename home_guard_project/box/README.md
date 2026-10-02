@@ -59,7 +59,13 @@ powershell -ExecutionPolicy Bypass -File C:\Users\<user>\Desktop\home_guard\home
 
 ### 4. AWS key for the box
 
-Give the box its own IAM user, not your personal keys. Policy for site `house2`:
+Give the box its own IAM user, not your personal keys. On the laptop:
+
+```bash
+uv run python -m home_guard_project.box.make_box_key house2
+```
+
+This creates the IAM user `homeguard-box-house2`, limits it to its own S3 folder, and writes `credentials` and `config` to `~/.homeguard/keys/house2/`. Copy both files to `C:\Users\<user>\.aws\` on the box and delete them from the laptop. The policy it applies, for site `house2`:
 
 ```json
 {
@@ -80,7 +86,7 @@ Give the box its own IAM user, not your personal keys. Policy for site `house2`:
 }
 ```
 
-Put the key in `C:\Users\<user>\.aws\credentials` on the box:
+By hand, the key goes in `C:\Users\<user>\.aws\credentials` on the box:
 
 ```
 [default]
@@ -105,13 +111,9 @@ The box only has to be on the same network as the cameras or their recorder. Eve
 | Reliability | Best. Use this when a cable can reach | Works, but video arrives with more damaged frames and the link can drop |
 | When both are connected | Windows uses the cable | |
 
-For Wi-Fi, save the network on the box once. If you know the other house's Wi-Fi name and password, do it before moving the box:
+For Wi-Fi, the box has to be told the network name and password once, before it is moved. The setup wizard does this (see "Customer setup" below): it saves the customer's Wi-Fi on the box so the box joins it by itself at boot with nobody logged in, and rejoins after a drop. The script it runs on the box is `setup_network.ps1`.
 
-```
-powershell -ExecutionPolicy Bypass -File C:\home_guard\home_guard_project\box\add_wifi.ps1 -Ssid "HouseWifi" -Password "secret"
-```
-
-The box then joins that network by itself at boot, with nobody logged in. `-ConnectNow` switches immediately; `-Remove` forgets a network. If you do not know the Wi-Fi details in advance, connect the box by cable or with a monitor and keyboard at the house, then run the same command.
+The wizard also saves a rescue hotspot on every box. If the customer's Wi-Fi password turns out to be wrong or is changed later, either plug in a cable, or turn on a phone hotspot with the rescue name and password next to the box; the box joins it and can be fixed remotely.
 
 If the house has more than one network (for example the internet provider's router and a separate mesh system), the box must be on the one the cameras use.
 
@@ -141,6 +143,38 @@ uv run python home_guard_project/data_collection/discover.py
 Either way the result is `data_collection/cameras.yaml`. The collector task notices it within a minute and starts collecting; no restart is needed. Edit that file to remove indoor cameras the household does not want recorded.
 
 A recorder's address can change when the router restarts. If the cameras stop connecting, run `scan` again and correct the address in `cameras.yaml`, or reserve the address in the router.
+
+## Customer setup (from the laptop)
+
+After a box has had its first setup (steps 1 to 3), preparing it for a customer is one program on the laptop:
+
+```
+dist\HomeGuardSetup.exe
+```
+
+or, without the compiled program:
+
+```
+powershell -ExecutionPolicy Bypass -File home_guard_project\box\setup_customer.ps1 -Target <user>@<box-tailscale-ip>
+```
+
+It asks whether the box will use Ethernet or Wi-Fi, for Wi-Fi the customer's network name and password, and optionally the camera login. Then it:
+
+1. Updates the box's software (`update.sh`).
+2. Configures the network on the box (`setup_network.ps1`).
+3. Finds the cameras (`find_cameras auto`) if a camera login was given.
+4. Prints a readiness report (`check_box.ps1`: PASS / WARN / FAIL) and the rescue hotspot name and password.
+
+| Option | Meaning |
+|---|---|
+| `-ForgetOtherWifi` | Remove every saved Wi-Fi network except the customer's and the rescue hotspot. Run this last before delivery: it removes your own Wi-Fi from the box, and takes the box offline if it is on that Wi-Fi |
+| `-SkipUpdate` | Do not update the box's software first |
+| `-KeyPath <path>` | SSH key to use (default `~\.ssh\homeguard_box`) |
+| `-DryRun` | Show the planned steps without touching the box |
+
+Passwords are sent in a temporary file that is deleted from the box afterwards. The rescue hotspot name and password are kept on the laptop in `~/.homeguard/rescue_wifi.txt`.
+
+Build the program with `powershell -ExecutionPolicy Bypass -File home_guard_project\box\build_exe.ps1` (writes `dist\HomeGuardSetup.exe`).
 
 ## Bench test before moving the box
 
