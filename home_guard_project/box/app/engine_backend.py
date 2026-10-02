@@ -31,6 +31,7 @@ class OutputParser:
         for secret in sorted(self.secrets,key=len,reverse=True):
             text=text.replace(secret,tr('hidden'))
         text=re.sub(r'\b[^\s@]+@[^\s@]+\b',tr('hidden_address'),text)
+        text=re.sub(r'(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?',tr('hidden_address'),text)
         return redact(text)
     def parse(self,line):
         line=line.strip()

@@ -657,6 +657,8 @@ class Window(QMainWindow):
 
     def closeEvent(self, event):
         if hasattr(self, "camera_retry"): self.camera_retry.clear()
+        if hasattr(self, "discovery_timer"): self.discovery_timer.stop()
+        if hasattr(self, "discovery_pool"): self.discovery_pool.shutdown(wait=False, cancel_futures=True)
         if hasattr(self, "cameras_page"):
             self.cameras_page.close()
         if hasattr(self,"wizard_cameras"):
@@ -728,7 +730,27 @@ class Window(QMainWindow):
                 self.pages.addWidget(summary_scroll)
             else:
                 self.pages.addWidget(panel)
-        self.add_input(0, "address", tr("address"))
+        self.inputs["address"] = QLineEdit()
+        self.inputs["address"].hide()
+        self.field_guidance["address"] = label("")
+        self.field_guidance["address"].setStyleSheet("color: " + ERROR)
+        self.page_layouts[0].addWidget(label(tr("box_label")))
+        self.box_picker = QComboBox()
+        self.box_picker.addItem(tr("box_loading"), None)
+        self.page_layouts[0].addWidget(self.box_picker)
+        self.box_address = QLineEdit()
+        self.box_address.setPlaceholderText(tr("box_address_placeholder"))
+        self.page_layouts[0].addWidget(self.box_address)
+        self.box_hint = label(tr("box_loading"), "muted")
+        self.page_layouts[0].addWidget(self.box_hint)
+        self.page_layouts[0].addWidget(label(tr("box_user_label")))
+        self.box_user = QLineEdit()
+        self.page_layouts[0].addWidget(self.box_user)
+        self.page_layouts[0].addWidget(label(tr("box_user_help"), "muted"))
+        self.page_layouts[0].addWidget(self.field_guidance["address"])
+        self.box_picker.currentIndexChanged.connect(self.choose_box)
+        self.box_address.textChanged.connect(self.compose_box_target)
+        self.box_user.textChanged.connect(self.compose_box_target)
         self.network = QComboBox()
         self.network.addItems([tr("ethernet"), tr("wifi")])
         self.page_layouts[1].addWidget(self.network)
@@ -882,6 +904,22 @@ class Window(QMainWindow):
             from .preferences import AddressPreference
             self.address_preference=AddressPreference()
             self.inputs["address"].setText(self.address_preference.load())
+        saved_target = self.inputs["address"].text()
+        if "@" in saved_target:
+            saved_user, saved_box = saved_target.split("@", 1)
+            if self.args.demo: self.box_user.setText(saved_user)
+            else: self.box_user.setText(self.address_preference.load_user())
+            self.box_address.setText(saved_box)
+        if self.args.demo:
+            from .box_discovery import Peer
+            self.populate_boxes([Peer(tr("demo_box_name"), "100.100.100.10", True)])
+        else:
+            from .box_discovery import discover
+            self.discovery_pool=ThreadPoolExecutor(max_workers=1)
+            self.discovery_future=self.discovery_pool.submit(discover)
+            self.discovery_timer=QTimer(self)
+            self.discovery_timer.timeout.connect(self.poll_boxes)
+            self.discovery_timer.start(100)
         self.find.setChecked(not self.args.skip_cameras)
         self.alerts.setChecked(self.args.alerts)
         if self.args.wifi:
@@ -962,6 +1000,36 @@ class Window(QMainWindow):
     def valid_page(self,index):
         return not self.errors_for_page(index)
 
+    def compose_box_target(self):
+        self.inputs["address"].setText(self.box_user.text().strip()+"@"+self.box_address.text().strip())
+
+    def choose_box(self, index):
+        address=self.box_picker.itemData(index)
+        self.box_address.setVisible(not bool(address))
+        if address: self.box_address.setText(address)
+
+    def populate_boxes(self, peers):
+        remembered=self.box_address.text()
+        self.box_picker.blockSignals(True)
+        self.box_picker.clear()
+        for peer in peers:
+            self.box_picker.addItem(tr("box_peer", name=peer.name, address=peer.address)+("" if peer.online else tr("box_offline")), peer.address)
+        self.box_picker.addItem(tr("box_manual"), None)
+        selection=next((i for i in range(self.box_picker.count()) if self.box_picker.itemData(i)==remembered), self.box_picker.count()-1 if remembered else 0)
+        self.box_picker.setCurrentIndex(selection)
+        self.box_picker.blockSignals(False)
+        self.box_picker.setVisible(bool(peers))
+        self.box_hint.setText(tr("box_pick_hint") if peers else tr("box_address_help"))
+        self.choose_box(selection)
+        self.compose_box_target()
+
+    def poll_boxes(self):
+        if self.discovery_future.done():
+            self.discovery_timer.stop()
+            try: peers=self.discovery_future.result()
+            except Exception: peers=[]
+            self.populate_boxes(peers)
+
     def next_page(self):
         index = self.pages.currentIndex()
         if index == 5:
@@ -979,13 +1047,14 @@ class Window(QMainWindow):
         if index == 6:
             self.begin_setup()
             return
+        if index == 0: self.compose_box_target()
         errors = self.errors_for_page(index)
         if errors:
             for key,message in errors.items():
                 self.inputs[key].setStyleSheet(f"border: 1px solid {ERROR};")
-                self.field_guidance[key].setText(tr(message))
+                self.field_guidance[key].setText(tr("box_target_error") if index == 0 and key == "address" else tr(message))
                 self.field_guidance[key].show()
-            self.inputs[next(iter(errors))].setFocus()
+            (self.box_user if not self.box_user.text().strip() else self.box_address).setFocus() if index == 0 else self.inputs[next(iter(errors))].setFocus()
             return
         if index == 0 and not self.args.demo:
             try: self.address_preference.save(self.inputs["address"].text().strip())
@@ -1115,6 +1184,9 @@ class Window(QMainWindow):
             item=self.check_labels[i];item.setText(event.status+tr("separator")+event.text)
             item.setStyleSheet("color: "+(ERROR if event.status=="FAIL" else WARNING if event.status=="WARN" else OK))
         self.camera_retry.clear()
+        if not self.args.demo:
+            try: self.address_preference.save_success(self.run_answers.address)
+            except OSError: pass
         self.later.setVisible(not self.run_answers.find_cameras)
         self.setup_success()
 

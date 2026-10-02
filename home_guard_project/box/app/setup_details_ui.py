@@ -1,3 +1,5 @@
+from html import escape
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QWidget,QVBoxLayout,QHBoxLayout,QComboBox,QLabel,QTextEdit,QPushButton,QCheckBox,QApplication,QScrollArea
 from .strings import tr
 from .theme import ERROR,WARNING,OK,MUTED
@@ -43,10 +45,10 @@ class DetailsPanel(QWidget):
     def render(self):
         if not hasattr(self,'model'): return
         step=ENGINE_STEPS[max(0,self.steps.currentIndex())];group=self.model.groups[step]
-        warnings=[text for role,text in group.messages if role in ('warning','error')]
-        if group.status in ('fail','warn') and group.result: warnings.insert(0,group.result)
-        self.attention.setText('\n'.join(dict.fromkeys(warnings)))
-        self.attention.setStyleSheet('color: '+(ERROR if group.status=='fail' or any(role=='error' for role,_ in group.messages) else WARNING))
+        warnings=[(role,text) for role,text in group.messages if role in ('warning','error')]
+        if group.status in ('fail','warn') and group.result: warnings.insert(0,('error' if group.status=='fail' else 'warning',group.result))
+        self.attention.setTextFormat(Qt.TextFormat.RichText)
+        self.attention.setText('<br>'.join('<span style="color:'+ (ERROR if role=='error' else WARNING)+'">'+escape(text)+'</span>' for role,text in dict.fromkeys(warnings)))
         self.attention.setVisible(bool(warnings))
         ordinary=[text for role,text in group.messages if role not in ('warning','error')]
         self.readable.setText('\n'.join(ordinary) or tr('details_empty'))

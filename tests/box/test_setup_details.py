@@ -28,3 +28,11 @@ class SetupDetailsTests(unittest.TestCase):
         model.feed(parser.parse('password=private-marker rtsp://private-marker@box.example/stream'))
         model.feed(parser.parse('@@rescue hotspot private-marker'))
         self.assertNotIn('private-marker',model.technical_log());self.assertNotIn('@@rescue',model.technical_log())
+
+class AddressRedactionTests(unittest.TestCase):
+    def test_bare_camera_address_is_hidden_in_support_log(self):
+        from home_guard_project.box.app.engine_backend import OutputParser
+        model=DetailsModel()
+        model.feed(OutputParser().parse('No working RTSP pattern found for 192.0.2.10:554'))
+        self.assertNotIn('192.0.2.10',model.technical_log())
+        self.assertTrue(model.groups['connect'].messages)

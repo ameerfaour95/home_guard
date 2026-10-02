@@ -1,6 +1,19 @@
 """All visible application copy; keys remain stable for translation."""
 
 TEXT = {
+    "demo_box_name": "Home Guard box",
+    "box_label": "The box",
+    "box_loading": "Looking for Windows boxes on this laptop's Tailscale network...",
+    "box_address_placeholder": "Box address, for example 100.100.100.10",
+    "box_user_label": "Windows user name on the box",
+    "box_user_help": "The Windows account on the box. On the box, open Command Prompt and type whoami; it is the part after the backslash.",
+    "box_manual": "Type an address",
+    "box_peer": "{name} - {address}",
+    "box_offline": " (offline)",
+    "box_pick_hint": "Choose the customer's box by name, or type its address.",
+    "box_address_help": "On this laptop, open Tailscale and copy the address of the customer's box.",
+    "box_target_error": "Enter the box address and its Windows user name (letters, digits, underscores, dots or hyphens).",
+
     "camera_login_help": "The user name is usually admin. Use the password set when the cameras were installed, the recorder's admin password, or the code on the camera label.",
     "camera_lock_warning": "Before trying a third time: some cameras lock logins for a while after repeated failures. Check the password before continuing.",
     "retry_confirming": "Confirming the earlier steps, then trying the new camera login.",
