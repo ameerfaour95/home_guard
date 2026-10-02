@@ -289,6 +289,26 @@ class OwnerAgentTest(unittest.TestCase):
         tool_msgs = [m for m in model.seen[1] if m.get("role") == "tool"]
         self.assertIn("could not get a picture", tool_msgs[0]["content"])
 
+    def test_set_camera_active_turns_a_camera_off(self) -> None:
+        calls = []
+        ctx = self._ctx()
+        ctx.set_camera = lambda cam, active: (calls.append((cam, active)) or {"ok": True})
+        model = RecordingModel([call("set_camera_active", camera="front_door", active=False),
+                                say("Done — the front camera is off.")])
+        OwnerAgent(model, ctx).handle("disable the front camera", "-1001", {}, None)
+        self.assertEqual(calls, [("front_door", False)])
+        tool_msgs = [m for m in model.seen[1] if m.get("role") == "tool"]
+        self.assertIn("turned off", tool_msgs[0]["content"])
+
+    def test_set_camera_active_relays_an_error(self) -> None:
+        ctx = self._ctx()
+        ctx.set_camera = lambda cam, active: {"error": "unknown camera 'garage'"}
+        model = RecordingModel([call("set_camera_active", camera="garage", active=False),
+                                say("I couldn't find that camera.")])
+        OwnerAgent(model, ctx).handle("turn off the garage camera", "-1001", {}, None)
+        tool_msgs = [m for m in model.seen[1] if m.get("role") == "tool"]
+        self.assertIn("unknown camera", tool_msgs[0]["content"])
+
     def test_invalid_json_arguments_return_an_error_without_running_the_tool(self) -> None:
         bad = ModelMessage(tool_calls=(ToolCall(id="c1", name="record_verdict", arguments={},
                                                 raw_arguments="{bad json", valid=False),))
