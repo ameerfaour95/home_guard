@@ -36,7 +36,7 @@ QPushButton { background: @action; color: @bg; border: 1px solid @action; border
 QPushButton#secondary { background: @raised; color: @text; border-color: @border; }
 QPushButton#iconButton { background: transparent; color: @text; border-color: transparent; padding: 10px; }
 QPushButton#iconButton:hover { background: @raised; border-color: transparent; }
-QPushButton#iconButton:checked { background: @bubble; border-color: @action; }
+QPushButton#iconButton:checked { background: @action; border-color: @action; }
 QPushButton#stopAction { background: @raised; color: @error; border-color: @error; }
 QPushButton#textAction { background: transparent; color: @secondary; border: none; padding: 4px; min-height: 20px; font-size: 14px; }
 QFrame#setupStep { border: 1px solid transparent; border-radius: 8px; background: transparent; }

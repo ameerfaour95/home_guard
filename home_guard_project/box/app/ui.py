@@ -188,7 +188,7 @@ class Window(QMainWindow):
         self.viewer_settings=self.viewer_preference.load()
         if getattr(args,"detections",False): self.viewer_settings=replace(self.viewer_settings,detections=True)
         from .box_controls import BoxControls, Settings
-        self.box_controls = BoxControls(demo=args.demo, stopped=args.state in ("stopped","ai-stopped"), settings=Settings(mode="inference" if (args.state in ("inference","no-cameras","box-unreachable") or args.state.startswith("ai-")) else "data_collection", show_cameras=args.state != "hidden"))
+        self.box_controls = BoxControls(demo=args.demo, stopped=args.state in ("stopped","ai-stopped"), settings=Settings(mode="inference" if (args.state in ("inference","live-detections","off-camera","no-cameras","box-unreachable") or args.state.startswith("ai-")) else "data_collection", show_cameras=args.state != "hidden"))
         self.start_requested = False
         self.box_unreachable = not args.setup and (args.state=="box-unreachable" if args.demo else not Path(bc.BOX_YAML).is_file())
         from .preferences import AddressPreference
@@ -367,6 +367,7 @@ class Window(QMainWindow):
         ml.addStretch()
         self.camera_stack.addWidget(self.message)
         leftlay.addWidget(self.camera_stack, 1)
+        self.detection_hint=label("", "muted");self.detection_hint.hide();leftlay.addWidget(self.detection_hint)
         self.status_strip=label("","muted")
 
         body.addWidget(left, 2)
@@ -531,7 +532,8 @@ class Window(QMainWindow):
         stopped=self.box_controls.is_stopped()
         if self.args.demo:
             from .ai_demo import demo_status
-            if not stopped or not self.ai_data:
+            if (not stopped or not self.ai_data) and (not self.ai_data or now-getattr(self,"demo_status_at",0)>=1):
+                self.demo_status_at=now
                 self.ai_data=demo_status(self.names or [],now,self.args.state)
                 if getattr(self,"demo_history_state",None)!=self.args.state:
                     self.demo_history_state=self.args.state
@@ -585,7 +587,7 @@ class Window(QMainWindow):
             tile.detection_labels=self.viewer_settings.detection_labels
             tile.detector_enabled=inference
             tile.detector_note.hide()
-            tile.detections,text=camera_view(self.ai_data,tile.name,now,stopped) if inference else ((),"")
+            tile.detections,text=camera_view(self.ai_data,tile.name,now,stopped)
             tile.detector_note.setToolTip(text)
             if not tile.hero: text=tile.detector_note.fontMetrics().elidedText(text,Qt.TextElideMode.ElideRight,max(120,tile.width()-48))
             tile.detector_note.setText(text)
@@ -715,10 +717,14 @@ class Window(QMainWindow):
     def set_viewer_settings(self,**changes):
         from dataclasses import replace
         self.viewer_settings=replace(self.viewer_settings,**changes)
-        try: self.viewer_preference.save(self.viewer_settings)
+        try:
+            if not self.args.demo: self.viewer_preference.save(self.viewer_settings)
         except OSError: self.control_note.setText(tr("viewer_save_error"))
         self.detection_toggle.blockSignals(True);self.detection_toggle.setChecked(self.viewer_settings.detections);self.detection_toggle.blockSignals(False)
         if hasattr(self,"settings_page"): self.settings_page.sync_viewer(self.viewer_settings)
+        if changes.get('detections') and self.box_controls.is_stopped() and not getattr(self,'detection_hint_seen',False):
+            self.detection_hint_seen=True;self.detection_hint.setText('Detections appear when Home Guard is running.');self.detection_hint.show()
+        self.update_detector()
         for tile in self.tiles:
             tile.show_detections=self.viewer_settings.detections;tile.detection_labels=self.viewer_settings.detection_labels;tile.update()
 

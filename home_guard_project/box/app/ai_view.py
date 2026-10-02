@@ -15,6 +15,7 @@ class Decision:
     false_positive: bool
     muted: bool
     error: str
+    label: str = ""
     def outcome(self):
         if self.sent: return ('ok',tr('ai_urgent_sent' if self.command=='[call_owner]' else 'ai_sent'))
         if self.false_positive: return ('muted',tr('ai_training'))
@@ -29,7 +30,7 @@ def decisions(data,limit=20):
     for entry in raw if isinstance(raw,list) else []:
         if not isinstance(entry,dict): continue
         labels=entry.get('labels',[])
-        result.append(Decision(timestamp(entry.get('ts')),str(entry.get('camera') or ''),tuple(str(v) for v in labels if isinstance(v,str)) if isinstance(labels,list) else (),str(entry.get('summary') or ''),str(entry.get('command') or ''),entry.get('sent') is True,entry.get('false_positive') is True,entry.get('muted') is True,parser.safe(str(entry.get('error') or ''))))
+        result.append(Decision(timestamp(entry.get('ts')),str(entry.get('camera') or ''),tuple(str(v) for v in labels if isinstance(v,str)) if isinstance(labels,list) else (),str(entry.get('summary') or ''),str(entry.get('command') or ''),entry.get('sent') is True,entry.get('false_positive') is True,entry.get('muted') is True,parser.safe(str(entry.get('error') or '')),str(entry.get('label') or '')))
     return sorted(reversed(result),key=lambda d:d.ts,reverse=True)[:limit]
 
 def status_note(data,now,stopped):

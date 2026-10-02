@@ -19,6 +19,7 @@ class Item:
     error: str = ''
     urgent: bool = False
     muted: bool = False
+    label: str = ''
 
 def image_path(directory,name):
     if not isinstance(name,str) or not re.fullmatch(r'[A-Za-z0-9_-]+\.jpe?g',name,re.I): return None
@@ -35,10 +36,10 @@ def merge_timeline(data,feed):
         elif d.muted:
             result.append(Item(d.ts,'assistant','quiet',d.summary,camera=d.camera,muted=True))
         elif not any(row.who=='box' and row.camera==d.camera and abs(row.ts-d.ts)<5 for row in result):
-            result.append(Item(d.ts,'box','alert',d.summary,camera=d.camera,delivered=d.sent,error=d.error,urgent=d.command=='[call_owner]'))
-        elif d.command=='[call_owner]':
+            result.append(Item(d.ts,'box','alert',d.summary,camera=d.camera,delivered=d.sent,error=d.error,urgent=d.command=='[call_owner]',label=d.label))
+        else:
             from dataclasses import replace
-            result=[replace(row,urgent=True) if row.who=='box' and row.camera==d.camera and abs(row.ts-d.ts)<5 else row for row in result]
+            result=[replace(row,urgent=d.command=="[call_owner]",label=d.label) if row.who=='box' and row.camera==d.camera and abs(row.ts-d.ts)<5 else row for row in result]
     return sorted(result,key=lambda item:item.ts)[-200:]
 
 def thinking_camera(data,now):

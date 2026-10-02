@@ -122,6 +122,8 @@ class AiActivity(QWidget):
                 name=record.name if record.who=='owner' else tr('ai_assistant') if record.who=='assistant' else record.camera.replace('_',' ').title()
                 meta.addWidget(label(name,'muted'),1)
             else: meta.addStretch()
+            if record.label in ('suspicious','escalation'):
+                chip=label(record.label.capitalize(),'warning' if record.label=='suspicious' else 'error');chip.setObjectName('decisionChip');chip.setStyleSheet('color: '+(__import__('home_guard_project.box.app.theme',fromlist=['WARNING']).WARNING if record.label=='suspicious' else __import__('home_guard_project.box.app.theme',fromlist=['ERROR']).ERROR)+'; padding: 4px 8px; border-radius: 6px; background: #202c36;');meta.addWidget(chip)
             meta.addWidget(label(stamp,'muted'));row.addLayout(meta)
             if record.who=='box' and record.image:
                 path=image_path(image_dir,record.image) if image_dir else None

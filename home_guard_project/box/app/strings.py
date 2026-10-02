@@ -406,7 +406,7 @@ TEXT.update(detail_no_camera_answer="No cameras answered on the home network. Ch
 
 TEXT.update(summary_details_heading="Setup finished · {house}")
 
-TEXT.update(show_detections="Show detections on the pictures",show_detections_tooltip="Show detections",display_group="Display",detection_labels="Detection labels",labels_confidence="Name and confidence",labels_name="Name only",labels_none="None",viewer_save_error="The display preference could not be saved.")
+TEXT.update(show_detections="Show detections on the pictures",show_detections_tooltip="Show detections (D)",display_group="Display",detection_labels="Detection labels",labels_confidence="Name and confidence",labels_name="Name only",labels_none="None",viewer_save_error="The display preference could not be saved.")
 
 TEXT.update(live_applied="Applied",detection_group="Detection",sensitivity="Sensitivity",certainty_required="Needs to be {percent}% sure",more_alerts="More alerts",fewer_false_alarms="Fewer false alarms",reset_sensitivity="Reset to 40%",live_not_picked_up="The program has not picked this up yet",sensitivity_in_force="Sensitivity {percent}%")
 

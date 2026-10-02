@@ -2,6 +2,7 @@
 from .strings import tr
 
 def demo_status(names,now,state):
+    if state=='live-detections': return recorded_status(names,now)
     data={'updated':now,'cameras':{},'decisions':[]}
     for i,name in enumerate(names):
         data['cameras'][name]={'checked_ts':now if i!=2 else now-20,'ts':now if i==0 else now-30,'objects':[{'label':'person','conf':.71,'box':[.1,.3,.18,.75]},{'label':'car','conf':.92,'box':[.41,.42,.61,.62]}]}
@@ -25,4 +26,21 @@ def demo_status(names,now,state):
             camera['checked_ts']-=30
             camera['ts']-=30
         for decision in data['decisions']: decision['ts']-=30
+    return data
+
+
+def recorded_status(names,now):
+    """Replay the ai_status.py wire example at wall-clock time; no live capture."""
+    import json
+    from pathlib import Path
+    data=json.loads((Path(__file__).parent/'assets'/'ai_status_recording.json').read_text())
+    base=data['updated'];original=data['cameras']['front_door']
+    data['updated']=now
+    data['cameras']={name:dict(original,ts=now,checked_ts=now) for name in names}
+    for decision in data['decisions']:
+        decision['ts']+=now-base
+        decision['camera']=names[0] if names else 'front_door'
+    if data['thinking']:
+        data['thinking']['ts']=now
+        data['thinking']['camera']=names[0] if names else 'front_door'
     return data
