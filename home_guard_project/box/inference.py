@@ -530,12 +530,13 @@ class _Stream:
     visits a camera only every second or two, too rarely for a video.
     """
 
-    def __init__(self, name: str, url: str, ring: Any = None) -> None:
+    def __init__(self, name: str, url: str, ring: Any = None, mask: Any = None) -> None:
         import cv2  # noqa: PLC0415
 
         self.name = name
         self.url = url
         self._ring = ring
+        self._mask = mask                    # zones.ZoneMask, or None to watch the whole picture
         self._cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
         self._frame = None
         self._lock = threading.Lock()
@@ -553,14 +554,18 @@ class _Stream:
                 self._cap.release()
                 self._cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
                 continue
-            with self._lock:
-                self._frame = frame
-            if self._ring is not None:
-                now = time.time()
-                if self._ring.wants(now):
-                    from .alert_clips import encode_frame  # noqa: PLC0415
+            self._ingest(frame, time.time())
 
-                    self._ring.add(now, encode_frame(frame))
+    def _ingest(self, frame: Any, now: float) -> None:
+        """One decoded frame: masked to the watch zone first, then kept as the latest frame and offered to the clip ring."""
+        if self._mask is not None:
+            frame = self._mask.apply(frame)
+        with self._lock:
+            self._frame = frame
+        if self._ring is not None and self._ring.wants(now):
+            from .alert_clips import encode_frame  # noqa: PLC0415
+
+            self._ring.add(now, encode_frame(frame))
 
     def read(self):
         with self._lock:
@@ -800,7 +805,13 @@ def run() -> int:
     from .boxconfig import LIVE_DIR, LOG_DIR, PRODUCTION_LIVE_DIR  # noqa: PLC0415
 
     rings: Dict[str, ClipRing] = {name: ClipRing() for name in cameras}
-    streams = {name: _Stream(name, url, ring=rings[name]) for name, url in cameras.items()}
+    from ..data_collection.zones import mask_for  # noqa: PLC0415
+
+    zones = dict(getattr(cam_cfg, "ROI_ZONES", {}) or {})
+    for name in cameras:
+        if name in zones:
+            log.info("[%s] watch zone active (%d corners); everything outside is blacked out", name, len(zones[name]))
+    streams = {name: _Stream(name, url, ring=rings[name], mask=mask_for(zones, name)) for name, url in cameras.items()}
     buffers: Dict[str, deque] = {name: deque(maxlen=settings.clip_frames) for name in cameras}
     last_buf_ts: Dict[str, float] = {name: 0.0 for name in cameras}
     last_alert_ts: Dict[str, float] = {name: 0.0 for name in cameras}

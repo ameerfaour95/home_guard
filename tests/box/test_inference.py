@@ -440,3 +440,52 @@ class EscalationTest(unittest.TestCase):
 
     def test_nothing_in_view_does_not_escalate(self) -> None:
         self.assertFalse(inf.should_escalate(person=False, vehicle=False, vehicles_moved=True))
+
+
+class _FakeRing:
+    def __init__(self) -> None:
+        self.added: list = []
+
+    def wants(self, now: float) -> bool:
+        return True
+
+    def add(self, now: float, encoded) -> None:
+        self.added.append(encoded)
+
+
+class StreamMaskTest(unittest.TestCase):
+    def test_a_frame_is_masked_once_before_read_and_before_the_clip_ring(self) -> None:
+        import threading
+
+        import numpy as np
+
+        from home_guard_project.data_collection.zones import ZoneMask
+
+        stream = inf._Stream.__new__(inf._Stream)      # no capture, no thread
+        stream._lock = threading.Lock()
+        stream._frame = None
+        stream._ring = _FakeRing()
+        stream._mask = ZoneMask([(0.0, 0.0), (0.5, 0.0), (0.5, 1.0), (0.0, 1.0)])   # the left half
+        frame = np.full((10, 20, 3), 255, dtype=np.uint8)
+
+        with mock.patch("home_guard_project.box.alert_clips.encode_frame", side_effect=lambda f: f):
+            stream._ingest(frame, now=1.0)
+
+        seen = stream.read()
+        self.assertEqual(int(seen[:, :10].min()), 255)
+        self.assertEqual(int(seen[:, 11:].max()), 0)
+        (ringed,) = stream._ring.added
+        self.assertEqual(int(ringed[:, 11:].max()), 0)
+
+    def test_without_a_mask_the_frame_is_kept_whole(self) -> None:
+        import threading
+
+        import numpy as np
+
+        stream = inf._Stream.__new__(inf._Stream)
+        stream._lock = threading.Lock()
+        stream._frame = None
+        stream._ring = None
+        stream._mask = None
+        stream._ingest(np.full((4, 4, 3), 7, dtype=np.uint8), now=1.0)
+        self.assertEqual(int(stream.read().min()), 7)
