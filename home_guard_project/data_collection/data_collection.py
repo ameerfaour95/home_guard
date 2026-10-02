@@ -1487,7 +1487,7 @@ def main() -> None:
                     )
 
                 # ── Display ──────────────────────────────────────────
-                if cfg.SHOW_WINDOWS or (preview is not None and preview.wanted(st.name)):
+                if cfg.SHOW_WINDOWS or (preview is not None and preview.wanted(st.name, frame)):
                     if results is not None and cfg.SHOW_PLOTTED_BOXES:
                         disp = results[0].plot()
                     else:
@@ -1506,7 +1506,7 @@ def main() -> None:
                         cv2.addWeighted(overlay, 0.15, disp, 0.85, 0, disp)
                         cv2.polylines(disp, [roi_disp], True, (0, 255, 0), 2)
                     if preview is not None:
-                        preview.publish(st.name, disp)
+                        preview.publish(st.name, disp, source=frame)
                     if cfg.SHOW_WINDOWS:
                         cv2.imshow(st.name, disp)
 

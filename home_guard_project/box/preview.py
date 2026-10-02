@@ -1,4 +1,5 @@
 """Local, demand-driven preview transport. Never opens a camera."""
+
 from pathlib import Path
 import hashlib
 import json
@@ -17,6 +18,7 @@ class PreviewWriter:
         self.interval = 1 / max(0.1, fps)
         self.clock = clock
         self.last = {}
+        self.sources = {}
 
     def set_cameras(self, names):
         if not self.enabled:
@@ -35,21 +37,27 @@ class PreviewWriter:
             except OSError:
                 pass
 
-    def wanted(self, camera):
-        if not self.enabled:
+    def wanted(self, camera, source=None):
+        if not self.enabled or (
+            source is not None and self.sources.get(camera) is source
+        ):
             return False
         now = self.clock()
         try:
             age = now - (self.directory / "viewer.alive").stat().st_mtime
-            return 0 <= age <= 15 and now - self.last.get(camera, float("-inf")) >= self.interval
+            return (
+                0 <= age <= 15
+                and now - self.last.get(camera, float("-inf")) >= self.interval
+            )
         except OSError:
             return False
 
-    def publish(self, camera, frame):
-        if not self.wanted(camera):
+    def publish(self, camera, frame, source=None):
+        if not self.wanted(camera, source):
             return False
         self.last[camera] = self.clock()  # throttle failed writes too
         import cv2
+
         key = camera_key(camera)
         target = self.directory / (key + ".jpg")
         temp = self.directory / (key + "." + str(os.getpid()) + ".tmp")
@@ -59,6 +67,8 @@ class PreviewWriter:
                 return False
             temp.write_bytes(encoded.tobytes())
             os.replace(temp, target)
+            if source is not None:
+                self.sources[camera] = source
             return True
         except (OSError, cv2.error):
             return False
@@ -77,8 +87,14 @@ class PreviewReader:
 
     def names(self):
         try:
-            raw = json.loads((self.directory / "cameras.json").read_text(encoding="utf-8"))
-            return [name for name in raw if isinstance(name, str)] if isinstance(raw, list) else []
+            raw = json.loads(
+                (self.directory / "cameras.json").read_text(encoding="utf-8")
+            )
+            return (
+                [name for name in raw if isinstance(name, str)]
+                if isinstance(raw, list)
+                else []
+            )
         except (OSError, ValueError):
             return []
 

@@ -96,7 +96,7 @@ while true; do
     # only needs the task restarted. An unreadable box.yaml falls back to collecting.
     mode="$("$PY" -m home_guard_project.box mode 2>> "$RUNNER_LOG")" || mode="data_collection"
     case "$mode" in
-        inference) entry=(-m home_guard_project.box.inference) ;;
+        inference) entry=(-m home_guard_project.box.inference_preview) ;;
         *)         mode="data_collection"; entry=(home_guard_project/data_collection/data_collection.py) ;;
     esac
 
