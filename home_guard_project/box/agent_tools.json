@@ -133,6 +133,44 @@
   {
     "type": "function",
     "function": {
+      "name": "set_camera_active",
+      "description": "Turn a camera OFF (active=false) or ON (active=true) for real. This actually disables/enables the camera in the box's camera list and the box restarts briefly to apply it - the camera stops/starts being watched and the app shows it off/on. Use this when the owner asks to disable, turn off, enable or turn on a camera. Do NOT use pause_alerts for that: pausing only mutes alerts and leaves the camera live.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "camera": {
+            "type": "string",
+            "description": "The name of the camera to turn off or on."
+          },
+          "active": {
+            "type": "boolean",
+            "description": "false to turn the camera off/disable it, true to turn it on/enable it."
+          }
+        },
+        "required": ["camera", "active"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "check_camera",
+      "description": "Take a LIVE look at one camera right now and get a description of what is currently visible. Use this when the owner asks what is happening at this moment ('what's at the front door now?', 'check the back yard', 'is anyone outside?') - find_alerts and summarize_activity only cover what was already saved, so they cannot answer about the present. A live photo is sent to the owner with your reply.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "camera": {
+            "type": "string",
+            "description": "The name of the camera to look at right now (one of the configured cameras)."
+          }
+        },
+        "required": ["camera"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
       "name": "send_clip",
       "description": "Attach the video of one saved alert to your reply. alert_id must be an id that find_alerts returned earlier in this same conversation. Call find_alerts first if you do not have one.",
       "parameters": {

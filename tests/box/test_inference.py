@@ -185,14 +185,13 @@ class WorkerWithAssistantTest(unittest.TestCase):
                          ("a person at the door", "[send_message]", False))
         self.assertEqual(job.alert["labels"], ["person"])
 
-    def test_a_paused_camera_is_described_and_saved_but_not_sent(self) -> None:
+    def test_a_paused_camera_is_not_analysed_and_nothing_is_sent(self) -> None:
         assistant = _FakeAssistant(muted=True)
         job = self._run(assistant)
 
         self.assertEqual(assistant.sent, [])
-        self.assertTrue(job.alert["muted"])
-        self.assertEqual(job.alert["summary"], "a person at the door")
-        self.assertFalse(job.alert["dispatch"]["sent"])
+        self.assertTrue(job.alert["muted"] and job.paused)
+        self.assertEqual((job.alert["summary"], job.alert["alert_command"]), ("", "[none]"))   # the AI was not asked
 
     def test_the_job_is_released_even_when_the_backend_fails(self) -> None:
         class Broken:
@@ -236,6 +235,47 @@ class _ParkedCarBackend:
     def analyze(self, frames, camera_name, t_sec, start_hour, end_hour):
         parsed = {"summary": "a car is parked in the driveway", "people": 0, "vehicle_moving": False}
         return "{}", parsed
+
+
+class PausedCameraTest(unittest.TestCase):
+    def test_a_paused_camera_is_not_analysed_and_its_clip_is_kept_for_training(self) -> None:
+        class CountingBackend:
+            calls = 0
+
+            def analyze(self, *args):
+                CountingBackend.calls += 1
+                return "{}", {"summary": "a person"}
+
+        assistant = _FakeAssistant(muted=True)
+        job = inf.AlertJob(camera="front_door", stem="front_door_100_alert", ts=100.0, labels=["person"])
+        decisions = []
+
+        class Status:
+            def decision(self, *args, **kwargs):
+                decisions.append((args, kwargs))
+
+        inf._worker(CountingBackend(), {"alert_channel": "telegram"}, {}, AlertSettings(), "front_door",
+                    [object()], assistant, job, Status())
+        self.assertEqual(CountingBackend.calls, 0)                  # no AI call while paused
+        self.assertEqual(assistant.sent, [])
+        self.assertTrue(job.paused and job.ready.is_set())
+        self.assertEqual(job.alert["alert_command"], "[none]")
+        self.assertTrue(decisions[0][1]["muted"])
+
+        import tempfile
+
+        import numpy as np
+
+        from home_guard_project.box.alert_clips import encode_frame
+
+        with tempfile.TemporaryDirectory() as tmp:
+            production, training = os.path.join(tmp, "production_multi"), os.path.join(tmp, "dataset_multi")
+            frames = [(100.0 + i * 0.2, encode_frame(np.zeros((48, 64, 3), dtype=np.uint8))) for i in range(5)]
+            with mock.patch("home_guard_project.box.alert_clips._to_h264", return_value=False):
+                inf._save_clip(job, frames, production, training, assistant)
+            metas = [n for _, _, names in os.walk(training) for n in names if n.endswith(".meta.json")]
+            self.assertEqual(metas, ["front_door_100_paused.meta.json"])
+            self.assertFalse(os.path.exists(production))
 
 
 class FalsePositiveTest(unittest.TestCase):

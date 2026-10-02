@@ -80,10 +80,13 @@ class OwnerAgentTest(unittest.TestCase):
     def setUp(self) -> None:
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        # Never embed (and never hit the network) in the unit tests, whatever the environment holds.
+        # Never embed or build a live-view caller (so no network) in the unit tests, whatever the env holds.
         patcher = mock.patch("home_guard_project.box.agent.make_embedder", return_value=None)
         patcher.start()
         self.addCleanup(patcher.stop)
+        lv = mock.patch("home_guard_project.box.agent.make_look_now", return_value=None)
+        lv.start()
+        self.addCleanup(lv.stop)
         self.live = os.path.join(tmp.name, "production_multi")
         self.site = os.path.join(tmp.name, "production_archive", "house2")
         make_alert(self.site, "back_yard", "back_yard_2_alert", NOW - 3 * HOUR, "a car is parked in the yard")
@@ -252,6 +255,59 @@ class OwnerAgentTest(unittest.TestCase):
         with mock.patch.object(agent, "_save", side_effect=OSError("disk full")):
             reply = agent.handle("thanks", "-1001", {}, ALERT)        # must not raise into the caller
         self.assertEqual(reply.text, "you're welcome")
+
+    def test_check_camera_takes_a_live_look_and_attaches_the_photo(self) -> None:
+        seen = []
+        ctx = self._ctx()
+        ctx.look_now = lambda cam: (seen.append(cam) or
+                                    {"camera": cam, "description": "A person is at the front door.",
+                                     "image": "/tmp/front_door.jpg"})
+        model = RecordingModel([call("check_camera", camera="front_door"), say("Someone's at the front door.")])
+        reply = OwnerAgent(model, ctx).handle("who's at the door now?", "-1001", {}, None)
+        self.assertEqual(seen, ["front_door"])
+        self.assertEqual(reply.photos, ("/tmp/front_door.jpg",))
+        tool_msgs = [m for m in model.seen[1] if m.get("role") == "tool"]
+        self.assertIn("A person is at the front door", tool_msgs[0]["content"])
+        self.assertEqual(reply.text, "Someone's at the front door.")
+
+    def test_check_camera_refuses_an_unknown_camera_without_looking(self) -> None:
+        seen = []
+        ctx = self._ctx()
+        ctx.look_now = lambda cam: (seen.append(cam) or {"camera": cam, "description": "x", "image": "/tmp/x.jpg"})
+        model = RecordingModel([call("check_camera", camera="garage"), say("which camera?")])
+        OwnerAgent(model, ctx).handle("check the garage", "-1001", {}, None)
+        self.assertEqual(seen, [])                                   # never attempted the live look
+        tool_msgs = [m for m in model.seen[1] if m.get("role") == "tool"]
+        self.assertIn("unknown camera", tool_msgs[0]["content"])
+
+    def test_check_camera_reports_a_failure_without_a_photo(self) -> None:
+        ctx = self._ctx()
+        ctx.look_now = lambda cam: {"error": "could not get a picture from front_door right now"}
+        model = RecordingModel([call("check_camera", camera="front_door"), say("I couldn't get a look just now.")])
+        reply = OwnerAgent(model, ctx).handle("check the front door", "-1001", {}, None)
+        self.assertEqual(reply.photos, ())
+        tool_msgs = [m for m in model.seen[1] if m.get("role") == "tool"]
+        self.assertIn("could not get a picture", tool_msgs[0]["content"])
+
+    def test_set_camera_active_turns_a_camera_off(self) -> None:
+        calls = []
+        ctx = self._ctx()
+        ctx.set_camera = lambda cam, active: (calls.append((cam, active)) or {"ok": True})
+        model = RecordingModel([call("set_camera_active", camera="front_door", active=False),
+                                say("Done — the front camera is off.")])
+        OwnerAgent(model, ctx).handle("disable the front camera", "-1001", {}, None)
+        self.assertEqual(calls, [("front_door", False)])
+        tool_msgs = [m for m in model.seen[1] if m.get("role") == "tool"]
+        self.assertIn("turned off", tool_msgs[0]["content"])
+
+    def test_set_camera_active_relays_an_error(self) -> None:
+        ctx = self._ctx()
+        ctx.set_camera = lambda cam, active: {"error": "unknown camera 'garage'"}
+        model = RecordingModel([call("set_camera_active", camera="garage", active=False),
+                                say("I couldn't find that camera.")])
+        OwnerAgent(model, ctx).handle("turn off the garage camera", "-1001", {}, None)
+        tool_msgs = [m for m in model.seen[1] if m.get("role") == "tool"]
+        self.assertIn("unknown camera", tool_msgs[0]["content"])
 
     def test_invalid_json_arguments_return_an_error_without_running_the_tool(self) -> None:
         bad = ModelMessage(tool_calls=(ToolCall(id="c1", name="record_verdict", arguments={},

@@ -507,6 +507,7 @@ class AlertJob:
     labels: List[str] = field(default_factory=list)
     alert: Dict[str, Any] = field(default_factory=dict)
     false_positive: bool = False     # the VLM saw nothing: not sent, saved for training instead
+    paused: bool = False             # the owner had paused alerts: the AI was not asked, saved for training
     ready: threading.Event = field(default_factory=threading.Event)
 
 
@@ -542,15 +543,26 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
             assistant: Any = None, job: Optional[AlertJob] = None, status: Any = None) -> None:
     """Run the VLM call + dispatch off the capture loop. Never raises out.
 
-    With an *assistant*, an alert for a camera the owner has paused is described
-    and saved but not sent. *job* receives the outcome for the clip's meta, and
-    *status* (ai_status.AiStatus) what the box's window shows about it.
+    With an *assistant*, a camera the owner has paused is not analysed at all:
+    the clip is kept for training (the owner usually paused because they know
+    who it is), nothing is sent. *job* receives the outcome for the clip's
+    meta, and *status* (ai_status.AiStatus) what the box's window shows.
     """
     labels = job.labels if job is not None else []
     try:
         now = datetime.now()
         in_win = in_alert_window(now.hour, settings.alert_start_hour, settings.alert_end_hour)
         if not in_win:
+            return
+        if assistant is not None and assistant.is_muted(camera_name):
+            log.info("[%s] alerts are paused; the AI was not asked (labels=%s)", camera_name, labels)
+            if job is not None:
+                job.paused = True
+                job.alert = {"summary": "", "alert_command": "[none]", "alert_reason": "alerts paused by the owner",
+                             "labels": labels, "muted": True, "paused": True}
+            if status is not None:
+                status.decision(camera_name, labels, "Alerts are paused; the AI was not asked.", "[none]",
+                                sent=False, muted=True)
             return
         raw, parsed = backend.analyze(frames, camera_name, int(time.time()),
                                       settings.alert_start_hour, settings.alert_end_hour)
@@ -628,11 +640,15 @@ def _save_clip(job: AlertJob, frames: List[Any], production_dir: str, training_d
         if job.false_positive:
             meta = write_alert_clip(training_dir, job.camera, false_positive_stem(job.camera, job.ts), frames,
                                     alert, kind="false_positive")
+        elif job.paused:
+            meta = write_alert_clip(training_dir, job.camera, f"{job.camera}_{int(job.ts)}_paused", frames,
+                                    alert, kind="paused")
         else:
             meta = write_alert_clip(production_dir, job.camera, job.stem, frames, alert)
         if meta:
             log.info("[%s] clip saved: %s (%d frames)", job.camera, os.path.basename(meta), len(frames))
-        if meta and assistant is not None and not job.false_positive and delivery(alert.get("dispatch") or {})[0]:
+        if (meta and assistant is not None and not job.false_positive and not job.paused
+                and delivery(alert.get("dispatch") or {})[0]):
             res = assistant.send_clip(job.stem, clip_file(production_dir, meta))
             log.info("[%s] video %s", job.camera, "sent" if res.get("sent") else f"not sent: {res}")
     except Exception as exc:  # noqa: BLE001

@@ -16,7 +16,7 @@ class _Box:
 
 
 class _Result:
-    names = {0: "person", 2: "car"}
+    names = {0: "person", 2: "car", 71: "sink", 58: "potted plant"}
 
     def __init__(self, boxes):
         self.boxes = boxes
@@ -35,6 +35,11 @@ class AiStatusTest(unittest.TestCase):
             {"label": "car", "conf": 0.5, "box": [0.5, 0.5, 0.75, 0.8]},
         ])
         self.assertEqual(objects_from_result(_Result([])), [])
+
+    def test_things_the_house_does_not_care_about_are_left_out(self) -> None:
+        result = _Result([_Box(71, 0.44, [0.1, 0.1, 0.2, 0.2]), _Box(58, 0.6, [0.5, 0.5, 0.6, 0.7]),
+                          _Box(0, 0.9, [0.3, 0.3, 0.4, 0.8])])
+        self.assertEqual([o["label"] for o in objects_from_result(result)], ["person"])   # no sink, no plant
         self.assertEqual(objects_from_result(object()), [])
 
     def test_a_detection_is_kept_when_later_pictures_are_empty(self) -> None:
