@@ -1,5 +1,5 @@
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QCheckBox, QSpinBox, QDoubleSpinBox, QPushButton, QHBoxLayout, QGridLayout
+from PySide6.QtWidgets import QCheckBox, QSpinBox, QDoubleSpinBox, QPushButton, QHBoxLayout, QGridLayout, QComboBox
 from .strings import tr
 from .theme import OK, ERROR, WARNING
 from .box_controls import Settings, minutes_to_seconds
@@ -7,7 +7,7 @@ from .ui import card, label, layout_for
 
 
 class SettingsPage:
-    def __init__(self, box, changed):
+    def __init__(self, box, changed, viewer=None, viewer_changed=None):
         from PySide6.QtWidgets import QWidget
         self.box,self.changed=box,changed
         self.widget=QWidget();layout=layout_for(self.widget,0);layout.setSpacing(24)
@@ -24,10 +24,25 @@ class SettingsPage:
         form.addWidget(label(tr("cooldown_hint"),"muted"));form.addStretch()
         viewing=card();view=layout_for(viewing,24);view.setSpacing(16)
         view.addWidget(label(tr("premium_viewing"),"section"));self.pictures=QCheckBox(tr("show"));view.addWidget(self.pictures);view.addWidget(label(tr("premium_view_hint"),"muted"));view.addStretch()
+        view.addWidget(label(tr("display_group"),"section"))
+        self.detections=QCheckBox(tr("show_detections"));view.addWidget(self.detections)
+        view.addWidget(label(tr("detection_labels")))
+        self.labels=QComboBox();self.labels.addItems([tr("labels_confidence"),tr("labels_name"),tr("labels_none")]);view.addWidget(self.labels)
+        self.viewer_changed=viewer_changed or (lambda **changes:None)
+        from .preferences import ViewerSettings
+        self.sync_viewer(viewer or ViewerSettings())
+        self.detections.toggled.connect(lambda value:self.viewer_changed(detections=value))
+        self.labels.currentIndexChanged.connect(lambda index:self.viewer_changed(detection_labels=("confidence","name","none")[index]))
         columns.addWidget(security,2);columns.addWidget(viewing,1);layout.addLayout(columns,1)
         footer=QHBoxLayout();self.note=label("","muted");footer.addWidget(self.note,1)
         self.save=QPushButton(tr("save_settings"));self.save.clicked.connect(self.save_clicked);footer.addWidget(self.save);layout.addLayout(footer)
         self.waiting=False;self.timer=QTimer(self.widget);self.timer.timeout.connect(self.check_applied);self.timer.start(250)
+
+    def sync_viewer(self,viewer):
+        self.detections.blockSignals(True);self.labels.blockSignals(True)
+        self.detections.setChecked(viewer.detections);self.labels.setCurrentIndex(("confidence","name","none").index(viewer.detection_labels))
+        self.labels.setEnabled(viewer.detections)
+        self.detections.blockSignals(False);self.labels.blockSignals(False)
 
     def reload(self):
         try:

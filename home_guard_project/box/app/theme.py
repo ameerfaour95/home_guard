@@ -33,6 +33,7 @@ QFrame#alertCard[urgent="true"] { border-left: 3px solid @error; }
 QPushButton { background: @action; color: @bg; border: 1px solid @action; border-radius: 8px; padding: 12px 24px; font-weight: 600; min-height: 20px; }
 QPushButton#secondary { background: @raised; color: @text; border-color: @border; }
 QPushButton#iconButton { background: transparent; color: @text; border-color: @border; padding: 10px; }
+QPushButton#iconButton:checked { background: @bubble; border-color: @action; }
 QPushButton#stopAction { background: @raised; color: @error; border-color: @error; }
 QPushButton#textAction { background: transparent; color: @secondary; border: none; padding: 4px; min-height: 20px; font-size: 14px; }
 QFrame#setupStep { border: 1px solid transparent; border-radius: 8px; background: transparent; }

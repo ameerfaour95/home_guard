@@ -72,6 +72,7 @@ class CameraTile(QFrame):
     def __init__(self, name):
         super().__init__()
         self.setObjectName("card")
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.name = name
         self.picture = None
         self.stopped = False
@@ -79,6 +80,8 @@ class CameraTile(QFrame):
         self.box_opacity = 1
         self.detections = ()
         self.detector_enabled = False
+        self.show_detections=False
+        self.detection_labels="confidence"
         self.detector_note = label("", "muted")
         self.detector_note.setObjectName("cameraDetection")
         self.detector_note.hide()
@@ -102,7 +105,7 @@ class CameraTile(QFrame):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            self.clicked.emit()
+            self.setFocus();self.clicked.emit()
         super().mousePressEvent(event)
 
     def mouseDoubleClickEvent(self,event):
@@ -126,7 +129,7 @@ class CameraTile(QFrame):
             from PySide6.QtGui import QPainterPath
             clip=QPainterPath();clip.addRoundedRect(QRectF(area),16,16);p.setClipPath(clip)
             p.drawPixmap(QRectF(x,y,w,h),self.picture,QRectF(self.picture.rect()))
-            if not self.stopped:
+            if not self.stopped and self.show_detections:
                 p.setOpacity(self.box_opacity)
                 p.setFont(QFont("Segoe UI",11))
                 for detection in self.detections:
@@ -136,7 +139,9 @@ class CameraTile(QFrame):
                     for cx,cy,sx,sy in ((rect.left(),rect.top(),1,1),(rect.right(),rect.top(),-1,1),(rect.left(),rect.bottom(),1,-1),(rect.right(),rect.bottom(),-1,-1)):
                         from PySide6.QtCore import QLineF
                         p.drawLine(QLineF(cx,cy,cx+sx*length,cy));p.drawLine(QLineF(cx,cy,cx,cy+sy*length))
-                    text=detection.caption();metrics=p.fontMetrics()
+                    if self.detection_labels=="none": continue
+                    from .detector_view import object_name
+                    text=detection.caption() if self.detection_labels=="confidence" else object_name(detection.label).capitalize();metrics=p.fontMetrics()
                     tx=max(x,min(rect.left(),x+w-metrics.horizontalAdvance(text)-16))
                     ty=max(y,rect.top()-metrics.height()-12)
                     tag=QRectF(tx,ty,metrics.horizontalAdvance(text)+16,metrics.height()+8)
@@ -159,6 +164,11 @@ class Window(QMainWindow):
     def __init__(self, args):
         super().__init__()
         self.args = args
+        from .preferences import ViewerPreference
+        from dataclasses import replace
+        self.viewer_preference=ViewerPreference()
+        self.viewer_settings=self.viewer_preference.load()
+        if getattr(args,"detections",False): self.viewer_settings=replace(self.viewer_settings,detections=True)
         from .box_controls import BoxControls, Settings
         self.box_controls = BoxControls(demo=args.demo, stopped=args.state in ("stopped","ai-stopped"), settings=Settings(mode="inference" if (args.state in ("inference","no-cameras","box-unreachable") or args.state.startswith("ai-")) else "data_collection", show_cameras=args.state != "hidden"))
         self.start_requested = False
@@ -292,11 +302,19 @@ class Window(QMainWindow):
         left = QWidget()
         leftlay = layout_for(left, 0)
         self.camera_heading = label(tr("cameras"), "section")
-        leftlay.addWidget(self.camera_heading)
+        stage_header=QHBoxLayout();stage_header.addWidget(self.camera_heading,1)
+        from .ai_activity_ui import icon
+        self.detection_toggle=QPushButton();self.detection_toggle.setObjectName("iconButton");self.detection_toggle.setIcon(icon("eye"));self.detection_toggle.setCheckable(True);self.detection_toggle.setToolTip(tr("show_detections_tooltip"));self.detection_toggle.setAccessibleName(tr("show_detections_tooltip"));self.detection_toggle.setChecked(self.viewer_settings.detections)
+        self.detection_toggle.toggled.connect(lambda checked:self.set_viewer_settings(detections=checked))
+        stage_header.addWidget(self.detection_toggle);leftlay.addLayout(stage_header)
         leftlay.addLayout(self.pause_row)
 
         self.camera_stack = QStackedWidget()
         self.grid_widget = QWidget()
+        self.grid_widget.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.detection_shortcut=QShortcut(QKeySequence("D"),self.grid_widget)
+        self.detection_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self.detection_shortcut.activated.connect(lambda:self.detection_toggle.toggle())
         self.grid = QGridLayout(self.grid_widget)
         self.grid.setContentsMargins(0, 0, 0, 0)
         self.grid.setSpacing(14)
@@ -371,7 +389,7 @@ class Window(QMainWindow):
         self.tick()
         self.details.setChecked(self.args.details)
         from .settings_ui import SettingsPage
-        self.settings_page = SettingsPage(self.box_controls, self.settings_changed)
+        self.settings_page = SettingsPage(self.box_controls, self.settings_changed, self.viewer_settings, self.set_viewer_settings)
         settings_scroll=QScrollArea();settings_scroll.setWidgetResizable(True);settings_scroll.setWidget(self.settings_page.widget)
         self.content_stack.addWidget(settings_scroll)
         from .camera_ui import CameraPage
@@ -530,6 +548,8 @@ class Window(QMainWindow):
                 self.hero_event_ts=latest.get('ts')
                 self.expanded_tile=next(t for t in self.tiles if t.name==latest['camera']);self.arrange_tiles()
         for tile in self.tiles:
+            tile.show_detections=self.viewer_settings.detections
+            tile.detection_labels=self.viewer_settings.detection_labels
             tile.detector_enabled=inference
             tile.detector_note.setVisible(inference)
             tile.detections,text=camera_view(self.ai_data,tile.name,now,stopped) if inference else ((),"")
@@ -539,7 +559,7 @@ class Window(QMainWindow):
             from .detector_view import fade_opacity
             entries=self.ai_data.get("cameras",{})
             entry=entries.get(tile.name,{}) if isinstance(entries,dict) else {}
-            tile.box_opacity=fade_opacity(entry.get("ts"),now) if isinstance(entry,dict) else 0
+            tile.box_opacity=fade_opacity(entry.get("ts"),now) if tile.show_detections and isinstance(entry,dict) else 1
             tile.update()
 
     def apply_state(self, state, show, events):
@@ -654,6 +674,16 @@ class Window(QMainWindow):
         except Exception:
             self.control_note.setText(tr("control_error"))
 
+    def set_viewer_settings(self,**changes):
+        from dataclasses import replace
+        self.viewer_settings=replace(self.viewer_settings,**changes)
+        try: self.viewer_preference.save(self.viewer_settings)
+        except OSError: self.control_note.setText(tr("viewer_save_error"))
+        self.detection_toggle.blockSignals(True);self.detection_toggle.setChecked(self.viewer_settings.detections);self.detection_toggle.blockSignals(False)
+        if hasattr(self,"settings_page"): self.settings_page.sync_viewer(self.viewer_settings)
+        for tile in self.tiles:
+            tile.show_detections=self.viewer_settings.detections;tile.detection_labels=self.viewer_settings.detection_labels;tile.update()
+
     def stage_action(self):
         if self.box_unreachable:
             if self.args.demo:
@@ -731,12 +761,12 @@ class Window(QMainWindow):
         if tile is not self.expanded_tile: self.toggle_tile(tile);return
         dialog=QDialog(self);dialog.setStyleSheet(self.styleSheet())
         lay=layout_for(dialog,0)
-        clone=CameraTile(tile.name);clone.hero=True;clone.picture=tile.picture;clone.detections=tile.detections;clone.box_opacity=tile.box_opacity
+        clone=CameraTile(tile.name);clone.hero=True;clone.picture=tile.picture;clone.detections=tile.detections;clone.box_opacity=tile.box_opacity;clone.show_detections=tile.show_detections;clone.detection_labels=tile.detection_labels
         clone.caption.setText(tile.caption.text());clone.detector_enabled=tile.detector_enabled;clone.detector_note.setText(tile.detector_note.text());clone.detector_note.setVisible(tile.detector_enabled)
         lay.addWidget(clone);clone.clicked.connect(dialog.close)
         timer=QTimer(dialog)
         def refresh():
-            clone.stopped=tile.stopped;clone.detections=tile.detections;clone.box_opacity=tile.box_opacity;clone.detector_note.setText(tile.detector_note.text());clone.update_picture(tile.picture)
+            clone.stopped=tile.stopped;clone.detections=tile.detections;clone.box_opacity=tile.box_opacity;clone.show_detections=tile.show_detections;clone.detection_labels=tile.detection_labels;clone.detector_note.setText(tile.detector_note.text());clone.update_picture(tile.picture)
         timer.timeout.connect(refresh);timer.start(166)
         dialog.showFullScreen();dialog.exec()
 

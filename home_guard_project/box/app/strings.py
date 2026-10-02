@@ -406,5 +406,7 @@ TEXT.update(detail_no_camera_answer="No cameras answered on the home network. Ch
 
 TEXT.update(summary_details_heading="Setup finished · {house}")
 
+TEXT.update(show_detections="Show detections on the pictures",show_detections_tooltip="Show detections",display_group="Display",detection_labels="Detection labels",labels_confidence="Name and confidence",labels_name="Name only",labels_none="None",viewer_save_error="The display preference could not be saved.")
+
 def tr(key, **values):
     return TEXT[key].format(**values)
