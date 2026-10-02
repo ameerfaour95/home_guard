@@ -223,15 +223,17 @@ class Window(QMainWindow):
         titles = QVBoxLayout()
         self.house_label = label(tr("setup_window_title") if args.setup else tr("home"), "title")
         if not args.setup:
-            self.house_label.setObjectName("house")
+            self.house_label.setObjectName("title")
 
         titles.addWidget(self.house_label)
         self.header_hint = label(tr("simulation") if args.setup and args.demo else tr("setup_live_hint") if args.setup else tr("close_hint"), "muted")
         if not args.setup: self.header_hint.setObjectName("headline")
-        titles.addWidget(self.header_hint)
+        if args.setup: titles.addWidget(self.header_hint)
+        else:
+            self.status_header=QHBoxLayout();self.status_header.setSpacing(16);self.status_header.addWidget(self.header_hint);self.status_header.addStretch();titles.addLayout(self.status_header)
         header.addLayout(titles, 1)
-        header.addStretch()
-        if args.demo:
+        if args.setup: header.addStretch()
+        if args.demo and args.setup:
             header.addWidget(label(tr("demo"), "muted"))
         self.top_header=header
         self.outer.addLayout(header)
@@ -311,8 +313,9 @@ class Window(QMainWindow):
         self.pause_label = label("", "warning")
         self.resume_button = QPushButton(tr("resume_alerts"))
         self.resume_button.clicked.connect(self.resume_alerts)
+        self.resume_button.setObjectName("secondary");self.status_header.insertWidget(1,self.resume_button)
         pause_row.addWidget(self.pause_label,1)
-        pause_row.addWidget(self.resume_button)
+        
         self.pause_row=pause_row
         self.pause_label.hide()
         self.resume_button.hide()
@@ -324,8 +327,9 @@ class Window(QMainWindow):
         from .ai_activity_ui import icon
         self.detection_toggle=QPushButton();self.detection_toggle.setObjectName("iconButton");self.detection_toggle.setIcon(icon("eye"));self.detection_toggle.setCheckable(True);self.detection_toggle.setToolTip(tr("show_detections_tooltip"));self.detection_toggle.setAccessibleName(tr("show_detections_tooltip"));self.detection_toggle.setChecked(self.viewer_settings.detections)
         self.detection_toggle.toggled.connect(lambda checked:self.set_viewer_settings(detections=checked))
-        stage_header.addWidget(self.detection_toggle);leftlay.addLayout(stage_header)
-        leftlay.addLayout(self.pause_row)
+        self.top_header.insertWidget(self.top_header.count()-1,self.detection_toggle)
+        self.camera_heading.hide()
+        self.pause_label.hide()
 
         self.camera_stack = QStackedWidget()
         self.grid_widget = QWidget()
@@ -362,7 +366,8 @@ class Window(QMainWindow):
         ml.addStretch()
         self.camera_stack.addWidget(self.message)
         leftlay.addWidget(self.camera_stack, 1)
-        leftlay.addLayout(self.stats_layout)
+        self.status_strip=label("","muted")
+
         body.addWidget(left, 2)
         panel = card()
         panel.setMinimumWidth(275)
@@ -386,6 +391,7 @@ class Window(QMainWindow):
         body.addWidget(self.ai_panel,1)
         self.ai_panel.hide()
         overview_layout.addLayout(body, 1)
+        overview_layout.addWidget(self.status_strip)
         self.tiles = []
         self.events = []
         self.render_activity()
@@ -606,7 +612,7 @@ class Window(QMainWindow):
         if self.events != events:
             self.events = events
             self.render_activity()
-        self.house_label.setText(tr("premium_home",house=state.site or tr("home")))
+        self.house_label.setText(state.site or tr("home"))
         values = [
             tr("restarting") if phase == "restarting" else tr("watching" if state.mode == "inference" else "collecting") if state.collecting else tr("stopped"),
             state.upload or tr("never"),
@@ -615,6 +621,10 @@ class Window(QMainWindow):
         ]
         for (value, hint), text in zip(self.stats, values):
             value.setText(tr("unknown") if state.error else text)
+        from .status_strip import status_text
+        status=status_text(state.upload,state.waiting,state.disk,state.error)
+        self.status_strip.setText(status)
+        if hasattr(self,'settings_page'): self.settings_page.facts.setText(status)
         from .alert_hours import hours_description
         try: settings = self.box_controls.load_settings()
         except Exception:
@@ -623,7 +633,8 @@ class Window(QMainWindow):
         until, some = self.alert_pause.status(state.cameras) if state.mode == "inference" else (None,False)
         paused = tr("paused_some" if some else "paused_until", time=time.strftime("%H:%M",time.localtime(until))) if until else ""
         self.pause_label.setText(paused)
-        self.pause_label.setVisible(bool(paused) and not stopped)
+        self.pause_label.hide()
+        if paused and not stopped and not self.box_unreachable: self.header_hint.setText(paused)
         self.resume_button.setVisible(bool(paused) and not stopped)
         self.stats[0][1].setText(tr("close_stopped") if stopped else hours_description(settings.alert_start_hour,settings.alert_end_hour) if state.mode == "inference" else tr("collection"))
         if self.box_unreachable: self.stats[0][1].setText(tr('offline_controls'))

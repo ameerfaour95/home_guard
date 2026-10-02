@@ -412,5 +412,7 @@ TEXT.update(live_applied="Applied",detection_group="Detection",sensitivity="Sens
 
 TEXT.update(camera_off="Off")
 
+TEXT.update(quiet_status="Last upload {time} \u00b7 {clips} clips waiting \u00b7 {disk} GB free")
+
 def tr(key, **values):
     return TEXT[key].format(**values)
