@@ -1,0 +1,17 @@
+# ──────────────────────────────────────────────────────────────────────────────
+#  Overrides for an unattended collector box.
+#  Merged over data_collection/config.yaml when HOME_GUARD_CONFIG_OVERLAY points here.
+# ──────────────────────────────────────────────────────────────────────────────
+
+display:
+  show_windows: false       # no monitor attached
+  show_plotted_boxes: false
+
+vlm:
+  enabled: false            # descriptions are written by annotators
+
+# Background clips with nobody in frame — the labeled set has none.
+random_clip:
+  enabled: true
+  interval_sec: 3600.0
+  allow_person: false
