@@ -45,6 +45,7 @@ def main():
             "failure",
             "validation",
             "review",
+            "camera-check",
         ),
     )
     parser.add_argument("--size", default="1366x768")

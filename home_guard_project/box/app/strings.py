@@ -1,6 +1,13 @@
 """All visible application copy; keys remain stable for translation."""
 
 TEXT = {
+    "check_cameras_title": "Check the cameras",
+    "check_cameras_hint": "Confirm the views, names and enabled cameras. Save your changes before finishing setup.",
+    "camera_snapshot_failed": "Could not take a photo. Check camera power and connection, then refresh.",
+    "remote_cameras_saved": "Camera changes saved on the box.",
+    "camera_check_continue": "Finish setup",
+    "camera_check_unsaved": "Save your camera changes before finishing setup.",
+
     "setup_live_hint": "Set up the box for this home. Changes begin only after you review and start setup.",
     "review_title": "Review your setup",
     "review_hint": "Check these choices before making changes to the box.",

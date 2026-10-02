@@ -7,18 +7,20 @@ from .theme import OK, ERROR, MUTED
 from .camera_controls import changes_payload
 
 class CameraPage:
-    def __init__(self, controls, changed):
+    def __init__(self, controls, changed, wizard=False):
         from .ui import card, label, layout_for
         self.controls, self.changed = controls, changed
+        self.wizard = wizard
+        self.saved = False
         self.widget = QWidget()
         outer = layout_for(self.widget, 0)
         heading = QHBoxLayout()
-        heading.addWidget(label(tr("cameras_title"), "section"), 1)
+        heading.addWidget(label(tr("check_cameras_title" if wizard else "cameras_title"), "section"), 1)
         self.refresh = QPushButton(tr("refresh_photos"))
         self.refresh.clicked.connect(self.refresh_clicked)
         heading.addWidget(self.refresh)
         outer.addLayout(heading)
-        outer.addWidget(label(tr("cameras_hint"), "muted"))
+        outer.addWidget(label(tr("check_cameras_hint" if wizard else "cameras_hint"), "muted"))
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)
         self.progress.hide()
@@ -79,6 +81,8 @@ class CameraPage:
             self.note.setStyleSheet(f"color: {OK if getattr(self, 'saving', False) else MUTED};")
             self.note.setText((tr("saved_stopped") if self.controls.box.is_stopped() else tr("camera_saved")) if getattr(self, "saving", False) else tr("camera_ready"))
             if getattr(self, "saving", False):
+                self.saved = True
+                if self.wizard: self.note.setText(tr("remote_cameras_saved"))
                 self.changed()
         except Exception:
             for _, field, enabled in self.rows:
@@ -107,7 +111,8 @@ class CameraPage:
             photo.setMaximumHeight(120)
             pix = demo_picture(i) if self.controls.box.demo and camera.ok else QPixmap(camera.file) if camera.ok else QPixmap()
             if pix.isNull():
-                photo.setText(tr("camera_no_photo"))
+                photo.setText(tr("camera_snapshot_failed" if self.wizard else "camera_no_photo"))
+                photo.setWordWrap(True)
             else:
                 photo.setPixmap(pix.scaled(540, 120, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
             layout.addWidget(photo)
@@ -118,6 +123,7 @@ class CameraPage:
             name.textChanged.connect(self.validate)
             enabled = QCheckBox(tr("camera_enabled"))
             enabled.setChecked(camera.enabled)
+            enabled.toggled.connect(self.validate)
             line.addWidget(name, 1)
             line.addWidget(enabled)
             layout.addLayout(line)
@@ -128,6 +134,7 @@ class CameraPage:
         self.validate()
 
     def validate(self):
+        self.saved = False
         try:
             changes_payload(self.changes())
             valid = bool(self.rows) and all(field.hasAcceptableInput() for _, field, _ in self.rows)
@@ -148,4 +155,8 @@ class CameraPage:
 
     def close(self):
         self.timer.stop()
+        if hasattr(self.controls,"cancel"):
+            self.controls.cancel()
+            if self.future is None or self.future.done(): self.controls.cleanup()
+            else: self.future.add_done_callback(lambda future:self.controls.cleanup())
         self.pool.shutdown(wait=False, cancel_futures=True)

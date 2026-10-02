@@ -656,6 +656,8 @@ class Window(QMainWindow):
     def closeEvent(self, event):
         if hasattr(self, "cameras_page"):
             self.cameras_page.close()
+        if hasattr(self,"wizard_cameras"):
+            self.wizard_cameras.close()
         if hasattr(self, "pool"):
             self.timer.stop()
             self.pool.shutdown(wait=False, cancel_futures=True)
@@ -873,8 +875,14 @@ class Window(QMainWindow):
                 "failure": 4,
                 "validation": 0,
                 "review": 6,
+                "camera-check": 7,
             }[self.args.page]
-            self.set_page(index)
+            if index == 7:
+                self.run_answers=self.collect_answers()
+                self.engine_cameras=[]
+                self.open_camera_check()
+            else:
+                self.set_page(index)
             if self.args.page == "validation":
                 self.inputs["address"].clear()
                 self.next_page()
@@ -913,11 +921,11 @@ class Window(QMainWindow):
         self.back.setVisible(0 < index < 4 or index == 6)
         self.next.setVisible(index != 4)
         self.next.setText(
-            tr("start_setup") if index == 6 else tr("finish") if index == 5 else tr("next")
+            tr("camera_check_continue") if index == 7 else tr("start_setup") if index == 6 else tr("finish") if index == 5 else tr("next")
         )
 
     def update_step_bar(self,index):
-        current = 3 if index == 6 else min(index,4)
+        current = 3 if index == 6 else 4 if index == 7 else min(index,4)
         for i,(item,name) in enumerate(zip(self.step_labels,TEXT["step_names"])):
             done = i < current or index == 5
             self.step_icons[i].setVisible(done)
@@ -935,6 +943,12 @@ class Window(QMainWindow):
         index = self.pages.currentIndex()
         if index == 5:
             self.close()
+            return
+        if index == 7:
+            if self.wizard_cameras.rows and not self.wizard_cameras.saved:
+                self.validation.setText(tr("camera_check_unsaved"))
+                return
+            self.set_page(5)
             return
         if index == 6:
             self.begin_setup()
@@ -1056,7 +1070,26 @@ class Window(QMainWindow):
         self.setup_success()
 
     def setup_success(self):
-        self.set_page(5)
+        self.open_camera_check()
+
+    def open_camera_check(self):
+        from .camera_ui import CameraPage
+        if hasattr(self,"wizard_cameras"):
+            self.wizard_cameras.close()
+            old=self.pages.widget(7)
+            self.pages.removeWidget(old)
+            old.deleteLater()
+        if self.args.demo:
+            from .camera_controls import CameraControls
+            from .box_controls import BoxControls
+            controls=CameraControls(BoxControls(demo=True),["front_door","garden","driveway"] if self.run_answers.find_cameras else ())
+        else:
+            from .remote_cameras import RemoteCameras
+            controls=RemoteCameras(self.run_answers.address,self.engine_cameras)
+        self.wizard_cameras=CameraPage(controls,lambda:self.validation.clear(),wizard=True)
+        self.pages.addWidget(self.wizard_cameras.widget)
+        self.set_page(7)
+        self.wizard_cameras.open()
 
     def retry_setup(self):
         from .engine_backend import OWNERS
