@@ -124,6 +124,33 @@ class ConversationInTheWindowTest(unittest.TestCase):
         self.assertFalse(entry["delivered"])
         self.assertIn("not a member", entry["error"])
 
+    def test_a_live_picture_the_assistant_took_is_sent_and_recorded(self) -> None:
+        sent = []
+
+        def post(token, method, fields, files=None, timeout=20.0):
+            sent.append((method, files))
+            return {"ok": True, "result": {"message_id": 70}}
+
+        picture = os.path.join(self.tmp, "front_door_now.jpg")
+        with open(picture, "wb") as f:
+            f.write(b"jpeg-bytes")
+
+        class LookingAgent:
+            def handle(self, text, chat_id, who, alert):
+                return AgentReply(text="Nobody is at the front door right now.", clips=(), photos=(picture,))
+
+        inbox = TelegramInbox(self.cfg, LookingAgent(), self.index, MuteState(os.path.join(self.tmp, "m.json")),
+                              os.path.join(self.tmp, "production"), os.path.join(self.tmp, "offset.json"),
+                              post=post, post_multipart=post, now=lambda: NOW, feed=self.feed)
+        inbox.handle_update({"update_id": 9, "message": {
+            "message_id": 80, "chat": {"id": int(CHAT)}, "from": {"id": 5, "first_name": "Ameer"},
+            "text": "what is happening at the front door now?"}})
+
+        self.assertEqual([m for m, _ in sent], ["sendMessage", "sendPhoto"])
+        self.assertEqual(sent[1][1]["photo"], ("front_door_now.jpg", b"jpeg-bytes", "image/jpeg"))
+        self.assertEqual([(e["who"], e["kind"]) for e in read_feed(self.path)],
+                         [("owner", "message"), ("assistant", "answer"), ("assistant", "photo")])
+
     def test_strangers_are_not_recorded(self) -> None:
         self._inbox(_Agent()).handle_update({"update_id": 3, "message": {
             "message_id": 60, "chat": {"id": 999}, "from": {"id": 9, "first_name": "X"}, "text": "hello"}})

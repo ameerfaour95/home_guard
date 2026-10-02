@@ -303,6 +303,19 @@ class TelegramInbox:
             data = f.read()
         self._post_multipart(self.cfg.bot_token, "sendVideo", {"chat_id": chat_id},
                              {"video": (os.path.basename(path), data, "video/mp4")}, timeout=120.0)
+        self._note("assistant", "video", os.path.basename(path))
+
+    def _send_photo(self, chat_id: str, photo: Any) -> None:
+        """A picture the assistant took just now: JPEG bytes, or the path of a JPEG file."""
+        if isinstance(photo, (bytes, bytearray)):
+            data, name = bytes(photo), "camera.jpg"
+        else:
+            with open(str(photo), "rb") as f:
+                data = f.read()
+            name = os.path.basename(str(photo))
+        self._post_multipart(self.cfg.bot_token, "sendPhoto", {"chat_id": chat_id},
+                             {"photo": (name, data, "image/jpeg")}, timeout=60.0)
+        self._note("assistant", "photo", name)
 
     # -- one update ---------------------------------------------------------------
     def _allowed(self, chat_id: str) -> bool:
@@ -343,6 +356,12 @@ class TelegramInbox:
             return
         reply = self.agent.handle(text, chat_id, _who(sender), alert)
         self._say(chat_id, reply.text, reply_to=message.get("message_id"))
+        for photo in getattr(reply, "photos", None) or ():        # a live picture the assistant took
+            try:
+                self._send_photo(chat_id, photo)
+            except (urllib.error.URLError, OSError) as exc:
+                log.warning("Could not send a live picture: %s", exc)
+                self._say(chat_id, "I could not send that picture right now.")
         for path in reply.clips:
             try:
                 self._send_clip(chat_id, path)

@@ -153,9 +153,24 @@ class BoxConfigTest(unittest.TestCase):
                 set_option("alert_cooldown_sec", bad, self.path)
 
     def test_options_the_running_program_must_be_restarted_for(self) -> None:
+        from home_guard_project.box.boxconfig import LIVE_OPTIONS
+
         self.assertIn("mode", RESTART_OPTIONS)
-        self.assertIn("alert_cooldown_sec", RESTART_OPTIONS)
+        self.assertIn("telegram_chat_ids", RESTART_OPTIONS)
         self.assertNotIn("show_cameras", RESTART_OPTIONS)
+        for key in ("alert_cooldown_sec", "alert_start_hour", "alert_end_hour", "inference_conf"):
+            self.assertIn(key, LIVE_OPTIONS)              # applied while running, no restart
+            self.assertNotIn(key, RESTART_OPTIONS)
+
+    def test_the_detector_threshold_is_a_decimal_within_its_range(self) -> None:
+        from home_guard_project.box.boxconfig import get_option
+
+        self.assertEqual(set_option("inference_conf", "0.35", self.path), 0.35)
+        self.assertEqual(get_option("inference_conf", self.path), 0.35)
+        self.assertEqual(set_option("inference_conf", ".5", self.path), 0.5)
+        for bad in ("0", "1", "0.04", "0.96", "high", ""):
+            with self.assertRaises(BoxConfigError, msg=bad):
+                set_option("inference_conf", bad, self.path)
 
     def test_unset_options_have_defaults(self) -> None:
         self._write('site: "house2"\n')
