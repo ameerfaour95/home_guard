@@ -35,6 +35,7 @@ QPushButton#iconButton { background: transparent; color: @text; border-color: @b
 QPushButton#stopAction { background: @raised; color: @error; border-color: @error; }
 QPushButton:hover { border-color: @text; }
 QPushButton:disabled { background: @raised; color: @muted; border-color: @border; }
+QPushButton#stopAction:disabled { background: @raised; color: @muted; border-color: @border; }
 QPushButton:focus, QCheckBox:focus { border: 2px solid @action; }
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QTextEdit { background: @surface; color: @text; border: 1px solid @border; border-radius: 8px; padding: 12px; selection-background-color: @action; min-height: 22px; }
 QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus { border-color: @action; }

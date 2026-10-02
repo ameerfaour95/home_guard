@@ -51,7 +51,7 @@ def main():
             "error",
             "loading",
             "inference", "paused", "ai-stopped", "ai-stale", "ai-empty", "ai-refused", "ai-delivered", "ai-urgent", "ai-paused", "ai-training", "ai-thinking",
-            "quiet",
+            "quiet", "no-cameras", "box-unreachable",
         ),
         default="mixed",
     )

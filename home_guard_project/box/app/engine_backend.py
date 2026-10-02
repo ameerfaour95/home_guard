@@ -156,7 +156,7 @@ class DemoEngine:
             failure_step = 'network' if self.failure is True else self.failure
             if step=='network':
                 emit(Event('detail',text='The box joined the home network.',facts={'network':answers.ssid or 'ameer2','address':'192.168.68.120'}))
-            if step==failure_step:
+            if step==failure_step and not (step=='cameras' and not answers.find_cameras):
                 if step=='cameras': emit(Event('detail',text='WARNING No device answers on the camera port. Is the box on the cameras network?'))
                 emit(Event('step',step,'fail',tr('failure_cameras_title' if step=='cameras' else 'failure_connect_title' if step=='connect' else 'failure_update_title' if step=='update' else 'network_fail')));return False
             if step=='cameras':

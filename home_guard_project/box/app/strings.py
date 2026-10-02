@@ -378,5 +378,23 @@ TEXT.update({
  "retry_setup_action": "Try again",
 })
 
+TEXT.update({
+ "open_home_guard": "Open Home Guard", "no_cameras": "No cameras yet",
+ "no_cameras_hint": "Add your cameras when you're ready. Home Guard is open and ready to set them up.",
+ "find_cameras_action": "Find cameras", "box_unreachable": "The box is not reachable",
+ "box_unreachable_hint": "Last known address: {address}\nCheck that the box is powered on and Tailscale is connected on both computers.",
+ "no_known_address": "No box selected yet", "offline_controls": "Reconnect to the box to use this control.",
+ "offline_settings": "These settings are available to read. Reconnect to the box before saving changes.",
+ "zero_cameras_summary": "0 cameras — add them later from the Cameras page",
+ "summary_camera_count": "{count} cameras", "summary_network": "Home network · {network}",
+ "camera_search_title": "Find your cameras", "camera_search_hint": "Keep the recorder powered on and on the same network as this box. Use the camera login set when it was installed.",
+ "camera_search_user": "Camera user name", "camera_search_password": "Camera password",
+ "camera_search_working": "Searching the home network for cameras…", "camera_search_empty": "No cameras answered. Check the recorder's power and home network, then try again.",
+ "camera_search_error": "The camera search could not finish. Check the network and camera login, then try again.",
+ "failure_cameras_body": "{location}, and nothing on that network answers as a camera. Usually the recorder is off or plugged into a different router. Check its power and that it shares the box's home network, then search again.",
+})
+
+TEXT.update(ready_for_cameras="Ready for your cameras", finishing_without_cameras="Finishing setup without cameras. Confirming the earlier steps, then checking that the box is ready.")
+
 def tr(key, **values):
     return TEXT[key].format(**values)
