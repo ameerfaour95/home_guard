@@ -7,6 +7,8 @@ Usage:
     python -m home_guard_project.box status           # print the status JSON locally (no network)
     python -m home_guard_project.box mode             # print the box's mode (read by run_collector.sh)
     python -m home_guard_project.box set-site house2  # name the house; clips then go to s3://<bucket>/dataset_house2/
+    python -m home_guard_project.box set-option show_cameras true   # camera windows on the box's own screen
+    python -m home_guard_project.box get-option show_cameras        # prints true or false
 """
 
 from __future__ import annotations
@@ -24,8 +26,10 @@ from .boxconfig import (
     OUTBOX_DIR,
     BoxConfig,
     BoxConfigError,
+    get_option,
     load_box_config,
     s3_prefix,
+    set_option,
     set_site,
 )
 from .heartbeat import build_heartbeat, put_heartbeat
@@ -99,16 +103,33 @@ def change_site(new_site: str, live_dir: str, outbox_dir: str, box_yaml: str) ->
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Collector box: upload, heartbeat, status, mode, set-site.")
-    parser.add_argument("command", choices=["upload", "heartbeat", "status", "mode", "set-site"])
-    parser.add_argument("value", nargs="?", help="For set-site: the site name.")
+    parser = argparse.ArgumentParser(description="Collector box: upload, heartbeat, status, mode, settings.")
+    parser.add_argument("command", choices=["upload", "heartbeat", "status", "mode", "set-site", "set-option", "get-option"])
+    parser.add_argument("values", nargs="*", help="set-site NAME | set-option KEY true|false | get-option KEY")
     args = parser.parse_args()
+    args.value = args.values[0] if args.values else None
 
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s  %(name)-12s  %(levelname)-8s  %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
+
+    if args.command in ("set-option", "get-option"):
+        try:
+            if args.command == "get-option":
+                if len(args.values) != 1:
+                    raise BoxConfigError("usage: get-option KEY")
+                print("true" if get_option(args.values[0]) else "false")
+            else:
+                if len(args.values) != 2:
+                    raise BoxConfigError("usage: set-option KEY true|false")
+                stored = set_option(args.values[0], args.values[1])
+                print(f"{args.values[0]} set to {'true' if stored else 'false'}")
+        except BoxConfigError as exc:
+            log.error("%s", exc)
+            sys.exit(1)
+        return
 
     if args.command == "set-site":
         from .boxconfig import BOX_YAML

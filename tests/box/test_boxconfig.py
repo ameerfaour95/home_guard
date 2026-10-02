@@ -7,9 +7,11 @@ import unittest
 from home_guard_project.box.boxconfig import (
     BoxConfig,
     BoxConfigError,
+    get_option,
     load_box_config,
     load_box_settings,
     s3_prefix,
+    set_option,
     set_site,
 )
 
@@ -91,6 +93,28 @@ class BoxConfigTest(unittest.TestCase):
         set_site("house2", self.path)
         cfg = load_box_config(self.path)
         self.assertEqual((cfg.site, cfg.min_age_minutes), ("house2", 5.0))
+
+    def test_option_defaults_to_false(self) -> None:
+        self.assertFalse(get_option("show_cameras", self.path))  # no file at all
+        self._write("site: house2\n")
+        self.assertFalse(get_option("show_cameras", self.path))
+
+    def test_set_option_stores_true_and_false_and_keeps_other_lines(self) -> None:
+        self._write('site: "house2"\nmode: inference\n')
+        self.assertTrue(set_option("show_cameras", "Yes", self.path))
+        self.assertTrue(get_option("show_cameras", self.path))
+        self.assertFalse(set_option("show_cameras", "false", self.path))
+        self.assertFalse(get_option("show_cameras", self.path))
+        with open(self.path, encoding="utf-8") as f:
+            self.assertEqual(f.read(), 'site: "house2"\nmode: inference\nshow_cameras: false\n')
+
+    def test_set_option_rejects_unknown_keys_and_values(self) -> None:
+        with self.assertRaises(BoxConfigError):
+            set_option("site", "true", self.path)
+        with self.assertRaises(BoxConfigError):
+            set_option("show_cameras", "maybe", self.path)
+        with self.assertRaises(BoxConfigError):
+            get_option("nope", self.path)
 
     def test_set_site_rejects_bad_names(self) -> None:
         for bad in ("House 2", "", "house-2", "../x"):
