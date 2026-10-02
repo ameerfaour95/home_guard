@@ -511,6 +511,7 @@ class Window(QMainWindow):
                     self.demo_history_state=self.args.state
                     self.demo_decisions=self.ai_data['decisions']
                 self.ai_data['decisions']=self.demo_decisions
+                self.ai_data['settings']=self.box_controls.reported_status()['settings']
         elif time.monotonic()-self.last_ai_poll>=1:
             data=read_status(str(Path(bc.LOG_DIR)/"ai_status.json"))
             if data: self.ai_data=data

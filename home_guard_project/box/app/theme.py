@@ -62,6 +62,10 @@ QScrollBar:horizontal { height: 6px; background: transparent; margin: 0; }
 QScrollBar::handle { background: @border; border-radius: 3px; min-height: 24px; min-width: 24px; }
 QScrollBar::add-line,QScrollBar::sub-line { width: 0; height: 0; }
 QScrollBar::add-page,QScrollBar::sub-page { background: transparent; }
+QSlider::groove:horizontal { background: @border; height: 4px; border-radius: 2px; }
+QSlider::handle:horizontal { background: @action; width: 18px; height: 18px; margin: -7px 0; border-radius: 9px; }
+QSlider::sub-page:horizontal { background: @action; border-radius: 2px; }
+QSlider:focus { border: 1px solid @action; }
 QProgressBar { background: @raised; border: none; border-radius: 4px; height: 8px; text-align: center; }
 QProgressBar::chunk { background: @action; border-radius: 4px; }
 QToolTip { background: @raised; color: @text; border: 1px solid @border; padding: 8px; }

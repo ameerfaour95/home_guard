@@ -1,5 +1,5 @@
 """Local control adapter and an isolated, mutable demo box."""
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 import time
 from decimal import Decimal, ROUND_HALF_UP
@@ -13,6 +13,7 @@ class Settings:
     alert_end_hour: int = 0
     alert_cooldown_sec: int = 120
     show_cameras: bool = False
+    inference_conf: float = 0.4
 
     def __post_init__(self):
         if self.mode not in boxconfig.MODES or type(self.show_cameras) is not bool:
@@ -21,9 +22,12 @@ class Settings:
             value = getattr(self, key)
             if type(value) is not int or not limits[0] <= value <= limits[1]:
                 raise ValueError("Invalid settings")
+        for key,(low,high) in boxconfig.DECIMAL_OPTIONS.items():
+            value=getattr(self,key)
+            if type(value) not in (int,float) or not low<=value<=high: raise ValueError('Invalid settings')
 
     def options(self):
-        return {key: getattr(self, key) for key in ("mode", "alert_start_hour", "alert_end_hour", "alert_cooldown_sec", "show_cameras")}
+        return {key: getattr(self, key) for key in ("mode", "alert_start_hour", "alert_end_hour", "alert_cooldown_sec", "show_cameras", "inference_conf")}
 
     @classmethod
     def from_options(cls, options):
@@ -66,6 +70,13 @@ class BoxControls:
             return self._settings
         return Settings.from_options({key: boxconfig.get_option(key) for key in Settings().options()})
 
+    def reported_status(self):
+        if self.demo:
+            s=self._settings
+            return {'updated':self.clock(),'settings':dict(conf=s.inference_conf,alert_start_hour=s.alert_start_hour,alert_end_hour=s.alert_end_hour,cooldown_sec=s.alert_cooldown_sec)}
+        from ..ai_status import read_status
+        return read_status(Path(boxconfig.LOG_DIR)/'ai_status.json')
+
     def save_settings(self, settings):
         previous = self.load_settings()
         changed = {key: value for key, value in settings.options().items() if previous.options()[key] != value}
@@ -106,3 +117,27 @@ class BoxControls:
                 return "restarting"
             self.pending_at = None
         return "running" if running else "starting"
+
+class RemoteSettingsBackend:
+    """Settings transport for a laptop connection, with injectable process/status readers."""
+    def __init__(self, target, settings, runner, status_reader, key=None, clock=time.time):
+        from .remote_cameras import target_user
+        target_user(target)
+        self.target, self._settings = target, settings
+        self.runner, self.status_reader, self.clock = runner, status_reader, clock
+        self.key = Path(key) if key else Path.home()/'.ssh'/'homeguard_box'
+
+    def load_settings(self): return self._settings
+
+    def reported_status(self): return self.status_reader()
+
+    def save_settings(self, settings):
+        changed = {key:value for key,value in settings.options().items() if self._settings.options()[key]!=value}
+        for key,value in changed.items():
+            value = str(value).lower() if isinstance(value,bool) else str(value)
+            command = r'cd /d C:\home_guard && .venv\Scripts\python.exe -m home_guard_project.box set-option '+key+'='+value
+            result = self.runner.run(['ssh.exe','-i',str(self.key),'-o','LogLevel=ERROR',self.target,command])
+            if result.returncode: raise RuntimeError('Settings command failed')
+            self._settings = replace(self._settings, **{key:getattr(settings,key)})
+        # set-option itself requests a restart for keys in the runtime table.
+        return any(key in boxconfig.RESTART_OPTIONS for key in changed)

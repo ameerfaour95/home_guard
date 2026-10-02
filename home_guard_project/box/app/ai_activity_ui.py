@@ -33,6 +33,7 @@ class AiActivity(QWidget):
         outer=layout_for(self,16);outer.setSpacing(16)
         heading=QHBoxLayout();bot=QLabel();bot.setPixmap(icon('bot').pixmap(24,24));heading.addWidget(bot);heading.addWidget(label(tr('ai_assistant'),'section'),1);outer.addLayout(heading)
         self.note=label('','muted');outer.addWidget(self.note)
+        self.sensitivity=label('','muted');outer.addWidget(self.sensitivity)
         self.scroll=QScrollArea();self.scroll.setWidgetResizable(True);outer.addWidget(self.scroll,1)
         self.opacity=QGraphicsOpacityEffect(self.scroll);self.scroll.setGraphicsEffect(self.opacity)
         self.thinking=label('','accent');thinking_row=QHBoxLayout();self.thinking_icon=QLabel();self.thinking_icon.setPixmap(icon('bot').pixmap(18,18));thinking_row.addWidget(self.thinking_icon);thinking_row.addWidget(self.thinking,1);outer.addLayout(thinking_row);self.thinking.hide();self.thinking_icon.hide()
@@ -59,6 +60,11 @@ class AiActivity(QWidget):
         if thinking and self.animation.state()!=QVariantAnimation.State.Running: self.animation.start()
         if not thinking: self.animation.stop()
         note=status_note(data,now,stopped) or (tr('ai_delivery_banner') if refused else tr('paused_until',time=time.strftime('%H:%M',time.localtime(paused))) if paused else tr('ai_watching',count=count))
+        settings=data.get("settings",{}) if isinstance(data,dict) else {}
+        try: conf=float(settings["conf"])
+        except (KeyError,TypeError,ValueError): conf=None
+        self.sensitivity.setVisible(conf is not None and math.isfinite(conf))
+        if conf is not None and math.isfinite(conf): self.sensitivity.setText(tr("sensitivity_in_force",percent=round(conf*100)))
         self.note.setText(note);self.note.setObjectName('error' if refused else 'muted');self.note.style().unpolish(self.note);self.note.style().polish(self.note)
         self.opacity.setOpacity(.45 if stopped else 1)
         key=tuple(rows)
