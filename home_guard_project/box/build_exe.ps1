@@ -40,7 +40,7 @@ if ($WithBundle) {
 
 $src = Join-Path $BoxDir 'setup_customer.ps1'
 $exe = Join-Path $DistDir 'HomeGuardSetup.exe'
-$icon = Join-Path $BoxDir 'assets\logo.ico'
+$icon = Join-Path $BoxDir 'assets\home_guard.ico'
 Write-Host "Compiling $src -> $exe" -ForegroundColor Cyan
 $ps2exeArgs = @{
     inputFile  = $src

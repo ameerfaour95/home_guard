@@ -8,13 +8,16 @@
 # ============================================================================
 $BoxDir   = $PSScriptRoot
 $liveCmd  = Join-Path $BoxDir 'live_view.cmd'
-$liveIcon = Join-Path $BoxDir 'assets\logo.ico'
+$liveIcon = Join-Path $BoxDir 'assets\home_guard.ico'
 $targets = @(
     (Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'Home Guard.lnk'),
     (Join-Path ([Environment]::GetFolderPath('Startup')) 'Home Guard.lnk')
 )
 foreach ($lnk in $targets) {
     try {
+        # Delete any existing .lnk first so Explorer re-reads the (new) icon
+        # instead of showing the icon it cached when the shortcut was created.
+        Remove-Item -Path $lnk -Force -ErrorAction SilentlyContinue
         $shell = New-Object -ComObject WScript.Shell
         $sc = $shell.CreateShortcut($lnk)
         $sc.TargetPath = $liveCmd
