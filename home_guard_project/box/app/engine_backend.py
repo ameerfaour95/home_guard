@@ -155,6 +155,7 @@ class DemoEngine:
     def run(self,answers,emit,instant=False):
         for step in ENGINE_STEPS:
             emit(Event('step',step,'start'))
+            emit(Event('detail',step=step,text=tr('demo_setup_'+step)))
             if not instant and self.cancelled.wait(.6): return False
             failure_step = 'network' if self.failure is True else self.failure
             if step=='network':

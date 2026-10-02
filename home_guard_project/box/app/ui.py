@@ -847,11 +847,13 @@ class Window(QMainWindow):
             panel = card()
             lay = layout_for(panel, 30)
             title_widget = label(tr(title), "title")
+            if title=='summary_title': self.summary_title=title_widget
             if title == "progress_title":
                 self.progress_title = title_widget
             lay.addWidget(title_widget)
             hint_widget = label(tr("live_summary_hint") if hint == "summary_hint" and not self.args.demo else tr(hint), "muted")
             lay.addWidget(hint_widget)
+            if hint=="summary_hint": self.summary_hint=hint_widget
             if hint == "progress_hint": self.progress_hint = hint_widget
             self.page_layouts.append(lay)
             if title == "summary_title":
@@ -937,41 +939,18 @@ class Window(QMainWindow):
         self.fail.setChecked(bool(self.args.fail))
         self.fail.setVisible(self.args.demo)
         self.page_layouts[3].addWidget(self.fail)
-        self.step_rows = []
-        self.engine_step_names=[]
-        progress_body = QHBoxLayout()
-        progress_steps = QVBoxLayout()
-        from .engine_backend import ENGINE_STEPS
-        for step in ENGINE_STEPS:
-            row = QHBoxLayout()
-            name = label(tr("step_"+step))
-            self.engine_step_names.append(name)
-            name.setMinimumWidth(190)
-            status = label(tr("pending"), "muted")
-            row.addWidget(name, 2)
-            row.addWidget(status, 3)
-            progress_steps.addLayout(row)
-            if step == "cameras":
-                self.camera_search_note=label("", "muted")
-                self.camera_search_note.setMaximumWidth(580)
-                self.camera_search_note.hide()
-                progress_steps.addWidget(self.camera_search_note)
-            self.step_rows.append(status)
-            if step == 'network':
-                self.network_progress_note=label('', 'warning')
-                self.network_progress_note.setMaximumWidth(580)
-                self.network_progress_note.hide()
-                progress_steps.addWidget(self.network_progress_note)
-        progress_steps.addStretch()
-        progress_body.addLayout(progress_steps,1)
-        self.setup_details_toggle = QCheckBox(tr("details"))
         from .setup_details_ui import DetailsPanel
-        self.setup_details = DetailsPanel()
-        self.setup_details.hide()
-        self.setup_details_toggle.toggled.connect(self.setup_details.setVisible)
-        self.page_layouts[4].addWidget(self.setup_details_toggle)
-        progress_body.addWidget(self.setup_details,1)
-        self.page_layouts[4].addLayout(progress_body,1)
+        from .setup_workspace import SetupWorkspace
+        self.setup_details=DetailsPanel()
+        self.setup_workspace=SetupWorkspace(self.setup_details)
+        self.step_rows=[row.status for row in self.setup_workspace.rows]
+        self.engine_step_names=[row.title for row in self.setup_workspace.rows]
+        self.camera_search_note=self.setup_workspace.rows[4].note
+        self.network_progress_note=self.setup_workspace.rows[3].note
+        self.setup_details_toggle=self.setup_workspace.toggle
+        self.page_layouts[4].setContentsMargins(16,16,16,16)
+        self.page_layouts[4].setSpacing(8)
+        self.page_layouts[4].addWidget(self.setup_workspace,1)
         self.setup_cancel = QPushButton(tr("cancel_setup"))
         self.setup_cancel.setObjectName("secondary")
         self.setup_cancel.clicked.connect(self.cancel_setup)
@@ -1007,13 +986,19 @@ class Window(QMainWindow):
         failure_layout.addWidget(self.failure_explanation)
         failure_layout.addWidget(self.failure_actions)
         failure_layout.addStretch()
-        progress_body.addWidget(self.failure_panel,3)
-        progress_body.removeWidget(self.setup_details)
-        self.page_layouts[4].addWidget(self.setup_details)
+        self.setup_workspace.panes.addWidget(self.failure_panel,2)
+        self.setup_workspace.fallback=self.failure_panel
         self.failure_panel.hide()
         self.setup_details_toggle.setText(tr("show_readable_details"))
         self.summary_house = label("", "section")
-        self.page_layouts[5].addWidget(self.summary_house)
+        summary_header=QHBoxLayout()
+        summary_header.addWidget(self.summary_house,1)
+        self.summary_details_action=QPushButton(tr("show_readable_details"))
+        self.summary_details_action.setObjectName("textAction")
+        self.summary_details_action.setCheckable(True)
+        self.summary_details_action.toggled.connect(self.toggle_summary_details)
+        summary_header.addWidget(self.summary_details_action)
+        self.page_layouts[5].addLayout(summary_header)
         self.summary_network=label("", "muted")
         self.summary_count=label("", "section")
         self.page_layouts[5].addWidget(self.summary_network)
@@ -1052,7 +1037,17 @@ class Window(QMainWindow):
         sr.addStretch()
         summary_columns.addWidget(summary_left, 3)
         summary_columns.addWidget(summary_right, 2)
-        self.page_layouts[5].addLayout(summary_columns)
+        self.summary_overview=QWidget()
+        self.summary_overview.setObjectName("summaryOverview")
+        self.summary_overview.setLayout(summary_columns)
+        self.page_layouts[5].addWidget(self.summary_overview)
+        self.summary_details=DetailsPanel(self.setup_details.model)
+        self.summary_workspace=SetupWorkspace(self.summary_details)
+        self.summary_workspace.toggle.hide()
+        self.summary_workspace.hide()
+        self.page_layouts[5].addWidget(self.summary_workspace,1)
+        self.page_layouts[5].setContentsMargins(16,16,16,16)
+        self.page_layouts[5].setSpacing(8)
         for lay in self.page_layouts:
             lay.addStretch()
         review = card()
@@ -1140,6 +1135,13 @@ class Window(QMainWindow):
                 if not self.args.demo:
                     return  # Render flags never launch a real setup process.
                 self.begin_setup(instant=True)
+                if self.args.page=='summary': self.set_page(5)
+
+        if self.args.details:
+            if self.pages.currentIndex()==5: self.summary_details_action.setChecked(True)
+            else: self.setup_details_toggle.setChecked(True)
+        if getattr(self.args,"technical_log",False):
+            (self.summary_details if self.pages.currentIndex()==5 else self.setup_details).technical.setChecked(True)
 
     def add_input(self, page, key, caption, secret=False):
         self.page_layouts[page].addWidget(label(caption))
@@ -1159,6 +1161,22 @@ class Window(QMainWindow):
     def network_changed(self, index):
         for key in ("ssid", "wifi_password"):
             self.inputs[key].setEnabled(index == 1)
+
+    def toggle_summary_details(self,opened):
+        from .ai_activity_ui import icon
+        self.summary_details_action.setText(tr("hide_details" if opened else "show_readable_details"))
+        self.summary_details_action.setIcon(icon("chevron-up" if opened else "chevron-down"))
+        self.summary_workspace.setVisible(opened)
+        self.summary_workspace.toggle.setChecked(opened)
+        self.summary_overview.setVisible(not opened)
+        self.summary_hint.setVisible(not opened)
+        self.summary_title.setVisible(not opened)
+        self.summary_house.setText(tr('summary_details_heading' if opened else 'summary_house',house=self.inputs['house'].text()))
+        self.summary_network.setVisible(not opened)
+        self.summary_count.setVisible(not opened)
+        if opened:
+            self.summary_details.reset(self.setup_details.model)
+            self.summary_workspace.refresh()
 
     def set_page(self, index):
         self.pages.setCurrentIndex(index)
@@ -1301,9 +1319,7 @@ class Window(QMainWindow):
         self.failure_facts=FailureFacts(network=self.run_answers.ssid if self.run_answers.network=="wifi" else "")
         self.failure_actions.hide()
         self.failure_panel.hide()
-        self.progress_title.show();self.progress_hint.show()
-        self.failure_layout.removeWidget(self.setup_details_toggle)
-        self.page_layouts[4].insertWidget(2,self.setup_details_toggle)
+        self.progress_title.show();self.progress_hint.hide()
         self.setup_details.setMaximumHeight(16777215)
         self.setup_cancel.show()
         self.setup_details_toggle.setChecked(False)
@@ -1317,6 +1333,7 @@ class Window(QMainWindow):
         self.camera_search_note.hide()
         self.network_progress_note.hide()
         self.setup_details.reset()
+        self.setup_workspace.refresh()
         for row in self.step_rows:
             row.setText(tr("pending"));row.setStyleSheet("")
         for name in self.engine_step_names: name.setStyleSheet('color: '+MUTED)
@@ -1329,7 +1346,7 @@ class Window(QMainWindow):
             self.engine_backend.run(self.run_answers,events.append,instant=True)
             for event in events:
                 self.engine_events.put(event)
-                if self.args.page=="progress" and event.kind=="step" and event.step=="update" and event.status=="start": break
+                if self.args.page=="progress" and event.kind=="detail" and event.step=="update": break
             self.present_engine_events()
             if self.args.page!="progress": self.finish_engine(not self.engine_failed_step)
             return
@@ -1392,6 +1409,7 @@ class Window(QMainWindow):
                 self.rescue_labels["rescue_name"].setText(tr("rescue_name")+": "+event.name)
                 self.rescue_labels["rescue_password"].setText(tr("rescue_password")+": "+event.password)
 
+        self.setup_workspace.refresh(int(time.monotonic()-getattr(self,"running_since",time.monotonic())))
         if self.running_step is not None:
             if self.camera_search.running:
                 elapsed=self.camera_search.elapsed(time.monotonic())
@@ -1400,6 +1418,8 @@ class Window(QMainWindow):
                 self.camera_search_note.setStyleSheet("color: " + (ERROR if self.camera_search.role == "error" else WARNING if self.camera_search.role == "warning" else MUTED))
             else:
                 self.step_rows[self.running_step].setText(tr("setup_elapsed",seconds=int(time.monotonic()-self.running_since)))
+
+        self.setup_workspace.refresh(int(time.monotonic()-getattr(self,"running_since",time.monotonic())))
 
     def poll_engine(self):
         self.present_engine_events()
@@ -1428,8 +1448,6 @@ class Window(QMainWindow):
             self.failure_explanation.setText(explanation)
             self.progress_title.hide();self.progress_hint.hide()
             self.failure_panel.show()
-            self.page_layouts[4].removeWidget(self.setup_details_toggle)
-            self.failure_layout.insertWidget(3,self.setup_details_toggle)
             self.setup_cancel.hide()
             self.failure_actions.show()
             cameras=self.engine_failed_step=="cameras"
@@ -1437,7 +1455,7 @@ class Window(QMainWindow):
             self.failure_login.setVisible(cameras)
             self.failure_finish.setVisible(cameras)
             self.failure_retry.setFocus()
-            self.setup_details.setMaximumHeight(230)
+            self.setup_details.setMaximumHeight(16777215)
             self.setup_details_toggle.setChecked(False)
             from .engine_backend import ENGINE_STEPS
             for step,row in zip(ENGINE_STEPS,self.step_rows):
@@ -1446,6 +1464,7 @@ class Window(QMainWindow):
             if self.engine_backend.cancelled.is_set(): self.validation.setText(tr("setup_cancelled"))
             self.next.setText(tr("retry"));self.next.hide()
             self.next.clicked.disconnect();self.next.clicked.connect(self.retry_setup)
+            self.setup_workspace.refresh()
             return
         for i,event in enumerate(self.engine_checks):
             if i>=len(self.check_labels):

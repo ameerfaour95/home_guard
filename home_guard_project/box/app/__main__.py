@@ -39,6 +39,7 @@ def main():
     parser.add_argument("--skip-cameras", action="store_true")
     parser.add_argument("--alerts", action="store_true")
     parser.add_argument("--details", action="store_true")
+    parser.add_argument("--technical-log", action="store_true")
     parser.add_argument(
         "--state",
         choices=(
@@ -74,6 +75,7 @@ def main():
     parser.add_argument("--size", default="1366x768")
     parser.add_argument("--screenshot")
     args = parser.parse_args()
+    args.details = args.details or args.technical_log
     if args.screenshot:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtWidgets import QApplication
@@ -87,6 +89,8 @@ def main():
     font_path = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts" / "segoeui.ttf"
     if font_path.exists():
         QFontDatabase.addApplicationFont(str(font_path))
+    mono_path=font_path.with_name('consola.ttf')
+    if mono_path.exists(): QFontDatabase.addApplicationFont(str(mono_path))
     app.setFont(QFont("Segoe UI", 11))
     window = Window(args)
     window.show()

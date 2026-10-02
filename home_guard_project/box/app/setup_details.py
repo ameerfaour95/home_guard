@@ -1,6 +1,7 @@
 """Readable setup history, separate from its already-redacted technical log."""
 from dataclasses import dataclass, field
 import re
+import time
 from .strings import tr
 from .engine_backend import ENGINE_STEPS
 
@@ -9,11 +10,14 @@ class StepDetails:
     status: str = 'pending'
     result: str = ''
     messages: list = field(default_factory=list)
+    entries: list = field(default_factory=list)
+    raw: list = field(default_factory=list)
 
 def readable_line(line):
     text=line.strip()
     if not text: return None
     low=text.lower()
+    if 'no device answers on the camera port' in low: return ('warning',tr('detail_no_camera_answer'))
     match=re.search(r'(\d+) of (\d+) device\(s\) refused this login',low)
     if match: return ('error',tr('detail_camera_refused_count',count=match[1],total=match[2]))
     match=re.search(r'(\d+) channel\(s\) answer',low)
@@ -38,7 +42,9 @@ class DetailsModel:
     def __init__(self):
         self.groups={step:StepDetails() for step in ENGINE_STEPS}
         self.current='connect';self.failed=None;self.raw=[]
-    def feed(self,event):
+    def feed(self,event,now=None):
+        before={key:len(group.messages) for key,group in self.groups.items()}
+        raw_before=len(self.raw)
         if event.kind=='step':
             self.current=event.step
             from .engine_backend import is_progress_warning
@@ -62,4 +68,20 @@ class DetailsModel:
             if message not in self.groups['cameras'].messages: self.groups['cameras'].messages.append(message)
         elif event.kind=='done': self.raw.append('@@done '+event.status)
         # Rescue credentials are intentionally absent from the support log.
-    def technical_log(self): return '\n'.join(self.raw)
+        timestamp=re.search(r'\b\d{2}:\d{2}:\d{2}\b',event.text)
+        stamp=timestamp[0] if timestamp else time.strftime('%H:%M:%S',time.localtime(time.time() if now is None else now))
+        for key,group in self.groups.items():
+            group.entries.extend((stamp,role,text) for role,text in group.messages[before[key]:])
+        destination='readiness' if event.kind=='check' else 'cameras' if event.kind=='camera' else self.current
+        self.groups[destination].raw.extend(self.raw[raw_before:])
+    def technical_log(self,step=None): return '\n'.join(self.groups[step].raw if step else self.raw)
+
+class DetailsSelection:
+    def __init__(self): self.selected='connect';self.following=True
+    def choose(self,step):
+        if step not in ENGINE_STEPS: raise ValueError('Unknown setup step')
+        self.selected=step;self.following=False
+    def resume(self,current): self.selected=current;self.following=True
+    def feed(self,event,current):
+        if event.kind=='step' and event.status=='fail': self.resume(event.step)
+        elif self.following: self.selected=current
