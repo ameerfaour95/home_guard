@@ -18,7 +18,7 @@ class ChannelSearchTest(unittest.TestCase):
             asked.append(path)
             return path in live_paths
 
-        with mock.patch.object(find_cameras, "rtsp_stream_exists", side_effect=exists):
+        with mock.patch.object(find_cameras, "rtsp_stream_state", side_effect=exists):
             return find_cameras.rtsp_channels("192.168.0.139", 554, "admin", "x", PATTERNS, 6, 0), asked
 
     def test_channel_one_may_be_empty(self) -> None:
@@ -35,6 +35,26 @@ class ChannelSearchTest(unittest.TestCase):
         (pattern, hits), asked = self._channels(set())
         self.assertEqual((pattern, hits), (None, []))
         self.assertEqual(len(asked), 12)          # every channel of every pattern was asked once
+
+    def test_a_device_that_does_not_answer_is_given_up_after_two_tries(self) -> None:
+        asked = []
+
+        def silent(host, port, user, password, path, timeout=5.0):
+            asked.append(path)
+            return None
+
+        with mock.patch.object(find_cameras, "rtsp_stream_state", side_effect=silent):
+            with self.assertRaises(find_cameras.DeviceSilent):
+                find_cameras.rtsp_channels("192.168.0.109", 554, "admin", "x", PATTERNS, 6, 0)
+        self.assertEqual(len(asked), 2)            # not 12: each would wait out a timeout
+
+    def test_one_lost_answer_does_not_end_the_search(self) -> None:
+        answers = {"/a/100": None, "/a/200": False, "/a/300": True}
+
+        with mock.patch.object(find_cameras, "rtsp_stream_state",
+                               side_effect=lambda h, p, u, pw, path, timeout=5.0: answers.get(path, False)):
+            pattern, hits = find_cameras.rtsp_channels("h", 554, "admin", "x", PATTERNS, 3, 0)
+        self.assertEqual((pattern["name"], hits), ("A", [(3, "/a/300")]))
 
     def test_stream_exists_logs_in_when_asked_to(self) -> None:
         replies = iter(['RTSP/1.0 401 Unauthorized\r\nWWW-Authenticate: Digest realm="r", nonce="n"\r\n\r\n',

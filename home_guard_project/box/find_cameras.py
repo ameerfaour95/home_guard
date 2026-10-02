@@ -254,8 +254,17 @@ def _authorization(challenge: str, user: str, password: str, uri: str) -> str:
     return ""
 
 
-def rtsp_stream_exists(host: str, port: int, user: str, password: str, path: str, timeout: float = 5.0) -> bool:
-    """True if the device answers 200 when asked to describe the stream at *path*, logging in if it must."""
+class DeviceSilent(Exception):
+    """The device stopped answering (or never did)."""
+
+
+def rtsp_stream_state(
+    host: str, port: int, user: str, password: str, path: str, timeout: float = 5.0,
+) -> Optional[bool]:
+    """Ask the device to describe the stream at *path*, logging in if it must.
+
+    True: it answers 200. False: it answers something else. None: it does not answer.
+    """
     uri = f"rtsp://{host}:{port}{path}"
     try:
         reply = _rtsp_describe(host, port, uri, timeout=timeout)
@@ -266,7 +275,12 @@ def rtsp_stream_exists(host: str, port: int, user: str, password: str, path: str
             reply = _rtsp_describe(host, port, uri, authorization, timeout=timeout)
         return " 200 " in reply.splitlines()[0]
     except (OSError, IndexError):
-        return False
+        return None
+
+
+def rtsp_stream_exists(host: str, port: int, user: str, password: str, path: str, timeout: float = 5.0) -> bool:
+    """True if the device answers 200 when asked to describe the stream at *path*."""
+    return bool(rtsp_stream_state(host, port, user, password, path, timeout))
 
 
 def rtsp_channels(
@@ -286,11 +300,21 @@ def rtsp_channels(
     each stream to see whether it works takes seconds, and the older search gave
     up when channel 1 was empty, which is normal on a recorder.
     """
+    silent = 0
     for pattern in patterns:
         hits = []
         for channel in range(1, max_channels + 1):
             path = pattern["tpl"].format(ch=channel, stream=stream, stream_0=stream - 1)
-            if rtsp_stream_exists(host, port, user, password, path, timeout):
+            state = rtsp_stream_state(host, port, user, password, path, timeout)
+            if state is None:
+                # No answer at all. Every further question would wait out the same
+                # timeout: fifty of them is four minutes spent on a dead device.
+                silent += 1
+                if silent >= 2:
+                    raise DeviceSilent(host)
+                continue
+            silent = 0
+            if state:
                 hits.append((channel, path))
         if hits:
             return pattern, hits
@@ -301,8 +325,12 @@ def _probe_host(host: str, port: int, user: str, password: str) -> List[Dict[str
     from home_guard_project.data_collection import discover
 
     cfg = discover._load_discovery_config()
-    pattern, hits = rtsp_channels(host, port, user, password, discover._RTSP_PATTERNS,
-                                  cfg["max_channels"], cfg["stream"])
+    try:
+        pattern, hits = rtsp_channels(host, port, user, password, discover._RTSP_PATTERNS,
+                                      cfg["max_channels"], cfg["stream"])
+    except DeviceSilent:
+        log.warning("  %s does not answer; skipped.", host)
+        return []
     if hits:
         log.info("  %s: %d channel(s) answer (%s): %s", host, len(hits), pattern["name"],
                  ", ".join(str(channel) for channel, _ in hits))
