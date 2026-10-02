@@ -656,6 +656,7 @@ class Window(QMainWindow):
         self.activity_layout.addStretch()
 
     def closeEvent(self, event):
+        if hasattr(self, "camera_retry"): self.camera_retry.clear()
         if hasattr(self, "cameras_page"):
             self.cameras_page.close()
         if hasattr(self,"wizard_cameras"):
@@ -696,6 +697,8 @@ class Window(QMainWindow):
         self.outer.addLayout(step_bar)
         self.pages = QStackedWidget()
         self.outer.addWidget(self.pages, 1)
+        from .camera_retry import CameraRetry
+        self.camera_retry = CameraRetry()
         self.inputs = {}
         self.field_guidance = {}
         titles = [
@@ -714,7 +717,9 @@ class Window(QMainWindow):
             if title == "progress_title":
                 self.progress_title = title_widget
             lay.addWidget(title_widget)
-            lay.addWidget(label(tr("live_summary_hint") if hint == "summary_hint" and not self.args.demo else tr(hint), "muted"))
+            hint_widget = label(tr("live_summary_hint") if hint == "summary_hint" and not self.args.demo else tr(hint), "muted")
+            lay.addWidget(hint_widget)
+            if hint == "progress_hint": self.progress_hint = hint_widget
             self.page_layouts.append(lay)
             if title == "summary_title":
                 summary_scroll = QScrollArea()
@@ -755,6 +760,14 @@ class Window(QMainWindow):
         self.page_layouts[3].addWidget(self.find)
         self.add_input(3, "camera_user", tr("camera_user"))
         self.add_input(3, "camera_password", tr("camera_password"), True)
+        self.camera_retry_message = label("")
+        self.camera_retry_message.setStyleSheet("color: " + ERROR)
+        self.page_layouts[3].addWidget(self.camera_retry_message)
+        self.page_layouts[3].addWidget(label(tr("camera_login_help"), "muted"))
+        self.camera_lock_warning = label(tr("camera_lock_warning"))
+        self.camera_lock_warning.setStyleSheet("color: " + WARNING)
+        self.camera_lock_warning.hide()
+        self.page_layouts[3].addWidget(self.camera_lock_warning)
         self.find.toggled.connect(
             lambda enabled: [
                 self.inputs[key].setEnabled(enabled)
@@ -981,7 +994,10 @@ class Window(QMainWindow):
                 self.validation.setText(tr("address_not_remembered"))
                 return
         if index == 3:
-            self.set_page(6)
+            if self.camera_retry.pending:
+                self.begin_setup()
+            else:
+                self.set_page(6)
         else:
             self.set_page(index + 1)
 
@@ -1002,7 +1018,10 @@ class Window(QMainWindow):
         import queue
         from .engine_backend import EngineBackend,DemoEngine
         self.progress_title.setText(tr("progress_title"))
-        self.run_answers=self.collect_answers()
+        self.progress_hint.setStyleSheet("")
+        self.run_answers = self.camera_retry.retry(self.inputs["camera_user"].text().strip(), self.inputs["camera_password"].text()) if self.camera_retry.pending else self.collect_answers()
+        self.camera_retry.capture(self.run_answers)
+        self.progress_hint.setText(tr("retry_confirming") if self.camera_retry.pending else tr("progress_hint"))
         self.engine_backend=DemoEngine(self.fail.isChecked() or self.args.page=="failure") if self.args.demo else EngineBackend()
         self.engine_events=queue.Queue()
         self.engine_checks=[];self.engine_cameras=[];self.engine_failed_step=None;self.running_step=None
@@ -1042,6 +1061,7 @@ class Window(QMainWindow):
                 index=ENGINE_STEPS.index(event.step)
                 row=self.step_rows[index]
                 if event.status=="start":
+                    if event.step == "cameras": self.camera_retry.started()
                     self.running_step=index;self.running_since=time.monotonic()
                     row.setText(tr("setup_elapsed",seconds=0))
                     row.setStyleSheet("")
@@ -1052,6 +1072,11 @@ class Window(QMainWindow):
                     row.setStyleSheet("color: "+(ERROR if event.status=="fail" else WARNING if event.status in ("warn","skip") else OK))
                     if event.status=="fail":
                         self.engine_failed_step=event.step
+                        if event.step == "cameras":
+                            self.camera_retry.failed(event.text)
+                            self.progress_hint.setText(event.text + "\n" + tr("camera_login_help"))
+                            self.progress_hint.setStyleSheet("color: " + ERROR)
+                            row.setText(tr("FAIL"))
                         self.setup_details_toggle.setChecked(True)
             elif event.kind=="check": self.engine_checks.append(event)
             elif event.kind=="camera": self.engine_cameras.append(event.name)
@@ -1089,6 +1114,7 @@ class Window(QMainWindow):
                 self.check_labels[0].parentWidget().layout().insertWidget(i+1,item)
             item=self.check_labels[i];item.setText(event.status+tr("separator")+event.text)
             item.setStyleSheet("color: "+(ERROR if event.status=="FAIL" else WARNING if event.status=="WARN" else OK))
+        self.camera_retry.clear()
         self.later.setVisible(not self.run_answers.find_cameras)
         self.setup_success()
 
@@ -1118,3 +1144,8 @@ class Window(QMainWindow):
         from .engine_backend import OWNERS
         self.next.clicked.disconnect();self.next.clicked.connect(self.next_page)
         self.set_page(OWNERS.get(self.engine_failed_step,0))
+        if self.engine_failed_step == "cameras":
+            self.camera_retry_message.setText(self.camera_retry.message)
+            self.camera_lock_warning.setVisible(self.camera_retry.lock_warning)
+            self.inputs["camera_password"].clear()
+            self.inputs["camera_password"].setFocus()

@@ -1,6 +1,9 @@
 """All visible application copy; keys remain stable for translation."""
 
 TEXT = {
+    "camera_login_help": "The user name is usually admin. Use the password set when the cameras were installed, the recorder's admin password, or the code on the camera label.",
+    "camera_lock_warning": "Before trying a third time: some cameras lock logins for a while after repeated failures. Check the password before continuing.",
+    "retry_confirming": "Confirming the earlier steps, then trying the new camera login.",
     "technical_log": "Technical log",
     "copy_log": "Copy",
     "details_empty": "No additional notes for this step yet.",
