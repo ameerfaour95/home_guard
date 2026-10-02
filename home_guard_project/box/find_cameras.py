@@ -33,6 +33,7 @@ import os
 import re
 import socket
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote as urlquote
 
@@ -238,8 +239,9 @@ def _rtsp_describe(host: str, port: int, uri: str, authorization: str = "", time
         return conn.recv(2048).decode("latin-1", "replace")
 
 
-def rtsp_login_check(host: str, port: int, user: str, password: str, timeout: float = 5.0) -> str:
-    """Does the device accept this login? ``accepted``, ``refused`` or ``unknown``.
+def rtsp_login_check(host: str, port: int, user: str, password: str, timeout: float = 3.0) -> str:
+    """Does the device accept this login? ``accepted``, ``refused``, ``silent`` (no answer) or
+    ``unknown`` (it answers, but asks for a kind of login this does not speak).
 
     One or two quick requests, before the slow search for the device's stream
     address. A camera checks the login before it looks at the address, so a
@@ -256,7 +258,7 @@ def rtsp_login_check(host: str, port: int, user: str, password: str, timeout: fl
         reply = _rtsp_describe(host, port, uri, authorization, timeout=timeout)
         return "refused" if " 401 " in reply.splitlines()[0] else "accepted"
     except (OSError, IndexError):
-        return "unknown"
+        return "silent"
 
 
 def _authorization(challenge: str, user: str, password: str, uri: str) -> str:
@@ -277,7 +279,7 @@ class DeviceSilent(Exception):
 
 
 def rtsp_stream_state(
-    host: str, port: int, user: str, password: str, path: str, timeout: float = 5.0,
+    host: str, port: int, user: str, password: str, path: str, timeout: float = 3.0,
 ) -> Optional[bool]:
     """Ask the device to describe the stream at *path*, logging in if it must.
 
@@ -353,10 +355,13 @@ def _probe_host(host: str, port: int, user: str, password: str) -> List[Dict[str
         log.info("  %s: %d channel(s) answer (%s): %s", host, len(hits), pattern["name"],
                  ", ".join(str(channel) for channel, _ in hits))
         login = f"{urlquote(user, safe='')}:{urlquote(password, safe='')}@"
+        urls = [f"rtsp://{login}{host}:{port}{path}" for _, path in hits]
+        # Opening a stream to read its size takes a second or more: open a few at a time.
+        with ThreadPoolExecutor(max_workers=min(4, len(urls))) as pool:
+            opened = list(pool.map(
+                lambda url: discover.validate_stream(url, timeout=max(cfg["probe_timeout_sec"], 10.0)), urls))
         found = []
-        for channel, path in hits:
-            url = f"rtsp://{login}{host}:{port}{path}"
-            ok, width, height = discover.validate_stream(url, timeout=max(cfg["probe_timeout_sec"], 10.0))
+        for (channel, _), url, (ok, width, height) in zip(hits, urls, opened):
             if ok:
                 log.info("  Channel %d: OK (%dx%d)", channel, width, height)
                 found.append({"channel": channel, "url": url, "pattern": pattern["name"], "w": width, "h": height})
@@ -509,22 +514,55 @@ def main() -> None:
         _finish(found, args, {"hosts_tried": [args.host]})
         return
 
-    scan = _scan()
-    targets = [(host, int(port)) for port, hosts in scan["rtsp_hosts"].items() for host in hosts]
+    found, extra = search(args.user, password)
+    _finish(found, args, extra)
+
+
+def rtsp_hosts() -> Dict[int, List[str]]:
+    """Devices that answer on each camera port, both ports scanned at the same time."""
+    from home_guard_project.data_collection import discover
+
+    with ThreadPoolExecutor(max_workers=len(RTSP_PORTS)) as pool:
+        scans = pool.map(lambda port: sorted(discover.subnet_scan(port=port)), RTSP_PORTS)
+        return dict(zip(RTSP_PORTS, scans))
+
+
+def search(user: str, password: str) -> Tuple[Found, Dict[str, Any]]:
+    """Find every camera this login opens: ``(found, facts for the report)``.
+
+    Kept short on purpose, because an installer is waiting on it: the ports are
+    scanned together, the login is checked on all devices at once, and a
+    device that refuses the login or does not answer is not asked again.
+    """
+    from home_guard_project.data_collection import discover
+
+    targets = [(host, port) for port, hosts in rtsp_hosts().items() for host in hosts]
     if not targets:
         log.warning("No device answers on the camera port. Is the box on the cameras' network?")
-    # A device that refuses the login would cost half a minute of trying stream
-    # addresses that can never work, and the reason would be lost in the noise.
-    refused = [host for host, port in targets if rtsp_login_check(host, port, args.user, password) == "refused"]
+        return {}, {"local_ip": discover._get_local_ip(), "hosts_tried": [], "devices_found": 0,
+                    "login_refused": [], "no_answer": []}
+
+    with ThreadPoolExecutor(max_workers=min(8, len(targets))) as pool:
+        states = dict(zip(
+            (host for host, _ in targets),
+            pool.map(lambda target: rtsp_login_check(target[0], target[1], user, password), targets),
+        ))
+    refused = [host for host, _ in targets if states[host] == "refused"]
+    silent = [host for host, _ in targets if states[host] == "silent"]
     if refused:
         log.warning("%d of %d device(s) refused this login: %s", len(refused), len(targets), ", ".join(refused))
-    found = {host: _probe_host(host, port, args.user, password) for host, port in targets if host not in refused}
-    _finish(found, args, {
-        "local_ip": scan["local_ip"],
-        "hosts_tried": [h for h, _ in targets],
+    if silent:
+        log.warning("%d of %d device(s) did not answer: %s", len(silent), len(targets), ", ".join(silent))
+
+    found = {host: _probe_host(host, port, user, password)
+             for host, port in targets if states[host] not in ("refused", "silent")}
+    return found, {
+        "local_ip": discover._get_local_ip(),
+        "hosts_tried": [host for host, _ in targets],
         "devices_found": len(targets),
         "login_refused": refused,
-    })
+        "no_answer": silent,
+    }
 
 
 if __name__ == "__main__":

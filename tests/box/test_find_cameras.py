@@ -104,10 +104,10 @@ class LoginCheckTest(unittest.TestCase):
         result, sent = self._check(["RTSP/1.0 404 Not Found\r\n\r\n"])
         self.assertEqual((result, len(sent)), ("accepted", 1))
 
-    def test_no_answer_is_unknown_not_refused(self) -> None:
+    def test_no_answer_is_silent_not_refused(self) -> None:
         from unittest import mock
 
         from home_guard_project.box import find_cameras
 
         with mock.patch.object(find_cameras, "_rtsp_describe", side_effect=OSError("timed out")):
-            self.assertEqual(find_cameras.rtsp_login_check("192.168.0.9", 554, "admin", "x"), "unknown")
+            self.assertEqual(find_cameras.rtsp_login_check("192.168.0.9", 554, "admin", "x"), "silent")
