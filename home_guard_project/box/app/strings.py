@@ -1,6 +1,9 @@
 """All visible application copy; keys remain stable for translation."""
 
 TEXT = {
+    "camera_search_wait": "Looking for cameras. Some devices may take a few minutes to answer.",
+    "camera_search_elapsed": "Searching - {minutes}m {seconds}s",
+
     "camera_changes_save_failed": "The camera changes could not be saved. Check the camera names and try again.",
     "camera_setup_finished": "Setup finished - {house}\n{count} cameras found: {names}",
     "camera_none_found": "None found",

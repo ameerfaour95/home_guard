@@ -818,6 +818,11 @@ class Window(QMainWindow):
             row.addWidget(name, 2)
             row.addWidget(status, 3)
             progress_steps.addLayout(row)
+            if step == "cameras":
+                self.camera_search_note=label("", "muted")
+                self.camera_search_note.setMaximumWidth(580)
+                self.camera_search_note.hide()
+                progress_steps.addWidget(self.camera_search_note)
             self.step_rows.append(status)
         progress_steps.addStretch()
         progress_body.addLayout(progress_steps,1)
@@ -1106,6 +1111,9 @@ class Window(QMainWindow):
         self.engine_backend=DemoEngine(self.fail.isChecked() or self.args.page=="failure") if self.args.demo else EngineBackend()
         self.engine_events=queue.Queue()
         self.engine_checks=[];self.engine_cameras=[];self.engine_failed_step=None;self.running_step=None
+        from .search_progress import CameraSearch
+        self.camera_search=CameraSearch()
+        self.camera_search_note.hide()
         self.setup_details.reset()
         for row in self.step_rows:
             row.setText(tr("pending"));row.setStyleSheet("")
@@ -1138,16 +1146,23 @@ class Window(QMainWindow):
             try: event=self.engine_events.get_nowait()
             except queue.Empty: break
             self.setup_details.feed(event)
+            if event.kind == "detail": self.camera_search.feed(event.text)
             if event.kind=="step":
                 index=ENGINE_STEPS.index(event.step)
                 row=self.step_rows[index]
                 if event.status=="start":
-                    if event.step == "cameras": self.camera_retry.started()
+                    if event.step == "cameras":
+                        self.camera_retry.started()
+                        self.camera_search.start(time.monotonic())
+                        self.camera_search_note.show()
                     self.running_step=index;self.running_since=time.monotonic()
                     row.setText(tr("setup_elapsed",seconds=0))
                     row.setStyleSheet("")
                 else:
                     self.running_step=None
+                    if event.step == "cameras":
+                        self.camera_search.finish()
+                        self.camera_search_note.hide()
                     status={"ok":"PASS","warn":"WARN","fail":"FAIL","skip":"step_skip"}[event.status]
                     row.setText(tr(status)+tr("separator")+event.text)
                     row.setStyleSheet("color: "+(ERROR if event.status=="fail" else WARNING if event.status in ("warn","skip") else OK))
@@ -1166,7 +1181,13 @@ class Window(QMainWindow):
                 self.rescue_labels["rescue_password"].setText(tr("rescue_password")+": "+event.password)
 
         if self.running_step is not None:
-            self.step_rows[self.running_step].setText(tr("setup_elapsed",seconds=int(time.monotonic()-self.running_since)))
+            if self.camera_search.running:
+                elapsed=self.camera_search.elapsed(time.monotonic())
+                self.step_rows[self.running_step].setText(tr("camera_search_elapsed",minutes=elapsed//60,seconds=elapsed%60))
+                self.camera_search_note.setText(self.camera_search.sentence)
+                self.camera_search_note.setStyleSheet("color: " + (ERROR if self.camera_search.role == "error" else WARNING if self.camera_search.role == "warning" else MUTED))
+            else:
+                self.step_rows[self.running_step].setText(tr("setup_elapsed",seconds=int(time.monotonic()-self.running_since)))
 
     def poll_engine(self):
         self.present_engine_events()
