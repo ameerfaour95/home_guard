@@ -146,19 +146,25 @@ def send_message(cfg: TelegramConfig, text: str) -> Dict[str, Any]:
     return {"sent": any(r["ok"] for r in results), "results": results}
 
 
+def alert_text(command: str, summary: str = "", reason: str = "") -> Optional[str]:
+    """The message for an alert_command, or None for a command that sends nothing."""
+    detail = summary if not reason else f"{summary} - {reason}"
+    detail = detail.strip() or "activity detected"
+    if command == "[send_message]":
+        return f"\U0001F7E1 Home Guard: {detail}"
+    if command == "[call_owner]":
+        return f"\U0001F6A8 Home Guard ALERT: {detail}"
+    return None
+
+
 def notify(cfg: TelegramConfig, command: str, summary: str = "", reason: str = "",
            image: Optional[bytes] = None) -> Dict[str, Any]:
     """Dispatch on an alert_command. Telegram cannot place calls, so
     ``[call_owner]`` is sent as a prominent urgent message. When *image* (JPEG
     bytes) is given, the alert is sent as a photo with the text as its caption.
     """
-    detail = summary if not reason else f"{summary} - {reason}"
-    detail = detail.strip() or "activity detected"
-    if command == "[send_message]":
-        text = f"\U0001F7E1 Home Guard: {detail}"
-    elif command == "[call_owner]":
-        text = f"\U0001F6A8 Home Guard ALERT: {detail}"
-    else:
+    text = alert_text(command, summary, reason)
+    if text is None:
         return {"command": command, "sent": False}
     if image:
         return {"command": command, "telegram": send_photo(cfg, image, text)}
