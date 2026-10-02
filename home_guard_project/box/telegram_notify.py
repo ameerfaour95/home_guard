@@ -18,8 +18,9 @@ import os
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 log = logging.getLogger("box.telegram")
 
@@ -71,6 +72,60 @@ def _http_get(token: str, method: str, timeout: float = 15.0) -> Dict[str, Any]:
         return json.loads(resp.read().decode("utf-8", errors="replace"))
 
 
+def _multipart(fields: Dict[str, str], files: Dict[str, Tuple[str, bytes, str]]) -> Tuple[str, bytes]:
+    """Build a multipart/form-data body. files: name -> (filename, data, content_type)."""
+    boundary = "----HomeGuard" + uuid.uuid4().hex
+    crlf = b"\r\n"
+    bb = boundary.encode()
+    body = b""
+    for name, value in fields.items():
+        body += b"--" + bb + crlf
+        body += f'Content-Disposition: form-data; name="{name}"'.encode() + crlf + crlf
+        body += str(value).encode("utf-8") + crlf
+    for name, (filename, data, ctype) in files.items():
+        body += b"--" + bb + crlf
+        body += f'Content-Disposition: form-data; name="{name}"; filename="{filename}"'.encode() + crlf
+        body += f"Content-Type: {ctype}".encode() + crlf + crlf
+        body += data + crlf
+    body += b"--" + bb + b"--" + crlf
+    return "multipart/form-data; boundary=" + boundary, body
+
+
+def _http_post_multipart(token: str, method: str, fields: Dict[str, str],
+                         files: Dict[str, Tuple[str, bytes, str]], timeout: float = 20.0) -> Dict[str, Any]:
+    """POST multipart form data (for file uploads such as sendPhoto). Isolated for testing."""
+    url = _API.format(token=token, method=method)
+    ctype, body = _multipart(fields, files)
+    req = urllib.request.Request(url, data=body, method="POST")
+    req.add_header("Content-Type", ctype)
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8", errors="replace"))
+
+
+def send_photo(cfg: TelegramConfig, image_bytes: bytes, caption: str = "") -> Dict[str, Any]:
+    """Send a JPEG photo with an optional caption to every chat. Never raises."""
+    if cfg.dry_run or not cfg.enabled:
+        reason = "dry_run" if cfg.dry_run else "not_configured"
+        log.info("Telegram photo not sent (%s): %s", reason, caption)
+        return {"sent": False, "reason": reason}
+    results = []
+    for chat_id in cfg.chat_ids:
+        try:
+            resp = _http_post_multipart(
+                cfg.bot_token, "sendPhoto",
+                {"chat_id": chat_id, "caption": caption},
+                {"photo": ("alert.jpg", image_bytes, "image/jpeg")},
+            )
+            ok = bool(resp.get("ok"))
+            results.append({"chat_id": chat_id, "ok": ok})
+            if not ok:
+                log.warning("Telegram sendPhoto not ok for %s: %s", chat_id, resp.get("description"))
+        except (urllib.error.URLError, OSError) as exc:
+            log.warning("Telegram photo failed for %s: %s", chat_id, exc)
+            results.append({"chat_id": chat_id, "ok": False, "error": str(exc)})
+    return {"sent": any(r["ok"] for r in results), "results": results}
+
+
 def send_message(cfg: TelegramConfig, text: str) -> Dict[str, Any]:
     """Send *text* to every configured chat. Never raises; returns a status dict."""
     if cfg.dry_run or not cfg.enabled:
@@ -91,17 +146,23 @@ def send_message(cfg: TelegramConfig, text: str) -> Dict[str, Any]:
     return {"sent": any(r["ok"] for r in results), "results": results}
 
 
-def notify(cfg: TelegramConfig, command: str, summary: str = "", reason: str = "") -> Dict[str, Any]:
+def notify(cfg: TelegramConfig, command: str, summary: str = "", reason: str = "",
+           image: Optional[bytes] = None) -> Dict[str, Any]:
     """Dispatch on an alert_command. Telegram cannot place calls, so
-    ``[call_owner]`` is sent as a prominent urgent message.
+    ``[call_owner]`` is sent as a prominent urgent message. When *image* (JPEG
+    bytes) is given, the alert is sent as a photo with the text as its caption.
     """
     detail = summary if not reason else f"{summary} - {reason}"
     detail = detail.strip() or "activity detected"
     if command == "[send_message]":
-        return {"command": command, "telegram": send_message(cfg, f"\U0001F7E1 Home Guard: {detail}")}
-    if command == "[call_owner]":
-        return {"command": command, "telegram": send_message(cfg, f"\U0001F6A8 Home Guard ALERT: {detail}")}
-    return {"command": command, "sent": False}
+        text = f"\U0001F7E1 Home Guard: {detail}"
+    elif command == "[call_owner]":
+        text = f"\U0001F6A8 Home Guard ALERT: {detail}"
+    else:
+        return {"command": command, "sent": False}
+    if image:
+        return {"command": command, "telegram": send_photo(cfg, image, text)}
+    return {"command": command, "telegram": send_message(cfg, text)}
 
 
 def discover_chats(token: str) -> List[Dict[str, str]]:

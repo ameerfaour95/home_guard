@@ -59,7 +59,7 @@ class SettingsTest(unittest.TestCase):
         s = AlertSettings.from_box_settings({})
         self.assertEqual(s.alert_channel, "telegram")
         self.assertEqual(s.vlm_backend, "gpt")
-        self.assertEqual(s.model, "yolo11n.pt")
+        self.assertEqual(s.model, "yolo11s.pt")
 
     def test_custom(self) -> None:
         s = AlertSettings.from_box_settings({

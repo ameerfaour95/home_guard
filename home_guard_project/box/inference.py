@@ -120,7 +120,7 @@ class AlertSettings:
     cooldown_sec: float = 120.0      # min seconds between VLM calls per camera
     clip_frames: int = 5             # frames sent to the VLM per escalation
     frame_interval_sec: float = 1.0  # spacing of buffered frames
-    model: str = "yolo11n.pt"        # small model for the gate (N150)
+    model: str = "yolo11s.pt"        # the model shipped in the bundle (avoids a download on the box)
     conf: float = 0.4
     vlm_backend: str = "gpt"
     vlm_model: str = "gpt-4o"
@@ -136,7 +136,7 @@ class AlertSettings:
             cooldown_sec=float(g("alert_cooldown_sec", 120.0)),
             clip_frames=int(g("alert_clip_frames", 5)),
             frame_interval_sec=float(g("alert_frame_interval_sec", 1.0)),
-            model=str(g("inference_yolo_model", "yolo11n.pt")),
+            model=str(g("inference_yolo_model", "yolo11s.pt")),
             conf=float(g("inference_conf", 0.4)),
             vlm_backend=str(g("vlm_backend", "gpt")),
             vlm_model=str(g("vlm_model", "gpt-4o")),
@@ -145,14 +145,18 @@ class AlertSettings:
         )
 
 
-def frame_to_jpeg_b64(frame_bgr: Any) -> str:
-    """JPEG-encode a BGR frame to base64. Imports cv2 lazily."""
+def frame_to_jpeg_bytes(frame_bgr: Any) -> bytes:
+    """JPEG-encode a BGR frame to raw bytes. Imports cv2 lazily."""
     import cv2  # noqa: PLC0415
 
     ok, buf = cv2.imencode(".jpg", frame_bgr, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
-    if not ok:
-        return ""
-    return base64.b64encode(buf.tobytes()).decode("utf-8")
+    return buf.tobytes() if ok else b""
+
+
+def frame_to_jpeg_b64(frame_bgr: Any) -> str:
+    """JPEG-encode a BGR frame to base64. Imports cv2 lazily."""
+    data = frame_to_jpeg_bytes(frame_bgr)
+    return base64.b64encode(data).decode("utf-8") if data else ""
 
 
 # ----------------------------------------------------------------------------
@@ -221,8 +225,12 @@ def make_backend(settings: AlertSettings, env: Dict[str, str]):
 # Alert dispatch (channel-agnostic)
 # ----------------------------------------------------------------------------
 def dispatch_alert(box_settings: Dict[str, Any], env: Dict[str, str],
-                   command: str, summary: str, reason: str) -> Dict[str, Any]:
-    """Send the alert over the configured channel(s). Never raises."""
+                   command: str, summary: str, reason: str,
+                   image: Optional[bytes] = None) -> Dict[str, Any]:
+    """Send the alert over the configured channel(s). Never raises.
+
+    *image* (JPEG bytes) is the camera snapshot; Telegram sends it as a photo.
+    """
     channel = str(box_settings.get("alert_channel", "telegram"))
     results: Dict[str, Any] = {"channel": channel}
     try:
@@ -230,7 +238,7 @@ def dispatch_alert(box_settings: Dict[str, Any], env: Dict[str, str],
             from . import telegram_notify  # noqa: PLC0415
 
             cfg = telegram_notify.load_telegram_config(box_settings, env)
-            results["telegram"] = telegram_notify.notify(cfg, command, summary, reason)
+            results["telegram"] = telegram_notify.notify(cfg, command, summary, reason, image=image)
         if channel in ("twilio", "both"):
             from . import notify as twilio_notify  # noqa: PLC0415
 
@@ -321,7 +329,14 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
         reason = str(parsed.get("alert_reason", ""))
         log.info("[%s] verdict=%s summary=%s", camera_name, cmd, summary)
         if cmd in ("[send_message]", "[call_owner]"):
-            res = dispatch_alert(box_settings, env, cmd, f"{camera_name}: {summary}", reason)
+            # Attach the most recent frame of the clip as the alert snapshot.
+            image = b""
+            try:
+                image = frame_to_jpeg_bytes(frames[-1]) if frames else b""
+            except Exception as exc:  # noqa: BLE001
+                log.warning("[%s] could not encode snapshot: %s", camera_name, exc)
+            res = dispatch_alert(box_settings, env, cmd, f"{camera_name}: {summary}", reason,
+                                 image=image or None)
             log.info("[%s] alert dispatched: %s", camera_name, res)
     except Exception as exc:  # noqa: BLE001
         log.warning("[%s] worker error: %s", camera_name, exc)

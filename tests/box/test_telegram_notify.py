@@ -76,6 +76,37 @@ class SendMessageTest(unittest.TestCase):
         self.assertFalse(res["sent"])
 
 
+class SendPhotoTest(unittest.TestCase):
+    def test_dry_run_sends_nothing(self) -> None:
+        cfg = TelegramConfig(bot_token="T", chat_ids=["1"], dry_run=True)
+        with mock.patch.object(tg, "_http_post_multipart") as post:
+            res = tg.send_photo(cfg, b"\xff\xd8\xff", "cap")
+        post.assert_not_called()
+        self.assertEqual(res["reason"], "dry_run")
+
+    def test_configured_uploads_photo(self) -> None:
+        cfg = TelegramConfig(bot_token="T", chat_ids=["100", "200"])
+        with mock.patch.object(tg, "_http_post_multipart", return_value={"ok": True}) as post:
+            res = tg.send_photo(cfg, b"\xff\xd8\xff", "caption")
+        self.assertTrue(res["sent"])
+        self.assertEqual(post.call_count, 2)
+        _token, method, fields, files = post.call_args.args
+        self.assertEqual(method, "sendPhoto")
+        self.assertEqual(fields["caption"], "caption")
+        self.assertIn("photo", files)
+
+
+class MultipartTest(unittest.TestCase):
+    def test_body_contains_fields_and_file(self) -> None:
+        ctype, body = tg._multipart({"chat_id": "123", "caption": "hi"},
+                                    {"photo": ("alert.jpg", b"\xff\xd8\xff", "image/jpeg")})
+        self.assertIn("multipart/form-data; boundary=", ctype)
+        self.assertIn(b'name="chat_id"', body)
+        self.assertIn(b"123", body)
+        self.assertIn(b'filename="alert.jpg"', body)
+        self.assertIn(b"\xff\xd8\xff", body)
+
+
 class DispatchTest(unittest.TestCase):
     def test_send_message_command(self) -> None:
         cfg = TelegramConfig(bot_token="T", chat_ids=["1"])
@@ -83,6 +114,16 @@ class DispatchTest(unittest.TestCase):
             res = tg.notify(cfg, "[send_message]", "person at gate")
         self.assertTrue(res["telegram"]["sent"])
         self.assertIn("person at gate", post.call_args.args[2]["text"])
+
+    def test_with_image_uses_send_photo(self) -> None:
+        cfg = TelegramConfig(bot_token="T", chat_ids=["1"])
+        with mock.patch.object(tg, "_http_post_multipart", return_value={"ok": True}) as mp, \
+                mock.patch.object(tg, "_http_post") as post:
+            res = tg.notify(cfg, "[send_message]", "person at gate", image=b"\xff\xd8\xff")
+        self.assertTrue(res["telegram"]["sent"])
+        mp.assert_called_once()
+        post.assert_not_called()
+        self.assertIn("person at gate", mp.call_args.args[2]["caption"])
 
     def test_call_owner_sends_urgent_message(self) -> None:
         cfg = TelegramConfig(bot_token="T", chat_ids=["1"])
