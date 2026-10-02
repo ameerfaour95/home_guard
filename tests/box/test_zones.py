@@ -31,6 +31,12 @@ class ValidatePointsTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 z.validate_points(bad)
 
+    def test_booleans_are_not_numbers(self) -> None:
+        with self.assertRaises(ValueError):
+            z.validate_points([(True, 0), (1, 0), (1, 1)])
+        with self.assertRaises(ValueError):
+            z.validate_points([(0, False), (1, 0), (1, 1)])
+
 
 class ParsePointsTest(unittest.TestCase):
     def test_semicolon_pairs_are_the_command_line_form(self) -> None:
@@ -161,3 +167,15 @@ class ZoneFileTest(unittest.TestCase):
     def test_save_zones_writes_the_whole_dict_for_the_laptop_editor(self) -> None:
         z.save_zones({"yard": [[0.1, 0.2], [0.9, 0.2], [0.5, 0.9]]}, self.path)
         self.assertEqual(z.load_zones(self.path), {"yard": [(0.1, 0.2), (0.9, 0.2), (0.5, 0.9)]})
+
+    def test_a_deeply_nested_file_loads_as_no_zones(self) -> None:
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write("zones: " + "[" * 5000 + "]" * 5000 + "\n")
+        self.assertEqual(z.load_zones(self.path), {})
+
+    def test_a_camera_key_written_as_a_number_can_still_be_cleared(self) -> None:
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write("zones:\n  123: [[0, 0], [1, 0], [1, 1]]\n")
+        self.assertEqual(set(z.load_zones(self.path)), {"123"})
+        self.assertTrue(z.clear_zone("123", self.path))
+        self.assertEqual(z.load_zones(self.path), {})

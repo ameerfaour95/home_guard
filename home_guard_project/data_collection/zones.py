@@ -51,6 +51,8 @@ def validate_points(points: Any) -> List[Point]:
     for p in points:
         if not isinstance(p, (list, tuple)) or len(p) != 2:
             raise ValueError("every corner must be two numbers, x and y")
+        if isinstance(p[0], bool) or isinstance(p[1], bool):
+            raise ValueError("every corner must be two numbers, x and y")
         try:
             x, y = float(p[0]), float(p[1])
         except Exception:  # noqa: BLE001 - anything that is not two finite numbers is one error for the owner
@@ -82,11 +84,11 @@ def _read_raw(path: str) -> Dict[str, Any]:
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
-    except (OSError, ValueError, yaml.YAMLError) as exc:
+    except Exception as exc:  # noqa: BLE001 - a damaged file means "no zones", never a crash at startup
         log.warning("Could not read %s (%s); no zones", path, exc)
         return {}
     raw = data.get("zones", {}) if isinstance(data, dict) else {}
-    return raw if isinstance(raw, dict) else {}
+    return {str(k): v for k, v in raw.items()} if isinstance(raw, dict) else {}
 
 
 def load_zones(path: str = ZONES_PATH) -> Dict[str, List[Point]]:
