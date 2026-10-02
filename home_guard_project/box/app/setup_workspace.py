@@ -27,13 +27,16 @@ class StepRow(QFrame):
         self.status.setText(tr(key,seconds=elapsed))
         colour={'ok':OK,'warn':WARNING,'fail':ERROR,'start':ACTION}.get(status,MUTED)
         self.status.setStyleSheet('color: '+colour)
+        self.note.setStyleSheet('color: '+MUTED)
         self.symbol.setPixmap(icon({'ok':'check','warn':'warning','fail':'cross','start':'spinner','skip':'dash'}.get(status,'dash')).pixmap(16,16))
         self.note.setText('')
+        self.note.setVisible(status=='start')
         if status=='start' and group.messages:
             sentence=group.messages[-1][1]
             self.note.setText(self.note.fontMetrics().elidedText(sentence,Qt.TextElideMode.ElideRight,max(10,self.width()-16)))
             self.note.setToolTip(sentence)
-        self.setProperty('selected',selected);self.style().unpolish(self);self.style().polish(self)
+        if self.property('selected')!=selected:
+            self.setProperty('selected',selected);self.style().unpolish(self);self.style().polish(self)
 
 class SetupWorkspace(QScrollArea):
     selected=Signal(str)

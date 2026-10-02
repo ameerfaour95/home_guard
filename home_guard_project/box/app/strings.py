@@ -402,5 +402,9 @@ TEXT.update(follow_progress="Follow progress", details_running_hint="Setup is wo
 
 TEXT.update(demo_setup_connect="Checking the connection to the box.", demo_setup_update="Updating the box software.", demo_setup_site="Saving your house name and preferences.", demo_setup_network="Preparing the home network.", demo_setup_cameras="Searching for cameras on the home network.", demo_setup_alerts="Saving your alert hours.", demo_setup_readiness="Checking that Home Guard is ready.")
 
+TEXT.update(detail_no_camera_answer="No cameras answered on the home network. Check the recorder's power and network cable.")
+
+TEXT.update(summary_details_heading="Setup finished · {house}")
+
 def tr(key, **values):
     return TEXT[key].format(**values)

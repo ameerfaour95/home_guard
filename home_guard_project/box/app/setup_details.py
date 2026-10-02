@@ -17,6 +17,7 @@ def readable_line(line):
     text=line.strip()
     if not text: return None
     low=text.lower()
+    if 'no device answers on the camera port' in low: return ('warning',tr('detail_no_camera_answer'))
     match=re.search(r'(\d+) of (\d+) device\(s\) refused this login',low)
     if match: return ('error',tr('detail_camera_refused_count',count=match[1],total=match[2]))
     match=re.search(r'(\d+) channel\(s\) answer',low)

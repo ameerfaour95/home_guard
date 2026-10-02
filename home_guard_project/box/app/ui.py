@@ -847,11 +847,13 @@ class Window(QMainWindow):
             panel = card()
             lay = layout_for(panel, 30)
             title_widget = label(tr(title), "title")
+            if title=='summary_title': self.summary_title=title_widget
             if title == "progress_title":
                 self.progress_title = title_widget
             lay.addWidget(title_widget)
             hint_widget = label(tr("live_summary_hint") if hint == "summary_hint" and not self.args.demo else tr(hint), "muted")
             lay.addWidget(hint_widget)
+            if hint=="summary_hint": self.summary_hint=hint_widget
             if hint == "progress_hint": self.progress_hint = hint_widget
             self.page_layouts.append(lay)
             if title == "summary_title":
@@ -989,7 +991,14 @@ class Window(QMainWindow):
         self.failure_panel.hide()
         self.setup_details_toggle.setText(tr("show_readable_details"))
         self.summary_house = label("", "section")
-        self.page_layouts[5].addWidget(self.summary_house)
+        summary_header=QHBoxLayout()
+        summary_header.addWidget(self.summary_house,1)
+        self.summary_details_action=QPushButton(tr("show_readable_details"))
+        self.summary_details_action.setObjectName("textAction")
+        self.summary_details_action.setCheckable(True)
+        self.summary_details_action.toggled.connect(self.toggle_summary_details)
+        summary_header.addWidget(self.summary_details_action)
+        self.page_layouts[5].addLayout(summary_header)
         self.summary_network=label("", "muted")
         self.summary_count=label("", "section")
         self.page_layouts[5].addWidget(self.summary_network)
@@ -1028,7 +1037,17 @@ class Window(QMainWindow):
         sr.addStretch()
         summary_columns.addWidget(summary_left, 3)
         summary_columns.addWidget(summary_right, 2)
-        self.page_layouts[5].addLayout(summary_columns)
+        self.summary_overview=QWidget()
+        self.summary_overview.setObjectName("summaryOverview")
+        self.summary_overview.setLayout(summary_columns)
+        self.page_layouts[5].addWidget(self.summary_overview)
+        self.summary_details=DetailsPanel(self.setup_details.model)
+        self.summary_workspace=SetupWorkspace(self.summary_details)
+        self.summary_workspace.toggle.hide()
+        self.summary_workspace.hide()
+        self.page_layouts[5].addWidget(self.summary_workspace,1)
+        self.page_layouts[5].setContentsMargins(16,16,16,16)
+        self.page_layouts[5].setSpacing(8)
         for lay in self.page_layouts:
             lay.addStretch()
         review = card()
@@ -1116,8 +1135,13 @@ class Window(QMainWindow):
                 if not self.args.demo:
                     return  # Render flags never launch a real setup process.
                 self.begin_setup(instant=True)
+                if self.args.page=='summary': self.set_page(5)
 
-        if self.args.details: self.setup_details_toggle.setChecked(True)
+        if self.args.details:
+            if self.pages.currentIndex()==5: self.summary_details_action.setChecked(True)
+            else: self.setup_details_toggle.setChecked(True)
+        if getattr(self.args,"technical_log",False):
+            (self.summary_details if self.pages.currentIndex()==5 else self.setup_details).technical.setChecked(True)
 
     def add_input(self, page, key, caption, secret=False):
         self.page_layouts[page].addWidget(label(caption))
@@ -1137,6 +1161,22 @@ class Window(QMainWindow):
     def network_changed(self, index):
         for key in ("ssid", "wifi_password"):
             self.inputs[key].setEnabled(index == 1)
+
+    def toggle_summary_details(self,opened):
+        from .ai_activity_ui import icon
+        self.summary_details_action.setText(tr("hide_details" if opened else "show_readable_details"))
+        self.summary_details_action.setIcon(icon("chevron-up" if opened else "chevron-down"))
+        self.summary_workspace.setVisible(opened)
+        self.summary_workspace.toggle.setChecked(opened)
+        self.summary_overview.setVisible(not opened)
+        self.summary_hint.setVisible(not opened)
+        self.summary_title.setVisible(not opened)
+        self.summary_house.setText(tr('summary_details_heading' if opened else 'summary_house',house=self.inputs['house'].text()))
+        self.summary_network.setVisible(not opened)
+        self.summary_count.setVisible(not opened)
+        if opened:
+            self.summary_details.reset(self.setup_details.model)
+            self.summary_workspace.refresh()
 
     def set_page(self, index):
         self.pages.setCurrentIndex(index)

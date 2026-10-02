@@ -37,7 +37,7 @@ QPushButton#stopAction { background: @raised; color: @error; border-color: @erro
 QPushButton#textAction { background: transparent; color: @secondary; border: none; padding: 4px; min-height: 20px; font-size: 14px; }
 QFrame#setupStep { border: 1px solid transparent; border-radius: 8px; background: transparent; }
 QFrame#setupStep[selected="true"] { background: @raised; border-color: @border; }
-QWidget#setupWorkspaceContent,QWidget#timelineBody { background: transparent; }
+QWidget#detailsTimelineRow,QWidget#summaryOverview,QWidget#setupWorkspaceContent,QWidget#timelineBody { background: transparent; }
 QWidget#setupDetails { background: @raised; border: 1px solid @border; border-radius: 16px; }
 QPushButton:hover { border-color: @text; }
 QPushButton:disabled { background: @raised; color: @muted; border-color: @border; }

@@ -2,6 +2,7 @@ import os
 os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
 import unittest
 from types import SimpleNamespace
+from pathlib import Path
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QPoint
 from home_guard_project.box.app.ui import Window
@@ -26,3 +27,26 @@ class SetupLayoutTests(unittest.TestCase):
                         bounds=workspace.step_list.rect().translated(workspace.step_list.mapTo(workspace.viewport(),QPoint(0,0)))
                         self.assertTrue(workspace.viewport().rect().contains(bounds),(bounds,workspace.viewport().rect()))
                     window.close();self.app.processEvents()
+
+    def test_recorded_summary_and_failure_keep_details_and_copy_usable(self):
+        from home_guard_project.box.app.engine_backend import OutputParser
+        args=SimpleNamespace(demo=True,setup=True,theme='dark',panel=None,fail=None,wifi=False,skip_cameras=False,alerts=False,details=False,state='mixed',cameras=3,page='progress',size='1366x768',screenshot=None)
+        window=Window(args);window.show();window.setup_details.reset()
+        recording=Path(__file__).with_name('fixtures').joinpath('setup_engine_success.txt').read_text()
+        parser=OutputParser()
+        for line in recording.splitlines(): window.engine_events.put(parser.parse(line))
+        window.present_engine_events();window.set_page(5);window.summary_details_action.setChecked(True);self.app.processEvents()
+        workspace=window.summary_workspace
+        bounds=workspace.step_list.rect().translated(workspace.step_list.mapTo(workspace.viewport(),QPoint(0,0)))
+        self.assertTrue(workspace.viewport().rect().contains(bounds),(bounds,workspace.viewport().rect()))
+        details=window.summary_details
+        details.select('network');self.assertFalse(details.selection.following)
+        details.copy();self.assertEqual(details.copy_button.text(),'Copied')
+        self.assertEqual(details.copy_timer.interval(),2000)
+        details.copy_timer.timeout.emit();self.assertEqual(details.copy_button.text(),'Copy')
+        self.assertTrue(QApplication.clipboard().text())
+        details.technical.setChecked(True);details.copy()
+        self.assertEqual(QApplication.clipboard().text(),details.model.technical_log('network'))
+        self.assertNotIn('@@step connect',QApplication.clipboard().text())
+        details.follow_progress();self.assertTrue(details.selection.following)
+        window.close();self.app.processEvents()
