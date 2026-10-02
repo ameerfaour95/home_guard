@@ -102,7 +102,7 @@ TEXT = {
     "details": "Show details",
     "close_hint": "Closing this window keeps your home protected.",
     "saved": "Clip saved from {camera}",
-    "sent": "{count} clips sent",
+    "sent": "{count} files sent to the online folder",
     "moved": "{count} clips ready for the online folder",
     "restart": "Home Guard restarted",
     "upload_error": "The online folder needs attention",
