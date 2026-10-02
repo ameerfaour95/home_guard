@@ -94,8 +94,68 @@ def send_alert(
                 log.warning("Telegram alert not ok for %s: %s", chat_id, resp.get("description"))
             results.append({"chat_id": chat_id, "ok": ok, "message_id": message_id})
         except (urllib.error.URLError, OSError) as exc:
-            log.warning("Telegram alert failed for %s: %s", chat_id, exc)
-            results.append({"chat_id": chat_id, "ok": False, "error": str(exc)})
+            reason = telegram_error(exc)
+            log.warning("Telegram alert failed for %s: %s", chat_id, reason)
+            results.append({"chat_id": chat_id, "ok": False, "error": reason})
+    return {"sent": any(r["ok"] for r in results), "results": results}
+
+
+def telegram_error(exc: BaseException) -> str:
+    """Why Telegram refused, in its own words when it gave any.
+
+    A refusal arrives as an HTTP error whose body says what is wrong ("Forbidden:
+    bot was kicked from the group chat"); the status line alone ("403 Forbidden")
+    does not tell an installer what to fix.
+    """
+    if isinstance(exc, urllib.error.HTTPError):
+        try:
+            description = json.loads(exc.read().decode("utf-8", "replace")).get("description")
+        except (ValueError, OSError, AttributeError):
+            description = None
+        if description:
+            hint = ""
+            if exc.code == 403:
+                hint = " - add the bot to the Telegram group again"
+            return f"{description}{hint}"
+    return str(exc)
+
+
+def send_clip(
+    cfg: TelegramConfig,
+    index: AlertIndex,
+    alert_id: str,
+    clip_path: str,
+    post_multipart: Post = telegram_notify._http_post_multipart,
+) -> Dict[str, Any]:
+    """Send an alert's video as a reply under the alert it belongs to, in every chat that got the alert. Never raises."""
+    if cfg.dry_run or not cfg.enabled:
+        return {"sent": False, "reason": "dry_run" if cfg.dry_run else "not_configured"}
+    targets = index.messages(alert_id)
+    if not targets:
+        return {"sent": False, "reason": "the alert was not delivered"}
+    results = []
+    try:
+        with open(clip_path, "rb") as f:
+            data = f.read()
+    except OSError as exc:
+        return {"sent": False, "reason": str(exc)}
+    for chat_id, message_id in targets:
+        try:
+            resp = post_multipart(
+                cfg.bot_token, "sendVideo",
+                {"chat_id": chat_id, "reply_to_message_id": str(message_id),
+                 "allow_sending_without_reply": "true", "supports_streaming": "true"},
+                {"video": (os.path.basename(clip_path), data, "video/mp4")},
+                timeout=120.0,
+            )
+            ok = bool(resp.get("ok"))
+            if not ok:
+                log.warning("Telegram video not ok for %s: %s", chat_id, resp.get("description"))
+            results.append({"chat_id": chat_id, "ok": ok})
+        except (urllib.error.URLError, OSError) as exc:
+            reason = telegram_error(exc)
+            log.warning("Telegram video failed for %s: %s", chat_id, reason)
+            results.append({"chat_id": chat_id, "ok": False, "error": reason})
     return {"sent": any(r["ok"] for r in results), "results": results}
 
 
@@ -114,6 +174,10 @@ class OwnerAssistant:
 
     def send_alert(self, alert: Dict[str, Any], text: str, image: Optional[bytes] = None) -> Dict[str, Any]:
         return send_alert(self.cfg, self.index, alert, text, image)
+
+    def send_clip(self, alert_id: str, clip_path: str) -> Dict[str, Any]:
+        """The alert's video, as a reply under the alert. Call it once the clip has been written."""
+        return send_clip(self.cfg, self.index, alert_id, clip_path)
 
 
 def alert_roots(live_dir: str = PRODUCTION_LIVE_DIR, archive_dir: str = PRODUCTION_ARCHIVE_DIR) -> List[str]:

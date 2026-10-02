@@ -385,6 +385,11 @@ class AlertIndex:
                 return entry["alert"]
         return None
 
+    def messages(self, alert_id: str) -> List[Tuple[str, int]]:
+        """``(chat_id, message_id)`` of every message that carried the alert *alert_id*."""
+        return [(entry["chat_id"], entry["message_id"]) for entry in self._entries
+                if (entry.get("alert") or {}).get("alert_id") == alert_id]
+
     def latest(self, chat_id: Any, now: float, max_age_sec: float = 6 * 3600) -> Optional[Dict[str, Any]]:
         """The newest alert sent to *chat_id*, for a message that replies to nothing. None if it is too old to guess."""
         for entry in reversed(self._entries):

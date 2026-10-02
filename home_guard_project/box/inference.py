@@ -301,6 +301,9 @@ def detect_trigger(result) -> Tuple[bool, bool, List[str]]:
 # ----------------------------------------------------------------------------
 # Runtime
 # ----------------------------------------------------------------------------
+STATUS_LOOK_SEC = 1.0   # how often the detector looks at a camera that cannot alert right now
+
+
 class _Stream:
     """Threaded RTSP reader keeping only the latest frame (drops stale frames).
 
@@ -359,14 +362,43 @@ class AlertJob:
     ready: threading.Event = field(default_factory=threading.Event)
 
 
+def delivery(res: Dict[str, Any]) -> Tuple[bool, str]:
+    """Did the alert reach anyone, and if not, why: ``(sent, reason)``.
+
+    A dispatch result is nested per channel and per chat; one delivery anywhere
+    counts as sent. The reason is the first one a channel gave.
+    """
+    sent = False
+    reasons: List[str] = []
+
+    def walk(node: Any) -> None:
+        nonlocal sent
+        if isinstance(node, dict):
+            if node.get("sent") is True:
+                sent = True
+            for key in ("error", "reason"):
+                if isinstance(node.get(key), str) and node[key]:
+                    reasons.append(node[key])
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(res)
+    return sent, "" if sent else (reasons[0] if reasons else "not delivered")
+
+
 def _worker(backend, box_settings, env, settings: AlertSettings,
             camera_name: str, frames: List[Any],
-            assistant: Any = None, job: Optional[AlertJob] = None) -> None:
+            assistant: Any = None, job: Optional[AlertJob] = None, status: Any = None) -> None:
     """Run the VLM call + dispatch off the capture loop. Never raises out.
 
     With an *assistant*, an alert for a camera the owner has paused is described
-    and saved but not sent. *job* receives the outcome for the clip's meta.
+    and saved but not sent. *job* receives the outcome for the clip's meta, and
+    *status* (ai_status.AiStatus) what the box's window shows about it.
     """
+    labels = job.labels if job is not None else []
     try:
         now = datetime.now()
         in_win = in_alert_window(now.hour, settings.alert_start_hour, settings.alert_end_hour)
@@ -397,6 +429,8 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                 job.alert = {"summary": summary, "alert_command": "[none]", "alert_reason": "",
                              "labels": job.labels, "false_positive": True,
                              "vlm": {"people": parsed.get("people"), "vehicle_moving": parsed.get("vehicle_moving")}}
+            if status is not None:
+                status.decision(camera_name, labels, summary, "[none]", sent=False, false_positive=True)
             return
         log.info("[%s] alert=%s summary=%s", camera_name, cmd, summary)
         # Attach the most recent frame of the clip as the alert snapshot.
@@ -416,6 +450,9 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
             res = dispatch_alert(box_settings, env, cmd, f"{camera_name}: {summary}", reason,
                                  image=image or None, assistant=assistant, alert=alert_ref)
             log.info("[%s] alert dispatched: %s", camera_name, res)
+        if status is not None:
+            sent, why_not = delivery(res)
+            status.decision(camera_name, labels, summary, cmd, sent=sent, muted=muted, error=why_not)
         if job is not None:
             job.alert = {"summary": summary, "alert_command": cmd, "alert_reason": reason,
                          "labels": job.labels, "muted": muted, "dispatch": res}
@@ -426,15 +463,17 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
             job.ready.set()
 
 
-def _save_clip(job: AlertJob, frames: List[Any], production_dir: str, training_dir: str) -> None:
+def _save_clip(job: AlertJob, frames: List[Any], production_dir: str, training_dir: str,
+               assistant: Any = None) -> None:
     """Write the alert's clip once the worker has decided what the alert was. Never raises out.
 
     A real alert goes to *production_dir* (kept two weeks, where the owner can
     ask for it). A false positive goes to *training_dir*, the collector's own
-    dataset folder, and is uploaded with the clips for tagging.
+    dataset folder, and is uploaded with the clips for tagging. With an
+    *assistant*, the video of an alert that was sent follows it in Telegram.
     """
     try:
-        from .alert_clips import false_positive_stem, write_alert_clip  # noqa: PLC0415
+        from .alert_clips import clip_file, false_positive_stem, write_alert_clip  # noqa: PLC0415
 
         job.ready.wait(timeout=90)
         alert = job.alert or {"summary": "", "alert_command": "[none]", "alert_reason": "", "labels": job.labels}
@@ -445,6 +484,9 @@ def _save_clip(job: AlertJob, frames: List[Any], production_dir: str, training_d
             meta = write_alert_clip(production_dir, job.camera, job.stem, frames, alert)
         if meta:
             log.info("[%s] clip saved: %s (%d frames)", job.camera, os.path.basename(meta), len(frames))
+        if meta and assistant is not None and not job.false_positive and delivery(alert.get("dispatch") or {})[0]:
+            res = assistant.send_clip(job.stem, clip_file(production_dir, meta))
+            log.info("[%s] video %s", job.camera, "sent" if res.get("sent") else f"not sent: {res}")
     except Exception as exc:  # noqa: BLE001
         log.warning("[%s] could not save the clip %s: %s", job.camera, job.stem, exc)
 
@@ -493,13 +535,16 @@ def run() -> int:
     # Every alert is saved as a clip (the seconds around it) in the production folder,
     # and the owner can answer it in Telegram. Neither may stop the alerts themselves.
     from .alert_clips import POST_SECONDS, PRE_SECONDS, ClipRing, alert_stem  # noqa: PLC0415
-    from .boxconfig import LIVE_DIR, PRODUCTION_LIVE_DIR  # noqa: PLC0415
+    from .ai_status import AiStatus, objects_from_result  # noqa: PLC0415
+    from .boxconfig import LIVE_DIR, LOG_DIR, PRODUCTION_LIVE_DIR  # noqa: PLC0415
 
     rings: Dict[str, ClipRing] = {name: ClipRing() for name in cameras}
     streams = {name: _Stream(name, url, ring=rings[name]) for name, url in cameras.items()}
     buffers: Dict[str, deque] = {name: deque(maxlen=settings.clip_frames) for name in cameras}
     last_buf_ts: Dict[str, float] = {name: 0.0 for name in cameras}
     last_alert_ts: Dict[str, float] = {name: 0.0 for name in cameras}
+    last_look_ts: Dict[str, float] = {name: 0.0 for name in cameras}
+    status = AiStatus(os.path.join(LOG_DIR, "ai_status.json"))  # what the box's window shows
     worker = {"t": None}  # single in-flight VLM call across cameras (N150 budget)
     pending: List[AlertJob] = []
     assistant = None
@@ -516,7 +561,8 @@ def run() -> int:
         for job in [j for j in pending if now_ts >= j.ts + POST_SECONDS]:
             pending.remove(job)
             clip = rings[job.camera].between(job.ts - PRE_SECONDS, job.ts + POST_SECONDS)
-            threading.Thread(target=_save_clip, args=(job, clip, PRODUCTION_LIVE_DIR, LIVE_DIR), daemon=True).start()
+            threading.Thread(target=_save_clip, args=(job, clip, PRODUCTION_LIVE_DIR, LIVE_DIR, assistant),
+                             daemon=True).start()
         for name in cameras:
             frame = streams[name].read()
             if frame is None:
@@ -526,15 +572,25 @@ def run() -> int:
                 buffers[name].append(frame)
                 last_buf_ts[name] = now_ts
 
-            if now_ts - last_alert_ts[name] < settings.cooldown_sec:
-                continue
             now = datetime.now()
             if not in_alert_window(now.hour, settings.alert_start_hour, settings.alert_end_hour):
                 continue
-            if worker["t"] is not None and worker["t"].is_alive():
-                continue  # a VLM call is already running
+            # No new alert for this camera during its cooldown, or while a VLM call is
+            # running. The detector still looks about once a second then, only so the
+            # window can show what it sees.
+            waiting = (now_ts - last_alert_ts[name] < settings.cooldown_sec
+                       or (worker["t"] is not None and worker["t"].is_alive()))
+            if waiting and now_ts - last_look_ts[name] < STATUS_LOOK_SEC:
+                continue
+            last_look_ts[name] = now_ts
 
             results = model.predict(frame, conf=settings.conf, verbose=False)
+            try:
+                status.detection(name, objects_from_result(results[0]) if results else [], now=now_ts)
+            except Exception as exc:  # noqa: BLE001 - what the window shows must never stop the alerts
+                log.debug("[%s] status not updated: %s", name, exc)
+            if waiting:
+                continue
             person, vehicle, labels = detect_trigger(results[0]) if results else (False, False, [])
             if not (person or vehicle):
                 continue
@@ -546,7 +602,7 @@ def run() -> int:
             job = AlertJob(camera=name, stem=alert_stem(name, now_ts), ts=now_ts, labels=labels)
             pending.append(job)
             t = threading.Thread(target=_worker,
-                                 args=(backend, box_settings, env, settings, name, frames, assistant, job),
+                                 args=(backend, box_settings, env, settings, name, frames, assistant, job, status),
                                  daemon=True)
             t.start()
             worker["t"] = t

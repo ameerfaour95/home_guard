@@ -80,6 +80,13 @@ def _to_h264(path: str) -> bool:
         return False
 
 
+def clip_file(root_dir: str, meta_path: str) -> str:
+    """The video that a meta file under *root_dir* describes, as a path on this machine."""
+    with open(meta_path, encoding="utf-8") as f:
+        relative = str(json.load(f)["clip_path"])
+    return os.path.join(root_dir, *relative.replace("\\", "/").split("/"))
+
+
 def write_alert_clip(
     root_dir: str,
     camera: str,
