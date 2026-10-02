@@ -32,6 +32,10 @@ import torch
 from ultralytics import YOLO
 
 from config import COCO_NAMES, Config, load_config
+try:
+    from zones import ZoneMask, mask_for
+except ModuleNotFoundError:   # loaded by file path with only `config` aliased (the preview test)
+    from home_guard_project.data_collection.zones import ZoneMask, mask_for
 
 log = logging.getLogger(__name__)
 
@@ -140,25 +144,6 @@ def _norm_polygon_to_px(
     return np.array(
         [[int(x * w), int(y * h)] for x, y in norm_pts], dtype=np.int32,
     )
-
-
-def _any_center_in_polygon(
-    boxes: Any, class_ids: List[int], polygon: np.ndarray,
-) -> bool:
-    """True if any bbox whose class is in *class_ids* has its centre inside *polygon*."""
-    if boxes is None or len(boxes) == 0:
-        return False
-    id_set = set(class_ids)
-    for b in boxes:
-        cid = int(b.cls.item()) if hasattr(b.cls, "item") else int(b.cls)
-        if cid not in id_set:
-            continue
-        xyxy = b.xyxy[0].tolist()
-        cx = (xyxy[0] + xyxy[2]) / 2.0
-        cy = (xyxy[1] + xyxy[3]) / 2.0
-        if cv2.pointPolygonTest(polygon, (cx, cy), False) >= 0:
-            return True
-    return False
 
 
 # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -357,10 +342,11 @@ class SubStreamThread:
 
     _BUF_JPEG_QUALITY = 92
 
-    def __init__(self, cfg: Config, src: str):
+    def __init__(self, cfg: Config, src: str, mask: Optional[ZoneMask] = None):
         os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", cfg.OPENCV_FFMPEG_CAPTURE_OPTIONS)
         self.cfg = cfg
         self.src = src
+        self.mask = mask or ZoneMask(None)   # blacks out everything outside the camera's watch zone
         self.capture: Optional[cv2.VideoCapture] = None
         self.lock = threading.Lock()
         self.buf: deque[Tuple[float, bytes]] = deque()
@@ -432,6 +418,7 @@ class SubStreamThread:
             if (now - self.last_store_ts) < self.store_interval:
                 continue
             self.last_store_ts = now
+            frame = self.mask.apply(frame)   # before resize, latest_frame and the buffer: nothing sees the outside
 
             if store_size is not None:
                 frame = cv2.resize(frame, store_size, interpolation=cv2.INTER_AREA)
@@ -511,10 +498,11 @@ class MainStreamThread:
     usage ~30-60x lower than raw numpy buffers for high-res streams.
     """
 
-    def __init__(self, cfg: Config, src: str):
+    def __init__(self, cfg: Config, src: str, mask: Optional[ZoneMask] = None):
         os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", cfg.OPENCV_FFMPEG_CAPTURE_OPTIONS)
         self.cfg = cfg
         self.src = src
+        self.mask = mask or ZoneMask(None)   # blacks out everything outside the camera's watch zone
         self.capture: Optional[cv2.VideoCapture] = None
         self.lock = threading.Lock()
         self.buf: deque[Tuple[float, bytes]] = deque()
@@ -585,6 +573,7 @@ class MainStreamThread:
             if (now - self.last_store_ts) < self.store_interval:
                 continue
             self.last_store_ts = now
+            frame = self.mask.apply(frame)
 
             self._frame_shape = (frame.shape[0], frame.shape[1])
             ok, encoded = cv2.imencode(".jpg", frame, self._jpeg_params)
@@ -867,7 +856,6 @@ class CameraState:
     is_recording: bool
     trigger_ts: float
     main_connect_ts: float
-    roi_polygon: Optional[np.ndarray]
     roi_norm: Optional[List[Tuple[float, float]]]
     last_score_log: float = 0.0
 
@@ -1131,7 +1119,7 @@ def _save_clip(
         },
 
         "roi": {
-            "active": st.roi_polygon is not None,
+            "active": st.roi_norm is not None,            # the clip was masked to this zone
             "polygon_normalized": (
                 [[float(x), float(y)] for x, y in st.roi_norm]
                 if st.roi_norm else None
@@ -1241,10 +1229,10 @@ def main() -> None:
     now = time.time()
     for name, rtsp_sub in cfg.CAMERAS.items():
         rtsp_main = cfg.CAMERAS_MAIN.get(name, "")
-        cap = SubStreamThread(cfg, rtsp_sub)
+        cap = SubStreamThread(cfg, rtsp_sub, mask=mask_for(cfg.ROI_ZONES, name))
         norm_pts = cfg.ROI_ZONES.get(name)
         if norm_pts:
-            log.info("%s: ROI zone active (%d vertices)", name, len(norm_pts))
+            log.info("%s: watch zone active (%d corners); everything outside is blacked out", name, len(norm_pts))
         cameras[name] = CameraState(
             name=name, rtsp=rtsp_sub, rtsp_main=rtsp_main,
             cap=cap, main_cap=None,
@@ -1257,7 +1245,6 @@ def main() -> None:
             trigger_detected=False, trigger_max_conf=0.0,
             yolo_class_counts={}, yolo_class_max_conf={},
             is_recording=False, trigger_ts=0.0, main_connect_ts=0.0,
-            roi_polygon=None,
             roi_norm=list(norm_pts) if norm_pts else None,
         )
 
@@ -1328,15 +1315,6 @@ def main() -> None:
                         (st.yolo_class_max_conf.get(cid, 0.0) for cid in cfg.TRIGGER_CLASS_IDS),
                         default=0.0,
                     )
-
-                    if st.roi_norm is not None:
-                        if st.roi_polygon is None:
-                            fh, fw = frame.shape[:2]
-                            st.roi_polygon = _norm_polygon_to_px(st.roi_norm, fw, fh)
-                        st.trigger_detected = _any_center_in_polygon(
-                            results[0].boxes, class_ids=cfg.TRIGGER_CLASS_IDS,
-                            polygon=st.roi_polygon,
-                        )
                 else:
                     results = st.last_yolo
 
@@ -1374,7 +1352,7 @@ def main() -> None:
                     and st.trigger_detected
                     and st.detection_score > 0
                 ):
-                    st.main_cap = MainStreamThread(cfg, st.rtsp_main)
+                    st.main_cap = MainStreamThread(cfg, st.rtsp_main, mask=ZoneMask(st.roi_norm))
                     st.main_connect_ts = now
                     log.info("[%s] Pre-connecting main-stream (score=%.1f)",
                              st.name, st.detection_score)
@@ -1400,7 +1378,7 @@ def main() -> None:
                     st.trigger_ts = 0.0
                     if cfg.MAIN_STREAM_ENABLED and st.rtsp_main:
                         if st.main_cap is None:
-                            st.main_cap = MainStreamThread(cfg, st.rtsp_main)
+                            st.main_cap = MainStreamThread(cfg, st.rtsp_main, mask=ZoneMask(st.roi_norm))
                             st.main_connect_ts = now
                         if st.main_cap.frame_shape is not None:
                             st.trigger_ts = now
