@@ -54,7 +54,7 @@ class CameraPage:
         self.error_details=QTextEdit()
         self.error_details.setReadOnly(True)
         self.error_details.setMaximumHeight(145)
-        self.error_details.setStyleSheet("font-family: Consolas; font-size: 12px;")
+        self.error_details.setStyleSheet("font-family: Consolas; font-size: 10.5pt;")
         self.error_details.hide()
         self.details_toggle.toggled.connect(self.error_details.setVisible)
         outer.addWidget(self.error_details)

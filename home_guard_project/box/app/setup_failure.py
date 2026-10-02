@@ -6,10 +6,10 @@ from .strings import tr
 def network_facts(line):
     # Retain only explicitly identified box/network facts, never camera addresses.
     facts = {}
-    if re.search(r'box|wi-fi|wifi|ipv4|ip address', line, re.I):
+    if re.search(r'box|wi-fi|wifi|ssid|ipv4|ip address|local_ip', line, re.I):
         address = re.search(r'(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?![\w.])', line)
         if address: facts['address'] = address[0]
-    name = re.search(r'(?:wi-fi|wifi|ssid)\s*(?:[:=]|is|on|to)?\s*[\"\']([^\"\']+)', line, re.I)
+    name = re.search(r'(?:wi-fi|wifi|ssid)[\"\']?\s*(?:[:=]|is|on|to)?\s*[\"\']([^\"\']+)', line, re.I)
     if name: facts['network'] = name[1]
     return facts
 

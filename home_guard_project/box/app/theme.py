@@ -1,5 +1,6 @@
 """All visual tokens and application control styles."""
 from pathlib import Path
+import re
 PALETTES={
  'dark':dict(bg='#0c1218',surface='#121c24',raised='#192731',border='#273743',text='#edf4f6',secondary='#b5c8d1',muted='#7e98a6',action='#42d6c3',ok='#7edcb0',error='#f17e86',warning='#e2ba76',bubble='#143330'),
  'light':dict(bg='#edf3f4',surface='#ffffff',raised='#e4eef0',border='#ccdadd',text='#182d37',secondary='#405f6e',muted='#5c7987',action='#087c73',ok='#16784c',error='#b83748',warning='#966917',bubble='#d7ece7')}
@@ -60,4 +61,7 @@ QProgressBar::chunk { background: @action; border-radius: 4px; }
 QToolTip { background: @raised; color: @text; border: 1px solid @border; padding: 8px; }
 """
     for name,value in dict(t,check=check,upArrow=(Path(__file__).parent/'assets/icons/chevron-up.svg').as_posix(),downArrow=(Path(__file__).parent/'assets/icons/chevron-down.svg').as_posix()).items(): sheet=sheet.replace('@'+name,value)
-    return sheet
+    # A pixel-sized QFont has pointSize() == -1. Qt's native/rich-text paths
+    # sometimes copy that sentinel into setPointSize(), producing a warning.
+    # Keep the same 96-DPI type scale, with positive point sizes throughout.
+    return re.sub(r'font-size:\s*(\d+(?:\.\d+)?)px',lambda m:'font-size: '+format(float(m[1])* .75,'g')+'pt',sheet)

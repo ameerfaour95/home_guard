@@ -423,7 +423,6 @@ class Window(QMainWindow):
             state.collecting = self.box_controls.phase() == "running"
             if not state.cameras:
                 state.waiting=0;state.upload=''
-            if scenario == "no-cameras": state.cameras=[]
             self.apply_state(
                 state,
                 demo_settings.show_cameras,
@@ -657,7 +656,9 @@ class Window(QMainWindow):
 
     def stage_action(self):
         if self.box_unreachable:
-            self.box_unreachable=self.args.state=="box-unreachable" if self.args.demo else not Path(bc.BOX_YAML).is_file()
+            if self.args.demo:
+                self.args.state='no-cameras';self.box_unreachable=False
+            else: self.box_unreachable=not Path(bc.BOX_YAML).is_file()
             self.last_poll=0
             self.tick()
         else:
@@ -937,12 +938,14 @@ class Window(QMainWindow):
         self.fail.setVisible(self.args.demo)
         self.page_layouts[3].addWidget(self.fail)
         self.step_rows = []
+        self.engine_step_names=[]
         progress_body = QHBoxLayout()
         progress_steps = QVBoxLayout()
         from .engine_backend import ENGINE_STEPS
         for step in ENGINE_STEPS:
             row = QHBoxLayout()
             name = label(tr("step_"+step))
+            self.engine_step_names.append(name)
             name.setMinimumWidth(190)
             status = label(tr("pending"), "muted")
             row.addWidget(name, 2)
@@ -954,6 +957,11 @@ class Window(QMainWindow):
                 self.camera_search_note.hide()
                 progress_steps.addWidget(self.camera_search_note)
             self.step_rows.append(status)
+            if step == 'network':
+                self.network_progress_note=label('', 'warning')
+                self.network_progress_note.setMaximumWidth(580)
+                self.network_progress_note.hide()
+                progress_steps.addWidget(self.network_progress_note)
         progress_steps.addStretch()
         progress_body.addLayout(progress_steps,1)
         self.setup_details_toggle = QCheckBox(tr("details"))
@@ -969,6 +977,8 @@ class Window(QMainWindow):
         self.setup_cancel.clicked.connect(self.cancel_setup)
         self.page_layouts[4].addWidget(self.setup_cancel)
         self.failure_actions = QWidget()
+        self.failure_actions.setObjectName('failureActions')
+        self.failure_actions.setStyleSheet('QWidget#failureActions { background: transparent; }')
         actions = QHBoxLayout(self.failure_actions)
         actions.setContentsMargins(0,0,0,0)
         self.failure_retry = QPushButton(tr("search_again"))
@@ -984,7 +994,23 @@ class Window(QMainWindow):
         actions.addWidget(self.failure_finish)
         actions.addStretch()
         self.failure_actions.hide()
-        self.page_layouts[4].insertWidget(2,self.failure_actions)
+        self.failure_panel=QWidget()
+        self.failure_panel.setObjectName('failurePanel')
+        self.failure_panel.setStyleSheet('QWidget#failurePanel { background: transparent; }')
+        failure_layout=layout_for(self.failure_panel,24)
+        self.failure_layout=failure_layout
+        failure_layout.setSpacing(24)
+        self.failure_title=label('', 'headline')
+        self.failure_explanation=label('')
+        self.failure_explanation.setMaximumWidth(850)
+        failure_layout.addWidget(self.failure_title)
+        failure_layout.addWidget(self.failure_explanation)
+        failure_layout.addWidget(self.failure_actions)
+        failure_layout.addStretch()
+        progress_body.addWidget(self.failure_panel,3)
+        progress_body.removeWidget(self.setup_details)
+        self.page_layouts[4].addWidget(self.setup_details)
+        self.failure_panel.hide()
         self.setup_details_toggle.setText(tr("show_readable_details"))
         self.summary_house = label("", "section")
         self.page_layouts[5].addWidget(self.summary_house)
@@ -1274,6 +1300,11 @@ class Window(QMainWindow):
         from .setup_failure import FailureFacts
         self.failure_facts=FailureFacts(network=self.run_answers.ssid if self.run_answers.network=="wifi" else "")
         self.failure_actions.hide()
+        self.failure_panel.hide()
+        self.progress_title.show();self.progress_hint.show()
+        self.failure_layout.removeWidget(self.setup_details_toggle)
+        self.page_layouts[4].insertWidget(2,self.setup_details_toggle)
+        self.setup_details.setMaximumHeight(16777215)
         self.setup_cancel.show()
         self.setup_details_toggle.setChecked(False)
         self.camera_retry.capture(self.run_answers)
@@ -1284,9 +1315,11 @@ class Window(QMainWindow):
         from .search_progress import CameraSearch
         self.camera_search=CameraSearch()
         self.camera_search_note.hide()
+        self.network_progress_note.hide()
         self.setup_details.reset()
         for row in self.step_rows:
             row.setText(tr("pending"));row.setStyleSheet("")
+        for name in self.engine_step_names: name.setStyleSheet('color: '+MUTED)
         for item in self.check_labels: item.clear()
         self.setup_cancel.setEnabled(True)
         self.set_page(4)
@@ -1311,7 +1344,7 @@ class Window(QMainWindow):
 
     def present_engine_events(self):
         import queue
-        from .engine_backend import ENGINE_STEPS
+        from .engine_backend import ENGINE_STEPS, is_progress_warning
         while True:
             try: event=self.engine_events.get_nowait()
             except queue.Empty: break
@@ -1329,14 +1362,22 @@ class Window(QMainWindow):
                     self.running_step=index;self.running_since=time.monotonic()
                     row.setText(tr("setup_elapsed",seconds=0))
                     row.setStyleSheet("")
+                    self.engine_step_names[index].setStyleSheet('color: '+ACTION)
+                elif is_progress_warning(event):
+                    self.running_step=index
+                    if not hasattr(self,'running_since'): self.running_since=time.monotonic()
+                    self.network_progress_note.setText(event.text)
+                    self.network_progress_note.show()
                 else:
                     self.running_step=None
+                    if event.step=='network': self.network_progress_note.hide()
                     if event.step == "cameras":
                         self.camera_search.finish()
                         self.camera_search_note.hide()
                     status={"ok":"PASS","warn":"WARN","fail":"FAIL","skip":"step_skip"}[event.status]
                     row.setText(tr(status)+tr("separator")+event.text)
                     row.setStyleSheet("color: "+(ERROR if event.status=="fail" else WARNING if event.status in ("warn","skip") else OK))
+                    self.engine_step_names[index].setStyleSheet('color: '+(ERROR if event.status=='fail' else WARNING if event.status in ('warn','skip') else OK))
                     if event.status=="fail":
                         self.engine_failed_step=event.step
                         if event.step == "cameras":
@@ -1378,16 +1419,25 @@ class Window(QMainWindow):
             self.update_step_bar(OWNERS.get(self.engine_failed_step,0))
             title,explanation=self.failure_facts.content(self.engine_failed_step)
             self.progress_title.setObjectName("headline")
+            self.progress_title.style().unpolish(self.progress_title);self.progress_title.style().polish(self.progress_title)
             self.progress_title.setText(title)
             self.progress_hint.setObjectName("")
             self.progress_hint.setStyleSheet("")
             self.progress_hint.setText(explanation)
+            self.failure_title.setText(title)
+            self.failure_explanation.setText(explanation)
+            self.progress_title.hide();self.progress_hint.hide()
+            self.failure_panel.show()
+            self.page_layouts[4].removeWidget(self.setup_details_toggle)
+            self.failure_layout.insertWidget(3,self.setup_details_toggle)
             self.setup_cancel.hide()
             self.failure_actions.show()
             cameras=self.engine_failed_step=="cameras"
             self.failure_retry.setText(tr("search_again" if cameras else "retry_setup_action"))
             self.failure_login.setVisible(cameras)
             self.failure_finish.setVisible(cameras)
+            self.failure_retry.setFocus()
+            self.setup_details.setMaximumHeight(230)
             self.setup_details_toggle.setChecked(False)
             from .engine_backend import ENGINE_STEPS
             for step,row in zip(ENGINE_STEPS,self.step_rows):

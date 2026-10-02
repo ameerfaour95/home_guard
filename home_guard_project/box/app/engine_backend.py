@@ -15,6 +15,9 @@ from .strings import tr
 ENGINE_STEPS = ('connect','update','site','network','cameras','alerts','readiness')
 OWNERS = {'connect':0,'update':0,'site':2,'network':1,'cameras':3,'alerts':2,'readiness':0}
 
+def is_progress_warning(event):
+    return event.kind=='step' and event.step=='network' and event.status=='warn' and 'switching' in event.text.lower()
+
 @dataclass(frozen=True)
 class Event:
     kind: str
@@ -110,7 +113,7 @@ class EngineBackend:
                                 if len(completed)>=len(ENGINE_STEPS) or event.step!=ENGINE_STEPS[len(completed)]:
                                     emit(Event('step',running,'fail',tr('engine_protocol_error')));failed=True;break
                             elif event.status in ('ok','warn','skip'):
-                                if event.step not in completed: completed.append(event.step)
+                                if not is_progress_warning(event) and event.step not in completed: completed.append(event.step)
                             elif event.status=='fail': failed=True
                         if event.kind=='check' and event.status=='FAIL': failed=True
                         if event.kind=='done':

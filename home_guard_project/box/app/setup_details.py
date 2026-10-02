@@ -41,7 +41,8 @@ class DetailsModel:
     def feed(self,event):
         if event.kind=='step':
             self.current=event.step
-            group=self.groups[event.step];group.status=event.status;group.result=event.text
+            from .engine_backend import is_progress_warning
+            group=self.groups[event.step];group.status='start' if is_progress_warning(event) else event.status;group.result=event.text
             self.raw.append('@@step '+event.step+' '+event.status+(' '+event.text if event.text else ''))
             if event.text:
                 message=('error' if event.status=='fail' else 'warning' if event.status=='warn' else 'muted',event.text)

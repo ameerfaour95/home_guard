@@ -22,7 +22,7 @@ class DetailsPanel(QWidget):
         self.readable=label('');self.readable.setAlignment(__import__('PySide6.QtCore',fromlist=['Qt']).Qt.AlignmentFlag.AlignTop)
         scroll=QScrollArea();scroll.setWidgetResizable(True);scroll.setWidget(self.readable)
         self.readable_scroll=scroll;layout.addWidget(scroll,1)
-        self.raw=QTextEdit();self.raw.setReadOnly(True);self.raw.setStyleSheet("font-family: Consolas; font-size: 12px;");layout.addWidget(self.raw,1)
+        self.raw=QTextEdit();self.raw.setReadOnly(True);self.raw.setStyleSheet("font-family: Consolas; font-size: 10.5pt;");layout.addWidget(self.raw,1)
         self.setMinimumHeight(180);self.setMaximumHeight(16777215)
         self.reset()
     def reset(self):
