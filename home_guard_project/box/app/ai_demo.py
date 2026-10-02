@@ -14,6 +14,10 @@ def demo_status(names,now,state):
         if state=='ai-delivered': samples.append((30,'person','demo_ai_person','[send_message]',False,False,False,tr('demo_ai_refused')))
         for age,label,summary,command,sent,training,muted,error in sorted(samples,key=lambda row:-row[0]):
             data['decisions'].append({'ts':now-age,'camera':names[0 if age==15 else min(1,len(names)-1)],'labels':[label],'summary':tr(summary),'command':command,'sent':sent,'false_positive':training,'muted':muted,'error':error})
+    if state in ('paused','ai-conversation','ai-group') and names:
+        data['decisions']=[{'ts':now-age,'camera':names[0],'labels':[],'summary':tr('demo_pause_summary'),'command':'[none]','sent':False,'false_positive':False,'muted':True,'error':''} for age in (110,100,90,80,70)]
+    if state=='ai-group' and names:
+        for decision in data['decisions']: decision['ts']+=65
     data['thinking']={'camera':names[0],'labels':['person'],'ts':now} if state=='ai-thinking' and names else None
     if state=='ai-stale':
         data['updated']=now-30

@@ -2,8 +2,8 @@
 from pathlib import Path
 import re
 PALETTES={
- 'dark':dict(bg='#0c1218',surface='#121c24',raised='#192731',border='#273743',text='#edf4f6',secondary='#b5c8d1',muted='#7e98a6',action='#42d6c3',ok='#7edcb0',error='#f17e86',warning='#e2ba76',bubble='#143330'),
- 'light':dict(bg='#edf3f4',surface='#ffffff',raised='#e4eef0',border='#ccdadd',text='#182d37',secondary='#405f6e',muted='#5c7987',action='#087c73',ok='#16784c',error='#b83748',warning='#966917',bubble='#d7ece7')}
+ 'dark':dict(bg='#0c1218',surface='#121c24',raised='#192731',border='#273743',text='#edf4f6',secondary='#bec8ce',muted='#a0adb8',action='#42d6c3',ok='#7edcb0',error='#f17e86',warning='#e2ba76',bubble='#143330'),
+ 'light':dict(bg='#edf3f4',surface='#ffffff',raised='#e4eef0',border='#ccdadd',text='#182d37',secondary='#405f6e',muted='#496775',action='#087c73',ok='#16784c',error='#b83748',warning='#966917',bubble='#d7ece7')}
 ACTION=PALETTES['dark']['action'];OK=PALETTES['dark']['ok'];ERROR=PALETTES['dark']['error'];WARNING=PALETTES['dark']['warning'];MUTED=PALETTES['dark']['muted']
 DETECTOR_PERSON=ACTION;DETECTOR_VEHICLE=WARNING
 
@@ -13,6 +13,8 @@ def stylesheet(theme='dark'):
     sheet="""
 QWidget { background: @bg; color: @text; font-family: 'Segoe UI Variable', 'Segoe UI', 'Inter'; font-size: 16px; }
 QLabel { background: transparent; border: none; }
+QLabel#botAvatar { background: @bubble; border-radius: 15px; }
+QWidget#quietGroup { background: transparent; }
 QLabel#title { font-size: 30px; font-weight: 600; }
 QLabel#headline { font-size: 34px; font-weight: 600; }
 QLabel#section { font-size: 21px; font-weight: 600; }
@@ -32,7 +34,8 @@ QFrame#familyBubble { background: @bubble; border: 1px solid @border; border-rad
 QFrame#alertCard[urgent="true"] { border-left: 3px solid @error; }
 QPushButton { background: @action; color: @bg; border: 1px solid @action; border-radius: 8px; padding: 12px 24px; font-weight: 600; min-height: 20px; }
 QPushButton#secondary { background: @raised; color: @text; border-color: @border; }
-QPushButton#iconButton { background: transparent; color: @text; border-color: @border; padding: 10px; }
+QPushButton#iconButton { background: transparent; color: @text; border-color: transparent; padding: 10px; }
+QPushButton#iconButton:hover { background: @raised; border-color: transparent; }
 QPushButton#iconButton:checked { background: @bubble; border-color: @action; }
 QPushButton#stopAction { background: @raised; color: @error; border-color: @error; }
 QPushButton#textAction { background: transparent; color: @secondary; border: none; padding: 4px; min-height: 20px; font-size: 14px; }

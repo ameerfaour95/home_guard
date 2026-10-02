@@ -49,7 +49,8 @@ class CameraControls:
             return list(self.records)
         from ..find_cameras import _read_cameras_raw
         raw = _read_cameras_raw()
-        self.records = [Camera(name, enabled) for group, enabled in (("cameras", True), ("disabled", False)) for name in raw.get(group, {})]
+        previous={camera.name:camera for camera in self.records}
+        self.records = [replace(previous[name],enabled=enabled) if name in previous else Camera(name,enabled) for group, enabled in (("cameras", True), ("disabled", False)) for name in raw.get(group, {})]
         return list(self.records)
 
     def search(self, user, password):

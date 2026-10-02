@@ -410,5 +410,15 @@ TEXT.update(show_detections="Show detections on the pictures",show_detections_to
 
 TEXT.update(live_applied="Applied",detection_group="Detection",sensitivity="Sensitivity",certainty_required="Needs to be {percent}% sure",more_alerts="More alerts",fewer_false_alarms="Fewer false alarms",reset_sensitivity="Reset to 40%",live_not_picked_up="The program has not picked this up yet",sensitivity_in_force="Sensitivity {percent}%")
 
+TEXT.update(camera_off="Off")
+
+TEXT.update(quiet_status="Last upload {time} \u00b7 {clips} clips waiting \u00b7 {disk} GB free")
+
+TEXT.update(today="Today",quiet_group="Checked {camera} {count} times since {time} \u2014 {text}",quiet_once="Checked {camera} \u00b7 {time} \u2014 {text}",quiet_paused_group="{camera} \u00b7 Alerts paused \u00b7 {count} checks since {time}",quiet_paused_once="{camera} \u00b7 Alerts paused \u00b7 {time}",quiet_no_alert="{text}; no alert",demo_pause_summary="Alerts are paused; the AI was not asked.")
+
+TEXT.update({"demo_chat_hebrew_answer": "\u05d1\u05d5\u05d5\u05d3\u05d0\u05d9. \u05d0\u05de\u05e9\u05d9\u05da \u05dc\u05e9\u05de\u05d5\u05e8 \u05e2\u05dc \u05d4\u05d1\u05d9\u05ea.", "demo_chat_arabic": "\u0647\u0644 \u0627\u0644\u0628\u064a\u062a \u0628\u0623\u0645\u0627\u0646\u061f", "demo_chat_arabic_answer": "\u0646\u0639\u0645\u060c \u0623\u0646\u0627 \u0623\u0631\u0627\u0642\u0628 \u0627\u0644\u0643\u0627\u0645\u064a\u0631\u0627\u062a."})
+
+TEXT.update(quiet_paused_description="{text}; alerts paused")
+
 def tr(key, **values):
     return TEXT[key].format(**values)

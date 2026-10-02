@@ -52,6 +52,7 @@ class SettingsPage:
         columns.addWidget(security,8);columns.addWidget(viewing,6);columns.addWidget(detection,5);layout.addLayout(columns,1)
         footer=QHBoxLayout();self.note=label("","muted");footer.addWidget(self.note,1)
         self.save=QPushButton(tr("save_settings"));self.save.clicked.connect(self.save_clicked);footer.addWidget(self.save);layout.addLayout(footer)
+        self.facts=label("","muted");layout.addWidget(self.facts)
         self.waiting=False;self.timer=QTimer(self.widget);self.timer.timeout.connect(self.check_applied);self.timer.start(250)
 
     def sync_viewer(self,viewer):

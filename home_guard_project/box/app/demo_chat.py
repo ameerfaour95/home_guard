@@ -15,3 +15,13 @@ def demo_feed(decisions):
     if not latest.get('false_positive') and not latest.get('muted'):
         rows.append({'ts':latest['ts'],'who':'box','kind':'alert','text':latest['summary'],'camera':latest['camera'],'image':'demo_1.jpg','delivered':latest['sent'],'error':latest['error']})
     return rows
+
+
+def conversation_feed(decisions):
+    if not decisions: return []
+    base=decisions[-1]['ts']
+    return [{'ts':base+20,'who':'owner','kind':'message','name':'Maya','text':tr('demo_chat_hebrew'),'delivered':True},
+            {'ts':base+30,'who':'assistant','kind':'answer','text':tr('demo_chat_hebrew_answer'),'delivered':True},
+            {'ts':base+40,'who':'owner','kind':'button','name':'Ameer','text':tr('demo_chat_button'),'delivered':True},
+            {'ts':base+50,'who':'owner','kind':'message','name':'Noor','text':tr('demo_chat_arabic'),'delivered':True},
+            {'ts':base+60,'who':'assistant','kind':'answer','text':tr('demo_chat_arabic_answer'),'delivered':True}]
