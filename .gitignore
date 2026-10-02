@@ -69,4 +69,4 @@ dist/
 
 # Inference-mode clips waiting for S3 (box)
 production_multi/
-production_outbox/
+production_archive/

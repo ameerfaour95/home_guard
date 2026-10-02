@@ -22,7 +22,7 @@ BOX_YAML = os.path.join(_DIR, "box.yaml")
 # same layout. They are uploaded like the collector's clips, but to an S3 folder
 # that the bucket empties after PRODUCTION_RETENTION_DAYS (see retention.py).
 PRODUCTION_LIVE_DIR = os.path.join(PROJECT_ROOT, "production_multi")
-PRODUCTION_OUTBOX_DIR = os.path.join(PROJECT_ROOT, "production_outbox")
+PRODUCTION_ARCHIVE_DIR = os.path.join(PROJECT_ROOT, "production_archive")
 PRODUCTION_PREFIX_ROOT = "production_"
 PRODUCTION_RETENTION_DAYS = 14
 

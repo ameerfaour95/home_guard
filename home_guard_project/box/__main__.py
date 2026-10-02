@@ -22,13 +22,15 @@ import os
 import sys
 from typing import Any, Callable, Sequence, Tuple
 
+from .archive import expire_old_files
 from .boxconfig import (
     ALIVE_FILE,
     LIVE_DIR,
     MODE_INFERENCE,
     OUTBOX_DIR,
+    PRODUCTION_ARCHIVE_DIR,
     PRODUCTION_LIVE_DIR,
-    PRODUCTION_OUTBOX_DIR,
+    PRODUCTION_RETENTION_DAYS,
     BoxConfig,
     BoxConfigError,
     get_option,
@@ -39,7 +41,7 @@ from .boxconfig import (
     set_site,
 )
 from .heartbeat import build_heartbeat, put_heartbeat
-from .outbox import ORPHAN_AGE_SEC, move_finished_clips, move_orphans
+from .outbox import ORPHAN_AGE_SEC, move_feedback, move_finished_clips, move_orphans
 
 log = logging.getLogger("box")
 
@@ -63,12 +65,14 @@ def run_upload(
     workers: int,
     uploader: Callable[..., Any],
     prefix_for: Callable[[str], str] = s3_prefix,
+    keep_local: bool = False,
 ) -> Tuple[int, int]:
     """Move finished clips to the outbox and upload it. Returns ``(clips_moved, files_moved)``.
 
     The outbox has one folder per site, uploaded to that site's own S3 folder
     (named by *prefix_for*), so clips saved before a box changed house still go
-    where they belong.
+    where they belong. With *keep_local* the uploaded files stay on the box:
+    the outbox is then an archive, emptied by age and not by upload.
     """
     os.makedirs(outbox_dir, exist_ok=True)
     site_outbox = os.path.join(outbox_dir, cfg.site)
@@ -78,6 +82,7 @@ def run_upload(
     orphans = move_orphans(live_dir, site_outbox, ORPHAN_AGE_SEC)
     if orphans:
         log.info("Moved %d file(s) of interrupted clips (no meta) to the outbox.", orphans)
+    move_feedback(live_dir, site_outbox)
 
     uploaded_any = False
     for site in _site_dirs(outbox_dir):
@@ -95,7 +100,7 @@ def run_upload(
             skip_reencode=False,
             no_cleanup=True,
             allowed_labels=frozenset(),
-            delete_local=True,
+            delete_local=not keep_local,
         )
     if not uploaded_any:
         log.info("Outbox is empty — nothing to upload.")
@@ -144,7 +149,7 @@ def split_option(values: list[str]) -> Tuple[str, str]:
 def _clip_dirs(mode: str) -> Tuple[str, str]:
     """The live and outbox folders the box is filling in *mode*, for the status report."""
     if mode == MODE_INFERENCE:
-        return PRODUCTION_LIVE_DIR, PRODUCTION_OUTBOX_DIR
+        return PRODUCTION_LIVE_DIR, PRODUCTION_ARCHIVE_DIR
     return LIVE_DIR, OUTBOX_DIR
 
 
@@ -190,7 +195,7 @@ def main() -> None:
                 raise BoxConfigError("set-site needs a site name, e.g. set-site house2")
             clips, _ = change_site(
                 args.value, LIVE_DIR, OUTBOX_DIR, BOX_YAML,
-                also=[(PRODUCTION_LIVE_DIR, PRODUCTION_OUTBOX_DIR)],
+                also=[(PRODUCTION_LIVE_DIR, PRODUCTION_ARCHIVE_DIR)],
             )
         except BoxConfigError as exc:
             log.error("%s", exc)
@@ -222,11 +227,16 @@ def main() -> None:
         from home_guard_project.s3_upload.s3_upload import run as s3_run
 
         run_upload(cfg, LIVE_DIR, OUTBOX_DIR, s3_cfg.bucket, s3_cfg.workers, uploader=s3_run)
-        # Clips saved in inference mode go to the folder that expires after two weeks.
+        # Clips saved in inference mode are kept two weeks, on the box (so the owner can
+        # ask for them) and in an S3 folder the bucket empties after the same time.
         run_upload(
-            cfg, PRODUCTION_LIVE_DIR, PRODUCTION_OUTBOX_DIR, s3_cfg.bucket, s3_cfg.workers,
-            uploader=s3_run, prefix_for=production_prefix,
+            cfg, PRODUCTION_LIVE_DIR, PRODUCTION_ARCHIVE_DIR, s3_cfg.bucket, s3_cfg.workers,
+            uploader=s3_run, prefix_for=production_prefix, keep_local=True,
         )
+        expired = expire_old_files(PRODUCTION_ARCHIVE_DIR, PRODUCTION_RETENTION_DAYS)
+        if expired:
+            log.info("Deleted %d production file(s) older than %d days from this box.",
+                     expired, PRODUCTION_RETENTION_DAYS)
 
     key = put_heartbeat(
         build_heartbeat(cfg.site, *_clip_dirs(cfg.mode), ALIVE_FILE, mode=cfg.mode),
