@@ -17,6 +17,12 @@ New-Item -ItemType Directory -Force -Path $DistDir | Out-Null
 Write-Host 'Ensuring ps2exe module...' -ForegroundColor Cyan
 if (-not (Get-Module -ListAvailable -Name ps2exe)) {
     try {
+        # On a fresh machine Install-Module throws a null-reference error unless the
+        # NuGet package provider is present first; install it non-interactively.
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        if (-not (Get-PackageProvider -Name NuGet -ErrorAction SilentlyContinue)) {
+            Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Scope CurrentUser -Force | Out-Null
+        }
         Install-Module -Name ps2exe -Scope CurrentUser -Force -AllowClobber
     } catch {
         throw "Could not install ps2exe. On a machine with no PSGallery access, run 'Install-Module ps2exe' manually, or build on a connected machine. ($($_.Exception.Message))"
