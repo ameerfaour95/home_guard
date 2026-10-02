@@ -1,6 +1,25 @@
 """All visible application copy; keys remain stable for translation."""
 
 TEXT = {
+    "camera_search_wait": "Looking for cameras. Some devices may take a few minutes to answer.",
+    "camera_search_elapsed": "Searching - {minutes}m {seconds}s",
+
+    "camera_changes_save_failed": "The camera changes could not be saved. Check the camera names and try again.",
+    "camera_setup_finished": "Setup finished - {house}\n{count} cameras found: {names}",
+    "camera_none_found": "None found",
+    "camera_check_only_hint": "Camera check only. Setup will not be run.",
+    "camera_photos_load_failed": "The camera photos could not be loaded",
+    "camera_save_failed": "The camera changes could not be saved. Your setup is still complete.",
+    "skip_camera_check": "Skip the camera check",
+    "only_check_cameras": "Only check this box's cameras",
+
+    "detail_camera_refused_count": "{count} of {total} cameras refused the login.",
+    "detail_recorder_answers": "{count} cameras answer on the recorder.",
+    "detail_channel_ok": "Camera {channel} sent a picture ({size}).",
+    "detail_channel_no_picture": "Camera {channel} answers, but no picture arrived.",
+    "detail_device_skipped": "A device did not answer and was skipped.",
+    "detail_camera_found": "Camera found: {name} ({size}).",
+
     "demo_box_name": "Home Guard box",
     "box_label": "The box",
     "box_loading": "Looking for Windows boxes on this laptop's Tailscale network...",
@@ -35,7 +54,7 @@ TEXT = {
     "address_not_remembered": "The box address could not be remembered. Enter it again next time.",
 
     "check_cameras_title": "Check the cameras",
-    "check_cameras_hint": "Confirm the views, names and enabled cameras. Save your changes before finishing setup.",
+    "check_cameras_hint": "Confirm the views, names and enabled cameras, or skip this check and finish.",
     "camera_snapshot_failed": "Could not take a photo. Check camera power and connection, then refresh.",
     "remote_cameras_saved": "Camera changes saved on the box.",
     "camera_check_continue": "Finish setup",

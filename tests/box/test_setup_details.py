@@ -20,8 +20,8 @@ class SetupDetailsTests(unittest.TestCase):
         model.feed(Event('step','cameras','fail','4 of 4 cameras refused this login'))
         for _ in range(100): model.feed(Event('detail',text='Trying stream pattern'))
         self.assertEqual(model.failed,'cameras');self.assertEqual(model.groups['cameras'].status,'fail')
-        self.assertEqual(len(model.groups['cameras'].messages),2)
-        self.assertEqual(len(model.groups['update'].messages),1)
+        self.assertEqual(len(model.groups['cameras'].messages),3)
+        self.assertEqual(len(model.groups['update'].messages),2)
         self.assertIn('401 Unauthorized',model.technical_log())
     def test_support_log_excludes_rescue_and_redacts_input(self):
         parser=OutputParser(('private-marker',));model=DetailsModel()
@@ -36,3 +36,21 @@ class AddressRedactionTests(unittest.TestCase):
         model.feed(OutputParser().parse('No working RTSP pattern found for 192.0.2.10:554'))
         self.assertNotIn('192.0.2.10',model.technical_log())
         self.assertTrue(model.groups['connect'].messages)
+
+class FullRunDetailsTests(unittest.TestCase):
+    def test_each_step_has_its_own_readable_output(self):
+        from pathlib import Path
+        from home_guard_project.box.app.engine_backend import OutputParser,ENGINE_STEPS
+        model=DetailsModel();parser=OutputParser()
+        for line in (Path(__file__).parent/'fixtures'/'setup_readable_full_run.txt').read_text().splitlines(): model.feed(parser.parse(line))
+        for step in ENGINE_STEPS:
+            with self.subTest(step=step): self.assertTrue(model.groups[step].messages)
+        network='\n'.join(text for _,text in model.groups['network'].messages)
+        self.assertIn('Ethernet mode',network);self.assertIn('Wrote network.json',network)
+        cameras='\n'.join(text for _,text in model.groups['cameras'].messages)
+        for sentence in ('2 of 4 cameras refused','3 cameras answer on the recorder','Camera 2 sent a picture','Camera 3 answers','was skipped'): self.assertIn(sentence,cameras)
+        self.assertNotIn('192.0.2.',cameras);self.assertNotIn('decoder noise',cameras)
+    def test_unknown_line_survives_and_noise_does_not(self):
+        self.assertEqual(readable_line('[OK] Saved network.json'),('ok','[OK] Saved network.json'))
+        self.assertIsNone(readable_line('[decoder @ deadbeef] noise'))
+        self.assertIsNone(readable_line('cap_ffmpeg_impl.hpp internals'))

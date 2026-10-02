@@ -1,0 +1,44 @@
+@@step connect start
+Connecting to the box...
+[OK] Box connection ready.
+@@step connect ok Connected
+@@step update start
+Updating box software...
+Already up to date.
+@@step update ok Software is current
+@@step site start
+[2] Saving house name...
+[OK] House name saved.
+@@step site ok House name saved
+@@step network start
+[3] Configuring the network...
+-- 1/3 Wi-Fi profiles --
+[OK]    Ethernet mode: no customer Wi-Fi profile needed.
+[OK]    Rescue Wi-Fi profile installed: homeguard-rescue
+[OK]    Wi-Fi power saving disabled.
+-- 2/3 Forget other Wi-Fi networks --
+[OK]    Left other saved Wi-Fi networks in place (pass -ForgetOtherWifi before delivery).
+-- 3/3 network.json --
+[OK]    Wrote network.json (mode: ethernet)
+[OK]    Network setup finished.
+@@step network ok Network setup finished
+@@step cameras start
+[4] Locating cameras (about one minute)...
+WARNING   2 of 4 device(s) refused this login: 192.0.2.10, 192.0.2.11
+INFO        192.0.2.12: 3 channel(s) answer (Hikvision/unicast): 2, 3, 4
+INFO        Channel 2: OK (2688x1520)
+INFO        Channel 3: answers, but no picture arrived
+WARNING     192.0.2.13 does not answer; skipped.
+[rtsp @ 000002a1371976c0] decoder noise
+cap_ffmpeg_impl.hpp decoder internals
+@@camera front_door 2688x1520
+@@step cameras warn One camera found; check the other logins
+@@step alerts start
+[OK] Security alerts enabled all day.
+@@step alerts ok Alerts saved
+@@step readiness start
+Checking the box...
+@@check PASS Collector is running
+@@check WARN Check power settings
+@@step readiness ok Ready
+@@done ok

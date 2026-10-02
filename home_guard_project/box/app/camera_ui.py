@@ -1,19 +1,25 @@
 from concurrent.futures import ThreadPoolExecutor
 from PySide6.QtCore import QTimer, QRegularExpression, Qt
 from PySide6.QtGui import QPixmap, QRegularExpressionValidator
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QScrollArea, QPushButton, QLineEdit, QCheckBox, QLabel, QProgressBar
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QScrollArea, QPushButton, QLineEdit, QCheckBox, QLabel, QProgressBar, QTextEdit
 from .strings import tr
 from .theme import OK, ERROR, MUTED
 from .camera_controls import changes_payload
 
 class CameraPage:
-    def __init__(self, controls, changed, wizard=False):
+    def __init__(self, controls, changed, wizard=False, check_state=None, skip=None):
         from .ui import card, label, layout_for
         self.controls, self.changed = controls, changed
+        from .camera_check_state import CameraCheckState
+        self.check_state=check_state or CameraCheckState()
         self.wizard = wizard
         self.saved = False
         self.widget = QWidget()
         outer = layout_for(self.widget, 0)
+        if wizard:
+            self.completion = label(self.check_state.heading(), "section")
+            self.completion.setStyleSheet("color: " + (OK if self.check_state.setup_finished else MUTED))
+            outer.addWidget(self.completion)
         heading = QHBoxLayout()
         heading.addWidget(label(tr("check_cameras_title" if wizard else "cameras_title"), "section"), 1)
         self.refresh = QPushButton(tr("refresh_photos"))
@@ -25,6 +31,16 @@ class CameraPage:
         self.progress.setRange(0, 0)
         self.progress.hide()
         outer.addWidget(self.progress)
+        self.details_toggle=QCheckBox(tr("details"))
+        self.details_toggle.hide()
+        outer.addWidget(self.details_toggle)
+        self.error_details=QTextEdit()
+        self.error_details.setReadOnly(True)
+        self.error_details.setMaximumHeight(145)
+        self.error_details.setStyleSheet("font-family: Consolas; font-size: 12px;")
+        self.error_details.hide()
+        self.details_toggle.toggled.connect(self.error_details.setVisible)
+        outer.addWidget(self.error_details)
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setStyleSheet("QScrollArea { border: none; background: transparent; } QScrollBar:vertical { background: #10151d; width: 8px; } QScrollBar::handle:vertical { background: #334354; min-height: 30px; border-radius: 4px; } QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }")
@@ -36,6 +52,11 @@ class CameraPage:
         self.save.setEnabled(False)
         self.save.clicked.connect(self.save_clicked)
         bottom.addWidget(self.save)
+        if wizard and skip:
+            self.skip=QPushButton(tr("skip_camera_check"))
+            self.skip.setObjectName("secondary")
+            self.skip.clicked.connect(skip)
+            bottom.addWidget(self.skip)
         outer.addLayout(bottom)
         self.pool = ThreadPoolExecutor(max_workers=1)
         self.future = None
@@ -54,6 +75,10 @@ class CameraPage:
         return self.controls.snapshots()
 
     def begin(self, task):
+        self.check_state.clear_failure()
+        self.details_toggle.setChecked(False)
+        self.details_toggle.hide()
+        self.refresh.setText(tr("refresh_photos"))
         self.refresh.setEnabled(False)
         self.save.setEnabled(False)
         for _, field, enabled in self.rows:
@@ -84,13 +109,20 @@ class CameraPage:
                 self.saved = True
                 if self.wizard: self.note.setText(tr("remote_cameras_saved"))
                 self.changed()
-        except Exception:
+        except Exception as exc:
             for _, field, enabled in self.rows:
                 field.setEnabled(True)
                 enabled.setEnabled(True)
             self.validate()
             self.note.setStyleSheet(f"color: {ERROR};")
-            self.note.setText(tr("camera_error"))
+            if self.wizard and not getattr(self,"saving",False):
+                self.check_state.failure(exc,getattr(self.controls,"diagnostic_output", ""),getattr(self.controls,"target", ""))
+                self.error_details.setPlainText(self.check_state.details)
+                self.details_toggle.show()
+                self.refresh.setText(tr("retry"))
+                self.note.setText(tr("camera_photos_load_failed"))
+            else:
+                self.note.setText(tr("camera_save_failed") if self.wizard and self.check_state.setup_finished else tr("camera_changes_save_failed") if self.wizard else tr("camera_error"))
         self.saving = False
 
     def render(self, records):
