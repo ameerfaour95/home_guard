@@ -43,6 +43,34 @@ class LoadConfigTest(unittest.TestCase):
         self.assertFalse(cfg.can_message)
         self.assertFalse(cfg.can_call)
 
+    def test_api_key_from_env(self) -> None:
+        env = {
+            "TWILIO_ACCOUNT_SID": "AC9",
+            "TWILIO_API_KEY_SID": "SKabc",
+            "TWILIO_API_KEY_SECRET": "sek",
+        }
+        settings = {"twilio_whatsapp_from": "whatsapp:+1", "owner_whatsapp": "whatsapp:+2"}
+        cfg = load_notify_config(settings, env)
+        self.assertEqual(cfg._auth, ("SKabc", "sek"))
+        self.assertTrue(cfg.can_message)
+
+    def test_api_key_without_account_sid_cannot_send(self) -> None:
+        # The Account SID (AC...) is required for the URL even with an API key.
+        cfg = NotifyConfig(api_key_sid="SK", api_key_secret="s",
+                           whatsapp_from="whatsapp:+1", owner_whatsapp="whatsapp:+2")
+        self.assertFalse(cfg.can_message)
+
+
+class ApiKeyAuthTest(unittest.TestCase):
+    def test_api_key_is_used_for_auth_account_sid_for_url(self) -> None:
+        cfg = NotifyConfig(account_sid="AC9", api_key_sid="SKabc", api_key_secret="sek",
+                           whatsapp_from="whatsapp:+1", owner_whatsapp="whatsapp:+2")
+        with mock.patch.object(notify, "_http_post", return_value={"sid": "SM1"}) as post:
+            notify.send_whatsapp(cfg, "hi")
+        url, _fields, auth_user, auth_pass = post.call_args.args
+        self.assertEqual(url, "https://api.twilio.com/2010-04-01/Accounts/AC9/Messages.json")
+        self.assertEqual((auth_user, auth_pass), ("SKabc", "sek"))
+
 
 class SendWhatsappTest(unittest.TestCase):
     def test_dry_run_sends_nothing(self) -> None:

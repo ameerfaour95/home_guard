@@ -30,10 +30,17 @@ _API_ROOT = "https://api.twilio.com/2010-04-01/Accounts"
 
 @dataclass(frozen=True)
 class NotifyConfig:
-    """Everything the notifier needs. Build it with :func:`load_notify_config`."""
+    """Everything the notifier needs. Build it with :func:`load_notify_config`.
 
-    account_sid: str = ""
-    auth_token: str = ""
+    Twilio REST auth is either the Account SID + Auth Token, or an API Key
+    (``SK...``) + its secret. Either way the Account SID (``AC...``) is still
+    required because it is part of the request URL.
+    """
+
+    account_sid: str = ""        # "AC..." - always required (URL path)
+    auth_token: str = ""         # Account Auth Token (if not using an API key)
+    api_key_sid: str = ""        # "SK..." - API key, used instead of the Auth Token
+    api_key_secret: str = ""
     whatsapp_from: str = ""      # e.g. "whatsapp:+14155238886"
     owner_whatsapp: str = ""     # e.g. "whatsapp:+972501234567"
     voice_from: str = ""         # e.g. "+14155238886" (for [call_owner])
@@ -41,12 +48,24 @@ class NotifyConfig:
     dry_run: bool = False
 
     @property
+    def _auth(self) -> tuple:
+        """(username, password) for HTTP basic auth: API key if set, else Account SID."""
+        if self.api_key_sid and self.api_key_secret:
+            return (self.api_key_sid, self.api_key_secret)
+        return (self.account_sid, self.auth_token)
+
+    @property
+    def _has_auth(self) -> bool:
+        user, pw = self._auth
+        return bool(user and pw)
+
+    @property
     def can_message(self) -> bool:
-        return bool(self.account_sid and self.auth_token and self.whatsapp_from and self.owner_whatsapp)
+        return bool(self.account_sid and self._has_auth and self.whatsapp_from and self.owner_whatsapp)
 
     @property
     def can_call(self) -> bool:
-        return bool(self.account_sid and self.auth_token and self.voice_from and self.owner_phone)
+        return bool(self.account_sid and self._has_auth and self.voice_from and self.owner_phone)
 
 
 def load_notify_config(settings: Dict[str, Any], env: Optional[Dict[str, str]] = None) -> NotifyConfig:
@@ -59,6 +78,8 @@ def load_notify_config(settings: Dict[str, Any], env: Optional[Dict[str, str]] =
     return NotifyConfig(
         account_sid=env.get("TWILIO_ACCOUNT_SID", ""),
         auth_token=env.get("TWILIO_AUTH_TOKEN", ""),
+        api_key_sid=env.get("TWILIO_API_KEY_SID", ""),
+        api_key_secret=env.get("TWILIO_API_KEY_SECRET", ""),
         whatsapp_from=str(settings.get("twilio_whatsapp_from", "")),
         owner_whatsapp=str(settings.get("owner_whatsapp", "")),
         voice_from=str(settings.get("twilio_voice_from", "")),
@@ -67,13 +88,13 @@ def load_notify_config(settings: Dict[str, Any], env: Optional[Dict[str, str]] =
     )
 
 
-def _http_post(url: str, fields: Dict[str, str], sid: str, token: str, timeout: float = 15.0) -> Dict[str, Any]:
+def _http_post(url: str, fields: Dict[str, str], auth_user: str, auth_pass: str, timeout: float = 15.0) -> Dict[str, Any]:
     """POST form fields to Twilio with basic auth. Returns the parsed response.
 
     Isolated so tests can patch it without touching the network.
     """
     data = urllib.parse.urlencode(fields).encode("utf-8")
-    auth = base64.b64encode(f"{sid}:{token}".encode("utf-8")).decode("ascii")
+    auth = base64.b64encode(f"{auth_user}:{auth_pass}".encode("utf-8")).decode("ascii")
     req = urllib.request.Request(url, data=data, method="POST")
     req.add_header("Authorization", f"Basic {auth}")
     req.add_header("Content-Type", "application/x-www-form-urlencoded")
@@ -93,8 +114,9 @@ def send_whatsapp(cfg: NotifyConfig, body: str) -> Dict[str, Any]:
         return {"sent": False, "reason": reason}
     url = f"{_API_ROOT}/{cfg.account_sid}/Messages.json"
     fields = {"From": cfg.whatsapp_from, "To": cfg.owner_whatsapp, "Body": body}
+    user, pw = cfg._auth
     try:
-        resp = _http_post(url, fields, cfg.account_sid, cfg.auth_token)
+        resp = _http_post(url, fields, user, pw)
         log.info("WhatsApp sent (sid=%s)", resp.get("sid", "?"))
         return {"sent": True, "sid": resp.get("sid")}
     except (urllib.error.URLError, OSError) as exc:
@@ -112,8 +134,9 @@ def call_owner(cfg: NotifyConfig, say_text: str) -> Dict[str, Any]:
     safe = say_text.replace("&", "and").replace("<", "").replace(">", "")
     twiml = f"<Response><Say>{safe}</Say></Response>"
     fields = {"From": cfg.voice_from, "To": cfg.owner_phone, "Twiml": twiml}
+    user, pw = cfg._auth
     try:
-        resp = _http_post(url, fields, cfg.account_sid, cfg.auth_token)
+        resp = _http_post(url, fields, user, pw)
         log.info("Call placed (sid=%s)", resp.get("sid", "?"))
         return {"called": True, "sid": resp.get("sid")}
     except (urllib.error.URLError, OSError) as exc:
