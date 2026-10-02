@@ -17,6 +17,7 @@ class Answers:
     alerts: bool = False
     start_hour: int = 0
     end_hour: int = 0
+    cooldown_sec: int = 120
     find_cameras: bool = True
     camera_user: str = ""
     camera_password: str = field(default="", repr=False)
