@@ -14,6 +14,26 @@ The collector uses `config.box.yaml` on top of `data_collection/config.yaml`: no
 
 Logs are in `logs/` at the project root: `runner.log`, `collector-<date>.log`, `upload-<date>.log`, `heartbeat.log`.
 
+## Desktop screen
+
+The Home Guard desktop shortcut now opens a single PySide6 window. It shows the
+house, background collector state, clips waiting, disk space, recent activity and
+camera pictures when `show_cameras` is enabled. Closing it leaves the collector
+running. If the GUI cannot start, the original console/live-camera screen remains
+available as a fallback.
+
+```powershell
+.venv\Scripts\python.exe -m home_guard_project.box.app
+.venv\Scripts\python.exe -m home_guard_project.box.app --demo
+.venv\Scripts\python.exe -m home_guard_project.box.app --setup --demo --skip-cameras
+```
+
+The setup screens currently use only a simulated backend; the existing real
+PowerShell wizard and compiled executable are unchanged. The box collector
+publishes demand-driven local previews, with no extra camera connection or
+inference process in the GUI. See [UI handoff](../../docs/ui/HANDOFF.md) and the
+[screenshot gallery](../../docs/ui/SCREENSHOTS.md) for review and hardware checks.
+
 ## Setting up a new box
 
 ### 1. First boot (at the box, with monitor and keyboard)
