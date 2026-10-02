@@ -15,6 +15,9 @@ from .strings import tr
 ENGINE_STEPS = ('connect','update','site','network','cameras','alerts','readiness')
 OWNERS = {'connect':0,'update':0,'site':2,'network':1,'cameras':3,'alerts':2,'readiness':0}
 
+def is_progress_warning(event):
+    return event.kind=='step' and event.step=='network' and event.status=='warn' and 'switching' in event.text.lower()
+
 @dataclass(frozen=True)
 class Event:
     kind: str
@@ -23,6 +26,7 @@ class Event:
     text: str = ''
     name: str = ''
     password: str = field(default='',repr=False)
+    facts: dict = field(default_factory=dict, repr=False)
 
 class OutputParser:
     def __init__(self, secrets=()):
@@ -35,9 +39,11 @@ class OutputParser:
         return redact(text)
     def parse(self,line):
         line=line.strip()
+        from .setup_failure import network_facts
+        facts=network_facts(line)
         match=re.fullmatch(r'@@step (\w+) (start|ok|warn|fail|skip)(?: (.*))?',line)
         if match and match[1] in ENGINE_STEPS:
-            return Event('step',match[1],match[2],self.safe(match[3] or ''))
+            return Event('step',match[1],match[2],self.safe(match[3] or ''), facts=facts)
         match=re.fullmatch(r'@@camera ([a-z0-9_]+) (\d+)x(\d+)',line)
         if match: return Event('camera',text=match[2]+'x'+match[3],name=match[1])
         match=re.fullmatch(r'@@check (PASS|WARN|FAIL) (.*)',line)
@@ -48,7 +54,7 @@ class OutputParser:
             return Event('rescue',name=match[1],password=match[2])
         match=re.fullmatch(r'@@done (ok|fail)',line)
         if match: return Event('done',status=match[1])
-        return Event('detail',text=self.safe(line))
+        return Event('detail',text=self.safe(line),facts=facts)
 
 def answers_payload(answers):
     return dict(target=answers.address,network=answers.network,wifi_ssid=answers.ssid,wifi_password=answers.wifi_password,site=answers.house,show_cameras=answers.show_cameras,find_cameras=answers.find_cameras,camera_user=answers.camera_user,camera_password=answers.camera_password,alerts=answers.alerts,alert_start_hour=answers.start_hour,alert_end_hour=answers.end_hour,alert_cooldown_sec=answers.cooldown_sec)
@@ -107,7 +113,7 @@ class EngineBackend:
                                 if len(completed)>=len(ENGINE_STEPS) or event.step!=ENGINE_STEPS[len(completed)]:
                                     emit(Event('step',running,'fail',tr('engine_protocol_error')));failed=True;break
                             elif event.status in ('ok','warn','skip'):
-                                if event.step not in completed: completed.append(event.step)
+                                if not is_progress_warning(event) and event.step not in completed: completed.append(event.step)
                             elif event.status=='fail': failed=True
                         if event.kind=='check' and event.status=='FAIL': failed=True
                         if event.kind=='done':
@@ -150,8 +156,12 @@ class DemoEngine:
         for step in ENGINE_STEPS:
             emit(Event('step',step,'start'))
             if not instant and self.cancelled.wait(.6): return False
-            if step=='network' and self.failure:
-                emit(Event('step',step,'fail',tr('network_fail' if answers.network=='wifi' else 'network_cable_fail')));return False
+            failure_step = 'network' if self.failure is True else self.failure
+            if step=='network':
+                emit(Event('detail',text='The box joined the home network.',facts={'network':answers.ssid or 'ameer2','address':'192.168.68.120'}))
+            if step==failure_step and not (step=='cameras' and not answers.find_cameras):
+                if step=='cameras': emit(Event('detail',text='WARNING No device answers on the camera port. Is the box on the cameras network?'))
+                emit(Event('step',step,'fail',tr('failure_cameras_title' if step=='cameras' else 'failure_connect_title' if step=='connect' else 'failure_update_title' if step=='update' else 'network_fail')));return False
             if step=='cameras':
                 if answers.find_cameras:
                     for name in ('front_door','garden','driveway'): emit(Event('camera',name=name,text='1920x1080'))

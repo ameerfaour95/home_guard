@@ -52,6 +52,25 @@ class CameraControls:
         self.records = [Camera(name, enabled) for group, enabled in (("cameras", True), ("disabled", False)) for name in raw.get(group, {})]
         return list(self.records)
 
+    def search(self, user, password):
+        """Search only after an explicit user action; passwords stay off argv."""
+        if self.box.demo:
+            self.records = [Camera(name, True, ok=True) for name in ('front_door','garden','driveway')]
+            return list(self.records)
+        env=os.environ.copy();env.pop('VIRTUAL_ENV',None)
+        env['HG_CAMERA_PASSWORD']=password
+        site=boxconfig.load_box_settings().get('site','home')
+        result=self.runner([sys.executable,'-m','home_guard_project.box.find_cameras','--json','auto','--user',user,'--prefix',site,'--write'],env=env,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True,encoding='utf-8',timeout=480,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+        data=json.loads(result.stdout)
+        if result.returncode not in (0,1) or not isinstance(data.get('cameras'),list):
+            raise ValueError('Camera search failed')
+        if not data['cameras']: return []
+        self.load()
+        if not self.box.is_stopped():
+            from .. import control
+            control.request_restart()
+        return self.snapshots()
+
     def snapshots(self):
         if self.box.demo:
             return list(self.records)

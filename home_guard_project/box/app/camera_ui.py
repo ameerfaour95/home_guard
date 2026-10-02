@@ -26,6 +26,23 @@ class CameraPage:
         self.refresh.clicked.connect(self.refresh_clicked)
         heading.addWidget(self.refresh)
         outer.addLayout(heading)
+        self.search_button=QPushButton(tr('find_cameras_action'))
+        self.search_button.setObjectName('secondary')
+        self.search_button.clicked.connect(self.show_search)
+        self.search_button.setVisible(not wizard)
+        heading.insertWidget(1,self.search_button)
+        self.search_form=card()
+        search_layout=layout_for(self.search_form,24)
+        search_layout.addWidget(label(tr('camera_search_title'),'section'))
+        search_layout.addWidget(label(tr('camera_search_hint'),'muted'))
+        fields=QHBoxLayout()
+        fields.addWidget(label(tr('camera_search_user')))
+        self.search_user=QLineEdit('admin');fields.addWidget(self.search_user)
+        fields.addWidget(label(tr('camera_search_password')))
+        self.search_password=QLineEdit();self.search_password.setEchoMode(QLineEdit.EchoMode.Password);fields.addWidget(self.search_password)
+        self.search_start=QPushButton(tr('find_cameras_action'));self.search_start.clicked.connect(self.search_clicked);fields.addWidget(self.search_start)
+        search_layout.addLayout(fields)
+        self.search_form.hide();outer.addWidget(self.search_form)
         outer.addWidget(label(tr("check_cameras_hint" if wizard else "cameras_hint"), "muted"))
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)
@@ -37,7 +54,7 @@ class CameraPage:
         self.error_details=QTextEdit()
         self.error_details.setReadOnly(True)
         self.error_details.setMaximumHeight(145)
-        self.error_details.setStyleSheet("font-family: Consolas; font-size: 12px;")
+        self.error_details.setStyleSheet("font-family: Consolas; font-size: 10.5pt;")
         self.error_details.hide()
         self.details_toggle.toggled.connect(self.error_details.setVisible)
         outer.addWidget(self.error_details)
@@ -70,6 +87,21 @@ class CameraPage:
         if not self.loaded and self.future is None:
             self.begin(self.load_photos)
 
+    def show_search(self):
+        self.search_form.show()
+        self.search_password.setFocus()
+
+    def search_clicked(self):
+        if self.future is not None: return
+        user=self.search_user.text().strip()
+        password=self.search_password.text()
+        if not user or (not password and not self.controls.box.demo):
+            self.note.setText(tr('camera_login_help'));return
+        self.search_password.clear()
+        self.searching=True
+        self.begin(lambda:self.controls.search(user,password))
+        self.note.setText(tr('camera_search_working'))
+
     def load_photos(self):
         self.controls.load()
         return self.controls.snapshots()
@@ -80,6 +112,7 @@ class CameraPage:
         self.details_toggle.hide()
         self.refresh.setText(tr("refresh_photos"))
         self.refresh.setEnabled(False)
+        self.search_start.setEnabled(False)
         self.save.setEnabled(False)
         for _, field, enabled in self.rows:
             field.setEnabled(False)
@@ -99,12 +132,17 @@ class CameraPage:
         future, self.future = self.future, None
         self.progress.hide()
         self.refresh.setEnabled(True)
+        self.search_start.setEnabled(True)
         try:
             records = future.result()
             self.render(records)
             self.loaded = True
             self.note.setStyleSheet(f"color: {OK if getattr(self, 'saving', False) else MUTED};")
             self.note.setText((tr("saved_stopped") if self.controls.box.is_stopped() else tr("camera_saved")) if getattr(self, "saving", False) else tr("camera_ready"))
+            if getattr(self,'searching',False):
+                self.note.setText(tr('camera_search_empty') if not records else tr('camera_ready'))
+                if records: self.search_form.hide()
+                self.changed()
             if getattr(self, "saving", False):
                 self.saved = True
                 if self.wizard: self.note.setText(tr("remote_cameras_saved"))
@@ -123,7 +161,9 @@ class CameraPage:
                 self.note.setText(tr("camera_photos_load_failed"))
             else:
                 self.note.setText(tr("camera_save_failed") if self.wizard and self.check_state.setup_finished else tr("camera_changes_save_failed") if self.wizard else tr("camera_error"))
+                if getattr(self,'searching',False): self.note.setText(tr('camera_search_error'))
         self.saving = False
+        self.searching = False
 
     def render(self, records):
         from .ui import card, label, layout_for, demo_picture
