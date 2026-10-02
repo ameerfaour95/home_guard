@@ -39,7 +39,13 @@ function Bad($m)  { Write-Host "[!!]  $m" -ForegroundColor Red }
 # Started by double-click, the window closes with the program. Wait, so the result can be read.
 function Wait-BeforeClose {
     Write-Host ''
-    [void](Read-Host 'Press Enter to close')
+    try {
+        Write-Host 'Press any key to close...' -NoNewline
+        [void][Console]::ReadKey($true)
+        Write-Host ''
+    } catch {
+        [void](Read-Host 'Press Enter to close')
+    }
 }
 trap {
     Write-Host ''
@@ -114,7 +120,9 @@ function Invoke-Native([string]$exe, [string[]]$arguments) {
 }
 function Invoke-Box([string]$command) {
     if ($DryRun) { Note "  ssh> $command"; $global:LASTEXITCODE = 0; return '' }
-    Invoke-Native 'ssh' @('-i', $KeyPath, '-o', 'ConnectTimeout=15', '-o', 'LogLevel=ERROR',
+    # -n: do not read from stdin, so ssh never swallows the console's keystrokes
+    # (that left the final "Press any key to close" unable to see the key press).
+    Invoke-Native 'ssh' @('-n', '-i', $KeyPath, '-o', 'ConnectTimeout=15', '-o', 'LogLevel=ERROR',
                           '-o', 'StrictHostKeyChecking=accept-new', $Target, $command)
 }
 function Copy-ToBox([string]$local, [string]$remote) {
