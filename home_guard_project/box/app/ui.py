@@ -170,8 +170,8 @@ class Window(QMainWindow):
     def __init__(self, args):
         super().__init__()
         self.args = args
-        from .box_controls import BoxControls
-        self.box_controls = BoxControls(demo=args.demo, stopped=args.state == "stopped")
+        from .box_controls import BoxControls, Settings
+        self.box_controls = BoxControls(demo=args.demo, stopped=args.state == "stopped", settings=Settings(mode="inference" if args.state == "inference" else "data_collection", show_cameras=args.state != "hidden"))
         self.start_requested = False
         self.setWindowTitle(tr("brand"))
         self.resize(*map(int, args.size.split("x")))
@@ -212,11 +212,24 @@ class Window(QMainWindow):
     def build_dashboard(self):
         control_row = QHBoxLayout()
         self.control_note = label("", "accent")
+        overview_button = QPushButton(tr("overview"))
+        overview_button.setObjectName("secondary")
+        overview_button.clicked.connect(lambda: self.content_stack.setCurrentIndex(0))
+        control_row.addWidget(overview_button)
+        settings_button = QPushButton(tr("settings"))
+        settings_button.setObjectName("secondary")
+        settings_button.clicked.connect(self.open_settings)
+        control_row.addWidget(settings_button)
         control_row.addWidget(self.control_note, 1)
         self.run_button = QPushButton(tr("stop_box"))
         self.run_button.clicked.connect(self.toggle_running)
         control_row.addWidget(self.run_button)
         self.outer.addLayout(control_row)
+        self.content_stack = QStackedWidget()
+        overview = QWidget()
+        overview_layout = layout_for(overview, 0)
+        self.content_stack.addWidget(overview)
+        self.outer.addWidget(self.content_stack, 1)
         stats = QHBoxLayout()
         self.stats = []
         for key in ("collecting", "upload", "waiting", "disk"):
@@ -228,7 +241,7 @@ class Window(QMainWindow):
             lay.addWidget(hint)
             stats.addWidget(panel)
             self.stats.append((value, hint))
-        self.outer.addLayout(stats)
+        overview_layout.addLayout(stats)
         body = QHBoxLayout()
         left = QWidget()
         leftlay = layout_for(left, 0)
@@ -267,7 +280,7 @@ class Window(QMainWindow):
         scroll.setWidget(self.activity_widget)
         al.addWidget(scroll, 1)
         body.addWidget(panel, 1)
-        self.outer.addLayout(body, 1)
+        overview_layout.addLayout(body, 1)
         self.tiles = []
         self.events = []
         self.render_activity()
@@ -284,6 +297,11 @@ class Window(QMainWindow):
         self.current_state = None
         self.tick()
         self.details.setChecked(self.args.details)
+        from .settings_ui import SettingsPage
+        self.settings_page = SettingsPage(self.box_controls, self.settings_changed)
+        self.content_stack.addWidget(self.settings_page.widget)
+        if getattr(self.args, "panel", None) == "settings":
+            self.open_settings()
 
     def fetch(self):
         from ..heartbeat import build_heartbeat
@@ -292,8 +310,8 @@ class Window(QMainWindow):
         events, upload = self.activity_feed.read()
         payload = build_heartbeat(
             str(settings.get("site", "")),
-            bc.LIVE_DIR,
-            bc.OUTBOX_DIR,
+            bc.PRODUCTION_LIVE_DIR if settings.get("mode") == "inference" else bc.LIVE_DIR,
+            bc.PRODUCTION_ARCHIVE_DIR if settings.get("mode") == "inference" else bc.OUTBOX_DIR,
             bc.ALIVE_FILE,
             mode=bc.get_option("mode"),
         )
@@ -321,10 +339,12 @@ class Window(QMainWindow):
             )
             if scenario == "empty":
                 state.cameras = []
-            state.collecting = not self.box_controls.is_stopped()
+            demo_settings = self.box_controls.load_settings()
+            state.mode = demo_settings.mode
+            state.collecting = self.box_controls.phase() == "running"
             self.apply_state(
                 state,
-                scenario != "hidden",
+                demo_settings.show_cameras,
                 (
                     []
                     if scenario in ("quiet", "empty", "loading")
@@ -352,6 +372,8 @@ class Window(QMainWindow):
         if not self.future and now - self.last_poll >= 5:
             self.future = self.pool.submit(self.fetch)
             self.last_poll = now
+        if self.current_state and self.box_controls.pending_at is not None:
+            self.apply_state(self.current_state, self.current_show, self.events)
         if self.current_state and self.box_controls.is_stopped() and self.current_state.collecting:
             self.apply_state(self.current_state, self.current_show, self.events)
         # Re-read permission at each viewer tick. Never touch the marker when hidden.
@@ -377,6 +399,7 @@ class Window(QMainWindow):
     def apply_state(self, state, show, events):
         self.current_state, self.current_show = state, show
         stopped = self.box_controls.is_stopped()
+        phase = self.box_controls.phase(state.collecting)
         if stopped:
             state.collecting = False
             self.start_requested = False
@@ -384,14 +407,14 @@ class Window(QMainWindow):
             self.start_requested = False
         self.run_button.setText(tr("start_box") if stopped else tr("stop_box"))
         self.run_button.setEnabled(not self.start_requested)
-        self.control_note.setText(tr("stopped_hint") if stopped else tr("start_pending") if self.start_requested else "")
+        self.control_note.setText(tr("stopped_hint") if stopped else tr("applying") if phase == "restarting" else tr("start_pending") if self.start_requested else "")
         self.run_button.setStyleSheet("background: #f27d7d;" if not stopped else "")
         if self.events != events:
             self.events = events
             self.render_activity()
         self.house_label.setText(state.site or tr("home"))
         values = [
-            tr("collecting") if state.collecting else tr("stopped"),
+            tr("restarting") if phase == "restarting" else tr("collecting") if state.collecting else tr("stopped"),
             state.upload or tr("never"),
             str(state.waiting),
             tr("gb", value=state.disk),
@@ -411,7 +434,7 @@ class Window(QMainWindow):
             for value, _ in self.stats:
                 value.setText(tr("loading"))
         message = (
-            "stopped_title" if stopped else
+            "stopped_title" if stopped else "applying" if phase == "restarting" else
             "loading"
             if scenario == "loading"
             else (
@@ -429,6 +452,7 @@ class Window(QMainWindow):
             self.message_title.setText(tr(message))
             hint = {
                 "stopped_title": "stopped_hint",
+                "applying": "applying_hint",
                 "loading": "",
                 "error": "error_hint",
                 "pictures_off": "pictures_hint",
@@ -443,6 +467,16 @@ class Window(QMainWindow):
                 self.grid.takeAt(0).widget().deleteLater()
             self.tiles = [CameraTile(name) for name in state.cameras]
             self.arrange_tiles()
+
+    def open_settings(self):
+        self.settings_page.reload()
+        self.content_stack.setCurrentIndex(1)
+
+    def settings_changed(self):
+        self.last_poll = 0
+        if self.current_state:
+            self.apply_state(self.current_state, self.box_controls.load_settings().show_cameras, self.events)
+        self.tick()
 
     def toggle_running(self):
         if self.box_controls.is_stopped():

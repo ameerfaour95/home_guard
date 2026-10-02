@@ -9,6 +9,7 @@ from pathlib import Path
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--demo", action="store_true")
+    parser.add_argument("--panel", choices=("settings", "cameras"))
     parser.add_argument("--setup", action="store_true")
     parser.add_argument("--fail", action="store_true")
     parser.add_argument("--wifi", action="store_true")
