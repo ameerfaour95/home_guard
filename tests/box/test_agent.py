@@ -180,6 +180,19 @@ class OwnerAgentTest(unittest.TestCase):
         self.assertIn("hello there", second_context)   # the owner's earlier message
         self.assertIn("Hello.", second_context)        # and the assistant's earlier reply
 
+    def test_summarize_activity_gathers_the_periods_events_for_the_model(self) -> None:
+        model = RecordingModel([call("summarize_activity", day="today"), say("A car and a person today.")])
+        agent = OwnerAgent(model, self._ctx())
+        reply = agent.handle("what happened today?", "-1001", {}, None)
+        tool_msgs = [m for m in model.seen[1] if m.get("role") == "tool"]
+        self.assertEqual(len(tool_msgs), 1)
+        result = json.loads(tool_msgs[0]["content"])
+        self.assertEqual(result["total"], 2)                       # both saved events, not capped like find_alerts
+        summaries = " ".join(e["summary"] for e in result["events"])
+        self.assertIn("car", summaries)
+        self.assertIn("person", summaries)
+        self.assertEqual(reply.text, "A car and a person today.")
+
     def test_history_is_reloaded_by_a_fresh_agent_after_a_restart(self) -> None:
         OwnerAgent(ScriptedModel([say("noted")]), self._ctx()).handle("remember this", "-1001", {}, None)
         model = RecordingModel([say("ok")])

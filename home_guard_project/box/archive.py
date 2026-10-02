@@ -104,6 +104,18 @@ def record_doc(record: AlertRecord, score: Optional[float] = None) -> Dict[str, 
     return doc
 
 
+def window(records: Sequence[AlertRecord], query: Query) -> List[AlertRecord]:
+    """Every saved alert inside the query's time range (and camera), oldest first.
+
+    Unlike :func:`search` this neither ranks nor caps - it is for summarizing a
+    whole period ("what happened today?"), where the caller wants the full set.
+    """
+    return [
+        r for r in records
+        if query.start_ts <= r.ts <= query.end_ts and (query.camera is None or r.camera == query.camera)
+    ]
+
+
 def _words(text: str) -> List[str]:
     return [w for w in re.findall(r"[a-z0-9]+", text.lower()) if len(w) > 2 and w not in ("the", "and", "was")]
 

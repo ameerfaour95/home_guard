@@ -30,7 +30,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
-from .archive import AlertRecord, load_records, record_doc, search
+from .archive import AlertRecord, load_records, record_doc, search, window
 from .conversation import ConversationStore
 from .embeddings import make_embedder
 from .feedback import (
@@ -46,6 +46,7 @@ log = logging.getLogger("box.agent")
 
 MAX_CLIPS_PER_REPLY = 3
 MAX_FOUND = 8
+SUMMARY_MAX_EVENTS = 60       # events detailed to the model for a period summary (counts still cover all)
 MAX_TOOL_ROUNDS = 5           # how many model <-> tool round-trips one message may take
 EMBED_CACHE_NAME = ".alert_embeddings.json"
 CONVERSATIONS_DIR_NAME = ".conversations"
@@ -69,17 +70,21 @@ Acting:
                     the house unwatched. A false alarm, a correction or a complaint is NOT a request
                     to pause: record the verdict and do not pause.
     resume_alerts   they ask for alerts to continue or come back on.
-    find_alerts     they ask what happened, or for a video or picture.
-    send_clip       send the video of an alert find_alerts returned.
+    find_alerts     they ask about, or want the video of, ONE specific event.
+    summarize_activity  they ask what happened over a period, or for a summary ("anything today?").
+    send_clip       send the video of an event find_alerts returned.
 - Most messages need one tool. Use two only when the message says two things ("it's me, stop until
   six" is the verdict "expected" and a pause).
 
-Looking things up (find_alerts):
-- The search matches meaning, not words, so pass the owner's own description of what they want in
-  "what" and the time they named. The results come back as JSON, most relevant first.
-- Then answer from the results: for a broad question ("anything last night?") give a short summary -
-  how many, when, on which camera, what - not a raw dump. Offer the video, and use send_clip when
-  they clearly want the footage.
+Looking things up:
+- For one event or its video, use find_alerts: it matches meaning, not words, so pass the owner's own
+  description in "what" and the time they named; results come back as JSON, most relevant first. Offer
+  the video, and use send_clip when they clearly want the footage.
+- For "what happened today?" or any summary of a period, use summarize_activity: it returns the total,
+  a per-camera breakdown, and each saved event's one-line description. Write a short natural summary
+  from it - how many events, roughly when, which cameras, the notable ones, and anything the owner
+  already marked - never a raw list. If total is 0, say nothing was saved for that period; if
+  truncated is true, the events are the earliest part of a larger set, so lean on the counts.
 
 Honesty:
 - Say only what the tools returned. If find_alerts returns nothing, say nothing was saved for that
@@ -189,6 +194,7 @@ class OwnerAgent:
             "pause_alerts": self._pause_alerts,
             "resume_alerts": self._resume_alerts,
             "find_alerts": self._find_alerts,
+            "summarize_activity": self._summarize_activity,
             "send_clip": self._send_clip,
         }
 
@@ -243,6 +249,29 @@ class OwnerAgent:
                          "camera": feedback.query.camera, "what": feedback.query.what},
             "count": len(records),
             "alerts": [record_doc(r) for r in records],
+        }
+
+    def _summarize_activity(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        feedback = self._checked({"action": "find", "find": {
+            "day": args.get("day"), "last_hours": args.get("last_hours"),
+            "camera": args.get("camera"), "what": "", "latest": False,
+        }})
+        records = window(load_records(self.ctx.roots()), feedback.query)
+        by_camera: Dict[str, int] = {}
+        for r in records:
+            by_camera[r.camera] = by_camera.get(r.camera, 0) + 1
+        log.info("summarize_activity(day=%s last_hours=%s camera=%s) -> %d events",
+                 args.get("day"), args.get("last_hours"), args.get("camera"), len(records))
+        return {
+            "period": {"from": _local(feedback.query.start_ts), "to": _local(feedback.query.end_ts)},
+            "total": len(records),
+            "by_camera": by_camera,
+            "truncated": len(records) > SUMMARY_MAX_EVENTS,
+            "events": [
+                {"time": _local(r.ts), "camera": r.camera,
+                 "summary": r.summary or "no description", "owner_said": list(r.verdicts)}
+                for r in records[:SUMMARY_MAX_EVENTS]
+            ],
         }
 
     def _send_clip(self, args: Dict[str, Any]) -> Dict[str, Any]:

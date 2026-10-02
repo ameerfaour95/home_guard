@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from typing import Optional
 
-from home_guard_project.box.archive import expire_old_files, load_records, record_doc, search
+from home_guard_project.box.archive import expire_old_files, load_records, record_doc, search, window
 from home_guard_project.box.feedback import Feedback, Query, save_feedback
 
 NOW = 1_800_000_000.0
@@ -123,6 +123,14 @@ class ArchiveTest(unittest.TestCase):
     def test_semantic_search_falls_back_to_keywords_when_the_embedder_is_down(self) -> None:
         self.assertEqual(self._ids(query(NOW - 6 * HOUR, NOW, what="the car"), embedder=DeadEmbedder()),
                          ["back_yard_2_alert"])
+
+    def test_window_returns_everything_in_range_uncapped_in_time_order(self) -> None:
+        recs = load_records([self.live, self.site])
+        self.assertEqual([r.alert_id for r in window(recs, query(NOW - 6 * HOUR, NOW))],
+                         ["front_door_1_alert", "back_yard_2_alert", "front_door_3_alert"])
+        self.assertEqual([r.alert_id for r in window(recs, query(NOW - 6 * HOUR, NOW, camera="back_yard"))],
+                         ["back_yard_2_alert"])
+        self.assertEqual(window(recs, query(NOW - 30 * DAY, NOW - 20 * DAY)), [])
 
     def test_record_doc_is_a_json_friendly_summary(self) -> None:
         records = {r.alert_id: r for r in load_records([self.live, self.site])}

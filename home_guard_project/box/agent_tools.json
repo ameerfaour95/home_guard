@@ -109,6 +109,30 @@
   {
     "type": "function",
     "function": {
+      "name": "summarize_activity",
+      "description": "Get everything the box saved over a period, so you can summarize it for the owner. Use this when they ask what happened, or for a summary, or 'anything today?' - NOT when they want one specific clip (use find_alerts for that). Returns the total count, a per-camera breakdown, and every saved event in time order with its one-line description and any verdict the owner already gave. Then write a short, natural summary from it - how many events, roughly when, which cameras, the notable ones - never a raw list of every line.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "day": {
+            "type": "string",
+            "description": "\"today\", \"yesterday\", or an exact date \"YYYY-MM-DD\". Defaults to the last day."
+          },
+          "last_hours": {
+            "type": "number",
+            "description": "Summarize the last this-many hours instead of a whole day."
+          },
+          "camera": {
+            "type": "string",
+            "description": "Limit the summary to one camera."
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
       "name": "send_clip",
       "description": "Attach the video of one saved alert to your reply. alert_id must be an id that find_alerts returned earlier in this same conversation. Call find_alerts first if you do not have one.",
       "parameters": {
