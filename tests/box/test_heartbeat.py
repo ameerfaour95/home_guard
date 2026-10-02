@@ -54,9 +54,10 @@ class HeartbeatTest(unittest.TestCase):
         make_clip(self.outbox, "yard", "yard_1_trigger", NOW - 9000)
         self._touch_alive(NOW - 10)
 
-        hb = build_heartbeat("house2", self.live, self.outbox, self.alive, now=NOW)
+        hb = build_heartbeat("house2", self.live, self.outbox, self.alive, now=NOW, mode="inference")
 
         self.assertEqual(hb["site"], "house2")
+        self.assertEqual(hb["mode"], "inference")
         self.assertEqual(hb["time_utc"], iso(NOW))
         self.assertTrue(hb["collector_running"])
         self.assertEqual(hb["clips_live"], 2)

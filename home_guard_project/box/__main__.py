@@ -5,6 +5,7 @@ Usage:
     python -m home_guard_project.box upload      # move finished clips to the outbox, sync to S3, heartbeat
     python -m home_guard_project.box heartbeat   # write the status JSON to S3
     python -m home_guard_project.box status      # print the status JSON locally (no network)
+    python -m home_guard_project.box mode        # print the box's mode (read by run_collector.sh)
 """
 
 from __future__ import annotations
@@ -68,8 +69,8 @@ def run_upload(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Collector box: upload, heartbeat, status.")
-    parser.add_argument("command", choices=["upload", "heartbeat", "status"])
+    parser = argparse.ArgumentParser(description="Collector box: upload, heartbeat, status, mode.")
+    parser.add_argument("command", choices=["upload", "heartbeat", "status", "mode"])
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -84,8 +85,12 @@ def main() -> None:
         log.error("%s", exc)
         sys.exit(1)
 
+    if args.command == "mode":
+        print(cfg.mode)
+        return
+
     if args.command == "status":
-        print(json.dumps(build_heartbeat(cfg.site, LIVE_DIR, OUTBOX_DIR, ALIVE_FILE), indent=2))
+        print(json.dumps(build_heartbeat(cfg.site, LIVE_DIR, OUTBOX_DIR, ALIVE_FILE, mode=cfg.mode), indent=2))
         return
 
     from home_guard_project.s3_upload.config import load_config as load_s3_config
@@ -98,7 +103,7 @@ def main() -> None:
         run_upload(cfg, LIVE_DIR, OUTBOX_DIR, s3_cfg.bucket, s3_cfg.workers, uploader=s3_run)
 
     key = put_heartbeat(
-        build_heartbeat(cfg.site, LIVE_DIR, OUTBOX_DIR, ALIVE_FILE),
+        build_heartbeat(cfg.site, LIVE_DIR, OUTBOX_DIR, ALIVE_FILE, mode=cfg.mode),
         s3_cfg.bucket,
         s3_prefix(cfg.site),
     )

@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
 # ============================================================================
-#  run_collector.sh - unattended data collection for a collector box
+#  run_collector.sh - the always-on program of a box, in either mode
 #
 #  Lives in:  home_guard_project/box/run_collector.sh
 #  Started by the "HomeGuard-Collector" scheduled task at boot.
 #
 #  What it does:
-#    1. Waits until cameras.yaml exists (camera discovery is a one-time manual step)
-#    2. Runs data_collection.py headless (config.box.yaml overlay), logging to logs/
-#    3. Touches logs/collector.alive while the collector runs (read by the heartbeat)
-#    4. Restarts the collector 15 s after it exits, forever
+#    1. Waits until cameras.yaml exists (camera discovery is a one-time step)
+#    2. Reads the mode from box.yaml and runs, headless (config.box.yaml overlay):
+#         data_collection -> data_collection.py          (clips for tagging)
+#         inference       -> home_guard_project.box.inference   (alerts)
+#       logging to logs/collector-<date>.log
+#    3. Touches logs/collector.alive while it runs (read by the heartbeat)
+#    4. Restarts it 15 s after it exits, forever
 # ============================================================================
 set -uo pipefail
 
@@ -82,11 +85,19 @@ while true; do
     fi
     waiting_logged=false
 
+    # box.yaml says what this box runs. Read it on every start, so a mode change
+    # only needs the task restarted. An unreadable box.yaml falls back to collecting.
+    mode="$("$PY" -m home_guard_project.box mode 2>> "$RUNNER_LOG")" || mode="data_collection"
+    case "$mode" in
+        inference) entry=(-m home_guard_project.box.inference) ;;
+        *)         mode="data_collection"; entry=(home_guard_project/data_collection/data_collection.py) ;;
+    esac
+
     collector_log="$LOG_DIR/collector-$(date +%F).log"
-    log "Starting collector (overlay: $HOME_GUARD_CONFIG_OVERLAY)" >> "$RUNNER_LOG"
+    log "Starting $mode (overlay: $HOME_GUARD_CONFIG_OVERLAY)" >> "$RUNNER_LOG"
     # The video decoder prints a line for every damaged frame, which would bury
     # the real log lines and grow the file without limit. Drop those lines.
-    "$PY" -u home_guard_project/data_collection/data_collection.py \
+    "$PY" -u "${entry[@]}" \
         > >(grep --line-buffered -a -v -E "$DECODER_NOISE" >> "$collector_log") 2>&1 &
     child=$!
     cat "/proc/$child/winpid" > "$PID_FILE" 2>/dev/null || echo "$child" > "$PID_FILE"
@@ -96,7 +107,7 @@ while true; do
         sleep 30
     done
     wait "$child"
-    log "Collector exited with code $? - restarting in 15 s" >> "$RUNNER_LOG"
+    log "$mode exited with code $? - restarting in 15 s" >> "$RUNNER_LOG"
     child=""
     rm -f "$PID_FILE"
     sleep 15

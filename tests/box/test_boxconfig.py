@@ -8,6 +8,7 @@ from home_guard_project.box.boxconfig import (
     BoxConfig,
     BoxConfigError,
     load_box_config,
+    load_box_settings,
     s3_prefix,
 )
 
@@ -46,6 +47,29 @@ class BoxConfigTest(unittest.TestCase):
 
     def test_s3_prefix(self) -> None:
         self.assertEqual(s3_prefix("house2"), "dataset_house2")
+
+    def test_mode_defaults_to_data_collection(self) -> None:
+        self._write("site: house2\n")
+        self.assertEqual(load_box_config(self.path).mode, "data_collection")
+
+    def test_mode_inference(self) -> None:
+        self._write("site: house2\nmode: inference\n")
+        self.assertEqual(load_box_config(self.path).mode, "inference")
+
+    def test_unknown_mode_raises(self) -> None:
+        self._write("site: house2\nmode: turbo\n")
+        with self.assertRaises(BoxConfigError):
+            load_box_config(self.path)
+
+    def test_load_box_settings_returns_every_key(self) -> None:
+        self._write("site: house2\nmode: inference\nalert_start_hour: 22\nowner_phone: '+972500000000'\n")
+        settings = load_box_settings(self.path)
+        self.assertEqual(settings["alert_start_hour"], 22)
+        self.assertEqual(settings["owner_phone"], "+972500000000")
+
+    def test_load_box_settings_missing_file_raises(self) -> None:
+        with self.assertRaises(BoxConfigError):
+            load_box_settings(self.path)
 
 
 if __name__ == "__main__":

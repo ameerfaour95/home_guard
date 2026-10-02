@@ -71,6 +71,7 @@ def build_heartbeat(
     outbox_dir: str,
     alive_path: str,
     now: Optional[float] = None,
+    mode: Optional[str] = None,
 ) -> Dict[str, Any]:
     now = time.time() if now is None else now
     live = _clip_times(live_dir)
@@ -84,6 +85,7 @@ def build_heartbeat(
     all_times = [t for per_cam in (*live.values(), *outbox.values()) for t in per_cam]
     return {
         "site": site,
+        "mode": mode,
         "host": socket.gethostname(),
         "local_ip": _local_ip(),
         "time_utc": _iso_utc(now),

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass
+from typing import Any, Dict
 
 import yaml
 
@@ -19,6 +20,11 @@ BOX_YAML = os.path.join(_DIR, "box.yaml")
 
 _SITE_RE = re.compile(r"^[a-z0-9_]+$")
 
+# What the box runs. data_collection saves clips for tagging; inference sends alerts.
+MODE_DATA_COLLECTION = "data_collection"
+MODE_INFERENCE = "inference"
+MODES = (MODE_DATA_COLLECTION, MODE_INFERENCE)
+
 
 class BoxConfigError(Exception):
     """box.yaml is missing or invalid."""
@@ -28,14 +34,19 @@ class BoxConfigError(Exception):
 class BoxConfig:
     site: str
     min_age_minutes: float
+    mode: str = MODE_DATA_COLLECTION
+
+
+def load_box_settings(path: str = BOX_YAML) -> Dict[str, Any]:
+    """Everything in box.yaml as a dict, for code that reads its own keys from it."""
+    if not os.path.isfile(path):
+        raise BoxConfigError(f"{path} not found — run setup_box.ps1 or create it with a 'site:' entry")
+    with open(path, encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
 
 
 def load_box_config(path: str = BOX_YAML) -> BoxConfig:
-    if not os.path.isfile(path):
-        raise BoxConfigError(f"{path} not found — run setup_box.ps1 or create it with a 'site:' entry")
-
-    with open(path, encoding="utf-8") as f:
-        raw = yaml.safe_load(f) or {}
+    raw = load_box_settings(path)
 
     site = str(raw.get("site") or "")
     if not _SITE_RE.match(site):
@@ -43,7 +54,11 @@ def load_box_config(path: str = BOX_YAML) -> BoxConfig:
             f"{path}: 'site' must be lowercase letters, digits or underscores (got {site!r})"
         )
 
-    return BoxConfig(site=site, min_age_minutes=float(raw.get("min_age_minutes", 10.0)))
+    mode = str(raw.get("mode") or MODE_DATA_COLLECTION)
+    if mode not in MODES:
+        raise BoxConfigError(f"{path}: 'mode' must be one of {', '.join(MODES)} (got {mode!r})")
+
+    return BoxConfig(site=site, min_age_minutes=float(raw.get("min_age_minutes", 10.0)), mode=mode)
 
 
 def s3_prefix(site: str) -> str:

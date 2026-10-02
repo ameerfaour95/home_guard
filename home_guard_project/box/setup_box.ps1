@@ -21,6 +21,11 @@ param(
     [ValidatePattern('^[a-z0-9_]+$')]
     [string]$Site,
 
+    # What the box runs: data_collection (clips for tagging) or inference (alerts).
+    # Left out: an existing box.yaml keeps its mode; a new one gets data_collection.
+    [ValidateSet('data_collection', 'inference')]
+    [string]$Mode,
+
     [string]$UploadTime = '03:00'
 )
 
@@ -128,13 +133,33 @@ if ($edition -match 'Home') {
 # ----------------------------------------------------------------------------
 Step '4/6 box.yaml'
 
+# Replace "key: ..." in the lines of a YAML file, or append it. Other lines are kept as they are.
+function Set-YamlValue([string[]]$lines, [string]$key, [string]$value) {
+    $found = $false
+    $out = @(foreach ($line in $lines) {
+        if ($line -match "^\s*$key\s*:") { $found = $true; "${key}: $value" } else { $line }
+    })
+    if (-not $found) { $out += "${key}: $value" }
+    return $out
+}
+
 $boxYaml = Join-Path $BoxDir 'box.yaml'
-@(
-    '# Per-box settings. Created by setup_box.ps1 - not committed.',
-    "site: `"$Site`"            # clips upload to s3://<bucket>/dataset_$Site/",
-    'min_age_minutes: 10       # a clip is uploaded once its meta file is this old'
-) | Set-Content -Path $boxYaml -Encoding ascii
-Ok "Wrote $boxYaml (site: $Site)"
+if (Test-Path $boxYaml) {
+    # Keep everything already in the file (alert settings and so on); only set what was asked.
+    $lines = @(Get-Content $boxYaml)
+    $lines = Set-YamlValue $lines 'site' "`"$Site`""
+    if ($Mode) { $lines = Set-YamlValue $lines 'mode' $Mode }
+} else {
+    $newMode = if ($Mode) { $Mode } else { 'data_collection' }
+    $lines = @(
+        '# Per-box settings. Created by setup_box.ps1 - not committed.',
+        "site: `"$Site`"",
+        "mode: $newMode",
+        'min_age_minutes: 10'
+    )
+}
+$lines | Set-Content -Path $boxYaml -Encoding ascii
+Ok "Wrote $boxYaml ($(($lines | Where-Object { $_ -match '^(site|mode)\s*:' }) -join ', '))"
 
 # ----------------------------------------------------------------------------
 Step '5/6 Python environment (first run downloads several GB)'
