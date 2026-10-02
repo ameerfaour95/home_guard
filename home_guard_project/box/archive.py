@@ -10,6 +10,7 @@ files is enough: no database and no index to keep in step.
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import logging
 import os
@@ -18,6 +19,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from .embeddings import cosine
 from .feedback import Query
 from .outbox import META_SUFFIX
 
@@ -87,28 +89,74 @@ def load_records(roots: Sequence[str]) -> List[AlertRecord]:
     return sorted(records, key=lambda r: r.ts)
 
 
+def record_doc(record: AlertRecord, score: Optional[float] = None) -> Dict[str, Any]:
+    """One alert as a JSON document for the agent: what it was, when, and whether the video is still here."""
+    doc: Dict[str, Any] = {
+        "id": record.alert_id,
+        "time": dt.datetime.fromtimestamp(record.ts).strftime("%a %d %b %H:%M"),
+        "camera": record.camera,
+        "summary": record.summary or "no description",
+        "owner_said": list(record.verdicts),
+        "has_video": record.clip_path is not None,
+    }
+    if score is not None:
+        doc["match"] = round(float(score), 3)
+    return doc
+
+
 def _words(text: str) -> List[str]:
     return [w for w in re.findall(r"[a-z0-9]+", text.lower()) if len(w) > 2 and w not in ("the", "and", "was")]
 
 
-def search(records: Sequence[AlertRecord], query: Query, limit: int = 5) -> List[AlertRecord]:
-    """The alerts that match *query*: in time order, or newest first for a "latest" query.
+def _semantic_rank(hits: Sequence[AlertRecord], what: str, embedder: Any) -> Optional[List[AlertRecord]]:
+    """*hits* ordered by how close each summary is in meaning to *what*.
 
-    The words in ``query.what`` narrow the result when some summary contains
-    them. When none does, everything in the range is returned: the owner's
-    words and the summary's words often differ, and the caller reads the
-    summaries anyway.
+    Returns None if the embedder cannot be reached at all, so the caller falls
+    back to the keyword search. Records whose summary could not be embedded keep
+    their time order at the end.
+    """
+    if not hits:
+        return []
+    query_vec = embedder.embed_one(what)
+    if query_vec is None:
+        return None
+    vectors = embedder.embed([r.summary or r.camera for r in hits])
+    if vectors is None:
+        return None
+    scored = sorted(
+        ((cosine(query_vec, vec), i, r) for i, (r, vec) in enumerate(zip(hits, vectors)) if vec is not None),
+        key=lambda t: (t[0], -t[1]), reverse=True,
+    )
+    ranked = [r for _, _, r in scored]
+    ranked += [r for r, vec in zip(hits, vectors) if vec is None]
+    return ranked
+
+
+def search(records: Sequence[AlertRecord], query: Query, limit: int = 5, embedder: Any = None) -> List[AlertRecord]:
+    """The alerts that match *query*: in time order, newest first for a "latest" query, or - when
+    *query.what* is set and an *embedder* is given - the ones closest in meaning first.
+
+    Time and camera are always the first filter (most questions are about a time
+    or a camera). Semantic ranking, when available, orders what is left; without
+    an embedder, or if it cannot be reached, ``query.what`` narrows by keyword
+    and, when nothing matches, everything in the range is returned (the owner's
+    words and the summary's often differ, and the caller reads the summaries).
     """
     hits = [
         r for r in records
         if query.start_ts <= r.ts <= query.end_ts and (query.camera is None or r.camera == query.camera)
     ]
-    words = _words(query.what)
-    if words:
-        matching = [r for r in hits if any(w in f"{r.summary} {r.camera}".lower() for w in words)]
-        hits = matching or hits
     if query.latest:
-        hits = hits[::-1]
+        return hits[::-1][:limit]
+    what = (query.what or "").strip()
+    if what:
+        ranked = _semantic_rank(hits, what, embedder) if embedder is not None else None
+        if ranked is not None:
+            return ranked[:limit]
+        words = _words(what)
+        if words:
+            matching = [r for r in hits if any(w in f"{r.summary} {r.camera}".lower() for w in words)]
+            return (matching or hits)[:limit]
     return hits[:limit]
 
 

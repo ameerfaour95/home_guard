@@ -1,0 +1,126 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "record_verdict",
+      "description": "File what the owner says about the alert they are answering. Use this whenever the owner judges an alert - confirms it, denies it, corrects it, or says it was expected. A denial or a correction is filed here; it is NOT a reason to pause.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "verdict": {
+            "type": "string",
+            "enum": ["true_alert", "false_alarm", "real_but_wrong", "expected", "missed_event"],
+            "description": "true_alert: real and worth the alert. false_alarm: nothing and nobody was there. real_but_wrong: real, but the alert described it wrongly or missed part of it. expected: real but expected - the owner themself, family, a guest, a delivery, a pet. missed_event: something happened and no alert came."
+          },
+          "note": {
+            "type": "string",
+            "description": "One short English sentence with any detail the owner gave, or an empty string."
+          }
+        },
+        "required": ["verdict"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "pause_alerts",
+      "description": "Stop sending alerts for a while. Use ONLY when the owner, in their latest message, asks for alerts to stop, pause, or be quiet. Pausing leaves the house unwatched, so never pause for a false alarm, a correction, or a complaint - those are a verdict, not a pause.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "owner_words": {
+            "type": "string",
+            "description": "The owner's own words that ask for the pause, copied exactly from their latest message."
+          },
+          "until": {
+            "type": "string",
+            "description": "A 24-hour local clock time \"HH:MM\" if the owner named a time to pause until, otherwise omit."
+          },
+          "minutes": {
+            "type": "number",
+            "description": "A duration in minutes if the owner named one, otherwise omit."
+          },
+          "camera": {
+            "type": "string",
+            "description": "A camera name to pause only that one camera, otherwise omit to pause all cameras."
+          }
+        },
+        "required": ["owner_words"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "resume_alerts",
+      "description": "Turn alerts back on for every camera. Use when the owner asks for alerts to continue or come back on.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "find_alerts",
+      "description": "Search the alerts the box has saved and get them back as JSON, most relevant first. Use when the owner asks what happened, or asks for a video or a picture. The search is by meaning, not keywords: put the owner's own description of what they want into \"what\" (for example \"delivery\", \"someone at the gate\", \"a dog\"), and add the time they named. Then read the returned summaries and answer from them. With no arguments it returns the most recent day.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "day": {
+            "type": "string",
+            "description": "\"today\", \"yesterday\", or an exact date \"YYYY-MM-DD\"."
+          },
+          "time_from": {
+            "type": "string",
+            "description": "Start of a time range, 24-hour local \"HH:MM\"."
+          },
+          "time_to": {
+            "type": "string",
+            "description": "End of a time range, 24-hour local \"HH:MM\"."
+          },
+          "last_hours": {
+            "type": "number",
+            "description": "Look back this many hours, for \"the last N hours\"."
+          },
+          "latest": {
+            "type": "boolean",
+            "description": "true for \"the last alert\" or \"the latest\"."
+          },
+          "camera": {
+            "type": "string",
+            "description": "A camera name to search only that camera."
+          },
+          "what": {
+            "type": "string",
+            "description": "A few words in English describing what the owner is looking for. This drives the semantic search, so paraphrase their intent (\"a parcel being dropped off\" rather than only \"delivery\")."
+          },
+          "want": {
+            "type": "string",
+            "enum": ["video", "text"],
+            "description": "\"video\" if the owner wants the footage, otherwise \"text\"."
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "send_clip",
+      "description": "Attach the video of one saved alert to your reply. alert_id must be an id that find_alerts returned earlier in this same conversation. Call find_alerts first if you do not have one.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "alert_id": {
+            "type": "string",
+            "description": "The id of the alert whose video to send, from a find_alerts result."
+          }
+        },
+        "required": ["alert_id"]
+      }
+    }
+  }
+]

@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from typing import Optional
 
-from home_guard_project.box.archive import expire_old_files, load_records, search
+from home_guard_project.box.archive import expire_old_files, load_records, record_doc, search
 from home_guard_project.box.feedback import Feedback, Query, save_feedback
 
 NOW = 1_800_000_000.0
@@ -35,6 +35,33 @@ def make_alert(root: str, camera: str, stem: str, ts: float, summary: str,
 
 def query(start: float, end: float, camera: Optional[str] = None, what: str = "", latest: bool = False) -> Query:
     return Query(start_ts=start, end_ts=end, camera=camera, what=what, latest=latest)
+
+
+class FakeEmbedder:
+    """Stands in for the embedding model: 'car' and 'person/door' are the only axes, no network."""
+
+    @staticmethod
+    def _vec(text: str):
+        t = text.lower()
+        vehicle = any(w in t for w in ("car", "vehicle", "driveway"))
+        person = any(w in t for w in ("person", "door", "walk"))
+        return [1.0 if vehicle else 0.0, 1.0 if person else 0.0, 0.1]
+
+    def embed_one(self, text: str):
+        return self._vec(text)
+
+    def embed(self, texts):
+        return [self._vec(t) for t in texts]
+
+
+class DeadEmbedder:
+    """An embedder that can never be reached, so the caller must fall back to keywords."""
+
+    def embed_one(self, text: str):
+        return None
+
+    def embed(self, texts):
+        return None
 
 
 class ArchiveTest(unittest.TestCase):
@@ -87,6 +114,22 @@ class ArchiveTest(unittest.TestCase):
         self.assertEqual(self._ids(query(NOW - 6 * HOUR, NOW, what="the car")), ["back_yard_2_alert"])
         # No summary mentions a giraffe: show what there is in the range, not nothing.
         self.assertEqual(len(self._ids(query(NOW - 6 * HOUR, NOW, what="giraffe"))), 3)
+
+    def test_semantic_search_ranks_by_meaning_when_an_embedder_is_given(self) -> None:
+        ids = self._ids(query(NOW - 6 * HOUR, NOW, what="a vehicle on the property"), embedder=FakeEmbedder())
+        self.assertEqual(ids[0], "back_yard_2_alert")  # the car summary is closest in meaning
+        self.assertEqual(set(ids), {"front_door_1_alert", "back_yard_2_alert", "front_door_3_alert"})
+
+    def test_semantic_search_falls_back_to_keywords_when_the_embedder_is_down(self) -> None:
+        self.assertEqual(self._ids(query(NOW - 6 * HOUR, NOW, what="the car"), embedder=DeadEmbedder()),
+                         ["back_yard_2_alert"])
+
+    def test_record_doc_is_a_json_friendly_summary(self) -> None:
+        records = {r.alert_id: r for r in load_records([self.live, self.site])}
+        doc = record_doc(records["back_yard_2_alert"], score=0.812345)
+        self.assertEqual((doc["id"], doc["camera"], doc["has_video"]), ("back_yard_2_alert", "back_yard", True))
+        self.assertEqual(doc["match"], 0.812)
+        json.dumps(doc)  # must be serialisable for a tool result
 
     def test_feedback_is_attached_to_its_alert(self) -> None:
         alert = {"alert_id": "back_yard_2_alert", "camera": "back_yard", "summary": "", "ts": NOW - 3 * HOUR}
