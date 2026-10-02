@@ -539,13 +539,57 @@ def main() -> None:
     _finish(found, args, extra)
 
 
-def rtsp_hosts() -> Dict[int, List[str]]:
-    """Devices that answer on each camera port, both ports scanned at the same time."""
+def lan_addresses() -> List[str]:
+    """This machine's addresses on local networks, where cameras can be.
+
+    Not the VPN (Tailscale's 100.64.0.0/10), not link-local, not loopback. The
+    default-route trick (``discover._get_local_ip``) picks the wrong interface
+    for a moment after the box changes network, which made a search right
+    after the Wi-Fi step scan nothing.
+    """
+    found: List[str] = []
+    try:
+        candidates = socket.gethostbyname_ex(socket.gethostname())[2]
+    except OSError:
+        candidates = []
+    for ip in candidates:
+        first, second = (int(x) for x in ip.split(".")[:2])
+        private = first == 10 or (first == 172 and 16 <= second <= 31) or (first == 192 and second == 168)
+        if private and ip not in found:
+            found.append(ip)
+    return found
+
+
+SETTLE_SCANS = 3          # scans of an empty network before giving up ...
+SETTLE_WAIT_SEC = 4.0     # ... this long apart: ARP and a fresh Wi-Fi link need a few seconds
+
+
+def rtsp_hosts(addresses: Optional[Sequence[str]] = None, sleep: Any = None) -> Dict[int, List[str]]:
+    """Devices that answer on each camera port, on every local network this machine is on.
+
+    A network that shows nothing is scanned again a few seconds later: right
+    after the box joins a Wi-Fi, the first scan comes back empty.
+    """
+    import time
+
     from home_guard_project.data_collection import discover
 
-    with ThreadPoolExecutor(max_workers=len(RTSP_PORTS)) as pool:
-        scans = pool.map(lambda port: sorted(discover.subnet_scan(port=port)), RTSP_PORTS)
-        return dict(zip(RTSP_PORTS, scans))
+    sleep = sleep or time.sleep
+    addresses = list(addresses) if addresses is not None else (lan_addresses() or [discover._get_local_ip() or ""])
+    subnets = [discover._subnet_from_ip(ip) for ip in addresses if ip]
+    jobs = [(subnet, port) for subnet in subnets for port in RTSP_PORTS]
+    hosts: Dict[int, List[str]] = {port: [] for port in RTSP_PORTS}
+    for attempt in range(SETTLE_SCANS):
+        if attempt:
+            log.info("No device answered yet; the network may still be settling. Scanning again...")
+            sleep(SETTLE_WAIT_SEC)
+        with ThreadPoolExecutor(max_workers=max(1, len(jobs))) as pool:
+            results = list(pool.map(lambda job: discover.subnet_scan(subnet=job[0], port=job[1]), jobs))
+        for (subnet, port), answering in zip(jobs, results):
+            hosts[port] = sorted(set(hosts[port]) | set(answering), key=lambda ip: list(map(int, ip.split("."))))
+        if any(hosts.values()):
+            break
+    return hosts
 
 
 def search(user: str, password: str) -> Tuple[Found, Dict[str, Any]]:
@@ -557,10 +601,13 @@ def search(user: str, password: str) -> Tuple[Found, Dict[str, Any]]:
     """
     from home_guard_project.data_collection import discover
 
-    targets = [(host, port) for port, hosts in rtsp_hosts().items() for host in hosts]
+    addresses = lan_addresses()
+    targets = [(host, port) for port, hosts in rtsp_hosts(addresses or None).items() for host in hosts]
+    local_ip = addresses[0] if addresses else discover._get_local_ip()
     if not targets:
-        log.warning("No device answers on the camera port. Is the box on the cameras' network?")
-        return {}, {"local_ip": discover._get_local_ip(), "hosts_tried": [], "devices_found": 0,
+        log.warning("No device answers on the camera port (scanned %s from %s). Is the box on the cameras' network?",
+                    ", ".join(discover._subnet_from_ip(ip) for ip in addresses) or "no local network", local_ip)
+        return {}, {"local_ip": local_ip, "hosts_tried": [], "devices_found": 0,
                     "login_refused": [], "no_answer": []}
 
     paths = first_stream_paths()
@@ -579,7 +626,7 @@ def search(user: str, password: str) -> Tuple[Found, Dict[str, Any]]:
     found = {host: _probe_host(host, port, user, password)
              for host, port in targets if states[host] not in ("refused", "silent")}
     return found, {
-        "local_ip": discover._get_local_ip(),
+        "local_ip": local_ip,
         "hosts_tried": [host for host, _ in targets],
         "devices_found": len(targets),
         "login_refused": refused,
