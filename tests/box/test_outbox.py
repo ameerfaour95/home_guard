@@ -6,10 +6,11 @@ import unittest
 
 from helpers import make_clip
 
-from home_guard_project.box.outbox import finished_clip_metas, move_finished_clips
+from home_guard_project.box.outbox import finished_clip_metas, move_finished_clips, move_orphans
 
 NOW = 1_800_000_000.0
 MIN_AGE = 600.0
+ORPHAN_AGE = 3600.0
 OLD = NOW - 3600
 RECENT = NOW - 30
 
@@ -55,6 +56,39 @@ class OutboxTest(unittest.TestCase):
         self.assertEqual(move_finished_clips(self.live, self.outbox, MIN_AGE, now=NOW), (0, 0))
         missing = os.path.join(self.live, "nope")
         self.assertEqual(move_finished_clips(missing, self.outbox, MIN_AGE, now=NOW), (0, 0))
+
+    def _make_interrupted_clip(self, camera: str, stem: str, mtime: float) -> list[str]:
+        """A clip the collector saved but never finished: every file except the meta."""
+        files = make_clip(self.live, camera, stem, mtime)
+        meta = files.pop()
+        os.remove(os.path.join(self.live, meta))
+        for rel in files:
+            os.utime(os.path.join(self.live, rel), (mtime, mtime))
+        return files
+
+    def test_old_files_without_a_meta_are_moved_as_orphans(self) -> None:
+        files = self._make_interrupted_clip("front", "front_100_trigger", OLD - ORPHAN_AGE)
+        self.assertEqual(move_orphans(self.live, self.outbox, ORPHAN_AGE, now=NOW), len(files))
+        for rel in files:
+            self.assertTrue(self._exists(self.outbox, rel), rel)
+            self.assertFalse(self._exists(self.live, rel), rel)
+
+    def test_files_still_waiting_for_their_meta_are_not_orphans(self) -> None:
+        files = self._make_interrupted_clip("front", "front_100_trigger", RECENT)
+        self.assertEqual(move_orphans(self.live, self.outbox, ORPHAN_AGE, now=NOW), 0)
+        for rel in files:
+            self.assertTrue(self._exists(self.live, rel), rel)
+
+    def test_files_of_a_clip_that_has_a_meta_are_not_orphans(self) -> None:
+        files = make_clip(self.live, "front", "front_100_trigger", RECENT)
+        for rel in files[:-1]:
+            os.utime(os.path.join(self.live, rel), (OLD - ORPHAN_AGE, OLD - ORPHAN_AGE))
+        self.assertEqual(move_orphans(self.live, self.outbox, ORPHAN_AGE, now=NOW), 0)
+        for rel in files:
+            self.assertTrue(self._exists(self.live, rel), rel)
+
+    def test_orphans_with_missing_live_dir(self) -> None:
+        self.assertEqual(move_orphans(os.path.join(self.live, "nope"), self.outbox, ORPHAN_AGE, now=NOW), 0)
 
     def test_finished_clip_metas_is_sorted_and_filtered(self) -> None:
         make_clip(self.live, "b", "b_2_trigger", OLD)

@@ -20,6 +20,9 @@ META_SUFFIX = ".meta.json"
 # Folders that hold a clip's files under <camera>/<date>/, besides meta/.
 _CLIP_DIRS = ("clips", "vlm_crops", "responses", "yolo/images", "yolo/labels")
 
+# Files with no meta after this long belong to a clip the collector never finished.
+ORPHAN_AGE_SEC = 3600.0
+
 
 def finished_clip_metas(
     live_dir: str,
@@ -68,6 +71,57 @@ def move_clip(meta_path: str, live_dir: str, outbox_dir: str) -> int:
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         os.replace(src, dst)
     return len(sources)
+
+
+def orphan_files(
+    live_dir: str,
+    min_age_sec: float,
+    now: Optional[float] = None,
+) -> List[str]:
+    """Return files under *live_dir* that belong to no meta and are at least *min_age_sec* old.
+
+    The meta is written last, a minute or more after the clip.  A collector that
+    is stopped in between leaves the clip's files without one, and nothing would
+    ever pick them up.  The age limit keeps clips whose meta is still on its way.
+    """
+    now = time.time() if now is None else now
+    cutoff = now - min_age_sec
+    orphans: List[str] = []
+    for sub in _CLIP_DIRS:
+        root = os.path.join(live_dir, sub)
+        for dirpath, _, filenames in os.walk(root):
+            meta_dir = os.path.join(live_dir, "meta", os.path.relpath(dirpath, root))
+            stems = (
+                [m[: -len(META_SUFFIX)] for m in os.listdir(meta_dir) if m.endswith(META_SUFFIX)]
+                if os.path.isdir(meta_dir)
+                else []
+            )
+            for name in filenames:
+                path = os.path.join(dirpath, name)
+                if os.path.getmtime(path) > cutoff:
+                    continue
+                if not any(_belongs_to_clip(name, stem) for stem in stems):
+                    orphans.append(path)
+    return sorted(orphans)
+
+
+def move_orphans(
+    live_dir: str,
+    outbox_dir: str,
+    min_age_sec: float,
+    now: Optional[float] = None,
+) -> int:
+    """Move the files of interrupted clips to the outbox. Returns files moved."""
+    moved = 0
+    for src in orphan_files(live_dir, min_age_sec, now):
+        dst = os.path.join(outbox_dir, os.path.relpath(src, live_dir))
+        try:
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            os.replace(src, dst)
+            moved += 1
+        except OSError as exc:
+            log.warning("Could not move %s (will retry next run): %s", src, exc)
+    return moved
 
 
 def move_finished_clips(

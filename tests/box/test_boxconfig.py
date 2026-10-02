@@ -116,6 +116,49 @@ class BoxConfigTest(unittest.TestCase):
         with self.assertRaises(BoxConfigError):
             get_option("nope", self.path)
 
+    def test_inference_options_are_validated_and_stored(self) -> None:
+        self._write('site: "house2"\n')
+        self.assertEqual(set_option("mode", "inference", self.path), "inference")
+        self.assertEqual(set_option("alert_start_hour", "22", self.path), 22)
+        self.assertEqual(set_option("alert_end_hour", "6", self.path), 6)
+        self.assertEqual(set_option("alert_channel", "telegram", self.path), "telegram")
+        self.assertEqual(set_option("telegram_chat_ids", "-1001234567,987654", self.path), "-1001234567,987654")
+        self.assertFalse(set_option("notify_dry_run", "off", self.path))
+
+        settings = load_box_settings(self.path)
+        self.assertEqual(settings["alert_start_hour"], 22)
+        self.assertEqual(settings["alert_end_hour"], 6)
+        self.assertEqual(settings["alert_channel"], "telegram")
+        self.assertEqual(settings["telegram_chat_ids"], "-1001234567,987654")
+        self.assertIs(settings["notify_dry_run"], False)
+        self.assertEqual(load_box_config(self.path), BoxConfig(site="house2", min_age_minutes=10.0, mode="inference"))
+        self.assertEqual(get_option("alert_start_hour", self.path), 22)
+        self.assertEqual(get_option("mode", self.path), "inference")
+
+    def test_unset_options_have_defaults(self) -> None:
+        self._write('site: "house2"\n')
+        self.assertFalse(get_option("notify_dry_run", self.path))
+        self.assertEqual(get_option("mode", self.path), "data_collection")
+        self.assertIsNone(get_option("alert_start_hour", self.path))
+        self.assertIsNone(get_option("telegram_chat_ids", self.path))
+
+    def test_inference_options_reject_bad_values_and_write_nothing(self) -> None:
+        self._write('site: "house2"\n')
+        for key, bad in (
+            ("mode", "turbo"),
+            ("alert_start_hour", "24"),
+            ("alert_end_hour", "-1"),
+            ("alert_start_hour", "ten"),
+            ("alert_channel", "pigeon"),
+            ("telegram_chat_ids", "12, 34"),
+            ("telegram_chat_ids", "abc"),
+            ("telegram_chat_ids", ""),
+        ):
+            with self.assertRaises(BoxConfigError, msg=f"{key}={bad!r}"):
+                set_option(key, bad, self.path)
+        with open(self.path, encoding="utf-8") as f:
+            self.assertEqual(f.read(), 'site: "house2"\n')
+
     def test_set_site_rejects_bad_names(self) -> None:
         for bad in ("House 2", "", "house-2", "../x"):
             with self.assertRaises(BoxConfigError):

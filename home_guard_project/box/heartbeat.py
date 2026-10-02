@@ -78,8 +78,8 @@ def build_heartbeat(
     # The outbox has one dataset folder per site.
     outbox: Dict[str, list[float]] = {}
     if os.path.isdir(outbox_dir):
-        for site in os.listdir(outbox_dir):
-            for camera, times in _clip_times(os.path.join(outbox_dir, site)).items():
+        for site_folder in os.listdir(outbox_dir):
+            for camera, times in _clip_times(os.path.join(outbox_dir, site_folder)).items():
                 outbox.setdefault(camera, []).extend(times)
 
     cameras: Dict[str, Dict[str, Any]] = {}

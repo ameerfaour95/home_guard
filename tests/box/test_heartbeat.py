@@ -75,6 +75,12 @@ class HeartbeatTest(unittest.TestCase):
         self.assertTrue(hb["local_ip"] is None or hb["local_ip"].count(".") == 3)
         self.assertGreater(hb["disk_free_gb"], 0)
 
+    def test_site_is_the_box_site_not_an_outbox_folder_name(self) -> None:
+        make_clip(os.path.join(self.outbox, "zz_old_house"), "yard", "yard_1_trigger", NOW - 9000)
+        hb = build_heartbeat("house2", self.live, self.outbox, self.alive, now=NOW)
+        self.assertEqual(hb["site"], "house2")
+        self.assertEqual(hb["clips_outbox"], 1)
+
     def test_no_clips(self) -> None:
         hb = build_heartbeat("house2", self.live, self.outbox, self.alive, now=NOW)
         self.assertIsNone(hb["newest_clip_utc"])

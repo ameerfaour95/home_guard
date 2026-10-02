@@ -8,7 +8,9 @@ Usage:
     python -m home_guard_project.box mode             # print the box's mode (read by run_collector.sh)
     python -m home_guard_project.box set-site house2  # name the house; clips then go to s3://<bucket>/dataset_house2/
     python -m home_guard_project.box set-option show_cameras true   # camera windows on the box's own screen
-    python -m home_guard_project.box get-option show_cameras        # prints true or false
+    python -m home_guard_project.box set-option alert_start_hour 22 # the options are listed in boxconfig.py
+    python -m home_guard_project.box set-option telegram_chat_ids=-1001234567,987654
+    python -m home_guard_project.box get-option show_cameras        # prints the stored value
 """
 
 from __future__ import annotations
@@ -33,7 +35,7 @@ from .boxconfig import (
     set_site,
 )
 from .heartbeat import build_heartbeat, put_heartbeat
-from .outbox import move_finished_clips
+from .outbox import ORPHAN_AGE_SEC, move_finished_clips, move_orphans
 
 log = logging.getLogger("box")
 
@@ -63,8 +65,13 @@ def run_upload(
     so clips saved before a box changed house still go where they belong.
     """
     os.makedirs(outbox_dir, exist_ok=True)
-    moved = move_finished_clips(live_dir, os.path.join(outbox_dir, cfg.site), cfg.min_age_minutes * 60)
+    site_outbox = os.path.join(outbox_dir, cfg.site)
+    moved = move_finished_clips(live_dir, site_outbox, cfg.min_age_minutes * 60)
     log.info("Moved %d finished clip(s) (%d files) to the outbox.", *moved)
+    # A clip cut short by a restart has no meta; it is uploaded too, not left on the box.
+    orphans = move_orphans(live_dir, site_outbox, ORPHAN_AGE_SEC)
+    if orphans:
+        log.info("Moved %d file(s) of interrupted clips (no meta) to the outbox.", orphans)
 
     uploaded_any = False
     for site in _site_dirs(outbox_dir):
@@ -102,10 +109,31 @@ def change_site(new_site: str, live_dir: str, outbox_dir: str, box_yaml: str) ->
     return moved
 
 
+def split_option(values: list[str]) -> Tuple[str, str]:
+    """``KEY VALUE`` or ``KEY=VALUE`` -> ``(key, value)``.
+
+    The one-token form carries values the command line would misread as a
+    flag, such as a chat id list that starts with a minus sign.
+    """
+    if len(values) == 2:
+        return values[0], values[1]
+    if len(values) == 1 and "=" in values[0]:
+        key, _, value = values[0].partition("=")
+        return key, value
+    raise BoxConfigError("usage: set-option KEY VALUE  (or KEY=VALUE)")
+
+
+def _shown(value: Any) -> str:
+    """An option value as the command line prints it: true/false, a number, text, or nothing."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return "" if value is None else str(value)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Collector box: upload, heartbeat, status, mode, settings.")
     parser.add_argument("command", choices=["upload", "heartbeat", "status", "mode", "set-site", "set-option", "get-option"])
-    parser.add_argument("values", nargs="*", help="set-site NAME | set-option KEY true|false | get-option KEY")
+    parser.add_argument("values", nargs="*", help="set-site NAME | set-option KEY VALUE (or KEY=VALUE) | get-option KEY")
     args = parser.parse_args()
     args.value = args.values[0] if args.values else None
 
@@ -120,12 +148,10 @@ def main() -> None:
             if args.command == "get-option":
                 if len(args.values) != 1:
                     raise BoxConfigError("usage: get-option KEY")
-                print("true" if get_option(args.values[0]) else "false")
+                print(_shown(get_option(args.values[0])))
             else:
-                if len(args.values) != 2:
-                    raise BoxConfigError("usage: set-option KEY true|false")
-                stored = set_option(args.values[0], args.values[1])
-                print(f"{args.values[0]} set to {'true' if stored else 'false'}")
+                key, value = split_option(args.values)
+                print(f"{key} set to {_shown(set_option(key, value))}")
         except BoxConfigError as exc:
             log.error("%s", exc)
             sys.exit(1)

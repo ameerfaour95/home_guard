@@ -8,8 +8,8 @@ from typing import Any, Dict
 
 from helpers import make_clip
 
-from home_guard_project.box.__main__ import change_site, run_upload
-from home_guard_project.box.boxconfig import BoxConfig, load_box_config
+from home_guard_project.box.__main__ import change_site, run_upload, split_option
+from home_guard_project.box.boxconfig import BoxConfig, BoxConfigError, load_box_config
 
 OLD = 3600  # seconds ago
 
@@ -74,6 +74,27 @@ class BoxCliTest(unittest.TestCase):
             sorted((os.path.basename(c["dataset_dir"]), c["prefix"]) for c in self.uploader.calls),
             [("house2", "dataset_house2"), ("old_house", "dataset_old_house")],
         )
+
+    def test_interrupted_clip_without_meta_is_uploaded_once_it_is_old(self) -> None:
+        files = make_clip(self.live, "front", "front_1_trigger", time.time())
+        os.remove(os.path.join(self.live, files.pop()))  # the collector stopped before the meta
+        long_ago = time.time() - 2 * 3600
+        for rel in files:
+            os.utime(os.path.join(self.live, rel), (long_ago, long_ago))
+
+        self.assertEqual(self._run(), (0, 0))
+
+        (call,) = self.uploader.calls
+        self.assertEqual(call["prefix"], "dataset_house2")
+        for rel in files:
+            self.assertTrue(os.path.isfile(os.path.join(self.outbox, "house2", rel)), rel)
+
+    def test_split_option_accepts_two_tokens_or_key_equals_value(self) -> None:
+        self.assertEqual(split_option(["alert_start_hour", "22"]), ("alert_start_hour", "22"))
+        self.assertEqual(split_option(["telegram_chat_ids=-1001,55"]), ("telegram_chat_ids", "-1001,55"))
+        for bad in ([], ["show_cameras"], ["a", "b", "c"]):
+            with self.assertRaises(BoxConfigError):
+                split_option(bad)
 
     def test_change_site_sets_aside_clips_saved_under_the_old_name(self) -> None:
         with open(self.box_yaml, "w", encoding="utf-8") as f:

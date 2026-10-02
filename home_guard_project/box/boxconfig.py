@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass
-from typing import Any, Dict
+from typing import Any, Dict, Optional, Union
 
 import yaml
 
@@ -91,34 +91,74 @@ def set_site(site: str, path: str = BOX_YAML) -> None:
     _set_line("site", f'"{site}"', path)
 
 
-# Yes/no choices the installer makes in the setup program.
-#   show_cameras: on the box's own screen, open a window per camera (true) or only the log (false).
-BOOLEAN_OPTIONS = ("show_cameras",)
+# Choices the installer makes in the setup program.
+#   show_cameras:      on the box's own screen, open a window per camera (true) or only the log (false).
+#   notify_dry_run:    inference mode logs its alerts instead of sending them.
+#   alert_start_hour,
+#   alert_end_hour:    the hours of the day between which inference mode alerts the owner.
+#   mode:              what the box runs.
+#   alert_channel:     how inference mode delivers its alerts.
+#   telegram_chat_ids: who receives the Telegram alerts, e.g. -1001234567,987654.
+BOOLEAN_OPTIONS = ("show_cameras", "notify_dry_run")
+HOUR_OPTIONS = ("alert_start_hour", "alert_end_hour")
+CHOICE_OPTIONS = {"mode": MODES, "alert_channel": ("telegram", "twilio", "both")}
+CHAT_IDS_OPTION = "telegram_chat_ids"
+OPTIONS = BOOLEAN_OPTIONS + HOUR_OPTIONS + tuple(CHOICE_OPTIONS) + (CHAT_IDS_OPTION,)
 
 _TRUE = ("true", "yes", "y", "1", "on")
 _FALSE = ("false", "no", "n", "0", "off")
+_CHAT_IDS_RE = re.compile(r"^-?\d+(,-?\d+)*$")
+
+OptionValue = Union[bool, int, str]
 
 
-def set_option(key: str, value: str, path: str = BOX_YAML) -> bool:
-    """Set a yes/no option in box.yaml. Returns the value stored."""
-    if key not in BOOLEAN_OPTIONS:
-        raise BoxConfigError(f"unknown option {key!r}; known: {', '.join(BOOLEAN_OPTIONS)}")
-    text = str(value).strip().lower()
-    if text not in _TRUE + _FALSE:
-        raise BoxConfigError(f"{key} must be true or false (got {value!r})")
-    flag = text in _TRUE
-    _set_line(key, "true" if flag else "false", path)
-    return flag
+def _check_option(key: str) -> None:
+    if key not in OPTIONS:
+        raise BoxConfigError(f"unknown option {key!r}; known: {', '.join(OPTIONS)}")
 
 
-def get_option(key: str, path: str = BOX_YAML) -> bool:
-    """A yes/no option from box.yaml; false when the key or the file is missing."""
-    if key not in BOOLEAN_OPTIONS:
-        raise BoxConfigError(f"unknown option {key!r}; known: {', '.join(BOOLEAN_OPTIONS)}")
+def set_option(key: str, value: str, path: str = BOX_YAML) -> OptionValue:
+    """Set an option in box.yaml, keeping every other line. Returns the value stored."""
+    _check_option(key)
+    text = str(value).strip()
+
+    if key in BOOLEAN_OPTIONS:
+        if text.lower() not in _TRUE + _FALSE:
+            raise BoxConfigError(f"{key} must be true or false (got {value!r})")
+        flag = text.lower() in _TRUE
+        _set_line(key, "true" if flag else "false", path)
+        return flag
+
+    if key in HOUR_OPTIONS:
+        if not text.isdigit() or int(text) > 23:
+            raise BoxConfigError(f"{key} must be an hour from 0 to 23 (got {value!r})")
+        _set_line(key, str(int(text)), path)
+        return int(text)
+
+    if key in CHOICE_OPTIONS:
+        if text not in CHOICE_OPTIONS[key]:
+            raise BoxConfigError(f"{key} must be one of {', '.join(CHOICE_OPTIONS[key])} (got {value!r})")
+        _set_line(key, text, path)
+        return text
+
+    if not _CHAT_IDS_RE.match(text):
+        raise BoxConfigError(f"{key} must be numbers separated by commas, without spaces (got {value!r})")
+    _set_line(key, f'"{text}"', path)
+    return text
+
+
+def get_option(key: str, path: str = BOX_YAML) -> Optional[OptionValue]:
+    """An option from box.yaml. Unset: yes/no options are false, mode is data_collection, the rest None."""
+    _check_option(key)
     try:
-        return bool(load_box_settings(path).get(key, False))
+        settings = load_box_settings(path)
     except BoxConfigError:
-        return False
+        settings = {}
+    if key in BOOLEAN_OPTIONS:
+        return bool(settings.get(key, False))
+    if key == "mode":
+        return str(settings.get(key) or MODE_DATA_COLLECTION)
+    return settings.get(key)
 
 
 def s3_prefix(site: str) -> str:
