@@ -27,11 +27,11 @@ import logging
 import os
 import threading
 import time
-from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Callable, Deque, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from .archive import AlertRecord, load_records, record_doc, search
+from .conversation import ConversationStore
 from .embeddings import make_embedder
 from .feedback import (
     MAX_MUTE_HOURS,
@@ -46,9 +46,9 @@ log = logging.getLogger("box.agent")
 
 MAX_CLIPS_PER_REPLY = 3
 MAX_FOUND = 8
-HISTORY_MESSAGES = 8          # earlier messages of the chat the model is shown
 MAX_TOOL_ROUNDS = 5           # how many model <-> tool round-trips one message may take
 EMBED_CACHE_NAME = ".alert_embeddings.json"
+CONVERSATIONS_DIR_NAME = ".conversations"
 TOOLS_PATH = os.path.join(os.path.dirname(__file__), "agent_tools.json")
 UNAVAILABLE_REPLY = "I could not work on that right now, but your message was saved."
 
@@ -99,6 +99,7 @@ class AgentContext:
     max_mute_hours: float = MAX_MUTE_HOURS
     retention_days: float = 14.0
     embedder: Optional[Any] = None             # semantic retriever; None builds one from the environment
+    conversations_dir: Optional[str] = None    # where per-chat history is kept; None -> <feedback_dir>/.conversations
 
 
 @dataclass(frozen=True)
@@ -177,11 +178,12 @@ class OwnerAgent:
         self._model = model
         self._lock = threading.Lock()
         self._turn: Optional[_Turn] = None
-        self._history: Dict[str, Deque[Dict[str, Any]]] = {}
         self._tools = load_tool_schemas()
         self._system = SYSTEM_PROMPT.format(retention_days=int(ctx.retention_days))
         cache_path = os.path.join(ctx.feedback_dir, EMBED_CACHE_NAME)
         self._embedder = ctx.embedder if ctx.embedder is not None else make_embedder(os.environ, cache_path)
+        self._conversations = ConversationStore(
+            ctx.conversations_dir or os.path.join(ctx.feedback_dir, CONVERSATIONS_DIR_NAME))
         self._handlers: Dict[str, Callable[[Dict[str, Any]], Dict[str, Any]]] = {
             "record_verdict": self._record_verdict,
             "pause_alerts": self._pause_alerts,
@@ -302,17 +304,15 @@ class OwnerAgent:
         """Act on one owner message and return what to answer. Never raises; the message is always saved."""
         with self._lock:
             turn = self._turn = _Turn(text=text, chat_id=str(chat_id), who=who or {}, alert=alert)
-            history = self._history.setdefault(turn.chat_id, deque(maxlen=HISTORY_MESSAGES))
             reply = UNAVAILABLE_REPLY
             try:
                 messages: List[Dict[str, Any]] = [
                     {"role": "system", "content": self._system},
-                    *history,
+                    *self._conversations.history(turn.chat_id),
                     {"role": "user", "content": f"{self._context_line(turn)}\n{text}"},
                 ]
                 reply = self._run(messages)
-                history.append({"role": "user", "content": text})
-                history.append({"role": "assistant", "content": reply})
+                self._conversations.append(turn.chat_id, text, reply)
             except Exception as exc:  # noqa: BLE001 - no network, a model error: the owner still gets an answer
                 log.warning("Agent could not handle a message: %s", exc)
             if not turn.saved:

@@ -43,6 +43,18 @@ class BrokenModel(ScriptedModel):
         raise ConnectionError("no internet")
 
 
+class RecordingModel(ScriptedModel):
+    """Remembers the messages it was handed, to check what context the agent built."""
+
+    def __init__(self, responses: List[ModelMessage]) -> None:
+        super().__init__(responses)
+        self.seen: List[List[dict]] = []
+
+    def chat(self, messages: Any, tools: Any) -> ModelMessage:
+        self.seen.append(list(messages))
+        return super().chat(messages, tools)
+
+
 def call(name: str, **args: Any) -> ModelMessage:
     return ModelMessage(tool_calls=(ToolCall(id=f"call_{name}", name=name, arguments=args),))
 
@@ -65,15 +77,17 @@ class OwnerAgentTest(unittest.TestCase):
         make_alert(self.live, "front_door", "front_door_3_alert", NOW - 60, "a person at the door")
         self.mute = MuteState(os.path.join(tmp.name, "alert_mute.json"))
 
-    def _agent(self, responses: List[ModelMessage], model_cls: type = ScriptedModel) -> OwnerAgent:
-        ctx = AgentContext(
+    def _ctx(self) -> AgentContext:
+        return AgentContext(
             camera_names=["front_door", "back_yard"],
             mute_state=self.mute,
             feedback_dir=self.live,
             roots=lambda: [self.live, self.site],
             now=lambda: NOW,
         )
-        return OwnerAgent(model_cls(responses=responses), ctx)
+
+    def _agent(self, responses: List[ModelMessage], model_cls: type = ScriptedModel) -> OwnerAgent:
+        return OwnerAgent(model_cls(responses=responses), self._ctx())
 
     def _saved(self) -> List[dict]:
         found = []
@@ -156,6 +170,23 @@ class OwnerAgentTest(unittest.TestCase):
         agent.handle("thanks", "-1001", {}, ALERT)
         (saved,) = self._saved()
         self.assertEqual((saved["verdict"], saved["action"], saved["raw_text"]), ("none", "none", "thanks"))
+
+    def test_the_conversation_history_is_carried_into_later_messages(self) -> None:
+        model = RecordingModel([say("Hello."), say("It was quiet.")])
+        agent = OwnerAgent(model, self._ctx())
+        agent.handle("hello there", "-1001", {}, None)
+        agent.handle("anything happen today?", "-1001", {}, None)
+        second_context = [m.get("content") for m in model.seen[1]]
+        self.assertIn("hello there", second_context)   # the owner's earlier message
+        self.assertIn("Hello.", second_context)        # and the assistant's earlier reply
+
+    def test_history_is_reloaded_by_a_fresh_agent_after_a_restart(self) -> None:
+        OwnerAgent(ScriptedModel([say("noted")]), self._ctx()).handle("remember this", "-1001", {}, None)
+        model = RecordingModel([say("ok")])
+        OwnerAgent(model, self._ctx()).handle("and now this", "-1001", {}, None)  # a new process = a restart
+        first_context = [m.get("content") for m in model.seen[0]]
+        self.assertIn("remember this", first_context)
+        self.assertIn("noted", first_context)
 
     def test_without_the_model_the_message_is_saved_and_the_owner_is_told(self) -> None:
         agent = self._agent([], model_cls=BrokenModel)
