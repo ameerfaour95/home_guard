@@ -104,14 +104,18 @@ def set_site(site: str, path: str = BOX_YAML) -> None:
 #   notify_dry_run:    inference mode logs its alerts instead of sending them.
 #   alert_start_hour,
 #   alert_end_hour:    the hours of the day between which inference mode alerts the owner.
+#   alert_cooldown_sec: the shortest time between two alerts from one camera, in seconds.
 #   mode:              what the box runs.
 #   alert_channel:     how inference mode delivers its alerts.
 #   telegram_chat_ids: who receives the Telegram alerts, e.g. -1001234567,987654.
 BOOLEAN_OPTIONS = ("show_cameras", "notify_dry_run")
-HOUR_OPTIONS = ("alert_start_hour", "alert_end_hour")
+# Whole numbers, each with the smallest and largest value it may take.
+NUMBER_OPTIONS = {"alert_start_hour": (0, 23), "alert_end_hour": (0, 23), "alert_cooldown_sec": (10, 86400)}
 CHOICE_OPTIONS = {"mode": MODES, "alert_channel": ("telegram", "twilio", "both")}
 CHAT_IDS_OPTION = "telegram_chat_ids"
-OPTIONS = BOOLEAN_OPTIONS + HOUR_OPTIONS + tuple(CHOICE_OPTIONS) + (CHAT_IDS_OPTION,)
+OPTIONS = BOOLEAN_OPTIONS + tuple(NUMBER_OPTIONS) + tuple(CHOICE_OPTIONS) + (CHAT_IDS_OPTION,)
+# Options the running program reads only when it starts. show_cameras is read by the screen, not by it.
+RESTART_OPTIONS = tuple(key for key in OPTIONS if key != "show_cameras")
 
 _TRUE = ("true", "yes", "y", "1", "on")
 _FALSE = ("false", "no", "n", "0", "off")
@@ -137,9 +141,10 @@ def set_option(key: str, value: str, path: str = BOX_YAML) -> OptionValue:
         _set_line(key, "true" if flag else "false", path)
         return flag
 
-    if key in HOUR_OPTIONS:
-        if not text.isdigit() or int(text) > 23:
-            raise BoxConfigError(f"{key} must be an hour from 0 to 23 (got {value!r})")
+    if key in NUMBER_OPTIONS:
+        low, high = NUMBER_OPTIONS[key]
+        if not text.isdigit() or not low <= int(text) <= high:
+            raise BoxConfigError(f"{key} must be a whole number from {low} to {high} (got {value!r})")
         _set_line(key, str(int(text)), path)
         return int(text)
 

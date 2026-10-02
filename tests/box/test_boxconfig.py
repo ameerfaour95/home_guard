@@ -7,6 +7,7 @@ import unittest
 from home_guard_project.box.boxconfig import (
     PRODUCTION_PREFIX_ROOT,
     PRODUCTION_RETENTION_DAYS,
+    RESTART_OPTIONS,
     BoxConfig,
     BoxConfigError,
     get_option,
@@ -142,6 +143,19 @@ class BoxConfigTest(unittest.TestCase):
         self.assertEqual(load_box_config(self.path), BoxConfig(site="house2", min_age_minutes=10.0, mode="inference"))
         self.assertEqual(get_option("alert_start_hour", self.path), 22)
         self.assertEqual(get_option("mode", self.path), "inference")
+
+    def test_alert_cooldown_is_a_bounded_number_of_seconds(self) -> None:
+        self._write('site: "house2"\n')
+        self.assertEqual(set_option("alert_cooldown_sec", "600", self.path), 600)
+        self.assertEqual(load_box_settings(self.path)["alert_cooldown_sec"], 600)
+        for bad in ("5", "0", "100000", "2.5", "soon"):
+            with self.assertRaises(BoxConfigError, msg=bad):
+                set_option("alert_cooldown_sec", bad, self.path)
+
+    def test_options_the_running_program_must_be_restarted_for(self) -> None:
+        self.assertIn("mode", RESTART_OPTIONS)
+        self.assertIn("alert_cooldown_sec", RESTART_OPTIONS)
+        self.assertNotIn("show_cameras", RESTART_OPTIONS)
 
     def test_unset_options_have_defaults(self) -> None:
         self._write('site: "house2"\n')

@@ -11,6 +11,11 @@ Usage:
     python -m home_guard_project.box set-option alert_start_hour 22 # the options are listed in boxconfig.py
     python -m home_guard_project.box set-option telegram_chat_ids=-1001234567,987654
     python -m home_guard_project.box get-option show_cameras        # prints the stored value
+    python -m home_guard_project.box stop             # stop the box's program until "start" (needs no admin rights)
+    python -m home_guard_project.box start
+    python -m home_guard_project.box restart          # restart it once, to pick up changed settings
+
+A changed setting that the running program reads at start-up restarts it by itself.
 """
 
 from __future__ import annotations
@@ -22,6 +27,7 @@ import os
 import sys
 from typing import Any, Callable, Sequence, Tuple
 
+from . import control
 from .archive import expire_old_files
 from .boxconfig import (
     ALIVE_FILE,
@@ -31,6 +37,7 @@ from .boxconfig import (
     PRODUCTION_ARCHIVE_DIR,
     PRODUCTION_LIVE_DIR,
     PRODUCTION_RETENTION_DAYS,
+    RESTART_OPTIONS,
     BoxConfig,
     BoxConfigError,
     get_option,
@@ -153,6 +160,13 @@ def _clip_dirs(mode: str) -> Tuple[str, str]:
     return LIVE_DIR, OUTBOX_DIR
 
 
+def _status(cfg: BoxConfig) -> dict:
+    """The status report: the heartbeat, plus whether the box was stopped on purpose."""
+    status = build_heartbeat(cfg.site, *_clip_dirs(cfg.mode), ALIVE_FILE, mode=cfg.mode)
+    status["stopped"] = control.is_stopped()
+    return status
+
+
 def _shown(value: Any) -> str:
     """An option value as the command line prints it: true/false, a number, text, or nothing."""
     if isinstance(value, bool):
@@ -162,7 +176,8 @@ def _shown(value: Any) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Collector box: upload, heartbeat, status, mode, settings.")
-    parser.add_argument("command", choices=["upload", "heartbeat", "status", "mode", "set-site", "set-option", "get-option"])
+    parser.add_argument("command", choices=["upload", "heartbeat", "status", "mode", "set-site", "set-option",
+                                            "get-option", "stop", "start", "restart"])
     parser.add_argument("values", nargs="*", help="set-site NAME | set-option KEY VALUE (or KEY=VALUE) | get-option KEY")
     args = parser.parse_args()
     args.value = args.values[0] if args.values else None
@@ -173,6 +188,19 @@ def main() -> None:
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
+    if args.command == "stop":
+        control.stop()
+        print("stopping; the box stays stopped until: start")
+        return
+    if args.command == "start":
+        control.start()
+        print("starting")
+        return
+    if args.command == "restart":
+        control.request_restart()
+        print("stopped; use start" if control.is_stopped() else "restarting")
+        return
+
     if args.command in ("set-option", "get-option"):
         try:
             if args.command == "get-option":
@@ -182,6 +210,8 @@ def main() -> None:
             else:
                 key, value = split_option(args.values)
                 print(f"{key} set to {_shown(set_option(key, value))}")
+                if key in RESTART_OPTIONS:
+                    control.request_restart()   # the running program reads it only at start-up
         except BoxConfigError as exc:
             log.error("%s", exc)
             sys.exit(1)
@@ -216,7 +246,7 @@ def main() -> None:
         return
 
     if args.command == "status":
-        print(json.dumps(build_heartbeat(cfg.site, *_clip_dirs(cfg.mode), ALIVE_FILE, mode=cfg.mode), indent=2))
+        print(json.dumps(_status(cfg), indent=2))
         return
 
     from home_guard_project.s3_upload.config import load_config as load_s3_config
@@ -238,11 +268,7 @@ def main() -> None:
             log.info("Deleted %d production file(s) older than %d days from this box.",
                      expired, PRODUCTION_RETENTION_DAYS)
 
-    key = put_heartbeat(
-        build_heartbeat(cfg.site, *_clip_dirs(cfg.mode), ALIVE_FILE, mode=cfg.mode),
-        s3_cfg.bucket,
-        s3_prefix(cfg.site),
-    )
+    key = put_heartbeat(_status(cfg), s3_cfg.bucket, s3_prefix(cfg.site))
     log.info("Heartbeat written to s3://%s/%s", s3_cfg.bucket, key)
 
 

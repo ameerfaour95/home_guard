@@ -13,6 +13,8 @@
 #       logging to logs/collector-<date>.log
 #    3. Touches logs/collector.alive while it runs (read by the heartbeat)
 #    4. Restarts it 15 s after it exits, forever
+#    5. Stops, starts or restarts it when asked through the flag files of
+#       "python -m home_guard_project.box stop|start|restart"
 # ============================================================================
 set -uo pipefail
 
@@ -76,12 +78,39 @@ stop() {
 }
 trap stop INT TERM
 
+# Flags written by "python -m home_guard_project.box stop|start|restart" (control.py).
+# The app on the desktop has no rights over this task, so it asks through these files.
+STOP_FLAG="$LOG_DIR/collector.stop"
+RESTART_FLAG="$LOG_DIR/collector.restart"
+
+# End the program and everything it started (python.exe in a venv is a launcher with a child).
+kill_child() {
+    local winpid
+    winpid="$(cat "$PID_FILE" 2>/dev/null)"
+    if [[ -n "$winpid" ]] && command -v taskkill &>/dev/null; then
+        taskkill //PID "$winpid" //T //F &>/dev/null || true
+    fi
+    [[ -n "$child" ]] && kill "$child" 2>/dev/null
+}
+
 ensure_venv >> "$RUNNER_LOG" 2>&1 || exit 1
 kill_previous_runner
 kill_leftover
 
 waiting_logged=false
+stopped_logged=false
 while true; do
+    if [[ -f "$STOP_FLAG" ]]; then
+        if [[ "$stopped_logged" == "false" ]]; then
+            log "Stopped on request. Waiting for start." >> "$RUNNER_LOG"
+            stopped_logged=true
+        fi
+        sleep 2
+        continue
+    fi
+    stopped_logged=false
+    rm -f "$RESTART_FLAG"   # starting now is the restart
+
     if [[ ! -f "$CAMERAS_YAML" ]]; then
         if [[ "$waiting_logged" == "false" ]]; then
             log "cameras.yaml not found - run camera discovery (see box/README.md). Checking every 60 s." >> "$RUNNER_LOG"
@@ -109,13 +138,33 @@ while true; do
     child=$!
     cat "/proc/$child/winpid" > "$PID_FILE" 2>/dev/null || echo "$child" > "$PID_FILE"
 
+    last_touch=0
+    asked=""
     while kill -0 "$child" 2>/dev/null; do
-        touch "$ALIVE_FILE"
-        sleep 30
+        now="$(date +%s)"
+        if (( now - last_touch >= 30 )); then
+            touch "$ALIVE_FILE"
+            last_touch="$now"
+        fi
+        if [[ -f "$STOP_FLAG" ]]; then
+            asked="stop"
+        elif [[ -f "$RESTART_FLAG" ]]; then
+            asked="restart"
+        fi
+        if [[ -n "$asked" ]]; then
+            kill_child
+            break
+        fi
+        sleep 2
     done
-    wait "$child"
-    log "$mode exited with code $? - restarting in 15 s" >> "$RUNNER_LOG"
+    wait "$child" 2>/dev/null
+    code=$?
     child=""
     rm -f "$PID_FILE"
+    if [[ -n "$asked" ]]; then
+        log "$mode ended on request ($asked)" >> "$RUNNER_LOG"
+        continue
+    fi
+    log "$mode exited with code $code - restarting in 15 s" >> "$RUNNER_LOG"
     sleep 15
 done

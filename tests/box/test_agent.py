@@ -11,7 +11,7 @@ from langchain_core.language_models.fake_chat_models import FakeMessagesListChat
 from langchain_core.messages import AIMessage
 from test_archive import make_alert
 
-from home_guard_project.box.agent import UNAVAILABLE_REPLY, AgentContext, OwnerAgent
+from home_guard_project.box.agent import UNAVAILABLE_REPLY, AgentContext, OwnerAgent, _reply_language
 from home_guard_project.box.feedback import MuteState
 
 NOW = dt.datetime(2026, 10, 2, 15, 0).timestamp()
@@ -76,7 +76,7 @@ class OwnerAgentTest(unittest.TestCase):
 
     def test_pause_until_a_time_then_continue(self) -> None:
         agent = self._agent([
-            call("pause_alerts", until="18:00"), AIMessage(content="Paused until 18:00."),
+            call("pause_alerts", owner_words="stop until six", until="18:00"), AIMessage(content="Paused until 18:00."),
             call("resume_alerts"), AIMessage(content="Alerts are back on."),
         ])
         agent.handle("it's me in the garden, stop until six", "-1001", {}, ALERT)
@@ -88,9 +88,20 @@ class OwnerAgentTest(unittest.TestCase):
         self.assertEqual([s["action"] for s in self._saved()], ["mute", "resume"])
 
     def test_a_pause_the_model_asks_for_cannot_exceed_the_cap(self) -> None:
-        agent = self._agent([call("pause_alerts", minutes=999999), AIMessage(content="ok")])
+        agent = self._agent([call("pause_alerts", owner_words="Stop  FOREVER", minutes=999999), AIMessage(content="ok")])
         agent.handle("stop forever", "-1001", {}, None)
+        self.assertTrue(self.mute.is_muted(NOW + HOUR, "front_door"))
         self.assertFalse(self.mute.is_muted(NOW + 25 * HOUR, "front_door"))
+
+    def test_no_pause_unless_the_owner_asked_for_it_in_this_message(self) -> None:
+        agent = self._agent([
+            call("record_verdict", verdict="false_alarm"),
+            call("pause_alerts", owner_words="please pause the alerts", minutes=60),   # words the owner never wrote
+            AIMessage(content="Marked as a false alarm."),
+        ])
+        agent.handle("no there was nothing", "-1001", {}, ALERT)
+        self.assertFalse(self.mute.is_muted(NOW + 60, "front_door"))
+        self.assertEqual([s["action"] for s in self._saved()], ["none"])
 
     def test_the_owner_asks_for_a_video_and_gets_the_clip(self) -> None:
         agent = self._agent([
@@ -103,6 +114,12 @@ class OwnerAgentTest(unittest.TestCase):
         self.assertEqual(len(reply.clips), 1)
         self.assertTrue(reply.clips[0].endswith("back_yard_2_alert.mp4"))
         self.assertTrue(os.path.isfile(reply.clips[0]))
+
+    def test_the_model_is_told_which_language_to_answer_in(self) -> None:
+        self.assertEqual(_reply_language("זה אני בגינה, תפסיק עד 22:00"), "Hebrew")
+        self.assertEqual(_reply_language("ابعتلي الفيديو تبع السيارة"), "Arabic")
+        self.assertIn("English", _reply_language("no there was nothing"))
+        self.assertIn("English", _reply_language("ok 👍"))
 
     def test_a_video_that_was_never_saved_is_not_sent(self) -> None:
         agent = self._agent([call("send_clip", alert_id="made_up_alert"), AIMessage(content="I have no such video.")])
