@@ -51,7 +51,7 @@ class HeartbeatTest(unittest.TestCase):
     def test_counts_and_newest_clip(self) -> None:
         make_clip(self.live, "front", "front_1_trigger", NOW - 500)
         make_clip(self.live, "front", "front_2_trigger", NOW - 100)
-        make_clip(self.outbox, "yard", "yard_1_trigger", NOW - 9000)
+        make_clip(os.path.join(self.outbox, "house2"), "yard", "yard_1_trigger", NOW - 9000)
         self._touch_alive(NOW - 10)
 
         hb = build_heartbeat("house2", self.live, self.outbox, self.alive, now=NOW, mode="inference")

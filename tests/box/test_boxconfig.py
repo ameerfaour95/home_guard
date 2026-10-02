@@ -10,6 +10,7 @@ from home_guard_project.box.boxconfig import (
     load_box_config,
     load_box_settings,
     s3_prefix,
+    set_site,
 )
 
 
@@ -70,6 +71,32 @@ class BoxConfigTest(unittest.TestCase):
     def test_load_box_settings_missing_file_raises(self) -> None:
         with self.assertRaises(BoxConfigError):
             load_box_settings(self.path)
+
+    def test_set_site_replaces_only_the_site_line(self) -> None:
+        self._write('# a comment\nsite: "old_house"\nmode: inference\nalert_start_hour: 22\n')
+        set_site("house2", self.path)
+        with open(self.path, encoding="utf-8") as f:
+            self.assertEqual(
+                f.read(),
+                '# a comment\nsite: "house2"\nmode: inference\nalert_start_hour: 22\n',
+            )
+        self.assertEqual(load_box_config(self.path), BoxConfig(site="house2", min_age_minutes=10.0, mode="inference"))
+
+    def test_set_site_creates_the_file(self) -> None:
+        set_site("house2", self.path)
+        self.assertEqual(load_box_config(self.path).site, "house2")
+
+    def test_set_site_adds_the_line_when_missing(self) -> None:
+        self._write("min_age_minutes: 5\n")
+        set_site("house2", self.path)
+        cfg = load_box_config(self.path)
+        self.assertEqual((cfg.site, cfg.min_age_minutes), ("house2", 5.0))
+
+    def test_set_site_rejects_bad_names(self) -> None:
+        for bad in ("House 2", "", "house-2", "../x"):
+            with self.assertRaises(BoxConfigError):
+                set_site(bad, self.path)
+        self.assertFalse(os.path.exists(self.path))
 
 
 if __name__ == "__main__":

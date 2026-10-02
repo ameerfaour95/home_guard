@@ -59,9 +59,49 @@ def policy_for(site: str, bucket: str) -> Dict[str, Any]:
     }
 
 
+# Shared pools a box must never write into, even with an any-site key.
+PROTECTED_PREFIXES = ("dataset_uca", "dataset_smarthome", "dataset_multi")
+
+
+def policy_any_site(bucket: str) -> Dict[str, Any]:
+    """For a box whose site is chosen by the installer: write under any ``dataset_<site>/`` folder.
+
+    The installer names the house in the setup program, so the folder is not
+    known when the key is made. The shared dataset pools are denied outright.
+    A box with this key can add or overwrite files in another site's folder,
+    but cannot read or delete anything.
+    """
+    protected_objects = [f"arn:aws:s3:::{bucket}/{p}/*" for p in PROTECTED_PREFIXES]
+    return {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Effect": "Allow",
+                "Action": "s3:ListBucket",
+                "Resource": f"arn:aws:s3:::{bucket}",
+                "Condition": {"StringLike": {"s3:prefix": "dataset_*"}},
+            },
+            {
+                "Effect": "Allow",
+                "Action": ["s3:PutObject", "s3:AbortMultipartUpload"],
+                "Resource": f"arn:aws:s3:::{bucket}/dataset_*/*",
+            },
+            {"Effect": "Deny", "Action": "s3:*", "Resource": protected_objects},
+            {
+                "Effect": "Deny",
+                "Action": "s3:ListBucket",
+                "Resource": f"arn:aws:s3:::{bucket}",
+                "Condition": {"StringLike": {"s3:prefix": [f"{p}/*" for p in PROTECTED_PREFIXES]}},
+            },
+        ],
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Create the AWS key for one collector box.")
-    parser.add_argument("site", help="Site name, e.g. house2 (lowercase letters, digits, underscores).")
+    parser.add_argument("site", help="Site name, e.g. house2 (with --any-site: a name for the box itself).")
+    parser.add_argument("--any-site", action="store_true",
+                        help="Let the box upload to any dataset_<site>/ folder, for boxes whose site is set by the installer.")
     parser.add_argument("--out", default=None, help=f"Output folder (default {KEY_ROOT}/<site>).")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)-8s %(message)s")
@@ -87,15 +127,18 @@ def main() -> None:
             raise
         log.info("IAM user %s already exists", name)
 
-    iam.put_user_policy(
-        UserName=name, PolicyName="box-upload",
-        PolicyDocument=json.dumps(policy_for(args.site, s3_cfg.bucket)),
-    )
-    log.info("Policy set: list + write under s3://%s/%s/ only", s3_cfg.bucket, s3_prefix(args.site))
+    if args.any_site:
+        policy = policy_any_site(s3_cfg.bucket)
+        scope = f"any s3://{s3_cfg.bucket}/dataset_<site>/ folder except {', '.join(PROTECTED_PREFIXES)}"
+    else:
+        policy = policy_for(args.site, s3_cfg.bucket)
+        scope = f"s3://{s3_cfg.bucket}/{s3_prefix(args.site)}/ only"
+    iam.put_user_policy(UserName=name, PolicyName="box-upload", PolicyDocument=json.dumps(policy))
+    log.info("Policy set: list + write under %s", scope)
 
     if iam.list_access_keys(UserName=name)["AccessKeyMetadata"]:
-        log.error("%s already has an access key. Delete it in IAM first if you want a new one.", name)
-        sys.exit(3)
+        log.info("%s already has an access key, so none was created. Delete it in IAM first if you want a new one.", name)
+        return
 
     key = iam.create_access_key(UserName=name)["AccessKey"]
     out_dir = args.out or os.path.join(KEY_ROOT, args.site)

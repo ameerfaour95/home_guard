@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import unittest
 
-from home_guard_project.box.find_cameras import camera_names, describe, redact
+from home_guard_project.box.find_cameras import camera_names, decode_password_file, describe, redact
 
 URL_1 = "rtsp://admin:s3cret@192.168.1.50:554/unicast/c1/s0/live"
 URL_3 = "rtsp://admin:s3cret@192.168.1.50:554/unicast/c3/s0/live"
@@ -46,6 +46,10 @@ class FindCamerasTest(unittest.TestCase):
             ],
         )
         self.assertNotIn("s3cret", json.dumps(rows))
+
+    def test_password_file_is_base64_utf8(self) -> None:
+        # "p@ss wörd\"&" survives quoting-hostile characters and a trailing newline or BOM-less file.
+        self.assertEqual(decode_password_file("cEBzcyB3w7ZyZCIm\n"), 'p@ss wörd"&')
 
     def test_redact_hides_credentials(self) -> None:
         self.assertEqual(redact(URL_1), "rtsp://<user>:<password>@192.168.1.50:554/unicast/c1/s0/live")

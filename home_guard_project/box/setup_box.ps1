@@ -10,7 +10,7 @@
 #    3. Enables Remote Desktop (Windows Pro only)
 #    4. Writes box.yaml with the site name
 #    5. Installs the Python environment (uv sync)
-#    6. Registers three scheduled tasks: collector (at boot), upload (nightly), heartbeat (hourly)
+#    6. Registers three scheduled tasks: collector (at boot), upload (every 15 minutes), heartbeat (hourly)
 #
 #  Not done here (see README.md): BIOS power-on setting, Tailscale sign-in,
 #  AWS credentials, camera discovery.
@@ -26,7 +26,9 @@ param(
     [ValidateSet('data_collection', 'inference')]
     [string]$Mode,
 
-    [string]$UploadTime = '03:00'
+    # Clips leave the box for S3 this often; local copies are deleted once S3 has them.
+    [ValidateRange(5, 1440)]
+    [int]$UploadEveryMinutes = 15
 )
 
 $ErrorActionPreference = 'Stop'
@@ -198,8 +200,8 @@ $atBoot = New-ScheduledTaskTrigger -AtStartup
 $atBoot.Delay = 'PT30S'
 Register-BoxTask 'HomeGuard-Collector' 'run_collector.sh' $atBoot 'Home Guard: headless camera data collection'
 
-$nightly = New-ScheduledTaskTrigger -Daily -At $UploadTime
-Register-BoxTask 'HomeGuard-Upload' 'run_upload.sh' $nightly 'Home Guard: upload finished clips to S3'
+$uploadEvery = New-ScheduledTaskTrigger -Once -At (Get-Date).Date -RepetitionInterval (New-TimeSpan -Minutes $UploadEveryMinutes)
+Register-BoxTask 'HomeGuard-Upload' 'run_upload.sh' $uploadEvery 'Home Guard: upload finished clips to S3'
 
 $hourly = New-ScheduledTaskTrigger -Once -At (Get-Date).Date -RepetitionInterval (New-TimeSpan -Hours 1)
 Register-BoxTask 'HomeGuard-Heartbeat' 'run_heartbeat.sh' $hourly 'Home Guard: hourly status to S3'

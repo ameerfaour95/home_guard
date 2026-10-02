@@ -15,7 +15,8 @@ Usage:
 With ``--write`` the result is saved to data_collection/cameras.yaml. With
 ``--json`` the result is printed as one JSON object on stdout (progress goes to
 stderr), so a setup program can call this and read the answer. The password
-comes from the HG_CAMERA_PASSWORD environment variable (preferred) or --password.
+comes from the HG_CAMERA_PASSWORD environment variable, from --password-file
+(base64, what the setup program uses), or from --password.
 
 This reuses the probing code of data_collection/discover.py, which stays the
 interactive way to do the same thing.
@@ -24,6 +25,7 @@ interactive way to do the same thing.
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import logging
 import os
@@ -96,10 +98,18 @@ def _probe_host(host: str, port: int, user: str, password: str) -> List[Dict[str
     )
 
 
+def decode_password_file(text: str) -> str:
+    """The password from a --password-file: one line of base64 (UTF-8), so any character survives the trip."""
+    return base64.b64decode(text.strip()).decode("utf-8")
+
+
 def _password(args: argparse.Namespace) -> str:
     password = args.password or os.environ.get(PASSWORD_ENV)
+    if args.password_file:
+        with open(args.password_file, encoding="utf-8-sig") as f:
+            password = decode_password_file(f.read())
     if not password:
-        log.error("No password: set %s or pass --password.", PASSWORD_ENV)
+        log.error("No password: set %s, or pass --password-file or --password.", PASSWORD_ENV)
         sys.exit(2)
     return password
 
@@ -141,6 +151,8 @@ def main() -> None:
     def add_login(p: argparse.ArgumentParser) -> None:
         p.add_argument("--user", default="admin")
         p.add_argument("--password", default=None, help=f"Prefer the {PASSWORD_ENV} environment variable.")
+        p.add_argument("--password-file", default=None,
+                       help="File holding the password as base64 (used by the setup program; it deletes the file).")
         p.add_argument("--prefix", required=True, help="Site name put in front of camera names, e.g. house2.")
         p.add_argument("--write", action="store_true", help="Save the result to cameras.yaml.")
 

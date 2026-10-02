@@ -75,7 +75,12 @@ def build_heartbeat(
 ) -> Dict[str, Any]:
     now = time.time() if now is None else now
     live = _clip_times(live_dir)
-    outbox = _clip_times(outbox_dir)
+    # The outbox has one dataset folder per site.
+    outbox: Dict[str, list[float]] = {}
+    if os.path.isdir(outbox_dir):
+        for site in os.listdir(outbox_dir):
+            for camera, times in _clip_times(os.path.join(outbox_dir, site)).items():
+                outbox.setdefault(camera, []).extend(times)
 
     cameras: Dict[str, Dict[str, Any]] = {}
     for camera in sorted(set(live) | set(outbox)):

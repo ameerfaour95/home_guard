@@ -2,10 +2,11 @@
 CLI for the collector box.
 
 Usage:
-    python -m home_guard_project.box upload      # move finished clips to the outbox, sync to S3, heartbeat
-    python -m home_guard_project.box heartbeat   # write the status JSON to S3
-    python -m home_guard_project.box status      # print the status JSON locally (no network)
-    python -m home_guard_project.box mode        # print the box's mode (read by run_collector.sh)
+    python -m home_guard_project.box upload           # move finished clips to the outbox, sync to S3, heartbeat
+    python -m home_guard_project.box heartbeat        # write the status JSON to S3
+    python -m home_guard_project.box status           # print the status JSON locally (no network)
+    python -m home_guard_project.box mode             # print the box's mode (read by run_collector.sh)
+    python -m home_guard_project.box set-site house2  # name the house; clips then go to s3://<bucket>/dataset_house2/
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ from .boxconfig import (
     BoxConfigError,
     load_box_config,
     s3_prefix,
+    set_site,
 )
 from .heartbeat import build_heartbeat, put_heartbeat
 from .outbox import move_finished_clips
@@ -36,6 +38,13 @@ def _has_files(root: str) -> bool:
     return any(filenames for _, _, filenames in os.walk(root))
 
 
+def _site_dirs(outbox_dir: str) -> list[str]:
+    """Site names that have a folder in the outbox. Each site's clips wait in their own folder."""
+    if not os.path.isdir(outbox_dir):
+        return []
+    return sorted(d for d in os.listdir(outbox_dir) if os.path.isdir(os.path.join(outbox_dir, d)))
+
+
 def run_upload(
     cfg: BoxConfig,
     live_dir: str,
@@ -44,33 +53,55 @@ def run_upload(
     workers: int,
     uploader: Callable[..., Any],
 ) -> Tuple[int, int]:
-    """Move finished clips to the outbox and upload it. Returns ``(clips_moved, files_moved)``."""
+    """Move finished clips to the outbox and upload it. Returns ``(clips_moved, files_moved)``.
+
+    The outbox has one folder per site, uploaded to that site's own S3 folder,
+    so clips saved before a box changed house still go where they belong.
+    """
     os.makedirs(outbox_dir, exist_ok=True)
-    moved = move_finished_clips(live_dir, outbox_dir, cfg.min_age_minutes * 60)
+    moved = move_finished_clips(live_dir, os.path.join(outbox_dir, cfg.site), cfg.min_age_minutes * 60)
     log.info("Moved %d finished clip(s) (%d files) to the outbox.", *moved)
 
-    if not _has_files(outbox_dir):
+    uploaded_any = False
+    for site in _site_dirs(outbox_dir):
+        site_dir = os.path.join(outbox_dir, site)
+        if not _has_files(site_dir):
+            continue
+        uploaded_any = True
+        # Orphan cleanup and the label filter are off: every clip the box saved is
+        # uploaded, and what to keep is decided at tagging time.
+        uploader(
+            dataset_dir=site_dir,
+            bucket=bucket,
+            prefix=s3_prefix(site),
+            workers=workers,
+            skip_reencode=False,
+            no_cleanup=True,
+            allowed_labels=frozenset(),
+            delete_local=True,
+        )
+    if not uploaded_any:
         log.info("Outbox is empty — nothing to upload.")
-        return moved
+    return moved
 
-    # Orphan cleanup and the label filter are off: every clip the box saved is
-    # uploaded, and what to keep is decided at tagging time.
-    uploader(
-        dataset_dir=outbox_dir,
-        bucket=bucket,
-        prefix=s3_prefix(cfg.site),
-        workers=workers,
-        skip_reencode=False,
-        no_cleanup=True,
-        allowed_labels=frozenset(),
-        delete_local=True,
-    )
+
+def change_site(new_site: str, live_dir: str, outbox_dir: str, box_yaml: str) -> Tuple[int, int]:
+    """Rename the site. Clips already saved are set aside under the old name first."""
+    moved = (0, 0)
+    try:
+        old_site = load_box_config(box_yaml).site
+    except BoxConfigError:
+        old_site = None
+    if old_site and old_site != new_site:
+        moved = move_finished_clips(live_dir, os.path.join(outbox_dir, old_site), 0)
+    set_site(new_site, box_yaml)
     return moved
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Collector box: upload, heartbeat, status, mode.")
-    parser.add_argument("command", choices=["upload", "heartbeat", "status", "mode"])
+    parser = argparse.ArgumentParser(description="Collector box: upload, heartbeat, status, mode, set-site.")
+    parser.add_argument("command", choices=["upload", "heartbeat", "status", "mode", "set-site"])
+    parser.add_argument("value", nargs="?", help="For set-site: the site name.")
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -78,6 +109,21 @@ def main() -> None:
         format="%(asctime)s  %(name)-12s  %(levelname)-8s  %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
+
+    if args.command == "set-site":
+        from .boxconfig import BOX_YAML
+
+        try:
+            if not args.value:
+                raise BoxConfigError("set-site needs a site name, e.g. set-site house2")
+            clips, _ = change_site(args.value, LIVE_DIR, OUTBOX_DIR, BOX_YAML)
+        except BoxConfigError as exc:
+            log.error("%s", exc)
+            sys.exit(1)
+        if clips:
+            log.info("Set aside %d clip(s) saved under the previous site name.", clips)
+        print(f"site set to {args.value}; clips go to the S3 folder {s3_prefix(args.value)}/")
+        return
 
     try:
         cfg = load_box_config()

@@ -7,7 +7,7 @@ Turns a Windows mini PC (built for a Beelink Mini S13, Intel N150) into an unatt
 | Scheduled task | When | Script | What it does |
 |---|---|---|---|
 | `HomeGuard-Collector` | at boot | `run_collector.sh` | Runs the collector headless and restarts it if it exits |
-| `HomeGuard-Upload` | nightly, 03:00 | `run_upload.sh` | Moves finished clips to `dataset_outbox/`, uploads them to `s3://<bucket>/dataset_<site>/`, deletes the local copies |
+| `HomeGuard-Upload` | every 15 minutes | `run_upload.sh` | Moves finished clips to `dataset_outbox/<site>/`, uploads them to `s3://<bucket>/dataset_<site>/`, deletes the local copies |
 | `HomeGuard-Heartbeat` | hourly | `run_heartbeat.sh` | Writes `dataset_<site>/_status/heartbeat.json` to S3 |
 
 The collector uses `config.box.yaml` on top of `data_collection/config.yaml`: no preview windows, no VLM, one random background clip per hour.
@@ -223,7 +223,7 @@ On the box itself, without network: `uv run python -m home_guard_project.box sta
 | Restart the collector | `schtasks /End /TN HomeGuard-Collector` then `schtasks /Run /TN HomeGuard-Collector`. The new runner stops the old one |
 | Stop collecting completely | `schtasks /End /TN HomeGuard-Collector`, then in Git Bash `./home_guard_project/box/stop_collector.sh`. Ending the task alone leaves the runner alive |
 | Box drops off Tailscale after a reboot | Tailscale must be in unattended mode (`tailscale set --unattended=true`, done by `setup_box.ps1`), and key expiry should be disabled for the box in the Tailscale admin console |
-| Change the upload time | Re-run `setup_box.ps1 -Site <site> -UploadTime 02:00` |
+| Change how often clips upload | Re-run `setup_box.ps1 -Site <site> -UploadEveryMinutes 30` |
 
 ## Privacy
 
