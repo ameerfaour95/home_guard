@@ -1,0 +1,17 @@
+# ──────────────────────────────────────────────────────────────────────────────
+#  Overrides for watching a box work on its own screen (watch_live.sh).
+#  Same as config.box.yaml, but with one window per camera and the detection
+#  boxes drawn. Clips are still saved while you watch.
+# ──────────────────────────────────────────────────────────────────────────────
+
+display:
+  show_windows: true
+  show_plotted_boxes: true
+
+vlm:
+  enabled: false
+
+random_clip:
+  enabled: true
+  interval_sec: 3600.0
+  allow_person: false
