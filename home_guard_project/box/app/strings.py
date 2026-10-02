@@ -1,6 +1,7 @@
 """All visible application copy; keys remain stable for translation."""
 
 TEXT = {
+    "ai_delivery_banner": "Alerts are NOT reaching Telegram",
     "ai_activity": "AI activity",
     "ai_sent": "Alert sent",
     "ai_urgent_sent": "Urgent alert sent",

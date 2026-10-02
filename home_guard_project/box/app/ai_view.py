@@ -36,3 +36,9 @@ def status_note(data,now,stopped):
     if stopped: return tr('ai_stopped')
     if not fresh(data.get('updated') if isinstance(data,dict) else None,now,15): return tr('ai_not_updating')
     return ''
+
+def undelivered_alert(data):
+    for decision in decisions(data,limit=50):
+        if decision.false_positive or decision.muted: continue
+        return decision if not decision.sent else None
+    return None

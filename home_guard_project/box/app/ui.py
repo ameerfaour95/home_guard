@@ -218,7 +218,7 @@ class Window(QMainWindow):
         super().__init__()
         self.args = args
         from .box_controls import BoxControls, Settings
-        self.box_controls = BoxControls(demo=args.demo, stopped=args.state in ("stopped","ai-stopped"), settings=Settings(mode="inference" if args.state in ("inference","ai-stopped","ai-stale","ai-empty","ai-refused","ai-delivered") else "data_collection", show_cameras=args.state != "hidden"))
+        self.box_controls = BoxControls(demo=args.demo, stopped=args.state in ("stopped","ai-stopped"), settings=Settings(mode="inference" if (args.state == "inference" or args.state.startswith("ai-")) else "data_collection", show_cameras=args.state != "hidden"))
         self.start_requested = False
         self.setWindowTitle(tr("setup_window_title") if args.setup else tr("brand"))
         self.setWindowIcon(QIcon(str(Path(__file__).parents[1] / "assets" / "home_guard.ico")))
@@ -259,6 +259,16 @@ class Window(QMainWindow):
             self.build_dashboard()
 
     def build_dashboard(self):
+        self.delivery_banner=QFrame()
+        self.delivery_banner.setStyleSheet("QFrame { background: #442225; border: 2px solid "+ERROR+"; border-radius: 8px; } QLabel { border: none; background: transparent; color: "+ERROR+"; }")
+        delivery_layout=layout_for(self.delivery_banner,16)
+        delivery_layout.setSpacing(6)
+        delivery_layout.addWidget(label(tr("ai_delivery_banner"),"section"))
+        self.delivery_error=label("")
+        self.delivery_error.setTextFormat(Qt.TextFormat.PlainText)
+        delivery_layout.addWidget(self.delivery_error)
+        self.outer.insertWidget(0,self.delivery_banner)
+        self.delivery_banner.hide()
         control_row = QHBoxLayout()
         self.control_note = label("", "warning")
         overview_button = QPushButton(tr("overview"))
@@ -495,15 +505,20 @@ class Window(QMainWindow):
         from .detector_view import camera_view
         from ..ai_status import read_status
         now=time.time()
+        stopped=self.box_controls.is_stopped()
         if self.args.demo:
             from .ai_demo import demo_status
-            self.ai_data=demo_status(self.names or [],now,self.args.state)
+            if not stopped or not self.ai_data:
+                self.ai_data=demo_status(self.names or [],now,self.args.state)
         elif time.monotonic()-self.last_ai_poll>=1:
             data=read_status(str(Path(bc.LOG_DIR)/"ai_status.json"))
             if data: self.ai_data=data
             self.last_ai_poll=time.monotonic()
         inference=self.current_state is not None and self.current_state.mode=="inference"
-        stopped=self.box_controls.is_stopped()
+        from .ai_view import undelivered_alert
+        failed=undelivered_alert(self.ai_data) if inference else None
+        self.delivery_banner.setVisible(failed is not None)
+        self.delivery_error.setText((failed.error or tr("ai_no_error")) if failed else "")
         self.ai_panel.setVisible(inference)
         self.log_panel.setVisible(not inference)
         if inference: self.ai_panel.render(self.ai_data,now,stopped)
