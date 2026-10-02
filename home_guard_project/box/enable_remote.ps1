@@ -5,7 +5,7 @@
 #      powershell -ExecutionPolicy Bypass -File <path>\enable_remote.ps1
 #
 #  What it does:
-#    1. Installs and starts the Windows OpenSSH server (starts automatically at boot)
+#    1. Installs and starts Microsoft's OpenSSH server (starts automatically at boot)
 #    2. Opens TCP port 22 in the Windows firewall
 #    3. Authorizes one SSH public key (the laptop's) - no password login is added
 #    4. Prints the user name and IP address to give back to the laptop
@@ -21,9 +21,20 @@ if ($PublicKey -notmatch '^ssh-') {
 }
 
 Write-Host '[1/4] OpenSSH server...'
-$cap = Get-WindowsCapability -Online -Name 'OpenSSH.Server*'
-if ($cap.State -ne 'Installed') {
-    Add-WindowsCapability -Online -Name $cap.Name | Out-Null
+if (-not (Get-Service -Name sshd -ErrorAction SilentlyContinue)) {
+    # Microsoft's own installer from GitHub. The built-in route (Add-WindowsCapability)
+    # goes through Windows Update and can sit for a long time with no progress shown.
+    Write-Host '      downloading the installer (about 10 MB)...'
+    $ProgressPreference = 'SilentlyContinue'
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    $release = Invoke-RestMethod 'https://api.github.com/repos/PowerShell/Win32-OpenSSH/releases/latest'
+    $asset = $release.assets | Where-Object { $_.name -like 'OpenSSH-Win64-*.msi' } | Select-Object -First 1
+    if (-not $asset) { throw 'Could not find the OpenSSH installer in the latest release.' }
+    $msi = Join-Path $env:TEMP $asset.name
+    Invoke-WebRequest $asset.browser_download_url -OutFile $msi -UseBasicParsing
+    Write-Host '      installing...'
+    $install = Start-Process msiexec.exe -ArgumentList '/i', "`"$msi`"", '/qn', '/norestart' -Wait -PassThru
+    if ($install.ExitCode -ne 0) { throw "OpenSSH installer failed with exit code $($install.ExitCode)." }
 }
 Set-Service -Name sshd -StartupType Automatic
 Start-Service -Name sshd

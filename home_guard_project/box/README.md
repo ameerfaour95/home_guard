@@ -95,7 +95,7 @@ region = us-east-1
 
 ### 5. Camera discovery (once per house)
 
-You need the camera or recorder username and password for that house. On the box (Remote Desktop, or at the box), in Git Bash:
+You need the camera or recorder username and password for that house. The box must be on the same network as the cameras or their recorder, preferably by Ethernet cable. On the box (at the box, or over SSH; Windows 11 Home has no Remote Desktop, so answer "no" to the preview), in Git Bash:
 
 ```bash
 cd /c/home_guard
@@ -117,6 +117,10 @@ Run it at your own house for a day first:
 5. Run an upload by hand: `./home_guard_project/box/run_upload.sh`. Clips older than ten minutes should appear on S3 and disappear locally.
 6. Note CPU and memory use in Task Manager with all cameras connected.
 
+## Measured on the Beelink N150 (2026-10-02)
+
+YOLO11s on the CPU takes about 327 ms per frame, so about 3 detections per second in total, shared between all cameras. That is comfortable for two or three cameras. With six or more, each camera is checked only about once every two seconds; switch to `yolo11n.pt` or raise `yolo_every_n_frames_cpu` (see Troubleshooting).
+
 ## Checking the box from the laptop
 
 ```bash
@@ -136,7 +140,9 @@ On the box itself, without network: `uv run python -m home_guard_project.box sta
 | High CPU, detections lag | In `config.box.yaml` add `detection: { yolo_every_n_frames_cpu: 10 }`, or `models: { yolo: "yolo11n.pt" }`, then restart the task |
 | Upload log shows credential errors | Check `.aws\credentials` on the box and the IAM policy prefix |
 | Clips stay in `dataset_outbox/` | The last upload failed; the next run retries. Read `upload-<date>.log` |
-| Restart the collector | `schtasks /End /TN HomeGuard-Collector` then `schtasks /Run /TN HomeGuard-Collector` |
+| Restart the collector | `schtasks /End /TN HomeGuard-Collector` then `schtasks /Run /TN HomeGuard-Collector`. The new runner stops the old one |
+| Stop collecting completely | `schtasks /End /TN HomeGuard-Collector`, then in Git Bash `./home_guard_project/box/stop_collector.sh`. Ending the task alone leaves the runner alive |
+| Box drops off Tailscale after a reboot | Tailscale must be in unattended mode (`tailscale set --unattended=true`, done by `setup_box.ps1`), and key expiry should be disabled for the box in the Tailscale admin console |
 | Change the upload time | Re-run `setup_box.ps1 -Site <site> -UploadTime 02:00` |
 
 ## Privacy

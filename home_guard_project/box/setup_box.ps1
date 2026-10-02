@@ -95,6 +95,9 @@ if (Test-Path 'C:\Program Files\Tailscale\tailscale.exe') {
     Start-Process msiexec.exe -ArgumentList '/i', "`"$msi`"", '/qn', '/norestart' -Wait
     Ok 'Tailscale installed.'
 }
+# Without unattended mode Tailscale disconnects when nobody is logged in to Windows.
+& 'C:\Program Files\Tailscale\tailscale.exe' set --unattended=true 2>$null
+if ($LASTEXITCODE -eq 0) { Ok 'Tailscale unattended mode on.' } else { Warn 'Could not set Tailscale unattended mode (sign in first, then re-run).' }
 
 # ----------------------------------------------------------------------------
 Step '2/6 Power: never sleep'
@@ -150,7 +153,9 @@ function Register-BoxTask($name, $script, $trigger, $description) {
     $action = New-ScheduledTaskAction -Execute $GitBash `
         -Argument "-lc `"'$posixRoot/home_guard_project/box/$script'`"" -WorkingDirectory $Root
     # S4U: runs without anyone logged in and without storing the Windows password.
-    $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType S4U -RunLevel Highest
+    # Take the account from the token: over SSH, $env:USERDOMAIN is not the computer name.
+    $account = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+    $principal = New-ScheduledTaskPrincipal -UserId $account -LogonType S4U -RunLevel Highest
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
         -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero) `
         -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)

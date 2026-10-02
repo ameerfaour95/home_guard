@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-#  run_collector.sh — unattended data collection for a collector box
+#  run_collector.sh - unattended data collection for a collector box
 #
 #  Lives in:  home_guard_project/box/run_collector.sh
 #  Started by the "HomeGuard-Collector" scheduled task at boot.
@@ -37,6 +37,24 @@ kill_leftover() {
     rm -f "$PID_FILE"
 }
 
+RUNNER_PID_FILE="$LOG_DIR/runner.winpid"
+MY_WINPID="$(cat "/proc/$$/winpid" 2>/dev/null || echo "$$")"
+
+# Only one runner may exist. Ending the scheduled task kills Git's bash.exe
+# launcher but not the real bash underneath it, so the newest runner stops the
+# previous one (and its collector) before taking over.
+kill_previous_runner() {
+    if [[ -f "$RUNNER_PID_FILE" ]] && command -v tasklist &>/dev/null; then
+        local winpid
+        winpid="$(cat "$RUNNER_PID_FILE")"
+        if [[ "$winpid" != "$MY_WINPID" ]] && tasklist //FI "PID eq $winpid" 2>/dev/null | grep -qi bash; then
+            log "Stopping previous runner (PID $winpid)" >> "$RUNNER_LOG"
+            taskkill //PID "$winpid" //T //F &>/dev/null || true
+        fi
+    fi
+    echo "$MY_WINPID" > "$RUNNER_PID_FILE"
+}
+
 stop() {
     log "Stopping." >> "$RUNNER_LOG"
     [[ -n "$child" ]] && kill "$child" 2>/dev/null
@@ -46,13 +64,14 @@ stop() {
 trap stop INT TERM
 
 ensure_venv >> "$RUNNER_LOG" 2>&1 || exit 1
+kill_previous_runner
 kill_leftover
 
 waiting_logged=false
 while true; do
     if [[ ! -f "$CAMERAS_YAML" ]]; then
         if [[ "$waiting_logged" == "false" ]]; then
-            log "cameras.yaml not found — run camera discovery (see box/README.md). Checking every 60 s." >> "$RUNNER_LOG"
+            log "cameras.yaml not found - run camera discovery (see box/README.md). Checking every 60 s." >> "$RUNNER_LOG"
             waiting_logged=true
         fi
         sleep 60
@@ -71,7 +90,7 @@ while true; do
         sleep 30
     done
     wait "$child"
-    log "Collector exited with code $? — restarting in 15 s" >> "$RUNNER_LOG"
+    log "Collector exited with code $? - restarting in 15 s" >> "$RUNNER_LOG"
     child=""
     rm -f "$PID_FILE"
     sleep 15

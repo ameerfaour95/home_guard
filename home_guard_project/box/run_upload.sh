@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-#  run_upload.sh — move finished clips to the outbox and sync them to S3
+#  run_upload.sh - move finished clips to the outbox and sync them to S3
 #
 #  Lives in:  home_guard_project/box/run_upload.sh
 #  Started by the "HomeGuard-Upload" scheduled task (nightly). Safe to run by hand.

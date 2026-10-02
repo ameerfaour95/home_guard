@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-#  run_heartbeat.sh — write the box status JSON to S3
+#  run_heartbeat.sh - write the box status JSON to S3
 #
 #  Lives in:  home_guard_project/box/run_heartbeat.sh
 #  Started by the "HomeGuard-Heartbeat" scheduled task (hourly).
