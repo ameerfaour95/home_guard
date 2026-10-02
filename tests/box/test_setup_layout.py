@@ -50,3 +50,19 @@ class SetupLayoutTests(unittest.TestCase):
         self.assertNotIn('@@step connect',QApplication.clipboard().text())
         details.follow_progress();self.assertTrue(details.selection.following)
         window.close();self.app.processEvents()
+
+    def test_details_twice_restore_exact_geometry(self):
+        for size in ('1920x1080','1366x768','1000x650'):
+            args=SimpleNamespace(demo=True,setup=True,theme='dark',panel=None,fail=None,wifi=False,skip_cameras=False,alerts=False,details=False,state='mixed',cameras=3,page='progress',size=size,screenshot=None)
+            window=Window(args);window.show();self.app.processEvents()
+            workspace=window.setup_workspace
+            running=next(row for row in workspace.rows if row.indicator.isVisible())
+            def geometry(widget):
+                return widget.rect().translated(widget.mapTo(window,QPoint()))
+            before=(geometry(running.indicator),geometry(workspace.rows[0]))
+            for _ in range(2):
+                workspace.toggle.setChecked(True);self.app.processEvents()
+                self.assertEqual(before,(geometry(running.indicator),geometry(workspace.rows[0])))
+                workspace.toggle.setChecked(False);self.app.processEvents()
+                self.assertEqual(before,(geometry(running.indicator),geometry(workspace.rows[0])))
+            window.close();self.app.processEvents()
