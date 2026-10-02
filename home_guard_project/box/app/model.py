@@ -36,6 +36,11 @@ class Activity:
     detail: str
     upload: bool = False
 
+    @property
+    def time(self):
+        match = re.search(r"\b(\d{2}:\d{2})(?::\d{2})?\b", self.detail)
+        return match[1] if match else tr("time_unavailable")
+
 
 def redact(line):
     line = re.sub(r"(?:rtsp|https?|s3)://[^\s]+", tr("hidden_address"), line)

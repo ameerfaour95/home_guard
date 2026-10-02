@@ -1,6 +1,7 @@
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QCheckBox, QSpinBox, QDoubleSpinBox, QPushButton, QHBoxLayout, QGridLayout
 from .strings import tr
+from .theme import OK, ERROR, WARNING
 from .box_controls import Settings, minutes_to_seconds
 from .ui import card, label, layout_for
 
@@ -9,25 +10,17 @@ class SettingsPage:
     def __init__(self, box, changed):
         self.box, self.changed = box, changed
         self.widget = card()
-        layout = layout_for(self.widget, 30)
+        layout = layout_for(self.widget, 24)
+        layout.setSpacing(10)
         layout.addWidget(label(tr("settings_title"), "title"))
         layout.addWidget(label(tr("settings_hint"), "muted"))
         self.alerts = QCheckBox(tr("security_alerts"))
         layout.addWidget(self.alerts)
         layout.addWidget(label(tr("security_alerts_hint"), "muted"))
-        grid = QGridLayout()
-        self.start, self.end = QSpinBox(), QSpinBox()
-        for spin in (self.start, self.end):
-            spin.setRange(0, 23)
-            spin.setMaximumWidth(300)
-            spin.valueChanged.connect(self.hours_changed)
-        grid.addWidget(label(tr("alert_from")), 0, 0)
-        grid.addWidget(label(tr("alert_until")), 0, 1)
-        grid.addWidget(self.start, 1, 0)
-        grid.addWidget(self.end, 1, 1)
-        layout.addLayout(grid)
-        self.hours_note = label("", "accent")
-        layout.addWidget(self.hours_note)
+        from .alert_hours import AlertHours
+        self.hours = AlertHours()
+        self.start, self.end = self.hours.start, self.hours.end
+        layout.addWidget(self.hours)
         layout.addWidget(label(tr("cooldown")))
         self.cooldown = QDoubleSpinBox()
         self.cooldown.setDecimals(2)
@@ -39,7 +32,7 @@ class SettingsPage:
         layout.addWidget(label(tr("cooldown_hint"), "muted"))
         self.pictures = QCheckBox(tr("show"))
         layout.addWidget(self.pictures)
-        self.note = label("", "accent")
+        self.note = label("", "muted")
         layout.addWidget(self.note)
         layout.addStretch()
         row = QHBoxLayout()
@@ -57,12 +50,12 @@ class SettingsPage:
         try:
             settings = self.box.load_settings()
             self.alerts.setChecked(settings.mode == "inference")
-            self.start.setValue(settings.alert_start_hour)
-            self.end.setValue(settings.alert_end_hour)
+            self.hours.set_hours(settings.alert_start_hour, settings.alert_end_hour)
             self.cooldown.setValue(settings.alert_cooldown_sec/60)
             self.pictures.setChecked(settings.show_cameras)
             self.note.setText("")
         except Exception:
+            self.note.setStyleSheet(f"color: {ERROR};")
             self.note.setText(tr("control_error"))
         self.hours_changed()
 
@@ -73,14 +66,16 @@ class SettingsPage:
         self.hours_note.setText(tr("all_day") if start == end else tr("hours_overnight" if end < start else "hours_window", start=start, end=end))
 
     def save_clicked(self):
-        settings = Settings("inference" if self.alerts.isChecked() else "data_collection", self.start.value(), self.end.value(), minutes_to_seconds(self.cooldown.value()), self.pictures.isChecked())
+        settings = Settings("inference" if self.alerts.isChecked() else "data_collection", *self.hours.values(), minutes_to_seconds(self.cooldown.value()), self.pictures.isChecked())
         try:
             self.box.save_settings(settings)
             self.waiting = self.box.phase() == "restarting"
             self.save.setEnabled(not self.waiting)
+            self.note.setStyleSheet(f"color: {WARNING if self.waiting else OK};")
             self.note.setText(tr("applying") if self.waiting else tr("saved_stopped") if self.box.is_stopped() else tr("settings_saved"))
             self.changed()
         except Exception:
+            self.note.setStyleSheet(f"color: {ERROR};")
             self.note.setText(tr("control_error"))
 
     def check_applied(self):
@@ -90,6 +85,7 @@ class SettingsPage:
         if phase != "restarting":
             self.waiting = False
             self.save.setEnabled(True)
+            self.note.setStyleSheet(f"color: {OK};")
             self.note.setText(tr("saved_stopped") if phase == "stopped" else tr("applied"))
         elif self.box.clock() - self.box.pending_at > 30:
             self.note.setText(tr("apply_slow"))
