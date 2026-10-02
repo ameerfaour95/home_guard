@@ -25,10 +25,11 @@ if (-not (Get-Module -ListAvailable -Name ps2exe)) {
 Import-Module ps2exe
 
 if ($WithBundle) {
+    # The bundle is the no-git fallback install path (see README). make_bundle
+    # writes it straight into dist\, beside the exe this script produces.
     Write-Host 'Building home_guard_box.zip...' -ForegroundColor Cyan
     Push-Location $RepoRoot
     try { uv run python -m home_guard_project.box.make_bundle } finally { Pop-Location }
-    Copy-Item (Join-Path $DistDir 'home_guard_box.zip') (Join-Path $DistDir 'home_guard_box.zip') -Force -ErrorAction SilentlyContinue
 }
 
 $src = Join-Path $BoxDir 'setup_customer.ps1'

@@ -1,28 +1,28 @@
 # ============================================================================
-#  setup_customer.ps1 - prepare a collector box for a customer, from the laptop.
-#  Compiled to HomeGuardSetup.exe by build_exe.ps1 (uses Windows' built-in
-#  ssh.exe / scp.exe - no Git Bash needed on the machine running it).
+#  setup_customer.ps1 - configure a collector box for a customer, from the
+#  laptop. Compiled to HomeGuardSetup.exe by build_exe.ps1 (uses Windows'
+#  built-in ssh.exe / scp.exe - no Git Bash needed on the machine running it).
 #
-#  Usage (or just double-click HomeGuardSetup.exe and answer the prompts):
+#  Use it AFTER the box has had its first-boot setup (git checkout at
+#  C:\home_guard + setup_box.ps1; see README). This tool does the repeatable
+#  part: pick Ethernet or Wi-Fi, join the customer's Wi-Fi, optionally locate
+#  the cameras, update the box's software, and report readiness.
+#
+#  Usage (or double-click HomeGuardSetup.exe and answer the prompts):
 #    setup_customer.ps1 -Target ameer@100.121.29.9
-#        [-NetworkOnly]        skip the code install; only (re)configure network
-#        [-ForgetOtherWifi]    also remove Wi-Fi networks other than the customer's
-#        [-KeyPath <path>]     SSH key (default ~\.ssh\homeguard_box)
-#        [-BundleZip <path>]   prebuilt home_guard_box.zip (default: beside the
-#                              exe, else dist\, else built with uv if available)
-#        [-DryRun]             print the planned steps without touching the box
+#        [-ForgetOtherWifi]   also remove Wi-Fi networks other than the customer's
+#        [-SkipUpdate]        do not git-pull the box's software first
+#        [-KeyPath <path>]    SSH key (default ~\.ssh\homeguard_box)
+#        [-DryRun]            print the planned steps without touching the box
 #
-#  Asks: site name, Ethernet or Wi-Fi, the customer's Wi-Fi name/password, and
-#  (optionally) the camera login so it can locate cameras automatically.
 #  Passwords travel in a temp file that is deleted from the box afterwards -
 #  never on a command line, never in network.json.
 # ============================================================================
 param(
     [Parameter(Mandatory = $true)][string]$Target,
-    [switch]$NetworkOnly,
     [switch]$ForgetOtherWifi,
+    [switch]$SkipUpdate,
     [string]$KeyPath = (Join-Path $HOME '.ssh\homeguard_box'),
-    [string]$BundleZip = '',
     [switch]$DryRun
 )
 $ErrorActionPreference = 'Stop'
@@ -36,8 +36,9 @@ $BoxUser = $Target.Substring(0, $Target.IndexOf('@'))
 $RemoteHome = "C:\Users\$BoxUser"
 $InstallDir = 'C:\home_guard'
 $BoxBox = "$InstallDir\home_guard_project\box"
+$Bash = '"C:\Program Files\Git\bin\bash.exe"'
 
-# ---- small helpers ----------------------------------------------------------
+# ---- helpers ----------------------------------------------------------------
 function To-B64([string]$s) { [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($s)) }
 
 function Read-NonEmpty([string]$prompt, [string]$pattern = '.+') {
@@ -50,7 +51,6 @@ function Read-Secret([string]$prompt) {
     try { [Runtime.InteropServices.Marshal]::PtrToStringAuto($b) }
     finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($b) }
 }
-
 function Invoke-Box([string]$command) {
     if ($DryRun) { Note "  ssh> $command"; return '' }
     & ssh -i $KeyPath -o ConnectTimeout=15 $Target $command
@@ -76,12 +76,7 @@ $RescuePass = (Select-String '^password=(.+)$' $RescueFile).Matches[0].Groups[1]
 
 # ---- questions --------------------------------------------------------------
 Info "`n=== Home Guard box setup ===`n"
-$Site = ''
-if (-not $NetworkOnly) {
-    $Site = Read-NonEmpty 'Site name (lowercase letters, digits, underscores)' '[a-z0-9_]+'
-}
-
-Info "`nHow does this box reach the internet?"
+Info 'How does this box reach the internet?'
 Write-Host '  1) Ethernet cable'
 Write-Host '  2) Wi-Fi'
 $Mode = ''
@@ -93,42 +88,29 @@ if ($Mode -eq 'wifi') {
     do { $WifiPass = Read-Secret 'Customer Wi-Fi password (8-63 chars)' } while ($WifiPass.Length -lt 8 -or $WifiPass.Length -gt 63)
 }
 
-$DoCameras = $false; $CamUser = ''; $CamPass = ''
-if (-not $NetworkOnly) {
-    if ((Read-Host 'Find cameras now? (needs the camera/recorder login) [y/N]') -match '^[Yy]') {
-        $DoCameras = $true
-        $CamUser = Read-NonEmpty 'Camera / recorder username'
-        $CamPass = Read-Secret 'Camera / recorder password'
-    }
+$DoCameras = $false; $CamUser = ''; $CamPass = ''; $Site = ''
+if ((Read-Host 'Find cameras now? (needs the camera/recorder login) [y/N]') -match '^[Yy]') {
+    $DoCameras = $true
+    $Site = Read-NonEmpty 'Site name for camera labels (lowercase letters, digits, underscores)' '[a-z0-9_]+'
+    $CamUser = Read-NonEmpty 'Camera / recorder username'
+    $CamPass = Read-Secret 'Camera / recorder password'
 }
 
-# ---- 1. install code (unless -NetworkOnly) ----------------------------------
-if (-not $NetworkOnly) {
-    Info "`n[1] Installing code on the box..."
-    $zip = $BundleZip
-    if (-not $zip) {
-        $beside = Join-Path $PSScriptRoot 'home_guard_box.zip'
-        $inDist = Join-Path $PSScriptRoot '..\..\dist\home_guard_box.zip'
-        if (Test-Path $beside) { $zip = $beside }
-        elseif (Test-Path $inDist) { $zip = (Resolve-Path $inDist).Path }
+# ---- 1. update the box's software (git pull) --------------------------------
+if (-not $SkipUpdate) {
+    Info "`n[1] Updating the box software..."
+    $isCheckout = $true
+    if (-not $DryRun) {
+        $isCheckout = ((Invoke-Box "powershell -Command `"Test-Path $InstallDir\.git`"" | Out-String).Trim() -eq 'True')
     }
-    if (-not $zip -or -not (Test-Path $zip)) {
-        # No prebuilt bundle: build it if this machine has the repo + uv.
-        $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-        if ((Get-Command uv -ErrorAction SilentlyContinue) -and (Test-Path (Join-Path $repoRoot 'pyproject.toml'))) {
-            Info '    building bundle with uv...'
-            if (-not $DryRun) { Push-Location $repoRoot; try { uv run python -m home_guard_project.box.make_bundle } finally { Pop-Location } }
-            $zip = Join-Path $repoRoot 'dist\home_guard_box.zip'
-        } else {
-            throw "No home_guard_box.zip found (looked beside the exe and in dist\). Pass -BundleZip <path>."
-        }
+    if ($isCheckout) {
+        Invoke-Box "$Bash -lc /c/home_guard/home_guard_project/box/update.sh"
+        Ok 'Box software updated (git pull + restart).'
+    } else {
+        Note "  $InstallDir is not a git checkout yet; skipping update (do the first-boot clone per README)."
     }
-    Ok "bundle: $zip"
-    Copy-ToBox $zip "C:/home_guard_box.zip"
-    # Stop a running collector before overwriting its scripts (peer's gotcha).
-    Invoke-Box "powershell -ExecutionPolicy Bypass -Command `"schtasks /End /TN HomeGuard-Collector 2>`$null; if (Test-Path $BoxBox\stop_collector.sh) { & 'C:\Program Files\Git\bin\bash.exe' -lc /c/home_guard/home_guard_project/box/stop_collector.sh }`""
-    Invoke-Box "powershell -Command `"Expand-Archive -Force C:\home_guard_box.zip $InstallDir`""
-    Invoke-Box "powershell -ExecutionPolicy Bypass -File $BoxBox\setup_box.ps1 -Site $Site"
+} else {
+    Note '[1] Skipping software update (-SkipUpdate).'
 }
 
 # ---- 2. network configuration ----------------------------------------------
@@ -169,7 +151,7 @@ if ($DoCameras) {
         $out = Invoke-Box $find
         if (-not $DryRun) {
             try { $j = ($out | Out-String | ConvertFrom-Json); Ok "cameras found: $($j.cameras.Count)" }
-            catch { Note "  (could not parse camera result; raw output:)"; Write-Host ($out | Out-String) }
+            catch { Note '  (could not parse camera result; raw output:)'; Write-Host ($out | Out-String) }
         }
     } finally {
         Invoke-Box "cmd /c del $camRemote" | Out-Null
@@ -186,7 +168,7 @@ Write-Host ''
 Info '=== Still to do by hand ==='
 Write-Host ' 1. BIOS: set "restore on AC power loss" to Power On (needs a screen once).'
 Write-Host ' 2. Tailscale admin console: disable key expiry for this box.'
-if (-not $DoCameras) { Write-Host ' 3. Camera discovery at the customer site (re-run with the camera login).' }
+if (-not $DoCameras) { Write-Host ' 3. Camera discovery at the customer site (re-run and answer yes to "Find cameras now").' }
 Write-Host ' *. Before delivery, re-run with -ForgetOtherWifi to drop your own Wi-Fi.'
 Write-Host ''
 Info 'Rescue hotspot (make a phone hotspot with these to recover a box):'
