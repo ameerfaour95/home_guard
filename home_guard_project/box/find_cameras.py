@@ -33,6 +33,8 @@ import re
 import sys
 from typing import Any, Dict, List
 
+import yaml
+
 log = logging.getLogger("box.cameras")
 
 PASSWORD_ENV = "HG_CAMERA_PASSWORD"
@@ -70,6 +72,123 @@ def describe(found: Found, prefix: str) -> List[Dict[str, Any]]:
 def redact(url: str) -> str:
     """Hide the user and password of an RTSP URL for printing."""
     return re.sub(r"(rtsp://)[^/@\s]+@", r"\1<user>:<password>@", url)
+
+
+# ── Camera confirmation (snapshots + apply), for the setup UI ────────────────
+_NAME_RE = re.compile(r"^[a-z0-9_]+$")
+CAMERAS_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data_collection", "cameras.yaml"))
+_YAML_HEADER = (
+    "# ──────────────────────────────────────────────────────────────────────────────\n"
+    "#  Camera RTSP streams — DO NOT COMMIT (contains credentials)\n"
+    "# ──────────────────────────────────────────────────────────────────────────────\n\n"
+)
+
+
+def _read_cameras_raw(path: str = CAMERAS_PATH) -> Dict[str, Any]:
+    if not os.path.exists(path):
+        return {}
+    with open(path, encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
+
+
+def _write_cameras(active: Dict[str, str], disabled: Dict[str, str], path: str = CAMERAS_PATH) -> None:
+    data: Dict[str, Any] = {"cameras": active}
+    if disabled:
+        data["disabled"] = disabled
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(_YAML_HEADER)
+        yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
+    os.replace(tmp, path)
+
+
+def apply_changes(changes: Dict[str, Any], path: str = CAMERAS_PATH) -> Dict[str, Any]:
+    """Rewrite cameras.yaml from {"cameras":[{"name","new_name","enabled"}]}.
+
+    A disabled camera is kept (recoverable) in a 'disabled:' section the loader
+    ignores. Names are validated, duplicates refused, and the file is written
+    atomically. On success the running program is asked to restart so it picks
+    the cameras up. Returns the new {"active", "disabled"} name lists.
+    """
+    raw = _read_cameras_raw(path)
+    active = dict(raw.get("cameras") or {})
+    disabled = dict(raw.get("disabled") or {})
+    known = {**disabled, **active}  # name -> url
+
+    new_active: Dict[str, str] = {}
+    new_disabled: Dict[str, str] = {}
+    final_names: set = set()
+    handled: set = set()
+
+    for ch in changes.get("cameras", []):
+        old = str(ch.get("name", ""))
+        new = str(ch.get("new_name") or old)
+        enabled = bool(ch.get("enabled", True))
+        if old not in known:
+            raise ValueError(f"unknown camera: {old!r}")
+        if not _NAME_RE.match(new):
+            raise ValueError(f"invalid camera name {new!r}: use lowercase letters, digits and underscores")
+        if new in final_names:
+            raise ValueError(f"duplicate camera name: {new!r}")
+        final_names.add(new)
+        handled.add(old)
+        (new_active if enabled else new_disabled)[new] = known[old]
+
+    # Cameras not mentioned keep their current bucket (unless a rename took the name).
+    for name, url in active.items():
+        if name not in handled and name not in final_names:
+            new_active[name] = url
+            final_names.add(name)
+    for name, url in disabled.items():
+        if name not in handled and name not in final_names:
+            new_disabled[name] = url
+            final_names.add(name)
+
+    _write_cameras(new_active, new_disabled, path)
+    try:
+        from . import control  # noqa: PLC0415
+
+        control.request_restart()
+    except Exception:  # noqa: BLE001
+        pass
+    return {"active": sorted(new_active), "disabled": sorted(new_disabled)}
+
+
+def _grab_snapshot(url: str, out_path: str, width: int = 960) -> bool:
+    import cv2  # noqa: PLC0415
+
+    cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
+    try:
+        frame = None
+        for _ in range(6):  # a few reads to get past the stream's buffer
+            ok, f = cap.read()
+            if ok and f is not None:
+                frame = f
+                break
+        if frame is None:
+            return False
+        h, w = frame.shape[:2]
+        if w > width:
+            frame = cv2.resize(frame, (width, max(1, int(h * width / w))))
+        return bool(cv2.imwrite(out_path, frame, [int(cv2.IMWRITE_JPEG_QUALITY), 85]))
+    finally:
+        cap.release()
+
+
+def take_snapshots(out_dir: str, path: str = CAMERAS_PATH) -> Dict[str, Any]:
+    """Save one <camera>.jpg (main stream, downscaled) per camera in cameras.yaml."""
+    cameras = dict(_read_cameras_raw(path).get("cameras") or {})
+    os.makedirs(out_dir, exist_ok=True)
+    results = []
+    for name, url in cameras.items():
+        out = os.path.join(out_dir, f"{name}.jpg")
+        ok = False
+        try:
+            ok = _grab_snapshot(url, out)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("snapshot failed for %s: %s", name, exc)
+        results.append({"name": name, "file": out if ok else "", "ok": ok})
+    return {"snapshots": results}
 
 
 def _scan() -> Dict[str, Any]:
@@ -164,6 +283,13 @@ def main() -> None:
     probe.add_argument("--port", type=int, default=554)
     add_login(probe)
 
+    snaps = sub.add_parser("snapshots", help="Save one JPEG per camera (for the setup UI to show).")
+    snaps.add_argument("--out", required=True, help="Directory to write <camera>.jpg files into.")
+
+    applyp = sub.add_parser("apply", help="Rewrite cameras.yaml from a changes JSON (rename / enable / disable).")
+    applyp.add_argument("--changes", required=True,
+                        help='JSON file: {"cameras":[{"name","new_name","enabled"}]}.')
+
     args = parser.parse_args()
     # Progress goes to stderr so --json output on stdout stays parseable.
     logging.basicConfig(
@@ -181,6 +307,35 @@ def main() -> None:
                 print(f"Devices answering on port {port}: {hosts if hosts else 'none'}")
             onvif = [f"{d['ip']}:{d['port']}" for d in result["onvif"]]
             print(f"ONVIF devices: {onvif if onvif else 'none answered'}")
+        return
+
+    if args.command == "snapshots":
+        result = take_snapshots(args.out)
+        if args.json:
+            print(json.dumps(result, indent=2))
+        else:
+            for s in result["snapshots"]:
+                print(f"  {s['name']:<22} {'ok' if s['ok'] else 'FAILED'}  {s['file']}")
+        if not any(s["ok"] for s in result["snapshots"]):
+            sys.exit(1)
+        return
+
+    if args.command == "apply":
+        with open(args.changes, encoding="utf-8") as f:
+            changes = json.load(f)
+        try:
+            result = apply_changes(changes)
+        except ValueError as exc:
+            if args.json:
+                print(json.dumps({"error": str(exc)}))
+            else:
+                print(f"Error: {exc}")
+            sys.exit(1)
+        if args.json:
+            print(json.dumps(result, indent=2))
+        else:
+            print(f"Active cameras:  {result['active']}")
+            print(f"Disabled:        {result['disabled']}")
         return
 
     password = _password(args)
