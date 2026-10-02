@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import re
+import shutil
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -41,6 +42,9 @@ ACTIONS = (
     "resume",  # turn alerts back on
     "find",    # look up saved alerts or video
 )
+
+# Verdicts that label the alert's clip: the clip is kept for training with the owner's answer.
+LABELLING_VERDICTS = ("true_alert", "false_alarm", "real_but_wrong", "expected")
 
 MAX_MUTE_HOURS = 24.0   # a pause with no end, or a longer one, ends after this
 MAX_NOTE_CHARS = 300
@@ -407,12 +411,15 @@ def save_feedback(
     who: Dict[str, Any],
     chat_id: Any,
     now: float,
+    training_dir: Optional[str] = None,
+    archive_dir: Optional[str] = None,
 ) -> str:
     """Write one feedback as its own JSON file under ``<root_dir>/feedback/``. Returns its path.
 
     *root_dir* is the production folder, so the file is uploaded and expires
     with the clips. An answer can arrive long after its clip was uploaded,
-    which is why it is not written into the clip's meta.
+    which is why it is not written into the clip's meta. An answer that judges
+    the alert also keeps the clip for training (:func:`keep_for_training`).
     """
     camera = (alert or {}).get("camera") or "_general"
     alert_id = (alert or {}).get("alert_id") or "general"
@@ -438,4 +445,94 @@ def save_feedback(
         "from": who,
         "chat_id": str(chat_id),
     })
+    if feedback.verdict in LABELLING_VERDICTS and (alert or {}).get("alert_id"):
+        try:
+            keep_for_training(alert or {}, feedback, raw_text, who, now, root_dir, training_dir, archive_dir)
+        except Exception as exc:  # noqa: BLE001 - the answer is saved; the training copy must not break the inbox
+            log.warning("Could not keep the clip of %s for training: %s", alert_id, exc)
     return path
+
+
+def _alert_files(alert_id: str, roots: Sequence[str]) -> Optional[Tuple[str, str]]:
+    """The meta and clip of *alert_id* under the first of *roots* that holds it."""
+    for root in roots:
+        meta_dir = os.path.join(root, "meta")
+        if not os.path.isdir(meta_dir):
+            continue
+        for dirpath, _, names in os.walk(meta_dir):
+            if f"{alert_id}.meta.json" in names:
+                meta_path = os.path.join(dirpath, f"{alert_id}.meta.json")
+                with open(meta_path, encoding="utf-8") as f:
+                    meta = json.load(f)
+                clip_rel = str(meta.get("clip_path") or "").replace("\\", "/")
+                clip_path = os.path.join(root, *clip_rel.split("/")) if clip_rel else ""
+                if clip_path and os.path.isfile(clip_path):
+                    return meta_path, clip_path
+    return None
+
+
+def keep_for_training(
+    alert: Dict[str, Any],
+    feedback: Feedback,
+    raw_text: str,
+    who: Dict[str, Any],
+    now: float,
+    production_dir: str,
+    training_dir: Optional[str] = None,
+    archive_dir: Optional[str] = None,
+) -> Optional[str]:
+    """Copy the alert's clip and meta into the training folder, with the owner's answer in the meta.
+
+    The production folder and its online copy expire after two weeks; the
+    training folder (the collector's own dataset) is uploaded for tagging and
+    kept. The copy carries everything a tagger needs in one meta: the video,
+    what the detector saw (``yolo``), what the AI said (``alert``) and the
+    owner's verdict (``owner_feedback``, a list: a later answer is added).
+    Returns the training meta's path, or None when the clip is not on this box
+    any more.
+    """
+    from .boxconfig import LIVE_DIR, PRODUCTION_ARCHIVE_DIR  # noqa: PLC0415
+
+    training_dir = training_dir or LIVE_DIR
+    archive_dir = archive_dir or PRODUCTION_ARCHIVE_DIR
+    alert_id = str(alert.get("alert_id"))
+    roots = [production_dir] + sorted(
+        os.path.join(archive_dir, name) for name in (os.listdir(archive_dir) if os.path.isdir(archive_dir) else [])
+        if os.path.isdir(os.path.join(archive_dir, name))
+    )
+    answer = {
+        "time_utc": dt.datetime.fromtimestamp(now, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "verdict": feedback.verdict,
+        "note": feedback.note,
+        "raw_text": raw_text,
+        "source": feedback.source,
+        "from": (who or {}).get("name") or "",
+    }
+    kept = _alert_files(alert_id, [training_dir])
+    if kept:
+        meta_path, _ = kept                                   # answered before: add this answer
+        with open(meta_path, encoding="utf-8") as f:
+            meta = json.load(f)
+        meta.setdefault("owner_feedback", []).append(answer)
+        _write_json(meta_path, meta)
+        return meta_path
+
+    found = _alert_files(alert_id, roots)
+    if not found:
+        log.info("The clip of %s is no longer on this box; the answer is saved without it.", alert_id)
+        return None
+    meta_path, clip_path = found
+    with open(meta_path, encoding="utf-8") as f:
+        meta = json.load(f)
+    clip_rel = str(meta.get("clip_path") or "").replace("\\", "/")
+    new_clip = os.path.join(training_dir, *clip_rel.split("/"))
+    new_meta = os.path.join(training_dir, os.path.relpath(meta_path, os.path.dirname(os.path.dirname(
+        os.path.dirname(os.path.dirname(meta_path))))))
+    os.makedirs(os.path.dirname(new_clip), exist_ok=True)
+    shutil.copy2(clip_path, new_clip)                       # the clip first: a meta on disk means a complete clip
+    meta["kind"] = "owner_feedback"
+    meta["owner_feedback"] = [answer]
+    meta["kept_from"] = os.path.basename(production_dir)
+    _write_json(new_meta, meta)
+    log.info("Kept the clip of %s for training with the owner's answer (%s).", alert_id, feedback.verdict)
+    return new_meta
