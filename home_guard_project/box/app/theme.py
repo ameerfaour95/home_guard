@@ -13,6 +13,8 @@ def stylesheet(theme='dark'):
     sheet="""
 QWidget { background: @bg; color: @text; font-family: 'Segoe UI Variable', 'Segoe UI', 'Inter'; font-size: 16px; }
 QLabel { background: transparent; border: none; }
+QLabel#botAvatar { background: @bubble; border-radius: 15px; }
+QWidget#quietGroup { background: transparent; }
 QLabel#title { font-size: 30px; font-weight: 600; }
 QLabel#headline { font-size: 34px; font-weight: 600; }
 QLabel#section { font-size: 21px; font-weight: 600; }

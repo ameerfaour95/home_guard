@@ -227,7 +227,8 @@ class Window(QMainWindow):
 
         titles.addWidget(self.house_label)
         self.header_hint = label(tr("simulation") if args.setup and args.demo else tr("setup_live_hint") if args.setup else tr("close_hint"), "muted")
-        if not args.setup: self.header_hint.setObjectName("headline")
+        if not args.setup:
+            self.header_hint.setObjectName("headline");self.header_hint.setWordWrap(False)
         if args.setup: titles.addWidget(self.header_hint)
         else:
             self.status_header=QHBoxLayout();self.status_header.setSpacing(16);self.status_header.addWidget(self.header_hint);self.status_header.addStretch();titles.addLayout(self.status_header)
@@ -315,7 +316,7 @@ class Window(QMainWindow):
         self.resume_button.clicked.connect(self.resume_alerts)
         self.resume_button.setObjectName("secondary");self.status_header.insertWidget(1,self.resume_button)
         pause_row.addWidget(self.pause_label,1)
-        
+
         self.pause_row=pause_row
         self.pause_label.hide()
         self.resume_button.hide()
@@ -557,6 +558,12 @@ class Window(QMainWindow):
                 for i in range(3): demo_picture(i).save(str(Path(self.demo_media_dir.name)/('demo_'+str(i)+'.jpg')),'JPEG',88)
             from .demo_chat import demo_feed
             self.chat_data=demo_feed(self.demo_decisions if hasattr(self,'demo_decisions') else [])
+            if self.args.state in ('paused','ai-conversation','ai-group'):
+                from .demo_chat import conversation_feed
+                self.chat_data=conversation_feed(self.demo_decisions)
+                if self.args.state=='ai-group':
+                    self.chat_data=self.chat_data[:2]
+                    for message in self.chat_data: message['ts']-=100
             image_dir=Path(self.demo_media_dir.name)
         else:
             from ..chat_feed import read_feed
