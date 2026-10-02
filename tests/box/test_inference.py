@@ -85,9 +85,9 @@ class BackendSelectionTest(unittest.TestCase):
         s = AlertSettings(vlm_backend="llava", dry_run=False)
         self.assertIsInstance(inf.make_backend(s, {}), NullBackend)
 
-    def test_null_backend_returns_none_verdict(self) -> None:
+    def test_null_backend_returns_summary_field(self) -> None:
         raw, parsed = NullBackend().analyze([], "cam", 0, 0, 0)
-        self.assertEqual(parsed["alert_command"], "[none]")
+        self.assertIn("summary", parsed)
 
 
 class _FakeBox:

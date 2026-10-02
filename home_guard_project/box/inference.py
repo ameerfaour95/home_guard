@@ -85,31 +85,19 @@ def apply_policy_override(parsed: Dict[str, Any], in_window: bool, person: bool,
 
 
 def build_prompt(camera_name: str, t_sec: int, local_time_str: str, start_hour: int, end_hour: int) -> str:
-    window = f"{start_hour:02d}:00-{end_hour:02d}:00"
+    # Purely descriptive, so the model does not treat this as surveillance/threat
+    # judgement of people (which it refuses). The alert decision is made in code
+    # from the YOLO gate; a future fine-tuned model may also return alert_command.
     return f"""
-You are a security camera assistant. You receive MULTIPLE sequential frames (~5 seconds) from camera "{camera_name}".
-Treat them as a SHORT VIDEO CLIP.
+You are helping a homeowner by describing what their own home security camera "{camera_name}" sees.
+Look at these sequential frames (about 5 seconds, one short clip) and reply with ONE short, factual
+sentence describing what is happening - for example "a person is walking toward the front door",
+"a car is in the driveway", "a cat is on the porch", or "nothing notable is happening".
+Do not identify anyone and do not describe a person's personal or physical characteristics; describe
+only the activity.
 
-Return EXACTLY ONE STRICT JSON OBJECT (NOT an array) and NOTHING else:
-{{
-  "time_sec": {t_sec},
-  "camera": "{camera_name}",
-  "summary": "<one sentence describing the ENTIRE clip>",
-  "alert_command": "[none]" or "[call_owner]" or "[send_message]",
-  "alert_reason": "<short reason, or empty string if alert_command is [none]>"
-}}
-
-HARD RULES:
-- Single JSON Object only.
-- Summary describes the 5-sec clip activity.
-- If person detected: describe appearance and action.
-
-Alert policy:
-- Alert window: {window}. Current time: {local_time_str}.
-- If OUTSIDE window: alert_command MUST be "[none]".
-- If INSIDE window:
-  * Person/Car visible? alert_command MUST be "[send_message]" (minimum).
-  * Suspicious (forced entry, hiding, loitering)? alert_command MUST be "[call_owner]".
+Reply with EXACTLY ONE strict JSON object and nothing else:
+{{"summary": "<one short sentence>"}}
 """.strip()
 
 
@@ -170,7 +158,7 @@ class NullBackend:
 
     def analyze(self, frames_bgr: List[Any], camera_name: str, t_sec: int,
                 start_hour: int, end_hour: int) -> Tuple[str, Optional[Dict[str, Any]]]:
-        parsed = {"summary": "(no VLM backend configured)", "alert_command": "[none]", "alert_reason": ""}
+        parsed = {"summary": ""}
         return json.dumps(parsed), parsed
 
 
@@ -330,25 +318,29 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
             return
         raw, parsed = backend.analyze(frames, camera_name, int(time.time()),
                                       settings.alert_start_hour, settings.alert_end_hour)
-        if not parsed:
-            log.warning("[%s] VLM returned unparseable output: %s", camera_name, raw[:200])
-            return
-        # person/vehicle already true at the gate, so pass True for the override's benefit.
-        parsed = apply_policy_override(parsed, in_win, person=True, vehicle=True)
-        cmd = parsed.get("alert_command", "[none]")
-        summary = str(parsed.get("summary", ""))
-        reason = str(parsed.get("alert_reason", ""))
-        log.info("[%s] verdict=%s summary=%s", camera_name, cmd, summary)
-        if cmd in ("[send_message]", "[call_owner]"):
-            # Attach the most recent frame of the clip as the alert snapshot.
-            image = b""
-            try:
-                image = frame_to_jpeg_bytes(frames[-1]) if frames else b""
-            except Exception as exc:  # noqa: BLE001
-                log.warning("[%s] could not encode snapshot: %s", camera_name, exc)
-            res = dispatch_alert(box_settings, env, cmd, f"{camera_name}: {summary}", reason,
-                                 image=image or None)
-            log.info("[%s] alert dispatched: %s", camera_name, res)
+        summary = ""
+        backend_cmd = None
+        if parsed:
+            summary = str(parsed.get("summary", "")).strip()
+            backend_cmd = parsed.get("alert_command")
+        else:
+            log.warning("[%s] VLM returned no usable output: %s", camera_name, (raw or "")[:200])
+        # The YOLO gate already confirmed a person/vehicle inside the window, so this
+        # is at least a [send_message]. A backend that returns its own alert_command
+        # (e.g. a future fine-tuned VLM) can raise it to [call_owner].
+        cmd = backend_cmd if backend_cmd in ("[send_message]", "[call_owner]") else "[send_message]"
+        if not summary:
+            summary = "a person or vehicle was detected"
+        reason = str(parsed.get("alert_reason", "")) if parsed else ""
+        log.info("[%s] alert=%s summary=%s", camera_name, cmd, summary)
+        # Attach the most recent frame of the clip as the alert snapshot.
+        image = b""
+        try:
+            image = frame_to_jpeg_bytes(frames[-1]) if frames else b""
+        except Exception as exc:  # noqa: BLE001
+            log.warning("[%s] could not encode snapshot: %s", camera_name, exc)
+        res = dispatch_alert(box_settings, env, cmd, f"{camera_name}: {summary}", reason, image=image or None)
+        log.info("[%s] alert dispatched: %s", camera_name, res)
     except Exception as exc:  # noqa: BLE001
         log.warning("[%s] worker error: %s", camera_name, exc)
 
