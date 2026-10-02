@@ -27,7 +27,7 @@ import sys
 import threading
 import time
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -225,10 +225,13 @@ def make_backend(settings: AlertSettings, env: Dict[str, str]):
 # ----------------------------------------------------------------------------
 def dispatch_alert(box_settings: Dict[str, Any], env: Dict[str, str],
                    command: str, summary: str, reason: str,
-                   image: Optional[bytes] = None) -> Dict[str, Any]:
+                   image: Optional[bytes] = None,
+                   assistant: Any = None, alert: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Send the alert over the configured channel(s). Never raises.
 
     *image* (JPEG bytes) is the camera snapshot; Telegram sends it as a photo.
+    With an *assistant* (telegram_agent.OwnerAssistant) the Telegram alert goes
+    out with the feedback question and buttons, filed under *alert*.
     """
     channel = str(box_settings.get("alert_channel", "telegram"))
     results: Dict[str, Any] = {"channel": channel}
@@ -236,8 +239,12 @@ def dispatch_alert(box_settings: Dict[str, Any], env: Dict[str, str],
         if channel in ("telegram", "both"):
             from . import telegram_notify  # noqa: PLC0415
 
-            cfg = telegram_notify.load_telegram_config(box_settings, env)
-            results["telegram"] = telegram_notify.notify(cfg, command, summary, reason, image=image)
+            text = telegram_notify.alert_text(command, summary, reason)
+            if assistant is not None and alert is not None and text is not None:
+                results["telegram"] = {"command": command, "telegram": assistant.send_alert(alert, text, image)}
+            else:
+                cfg = telegram_notify.load_telegram_config(box_settings, env)
+                results["telegram"] = telegram_notify.notify(cfg, command, summary, reason, image=image)
         if channel in ("twilio", "both"):
             from . import notify as twilio_notify  # noqa: PLC0415
 
@@ -308,9 +315,26 @@ class _Stream:
             return None if self._frame is None else self._frame.copy()
 
 
+@dataclass
+class AlertJob:
+    """One alert on its way: the worker fills in what was decided, the clip writer saves it with the video."""
+
+    camera: str
+    stem: str                        # the clip's file stem, and the id the owner's answers are filed under
+    ts: float                        # when the gate opened
+    labels: List[str] = field(default_factory=list)
+    alert: Dict[str, Any] = field(default_factory=dict)
+    ready: threading.Event = field(default_factory=threading.Event)
+
+
 def _worker(backend, box_settings, env, settings: AlertSettings,
-            camera_name: str, frames: List[Any]) -> None:
-    """Run the VLM call + dispatch off the capture loop. Never raises out."""
+            camera_name: str, frames: List[Any],
+            assistant: Any = None, job: Optional[AlertJob] = None) -> None:
+    """Run the VLM call + dispatch off the capture loop. Never raises out.
+
+    With an *assistant*, an alert for a camera the owner has paused is described
+    and saved but not sent. *job* receives the outcome for the clip's meta.
+    """
     try:
         now = datetime.now()
         in_win = in_alert_window(now.hour, settings.alert_start_hour, settings.alert_end_hour)
@@ -339,18 +363,58 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
             image = frame_to_jpeg_bytes(frames[-1]) if frames else b""
         except Exception as exc:  # noqa: BLE001
             log.warning("[%s] could not encode snapshot: %s", camera_name, exc)
-        res = dispatch_alert(box_settings, env, cmd, f"{camera_name}: {summary}", reason, image=image or None)
-        log.info("[%s] alert dispatched: %s", camera_name, res)
+        muted = bool(assistant is not None and assistant.is_muted(camera_name))
+        if muted:
+            res: Dict[str, Any] = {"sent": False, "reason": "paused by the owner"}
+            log.info("[%s] alert not sent: the owner paused alerts", camera_name)
+        else:
+            alert_ref = None
+            if job is not None:
+                alert_ref = {"alert_id": job.stem, "camera": camera_name, "summary": summary, "ts": job.ts}
+            res = dispatch_alert(box_settings, env, cmd, f"{camera_name}: {summary}", reason,
+                                 image=image or None, assistant=assistant, alert=alert_ref)
+            log.info("[%s] alert dispatched: %s", camera_name, res)
+        if job is not None:
+            job.alert = {"summary": summary, "alert_command": cmd, "alert_reason": reason,
+                         "labels": job.labels, "muted": muted, "dispatch": res}
     except Exception as exc:  # noqa: BLE001
         log.warning("[%s] worker error: %s", camera_name, exc)
+    finally:
+        if job is not None:
+            job.ready.set()
+
+
+def _save_clip(job: AlertJob, frames: List[Any], root_dir: str) -> None:
+    """Write the alert's clip once the worker has decided what the alert was. Never raises out."""
+    try:
+        from .alert_clips import write_alert_clip  # noqa: PLC0415
+
+        job.ready.wait(timeout=90)
+        alert = job.alert or {"summary": "", "alert_command": "[none]", "alert_reason": "", "labels": job.labels}
+        meta = write_alert_clip(root_dir, job.camera, job.stem, frames, alert)
+        if meta:
+            log.info("[%s] clip saved: %s (%d frames)", job.camera, job.stem, len(frames))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("[%s] could not save the clip %s: %s", job.camera, job.stem, exc)
 
 
 def run() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", stream=sys.stdout)
+    # Use the OS certificate store for all HTTPS (urllib + httpx), so Telegram
+    # and OpenAI work on networks that intercept TLS (an antivirus / proxy whose
+    # root is installed in the Windows store). Harmless where there is no proxy.
+    try:
+        import truststore  # noqa: PLC0415
+
+        truststore.inject_into_ssl()
+    except Exception:  # noqa: BLE001
+        pass
     try:
         from dotenv import load_dotenv  # noqa: PLC0415
+        from .boxconfig import PROJECT_ROOT  # noqa: PLC0415
 
-        load_dotenv()  # api_key.env at the repo root
+        # Secrets live in api_key.env (NOT .env), at the repo root.
+        load_dotenv(os.path.join(PROJECT_ROOT, "api_key.env"))
     except Exception:  # noqa: BLE001
         pass
     env = dict(os.environ)
@@ -381,9 +445,28 @@ def run() -> int:
     last_alert_ts: Dict[str, float] = {name: 0.0 for name in cameras}
     worker = {"t": None}  # single in-flight VLM call across cameras (N150 budget)
 
+    # Every alert is saved as a clip (the seconds around it) in the production folder,
+    # and the owner can answer it in Telegram. Neither may stop the alerts themselves.
+    from .alert_clips import POST_SECONDS, PRE_SECONDS, ClipRing, alert_stem, encode_frame  # noqa: PLC0415
+    from .boxconfig import PRODUCTION_LIVE_DIR  # noqa: PLC0415
+
+    rings: Dict[str, ClipRing] = {name: ClipRing() for name in cameras}
+    pending: List[AlertJob] = []
+    assistant = None
+    try:
+        from . import telegram_agent  # noqa: PLC0415
+
+        assistant = telegram_agent.start(box_settings, env, list(cameras))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Owner assistant not started (%s); alerts go out without feedback buttons.", exc)
+
     log.info("Watching %d camera(s): %s", len(cameras), ", ".join(cameras))
     while True:
         now_ts = time.time()
+        for job in [j for j in pending if now_ts >= j.ts + POST_SECONDS]:
+            pending.remove(job)
+            clip = rings[job.camera].between(job.ts - PRE_SECONDS, job.ts + POST_SECONDS)
+            threading.Thread(target=_save_clip, args=(job, clip, PRODUCTION_LIVE_DIR), daemon=True).start()
         for name in cameras:
             frame = streams[name].read()
             if frame is None:
@@ -392,6 +475,8 @@ def run() -> int:
             if now_ts - last_buf_ts[name] >= settings.frame_interval_sec:
                 buffers[name].append(frame)
                 last_buf_ts[name] = now_ts
+            if rings[name].wants(now_ts):
+                rings[name].add(now_ts, encode_frame(frame))
 
             if now_ts - last_alert_ts[name] < settings.cooldown_sec:
                 continue
@@ -410,8 +495,10 @@ def run() -> int:
             frames = list(buffers[name])
             last_alert_ts[name] = now_ts
             log.info("[%s] escalating (labels=%s), calling VLM", name, labels)
+            job = AlertJob(camera=name, stem=alert_stem(name, now_ts), ts=now_ts, labels=labels)
+            pending.append(job)
             t = threading.Thread(target=_worker,
-                                 args=(backend, box_settings, env, settings, name, frames),
+                                 args=(backend, box_settings, env, settings, name, frames, assistant, job),
                                  daemon=True)
             t.start()
             worker["t"] = t

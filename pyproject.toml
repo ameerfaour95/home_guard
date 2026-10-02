@@ -32,6 +32,9 @@ dependencies = [
     "awscli>=1.44.62",
     "yt-dlp>=2024.12.0",
     "pyside6-essentials>=6.11.2",
+    "langgraph>=1.2.12",
+    "langchain-openai>=1.1.9",
+    "langchain>=1.4.3",
 ]
 
 [tool.uv]

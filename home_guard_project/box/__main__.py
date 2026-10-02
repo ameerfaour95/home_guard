@@ -11,6 +11,11 @@ Usage:
     python -m home_guard_project.box set-option alert_start_hour 22 # the options are listed in boxconfig.py
     python -m home_guard_project.box set-option telegram_chat_ids=-1001234567,987654
     python -m home_guard_project.box get-option show_cameras        # prints the stored value
+    python -m home_guard_project.box stop             # stop the box's program until "start" (needs no admin rights)
+    python -m home_guard_project.box start
+    python -m home_guard_project.box restart          # restart it once, to pick up changed settings
+
+A changed setting that the running program reads at start-up restarts it by itself.
 """
 
 from __future__ import annotations
@@ -20,22 +25,30 @@ import json
 import logging
 import os
 import sys
-from typing import Any, Callable, Tuple
+from typing import Any, Callable, Sequence, Tuple
 
+from . import control
+from .archive import expire_old_files
 from .boxconfig import (
     ALIVE_FILE,
     LIVE_DIR,
+    MODE_INFERENCE,
     OUTBOX_DIR,
+    PRODUCTION_ARCHIVE_DIR,
+    PRODUCTION_LIVE_DIR,
+    PRODUCTION_RETENTION_DAYS,
+    RESTART_OPTIONS,
     BoxConfig,
     BoxConfigError,
     get_option,
     load_box_config,
+    production_prefix,
     s3_prefix,
     set_option,
     set_site,
 )
 from .heartbeat import build_heartbeat, put_heartbeat
-from .outbox import ORPHAN_AGE_SEC, move_finished_clips, move_orphans
+from .outbox import ORPHAN_AGE_SEC, move_feedback, move_finished_clips, move_orphans
 
 log = logging.getLogger("box")
 
@@ -58,11 +71,15 @@ def run_upload(
     bucket: str,
     workers: int,
     uploader: Callable[..., Any],
+    prefix_for: Callable[[str], str] = s3_prefix,
+    keep_local: bool = False,
 ) -> Tuple[int, int]:
     """Move finished clips to the outbox and upload it. Returns ``(clips_moved, files_moved)``.
 
-    The outbox has one folder per site, uploaded to that site's own S3 folder,
-    so clips saved before a box changed house still go where they belong.
+    The outbox has one folder per site, uploaded to that site's own S3 folder
+    (named by *prefix_for*), so clips saved before a box changed house still go
+    where they belong. With *keep_local* the uploaded files stay on the box:
+    the outbox is then an archive, emptied by age and not by upload.
     """
     os.makedirs(outbox_dir, exist_ok=True)
     site_outbox = os.path.join(outbox_dir, cfg.site)
@@ -72,6 +89,7 @@ def run_upload(
     orphans = move_orphans(live_dir, site_outbox, ORPHAN_AGE_SEC)
     if orphans:
         log.info("Moved %d file(s) of interrupted clips (no meta) to the outbox.", orphans)
+    move_feedback(live_dir, site_outbox)
 
     uploaded_any = False
     for site in _site_dirs(outbox_dir):
@@ -84,29 +102,41 @@ def run_upload(
         uploader(
             dataset_dir=site_dir,
             bucket=bucket,
-            prefix=s3_prefix(site),
+            prefix=prefix_for(site),
             workers=workers,
             skip_reencode=False,
             no_cleanup=True,
             allowed_labels=frozenset(),
-            delete_local=True,
+            delete_local=not keep_local,
         )
     if not uploaded_any:
         log.info("Outbox is empty — nothing to upload.")
     return moved
 
 
-def change_site(new_site: str, live_dir: str, outbox_dir: str, box_yaml: str) -> Tuple[int, int]:
-    """Rename the site. Clips already saved are set aside under the old name first."""
-    moved = (0, 0)
+def change_site(
+    new_site: str,
+    live_dir: str,
+    outbox_dir: str,
+    box_yaml: str,
+    also: Sequence[Tuple[str, str]] = (),
+) -> Tuple[int, int]:
+    """Rename the site. Clips already saved are set aside under the old name first.
+
+    *also* lists further ``(live_dir, outbox_dir)`` pairs to set aside the same way.
+    Returns the clips and files moved, over all pairs.
+    """
+    clips = files = 0
     try:
         old_site = load_box_config(box_yaml).site
     except BoxConfigError:
         old_site = None
     if old_site and old_site != new_site:
-        moved = move_finished_clips(live_dir, os.path.join(outbox_dir, old_site), 0)
+        for live, outbox in ((live_dir, outbox_dir), *also):
+            moved = move_finished_clips(live, os.path.join(outbox, old_site), 0)
+            clips, files = clips + moved[0], files + moved[1]
     set_site(new_site, box_yaml)
-    return moved
+    return clips, files
 
 
 def split_option(values: list[str]) -> Tuple[str, str]:
@@ -123,6 +153,20 @@ def split_option(values: list[str]) -> Tuple[str, str]:
     raise BoxConfigError("usage: set-option KEY VALUE  (or KEY=VALUE)")
 
 
+def _clip_dirs(mode: str) -> Tuple[str, str]:
+    """The live and outbox folders the box is filling in *mode*, for the status report."""
+    if mode == MODE_INFERENCE:
+        return PRODUCTION_LIVE_DIR, PRODUCTION_ARCHIVE_DIR
+    return LIVE_DIR, OUTBOX_DIR
+
+
+def _status(cfg: BoxConfig) -> dict:
+    """The status report: the heartbeat, plus whether the box was stopped on purpose."""
+    status = build_heartbeat(cfg.site, *_clip_dirs(cfg.mode), ALIVE_FILE, mode=cfg.mode)
+    status["stopped"] = control.is_stopped()
+    return status
+
+
 def _shown(value: Any) -> str:
     """An option value as the command line prints it: true/false, a number, text, or nothing."""
     if isinstance(value, bool):
@@ -132,7 +176,8 @@ def _shown(value: Any) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Collector box: upload, heartbeat, status, mode, settings.")
-    parser.add_argument("command", choices=["upload", "heartbeat", "status", "mode", "set-site", "set-option", "get-option"])
+    parser.add_argument("command", choices=["upload", "heartbeat", "status", "mode", "set-site", "set-option",
+                                            "get-option", "stop", "start", "restart"])
     parser.add_argument("values", nargs="*", help="set-site NAME | set-option KEY VALUE (or KEY=VALUE) | get-option KEY")
     args = parser.parse_args()
     args.value = args.values[0] if args.values else None
@@ -143,6 +188,19 @@ def main() -> None:
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
+    if args.command == "stop":
+        control.stop()
+        print("stopping; the box stays stopped until: start")
+        return
+    if args.command == "start":
+        control.start()
+        print("starting")
+        return
+    if args.command == "restart":
+        control.request_restart()
+        print("stopped; use start" if control.is_stopped() else "restarting")
+        return
+
     if args.command in ("set-option", "get-option"):
         try:
             if args.command == "get-option":
@@ -152,6 +210,8 @@ def main() -> None:
             else:
                 key, value = split_option(args.values)
                 print(f"{key} set to {_shown(set_option(key, value))}")
+                if key in RESTART_OPTIONS:
+                    control.request_restart()   # the running program reads it only at start-up
         except BoxConfigError as exc:
             log.error("%s", exc)
             sys.exit(1)
@@ -163,7 +223,10 @@ def main() -> None:
         try:
             if not args.value:
                 raise BoxConfigError("set-site needs a site name, e.g. set-site house2")
-            clips, _ = change_site(args.value, LIVE_DIR, OUTBOX_DIR, BOX_YAML)
+            clips, _ = change_site(
+                args.value, LIVE_DIR, OUTBOX_DIR, BOX_YAML,
+                also=[(PRODUCTION_LIVE_DIR, PRODUCTION_ARCHIVE_DIR)],
+            )
         except BoxConfigError as exc:
             log.error("%s", exc)
             sys.exit(1)
@@ -183,7 +246,7 @@ def main() -> None:
         return
 
     if args.command == "status":
-        print(json.dumps(build_heartbeat(cfg.site, LIVE_DIR, OUTBOX_DIR, ALIVE_FILE, mode=cfg.mode), indent=2))
+        print(json.dumps(_status(cfg), indent=2))
         return
 
     from home_guard_project.s3_upload.config import load_config as load_s3_config
@@ -194,12 +257,18 @@ def main() -> None:
         from home_guard_project.s3_upload.s3_upload import run as s3_run
 
         run_upload(cfg, LIVE_DIR, OUTBOX_DIR, s3_cfg.bucket, s3_cfg.workers, uploader=s3_run)
+        # Clips saved in inference mode are kept two weeks, on the box (so the owner can
+        # ask for them) and in an S3 folder the bucket empties after the same time.
+        run_upload(
+            cfg, PRODUCTION_LIVE_DIR, PRODUCTION_ARCHIVE_DIR, s3_cfg.bucket, s3_cfg.workers,
+            uploader=s3_run, prefix_for=production_prefix, keep_local=True,
+        )
+        expired = expire_old_files(PRODUCTION_ARCHIVE_DIR, PRODUCTION_RETENTION_DAYS)
+        if expired:
+            log.info("Deleted %d production file(s) older than %d days from this box.",
+                     expired, PRODUCTION_RETENTION_DAYS)
 
-    key = put_heartbeat(
-        build_heartbeat(cfg.site, LIVE_DIR, OUTBOX_DIR, ALIVE_FILE, mode=cfg.mode),
-        s3_cfg.bucket,
-        s3_prefix(cfg.site),
-    )
+    key = put_heartbeat(_status(cfg), s3_cfg.bucket, s3_prefix(cfg.site))
     log.info("Heartbeat written to s3://%s/%s", s3_cfg.bucket, key)
 
 

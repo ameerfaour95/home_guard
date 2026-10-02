@@ -124,6 +124,28 @@ def move_orphans(
     return moved
 
 
+def move_feedback(live_dir: str, outbox_dir: str) -> int:
+    """Move the owner-feedback files (``feedback/``, written by inference mode) to the outbox. Returns files moved.
+
+    Each file is complete when it appears (it is written through a ``.tmp``
+    file), so there is no age to wait for.
+    """
+    moved = 0
+    for dirpath, _, filenames in os.walk(os.path.join(live_dir, "feedback")):
+        for name in filenames:
+            if name.endswith(".tmp"):
+                continue
+            src = os.path.join(dirpath, name)
+            dst = os.path.join(outbox_dir, os.path.relpath(src, live_dir))
+            try:
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                os.replace(src, dst)
+                moved += 1
+            except OSError as exc:
+                log.warning("Could not move %s (will retry next run): %s", src, exc)
+    return moved
+
+
 def move_finished_clips(
     live_dir: str,
     outbox_dir: str,

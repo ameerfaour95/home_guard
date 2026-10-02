@@ -139,3 +139,72 @@ class DispatchTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class _FakeAssistant:
+    def __init__(self, muted: bool = False) -> None:
+        self.muted = muted
+        self.sent: list = []
+
+    def is_muted(self, camera: str) -> bool:
+        return self.muted
+
+    def send_alert(self, alert, text, image=None):
+        self.sent.append({"alert": alert, "text": text, "image": image})
+        return {"sent": True, "results": [{"chat_id": "1", "ok": True, "message_id": 7}]}
+
+
+class _DescribingBackend:
+    def analyze(self, frames, camera_name, t_sec, start_hour, end_hour):
+        return '{"summary": "a person at the door"}', {"summary": "a person at the door"}
+
+
+class WorkerWithAssistantTest(unittest.TestCase):
+    SETTINGS = AlertSettings()          # 0,0 = always inside the alert window
+    BOX = {"alert_channel": "telegram"}
+
+    def _run(self, assistant) -> inf.AlertJob:
+        job = inf.AlertJob(camera="front_door", stem="front_door_100_alert", ts=100.0, labels=["person"])
+        with mock.patch.object(inf, "frame_to_jpeg_bytes", return_value=b"jpg"):
+            inf._worker(_DescribingBackend(), self.BOX, {}, self.SETTINGS, "front_door", [object()], assistant, job)
+        return job
+
+    def test_the_alert_goes_out_through_the_assistant_and_is_filed_under_the_clip(self) -> None:
+        assistant = _FakeAssistant()
+        job = self._run(assistant)
+
+        (sent,) = assistant.sent
+        self.assertEqual(sent["alert"], {"alert_id": "front_door_100_alert", "camera": "front_door",
+                                         "summary": "a person at the door", "ts": 100.0})
+        self.assertIn("front_door: a person at the door", sent["text"])
+        self.assertEqual(sent["image"], b"jpg")
+        self.assertTrue(job.ready.is_set())
+        self.assertEqual((job.alert["summary"], job.alert["alert_command"], job.alert["muted"]),
+                         ("a person at the door", "[send_message]", False))
+        self.assertEqual(job.alert["labels"], ["person"])
+
+    def test_a_paused_camera_is_described_and_saved_but_not_sent(self) -> None:
+        assistant = _FakeAssistant(muted=True)
+        job = self._run(assistant)
+
+        self.assertEqual(assistant.sent, [])
+        self.assertTrue(job.alert["muted"])
+        self.assertEqual(job.alert["summary"], "a person at the door")
+        self.assertFalse(job.alert["dispatch"]["sent"])
+
+    def test_the_job_is_released_even_when_the_backend_fails(self) -> None:
+        class Broken:
+            def analyze(self, *args):
+                raise RuntimeError("boom")
+
+        job = inf.AlertJob(camera="front_door", stem="s", ts=1.0)
+        inf._worker(Broken(), self.BOX, {}, self.SETTINGS, "front_door", [], _FakeAssistant(), job)
+        self.assertTrue(job.ready.is_set())
+        self.assertEqual(job.alert, {})
+
+    def test_without_an_assistant_the_old_path_is_used(self) -> None:
+        with mock.patch("home_guard_project.box.telegram_notify.notify", return_value={"sent": True}) as notify, \
+                mock.patch.object(inf, "frame_to_jpeg_bytes", return_value=b"jpg"):
+            inf._worker(_DescribingBackend(), self.BOX, {"TELEGRAM_BOT_TOKEN": "T"}, self.SETTINGS,
+                        "front_door", [object()])
+        notify.assert_called_once()

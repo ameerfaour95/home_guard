@@ -25,7 +25,7 @@ import re
 import sys
 from typing import Any, Dict
 
-from .boxconfig import s3_prefix
+from .boxconfig import PRODUCTION_PREFIX_ROOT, s3_prefix
 
 log = logging.getLogger("box.key")
 
@@ -64,7 +64,8 @@ PROTECTED_PREFIXES = ("dataset_uca", "dataset_smarthome", "dataset_multi")
 
 
 def policy_any_site(bucket: str) -> Dict[str, Any]:
-    """For a box whose site is chosen by the installer: write under any ``dataset_<site>/`` folder.
+    """For a box whose site is chosen by the installer: write under any ``dataset_<site>/``
+    folder, and under any ``production_<site>/`` folder (inference-mode clips, which expire).
 
     The installer names the house in the setup program, so the folder is not
     known when the key is made. The shared dataset pools are denied outright.
@@ -72,6 +73,7 @@ def policy_any_site(bucket: str) -> Dict[str, Any]:
     but cannot read or delete anything.
     """
     protected_objects = [f"arn:aws:s3:::{bucket}/{p}/*" for p in PROTECTED_PREFIXES]
+    roots = ("dataset_", PRODUCTION_PREFIX_ROOT)
     return {
         "Version": "2012-10-17",
         "Statement": [
@@ -79,12 +81,12 @@ def policy_any_site(bucket: str) -> Dict[str, Any]:
                 "Effect": "Allow",
                 "Action": "s3:ListBucket",
                 "Resource": f"arn:aws:s3:::{bucket}",
-                "Condition": {"StringLike": {"s3:prefix": "dataset_*"}},
+                "Condition": {"StringLike": {"s3:prefix": [f"{root}*" for root in roots]}},
             },
             {
                 "Effect": "Allow",
                 "Action": ["s3:PutObject", "s3:AbortMultipartUpload"],
-                "Resource": f"arn:aws:s3:::{bucket}/dataset_*/*",
+                "Resource": [f"arn:aws:s3:::{bucket}/{root}*/*" for root in roots],
             },
             {"Effect": "Deny", "Action": "s3:*", "Resource": protected_objects},
             {
@@ -129,7 +131,8 @@ def main() -> None:
 
     if args.any_site:
         policy = policy_any_site(s3_cfg.bucket)
-        scope = f"any s3://{s3_cfg.bucket}/dataset_<site>/ folder except {', '.join(PROTECTED_PREFIXES)}"
+        scope = (f"any s3://{s3_cfg.bucket}/dataset_<site>/ or production_<site>/ folder "
+                 f"except {', '.join(PROTECTED_PREFIXES)}")
     else:
         policy = policy_for(args.site, s3_cfg.bucket)
         scope = f"s3://{s3_cfg.bucket}/{s3_prefix(args.site)}/ only"

@@ -38,7 +38,12 @@ class MakeBoxKeyTest(unittest.TestCase):
             sorted(["s3:ListBucket", str(["s3:PutObject", "s3:AbortMultipartUpload"])]),
         )
         write = next(s for s in allows if s["Action"] != "s3:ListBucket")
-        self.assertEqual(write["Resource"], f"arn:aws:s3:::{BUCKET}/dataset_*/*")
+        self.assertEqual(
+            write["Resource"],
+            [f"arn:aws:s3:::{BUCKET}/dataset_*/*", f"arn:aws:s3:::{BUCKET}/production_*/*"],
+        )
+        listing = next(s for s in allows if s["Action"] == "s3:ListBucket")
+        self.assertEqual(listing["Condition"], {"StringLike": {"s3:prefix": ["dataset_*", "production_*"]}})
         allowed_text = json.dumps(allows)
         for forbidden in ("GetObject", "DeleteObject", '"s3:*"', "tagging"):
             self.assertNotIn(forbidden, allowed_text)

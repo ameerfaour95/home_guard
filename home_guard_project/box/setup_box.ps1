@@ -211,30 +211,9 @@ Ok 'Collector task started (it waits until cameras.yaml exists).'
 
 # ----------------------------------------------------------------------------
 Step 'Home Guard desktop + startup shortcut'
-
-# A "Home Guard" shortcut on the desktop and in Startup (so it opens at sign-in).
-# It launches live_view.cmd, which always shows the log window, plus the camera
-# windows when box.yaml show_cameras is true.
-$liveCmd  = Join-Path $BoxDir 'live_view.cmd'
-$liveIcon = Join-Path $BoxDir 'assets\logo.ico'
-$shortcutTargets = @(
-    (Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'Home Guard.lnk'),
-    (Join-Path ([Environment]::GetFolderPath('Startup')) 'Home Guard.lnk')
-)
-foreach ($lnkPath in $shortcutTargets) {
-    try {
-        $shell = New-Object -ComObject WScript.Shell
-        $sc = $shell.CreateShortcut($lnkPath)
-        $sc.TargetPath = $liveCmd
-        $sc.WorkingDirectory = $BoxDir
-        if (Test-Path $liveIcon) { $sc.IconLocation = $liveIcon }
-        $sc.Description = 'Home Guard - open the box window (logs, and cameras if enabled)'
-        $sc.Save()
-        Ok "Shortcut created: $lnkPath"
-    } catch {
-        Warn "Could not create shortcut $lnkPath : $($_.Exception.Message)"
-    }
-}
+# Shared with the customer wizard (setup_customer.ps1) so both create the same
+# "Home Guard" shortcut on the desktop and in Startup.
+& (Join-Path $BoxDir 'make_shortcut.ps1')
 
 Write-Host ''
 Write-Host 'Setup finished. Still to do by hand (details in box\README.md):' -ForegroundColor Green

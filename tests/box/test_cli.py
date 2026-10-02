@@ -9,7 +9,7 @@ from typing import Any, Dict
 from helpers import make_clip
 
 from home_guard_project.box.__main__ import change_site, run_upload, split_option
-from home_guard_project.box.boxconfig import BoxConfig, BoxConfigError, load_box_config
+from home_guard_project.box.boxconfig import BoxConfig, BoxConfigError, load_box_config, production_prefix
 
 OLD = 3600  # seconds ago
 
@@ -74,6 +74,53 @@ class BoxCliTest(unittest.TestCase):
             sorted((os.path.basename(c["dataset_dir"]), c["prefix"]) for c in self.uploader.calls),
             [("house2", "dataset_house2"), ("old_house", "dataset_old_house")],
         )
+
+    def test_production_clips_go_to_the_production_folder(self) -> None:
+        make_clip(self.live, "front", "front_1_alert", time.time() - OLD)
+        run_upload(
+            self.cfg,
+            live_dir=self.live,
+            outbox_dir=self.outbox,
+            bucket="my-bucket",
+            workers=2,
+            uploader=self.uploader,
+            prefix_for=production_prefix,
+        )
+        (call,) = self.uploader.calls
+        self.assertEqual(call["prefix"], "production_house2")
+        self.assertEqual(call["dataset_dir"], os.path.join(self.outbox, "house2"))
+        self.assertTrue(call["delete_local"])
+
+    def test_keep_local_uploads_without_deleting_and_takes_the_owner_feedback_along(self) -> None:
+        make_clip(self.live, "front", "front_1_alert", time.time() - OLD)
+        feedback = os.path.join(self.live, "feedback", "front", "2026-10-02", "front_1_alert_1.feedback.json")
+        os.makedirs(os.path.dirname(feedback))
+        with open(feedback, "w", encoding="utf-8") as f:
+            f.write("{}")
+
+        run_upload(
+            self.cfg, live_dir=self.live, outbox_dir=self.outbox, bucket="my-bucket", workers=2,
+            uploader=self.uploader, prefix_for=production_prefix, keep_local=True,
+        )
+
+        (call,) = self.uploader.calls
+        self.assertFalse(call["delete_local"])
+        self.assertTrue(os.path.isfile(
+            os.path.join(self.outbox, "house2", "feedback", "front", "2026-10-02", "front_1_alert_1.feedback.json")
+        ))
+        self.assertFalse(os.path.exists(feedback))
+
+    def test_change_site_sets_aside_production_clips_too(self) -> None:
+        with open(self.box_yaml, "w", encoding="utf-8") as f:
+            f.write('site: "old_house"\nmode: inference\n')
+        prod_live = os.path.join(os.path.dirname(self.live), "production_multi")
+        prod_outbox = os.path.join(os.path.dirname(self.live), "production_archive")
+        files = make_clip(prod_live, "front", "front_1_alert", time.time() - 5)
+
+        change_site("house2", self.live, self.outbox, self.box_yaml, also=[(prod_live, prod_outbox)])
+
+        for rel in files:
+            self.assertTrue(os.path.isfile(os.path.join(prod_outbox, "old_house", rel)), rel)
 
     def test_interrupted_clip_without_meta_is_uploaded_once_it_is_old(self) -> None:
         files = make_clip(self.live, "front", "front_1_trigger", time.time())
