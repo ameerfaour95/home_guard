@@ -1,6 +1,21 @@
 """All visible application copy; keys remain stable for translation."""
 
 TEXT = {
+    "cameras_title": "Your cameras",
+    "cameras_hint": "Choose which cameras protect your home. Use lowercase letters, numbers and underscores for names. Refreshing photos may take a few moments per camera.",
+    "refresh_photos": "Refresh photos",
+    "save_cameras": "Save cameras",
+    "camera_working": "Working on your cameras...",
+    "camera_ready": "Photos loaded. Make your changes, then save.",
+    "camera_saved": "Camera changes saved. The box is applying them.",
+    "camera_error": "We could not finish. Check your cameras and try again.",
+    "camera_empty": "No cameras are configured for this box yet.",
+    "camera_no_photo": "No picture available",
+    "camera_enabled": "Enabled",
+    "camera_name": "Camera name",
+    "camera_names_invalid": "Give every camera a different name using lowercase letters, numbers and underscores.",
+    "cameras_page": "Cameras",
+
     "overview": "Overview",
     "settings": "Settings",
     "settings_title": "How Home Guard protects your home",
@@ -16,7 +31,7 @@ TEXT = {
     "minutes_suffix": " minutes",
     "cooldown_hint": "From 10 seconds to 24 hours. Times are saved to the nearest second.",
     "save_settings": "Save settings",
-    "saved": "Saved.",
+    "settings_saved": "Saved.",
     "saved_stopped": "Saved. Choose Start Home Guard to use these settings.",
     "applying": "Applying settings - Home Guard is restarting...",
     "restarting": "Restarting",

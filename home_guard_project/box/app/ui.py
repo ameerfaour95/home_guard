@@ -44,7 +44,7 @@ QPushButton { background: #39c6e5; color: #111722; border: none; border-radius: 
 QPushButton#secondary { background: #263344; color: #edf1f7; }
 QPushButton:disabled { background: #263344; color: #8793a4; }
 QPushButton:hover { background: #77ddf2; }
-QLineEdit, QComboBox, QSpinBox { background: #151e2a; border: 1px solid #435063; border-radius: 7px; padding: 10px; min-height: 23px; }
+QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox { background: #151e2a; border: 1px solid #435063; border-radius: 7px; padding: 10px; min-height: 23px; }
 QLineEdit:focus { border: 1px solid #39c6e5; }
 QCheckBox { spacing: 12px; background: transparent; padding: 6px 0; }
 QCheckBox::indicator { width: 21px; height: 21px; border: 1px solid #526179; border-radius: 4px; background: #151e2a; }
@@ -216,6 +216,10 @@ class Window(QMainWindow):
         overview_button.setObjectName("secondary")
         overview_button.clicked.connect(lambda: self.content_stack.setCurrentIndex(0))
         control_row.addWidget(overview_button)
+        cameras_button = QPushButton(tr("cameras_page"))
+        cameras_button.setObjectName("secondary")
+        cameras_button.clicked.connect(self.open_cameras)
+        control_row.addWidget(cameras_button)
         settings_button = QPushButton(tr("settings"))
         settings_button.setObjectName("secondary")
         settings_button.clicked.connect(self.open_settings)
@@ -295,11 +299,18 @@ class Window(QMainWindow):
         self.timer.start(500)
         self.camera_stack.setCurrentIndex(1)
         self.current_state = None
+        from .camera_controls import CameraControls
+        self.camera_controls = CameraControls(self.box_controls, TEXT["demo_names"][:self.args.cameras] if self.args.state != "empty" else ())
         self.tick()
         self.details.setChecked(self.args.details)
         from .settings_ui import SettingsPage
         self.settings_page = SettingsPage(self.box_controls, self.settings_changed)
         self.content_stack.addWidget(self.settings_page.widget)
+        from .camera_ui import CameraPage
+        self.cameras_page = CameraPage(self.camera_controls, self.settings_changed)
+        self.content_stack.addWidget(self.cameras_page.widget)
+        if getattr(self.args, "panel", None) == "cameras":
+            self.open_cameras()
         if getattr(self.args, "panel", None) == "settings":
             self.open_settings()
 
@@ -326,7 +337,7 @@ class Window(QMainWindow):
     def tick(self):
         if self.args.demo:
             scenario = self.args.state
-            names = TEXT["demo_names"][: self.args.cameras]
+            names = [c.name for c in self.camera_controls.records if c.enabled]
             state = State(
                 tr("demo_house"),
                 scenario != "stopped",
@@ -468,6 +479,10 @@ class Window(QMainWindow):
             self.tiles = [CameraTile(name) for name in state.cameras]
             self.arrange_tiles()
 
+    def open_cameras(self):
+        self.content_stack.setCurrentIndex(2)
+        self.cameras_page.open()
+
     def open_settings(self):
         self.settings_page.reload()
         self.content_stack.setCurrentIndex(1)
@@ -546,6 +561,8 @@ class Window(QMainWindow):
         self.activity_layout.addStretch()
 
     def closeEvent(self, event):
+        if hasattr(self, "cameras_page"):
+            self.cameras_page.close()
         if hasattr(self, "pool"):
             self.timer.stop()
             self.pool.shutdown(wait=False, cancel_futures=True)

@@ -78,7 +78,7 @@ class SettingsPage:
             self.box.save_settings(settings)
             self.waiting = self.box.phase() == "restarting"
             self.save.setEnabled(not self.waiting)
-            self.note.setText(tr("applying") if self.waiting else tr("saved_stopped") if self.box.is_stopped() else tr("saved"))
+            self.note.setText(tr("applying") if self.waiting else tr("saved_stopped") if self.box.is_stopped() else tr("settings_saved"))
             self.changed()
         except Exception:
             self.note.setText(tr("control_error"))
