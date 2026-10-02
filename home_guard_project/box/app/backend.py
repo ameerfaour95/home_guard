@@ -16,7 +16,7 @@ class Answers:
     show_cameras: bool = False
     alerts: bool = False
     start_hour: int = 0
-    end_hour: int = 23
+    end_hour: int = 0
     find_cameras: bool = True
     camera_user: str = ""
     camera_password: str = field(default="", repr=False)

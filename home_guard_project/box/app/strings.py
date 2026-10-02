@@ -1,6 +1,17 @@
 """All visible application copy; keys remain stable for translation."""
 
 TEXT = {
+    "stopped_banner": "Home Guard is stopped. Your home is not being watched.",
+    "close_stopped": "Home Guard is stopped. Start it to watch your home again.",
+    "close_starting": "Home Guard is starting. Watching has not resumed yet.",
+    "all_day_choice": "All day",
+    "hours_from": "From",
+    "hours_to": "To",
+    "watching": "Watching",
+    "paused_until": "Alerts paused until {time}",
+    "paused_some": "Some camera alerts paused until {time}",
+    "resume_alerts": "Resume alerts",
+
     "cameras_title": "Your cameras",
     "cameras_hint": "Choose which cameras protect your home. Use lowercase letters, numbers and underscores for names. Refreshing photos may take a few moments per camera.",
     "refresh_photos": "Refresh photos",
@@ -26,7 +37,7 @@ TEXT = {
     "alert_until": "Alerts until (hour)",
     "all_day": "Alerts can arrive all day.",
     "hours_window": "Alerts from {start:02d}:00 until {end:02d}:00.",
-    "hours_overnight": "Alerts from {start:02d}:00 until {end:02d}:00 the next day.",
+    "hours_overnight": "Alerts from {start:02d}:00 tonight until {end:02d}:00 tomorrow.",
     "cooldown": "Minutes between alerts from the same camera",
     "minutes_suffix": " minutes",
     "cooldown_hint": "From 10 seconds to 24 hours. Times are saved to the nearest second.",

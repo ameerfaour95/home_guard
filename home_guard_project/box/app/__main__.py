@@ -27,7 +27,7 @@ def main():
             "empty",
             "error",
             "loading",
-            "inference",
+            "inference", "paused",
             "quiet",
         ),
         default="mixed",

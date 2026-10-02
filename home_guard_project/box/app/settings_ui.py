@@ -15,19 +15,10 @@ class SettingsPage:
         self.alerts = QCheckBox(tr("security_alerts"))
         layout.addWidget(self.alerts)
         layout.addWidget(label(tr("security_alerts_hint"), "muted"))
-        grid = QGridLayout()
-        self.start, self.end = QSpinBox(), QSpinBox()
-        for spin in (self.start, self.end):
-            spin.setRange(0, 23)
-            spin.setMaximumWidth(300)
-            spin.valueChanged.connect(self.hours_changed)
-        grid.addWidget(label(tr("alert_from")), 0, 0)
-        grid.addWidget(label(tr("alert_until")), 0, 1)
-        grid.addWidget(self.start, 1, 0)
-        grid.addWidget(self.end, 1, 1)
-        layout.addLayout(grid)
-        self.hours_note = label("", "accent")
-        layout.addWidget(self.hours_note)
+        from .alert_hours import AlertHours
+        self.hours = AlertHours()
+        self.start, self.end = self.hours.start, self.hours.end
+        layout.addWidget(self.hours)
         layout.addWidget(label(tr("cooldown")))
         self.cooldown = QDoubleSpinBox()
         self.cooldown.setDecimals(2)
@@ -57,8 +48,7 @@ class SettingsPage:
         try:
             settings = self.box.load_settings()
             self.alerts.setChecked(settings.mode == "inference")
-            self.start.setValue(settings.alert_start_hour)
-            self.end.setValue(settings.alert_end_hour)
+            self.hours.set_hours(settings.alert_start_hour, settings.alert_end_hour)
             self.cooldown.setValue(settings.alert_cooldown_sec/60)
             self.pictures.setChecked(settings.show_cameras)
             self.note.setText("")
@@ -73,7 +63,7 @@ class SettingsPage:
         self.hours_note.setText(tr("all_day") if start == end else tr("hours_overnight" if end < start else "hours_window", start=start, end=end))
 
     def save_clicked(self):
-        settings = Settings("inference" if self.alerts.isChecked() else "data_collection", self.start.value(), self.end.value(), minutes_to_seconds(self.cooldown.value()), self.pictures.isChecked())
+        settings = Settings("inference" if self.alerts.isChecked() else "data_collection", *self.hours.values(), minutes_to_seconds(self.cooldown.value()), self.pictures.isChecked())
         try:
             self.box.save_settings(settings)
             self.waiting = self.box.phase() == "restarting"

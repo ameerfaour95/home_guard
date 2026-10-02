@@ -126,6 +126,7 @@ class CameraTile(QFrame):
         self.setObjectName("card")
         self.name = name
         self.picture = None
+        self.stopped = False
         self.status = label(tr("offline"), "muted")
         self.caption = label(name.replace("_", " "))
         layout = QHBoxLayout(self)
@@ -139,7 +140,7 @@ class CameraTile(QFrame):
 
     def update_picture(self, pix):
         self.picture = pix if pix and not pix.isNull() else None
-        self.status.setText(tr("live") if self.picture else tr("offline"))
+        self.status.setText(tr("stopped") if self.stopped else tr("live") if self.picture else tr("offline"))
         self.status.setObjectName("accent" if self.picture else "muted")
         self.status.setStyleSheet("color: " + (ACCENT if self.picture else "#98a6ba"))
         self.update()
@@ -162,7 +163,7 @@ class CameraTile(QFrame):
         else:
             p.setPen(QColor("#98a6ba"))
             p.setFont(QFont("Segoe UI", 14))
-            p.drawText(area, Qt.AlignmentFlag.AlignCenter, tr("offline_hint"))
+            p.drawText(area, Qt.AlignmentFlag.AlignCenter, tr("stopped") if self.stopped else tr("offline_hint"))
         p.end()
 
 
@@ -196,9 +197,8 @@ class Window(QMainWindow):
         titles = QVBoxLayout()
         self.house_label = label(tr("setup") if args.setup else tr("home"), "title")
         titles.addWidget(self.house_label)
-        titles.addWidget(
-            label(tr("simulation") if args.setup else tr("close_hint"), "muted")
-        )
+        self.header_hint = label(tr("simulation") if args.setup else tr("close_hint"), "muted")
+        titles.addWidget(self.header_hint)
         header.addLayout(titles, 1)
         header.addStretch()
         if args.demo or args.setup:
@@ -229,6 +229,21 @@ class Window(QMainWindow):
         self.run_button.clicked.connect(self.toggle_running)
         control_row.addWidget(self.run_button)
         self.outer.addLayout(control_row)
+        self.stop_banner = QFrame()
+        self.stop_banner.setStyleSheet("QFrame { background: #493b20; border-radius: 8px; } QLabel { color: #ffd27d; }")
+        banner_layout = QHBoxLayout(self.stop_banner)
+        banner_layout.setContentsMargins(18,12,18,12)
+        banner_layout.addWidget(label(tr("stopped_banner")),1)
+        banner_start = QPushButton(tr("start_box"))
+        banner_start.clicked.connect(self.toggle_running)
+        banner_layout.addWidget(banner_start)
+        self.outer.addWidget(self.stop_banner)
+        self.stop_banner.hide()
+        from .alert_pause import AlertPause
+        self.alert_pause = AlertPause(demo=self.args.demo)
+        if self.args.demo and self.args.state == "paused":
+            self.box_controls._settings = __import__("dataclasses").replace(self.box_controls._settings,mode="inference")
+            self.alert_pause.demo_until = time.time()+3600
         self.content_stack = QStackedWidget()
         overview = QWidget()
         overview_layout = layout_for(overview, 0)
@@ -246,6 +261,15 @@ class Window(QMainWindow):
             stats.addWidget(panel)
             self.stats.append((value, hint))
         overview_layout.addLayout(stats)
+        pause_row = QHBoxLayout()
+        self.pause_label = label("", "warning")
+        self.resume_button = QPushButton(tr("resume_alerts"))
+        self.resume_button.clicked.connect(self.resume_alerts)
+        pause_row.addWidget(self.pause_label,1)
+        pause_row.addWidget(self.resume_button)
+        overview_layout.addLayout(pause_row)
+        self.pause_label.hide()
+        self.resume_button.hide()
         body = QHBoxLayout()
         left = QWidget()
         leftlay = layout_for(left, 0)
@@ -319,13 +343,9 @@ class Window(QMainWindow):
 
         settings = bc.load_box_settings()
         events, upload = self.activity_feed.read()
-        payload = build_heartbeat(
-            str(settings.get("site", "")),
-            bc.PRODUCTION_LIVE_DIR if settings.get("mode") == "inference" else bc.LIVE_DIR,
-            bc.PRODUCTION_ARCHIVE_DIR if settings.get("mode") == "inference" else bc.OUTBOX_DIR,
-            bc.ALIVE_FILE,
-            mode=bc.get_option("mode"),
-        )
+        from ..__main__ import _clip_dirs
+        mode = bc.get_option("mode")
+        payload = build_heartbeat(str(settings.get("site", "")), *_clip_dirs(mode), bc.ALIVE_FILE, mode=mode)
         # Read only names, never retain or display camera URLs.
         names = self.reader.names() or list(payload.get("cameras", {}))
         return (
@@ -394,7 +414,7 @@ class Window(QMainWindow):
             allowed = False
         if self.current_state is not None and allowed != self.current_show:
             self.apply_state(self.current_state, allowed, self.events)
-        if allowed:
+        if allowed and not self.box_controls.is_stopped():
             try:
                 self.reader.touch()
                 for tile in self.tiles:
@@ -416,6 +436,9 @@ class Window(QMainWindow):
             self.start_requested = False
         if state.collecting:
             self.start_requested = False
+        self.stop_banner.setVisible(stopped)
+        self.run_button.setVisible(not stopped)
+        self.header_hint.setText(tr("close_stopped") if stopped else tr("close_hint") if state.collecting else tr("close_starting"))
         self.run_button.setText(tr("start_box") if stopped else tr("stop_box"))
         self.run_button.setEnabled(not self.start_requested)
         self.control_note.setText(tr("stopped_hint") if stopped else tr("applying") if phase == "restarting" else tr("start_pending") if self.start_requested else "")
@@ -425,16 +448,21 @@ class Window(QMainWindow):
             self.render_activity()
         self.house_label.setText(state.site or tr("home"))
         values = [
-            tr("restarting") if phase == "restarting" else tr("collecting") if state.collecting else tr("stopped"),
+            tr("restarting") if phase == "restarting" else tr("watching" if state.mode == "inference" else "collecting") if state.collecting else tr("stopped"),
             state.upload or tr("never"),
             str(state.waiting),
             tr("gb", value=state.disk),
         ]
         for (value, hint), text in zip(self.stats, values):
             value.setText(tr("unknown") if state.error else text)
-        self.stats[0][1].setText(
-            tr("inference") if state.mode == "inference" else tr("collection")
-        )
+        from .alert_hours import hours_description
+        settings = self.box_controls.load_settings()
+        until, some = self.alert_pause.status(state.cameras) if state.mode == "inference" else (None,False)
+        paused = tr("paused_some" if some else "paused_until", time=time.strftime("%H:%M",time.localtime(until))) if until else ""
+        self.pause_label.setText(paused)
+        self.pause_label.setVisible(bool(paused) and not stopped)
+        self.resume_button.setVisible(bool(paused) and not stopped)
+        self.stats[0][1].setText(paused or hours_description(settings.alert_start_hour,settings.alert_end_hour) if state.mode == "inference" else tr("collection"))
         self.camera_heading.setText(
             tr("cameras")
             + tr("separator")
@@ -445,7 +473,7 @@ class Window(QMainWindow):
             for value, _ in self.stats:
                 value.setText(tr("loading"))
         message = (
-            "stopped_title" if stopped else "applying" if phase == "restarting" else
+            "applying" if phase == "restarting" else
             "loading"
             if scenario == "loading"
             else (
@@ -478,6 +506,17 @@ class Window(QMainWindow):
                 self.grid.takeAt(0).widget().deleteLater()
             self.tiles = [CameraTile(name) for name in state.cameras]
             self.arrange_tiles()
+        for tile in self.tiles:
+            tile.stopped = stopped
+            if stopped: tile.update_picture(None)
+
+    def resume_alerts(self):
+        try:
+            self.alert_pause.resume()
+            self.tick()
+            if self.current_state: self.apply_state(self.current_state,self.current_show,self.events)
+        except Exception:
+            self.control_note.setText(tr("control_error"))
 
     def open_cameras(self):
         self.content_stack.setCurrentIndex(2)
@@ -608,21 +647,12 @@ class Window(QMainWindow):
         self.alerts = QCheckBox(tr("alerts"))
         self.page_layouts[2].addWidget(self.show_pictures)
         self.page_layouts[2].addWidget(self.alerts)
-        hours = QHBoxLayout()
-        hours.addWidget(label(tr("hours")))
-        self.hour_start, self.hour_end = QSpinBox(), QSpinBox()
-        for spin in (self.hour_start, self.hour_end):
-            spin.setRange(0, 23)
-            hours.addWidget(spin)
-        self.hour_end.setValue(23)
-        self.page_layouts[2].addLayout(hours)
-        self.alerts.toggled.connect(
-            lambda enabled: [
-                w.setEnabled(enabled) for w in (self.hour_start, self.hour_end)
-            ]
-        )
-        self.hour_start.setEnabled(False)
-        self.hour_end.setEnabled(False)
+        from .alert_hours import AlertHours
+        self.wizard_hours = AlertHours()
+        self.hour_start, self.hour_end = self.wizard_hours.start, self.wizard_hours.end
+        self.page_layouts[2].addWidget(self.wizard_hours)
+        self.alerts.toggled.connect(self.wizard_hours.setEnabled)
+        self.wizard_hours.setEnabled(False)
         self.find = QCheckBox(tr("find"))
         self.find.setChecked(True)
         self.page_layouts[3].addWidget(self.find)
@@ -804,8 +834,8 @@ class Window(QMainWindow):
             network="wifi" if self.network.currentIndex() else "ethernet",
             show_cameras=self.show_pictures.isChecked(),
             alerts=self.alerts.isChecked(),
-            start_hour=self.hour_start.value(),
-            end_hour=self.hour_end.value(),
+            start_hour=self.wizard_hours.values()[0],
+            end_hour=self.wizard_hours.values()[1],
             find_cameras=self.find.isChecked(),
         )
         self.sequence = Sequence(SimulatedBackend(self.fail.isChecked()), answers)
