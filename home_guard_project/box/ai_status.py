@@ -28,21 +28,24 @@ from typing import Any, Dict, List, Optional
 
 KEEP_DECISIONS = 50
 
+# What the window is told about. The detector knows 80 kinds of things and names a "sink" or a
+# "potted plant" as readily as a person; only the kinds the house cares about are shown.
+SHOWN_LABELS = frozenset({"person", "bicycle", "car", "motorcycle", "bus", "truck", "bird", "cat", "dog"})
 
-def objects_from_result(result: Any) -> List[Dict[str, Any]]:
-    """The objects in one ultralytics result: label, confidence, and box as fractions of the picture."""
+
+def objects_from_result(result: Any, shown: frozenset = SHOWN_LABELS) -> List[Dict[str, Any]]:
+    """The objects of interest in one ultralytics result: label, confidence, and box as fractions of the picture."""
     boxes = getattr(result, "boxes", None)
     if boxes is None or len(boxes) == 0:
         return []
     names = getattr(result, "names", {})
     objects = []
     for box in boxes:
+        label = names.get(int(box.cls[0]), str(int(box.cls[0])))
+        if label not in shown:
+            continue
         x1, y1, x2, y2 = (round(float(v), 4) for v in box.xyxyn[0])
-        objects.append({
-            "label": names.get(int(box.cls[0]), str(int(box.cls[0]))),
-            "conf": round(float(box.conf[0]), 2),
-            "box": [x1, y1, x2, y2],
-        })
+        objects.append({"label": label, "conf": round(float(box.conf[0]), 2), "box": [x1, y1, x2, y2]})
     return objects
 
 
