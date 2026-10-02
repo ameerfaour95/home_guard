@@ -111,17 +111,25 @@ def set_site(site: str, path: str = BOX_YAML) -> None:
 BOOLEAN_OPTIONS = ("show_cameras", "notify_dry_run")
 # Whole numbers, each with the smallest and largest value it may take.
 NUMBER_OPTIONS = {"alert_start_hour": (0, 23), "alert_end_hour": (0, 23), "alert_cooldown_sec": (10, 86400)}
+# Decimal numbers, each with its range.
+#   inference_conf:    how sure the detector must be before a person or vehicle counts
+#                      (0.05 reacts to almost anything, 0.95 only to what it is certain of).
+DECIMAL_OPTIONS = {"inference_conf": (0.05, 0.95)}
 CHOICE_OPTIONS = {"mode": MODES, "alert_channel": ("telegram", "twilio", "both")}
 CHAT_IDS_OPTION = "telegram_chat_ids"
-OPTIONS = BOOLEAN_OPTIONS + tuple(NUMBER_OPTIONS) + tuple(CHOICE_OPTIONS) + (CHAT_IDS_OPTION,)
+OPTIONS = (BOOLEAN_OPTIONS + tuple(NUMBER_OPTIONS) + tuple(DECIMAL_OPTIONS) + tuple(CHOICE_OPTIONS)
+           + (CHAT_IDS_OPTION,))
+# Options the running program re-reads while it runs (inference.LiveSettings): a change applies
+# within seconds, without a restart.
+LIVE_OPTIONS = ("alert_start_hour", "alert_end_hour", "alert_cooldown_sec", "inference_conf")
 # Options the running program reads only when it starts. show_cameras is read by the screen, not by it.
-RESTART_OPTIONS = tuple(key for key in OPTIONS if key != "show_cameras")
+RESTART_OPTIONS = tuple(key for key in OPTIONS if key != "show_cameras" and key not in LIVE_OPTIONS)
 
 _TRUE = ("true", "yes", "y", "1", "on")
 _FALSE = ("false", "no", "n", "0", "off")
 _CHAT_IDS_RE = re.compile(r"^-?\d+(,-?\d+)*$")
 
-OptionValue = Union[bool, int, str]
+OptionValue = Union[bool, int, float, str]
 
 
 def _check_option(key: str) -> None:
@@ -147,6 +155,17 @@ def set_option(key: str, value: str, path: str = BOX_YAML) -> OptionValue:
             raise BoxConfigError(f"{key} must be a whole number from {low} to {high} (got {value!r})")
         _set_line(key, str(int(text)), path)
         return int(text)
+
+    if key in DECIMAL_OPTIONS:
+        low, high = DECIMAL_OPTIONS[key]
+        try:
+            number = round(float(text), 3)
+        except ValueError:
+            number = None
+        if number is None or not low <= number <= high:
+            raise BoxConfigError(f"{key} must be a number from {low} to {high} (got {value!r})")
+        _set_line(key, repr(number), path)
+        return number
 
     if key in CHOICE_OPTIONS:
         if text not in CHOICE_OPTIONS[key]:

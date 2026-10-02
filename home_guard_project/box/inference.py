@@ -136,6 +136,11 @@ class AlertSettings:
     alert_channel: str = "telegram"  # telegram | twilio | both
     dry_run: bool = False
 
+    def live_values(self) -> Dict[str, Any]:
+        """The values the window shows and the owner can change while the program runs."""
+        return {"conf": self.conf, "alert_start_hour": self.alert_start_hour,
+                "alert_end_hour": self.alert_end_hour, "cooldown_sec": self.cooldown_sec}
+
     @classmethod
     def from_box_settings(cls, s: Dict[str, Any]) -> "AlertSettings":
         g = s.get
@@ -384,6 +389,67 @@ def should_escalate(person: bool, vehicle: bool, vehicles_moved: bool) -> bool:
 # Runtime
 # ----------------------------------------------------------------------------
 STATUS_LOOK_SEC = 1.0   # how often the detector looks at a camera that cannot alert right now
+LIVE_SETTINGS_POLL_SEC = 2.0   # how often box.yaml is checked for a change made while running
+
+
+def apply_live_settings(settings: AlertSettings, box_settings: Dict[str, Any]) -> List[str]:
+    """Take over the values the program re-reads while running. Returns the names that changed."""
+    fresh = AlertSettings.from_box_settings(box_settings)
+    changed = []
+    for name in ("alert_start_hour", "alert_end_hour", "cooldown_sec", "conf"):
+        if getattr(settings, name) != getattr(fresh, name):
+            # The settings object is frozen and shared with the worker threads: the same
+            # instance must carry the new value, so the one write goes around the freeze.
+            object.__setattr__(settings, name, getattr(fresh, name))
+            changed.append(name)
+    return changed
+
+
+class LiveSettings:
+    """Re-reads box.yaml while the program runs, so the owner's changes apply without a restart.
+
+    The alert hours, the cooldown and the detector's threshold (boxconfig.LIVE_OPTIONS)
+    are taken over within a couple of seconds of the file changing; everything
+    else still needs a restart.
+    """
+
+    def __init__(self, settings: AlertSettings, path: Optional[str] = None,
+                 poll_sec: float = LIVE_SETTINGS_POLL_SEC, now: float = 0.0) -> None:
+        from .boxconfig import BOX_YAML  # noqa: PLC0415
+
+        self.settings = settings
+        self.path = path or BOX_YAML
+        self.poll_sec = poll_sec
+        self._mtime = self._stat()
+        self._checked = now
+
+    def _stat(self) -> Optional[float]:
+        try:
+            return os.stat(self.path).st_mtime
+        except OSError:
+            return None
+
+    def check(self, now: float) -> List[str]:
+        """Apply a change if the file changed since the last look. Returns the names that changed."""
+        if now - self._checked < self.poll_sec:
+            return []
+        self._checked = now
+        mtime = self._stat()
+        if mtime == self._mtime:
+            return []
+        self._mtime = mtime
+        try:
+            from .boxconfig import load_box_settings  # noqa: PLC0415
+
+            box_settings = load_box_settings(self.path)
+        except Exception as exc:  # noqa: BLE001 - a half-written file: keep the current values
+            log.warning("Settings file not readable (%s); keeping the current values.", exc)
+            return []
+        changed = apply_live_settings(self.settings, box_settings)
+        if changed:
+            log.info("Settings changed while running: %s",
+                     ", ".join(f"{name}={getattr(self.settings, name)}" for name in changed))
+        return changed
 
 
 class _Stream:
@@ -629,6 +695,8 @@ def run() -> int:
     vehicles: Dict[str, VehicleMemory] = {name: VehicleMemory() for name in cameras}
     parked: Dict[str, bool] = {name: False for name in cameras}  # "have not moved" already logged
     status = AiStatus(os.path.join(LOG_DIR, "ai_status.json"))  # what the box's window shows
+    live = LiveSettings(settings, now=time.time())
+    status.settings(settings.live_values())
     worker = {"t": None}  # single in-flight VLM call across cameras (N150 budget)
     pending: List[AlertJob] = []
     assistant = None
@@ -642,6 +710,8 @@ def run() -> int:
     log.info("Watching %d camera(s): %s", len(cameras), ", ".join(cameras))
     while True:
         now_ts = time.time()
+        if live.check(now_ts):
+            status.settings(settings.live_values())
         for job in [j for j in pending if now_ts >= j.ts + POST_SECONDS]:
             pending.remove(job)
             clip = rings[job.camera].between(job.ts - PRE_SECONDS, job.ts + POST_SECONDS)

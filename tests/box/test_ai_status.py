@@ -78,6 +78,13 @@ class AiStatusTest(unittest.TestCase):
         status.decision("door", ["person"], "A person at the door.", "[send_message]", sent=True, now=NOW + 3)
         self.assertIsNone(read_status(self.path)["thinking"])
 
+    def test_the_values_in_force_are_written_at_once(self) -> None:
+        status = AiStatus(self.path, min_interval=60)
+        status.settings({"conf": 0.4, "cooldown_sec": 120.0}, now=NOW)
+        self.assertEqual(read_status(self.path)["settings"], {"conf": 0.4, "cooldown_sec": 120.0})
+        status.settings({"conf": 0.25, "cooldown_sec": 120.0}, now=NOW + 1)
+        self.assertEqual(read_status(self.path)["settings"]["conf"], 0.25)
+
     def test_a_missing_or_damaged_file_reads_as_empty(self) -> None:
         self.assertEqual(read_status(self.path), {})
         os.makedirs(os.path.dirname(self.path))
