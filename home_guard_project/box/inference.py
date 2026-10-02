@@ -180,7 +180,18 @@ class GptBackend:
     def __init__(self, api_key: str, model: str = "gpt-4o") -> None:
         from openai import OpenAI  # noqa: PLC0415
 
-        self._client = OpenAI(api_key=api_key)
+        # Use the OS trust store so the call still works where TLS is
+        # intercepted (a laptop antivirus, a corporate/home MITM proxy); the
+        # default certifi bundle would not trust those roots.
+        http_client = None
+        try:
+            import ssl  # noqa: PLC0415
+            import httpx  # noqa: PLC0415
+
+            http_client = httpx.Client(verify=ssl.create_default_context())
+        except Exception:  # noqa: BLE001
+            http_client = None
+        self._client = OpenAI(api_key=api_key, http_client=http_client) if http_client else OpenAI(api_key=api_key)
         self._model = model
 
     def analyze(self, frames_bgr: List[Any], camera_name: str, t_sec: int,
