@@ -1306,7 +1306,7 @@ class Window(QMainWindow):
             self.engine_backend.run(self.run_answers,events.append,instant=True)
             for event in events:
                 self.engine_events.put(event)
-                if self.args.page=="progress" and event.kind=="step" and event.step=="update" and event.status=="start": break
+                if self.args.page=="progress" and event.kind=="detail" and event.step=="update": break
             self.present_engine_events()
             if self.args.page!="progress": self.finish_engine(not self.engine_failed_step)
             return
@@ -1424,6 +1424,7 @@ class Window(QMainWindow):
             if self.engine_backend.cancelled.is_set(): self.validation.setText(tr("setup_cancelled"))
             self.next.setText(tr("retry"));self.next.hide()
             self.next.clicked.disconnect();self.next.clicked.connect(self.retry_setup)
+            self.setup_workspace.refresh()
             return
         for i,event in enumerate(self.engine_checks):
             if i>=len(self.check_labels):

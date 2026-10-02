@@ -398,5 +398,9 @@ TEXT.update(ready_for_cameras="Ready for your cameras", finishing_without_camera
 
 TEXT.update(details_steps="Setup steps", hide_details="Hide details", details_working_time="Working · {seconds} s", details_finished="Finished", details_finished_warning="Finished", details_failed="Failed", details_skipped="Skipped")
 
+TEXT.update(follow_progress="Follow progress", details_running_hint="Setup is working on this step.", details_not_started="This step has not started.", details_working="Working…", details_copied="Copied")
+
+TEXT.update(demo_setup_connect="Checking the connection to the box.", demo_setup_update="Updating the box software.", demo_setup_site="Saving your house name and preferences.", demo_setup_network="Preparing the home network.", demo_setup_cameras="Searching for cameras on the home network.", demo_setup_alerts="Saving your alert hours.", demo_setup_readiness="Checking that Home Guard is ready.")
+
 def tr(key, **values):
     return TEXT[key].format(**values)

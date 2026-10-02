@@ -40,6 +40,7 @@ class SetupWorkspace(QScrollArea):
     def __init__(self,details):
         super().__init__();self.details=details;self.fallback=None;self.setWidgetResizable(True)
         self.content=QWidget();self.setWidget(self.content)
+        self.content.setObjectName('setupWorkspaceContent')
         self.panes=QBoxLayout(QBoxLayout.Direction.LeftToRight,self.content);self.panes.setContentsMargins(0,0,0,0);self.panes.setSpacing(24)
         self.step_list=QWidget();self.step_list.setFixedWidth(360)
         layout=QVBoxLayout(self.step_list);layout.setContentsMargins(0,0,0,0);layout.setSpacing(2)
@@ -52,6 +53,7 @@ class SetupWorkspace(QScrollArea):
         self.step_list.setFixedHeight(398)
         self.panes.addWidget(self.step_list,0,Qt.AlignmentFlag.AlignTop)
         self.panes.addWidget(details,1);details.hide()
+        if hasattr(details,'selection_changed'): details.selection_changed.connect(self.refresh)
     def select(self,step):
         if hasattr(self.details,'select'): self.details.select(step)
         else: self.details.steps.setCurrentIndex(ENGINE_STEPS.index(step))
