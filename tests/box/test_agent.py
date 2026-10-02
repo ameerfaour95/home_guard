@@ -4,6 +4,7 @@ import datetime as dt
 import json
 import os
 import tempfile
+import types
 import unittest
 from typing import Any, List
 from unittest import mock
@@ -16,6 +17,7 @@ from home_guard_project.box.agent import (
     ModelMessage,
     OwnerAgent,
     ToolCall,
+    _OpenAIChat,
     _reply_language,
 )
 from home_guard_project.box.feedback import MuteState
@@ -32,15 +34,26 @@ class ScriptedModel:
         self._responses = list(responses)
         self._i = 0
 
-    def chat(self, messages: Any, tools: Any) -> ModelMessage:
+    def chat(self, messages: Any, tools: Any, tool_choice: Any = None) -> ModelMessage:
         msg = self._responses[self._i]
         self._i += 1
         return msg
 
 
 class BrokenModel(ScriptedModel):
-    def chat(self, messages: Any, tools: Any) -> ModelMessage:
+    def chat(self, messages: Any, tools: Any, tool_choice: Any = None) -> ModelMessage:
         raise ConnectionError("no internet")
+
+
+class DropsAfterModel(ScriptedModel):
+    """Plays its scripted responses, then raises - a model/network drop partway through a turn."""
+
+    def chat(self, messages: Any, tools: Any, tool_choice: Any = None) -> ModelMessage:
+        if self._i < len(self._responses):
+            msg = self._responses[self._i]
+            self._i += 1
+            return msg
+        raise ConnectionError("dropped mid-turn")
 
 
 class RecordingModel(ScriptedModel):
@@ -50,9 +63,9 @@ class RecordingModel(ScriptedModel):
         super().__init__(responses)
         self.seen: List[List[dict]] = []
 
-    def chat(self, messages: Any, tools: Any) -> ModelMessage:
+    def chat(self, messages: Any, tools: Any, tool_choice: Any = None) -> ModelMessage:
         self.seen.append(list(messages))
-        return super().chat(messages, tools)
+        return super().chat(messages, tools, tool_choice)
 
 
 def call(name: str, **args: Any) -> ModelMessage:
@@ -207,6 +220,98 @@ class OwnerAgentTest(unittest.TestCase):
         self.assertEqual(reply.text, UNAVAILABLE_REPLY)
         (saved,) = self._saved()
         self.assertEqual(saved["raw_text"], "no there was nothing")
+
+    def test_a_single_word_quote_does_not_authorize_a_pause(self) -> None:
+        agent = self._agent([call("pause_alerts", owner_words="nothing", minutes=60), say("ok")])
+        agent.handle("no there was nothing", "-1001", {}, ALERT)
+        self.assertFalse(self.mute.is_muted(NOW + 60, "front_door"))   # one word is not enough to pause
+
+    def test_pause_with_an_unknown_camera_is_refused_and_pauses_nothing(self) -> None:
+        agent = self._agent([call("pause_alerts", owner_words="quiet on garden", camera="garden", minutes=60),
+                             say("which camera?")])
+        agent.handle("be quiet on garden cam", "-1001", {}, ALERT)
+        self.assertFalse(self.mute.is_muted(NOW + 60, "front_door"))   # NOT silently widened to all cameras
+        self.assertFalse(self.mute.is_muted(NOW + 60, "back_yard"))
+
+    def test_find_with_an_unknown_camera_is_refused(self) -> None:
+        model = RecordingModel([call("find_alerts", camera="garden", what="car"), say("which camera?")])
+        OwnerAgent(model, self._ctx()).handle("the car on garden", "-1001", {}, None)
+        tool_msgs = [m for m in model.seen[1] if m.get("role") == "tool"]
+        self.assertIn("unknown camera", tool_msgs[0]["content"])
+
+    def test_a_mid_turn_failure_after_a_tool_acted_reports_what_happened(self) -> None:
+        agent = OwnerAgent(DropsAfterModel([call("pause_alerts", owner_words="stop until six", until="18:00")]),
+                           self._ctx())
+        reply = agent.handle("stop until six please", "-1001", {}, ALERT)
+        self.assertNotEqual(reply.text, UNAVAILABLE_REPLY)             # reports the pause, not "unavailable"
+        self.assertIn("paused", reply.text.lower())
+        self.assertTrue(self.mute.is_muted(NOW + HOUR, "front_door"))  # and the pause really applied
+
+    def test_handle_does_not_raise_when_saving_the_message_fails(self) -> None:
+        agent = self._agent([say("you're welcome")])
+        with mock.patch.object(agent, "_save", side_effect=OSError("disk full")):
+            reply = agent.handle("thanks", "-1001", {}, ALERT)        # must not raise into the caller
+        self.assertEqual(reply.text, "you're welcome")
+
+    def test_invalid_json_arguments_return_an_error_without_running_the_tool(self) -> None:
+        bad = ModelMessage(tool_calls=(ToolCall(id="c1", name="record_verdict", arguments={},
+                                                raw_arguments="{bad json", valid=False),))
+        model = RecordingModel([bad, say("could you rephrase?")])
+        OwnerAgent(model, self._ctx()).handle("mark it real", "-1001", {}, ALERT)
+        tool_msgs = [m for m in model.seen[1] if m.get("role") == "tool"]
+        self.assertIn("not valid JSON", tool_msgs[0]["content"])
+        (saved,) = self._saved()
+        self.assertEqual(saved["verdict"], "none")                    # the verdict tool never ran
+
+
+class OpenAIChatWrapperTest(unittest.TestCase):
+    """_OpenAIChat is the only part that talks to the SDK; the scripted-model tests bypass it."""
+
+    @staticmethod
+    def _tc(name: str, arguments: str) -> Any:
+        return types.SimpleNamespace(id="c1", type="function",
+                                     function=types.SimpleNamespace(name=name, arguments=arguments))
+
+    def _client(self, message: Any, finish_reason: str = "stop") -> Any:
+        captured: dict = {}
+
+        def create(**kwargs: Any) -> Any:
+            captured.update(kwargs)
+            return types.SimpleNamespace(choices=[types.SimpleNamespace(finish_reason=finish_reason, message=message)])
+
+        client = types.SimpleNamespace(
+            chat=types.SimpleNamespace(completions=types.SimpleNamespace(create=create)))
+        client._captured = captured
+        return client
+
+    def test_valid_tool_call_parses_with_raw_args(self) -> None:
+        msg = types.SimpleNamespace(content=None, tool_calls=[self._tc("record_verdict", '{"verdict":"false_alarm"}')])
+        out = _OpenAIChat(self._client(msg), "gpt-4o-mini").chat([], [{"type": "function"}])
+        call = out.tool_calls[0]
+        self.assertEqual((call.arguments, call.valid, call.raw_arguments),
+                         ({"verdict": "false_alarm"}, True, '{"verdict":"false_alarm"}'))
+
+    def test_invalid_json_is_flagged_not_run(self) -> None:
+        msg = types.SimpleNamespace(content=None, tool_calls=[self._tc("record_verdict", "{bad")])
+        call = _OpenAIChat(self._client(msg), "m").chat([], [{"x": 1}]).tool_calls[0]
+        self.assertFalse(call.valid)
+        self.assertEqual(call.raw_arguments, "{bad")
+
+    def test_truncated_response_marks_args_invalid(self) -> None:
+        msg = types.SimpleNamespace(content=None, tool_calls=[self._tc("find_alerts", '{"what":"c')])
+        call = _OpenAIChat(self._client(msg, finish_reason="length"), "m").chat([], [{"x": 1}]).tool_calls[0]
+        self.assertFalse(call.valid)
+
+    def test_tool_choice_is_passed_through(self) -> None:
+        client = self._client(types.SimpleNamespace(content="hi", tool_calls=[]))
+        _OpenAIChat(client, "m").chat([], [{"type": "function"}], tool_choice="none")
+        self.assertEqual(client._captured.get("tool_choice"), "none")
+
+    def test_no_tools_sends_no_tool_params(self) -> None:
+        client = self._client(types.SimpleNamespace(content="hi", tool_calls=[]))
+        _OpenAIChat(client, "m").chat([], [])
+        self.assertNotIn("tools", client._captured)
+        self.assertNotIn("tool_choice", client._captured)
 
 
 if __name__ == "__main__":

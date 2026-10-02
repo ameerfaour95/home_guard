@@ -118,6 +118,8 @@ class ToolCall:
     id: str
     name: str
     arguments: Dict[str, Any]
+    raw_arguments: str = ""        # the model's exact argument string, echoed back for history fidelity
+    valid: bool = True             # False when the arguments were not valid/complete JSON
 
 
 @dataclass(frozen=True)
@@ -139,6 +141,7 @@ class _Turn:
     found: Dict[str, AlertRecord] = field(default_factory=dict)
     clips: List[str] = field(default_factory=list)
     saved: int = 0
+    notes: List[str] = field(default_factory=list)   # confirmation lines from tools that acted this turn
 
 
 def load_tool_schemas(path: str = TOOLS_PATH) -> List[Dict[str, Any]]:
@@ -170,9 +173,17 @@ def _reply_language(text: str) -> str:
 
 
 def _quoted_from(quote: str, text: str) -> bool:
-    """True if *quote* is a real piece of *text* (ignoring case and spacing), not something made up."""
+    """True if *quote* is a real, substantial piece of *text* (ignoring case and spacing).
+
+    Requires at least two words, so a single short token the model could lift from almost any
+    message ("no", "the") cannot by itself authorise a pause. The intent check is the model's and
+    the prompt's job; this only proves the words came from the latest message.
+    """
     squeeze = lambda s: " ".join(str(s).casefold().split())  # noqa: E731
-    return len(squeeze(quote)) >= 3 and squeeze(quote) in squeeze(text)
+    q = squeeze(quote)
+    if len(q) < 3 or len(q.split()) < 2:
+        return False
+    return q in squeeze(text)
 
 
 class OwnerAgent:
@@ -217,12 +228,26 @@ class OwnerAgent:
         self._save(feedback)
         return {"ok": True, "message": confirmation_text(feedback)}
 
+    def _unknown_camera(self, requested: Any, resolved: Optional[str]) -> Optional[Dict[str, Any]]:
+        """An error dict when a camera was named but did not match one, else None.
+
+        Without this a mis-named camera resolves to None and silently widens to ALL cameras - a
+        pause would then leave the whole house unwatched. Make the model retry or ask instead.
+        """
+        if str(requested or "").strip() and resolved is None:
+            return {"ok": False, "error": f"unknown camera {str(requested).strip()!r}; "
+                                          f"the cameras are: {', '.join(self.ctx.camera_names) or 'none'}"}
+        return None
+
     def _pause_alerts(self, args: Dict[str, Any]) -> Dict[str, Any]:
         if not _quoted_from(str(args.get("owner_words") or ""), self._turn.text):
             return {"ok": False, "error": "Not paused: pause only when the owner asked for it in this message, "
                                           "and owner_words must be copied from that message."}
         feedback = self._checked({"action": "mute", "mute_until": args.get("until"),
                                   "mute_minutes": args.get("minutes"), "camera": args.get("camera")})
+        bad = self._unknown_camera(args.get("camera"), feedback.camera)
+        if bad:
+            return bad
         self.ctx.mute_state.apply(feedback, self.ctx.now())
         self._save(feedback)
         return {"ok": True, "message": confirmation_text(feedback)}
@@ -239,6 +264,9 @@ class OwnerAgent:
             "last_hours": args.get("last_hours"), "latest": bool(args.get("latest")),
             "camera": args.get("camera"), "what": args.get("what", ""), "want": args.get("want", "video"),
         }})
+        bad = self._unknown_camera(args.get("camera"), feedback.query.camera)
+        if bad:
+            return bad
         records = search(load_records(self.ctx.roots()), feedback.query, limit=MAX_FOUND, embedder=self._embedder)
         self._turn.found.update({r.alert_id: r for r in records})
         log.info("find_alerts(day=%s from=%s to=%s last_hours=%s latest=%s camera=%s what=%r) -> %d",
@@ -256,6 +284,9 @@ class OwnerAgent:
             "day": args.get("day"), "last_hours": args.get("last_hours"),
             "camera": args.get("camera"), "what": "", "latest": False,
         }})
+        bad = self._unknown_camera(args.get("camera"), feedback.query.camera)
+        if bad:
+            return bad
         records = window(load_records(self.ctx.roots()), feedback.query)
         by_camera: Dict[str, int] = {}
         for r in records:
@@ -300,6 +331,10 @@ class OwnerAgent:
                 f"The alert this message answers: {alert}. Answer in: {_reply_language(turn.text)}.]")
 
     def _dispatch(self, call: ToolCall) -> Dict[str, Any]:
+        if not call.valid:
+            # Arguments did not parse (bad or truncated JSON): don't run the tool on empty args,
+            # make the model resend them.
+            return {"ok": False, "error": "the tool arguments were not valid JSON; resend the call with valid JSON"}
         handler = self._handlers.get(call.name)
         if handler is None:
             return {"ok": False, "error": f"unknown tool {call.name}"}
@@ -318,14 +353,21 @@ class OwnerAgent:
             messages.append({
                 "role": "assistant",
                 "content": msg.content or None,
+                # Echo the model's exact argument string (not a re-serialisation), so the history
+                # stays faithful even when the model emitted odd JSON.
                 "tool_calls": [{"id": c.id, "type": "function",
-                                "function": {"name": c.name, "arguments": json.dumps(c.arguments)}}
+                                "function": {"name": c.name, "arguments": c.raw_arguments or json.dumps(c.arguments)}}
                                for c in msg.tool_calls],
             })
             for call in msg.tool_calls:
+                result = self._dispatch(call)
+                if isinstance(result, dict) and result.get("message"):
+                    self._turn.notes.append(str(result["message"]))   # so a mid-turn failure can still report it
                 messages.append({"role": "tool", "tool_call_id": call.id,
-                                 "content": json.dumps(self._dispatch(call))})
-        final = self._model.chat(messages, [])        # out of rounds: one plain answer, no more tools
+                                 "content": json.dumps(result, default=str)})
+        # Out of rounds: force a plain answer. Send the tools with tool_choice="none" (the documented
+        # way) rather than dropping the tools param while the history still holds tool-call messages.
+        final = self._model.chat(messages, self._tools, tool_choice="none")
         return (final.content or "").strip() or "Noted."
 
     def handle(self, text: str, chat_id: Any, who: Optional[Dict[str, Any]] = None,
@@ -344,9 +386,17 @@ class OwnerAgent:
                 self._conversations.append(turn.chat_id, text, reply)
             except Exception as exc:  # noqa: BLE001 - no network, a model error: the owner still gets an answer
                 log.warning("Agent could not handle a message: %s", exc)
-            if not turn.saved:
-                # Nothing was filed by a tool: keep the owner's words anyway.
-                self._save(Feedback())
+                # A tool may already have acted (pause applied+saved, verdict saved, clip queued) before
+                # the failure. Report what actually happened rather than a bare "unavailable"; UNAVAILABLE
+                # (with no clips) stands only when nothing was done.
+                if turn.notes:
+                    reply = " ".join(turn.notes)
+            try:
+                if not turn.saved:
+                    # Nothing was filed by a tool: keep the owner's words anyway.
+                    self._save(Feedback())
+            except Exception as exc:  # noqa: BLE001 - a disk/IO error here must not raise into the poll loop
+                log.warning("Could not save the owner's message: %s", exc)
             clips = tuple(turn.clips)
             self._turn = None
             return AgentReply(text=reply, clips=clips)
@@ -363,21 +413,28 @@ class _OpenAIChat:
         self._client = client
         self._model = model_name
 
-    def chat(self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]]) -> ModelMessage:
+    def chat(self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]],
+             tool_choice: Optional[str] = None) -> ModelMessage:
         kwargs: Dict[str, Any] = {"model": self._model, "messages": messages, "temperature": 0}
         if tools:
             kwargs["tools"] = tools
-            kwargs["tool_choice"] = "auto"
+            kwargs["tool_choice"] = tool_choice or "auto"   # "none" forces a plain answer with the tools still declared
         resp = self._client.chat.completions.create(**kwargs)
-        msg = resp.choices[0].message
+        choice = resp.choices[0]
+        truncated = (getattr(choice, "finish_reason", None) == "length")   # cut-off tool args can't be trusted
+        msg = choice.message
         calls: List[ToolCall] = []
         for tc in (getattr(msg, "tool_calls", None) or []):
+            raw = tc.function.arguments or ""
+            valid = not truncated
             try:
-                args = json.loads(tc.function.arguments or "{}")
+                args = json.loads(raw) if raw else {}
             except (ValueError, TypeError):
-                args = {}
-            calls.append(ToolCall(id=tc.id, name=tc.function.name,
-                                  arguments=args if isinstance(args, dict) else {}))
+                args, valid = {}, False
+            if not isinstance(args, dict):
+                args, valid = {}, False
+            calls.append(ToolCall(id=tc.id, name=tc.function.name, arguments=args,
+                                  raw_arguments=raw, valid=valid))
         return ModelMessage(content=msg.content, tool_calls=tuple(calls))
 
 
@@ -394,5 +451,7 @@ def make_chat_model(env: Dict[str, str], model_name: str = "gpt-4o-mini") -> Any
     import httpx  # noqa: PLC0415
     from openai import OpenAI  # noqa: PLC0415
 
+    # temperature=0 is fine for gpt-4o-mini (the default). Reasoning models (o-series / gpt-5 family)
+    # reject a non-default temperature, so a different model_name may need that dropped in _OpenAIChat.chat.
     client = OpenAI(api_key=key, http_client=httpx.Client(verify=ssl.create_default_context()))
     return _OpenAIChat(client, model_name)
