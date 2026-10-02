@@ -21,7 +21,7 @@ def toast(window,text):
 
 from PySide6.QtCore import Qt, QObject, QEvent, QVariantAnimation, QRectF, QSize
 from PySide6.QtGui import QPainter, QColor, QPen, QIcon, QPixmap
-from PySide6.QtWidgets import QWidget, QStackedWidget, QAbstractButton, QAbstractScrollArea, QAbstractItemView, QCheckBox, QComboBox, QSlider, QApplication, QGraphicsOpacityEffect
+from PySide6.QtWidgets import QWidget, QStackedWidget, QAbstractButton, QAbstractScrollArea, QAbstractItemView, QCheckBox, QComboBox, QSlider, QApplication
 from .theme import ACTION
 
 class Transition(QWidget):
@@ -65,6 +65,21 @@ def reveal(widget,opened):
     rect=widget.geometry()
     widget.setVisible(opened)
     widget._reveal=Transition(parent,before,after,rect)
+
+class DecisionChip(QLabel):
+    """Paint the fade directly: nested graphics effects erase chips on Windows."""
+    def __init__(self,text,color):
+        super().__init__(text);self.setObjectName('decisionChip');self.color=QColor(color);self.alpha=0.
+        self.setContentsMargins(8,4,8,4)
+        self.fade=QVariantAnimation(self);self.fade.setDuration(TOGGLE_MS);self.fade.setEasingCurve(EASING);self.fade.setStartValue(0.);self.fade.setEndValue(1.)
+        self.fade.valueChanged.connect(self.advance)
+    def showEvent(self,event):
+        super().showEvent(event);self.fade.start()
+    def advance(self,value): self.alpha=float(value);self.update()
+    def paintEvent(self,event):
+        painter=QPainter(self);painter.setRenderHint(QPainter.RenderHint.Antialiasing);painter.setOpacity(self.alpha)
+        painter.setPen(Qt.PenStyle.NoPen);painter.setBrush(QColor('#202c36'));painter.drawRoundedRect(QRectF(self.rect()),6,6)
+        painter.setPen(self.color);painter.drawText(self.contentsRect(),Qt.AlignmentFlag.AlignCenter,self.text())
 
 class Switch(QCheckBox):
     def __init__(self,text='',parent=None):
@@ -137,9 +152,6 @@ class MotionSystem(QObject):
             elif kind==QEvent.Type.FocusOut:
                 obj.setProperty('keyboardFocus',False)
                 if overlay: overlay.update()
-        if kind==QEvent.Type.Show and isinstance(obj,QLabel) and obj.objectName()=='decisionChip' and not hasattr(obj,'_fade'):
-            effect=QGraphicsOpacityEffect(obj);obj.setGraphicsEffect(effect)
-            obj._fade=QPropertyAnimation(effect,b'opacity',obj);obj._fade.setDuration(TOGGLE_MS);obj._fade.setEasingCurve(EASING);obj._fade.setStartValue(0.);obj._fade.setEndValue(1.);obj._fade.start()
         if kind==QEvent.Type.Show and isinstance(obj,QAbstractItemView): obj.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         if kind==QEvent.Type.Wheel and isinstance(obj,QWidget) and isinstance(obj.parentWidget(),QAbstractScrollArea):
             area=obj.parentWidget();bar=area.verticalScrollBar()

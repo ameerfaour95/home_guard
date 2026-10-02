@@ -85,6 +85,10 @@ class MotionTests(unittest.TestCase):
         self.assertEqual((HOVER_MS,TOGGLE_MS,PANE_MS),(120,180,240))
         self.assertEqual(EASING,QEasingCurve.Type.OutCubic)
         w=Window(args());w.show();QTest.qWait(260)
+        from home_guard_project.box.app.motion import DecisionChip
+        chips=w.ai_panel.findChildren(DecisionChip)
+        self.assertEqual({c.text() for c in chips},{'Suspicious','Escalation'})
+        self.assertTrue(all(c.alpha==1. and c.graphicsEffect() is None for c in chips))
         before=w.content_stack.geometry()
         w.open_settings();transition=w.content_stack.transition
         self.assertIsNotNone(transition)
