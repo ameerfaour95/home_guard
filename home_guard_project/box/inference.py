@@ -347,6 +347,15 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
 
 def run() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", stream=sys.stdout)
+    # Use the OS certificate store for all HTTPS (urllib + httpx), so Telegram
+    # and OpenAI work on networks that intercept TLS (an antivirus / proxy whose
+    # root is installed in the Windows store). Harmless where there is no proxy.
+    try:
+        import truststore  # noqa: PLC0415
+
+        truststore.inject_into_ssl()
+    except Exception:  # noqa: BLE001
+        pass
     try:
         from dotenv import load_dotenv  # noqa: PLC0415
         from .boxconfig import PROJECT_ROOT  # noqa: PLC0415
