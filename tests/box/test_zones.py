@@ -85,6 +85,25 @@ class ZoneFileTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.tmp.cleanup()
 
+    def test_a_corner_that_is_not_a_pair_does_not_crash_the_loader(self) -> None:
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write("zones:\n  yard: [{a: 1}, [0, 0], [1, 1]]\n  gate: [[0, 0], [1, 0], [1, 1]]\n")
+        self.assertEqual(z.load_zones(self.path), {"gate": [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)]})
+
+    def test_a_file_that_is_not_utf8_loads_as_no_zones(self) -> None:
+        with open(self.path, "wb") as f:
+            f.write(b"zones:\n  yard: \xff\xfe\n")
+        self.assertEqual(z.load_zones(self.path), {})
+
+    def test_a_malformed_sibling_entry_does_not_stop_saving_clearing_or_renaming(self) -> None:
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write("zones:\n  bad: 5\n  other: null\n  gate: [[0, 0], [1, 0], [1, 1]]\n")
+        z.save_zone("yard", LEFT_HALF, self.path)
+        self.assertEqual(set(z.load_zones(self.path)), {"gate", "yard"})
+        self.assertTrue(z.rename_zone("yard", "garden", self.path))
+        self.assertTrue(z.clear_zone("gate", self.path))
+        self.assertEqual(set(z.load_zones(self.path)), {"garden"})
+
     def test_missing_file_means_no_zones(self) -> None:
         self.assertEqual(z.load_zones(self.path), {})
 

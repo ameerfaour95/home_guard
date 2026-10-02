@@ -51,7 +51,7 @@ def validate_points(points: Any) -> List[Point]:
     for p in points:
         try:
             x, y = float(p[0]), float(p[1])
-        except (TypeError, ValueError, IndexError):
+        except (TypeError, ValueError, IndexError, KeyError):
             raise ValueError("every corner must be two numbers, x and y") from None
         if not (0.0 <= x <= 1.0 and 0.0 <= y <= 1.0):
             raise ValueError("every corner must lie inside the picture (0 to 1)")
@@ -80,7 +80,7 @@ def _read_raw(path: str) -> Dict[str, Any]:
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
-    except (OSError, yaml.YAMLError) as exc:
+    except (OSError, ValueError, yaml.YAMLError) as exc:
         log.warning("Could not read %s (%s); no zones", path, exc)
         return {}
     raw = data.get("zones", {}) if isinstance(data, dict) else {}
@@ -100,14 +100,27 @@ def load_zones(path: str = ZONES_PATH) -> Dict[str, List[Point]]:
 
 def save_zones(zones: Dict[str, Sequence[Sequence[float]]], path: str = ZONES_PATH) -> None:
     """Write the whole file (temp file + replace, so a reader never sees half a file)."""
-    data = {"zones": {str(k): [[float(x), float(y)] for x, y in v] for k, v in zones.items()}}
+    clean: Dict[str, List[List[float]]] = {}
+    for camera, pts in zones.items():
+        try:
+            clean[str(camera)] = [[x, y] for x, y in validate_points(pts)]
+        except ValueError as exc:
+            log.warning("Zone for %s dropped: %s", camera, exc)
+    data = {"zones": clean}
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write(_HEADER)
-        yaml.dump(data, f, default_flow_style=None, allow_unicode=True)
-    os.replace(tmp, path)
-    log.info("Wrote %d zone(s) to %s", len(zones), path)
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(_HEADER)
+            yaml.dump(data, f, default_flow_style=None, allow_unicode=True)
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+    log.info("Wrote %d zone(s) to %s", len(clean), path)
 
 
 def save_zone(camera: str, points: Any, path: str = ZONES_PATH) -> List[Point]:
