@@ -34,9 +34,12 @@
 | `home_guard_project/box/outbox.py` | move finished clips live → outbox |
 | `home_guard_project/box/heartbeat.py` | build and put status JSON |
 | `home_guard_project/box/__main__.py` | CLI: `upload`, `heartbeat`, `status` |
-| `home_guard_project/box/run_collector.sh` | headless restart loop + alive file |
+| `home_guard_project/box/_common.sh` | shared runner setup: project root, logs, venv Python |
+| `home_guard_project/box/run_collector.sh` | headless restart loop + alive file; kills a leftover collector on start |
 | `home_guard_project/box/run_upload.sh`, `run_heartbeat.sh` | scheduled-task wrappers with logging |
-| `home_guard_project/box/setup_box.ps1` | one-time Windows setup + scheduled tasks |
+| `home_guard_project/box/prepare_remote.sh` | laptop side: SSH key + `dist/enable_remote.ps1` with the key filled in |
+| `home_guard_project/box/enable_remote.ps1` | box side, run once by hand: OpenSSH server + authorize the laptop key |
+| `home_guard_project/box/setup_box.ps1` | one-time Windows setup + scheduled tasks (run locally or over SSH) |
 | `home_guard_project/box/make_bundle.py` | build `dist/home_guard_box.zip` |
 | `home_guard_project/box/README.md` | founder's step-by-step guide |
 | `tests/box/test_*.py` | unit tests |
@@ -98,7 +101,7 @@
 **Files:** create `home_guard_project/box/__main__.py`, `tests/box/test_cli.py`.
 
 **Interfaces — consumes:** `load_box_config`, `s3_prefix`, paths, `move_finished_clips`, `build_heartbeat`, `put_heartbeat`, `home_guard_project.s3_upload.config.load_config`, `home_guard_project.s3_upload.s3_upload.run`.
-**Produces:** `python -m home_guard_project.box {upload,heartbeat,status}`; `run_upload(cfg: BoxConfig, uploader=..., s3_bucket: str, workers: int) -> tuple[int, int]`.
+**Produces:** `python -m home_guard_project.box {upload,heartbeat,status}`; `run_upload(cfg: BoxConfig, live_dir: str, outbox_dir: str, bucket: str, workers: int, uploader: Callable[..., Any]) -> tuple[int, int]`.
 
 - `upload`: ensure outbox dir exists → `move_finished_clips(LIVE_DIR, OUTBOX_DIR, cfg.min_age_minutes * 60)` → if the outbox contains any file, call `run(dataset_dir=OUTBOX_DIR, bucket=..., prefix=s3_prefix(cfg.site), workers=..., skip_reencode=False, no_cleanup=True, allowed_labels=frozenset(), delete_local=True)` → put heartbeat.
 - `heartbeat`: build and put.
@@ -148,6 +151,13 @@ Include: `pyproject.toml`, `uv.lock`, `.python-version` if present, `yolo11s.pt`
 - [ ] Build the bundle; list its contents and size.
 - [ ] Write `README.md`: what the box does; first-boot checklist; copying and unpacking the bundle to `C:\home_guard`; running `setup_box.ps1`; AWS key with the exact IAM policy JSON; camera discovery over Remote Desktop with site-prefixed camera names; the bench test; moving the box; checking the heartbeat from the laptop; troubleshooting (logs, restarting tasks, changing YOLO cadence).
 - [ ] Commit.
+
+## Changes made during execution
+
+- Runners call the virtualenv's Python directly instead of `uv run`, so there is one process to stop; `uv sync` runs once at runner start.
+- OpenSSH setup moved out of `setup_box.ps1` into `enable_remote.ps1`, so the founder runs one small script by hand and the rest is done from the laptop over SSH (founder asked for remote setup).
+- PowerShell scripts are ASCII-only: Windows PowerShell 5.1 reads BOM-less files as ANSI and UTF-8 dashes broke string parsing.
+- `make_bundle.py` converts `.sh` files to LF inside the zip.
 
 ## Self-review
 
