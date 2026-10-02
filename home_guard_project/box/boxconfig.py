@@ -18,6 +18,14 @@ LOG_DIR = os.path.join(PROJECT_ROOT, "logs")
 ALIVE_FILE = os.path.join(LOG_DIR, "collector.alive")       # touched by run_collector.sh
 BOX_YAML = os.path.join(_DIR, "box.yaml")
 
+# Inference (production) mode saves its alert clips in folders of its own, in the
+# same layout. They are uploaded like the collector's clips, but to an S3 folder
+# that the bucket empties after PRODUCTION_RETENTION_DAYS (see retention.py).
+PRODUCTION_LIVE_DIR = os.path.join(PROJECT_ROOT, "production_multi")
+PRODUCTION_OUTBOX_DIR = os.path.join(PROJECT_ROOT, "production_outbox")
+PRODUCTION_PREFIX_ROOT = "production_"
+PRODUCTION_RETENTION_DAYS = 14
+
 _SITE_RE = re.compile(r"^[a-z0-9_]+$")
 
 # What the box runs. data_collection saves clips for tagging; inference sends alerts.
@@ -164,3 +172,8 @@ def get_option(key: str, path: str = BOX_YAML) -> Optional[OptionValue]:
 def s3_prefix(site: str) -> str:
     """Top-level S3 dataset prefix for a site, e.g. ``dataset_house2``."""
     return f"dataset_{site}"
+
+
+def production_prefix(site: str) -> str:
+    """Top-level S3 prefix for a site's production (inference mode) clips, e.g. ``production_house2``."""
+    return f"{PRODUCTION_PREFIX_ROOT}{site}"

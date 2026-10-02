@@ -66,3 +66,7 @@ home_guard_project/box/box.yaml
 home_guard_project/box/network.json
 dataset_outbox/
 dist/
+
+# Inference-mode clips waiting for S3 (box)
+production_multi/
+production_outbox/

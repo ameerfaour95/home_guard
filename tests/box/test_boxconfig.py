@@ -5,11 +5,14 @@ import tempfile
 import unittest
 
 from home_guard_project.box.boxconfig import (
+    PRODUCTION_PREFIX_ROOT,
+    PRODUCTION_RETENTION_DAYS,
     BoxConfig,
     BoxConfigError,
     get_option,
     load_box_config,
     load_box_settings,
+    production_prefix,
     s3_prefix,
     set_option,
     set_site,
@@ -50,6 +53,11 @@ class BoxConfigTest(unittest.TestCase):
 
     def test_s3_prefix(self) -> None:
         self.assertEqual(s3_prefix("house2"), "dataset_house2")
+
+    def test_production_prefix_is_a_separate_folder_that_expires(self) -> None:
+        self.assertEqual(production_prefix("house2"), "production_house2")
+        self.assertTrue(production_prefix("house2").startswith(PRODUCTION_PREFIX_ROOT))
+        self.assertEqual(PRODUCTION_RETENTION_DAYS, 14)
 
     def test_mode_defaults_to_data_collection(self) -> None:
         self._write("site: house2\n")

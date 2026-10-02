@@ -20,16 +20,20 @@ import json
 import logging
 import os
 import sys
-from typing import Any, Callable, Tuple
+from typing import Any, Callable, Sequence, Tuple
 
 from .boxconfig import (
     ALIVE_FILE,
     LIVE_DIR,
+    MODE_INFERENCE,
     OUTBOX_DIR,
+    PRODUCTION_LIVE_DIR,
+    PRODUCTION_OUTBOX_DIR,
     BoxConfig,
     BoxConfigError,
     get_option,
     load_box_config,
+    production_prefix,
     s3_prefix,
     set_option,
     set_site,
@@ -58,11 +62,13 @@ def run_upload(
     bucket: str,
     workers: int,
     uploader: Callable[..., Any],
+    prefix_for: Callable[[str], str] = s3_prefix,
 ) -> Tuple[int, int]:
     """Move finished clips to the outbox and upload it. Returns ``(clips_moved, files_moved)``.
 
-    The outbox has one folder per site, uploaded to that site's own S3 folder,
-    so clips saved before a box changed house still go where they belong.
+    The outbox has one folder per site, uploaded to that site's own S3 folder
+    (named by *prefix_for*), so clips saved before a box changed house still go
+    where they belong.
     """
     os.makedirs(outbox_dir, exist_ok=True)
     site_outbox = os.path.join(outbox_dir, cfg.site)
@@ -84,7 +90,7 @@ def run_upload(
         uploader(
             dataset_dir=site_dir,
             bucket=bucket,
-            prefix=s3_prefix(site),
+            prefix=prefix_for(site),
             workers=workers,
             skip_reencode=False,
             no_cleanup=True,
@@ -96,17 +102,29 @@ def run_upload(
     return moved
 
 
-def change_site(new_site: str, live_dir: str, outbox_dir: str, box_yaml: str) -> Tuple[int, int]:
-    """Rename the site. Clips already saved are set aside under the old name first."""
-    moved = (0, 0)
+def change_site(
+    new_site: str,
+    live_dir: str,
+    outbox_dir: str,
+    box_yaml: str,
+    also: Sequence[Tuple[str, str]] = (),
+) -> Tuple[int, int]:
+    """Rename the site. Clips already saved are set aside under the old name first.
+
+    *also* lists further ``(live_dir, outbox_dir)`` pairs to set aside the same way.
+    Returns the clips and files moved, over all pairs.
+    """
+    clips = files = 0
     try:
         old_site = load_box_config(box_yaml).site
     except BoxConfigError:
         old_site = None
     if old_site and old_site != new_site:
-        moved = move_finished_clips(live_dir, os.path.join(outbox_dir, old_site), 0)
+        for live, outbox in ((live_dir, outbox_dir), *also):
+            moved = move_finished_clips(live, os.path.join(outbox, old_site), 0)
+            clips, files = clips + moved[0], files + moved[1]
     set_site(new_site, box_yaml)
-    return moved
+    return clips, files
 
 
 def split_option(values: list[str]) -> Tuple[str, str]:
@@ -121,6 +139,13 @@ def split_option(values: list[str]) -> Tuple[str, str]:
         key, _, value = values[0].partition("=")
         return key, value
     raise BoxConfigError("usage: set-option KEY VALUE  (or KEY=VALUE)")
+
+
+def _clip_dirs(mode: str) -> Tuple[str, str]:
+    """The live and outbox folders the box is filling in *mode*, for the status report."""
+    if mode == MODE_INFERENCE:
+        return PRODUCTION_LIVE_DIR, PRODUCTION_OUTBOX_DIR
+    return LIVE_DIR, OUTBOX_DIR
 
 
 def _shown(value: Any) -> str:
@@ -163,7 +188,10 @@ def main() -> None:
         try:
             if not args.value:
                 raise BoxConfigError("set-site needs a site name, e.g. set-site house2")
-            clips, _ = change_site(args.value, LIVE_DIR, OUTBOX_DIR, BOX_YAML)
+            clips, _ = change_site(
+                args.value, LIVE_DIR, OUTBOX_DIR, BOX_YAML,
+                also=[(PRODUCTION_LIVE_DIR, PRODUCTION_OUTBOX_DIR)],
+            )
         except BoxConfigError as exc:
             log.error("%s", exc)
             sys.exit(1)
@@ -183,7 +211,7 @@ def main() -> None:
         return
 
     if args.command == "status":
-        print(json.dumps(build_heartbeat(cfg.site, LIVE_DIR, OUTBOX_DIR, ALIVE_FILE, mode=cfg.mode), indent=2))
+        print(json.dumps(build_heartbeat(cfg.site, *_clip_dirs(cfg.mode), ALIVE_FILE, mode=cfg.mode), indent=2))
         return
 
     from home_guard_project.s3_upload.config import load_config as load_s3_config
@@ -194,9 +222,14 @@ def main() -> None:
         from home_guard_project.s3_upload.s3_upload import run as s3_run
 
         run_upload(cfg, LIVE_DIR, OUTBOX_DIR, s3_cfg.bucket, s3_cfg.workers, uploader=s3_run)
+        # Clips saved in inference mode go to the folder that expires after two weeks.
+        run_upload(
+            cfg, PRODUCTION_LIVE_DIR, PRODUCTION_OUTBOX_DIR, s3_cfg.bucket, s3_cfg.workers,
+            uploader=s3_run, prefix_for=production_prefix,
+        )
 
     key = put_heartbeat(
-        build_heartbeat(cfg.site, LIVE_DIR, OUTBOX_DIR, ALIVE_FILE, mode=cfg.mode),
+        build_heartbeat(cfg.site, *_clip_dirs(cfg.mode), ALIVE_FILE, mode=cfg.mode),
         s3_cfg.bucket,
         s3_prefix(cfg.site),
     )
