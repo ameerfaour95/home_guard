@@ -65,9 +65,28 @@ if (-not $AnswersFile -and -not $Console) {
     try {
         $repo = Get-SetupRepoRoot
         if ($repo) {
-            Start-Process -FilePath (Join-Path $repo '.venv\Scripts\pythonw.exe') `
-                -ArgumentList @('-m', 'home_guard_project.box.app', '--setup') -WorkingDirectory $repo
-            exit 0
+            # The uv venv's own pythonw.exe hands off to the CONSOLE interpreter, which opens an empty
+            # black terminal beside the wizard. Launch the base install's windowless pythonw on
+            # app\start.pyw instead (the base is named in .venv\pyvenv.cfg as "home = <folder>"), the
+            # same way live_view.cmd / make_setup_shortcut.ps1 do, so no terminal appears.
+            $starter = Join-Path $repo 'home_guard_project\box\app\start.pyw'
+            $cfg = Join-Path $repo '.venv\pyvenv.cfg'
+            $base = ''
+            if (Test-Path $cfg) {
+                $m = Select-String -Path $cfg -Pattern '^\s*home\s*=\s*(.+)$'
+                if ($m) { $base = $m.Matches[0].Groups[1].Value.Trim() }
+            }
+            $basePythonw = if ($base) { Join-Path $base 'pythonw.exe' } else { '' }
+            if ($basePythonw -and (Test-Path $basePythonw) -and (Test-Path $starter)) {
+                Start-Process -FilePath $basePythonw -ArgumentList "`"$starter`" --setup" -WorkingDirectory $repo
+                exit 0
+            }
+            $venvPythonw = Join-Path $repo '.venv\Scripts\pythonw.exe'
+            if (Test-Path $venvPythonw) {       # fallback: venv launch (may still flash a terminal)
+                Start-Process -FilePath $venvPythonw `
+                    -ArgumentList '-m home_guard_project.box.app --setup' -WorkingDirectory $repo
+                exit 0
+            }
         }
     } catch { }   # fall through to the console wizard
 }
