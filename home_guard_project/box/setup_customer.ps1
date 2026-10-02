@@ -204,8 +204,32 @@ function Invoke-Native([string]$exe, [string[]]$arguments) {
 function Invoke-Box([string]$command) {
     if ($DryRun) { Note "  ssh> $command"; $global:LASTEXITCODE = 0; return '' }
     # -n: do not read from stdin, so ssh never swallows the console's keystrokes.
+    # ServerAlive*: if the box stops answering (e.g. it switches Wi-Fi mid-command and the link
+    # drops), ssh gives up in ~30 s instead of hanging. A long-but-alive command (camera search)
+    # keeps answering the keepalives, so it is not cut off.
     Invoke-Native 'ssh' @('-n', '-i', $KeyPath, '-o', 'ConnectTimeout=15', '-o', 'LogLevel=ERROR',
+                          '-o', 'ServerAliveInterval=10', '-o', 'ServerAliveCountMax=3',
                           '-o', 'StrictHostKeyChecking=accept-new', $Target, $command)
+}
+
+# The box drops its network link when it joins the customer/home Wi-Fi during the network step.
+# Wait for it to come back over Tailscale, and read back what network.json recorded.
+function Wait-ForBox([int]$seconds = 90) {
+    if ($DryRun) { return $true }
+    $deadline = (Get-Date).AddSeconds($seconds)
+    while ((Get-Date) -lt $deadline) {
+        $hello = (Invoke-Native 'ssh' @('-n', '-i', $KeyPath, '-o', 'ConnectTimeout=10', '-o', 'LogLevel=ERROR',
+                                        '-o', 'StrictHostKeyChecking=accept-new', $Target, 'echo box-is-reachable') | Out-String)
+        if ($hello -match 'box-is-reachable') { return $true }
+        Start-Sleep -Seconds 5
+    }
+    return $false
+}
+function Get-BoxNetMode {
+    if ($DryRun) { return $Mode }
+    $json = (Invoke-Box "type $InstallDir\home_guard_project\box\network.json" | Out-String)
+    if ($json -match '"mode"\s*:\s*"([a-z]+)"') { return $Matches[1] }
+    return ''
 }
 function Copy-ToBox([string]$local, [string]$remote) {
     if ($DryRun) { Note "  scp> $local  ->  ${Target}:$remote"; return }
@@ -313,6 +337,10 @@ Step-Ok 'site' "dataset_$Site, show_cameras=$showVal"
 # ---- network configuration --------------------------------------------------
 Step-Start 'network'
 Info "`n[3] Configuring the network..."
+if ($Mode -eq 'wifi') {
+    Note "The box will join the Wi-Fi '$WifiSsid'; the connection may drop for up to a minute while it switches."
+    Step-Warn 'network' "the box is switching to Wi-Fi '$WifiSsid'; the connection will drop for up to a minute"
+}
 $answersLocal = [IO.Path]::GetTempFileName()
 $lines = @(
     "mode=$(To-B64 $Mode)"
@@ -323,11 +351,29 @@ $lines = @(
 )
 [IO.File]::WriteAllLines($answersLocal, $lines, (New-Object Text.UTF8Encoding($false)))
 $answersRemote = "$RemoteHome\net_answers.txt"
+$forget = ''; if ($ForgetOtherWifi) { $forget = ' -ForgetOtherWifi' }
+$netCmd = "powershell -ExecutionPolicy Bypass -File $BoxBox\setup_network.ps1 -AnswersFile $answersRemote$forget"
 try {
     Copy-ToBox $answersLocal $answersRemote
-    $forget = ''; if ($ForgetOtherWifi) { $forget = ' -ForgetOtherWifi' }
-    Invoke-Box "powershell -ExecutionPolicy Bypass -File $BoxBox\setup_network.ps1 -AnswersFile $answersRemote$forget"
-    if ($LASTEXITCODE -ne 0) { Step-Fail 'network' 'the box could not save the network settings'; throw 'The network settings could not be saved on the box.' }
+    # This may drop the SSH link when the box joins the new Wi-Fi, so don't trust the exit code -
+    # reconnect over Tailscale and read back network.json to confirm the config actually landed.
+    Invoke-Box $netCmd
+    if (-not $DryRun) {
+        if (-not (Wait-ForBox 90)) {
+            Step-Fail 'network' "the box did not come back on '$WifiSsid'; it is reachable on the rescue Wi-Fi '$RescueSsid'"
+            throw "The box did not come back after switching to '$WifiSsid'. Recover it on the rescue hotspot '$RescueSsid' (see below)."
+        }
+        if ((Get-BoxNetMode) -ne $Mode) {
+            # The Wi-Fi switch interrupted setup_network before it wrote network.json; the box is stable
+            # now, so run it once more.
+            Copy-ToBox $answersLocal $answersRemote
+            Invoke-Box $netCmd | ForEach-Object { Note "    $_" }
+            if ((Get-BoxNetMode) -ne $Mode) {
+                Step-Fail 'network' 'the box could not save the network settings'
+                throw 'The network settings could not be saved on the box.'
+            }
+        }
+    }
 } finally {
     Invoke-Box "cmd /c del $answersRemote" | Out-Null
     Remove-Item $answersLocal -ErrorAction SilentlyContinue
