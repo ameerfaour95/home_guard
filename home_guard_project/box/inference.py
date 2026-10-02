@@ -86,6 +86,26 @@ def apply_policy_override(parsed: Dict[str, Any], in_window: bool, person: bool,
     return out
 
 
+# Bumped whenever the prompt or the answer's schema changes, so training records can be told apart.
+PROMPT_VERSION = "2026-10-02.summary-people-vehicle"
+
+# The answer's shape, enforced on the model (structured output) and checked on the way back.
+VLM_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "summary": {"type": "string"},
+        "people": {"type": "integer"},
+        "vehicle_moving": {"type": "boolean"},
+    },
+    "required": ["summary", "people", "vehicle_moving"],
+    "additionalProperties": False,
+}
+VLM_RESPONSE_FORMAT: Dict[str, Any] = {
+    "type": "json_schema",
+    "json_schema": {"name": "camera_report", "strict": True, "schema": VLM_SCHEMA},
+}
+
+
 def build_prompt(camera_name: str, t_sec: int, local_time_str: str, start_hour: int, end_hour: int) -> str:
     # Purely descriptive, so the model does not treat this as surveillance/threat
     # judgement of people (which it refuses). The alert decision is made in code
@@ -207,23 +227,39 @@ class GptBackend:
             http_client = None
         self._client = OpenAI(api_key=api_key, http_client=http_client) if http_client else OpenAI(api_key=api_key)
         self._model = model
+        self.model_name = model
+        self.last_prompt = ""           # what the last call asked, kept for the training record
+        self._response_format: Dict[str, Any] = VLM_RESPONSE_FORMAT
 
     def analyze(self, frames_bgr: List[Any], camera_name: str, t_sec: int,
                 start_hour: int, end_hour: int) -> Tuple[str, Optional[Dict[str, Any]]]:
         prompt = build_prompt(camera_name, t_sec, datetime.now().strftime("%H:%M:%S"), start_hour, end_hour)
+        self.last_prompt = prompt
         content: List[Dict[str, Any]] = [{"type": "text", "text": prompt}]
         for fr in frames_bgr:
             b64 = frame_to_jpeg_b64(fr)
             if b64:
                 content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
-        resp = self._client.chat.completions.create(
+        try:
+            resp = self._complete(content, self._response_format)
+        except Exception as exc:  # noqa: BLE001
+            # A model without structured output refuses the schema: ask for plain JSON from now on.
+            if self._response_format.get("type") == "json_schema" and "response_format" in str(exc):
+                log.warning("%s does not take a JSON schema (%s); asking for a JSON object instead.", self._model, exc)
+                self._response_format = {"type": "json_object"}
+                resp = self._complete(content, self._response_format)
+            else:
+                raise
+        raw = resp.choices[0].message.content or ""
+        return raw, parse_vlm_json(raw)
+
+    def _complete(self, content: List[Dict[str, Any]], response_format: Dict[str, Any]) -> Any:
+        return self._client.chat.completions.create(
             model=self._model,
             messages=[{"role": "user", "content": content}],
             temperature=0,
-            response_format={"type": "json_object"},
+            response_format=response_format,
         )
-        raw = resp.choices[0].message.content or ""
-        return raw, parse_vlm_json(raw)
 
 
 def make_backend(settings: AlertSettings, env: Dict[str, str]):
@@ -508,6 +544,7 @@ class AlertJob:
     alert: Dict[str, Any] = field(default_factory=dict)
     false_positive: bool = False     # the VLM saw nothing: not sent, saved for training instead
     paused: bool = False             # the owner had paused alerts: the AI was not asked, saved for training
+    teacher: Dict[str, Any] = field(default_factory=dict)   # what the VLM was asked and answered (alert_clips.teacher_record)
     ready: threading.Event = field(default_factory=threading.Event)
 
 
@@ -538,6 +575,19 @@ def delivery(res: Dict[str, Any]) -> Tuple[bool, str]:
     return sent, "" if sent else (reasons[0] if reasons else "not delivered")
 
 
+def _jpegs(frames: List[Any]) -> List[bytes]:
+    """The frames as JPEG bytes, exactly as they are sent to the VLM; a frame that cannot be encoded is skipped."""
+    out = []
+    for frame in frames:
+        try:
+            data = frame_to_jpeg_bytes(frame)
+        except Exception:  # noqa: BLE001
+            data = b""
+        if data:
+            out.append(data)
+    return out
+
+
 def _worker(backend, box_settings, env, settings: AlertSettings,
             camera_name: str, frames: List[Any],
             assistant: Any = None, job: Optional[AlertJob] = None, status: Any = None) -> None:
@@ -566,6 +616,17 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
             return
         raw, parsed = backend.analyze(frames, camera_name, int(time.time()),
                                       settings.alert_start_hour, settings.alert_end_hour)
+        if job is not None and raw:
+            # Everything a student model needs to learn this answer: the exact pictures,
+            # the question, and the answer word for word.
+            job.teacher = {
+                "model": getattr(backend, "model_name", settings.vlm_model),
+                "prompt_version": PROMPT_VERSION,
+                "prompt": getattr(backend, "last_prompt", ""),
+                "frames": _jpegs(frames),
+                "raw": raw,
+                "parsed": parsed,
+            }
         summary = ""
         backend_cmd = None
         if parsed:
@@ -639,12 +700,15 @@ def _save_clip(job: AlertJob, frames: List[Any], production_dir: str, training_d
         alert = job.alert or {"summary": "", "alert_command": "[none]", "alert_reason": "", "labels": job.labels}
         if job.false_positive:
             meta = write_alert_clip(training_dir, job.camera, false_positive_stem(job.camera, job.ts), frames,
-                                    alert, kind="false_positive")
+                                    alert, kind="false_positive", teacher=job.teacher)
         elif job.paused:
             meta = write_alert_clip(training_dir, job.camera, f"{job.camera}_{int(job.ts)}_paused", frames,
                                     alert, kind="paused")
         else:
             meta = write_alert_clip(production_dir, job.camera, job.stem, frames, alert)
+            # The owner's copy above expires in two weeks; the training set keeps every
+            # alert with the teacher's answer, so a student model can be trained on it.
+            write_alert_clip(training_dir, job.camera, job.stem, frames, alert, kind="alert", teacher=job.teacher)
         if meta:
             log.info("[%s] clip saved: %s (%d frames)", job.camera, os.path.basename(meta), len(frames))
         if (meta and assistant is not None and not job.false_positive and not job.paused

@@ -87,6 +87,45 @@ def clip_file(root_dir: str, meta_path: str) -> str:
     return os.path.join(root_dir, *relative.replace("\\", "/").split("/"))
 
 
+def teacher_record(root_dir: str, camera: str, day: str, stem: str, teacher: Dict[str, Any]) -> Dict[str, Any]:
+    """Save the VLM's inputs and answer next to the clip; return the meta fields that point at them.
+
+    *teacher* holds ``model``, ``prompt_version``, ``prompt``, ``frames``
+    (the JPEG bytes sent, in order), ``raw`` (the answer verbatim) and
+    ``parsed``. The pictures become ``vlm_crops/<camera>/<day>/<stem>_f<i>.jpg``
+    and the raw answer ``responses/<camera>/<day>/<stem>.model_raw.txt``, the
+    layout the collector already uses, so the uploader and the tagging tools
+    take them as they are.
+    """
+    inputs = []
+    for i, data in enumerate(teacher.get("frames") or []):
+        rel = os.path.join("vlm_crops", camera, day, f"{stem}_f{i}.jpg")
+        path = os.path.join(root_dir, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(data)
+        inputs.append(rel.replace("/", "\\"))
+    raw_rel = None
+    if teacher.get("raw"):
+        raw_rel = os.path.join("responses", camera, day, f"{stem}.model_raw.txt")
+        path = os.path.join(root_dir, raw_rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(str(teacher["raw"]))
+        raw_rel = raw_rel.replace("/", "\\")
+    return {
+        "model_response": teacher.get("parsed"),
+        "teacher": {
+            "model": teacher.get("model"),
+            "prompt_version": teacher.get("prompt_version"),
+            "prompt": teacher.get("prompt"),
+            "input_frames": inputs,
+            "raw_path": raw_rel,
+            "temperature": 0,
+        },
+    }
+
+
 def write_alert_clip(
     root_dir: str,
     camera: str,
@@ -95,11 +134,15 @@ def write_alert_clip(
     alert: Dict[str, Any],
     h264: bool = True,
     kind: str = "alert",
+    teacher: Optional[Dict[str, Any]] = None,
 ) -> Optional[str]:
     """Write the clip and then its meta under *root_dir*. Returns the meta path, or None with no frames.
 
     The meta is written last and through a temp file: a meta on disk means
-    the clip is complete.
+    the clip is complete. With a *teacher* record (what the VLM was asked and
+    answered, see :func:`teacher_record`) the pictures it saw go to
+    ``vlm_crops/`` and its raw answer to ``responses/``, named after the clip
+    so they travel with it, and the meta carries ``model_response``.
     """
     import cv2  # noqa: PLC0415
     import numpy as np  # noqa: PLC0415
@@ -157,6 +200,8 @@ def write_alert_clip(
                  "trigger_classes": list(alert.get("labels", [])), "trigger_detected": True},
         "alert": alert,
     }
+    if teacher:
+        meta.update(teacher_record(root_dir, camera, day, stem, teacher))
     tmp = f"{meta_path}.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=2)
