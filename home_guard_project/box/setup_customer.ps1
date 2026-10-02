@@ -174,11 +174,14 @@ $Site = Read-NonEmpty 'House name, for example cohen_haifa' '[a-z0-9_]+'
 $ShowCameras = $false
 if ((Read-Host "Show the live camera pictures on the box's own screen? [y/N]") -match '^[Yy]') { $ShowCameras = $true }
 
-# AI alerts (inference mode). Off = the box just collects clips for tagging.
-$UseAI = $false; $AlertStart = 0; $AlertEnd = 0
-Info "`nAI alerts: when a person is seen during the chosen hours, the box sends a Telegram message with a photo and logs what the AI saw. (Turning this on stops saving training clips.)"
-if ((Read-Host 'Turn on AI alerts? [y/N]') -match '^[Yy]') {
-    $UseAI = $true
+# Collection vs production mode.
+Info "`nWhat is this box for?"
+Write-Host '  1) Data collection - save camera clips for later tagging/training'
+Write-Host '  2) Production      - AI watches and sends Telegram alerts (does not save clips)'
+$UseAI = $null; $AlertStart = 0; $AlertEnd = 0
+do { switch (Read-Host 'Choose 1 or 2') { '1' { $UseAI = $false } '2' { $UseAI = $true } } } while ($null -eq $UseAI)
+if ($UseAI) {
+    Info '  Production: when a person is seen during the hours below, the box sends a Telegram alert with a photo and logs what the AI saw.'
     $AlertStart = [int](Read-NonEmpty 'Send alerts from which hour (0-23)?' '([0-9]|1[0-9]|2[0-3])')
     $AlertEnd   = [int](Read-NonEmpty 'Send alerts until which hour (0-23)?' '([0-9]|1[0-9]|2[0-3])')
 }
@@ -251,6 +254,10 @@ if ($UseAI) {
     Invoke-Box "$SetOpt mode data_collection" | ForEach-Object { Note "    $_" }
     Ok 'AI alerts off: the box collects clips for tagging (data-collection mode).'
 }
+
+# Put the "Home Guard" shortcut on the box's desktop and Startup.
+Invoke-Box "powershell -ExecutionPolicy Bypass -File $BoxBox\make_shortcut.ps1" | ForEach-Object { Note "    $_" }
+Ok 'Placed the Home Guard shortcut on the box desktop and startup.'
 
 # ---- 3. network configuration ----------------------------------------------
 Info "`n[3] Configuring the network..."
