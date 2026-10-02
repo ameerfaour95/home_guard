@@ -163,6 +163,9 @@ Write-Host '  The clips are saved online in a folder with this name (dataset_<na
 Write-Host '  and the cameras are labelled with it. Lowercase letters, digits and underscores only.'
 $Site = Read-NonEmpty 'House name, for example cohen_haifa' '[a-z0-9_]+'
 
+$ShowCameras = $false
+if ((Read-Host "Show the live camera pictures on the box's own screen? [y/N]") -match '^[Yy]') { $ShowCameras = $true }
+
 $DoCameras = $false; $CamUser = ''; $CamPass = ''
 if ((Read-Host 'Find cameras now? (needs the camera/recorder login) [y/N]') -match '^[Yy]') {
     $DoCameras = $true
@@ -193,6 +196,10 @@ Info "`n[2] Setting the house name..."
 Invoke-Box "cd /d $InstallDir && $Python -m home_guard_project.box set-site $Site" | ForEach-Object { Note "    $_" }
 if ($LASTEXITCODE -ne 0) { throw "The box did not accept the house name '$Site'." }
 Ok "Clips from this box are saved in the online folder dataset_$Site"
+
+$showVal = 'false'; if ($ShowCameras) { $showVal = 'true' }
+Invoke-Box "cd /d $InstallDir && $Python -m home_guard_project.box set-option show_cameras $showVal" | ForEach-Object { Note "    $_" }
+Ok "Camera windows on the box's own screen: $showVal"
 
 # ---- 3. network configuration ----------------------------------------------
 Info "`n[3] Configuring the network..."
