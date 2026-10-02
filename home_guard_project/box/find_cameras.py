@@ -33,7 +33,8 @@ import os
 import re
 import socket
 import sys
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import quote as urlquote
 
 import yaml
 
@@ -231,16 +232,8 @@ def rtsp_login_check(host: str, port: int, user: str, password: str, timeout: fl
         reply = _rtsp_describe(host, port, uri, timeout=timeout)
         if " 401 " not in reply.splitlines()[0]:
             return "accepted"                      # it asks for no login at all
-        digest = re.search(r'WWW-Authenticate:\s*Digest\s+(.*)', reply, re.IGNORECASE)
-        if digest:
-            fields = dict(re.findall(r'(\w+)="([^"]*)"', digest.group(1)))
-            realm, nonce = fields.get("realm", ""), fields.get("nonce", "")
-            answer = digest_response(user, realm, password, "DESCRIBE", uri, nonce)
-            authorization = (f'Digest username="{user}", realm="{realm}", nonce="{nonce}", '
-                             f'uri="{uri}", response="{answer}"')
-        elif re.search(r"WWW-Authenticate:\s*Basic", reply, re.IGNORECASE):
-            authorization = "Basic " + base64.b64encode(f"{user}:{password}".encode("utf-8")).decode("ascii")
-        else:
+        authorization = _authorization(reply, user, password, uri)
+        if not authorization:
             return "unknown"
         reply = _rtsp_describe(host, port, uri, authorization, timeout=timeout)
         return "refused" if " 401 " in reply.splitlines()[0] else "accepted"
@@ -248,10 +241,83 @@ def rtsp_login_check(host: str, port: int, user: str, password: str, timeout: fl
         return "unknown"
 
 
+def _authorization(challenge: str, user: str, password: str, uri: str) -> str:
+    """The Authorization header that answers a device's 401 reply (Digest preferred, else Basic), or ""."""
+    digest = re.search(r'WWW-Authenticate:\s*Digest\s+(.*)', challenge, re.IGNORECASE)
+    if digest:
+        fields = dict(re.findall(r'(\w+)="([^"]*)"', digest.group(1)))
+        realm, nonce = fields.get("realm", ""), fields.get("nonce", "")
+        answer = digest_response(user, realm, password, "DESCRIBE", uri, nonce)
+        return f'Digest username="{user}", realm="{realm}", nonce="{nonce}", uri="{uri}", response="{answer}"'
+    if re.search(r"WWW-Authenticate:\s*Basic", challenge, re.IGNORECASE):
+        return "Basic " + base64.b64encode(f"{user}:{password}".encode("utf-8")).decode("ascii")
+    return ""
+
+
+def rtsp_stream_exists(host: str, port: int, user: str, password: str, path: str, timeout: float = 5.0) -> bool:
+    """True if the device answers 200 when asked to describe the stream at *path*, logging in if it must."""
+    uri = f"rtsp://{host}:{port}{path}"
+    try:
+        reply = _rtsp_describe(host, port, uri, timeout=timeout)
+        if " 401 " in reply.splitlines()[0]:
+            authorization = _authorization(reply, user, password, uri)
+            if not authorization:
+                return False
+            reply = _rtsp_describe(host, port, uri, authorization, timeout=timeout)
+        return " 200 " in reply.splitlines()[0]
+    except (OSError, IndexError):
+        return False
+
+
+def rtsp_channels(
+    host: str,
+    port: int,
+    user: str,
+    password: str,
+    patterns: List[Dict[str, str]],
+    max_channels: int,
+    stream: int,
+    timeout: float = 5.0,
+) -> Tuple[Optional[Dict[str, str]], List[Tuple[int, str]]]:
+    """Which channels of a recorder have a stream: ``(pattern, [(channel, path)])`` for the
+    first address pattern that any channel answers to.
+
+    A describe request takes milliseconds, so every channel can be asked. Opening
+    each stream to see whether it works takes seconds, and the older search gave
+    up when channel 1 was empty, which is normal on a recorder.
+    """
+    for pattern in patterns:
+        hits = []
+        for channel in range(1, max_channels + 1):
+            path = pattern["tpl"].format(ch=channel, stream=stream, stream_0=stream - 1)
+            if rtsp_stream_exists(host, port, user, password, path, timeout):
+                hits.append((channel, path))
+        if hits:
+            return pattern, hits
+    return None, []
+
+
 def _probe_host(host: str, port: int, user: str, password: str) -> List[Dict[str, Any]]:
     from home_guard_project.data_collection import discover
 
     cfg = discover._load_discovery_config()
+    pattern, hits = rtsp_channels(host, port, user, password, discover._RTSP_PATTERNS,
+                                  cfg["max_channels"], cfg["stream"])
+    if hits:
+        log.info("  %s: %d channel(s) answer (%s): %s", host, len(hits), pattern["name"],
+                 ", ".join(str(channel) for channel, _ in hits))
+        login = f"{urlquote(user, safe='')}:{urlquote(password, safe='')}@"
+        found = []
+        for channel, path in hits:
+            url = f"rtsp://{login}{host}:{port}{path}"
+            ok, width, height = discover.validate_stream(url, timeout=max(cfg["probe_timeout_sec"], 10.0))
+            if ok:
+                log.info("  Channel %d: OK (%dx%d)", channel, width, height)
+                found.append({"channel": channel, "url": url, "pattern": pattern["name"], "w": width, "h": height})
+            else:
+                log.info("  Channel %d: answers, but no picture arrived", channel)
+        return found
+    # A device that does not answer describe requests this way: the slower search that opens each stream.
     return discover.probe_rtsp_channels(
         host,
         port,
