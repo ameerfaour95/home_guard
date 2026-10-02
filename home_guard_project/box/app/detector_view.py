@@ -26,7 +26,7 @@ class Detection:
     def color(self): return DETECTOR_PERSON if self.label=='person' else DETECTOR_VEHICLE if self.label in VEHICLES else MUTED
     @property
     def width(self): return 2 if self.label=='person' or self.label in VEHICLES else 1
-    def caption(self): return tr('detection_label',label=object_name(self.label),percent=round(self.confidence*100))
+    def caption(self): return tr('detection_label',label=object_name(self.label).capitalize(),percent=round(self.confidence*100))
 
 def object_name(name,count=1):
     from .strings import TEXT
@@ -54,6 +54,16 @@ def camera_view(data,name,now,stopped=False):
         counts=Counter(d.label for d in found)
         return tuple(found),tr('detector_sees',objects=', '.join(tr('object_count',count=n,label=object_name(label,n)) for label,n in counts.items()))
     return (),tr('detector_nothing') if fresh(entry.get('checked_ts'),now,10) else tr('detector_not_looking')
+
+def fade_opacity(ts,now):
+    age=now-timestamp(ts)
+    return max(0,min(1,3-age)) if age>=0 else 0
+
+def picture_rect(area,source,dpr=1):
+    x,y,w,h=area;sw,sh=source
+    scale=min(w/sw,h/sh,1/max(1,dpr))
+    width,height=sw*scale,sh*scale
+    return x+(w-width)/2,y+(h-height)/2,width,height
 
 def box_rect(box,picture):
     x,y,width,height=picture

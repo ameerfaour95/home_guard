@@ -20,7 +20,7 @@ TEXT = {
     "demo_ai_urgent": "Two people are trying to force the front door open.",
     "demo_ai_refused": "The bot is not a member of the group chat. Add the bot to the Telegram group again.",
 
-    "detection_label": "{label} {percent}%",
+    "detection_label": "{label} \u00b7 {percent}%",
     "detector_sees": "Sees: {objects}",
     "object_count": "{count} {label}",
     "object_person": "person", "object_person_plural": "people",

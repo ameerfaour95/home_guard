@@ -5,5 +5,5 @@ WARNING = "#ffd27d"
 ERROR = "#f27d7d"
 MUTED = "#98a6ba"
 
-DETECTOR_PERSON = "#81d3b0"
+DETECTOR_PERSON = "#42d6c3"
 DETECTOR_VEHICLE = "#ffd27d"

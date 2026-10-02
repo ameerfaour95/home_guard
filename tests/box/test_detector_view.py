@@ -12,7 +12,7 @@ class DetectorViewTests(unittest.TestCase):
     def test_fresh_last_detection_and_recent_empty_check(self):
         objects,text=camera_view(self.data,'bian_ch2',self.now)
         self.assertEqual(len(objects),2);self.assertIn('1 person',text);self.assertIn('1 car',text)
-        self.assertEqual(objects[1].caption(),'person 71%')
+        self.assertEqual(objects[1].caption(),'Person \u00b7 71%')
         self.assertNotEqual(objects[0].color,objects[1].color)
         self.assertEqual(camera_view(self.data,'bian_ch3',self.now),((),'Nothing right now'))
         self.assertEqual(camera_view(self.data,'bian_ch2',self.now+4),((),'Nothing right now'))

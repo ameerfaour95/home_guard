@@ -140,16 +140,19 @@ def demo_picture(number):
 
 class CameraTile(QFrame):
     clicked = Signal()
+    double_clicked = Signal()
     def __init__(self, name):
         super().__init__()
         self.setObjectName("card")
         self.name = name
         self.picture = None
         self.stopped = False
+        self.hero = False
+        self.box_opacity = 1
         self.detections = ()
         self.detector_enabled = False
         self.detector_note = label("", "muted")
-        self.detector_note.setStyleSheet("font-size: 12px; color: " + MUTED)
+        self.detector_note.setStyleSheet("font-size: 14px; color: " + MUTED)
         self.detector_note.hide()
         self.status = label(tr("offline"), "muted")
         self.caption = label(name.replace("_", " "))
@@ -171,6 +174,9 @@ class CameraTile(QFrame):
             self.clicked.emit()
         super().mousePressEvent(event)
 
+    def mouseDoubleClickEvent(self,event):
+        self.double_clicked.emit()
+
     def update_picture(self, pix):
         self.picture = pix if pix and not pix.isNull() else None
         self.status.setText(tr("stopped") if self.stopped else tr("live") if self.picture else tr("offline"))
@@ -181,31 +187,31 @@ class CameraTile(QFrame):
     def paintEvent(self, event):
         super().paintEvent(event)
         p = QPainter(self)
-        area = self.rect().adjusted(2, 2, -2, -64 if self.detector_enabled else -42)
+        area = self.rect().adjusted(1,1,-1,-1)
         if self.picture:
-            scaled = self.picture.scaled(
-                area.size(),
-                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                Qt.TransformationMode.SmoothTransformation,
-            )
+            from .detector_view import box_rect,picture_rect
+            x,y,w,h=picture_rect((area.x(),area.y(),area.width(),area.height()),(self.picture.width(),self.picture.height()),self.devicePixelRatioF())
+            p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
             p.setClipRect(area)
-            x=area.center().x()-scaled.width()//2
-            y=area.center().y()-scaled.height()//2
-            p.drawPixmap(x,y,scaled)
+            p.drawPixmap(QRectF(x,y,w,h),self.picture,QRectF(self.picture.rect()))
             if not self.stopped:
-                from .detector_view import box_rect
-                p.setFont(QFont("Segoe UI",9))
+                p.setOpacity(self.box_opacity)
+                p.setFont(QFont("Segoe UI",11 if self.hero else 10))
                 for detection in self.detections:
-                    rect=QRectF(*box_rect(detection.box,(x,y,scaled.width(),scaled.height())))
-                    p.setPen(QPen(QColor(detection.color),detection.width))
-                    p.drawRect(rect)
-                    text=detection.caption()
-                    metrics=p.fontMetrics()
-                    tx=max(area.left(),min(rect.left(),area.right()-metrics.horizontalAdvance(text)-8))
-                    ty=max(area.top(),min(rect.top()-metrics.height()-4,area.bottom()-metrics.height()-4))
-                    tag=QRectF(tx,ty,metrics.horizontalAdvance(text)+8,metrics.height()+4)
-                    p.fillRect(tag,QColor("#10151d"))
-                    p.drawText(tag.adjusted(4,0,-4,0),Qt.AlignmentFlag.AlignVCenter,text)
+                    rect=QRectF(*box_rect(detection.box,(x,y,w,h)))
+                    p.setPen(QPen(QColor(detection.color),3 if self.hero else 2))
+                    length=min(24,rect.width()/3,rect.height()/3)
+                    for cx,cy,sx,sy in ((rect.left(),rect.top(),1,1),(rect.right(),rect.top(),-1,1),(rect.left(),rect.bottom(),1,-1),(rect.right(),rect.bottom(),-1,-1)):
+                        from PySide6.QtCore import QLineF
+                        p.drawLine(QLineF(cx,cy,cx+sx*length,cy));p.drawLine(QLineF(cx,cy,cx,cy+sy*length))
+                    text=detection.caption();metrics=p.fontMetrics()
+                    tx=max(x,min(rect.left(),x+w-metrics.horizontalAdvance(text)-16))
+                    ty=max(y,rect.top()-metrics.height()-12)
+                    tag=QRectF(tx,ty,metrics.horizontalAdvance(text)+16,metrics.height()+8)
+                    p.fillRect(tag,QColor("#101a21"));p.drawText(tag.adjusted(8,0,-8,0),Qt.AlignmentFlag.AlignVCenter,text)
+                p.setOpacity(1)
+            footer=QRectF(area.left()+16,area.bottom()-76,min(area.width()-32,580),60)
+            p.fillRect(footer,QColor(12,22,28,235))
         else:
             p.setPen(QColor("#98a6ba"))
             p.setFont(QFont("Segoe UI", 14))
@@ -488,7 +494,7 @@ class Window(QMainWindow):
             self.apply_state(self.current_state, allowed, self.events)
         if allowed and not self.box_controls.is_stopped():
             try:
-                self.reader.touch()
+                self.reader.touch(self.expanded_tile.name if self.expanded_tile else (self.tiles[0].name if self.tiles else None))
                 for tile in self.tiles:
                     data = self.reader.read(tile.name)
                     pix = QPixmap()
@@ -527,6 +533,10 @@ class Window(QMainWindow):
             tile.detector_note.setVisible(inference)
             tile.detections,text=camera_view(self.ai_data,tile.name,now,stopped) if inference else ((),"")
             tile.detector_note.setText(text)
+            from .detector_view import fade_opacity
+            entries=self.ai_data.get("cameras",{})
+            entry=entries.get(tile.name,{}) if isinstance(entries,dict) else {}
+            tile.box_opacity=fade_opacity(entry.get("ts"),now) if isinstance(entry,dict) else 0
             tile.update()
 
     def apply_state(self, state, show, events):
@@ -610,6 +620,7 @@ class Window(QMainWindow):
             self.expanded_tile = None
             for tile in self.tiles:
                 tile.clicked.connect(lambda tile=tile: self.toggle_tile(tile))
+                tile.double_clicked.connect(lambda tile=tile: self.fullscreen_camera(tile))
             self.arrange_tiles()
         for tile in self.tiles:
             tile.stopped = stopped
@@ -676,36 +687,42 @@ class Window(QMainWindow):
                 self.control_note.setText(tr("control_error"))
 
     def toggle_tile(self, tile):
-        self.expanded_tile = None if self.expanded_tile is tile else tile
+        self.expanded_tile=tile
         self.arrange_tiles()
 
+    def fullscreen_camera(self,tile):
+        if tile is not self.expanded_tile: self.toggle_tile(tile);return
+        dialog=QDialog(self);dialog.setStyleSheet(self.styleSheet())
+        lay=layout_for(dialog,0)
+        clone=CameraTile(tile.name);clone.hero=True;clone.picture=tile.picture;clone.detections=tile.detections;clone.box_opacity=tile.box_opacity
+        clone.caption.setText(tile.caption.text());clone.detector_enabled=tile.detector_enabled;clone.detector_note.setText(tile.detector_note.text());clone.detector_note.setVisible(tile.detector_enabled)
+        lay.addWidget(clone);clone.clicked.connect(dialog.close)
+        timer=QTimer(dialog)
+        def refresh():
+            clone.stopped=tile.stopped;clone.detections=tile.detections;clone.box_opacity=tile.box_opacity;clone.update_picture(tile.picture)
+        timer.timeout.connect(refresh);timer.start(166)
+        dialog.showFullScreen();dialog.exec()
+
     def keyPressEvent(self, event):
-        if event.key() == Qt.Key.Key_Escape and getattr(self, "expanded_tile", None):
-            self.expanded_tile = None
-            self.arrange_tiles()
-            event.accept()
-        else:
-            super().keyPressEvent(event)
+        if event.key()==Qt.Key.Key_F11:
+            self.showNormal() if self.isFullScreen() else self.showFullScreen();event.accept()
+        elif event.key()==Qt.Key.Key_Escape and self.isFullScreen(): self.showNormal();event.accept()
+        else: super().keyPressEvent(event)
 
     def arrange_tiles(self):
-        while self.grid.count():
-            self.grid.takeAt(0)
-        for index in range(3):
-            self.grid.setRowStretch(index,0)
-            self.grid.setColumnStretch(index,0)
-        if self.expanded_tile:
-            for tile in self.tiles:
-                tile.setVisible(tile is self.expanded_tile)
-            self.grid.addWidget(self.expanded_tile,0,0)
-            self.grid.setRowStretch(0,1)
-            self.grid.setColumnStretch(0,1)
-            return
-        columns = 1 if len(self.tiles) == 1 else 2 if len(self.tiles) <= 4 else 3
-        for i, tile in enumerate(self.tiles):
-            tile.show()
-            self.grid.addWidget(tile,i//columns,i%columns)
-            self.grid.setRowStretch(i//columns,1)
-            self.grid.setColumnStretch(i%columns,1)
+        while self.grid.count(): self.grid.takeAt(0)
+        if not self.tiles: return
+        if self.expanded_tile not in self.tiles: self.expanded_tile=self.tiles[0]
+        for i in range(10): self.grid.setColumnStretch(i,0);self.grid.setRowStretch(i,0)
+        others=[tile for tile in self.tiles if tile is not self.expanded_tile]
+        count=max(1,len(others))
+        self.grid.addWidget(self.expanded_tile,0,0,1,count)
+        self.expanded_tile.hero=True;self.expanded_tile.setMinimumHeight(260);self.expanded_tile.setMaximumHeight(16777215)
+        self.grid.setRowStretch(0,1)
+        for i,tile in enumerate(others):
+            tile.hero=False;tile.setMinimumHeight(144);tile.setMaximumHeight(160)
+            self.grid.addWidget(tile,1,i);self.grid.setColumnStretch(i,1)
+        for tile in self.tiles: tile.show();tile.update()
 
     def render_activity(self):
         while self.activity_layout.count():
