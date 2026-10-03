@@ -13,7 +13,7 @@ import json
 import logging
 import os
 import re
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 log = logging.getLogger("box.brain.profiles")
 
@@ -31,13 +31,19 @@ PROMPT_VERSIONS = {"guard": "2026-10-03.guard.v1", "assistant": "2026-10-03.assi
 
 # Messages that go straight to the big model, decided in code (the fast model would have to judge its own
 # competence otherwise): anything that changes state, a reply to an alert, negation or an upset tone.
+_APOS = "['\u2019]"
 _BIG_WORDS_EN = re.compile(
-    r"\b(?:stop|pause|mute|silence|quiet|resume|continue|turn (?:on|off)|switch (?:on|off)|disable|enable|change|"
-    r"set|call (?:it|camera)|rename|wrong|false|mistake|not (?:me|us|true|right)|it'?s (?:me|us)|nobody|why|"
-    r"angry|annoying|useless|stupid|broken|doesn'?t work|language|hebrew|english|suspicious)\b", re.IGNORECASE)
+    r"\b(?:stop|pause|mute|unmute|silence|quiet|resume|continue|turn(?:ed)?\s+(?:\w+\s+){0,3}(?:on|off)|"
+    r"switch (?:on|off)|shut (?:off|down)|disarm|arm|snooze|disable|enable|change|"
+    r"set|call (?:it|camera)|rename|wrong|false|mistake|not (?:me|us|true|right)|it" + _APOS + r"?s (?:me|us)|"
+    r"that" + _APOS + r"?s me|(?:that |it )?was (?:me|us)|nobody|why|"
+    r"angry|annoying|useless|stupid|broken|doesn" + _APOS + r"?t work|language|hebrew|english|suspicious)\b",
+    re.IGNORECASE)
 _BIG_WORDS_HE = ("תכבה", "תדליק", "תשתיק", "תפסיק", "עצור", "תמשיך", "תחזיר", "תשנה", "שנה", "תקרא", "טעות",
                  "שגוי", "לא נכון", "זה אני", "זה אנחנו", "אין אף אחד", "למה", "מעצבן", "לא עובד", "שפה",
-                 "עברית", "אנגלית", "חשוד")
+                 "עברית", "אנגלית", "חשוד",
+                 "תפעיל", "הפעל", "תכבי", "כבה", "תדליקי", "הדלק", "השתק", "תשתיקי", "הפסק", "תפסיקי",
+                 "תגדיר", "הגדר", "בטל", "תבטל", "תחזירי", "תמשיכי")
 
 
 def needs_big(text: str, threaded: bool = False) -> bool:
@@ -51,15 +57,17 @@ def needs_big(text: str, threaded: bool = False) -> bool:
 
 
 def load_schemas(path: str = TOOLS_PATH) -> Dict[str, Dict]:
-    """Load usable definitions, skipping malformed entries with one warning per load."""
+    """Load usable definitions, skipping malformed entries with one warning per load.
+
+    An unreadable or wrongly shaped file raises RuntimeError: a model without its tools must not run.
+    """
     try:
         with open(path, encoding="utf-8") as f:
             items = json.load(f)
         if not isinstance(items, list):
             raise ValueError("tool schemas must be a list")
     except (OSError, ValueError, TypeError) as exc:
-        log.warning("Cannot load tool schemas: %s", exc)
-        return {}
+        raise RuntimeError(f"Cannot load tool schemas from {path}: {exc}") from exc
     schemas = {}
     skipped = 0
     for item in items:
@@ -77,7 +85,14 @@ def load_schemas(path: str = TOOLS_PATH) -> Dict[str, Dict]:
     return schemas
 
 
-_SCHEMAS = load_schemas()
+_SCHEMAS: Optional[Dict[str, Dict]] = None    # loaded on first use so a broken file cannot break the import
+
+
+def _schemas() -> Dict[str, Dict]:
+    global _SCHEMAS
+    if _SCHEMAS is None:
+        _SCHEMAS = load_schemas(TOOLS_PATH)
+    return _SCHEMAS
 
 
 def tool_names(mode: str, tier: str = "big") -> List[str]:
@@ -89,10 +104,11 @@ def tool_names(mode: str, tier: str = "big") -> List[str]:
 
 def tools_for(mode: str, tier: str = "big") -> List[Dict]:
     names = tool_names(mode, tier)
-    missing = [name for name in names if name not in _SCHEMAS]
+    schemas = _schemas()
+    missing = [name for name in names if name not in schemas]
     if missing:
         log.warning("Skipping unavailable tool schemas: %s", ", ".join(missing))
-    return [_SCHEMAS[name] for name in names if name in _SCHEMAS]
+    return [schemas[name] for name in names if name in schemas]
 
 
 def _read(name: str) -> str:
@@ -117,5 +133,4 @@ def system_prompt(mode: str, retention_days: float, tier: str = "big") -> str:
             log.warning("Replaced invalid UTF-8 in system prompt")
         return "\n\n".join(parts)
     except (OSError, ValueError, TypeError) as exc:
-        log.warning("Cannot read system prompt: %s", exc)
-        return ""
+        raise RuntimeError(f"Cannot read system prompt from {PROMPTS_DIR}: {exc}") from exc

@@ -15,8 +15,7 @@ from home_guard_project.box.brain.tools import TOOLS
 class ProfilesTest(unittest.TestCase):
     def test_every_tool_has_a_schema_and_every_schema_a_tool(self) -> None:
         schemas = load_schemas()
-        self.assertEqual(len(TOOLS), 14)
-        self.assertEqual(len(schemas), 16)
+        self.assertEqual(len(schemas), len(TOOLS) + 2)
         self.assertEqual(set(schemas) - {"reply", "hand_off"}, set(TOOLS))
         for name, schema in schemas.items():
             self.assertEqual(schema["function"]["name"], name)
@@ -71,9 +70,9 @@ class ProfilesTest(unittest.TestCase):
                 self.assertEqual(fast[-1], "hand_off")
                 self.assertEqual([t["function"]["name"] for t in tools_for(mode, "fast")], fast)
 
-    def test_schema_file_has_exactly_sixteen_unique_definitions(self) -> None:
+    def test_schema_file_has_one_unique_definition_per_tool_plus_two(self) -> None:
         items = json.loads(Path(profiles.TOOLS_PATH).read_text(encoding="utf-8"))
-        self.assertEqual(len(items), 16)
+        self.assertEqual(len(items), len(TOOLS) + 2)
         self.assertEqual({item["function"]["name"] for item in items}, set(TOOLS) | {"reply", "hand_off"})
 
     def test_malformed_message_routes_to_big_without_raising(self) -> None:
@@ -84,18 +83,48 @@ class ProfilesTest(unittest.TestCase):
         self.assertFalse(needs_big(None))
         self.assertTrue(needs_big([], threaded=True))
 
-    def test_schema_loader_handles_bad_files_and_wrong_root_types(self) -> None:
+    def test_schema_loader_raises_on_bad_files_and_wrong_root_types(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "tools.json"
             for payload in (b"{", b"{}", b"null", b'"tools"', b"42", b"[\xff]"):
                 path.write_bytes(payload)
-                with self.subTest(payload=payload), self.assertLogs("box.brain.profiles", level="WARNING") as logs:
-                    self.assertEqual(load_schemas(path), {})
-                self.assertEqual(len(logs.output), 1)
+                with self.subTest(payload=payload), self.assertRaises(RuntimeError) as ctx:
+                    load_schemas(path)
+                self.assertIn(str(path), str(ctx.exception))
             path.unlink()
-            with self.assertLogs("box.brain.profiles", level="WARNING") as logs:
-                self.assertEqual(load_schemas(path), {})
-            self.assertEqual(len(logs.output), 1)
+            with self.assertRaises(RuntimeError) as ctx:
+                load_schemas(path)
+            self.assertIn(str(path), str(ctx.exception))
+
+    def test_broken_schema_file_fails_tools_for_but_not_import(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "tools.json"
+            path.write_text("{", encoding="utf-8")
+            with patch.object(profiles, "TOOLS_PATH", str(path)), patch.object(profiles, "_SCHEMAS", None):
+                with self.assertRaises(RuntimeError):
+                    tools_for("guard")
+                with self.assertRaises(RuntimeError):
+                    profiles._schemas()
+        self.assertTrue(tools_for("guard"))
+
+    def test_hebrew_state_changes_route_to_big(self) -> None:
+        for text in ("תפעיל את המצלמה", "כבה את הכניסה", "הדלק את המצלמה האחורית", "השתק לשעה",
+                     "הפסק את ההתראות", "תגדיר שעות מ-23"):
+            with self.subTest(text=text):
+                self.assertTrue(needs_big(text))
+        for text in ("מה קורה בכניסה עכשיו", "יש מישהו בחצר?"):
+            with self.subTest(text=text):
+                self.assertFalse(needs_big(text))
+
+    def test_english_state_changes_route_to_big(self) -> None:
+        for text in ("turn the camera off", "turn the cameras off until 17:00", "unmute", "shut off the porch",
+                     "shut down alerts", "disarm", "arm the cameras", "snooze", "that was me", "it was us",
+                     "that's me", "was me", "it’s me", "doesn’t work"):
+            with self.subTest(text=text):
+                self.assertTrue(needs_big(text))
+        for text in ("send me a picture of the gate", "what happened today"):
+            with self.subTest(text=text):
+                self.assertFalse(needs_big(text))
 
     def test_schema_loader_skips_bad_entries_and_logs_once(self) -> None:
         good = load_schemas()["reply"]
@@ -141,11 +170,14 @@ class ProfilesTest(unittest.TestCase):
             self.assertIn("\ufffd", prompt)
             self.assertIn("MODE: GUARD", prompt)
 
-    def test_unreadable_prompt_does_not_raise(self) -> None:
+    def test_unreadable_prompt_stops_the_turn(self) -> None:
         with patch.object(profiles, "_read", side_effect=OSError("unreadable")):
-            with self.assertLogs("box.brain.profiles", level="WARNING") as logs:
-                self.assertEqual(system_prompt("guard", 14), "")
-            self.assertEqual(len(logs.output), 1)
+            with self.assertRaises(RuntimeError):
+                system_prompt("guard", 14)
+        with tempfile.TemporaryDirectory() as directory, patch.object(profiles, "PROMPTS_DIR", directory):
+            with self.assertRaises(RuntimeError) as ctx:
+                system_prompt("guard", 14)
+            self.assertIn(directory, str(ctx.exception))
 
 
 if __name__ == "__main__":
