@@ -90,11 +90,11 @@ class EventView(QWidget):
 
     def showEvent(self, event):
         super().showEvent(event)
-        if self.cancelled.is_set() and self.event_id is not None:
+        if (self.cancelled.is_set() or self.recording is None) and self.event_id is not None:
             self.open(self.event_id, self.zone)
 
     def request_event(self):
-        if self.runner.busy or self.cancelled.is_set():
+        if self.runner.busy or self.cancelled.is_set() or self.open_timer.isActive() or not self.isVisible():
             return
         eid = self.event_id
         self.pending = self.generation
@@ -123,7 +123,7 @@ class EventView(QWidget):
         self.load_evidence()
 
     def load_evidence(self):
-        if self.evidence_runner.busy or self.recording is None or self.cancelled.is_set():
+        if self.evidence_runner.busy or self.recording is None or self.cancelled.is_set() or not self.isVisible():
             return
         event, purpose = self.recording, 'training' if self.role == 'labeler' else 'support' if self.role == 'support' else 'review'
         self.evidence_pending = self.generation

@@ -424,3 +424,26 @@ def test_thumbnail_501_is_typed_unsupported():
     backend = client(lambda request: httpx.Response(501))
     with pytest.raises(UnsupportedError):
         backend.media_bytes('/v1/events/101/thumbnail')
+
+
+def test_hidden_event_view_never_requests_evidence(app, widgets):
+    from PySide6.QtTest import QTest
+    from home_guard_project.admin.event_view import EventView
+    backend = DemoBackend()
+    calls = []
+    original = backend.event
+    backend.event = lambda eid: calls.append(eid) or original(eid)
+    view = EventView(backend); widgets.append(view)
+    view.open(101)
+    QTest.qWait(220)
+    assert calls == []
+
+
+def test_stale_detail_completion_does_not_bypass_open_debounce(app, widgets):
+    from home_guard_project.admin.event_view import EventView
+    backend = DemoBackend()
+    view = EventView(backend); widgets.append(view); view.show()
+    view.open(102)
+    view.pending = 0
+    view.loaded(backend.event(101), None)
+    assert not view.runner.busy
