@@ -1,0 +1,498 @@
+{
+  "id": 6,
+  "site": "cohen_ramatgan",
+  "customer_id": 1,
+  "customer_name": "Dana Cohen",
+  "camera": "driveway",
+  "kind": "alert",
+  "start_utc": "2026-10-02T10:10:28.341443Z",
+  "end_utc": "2026-10-02T10:10:32.341443Z",
+  "summary": "A dark SUV reverses out of the driveway and drives off down the street.",
+  "label": "normal",
+  "alert_command": "[send_message]",
+  "detected": [
+    "car"
+  ],
+  "owner_verdicts": [],
+  "completeness": {
+    "video": true,
+    "boxes": "sampled",
+    "ai": "real",
+    "owner_feedback": false,
+    "expired": false,
+    "copies": [
+      "production",
+      "training"
+    ]
+  },
+  "reviewed": true,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/6/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": "2026-10-02 13:10:28",
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": {
+    "channel": "telegram",
+    "sent": true,
+    "detail": {
+      "channel": "telegram",
+      "telegram": {
+        "command": "[send_message]",
+        "telegram": {
+          "sent": true,
+          "results": [
+            {
+              "ok": true,
+              "chat_id": "-100100",
+              "message_id": 632
+            }
+          ]
+        }
+      }
+    }
+  },
+  "ai_runs": [
+    {
+      "id": 6,
+      "purpose": "guard",
+      "status": "real",
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"driveway\", local time 13:10:31.\n\nWrite \"summary\": what happ",
+      "parsed": {
+        "label": "normal",
+        "people": 0,
+        "summary": "A dark SUV reverses out of the driveway and drives off down the street.",
+        "vehicle_moving": true
+      },
+      "raw_text_artifact_id": 143,
+      "input_frame_artifact_ids": [
+        167,
+        168,
+        169,
+        170,
+        171
+      ]
+    }
+  ],
+  "feedback": [],
+  "artifacts": [
+    {
+      "id": 3,
+      "role": "original_video",
+      "s3_key": "production_cohen_ramatgan/clips/driveway/2026-10-02/driveway_1790935831_alert.mp4",
+      "bytes": 3535,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 31,
+      "role": "meta",
+      "s3_key": "production_cohen_ramatgan/meta/driveway/2026-10-02/driveway_1790935831_alert.meta.json",
+      "bytes": 921,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 52,
+      "role": "original_video",
+      "s3_key": "dataset_cohen_ramatgan/clips/driveway/2026-10-02/driveway_1790935831_alert.mp4",
+      "bytes": 3535,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 98,
+      "role": "meta",
+      "s3_key": "dataset_cohen_ramatgan/meta/driveway/2026-10-02/driveway_1790935831_alert.meta.json",
+      "bytes": 3546,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 143,
+      "role": "raw_answer",
+      "s3_key": "dataset_cohen_ramatgan/responses/driveway/2026-10-02/driveway_1790935831_alert.model_raw.txt",
+      "bytes": 142,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 167,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/driveway/2026-10-02/driveway_1790935831_alert_f0.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 168,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/driveway/2026-10-02/driveway_1790935831_alert_f1.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 169,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/driveway/2026-10-02/driveway_1790935831_alert_f2.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 170,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/driveway/2026-10-02/driveway_1790935831_alert_f3.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 171,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/driveway/2026-10-02/driveway_1790935831_alert_f4.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 257,
+      "role": "yolo_image",
+      "s3_key": "dataset_cohen_ramatgan/yolo/images/driveway/2026-10-02/driveway_1790935831_alert_f0000.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 258,
+      "role": "yolo_image",
+      "s3_key": "dataset_cohen_ramatgan/yolo/images/driveway/2026-10-02/driveway_1790935831_alert_f0003.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 259,
+      "role": "yolo_image",
+      "s3_key": "dataset_cohen_ramatgan/yolo/images/driveway/2026-10-02/driveway_1790935831_alert_f0006.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 260,
+      "role": "yolo_image",
+      "s3_key": "dataset_cohen_ramatgan/yolo/images/driveway/2026-10-02/driveway_1790935831_alert_f0009.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 261,
+      "role": "yolo_image",
+      "s3_key": "dataset_cohen_ramatgan/yolo/images/driveway/2026-10-02/driveway_1790935831_alert_f0012.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 262,
+      "role": "yolo_image",
+      "s3_key": "dataset_cohen_ramatgan/yolo/images/driveway/2026-10-02/driveway_1790935831_alert_f0015.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 263,
+      "role": "yolo_image",
+      "s3_key": "dataset_cohen_ramatgan/yolo/images/driveway/2026-10-02/driveway_1790935831_alert_f0018.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 369,
+      "role": "yolo_label",
+      "s3_key": "dataset_cohen_ramatgan/yolo/labels/driveway/2026-10-02/driveway_1790935831_alert_f0000.txt",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 370,
+      "role": "yolo_label",
+      "s3_key": "dataset_cohen_ramatgan/yolo/labels/driveway/2026-10-02/driveway_1790935831_alert_f0003.txt",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 371,
+      "role": "yolo_label",
+      "s3_key": "dataset_cohen_ramatgan/yolo/labels/driveway/2026-10-02/driveway_1790935831_alert_f0006.txt",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 372,
+      "role": "yolo_label",
+      "s3_key": "dataset_cohen_ramatgan/yolo/labels/driveway/2026-10-02/driveway_1790935831_alert_f0009.txt",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 373,
+      "role": "yolo_label",
+      "s3_key": "dataset_cohen_ramatgan/yolo/labels/driveway/2026-10-02/driveway_1790935831_alert_f0012.txt",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 374,
+      "role": "yolo_label",
+      "s3_key": "dataset_cohen_ramatgan/yolo/labels/driveway/2026-10-02/driveway_1790935831_alert_f0015.txt",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 375,
+      "role": "yolo_label",
+      "s3_key": "dataset_cohen_ramatgan/yolo/labels/driveway/2026-10-02/driveway_1790935831_alert_f0018.txt",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1466,
+      "role": "thumbnail",
+      "s3_key": "admin_cache/thumbs/6.jpg",
+      "bytes": 3447,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "src_etag": "d8374b2335d238d328c048618352cb90",
+        "needs_rendition": false
+      }
+    },
+    {
+      "id": 1467,
+      "role": "filmstrip",
+      "s3_key": "admin_cache/filmstrips/6.jpg",
+      "bytes": 3045,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "count": 4,
+        "tile_h": 90,
+        "tile_w": 160,
+        "src_etag": "d8374b2335d238d328c048618352cb90"
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "alert",
+    "yolo": {
+      "class_counts": {
+        "car": 1
+      },
+      "class_max_conf": {
+        "car": 0.764
+      },
+      "trigger_classes": [
+        "car"
+      ],
+      "trigger_detected": true
+    },
+    "alert": {
+      "label": "normal",
+      "muted": false,
+      "labels": [
+        "car"
+      ],
+      "summary": "A dark SUV reverses out of the driveway and drives off down the street.",
+      "alert_reason": "",
+      "alert_command": "[send_message]"
+    },
+    "codec": "h264",
+    "buffer": {
+      "store_fps": 5.0,
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "teacher": {
+      "model": "gpt-4o",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"driveway\", local time 13:10:31.\n\nWrite \"summary\": what happ",
+      "raw_path": "responses\\driveway\\2026-10-02\\driveway_1790935831_alert.model_raw.txt",
+      "temperature": 0,
+      "input_frames": [
+        "vlm_crops\\driveway\\2026-10-02\\driveway_1790935831_alert_f0.jpg",
+        "vlm_crops\\driveway\\2026-10-02\\driveway_1790935831_alert_f1.jpg",
+        "vlm_crops\\driveway\\2026-10-02\\driveway_1790935831_alert_f2.jpg",
+        "vlm_crops\\driveway\\2026-10-02\\driveway_1790935831_alert_f3.jpg",
+        "vlm_crops\\driveway\\2026-10-02\\driveway_1790935831_alert_f4.jpg"
+      ],
+      "prompt_version": "2026-10-03.tagged-rules-label"
+    },
+    "clip_path": "clips\\driveway\\2026-10-02\\driveway_1790935831_alert.mp4",
+    "camera_name": "driveway",
+    "clip_end_ts": 1790935832.6909056,
+    "yolo_export": {
+      "conf": 0.25,
+      "enabled": true,
+      "export_fps": 1.7,
+      "images_root": "yolo\\images",
+      "labels_root": "yolo\\labels",
+      "exported_frames": [
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\driveway\\2026-10-02\\driveway_1790935831_alert_f0000.jpg",
+          "label_path": "yolo\\labels\\driveway\\2026-10-02\\driveway_1790935831_alert_f0000.txt",
+          "frame_index": 0,
+          "approx_time_offset_sec": 0.0
+        },
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\driveway\\2026-10-02\\driveway_1790935831_alert_f0003.jpg",
+          "label_path": "yolo\\labels\\driveway\\2026-10-02\\driveway_1790935831_alert_f0003.txt",
+          "frame_index": 3,
+          "approx_time_offset_sec": 0.6
+        },
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\driveway\\2026-10-02\\driveway_1790935831_alert_f0006.jpg",
+          "label_path": "yolo\\labels\\driveway\\2026-10-02\\driveway_1790935831_alert_f0006.txt",
+          "frame_index": 6,
+          "approx_time_offset_sec": 1.2
+        },
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\driveway\\2026-10-02\\driveway_1790935831_alert_f0009.jpg",
+          "label_path": "yolo\\labels\\driveway\\2026-10-02\\driveway_1790935831_alert_f0009.txt",
+          "frame_index": 9,
+          "approx_time_offset_sec": 1.8
+        },
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\driveway\\2026-10-02\\driveway_1790935831_alert_f0012.jpg",
+          "label_path": "yolo\\labels\\driveway\\2026-10-02\\driveway_1790935831_alert_f0012.txt",
+          "frame_index": 12,
+          "approx_time_offset_sec": 2.4
+        },
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\driveway\\2026-10-02\\driveway_1790935831_alert_f0015.jpg",
+          "label_path": "yolo\\labels\\driveway\\2026-10-02\\driveway_1790935831_alert_f0015.txt",
+          "frame_index": 15,
+          "approx_time_offset_sec": 3.0
+        },
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\driveway\\2026-10-02\\driveway_1790935831_alert_f0018.jpg",
+          "label_path": "yolo\\labels\\driveway\\2026-10-02\\driveway_1790935831_alert_f0018.txt",
+          "frame_index": 18,
+          "approx_time_offset_sec": 3.6
+        }
+      ]
+    },
+    "duration_sec": 4.0,
+    "clip_start_ts": 1790935828.6909056,
+    "fps_estimated": 5.0,
+    "clip_end_local": "2026-10-02 13:10:32",
+    "frames_written": 20,
+    "model_response": {
+      "label": "normal",
+      "people": 0,
+      "summary": "A dark SUV reverses out of the driveway and drives off down the street.",
+      "vehicle_moving": true
+    },
+    "clip_start_local": "2026-10-02 13:10:28"
+  }
+}

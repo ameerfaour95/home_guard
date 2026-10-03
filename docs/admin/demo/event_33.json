@@ -1,0 +1,244 @@
+{
+  "id": 33,
+  "site": "cohen_ramatgan",
+  "customer_id": 1,
+  "customer_name": "Dana Cohen",
+  "camera": "front_door",
+  "kind": "alert",
+  "start_utc": "2026-10-03T07:21:47.411087Z",
+  "end_utc": "2026-10-03T07:21:51.411087Z",
+  "summary": "Two people in dark jackets stand at the front door talking while one of them knocks twice.",
+  "label": "normal",
+  "alert_command": "[send_message]",
+  "detected": [
+    "person"
+  ],
+  "owner_verdicts": [],
+  "completeness": {
+    "video": true,
+    "boxes": "none",
+    "ai": "real",
+    "owner_feedback": false,
+    "expired": false,
+    "copies": [
+      "training"
+    ]
+  },
+  "reviewed": false,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/33/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": "2026-10-03 10:21:47",
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 33,
+      "purpose": "guard",
+      "status": "real",
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"front_door\", local time 10:21:50.\n\nWrite \"summary\": what happ",
+      "parsed": {
+        "label": "normal",
+        "people": 1,
+        "summary": "Two people in dark jackets stand at the front door talking while one of them knocks twice.",
+        "vehicle_moving": false
+      },
+      "raw_text_artifact_id": 151,
+      "input_frame_artifact_ids": [
+        217,
+        218,
+        219,
+        220,
+        221
+      ]
+    }
+  ],
+  "feedback": [],
+  "artifacts": [
+    {
+      "id": 76,
+      "role": "original_video",
+      "s3_key": "dataset_cohen_ramatgan/clips/front_door/2026-10-03/front_door_1791012110_alert.mp4",
+      "bytes": 3865,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 124,
+      "role": "meta",
+      "s3_key": "dataset_cohen_ramatgan/meta/front_door/2026-10-03/front_door_1791012110_alert.meta.json",
+      "bytes": 1759,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 151,
+      "role": "raw_answer",
+      "s3_key": "dataset_cohen_ramatgan/responses/front_door/2026-10-03/front_door_1791012110_alert.model_raw.txt",
+      "bytes": 162,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 217,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/front_door/2026-10-03/front_door_1791012110_alert_f0.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 218,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/front_door/2026-10-03/front_door_1791012110_alert_f1.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 219,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/front_door/2026-10-03/front_door_1791012110_alert_f2.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 220,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/front_door/2026-10-03/front_door_1791012110_alert_f3.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 221,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/front_door/2026-10-03/front_door_1791012110_alert_f4.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1366,
+      "role": "thumbnail",
+      "s3_key": "admin_cache/thumbs/33.jpg",
+      "bytes": 3539,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "src_etag": "233919565112d7348c91b9fd5f8e57cc",
+        "needs_rendition": false
+      }
+    },
+    {
+      "id": 1367,
+      "role": "filmstrip",
+      "s3_key": "admin_cache/filmstrips/33.jpg",
+      "bytes": 3175,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "count": 4,
+        "tile_h": 90,
+        "tile_w": 160,
+        "src_etag": "233919565112d7348c91b9fd5f8e57cc"
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "alert",
+    "yolo": {
+      "class_counts": {
+        "person": 1
+      },
+      "class_max_conf": {
+        "person": 0.746
+      },
+      "trigger_classes": [
+        "person"
+      ],
+      "trigger_detected": true
+    },
+    "alert": {
+      "label": "normal",
+      "muted": false,
+      "labels": [
+        "person"
+      ],
+      "summary": "Two people in dark jackets stand at the front door talking while one of them knocks twice.",
+      "alert_reason": "",
+      "alert_command": "[send_message]"
+    },
+    "codec": "h264",
+    "buffer": {
+      "store_fps": 5.0,
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "teacher": {
+      "model": "gpt-4o",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"front_door\", local time 10:21:50.\n\nWrite \"summary\": what happ",
+      "raw_path": "responses\\front_door\\2026-10-03\\front_door_1791012110_alert.model_raw.txt",
+      "temperature": 0,
+      "input_frames": [
+        "vlm_crops\\front_door\\2026-10-03\\front_door_1791012110_alert_f0.jpg",
+        "vlm_crops\\front_door\\2026-10-03\\front_door_1791012110_alert_f1.jpg",
+        "vlm_crops\\front_door\\2026-10-03\\front_door_1791012110_alert_f2.jpg",
+        "vlm_crops\\front_door\\2026-10-03\\front_door_1791012110_alert_f3.jpg",
+        "vlm_crops\\front_door\\2026-10-03\\front_door_1791012110_alert_f4.jpg"
+      ],
+      "prompt_version": "2026-10-03.tagged-rules-label"
+    },
+    "clip_path": "clips\\front_door\\2026-10-03\\front_door_1791012110_alert.mp4",
+    "camera_name": "front_door",
+    "clip_end_ts": 1791012111.411087,
+    "duration_sec": 4.0,
+    "clip_start_ts": 1791012107.411087,
+    "fps_estimated": 5.0,
+    "clip_end_local": "2026-10-03 10:21:51",
+    "frames_written": 20,
+    "model_response": {
+      "label": "normal",
+      "people": 1,
+      "summary": "Two people in dark jackets stand at the front door talking while one of them knocks twice.",
+      "vehicle_moving": false
+    },
+    "clip_start_local": "2026-10-03 10:21:47"
+  }
+}

@@ -1,0 +1,108 @@
+{
+  "provenance": "sampled",
+  "model": "yolo (collection export)",
+  "frames": [
+    {
+      "frame_index": 0,
+      "t_sec": 0.0,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 2,
+          "label": "car",
+          "conf": null,
+          "xyxy": [
+            0.546087,
+            0.55,
+            0.8860870000000001,
+            0.77
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 3,
+      "t_sec": 0.6,
+      "status": "not_run",
+      "boxes": []
+    },
+    {
+      "frame_index": 6,
+      "t_sec": 1.2,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 2,
+          "label": "car",
+          "conf": null,
+          "xyxy": [
+            0.427238,
+            0.55,
+            0.7672380000000001,
+            0.77
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 9,
+      "t_sec": 1.8,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 2,
+          "label": "car",
+          "conf": null,
+          "xyxy": [
+            0.367814,
+            0.55,
+            0.707814,
+            0.77
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 12,
+      "t_sec": 2.4,
+      "status": "ran_empty",
+      "boxes": []
+    },
+    {
+      "frame_index": 15,
+      "t_sec": 3.0,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 2,
+          "label": "car",
+          "conf": null,
+          "xyxy": [
+            0.248964,
+            0.55,
+            0.588964,
+            0.77
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 18,
+      "t_sec": 3.6,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 2,
+          "label": "car",
+          "conf": null,
+          "xyxy": [
+            0.18954000000000001,
+            0.55,
+            0.52954,
+            0.77
+          ]
+        }
+      ]
+    }
+  ]
+}

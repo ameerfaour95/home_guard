@@ -1,0 +1,120 @@
+{
+  "provenance": "sampled",
+  "model": "yolo (collection export)",
+  "frames": [
+    {
+      "frame_index": 0,
+      "t_sec": 0.0,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 16,
+          "label": "dog",
+          "conf": null,
+          "xyxy": [
+            0.540753,
+            0.73,
+            0.6607529999999999,
+            0.8300000000000001
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 3,
+      "t_sec": 0.6,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 16,
+          "label": "dog",
+          "conf": null,
+          "xyxy": [
+            0.49499299999999996,
+            0.73,
+            0.6149929999999999,
+            0.8300000000000001
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 6,
+      "t_sec": 1.2,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 16,
+          "label": "dog",
+          "conf": null,
+          "xyxy": [
+            0.44923399999999997,
+            0.73,
+            0.569234,
+            0.8300000000000001
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 9,
+      "t_sec": 1.8,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 16,
+          "label": "dog",
+          "conf": null,
+          "xyxy": [
+            0.403474,
+            0.73,
+            0.523474,
+            0.8300000000000001
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 12,
+      "t_sec": 2.4,
+      "status": "ran_empty",
+      "boxes": []
+    },
+    {
+      "frame_index": 15,
+      "t_sec": 3.0,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 16,
+          "label": "dog",
+          "conf": null,
+          "xyxy": [
+            0.311956,
+            0.73,
+            0.431956,
+            0.8300000000000001
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 18,
+      "t_sec": 3.6,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 16,
+          "label": "dog",
+          "conf": null,
+          "xyxy": [
+            0.266196,
+            0.73,
+            0.386196,
+            0.8300000000000001
+          ]
+        }
+      ]
+    }
+  ]
+}

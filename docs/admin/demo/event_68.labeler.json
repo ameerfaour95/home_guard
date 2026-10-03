@@ -1,0 +1,367 @@
+{
+  "id": 68,
+  "site": "customer-3e7e2d",
+  "customer_id": 0,
+  "customer_name": "customer-3e7e2d",
+  "camera": "cam-050ee8",
+  "kind": "false_positive",
+  "start_utc": "2026-10-02T19:08:06.557028Z",
+  "end_utc": "2026-10-02T19:08:10.557028Z",
+  "summary": "Tree branches sway in the wind and cast moving shadows; nothing else is visible.",
+  "label": "normal",
+  "alert_command": "[none]",
+  "detected": [
+    "person"
+  ],
+  "owner_verdicts": [],
+  "completeness": {
+    "video": true,
+    "boxes": "sampled",
+    "ai": "real",
+    "owner_feedback": false,
+    "expired": false,
+    "copies": [
+      "training"
+    ]
+  },
+  "reviewed": false,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/68/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": null,
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 68,
+      "purpose": "guard",
+      "status": "real",
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "prompt": null,
+      "parsed": {
+        "label": "normal",
+        "people": 1,
+        "summary": "Tree branches sway in the wind and cast moving shadows; nothing else is visible.",
+        "vehicle_moving": false
+      },
+      "raw_text_artifact_id": 581,
+      "input_frame_artifact_ids": [
+        613,
+        614,
+        615,
+        616,
+        617
+      ]
+    }
+  ],
+  "feedback": [],
+  "artifacts": [
+    {
+      "id": 525,
+      "role": "original_video",
+      "s3_key": "artifact-525",
+      "bytes": 3304,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 559,
+      "role": "meta",
+      "s3_key": "artifact-559",
+      "bytes": 3806,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 581,
+      "role": "raw_answer",
+      "s3_key": "artifact-581",
+      "bytes": 152,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 613,
+      "role": "teacher_frame",
+      "s3_key": "artifact-613",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 614,
+      "role": "teacher_frame",
+      "s3_key": "artifact-614",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 615,
+      "role": "teacher_frame",
+      "s3_key": "artifact-615",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 616,
+      "role": "teacher_frame",
+      "s3_key": "artifact-616",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 617,
+      "role": "teacher_frame",
+      "s3_key": "artifact-617",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 688,
+      "role": "yolo_image",
+      "s3_key": "artifact-688",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 689,
+      "role": "yolo_image",
+      "s3_key": "artifact-689",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 690,
+      "role": "yolo_image",
+      "s3_key": "artifact-690",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 691,
+      "role": "yolo_image",
+      "s3_key": "artifact-691",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 692,
+      "role": "yolo_image",
+      "s3_key": "artifact-692",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 693,
+      "role": "yolo_image",
+      "s3_key": "artifact-693",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 694,
+      "role": "yolo_image",
+      "s3_key": "artifact-694",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 786,
+      "role": "yolo_label",
+      "s3_key": "artifact-786",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 787,
+      "role": "yolo_label",
+      "s3_key": "artifact-787",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 788,
+      "role": "yolo_label",
+      "s3_key": "artifact-788",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 789,
+      "role": "yolo_label",
+      "s3_key": "artifact-789",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 790,
+      "role": "yolo_label",
+      "s3_key": "artifact-790",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 791,
+      "role": "yolo_label",
+      "s3_key": "artifact-791",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 792,
+      "role": "yolo_label",
+      "s3_key": "artifact-792",
+      "bytes": 0,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1392,
+      "role": "thumbnail",
+      "s3_key": "artifact-1392",
+      "bytes": 2783,
+      "available": true,
+      "provenance": "cloud",
+      "detail": null
+    },
+    {
+      "id": 1393,
+      "role": "filmstrip",
+      "s3_key": "artifact-1393",
+      "bytes": 2726,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "tile_w": 160,
+        "tile_h": 90,
+        "count": 4
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "false_positive",
+    "duration_sec": 4.0,
+    "fps_estimated": 5.0,
+    "frames_written": 20,
+    "codec": "h264",
+    "buffer": {
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "yolo": {
+      "class_counts": {
+        "person": 1
+      },
+      "class_max_conf": {
+        "person": 0.771
+      },
+      "trigger_classes": [
+        "person"
+      ]
+    },
+    "model_response": {
+      "label": "normal",
+      "people": 1,
+      "summary": "Tree branches sway in the wind and cast moving shadows; nothing else is visible.",
+      "vehicle_moving": false
+    },
+    "teacher": {
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "temperature": 0
+    }
+  }
+}

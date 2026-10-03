@@ -1,0 +1,125 @@
+{
+  "id": 35,
+  "site": "customer-1fc0de",
+  "customer_id": 0,
+  "customer_name": "customer-1fc0de",
+  "camera": "cam-b42d16",
+  "kind": "alert",
+  "start_utc": "2026-10-03T09:12:46.679606Z",
+  "end_utc": "2026-10-03T09:12:50.679606Z",
+  "summary": "A woman carrying two grocery bags walks up the path and unlocks the cam-b42d16 with a key.",
+  "label": "normal",
+  "alert_command": "[send_message]",
+  "detected": [
+    "person"
+  ],
+  "owner_verdicts": [],
+  "completeness": {
+    "video": true,
+    "boxes": "none",
+    "ai": "none",
+    "owner_feedback": false,
+    "expired": false,
+    "copies": [
+      "production"
+    ]
+  },
+  "reviewed": true,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/35/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": null,
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 35,
+      "purpose": "guard",
+      "status": "none",
+      "model": null,
+      "prompt_version": null,
+      "prompt": null,
+      "parsed": null,
+      "raw_text_artifact_id": null,
+      "input_frame_artifact_ids": []
+    }
+  ],
+  "feedback": [],
+  "artifacts": [
+    {
+      "id": 12,
+      "role": "original_video",
+      "s3_key": "artifact-12",
+      "bytes": 3362,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 40,
+      "role": "meta",
+      "s3_key": "artifact-40",
+      "bytes": 958,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 1360,
+      "role": "thumbnail",
+      "s3_key": "artifact-1360",
+      "bytes": 3699,
+      "available": true,
+      "provenance": "cloud",
+      "detail": null
+    },
+    {
+      "id": 1361,
+      "role": "filmstrip",
+      "s3_key": "artifact-1361",
+      "bytes": 3354,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "tile_w": 160,
+        "tile_h": 90,
+        "count": 4
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "alert",
+    "duration_sec": 4.0,
+    "fps_estimated": 5.0,
+    "frames_written": 20,
+    "codec": "h264",
+    "buffer": {
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "yolo": {
+      "class_counts": {
+        "person": 1
+      },
+      "class_max_conf": {
+        "person": 0.673
+      },
+      "trigger_classes": [
+        "person"
+      ]
+    }
+  }
+}

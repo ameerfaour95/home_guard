@@ -1,0 +1,129 @@
+{
+  "id": 95,
+  "site": "mizrahi_beersheva",
+  "customer_id": 3,
+  "customer_name": "Tamar Mizrahi",
+  "camera": "garage",
+  "kind": "random",
+  "start_utc": "2026-10-01T21:03:18.684173Z",
+  "end_utc": "2026-10-01T21:03:22.684173Z",
+  "summary": "",
+  "label": null,
+  "alert_command": null,
+  "detected": [],
+  "owner_verdicts": [],
+  "completeness": {
+    "video": true,
+    "boxes": "none",
+    "ai": "none",
+    "owner_feedback": false,
+    "expired": false,
+    "copies": [
+      "training"
+    ]
+  },
+  "reviewed": false,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/95/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": "2026-10-02 00:03:18",
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 95,
+      "purpose": "guard",
+      "status": "none",
+      "model": null,
+      "prompt_version": null,
+      "prompt": null,
+      "parsed": null,
+      "raw_text_artifact_id": null,
+      "input_frame_artifact_ids": []
+    }
+  ],
+  "feedback": [],
+  "artifacts": [
+    {
+      "id": 885,
+      "role": "original_video",
+      "s3_key": "dataset_mizrahi_beersheva/clips/garage/2026-10-02/garage_1790888601_random.mp4",
+      "bytes": 2364,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 906,
+      "role": "meta",
+      "s3_key": "dataset_mizrahi_beersheva/meta/garage/2026-10-02/garage_1790888601_random.meta.json",
+      "bytes": 511,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1500,
+      "role": "thumbnail",
+      "s3_key": "admin_cache/thumbs/95.jpg",
+      "bytes": 1831,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "src_etag": "86cf4b98610b0ef67360db350c8c129c",
+        "needs_rendition": false
+      }
+    },
+    {
+      "id": 1501,
+      "role": "filmstrip",
+      "s3_key": "admin_cache/filmstrips/95.jpg",
+      "bytes": 1548,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "count": 4,
+        "tile_h": 90,
+        "tile_w": 160,
+        "src_etag": "86cf4b98610b0ef67360db350c8c129c"
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "random",
+    "yolo": {
+      "class_counts": {},
+      "class_max_conf": {},
+      "trigger_classes": [],
+      "trigger_detected": false
+    },
+    "codec": "h264",
+    "buffer": {
+      "store_fps": 5.0,
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "clip_path": "clips\\garage\\2026-10-02\\garage_1790888601_random.mp4",
+    "camera_name": "garage",
+    "clip_end_ts": 1790888602.6841733,
+    "duration_sec": 4.0,
+    "clip_start_ts": 1790888598.6841733,
+    "fps_estimated": 5.0,
+    "clip_end_local": "2026-10-02 00:03:22",
+    "frames_written": 20,
+    "clip_start_local": "2026-10-02 00:03:18"
+  }
+}

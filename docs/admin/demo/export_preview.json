@@ -1,0 +1,35 @@
+{
+  "included_ids": [
+    1,
+    2,
+    11,
+    19,
+    20,
+    55,
+    57,
+    58,
+    68,
+    76,
+    83
+  ],
+  "excluded": [
+    {
+      "event_id": 87,
+      "reason": "no_training_consent"
+    },
+    {
+      "event_id": 88,
+      "reason": "no_training_consent"
+    }
+  ],
+  "split_counts": {
+    "train": 7,
+    "val": 0,
+    "test": 4
+  },
+  "groups": 4,
+  "warnings": [
+    "Empty split: val",
+    "2 event(s) excluded."
+  ]
+}

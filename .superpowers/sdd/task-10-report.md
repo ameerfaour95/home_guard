@@ -98,3 +98,50 @@ Notes:
   video and images are the labeling material.
 - `ExportPreview.excluded` still lists event ids of non-consenting customers with the reason (ids only, no
   identity; unchanged behaviour).
+
+## Fix round 2 (Codex re-review)
+
+Spec `.superpowers/sdd/fix-10b.md`, review `task-10-codex-rereview.md`. Commit `dceac30`. Design change:
+labelers lose the capabilities that leaked (search, prompt text); redaction stays as defence in depth.
+`schemas.py` and `docs/admin/openapi.json` are unchanged (contract test green; the preview's new labeler note is a
+comment, not docstring, because route docstrings are in the frozen OpenAPI).
+
+All new and changed tests were written first and run against `d6f9ce5` code: 14 failed, 2 passed (the two that
+passed are a positive indexer check and the unchanged media-URL test).
+
+| Probe (re-review) | Test (`tests/cloud/test_labeler_privacy.py` unless noted) | RED on old code | GREEN change |
+|---|---|---|---|
+| `q=walking OR bian` / `walking -bian` total 0 vs 2; `q=tail9c3&cursor=` 200 vs unknown host 400 | `test_labeler_search_is_refused_uniformly` (16 probes incl. OR/negation, identity, unknown words, empty cursor, `with_total`, bad cursor, bad filter; all `(400, {"detail": "Search is not available for this role"})`; admin search still works; `q=""` is 200) | `{'q': 'walking'}` -> 200 | `list_events`: labeler + non-empty `q` -> 400 first; identity early return (`_names_household`) and labeler `search_redacted` query removed |
+| Search decided before any DB access | `test_labeler_search_is_refused_before_any_event_query` (SQL listener: no statement touches events/customers/devices/cameras) | 200 != 400 | same |
+| with_total counted before the cursor was decoded | `test_cursor_and_filter_are_validated_before_any_count_or_lookup` (admin: empty/bad cursor with total, bad filter with site+camera, `MTow` = id 0; no events/customers/devices/cameras statement) | `{'with_total': True, 'cursor': ''}`: count ran first | filter and cursor validated at the top of `list_events`; `event_page` decodes before counting; collection items decode before the collection lookup |
+| `MyBIANHome BIANHome` survive in summary, alert_reason, model_response, prompts, parsed | `test_acronym_and_case_run_spellings_are_redacted` (MyBIANHome, BIANHome, myBIANhome, XMLBian, BIAN2, BIANHOUSE; Bianca/BIANCA/Fabian untouched); `test_acronym_variants_never_reach_a_labeler`; response-wide test LEAKY/REASON now carry the variants and IDENTITY lists `mybianhome`, `bianhome` | `MyBIANHome` unchanged; detail leaked `mybianhome and bianhome` | `redact._START/_END` add boundaries: Upper->Upper+lower (acronym end), upper run (>=2) -> lower, letter<->digit |
+| Prompt text reaches labelers | same detail test + response-wide test (`ai_runs[].prompt is None`, teacher keeps model/prompt_version/temperature only); `test_event_routes.py::test_labeler_sees_pseudonyms_and_no_dispatch` | prompt present | labeler `AiRunOut.prompt=None`; `_LABELER_META.teacher` drops `prompt` |
+| `alert_command="BianHouse"`, `clip_start_local="Daniel Levi"` returned verbatim | `test_injected_enum_and_format_fields_are_not_shown_to_labelers` (DB-injected; valid `[call_owner]`/`suspicious` still shown) | `{'BianHouse'} == {None}` | labeler projection: `redact.alert_command` / `redact.label` (enum or null), `clip_start_local` null |
+| Ingestion accepts those strings | `test_indexer_drops_values_outside_the_enums_and_formats`; `test_indexer_keeps_valid_enums_and_formats` | rows `('BianHouse', 'Daniel Levi', 'Daniel Levi')` | indexer stores `alert_command`/`label` only from their enums, `clip_start_local` only as `YYYY-MM-DD HH:MM[:SS[.f]][Z/offset]` or an import's `<sec>s` |
+| Artifact enumeration: hidden available 403, hidden unavailable 410, missing 404 | `test_hidden_artifacts_are_indistinguishable_from_missing_ones` (non-consented household next to `bian`; available, unavailable, opaque_copy and missing ids, purposes training and support: identical `(404, body)`; media_denied audited with the real reason for the hidden keys; hidden event detail/detections/thumbnail identical 404) | `(26, 'training', 'This customer has not agreed to training use')` | `artifact_access`: for labelers, visibility (`_labeler_hidden_reason`: missing, no household, no consent, meta/feedback/raw_answer/opaque_copy) is decided before availability/consent; refused with the generic `Artifact not found` 404 and audited as `media_denied` (reason in detail, committed) |
+| Export preview lists hidden event under `no_training_consent` | `test_export_preview_drops_hidden_events_silently` (mixed collection preview == preview of the visible events alone; admin still sees `no_training_consent`) | hidden ids in `excluded` | `select_export_items(..., labeler=True)` filters non-consented events in the query |
+| Split bits `1110111111110110` identify `bian` offline | `test_export_split_is_not_an_offline_site_oracle` (one-event collection, 16 names, 0.5/0.5; bits match no unkeyed candidate, still deterministic); `test_assign_splits_is_keyed_and_group_aware`; `test_studio_routes.py` passes `secret=` | observed bits exactly `1110111111110110`; `assign_splits` had no `secret` | `assign_splits(items, name, split, *, secret)`: HMAC-SHA256 under `HMAC(jwt_secret, "home-guard-admin/export-split/v1")` over `name\0site\0day` (separate derivation label from pseudonyms); the preview passes `settings.jwt_secret` |
+
+Changed expectations in existing tests: labeler search tests now expect the uniform 400; labeler meta-artifact access
+and no-consent artifact access are 404 (was 403) in `test_labeler_privacy.py` and
+`test_media_routes.py::test_labeler_needs_training_consent_and_creates_no_notice`.
+
+Full suite (exact command from constraints.md): **286 passed in 119.71s**.
+
+Notes:
+- Collection item add/remove (`POST`/`DELETE /studio/collections/{id}/items`) are still 501 stubs; when Task 13
+  implements them, labelers must get the same 404 for hidden and missing event ids (use `_load_one`-style
+  visibility before existence).
+- The export builder (Task 13) must call `assign_splits(..., secret=settings.jwt_secret)` so the preview and the
+  export agree.
+- `summary_redacted`/`search_redacted` are still filled by the indexer but unused for labelers; the stale-copy
+  finding no longer reaches a labeler. `redact.Identity.mentions` is kept (tested) but no longer used by routes.
+
+
+## Fix round 3 (privacy-pass3.md, fix-10c.md)
+
+- A: `redact._CAMEL` splits identity sources at every case/digit boundary (lower->Upper, UPPER->Upper+lower, letter<->digit), so `OAKRIDGEHome` yields `OAKRIDGE Home`, `OAKRIDGE_Home`, `oakridgehome`, `OAKRIDGE`. Same tokenizer for all sources. Tests: unit variants + ingestion-to-response regression (`test_acronym_display_name_never_reaches_a_labeler`). An all-caps run followed by lower case with no capital (`BIANhome`) has no unambiguous source split; the matcher's boundaries still catch it in text.
+- B: `redact.VERDICTS` / `verdict()`. Indexer: owner_feedback verdicts (meta) and Feedback.verdict outside the set are stored as "unknown" with IndexProblem "invalid verdict"; labelers also see out-of-vocabulary stored values as "unknown" (old rows, no migration). `verdict`, `kind`, `ai` filters (and density `kind`) are validated for every role: 400 before any query.
+- C: density omits cameras without events in the interval for labelers (admin/support keep the zero rows).
+- D: `media._labeler_lookup` is one SELECT (artifact joined to event/device/customer, consent + role predicates in WHERE). Hidden/missing/unavailable/opaque artifacts run the same statements; audit `media_denied` with reason `not_visible`, target `artifact/<id>`. Behavior change: event-less artifacts are no longer reachable by labelers.
+- RED recorded first: 9 new tests failed (acronym x2, verdict ingest, filters, hidden-vs-missing work, density, 3 loop/pool tests); after the changes all pass. Existing hidden-artifact test updated for the uniform audit target.

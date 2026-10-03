@@ -1,0 +1,205 @@
+{
+  "id": 88,
+  "site": "mizrahi_beersheva",
+  "customer_id": 3,
+  "customer_name": "Tamar Mizrahi",
+  "camera": "garage",
+  "kind": "alert",
+  "start_utc": "2026-10-01T14:16:29.654146Z",
+  "end_utc": "2026-10-01T14:16:33.654146Z",
+  "summary": "A person forces the garage side door with a tool while a second person watches the street.",
+  "label": "suspicious",
+  "alert_command": "[call_owner]",
+  "detected": [
+    "person"
+  ],
+  "owner_verdicts": [
+    "true_alert"
+  ],
+  "completeness": {
+    "video": true,
+    "boxes": "none",
+    "ai": "none",
+    "owner_feedback": true,
+    "expired": false,
+    "copies": [
+      "production"
+    ]
+  },
+  "reviewed": false,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/88/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": "2026-10-01 17:16:29",
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "Forced entry attempt at the garage.",
+  "dispatch": {
+    "channel": "telegram",
+    "sent": true,
+    "detail": {
+      "channel": "telegram",
+      "telegram": {
+        "command": "[call_owner]",
+        "telegram": {
+          "sent": true,
+          "results": [
+            {
+              "ok": true,
+              "chat_id": "-100100",
+              "message_id": 93
+            }
+          ]
+        }
+      }
+    }
+  },
+  "ai_runs": [
+    {
+      "id": 88,
+      "purpose": "guard",
+      "status": "none",
+      "model": null,
+      "prompt_version": null,
+      "prompt": null,
+      "parsed": null,
+      "raw_text_artifact_id": null,
+      "input_frame_artifact_ids": []
+    }
+  ],
+  "feedback": [
+    {
+      "id": 21,
+      "verdict": "true_alert",
+      "action": "none",
+      "note": "",
+      "raw_text": "👍",
+      "source": "text",
+      "received_utc": "2026-10-01T14:34:10Z"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": 847,
+      "role": "original_video",
+      "s3_key": "production_mizrahi_beersheva/clips/garage/2026-10-01/garage_1790864192_alert.mp4",
+      "bytes": 3489,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 858,
+      "role": "feedback",
+      "s3_key": "production_mizrahi_beersheva/feedback/garage/2026-10-01/garage_1790864192_alert_1790865250000.feedback.json",
+      "bytes": 425,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 868,
+      "role": "meta",
+      "s3_key": "production_mizrahi_beersheva/meta/garage/2026-10-01/garage_1790864192_alert.meta.json",
+      "bytes": 980,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 1564,
+      "role": "thumbnail",
+      "s3_key": "admin_cache/thumbs/88.jpg",
+      "bytes": 3589,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "src_etag": "0020d0c06473fe73143d8868f7d58d67",
+        "needs_rendition": false
+      }
+    },
+    {
+      "id": 1565,
+      "role": "filmstrip",
+      "s3_key": "admin_cache/filmstrips/88.jpg",
+      "bytes": 3268,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "count": 4,
+        "tile_h": 90,
+        "tile_w": 160,
+        "src_etag": "0020d0c06473fe73143d8868f7d58d67"
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "alert",
+    "yolo": {
+      "class_counts": {
+        "person": 2
+      },
+      "class_max_conf": {
+        "person": 0.836
+      },
+      "trigger_classes": [
+        "person"
+      ],
+      "trigger_detected": true
+    },
+    "alert": {
+      "label": "suspicious",
+      "muted": false,
+      "labels": [
+        "person"
+      ],
+      "summary": "A person forces the garage side door with a tool while a second person watches the street.",
+      "dispatch": {
+        "channel": "telegram",
+        "telegram": {
+          "command": "[call_owner]",
+          "telegram": {
+            "sent": true,
+            "results": [
+              {
+                "ok": true,
+                "chat_id": "-100100",
+                "message_id": 93
+              }
+            ]
+          }
+        }
+      },
+      "alert_reason": "Forced entry attempt at the garage.",
+      "alert_command": "[call_owner]"
+    },
+    "codec": "h264",
+    "buffer": {
+      "store_fps": 5.0,
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "clip_path": "clips\\garage\\2026-10-01\\garage_1790864192_alert.mp4",
+    "camera_name": "garage",
+    "clip_end_ts": 1790864193.6541457,
+    "duration_sec": 4.0,
+    "clip_start_ts": 1790864189.6541457,
+    "fps_estimated": 5.0,
+    "clip_end_local": "2026-10-01 17:16:33",
+    "frames_written": 20,
+    "clip_start_local": "2026-10-01 17:16:29"
+  }
+}

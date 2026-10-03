@@ -1,0 +1,292 @@
+{
+  "id": 45,
+  "site": "cohen_ramatgan",
+  "customer_id": 1,
+  "customer_name": "Dana Cohen",
+  "camera": "garden",
+  "kind": "alert",
+  "start_utc": "2026-10-03T04:04:21.524468Z",
+  "end_utc": "2026-10-03T04:04:25.524468Z",
+  "summary": "A person was detected near the camera.",
+  "label": "normal",
+  "alert_command": "[send_message]",
+  "detected": [
+    "person"
+  ],
+  "owner_verdicts": [
+    "true_alert"
+  ],
+  "completeness": {
+    "video": true,
+    "boxes": "none",
+    "ai": "fallback",
+    "owner_feedback": true,
+    "expired": false,
+    "copies": [
+      "production",
+      "training"
+    ]
+  },
+  "reviewed": false,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/45/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": "2026-10-03 07:04:21",
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": {
+    "channel": "telegram",
+    "sent": true,
+    "detail": {
+      "channel": "telegram",
+      "telegram": {
+        "command": "[send_message]",
+        "telegram": {
+          "sent": true,
+          "results": [
+            {
+              "ok": true,
+              "chat_id": "-100100",
+              "message_id": 265
+            }
+          ]
+        }
+      }
+    }
+  },
+  "ai_runs": [
+    {
+      "id": 45,
+      "purpose": "guard",
+      "status": "fallback",
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"garden\", local time 07:04:24.\n\nWrite \"summary\": what happ",
+      "parsed": {
+        "summary": ""
+      },
+      "raw_text_artifact_id": null,
+      "input_frame_artifact_ids": [
+        242,
+        243,
+        244,
+        245,
+        246
+      ]
+    }
+  ],
+  "feedback": [
+    {
+      "id": 10,
+      "verdict": "true_alert",
+      "action": "none",
+      "note": "",
+      "raw_text": "👍",
+      "source": "text",
+      "received_utc": "2026-10-03T04:08:05Z"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": 15,
+      "role": "original_video",
+      "s3_key": "production_cohen_ramatgan/clips/garden/2026-10-03/garden_1791000264_alert.mp4",
+      "bytes": 3600,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 27,
+      "role": "feedback",
+      "s3_key": "production_cohen_ramatgan/feedback/garden/2026-10-03/garden_1791000264_alert_1791000485000.feedback.json",
+      "bytes": 404,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 43,
+      "role": "meta",
+      "s3_key": "production_cohen_ramatgan/meta/garden/2026-10-03/garden_1791000264_alert.meta.json",
+      "bytes": 894,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 87,
+      "role": "original_video",
+      "s3_key": "dataset_cohen_ramatgan/clips/garden/2026-10-03/garden_1791000264_alert.mp4",
+      "bytes": 3600,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 135,
+      "role": "meta",
+      "s3_key": "dataset_cohen_ramatgan/meta/garden/2026-10-03/garden_1791000264_alert.meta.json",
+      "bytes": 1432,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 242,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/garden/2026-10-03/garden_1791000264_alert_f0.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 243,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/garden/2026-10-03/garden_1791000264_alert_f1.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 244,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/garden/2026-10-03/garden_1791000264_alert_f2.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 245,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/garden/2026-10-03/garden_1791000264_alert_f3.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 246,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/garden/2026-10-03/garden_1791000264_alert_f4.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1378,
+      "role": "thumbnail",
+      "s3_key": "admin_cache/thumbs/45.jpg",
+      "bytes": 3578,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "src_etag": "9a8c8c2d66a4af66bffc72aecab1015d",
+        "needs_rendition": false
+      }
+    },
+    {
+      "id": 1379,
+      "role": "filmstrip",
+      "s3_key": "admin_cache/filmstrips/45.jpg",
+      "bytes": 3174,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "count": 4,
+        "tile_h": 90,
+        "tile_w": 160,
+        "src_etag": "9a8c8c2d66a4af66bffc72aecab1015d"
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "alert",
+    "yolo": {
+      "class_counts": {
+        "person": 1
+      },
+      "class_max_conf": {
+        "person": 0.744
+      },
+      "trigger_classes": [
+        "person"
+      ],
+      "trigger_detected": true
+    },
+    "alert": {
+      "label": "normal",
+      "muted": false,
+      "labels": [
+        "person"
+      ],
+      "summary": "A person was detected near the camera.",
+      "alert_reason": "",
+      "alert_command": "[send_message]"
+    },
+    "codec": "h264",
+    "buffer": {
+      "store_fps": 5.0,
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "teacher": {
+      "model": "gpt-4o",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"garden\", local time 07:04:24.\n\nWrite \"summary\": what happ",
+      "raw_path": null,
+      "temperature": 0,
+      "input_frames": [
+        "vlm_crops\\garden\\2026-10-03\\garden_1791000264_alert_f0.jpg",
+        "vlm_crops\\garden\\2026-10-03\\garden_1791000264_alert_f1.jpg",
+        "vlm_crops\\garden\\2026-10-03\\garden_1791000264_alert_f2.jpg",
+        "vlm_crops\\garden\\2026-10-03\\garden_1791000264_alert_f3.jpg",
+        "vlm_crops\\garden\\2026-10-03\\garden_1791000264_alert_f4.jpg"
+      ],
+      "prompt_version": "2026-10-03.tagged-rules-label"
+    },
+    "clip_path": "clips\\garden\\2026-10-03\\garden_1791000264_alert.mp4",
+    "camera_name": "garden",
+    "clip_end_ts": 1791000265.4136899,
+    "duration_sec": 4.0,
+    "clip_start_ts": 1791000261.4136899,
+    "fps_estimated": 5.0,
+    "clip_end_local": "2026-10-03 07:04:25",
+    "frames_written": 20,
+    "model_response": {
+      "summary": ""
+    },
+    "clip_start_local": "2026-10-03 07:04:21"
+  }
+}

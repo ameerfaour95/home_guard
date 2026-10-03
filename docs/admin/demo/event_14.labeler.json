@@ -1,0 +1,129 @@
+{
+  "id": 14,
+  "site": "customer-1fc0de",
+  "customer_id": 0,
+  "customer_name": "customer-1fc0de",
+  "camera": "cam-0157f7",
+  "kind": "alert",
+  "start_utc": "2026-10-03T06:38:38.320153Z",
+  "end_utc": "2026-10-03T06:38:42.320153Z",
+  "summary": "A delivery van stops at the end of the cam-0157f7 and the driver walks up with a parcel.",
+  "label": "normal",
+  "alert_command": "[send_message]",
+  "detected": [
+    "truck",
+    "person"
+  ],
+  "owner_verdicts": [],
+  "completeness": {
+    "video": true,
+    "boxes": "none",
+    "ai": "none",
+    "owner_feedback": false,
+    "expired": false,
+    "copies": [
+      "production"
+    ]
+  },
+  "reviewed": false,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/14/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": null,
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 14,
+      "purpose": "guard",
+      "status": "none",
+      "model": null,
+      "prompt_version": null,
+      "prompt": null,
+      "parsed": null,
+      "raw_text_artifact_id": null,
+      "input_frame_artifact_ids": []
+    }
+  ],
+  "feedback": [],
+  "artifacts": [
+    {
+      "id": 7,
+      "role": "original_video",
+      "s3_key": "artifact-7",
+      "bytes": 4131,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 35,
+      "role": "meta",
+      "s3_key": "artifact-35",
+      "bytes": 994,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 1370,
+      "role": "thumbnail",
+      "s3_key": "artifact-1370",
+      "bytes": 4184,
+      "available": true,
+      "provenance": "cloud",
+      "detail": null
+    },
+    {
+      "id": 1371,
+      "role": "filmstrip",
+      "s3_key": "artifact-1371",
+      "bytes": 3753,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "tile_w": 160,
+        "tile_h": 90,
+        "count": 4
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "alert",
+    "duration_sec": 4.0,
+    "fps_estimated": 5.0,
+    "frames_written": 20,
+    "codec": "h264",
+    "buffer": {
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "yolo": {
+      "class_counts": {
+        "truck": 1,
+        "person": 1
+      },
+      "class_max_conf": {
+        "truck": 0.519,
+        "person": 0.429
+      },
+      "trigger_classes": [
+        "person",
+        "truck"
+      ]
+    }
+  }
+}

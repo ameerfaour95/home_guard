@@ -1,0 +1,68 @@
+{
+  "name": "Tamar Mizrahi",
+  "timezone": "Asia/Jerusalem",
+  "consent_live": false,
+  "consent_recordings": true,
+  "consent_training": false,
+  "notes": "Two properties: the family house in Beer Sheva and a holiday flat in Eilat. No training consent.",
+  "id": 3,
+  "devices": [
+    {
+      "device_id": "76b32708-d2ce-5118-9e16-2c15bc450234",
+      "site": "mizrahi_eilat",
+      "customer_id": 3,
+      "customer_name": "Tamar Mizrahi",
+      "verdict": "offline",
+      "reasons": [
+        {
+          "code": "heartbeat_old",
+          "message": "Last heard 33 h ago",
+          "severity": "offline"
+        },
+        {
+          "code": "camera_quiet",
+          "message": "No clip for 39 h: Front door",
+          "severity": "warning"
+        }
+      ],
+      "last_seen_utc": "2026-10-02T02:30:00Z",
+      "mode": "inference",
+      "host": "hg-box-eilat",
+      "cameras_total": 1,
+      "cameras_stale": 1,
+      "disk_free_gb": 211.0,
+      "collector_running": true,
+      "stopped": false,
+      "newest_clip_utc": "2026-10-01T20:41:13Z",
+      "events_24h": 0,
+      "alerts_24h": 0,
+      "false_alarms_7d": 0
+    },
+    {
+      "device_id": "0a5823a6-8e52-568d-802e-b19165904dc2",
+      "site": "mizrahi_beersheva",
+      "customer_id": 3,
+      "customer_name": "Tamar Mizrahi",
+      "verdict": "critical",
+      "reasons": [
+        {
+          "code": "engine_down",
+          "message": "Collector is not running",
+          "severity": "critical"
+        }
+      ],
+      "last_seen_utc": "2026-10-03T11:48:00Z",
+      "mode": "inference",
+      "host": "hg-box-beersheva",
+      "cameras_total": 1,
+      "cameras_stale": 0,
+      "disk_free_gb": 118.4,
+      "collector_running": false,
+      "stopped": false,
+      "newest_clip_utc": "2026-10-03T03:10:04Z",
+      "events_24h": 10,
+      "alerts_24h": 4,
+      "false_alarms_7d": 2
+    }
+  ]
+}

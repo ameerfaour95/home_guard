@@ -1,0 +1,125 @@
+{
+  "id": 77,
+  "site": "customer-3e7e2d",
+  "customer_id": 0,
+  "customer_name": "customer-3e7e2d",
+  "camera": "cam-837a19",
+  "kind": "paused",
+  "start_utc": "2026-10-01T19:36:26.397762Z",
+  "end_utc": "2026-10-01T19:36:30.397762Z",
+  "summary": "",
+  "label": null,
+  "alert_command": "[none]",
+  "detected": [
+    "car"
+  ],
+  "owner_verdicts": [],
+  "completeness": {
+    "video": true,
+    "boxes": "none",
+    "ai": "none",
+    "owner_feedback": false,
+    "expired": false,
+    "copies": [
+      "training"
+    ]
+  },
+  "reviewed": false,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/77/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": null,
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "alerts paused by the owner",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 77,
+      "purpose": "guard",
+      "status": "none",
+      "model": null,
+      "prompt_version": null,
+      "prompt": null,
+      "parsed": null,
+      "raw_text_artifact_id": null,
+      "input_frame_artifact_ids": []
+    }
+  ],
+  "feedback": [],
+  "artifacts": [
+    {
+      "id": 533,
+      "role": "original_video",
+      "s3_key": "artifact-533",
+      "bytes": 3294,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 568,
+      "role": "meta",
+      "s3_key": "artifact-568",
+      "bytes": 693,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1506,
+      "role": "thumbnail",
+      "s3_key": "artifact-1506",
+      "bytes": 2911,
+      "available": true,
+      "provenance": "cloud",
+      "detail": null
+    },
+    {
+      "id": 1507,
+      "role": "filmstrip",
+      "s3_key": "artifact-1507",
+      "bytes": 2606,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "tile_w": 160,
+        "tile_h": 90,
+        "count": 4
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "paused",
+    "duration_sec": 4.0,
+    "fps_estimated": 5.0,
+    "frames_written": 20,
+    "codec": "h264",
+    "buffer": {
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "yolo": {
+      "class_counts": {
+        "car": 1
+      },
+      "class_max_conf": {
+        "car": 0.734
+      },
+      "trigger_classes": [
+        "car"
+      ]
+    }
+  }
+}

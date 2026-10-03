@@ -1,0 +1,309 @@
+{
+  "id": 55,
+  "site": "levi_haifa",
+  "customer_id": 2,
+  "customer_name": "Yossi Levi",
+  "camera": "main_entrance",
+  "kind": "alert",
+  "start_utc": "2026-10-01T20:32:44.364223Z",
+  "end_utc": "2026-10-01T20:32:48.364223Z",
+  "summary": "A man pushing a stroller waits at the entrance door until a neighbour holds it open.",
+  "label": "normal",
+  "alert_command": "[send_message]",
+  "detected": [
+    "person"
+  ],
+  "owner_verdicts": [
+    "false_alarm"
+  ],
+  "completeness": {
+    "video": true,
+    "boxes": "none",
+    "ai": "real",
+    "owner_feedback": true,
+    "expired": false,
+    "copies": [
+      "production",
+      "training"
+    ]
+  },
+  "reviewed": false,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/55/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": "2026-10-01 23:32:44",
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": {
+    "channel": "telegram",
+    "sent": true,
+    "detail": {
+      "channel": "telegram",
+      "telegram": {
+        "command": "[send_message]",
+        "telegram": {
+          "sent": true,
+          "results": [
+            {
+              "ok": true,
+              "chat_id": "-100100",
+              "message_id": 168
+            }
+          ]
+        }
+      }
+    }
+  },
+  "ai_runs": [
+    {
+      "id": 55,
+      "purpose": "guard",
+      "status": "real",
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"main_entrance\", local time 23:32:47.\n\nWrite \"summary\": what happ",
+      "parsed": {
+        "label": "normal",
+        "people": 1,
+        "summary": "A man pushing a stroller waits at the entrance door until a neighbour holds it open.",
+        "vehicle_moving": false
+      },
+      "raw_text_artifact_id": 577,
+      "input_frame_artifact_ids": [
+        588,
+        589,
+        590,
+        591,
+        592
+      ]
+    }
+  ],
+  "feedback": [
+    {
+      "id": 12,
+      "verdict": "false_alarm",
+      "action": "none",
+      "note": "Just the neighbour.",
+      "raw_text": "Just the neighbour.",
+      "source": "text",
+      "received_utc": "2026-10-01T20:56:50Z"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": 475,
+      "role": "original_video",
+      "s3_key": "production_levi_haifa/clips/main_entrance/2026-10-01/main_entrance_1790886767_alert.mp4",
+      "bytes": 3219,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 486,
+      "role": "feedback",
+      "s3_key": "production_levi_haifa/feedback/main_entrance/2026-10-01/main_entrance_1790886767_alert_1790888210000.feedback.json",
+      "bytes": 466,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 495,
+      "role": "meta",
+      "s3_key": "production_levi_haifa/meta/main_entrance/2026-10-01/main_entrance_1790886767_alert.meta.json",
+      "bytes": 961,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 512,
+      "role": "original_video",
+      "s3_key": "dataset_levi_haifa/clips/main_entrance/2026-10-01/main_entrance_1790886767_alert.mp4",
+      "bytes": 3219,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 546,
+      "role": "meta",
+      "s3_key": "dataset_levi_haifa/meta/main_entrance/2026-10-01/main_entrance_1790886767_alert.meta.json",
+      "bytes": 1797,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 577,
+      "role": "raw_answer",
+      "s3_key": "dataset_levi_haifa/responses/main_entrance/2026-10-01/main_entrance_1790886767_alert.model_raw.txt",
+      "bytes": 156,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 588,
+      "role": "teacher_frame",
+      "s3_key": "dataset_levi_haifa/vlm_crops/main_entrance/2026-10-01/main_entrance_1790886767_alert_f0.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 589,
+      "role": "teacher_frame",
+      "s3_key": "dataset_levi_haifa/vlm_crops/main_entrance/2026-10-01/main_entrance_1790886767_alert_f1.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 590,
+      "role": "teacher_frame",
+      "s3_key": "dataset_levi_haifa/vlm_crops/main_entrance/2026-10-01/main_entrance_1790886767_alert_f2.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 591,
+      "role": "teacher_frame",
+      "s3_key": "dataset_levi_haifa/vlm_crops/main_entrance/2026-10-01/main_entrance_1790886767_alert_f3.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 592,
+      "role": "teacher_frame",
+      "s3_key": "dataset_levi_haifa/vlm_crops/main_entrance/2026-10-01/main_entrance_1790886767_alert_f4.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1504,
+      "role": "thumbnail",
+      "s3_key": "admin_cache/thumbs/55.jpg",
+      "bytes": 2754,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "src_etag": "3d5f8531118ca40316e546cd952bee38",
+        "needs_rendition": false
+      }
+    },
+    {
+      "id": 1505,
+      "role": "filmstrip",
+      "s3_key": "admin_cache/filmstrips/55.jpg",
+      "bytes": 2737,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "count": 4,
+        "tile_h": 90,
+        "tile_w": 160,
+        "src_etag": "3d5f8531118ca40316e546cd952bee38"
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "alert",
+    "yolo": {
+      "class_counts": {
+        "person": 1
+      },
+      "class_max_conf": {
+        "person": 0.552
+      },
+      "trigger_classes": [
+        "person"
+      ],
+      "trigger_detected": true
+    },
+    "alert": {
+      "label": "normal",
+      "muted": false,
+      "labels": [
+        "person"
+      ],
+      "summary": "A man pushing a stroller waits at the entrance door until a neighbour holds it open.",
+      "alert_reason": "",
+      "alert_command": "[send_message]"
+    },
+    "codec": "h264",
+    "buffer": {
+      "store_fps": 5.0,
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "teacher": {
+      "model": "gpt-4o",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"main_entrance\", local time 23:32:47.\n\nWrite \"summary\": what happ",
+      "raw_path": "responses\\main_entrance\\2026-10-01\\main_entrance_1790886767_alert.model_raw.txt",
+      "temperature": 0,
+      "input_frames": [
+        "vlm_crops\\main_entrance\\2026-10-01\\main_entrance_1790886767_alert_f0.jpg",
+        "vlm_crops\\main_entrance\\2026-10-01\\main_entrance_1790886767_alert_f1.jpg",
+        "vlm_crops\\main_entrance\\2026-10-01\\main_entrance_1790886767_alert_f2.jpg",
+        "vlm_crops\\main_entrance\\2026-10-01\\main_entrance_1790886767_alert_f3.jpg",
+        "vlm_crops\\main_entrance\\2026-10-01\\main_entrance_1790886767_alert_f4.jpg"
+      ],
+      "prompt_version": "2026-10-03.tagged-rules-label"
+    },
+    "clip_path": "clips\\main_entrance\\2026-10-01\\main_entrance_1790886767_alert.mp4",
+    "camera_name": "main_entrance",
+    "clip_end_ts": 1790886768.4177823,
+    "duration_sec": 4.0,
+    "clip_start_ts": 1790886764.4177823,
+    "fps_estimated": 5.0,
+    "clip_end_local": "2026-10-01 23:32:48",
+    "frames_written": 20,
+    "model_response": {
+      "label": "normal",
+      "people": 1,
+      "summary": "A man pushing a stroller waits at the entrance door until a neighbour holds it open.",
+      "vehicle_moving": false
+    },
+    "clip_start_local": "2026-10-01 23:32:44"
+  }
+}

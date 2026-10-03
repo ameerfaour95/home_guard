@@ -126,8 +126,6 @@ def test_manage_swallows_only_the_expected_missing_module(monkeypatch):
 
     monkeypatch.setattr(importlib, "import_module", missing("boto3"))
     with pytest.raises(ModuleNotFoundError):
-        manage.cmd_index_once(None)
-    with pytest.raises(ModuleNotFoundError):
         manage.cmd_serve(type("A", (), {"port": 1})())
-    monkeypatch.setattr(importlib, "import_module", missing("home_guard_project.cloud.indexer"))
-    assert manage.cmd_index_once(None) == 0
+    monkeypatch.setattr(importlib, "import_module", missing("home_guard_project.cloud.app"))
+    assert manage.cmd_serve(type("A", (), {"port": 1})()) == 0

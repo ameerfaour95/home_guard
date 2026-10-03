@@ -1,0 +1,198 @@
+{
+  "provenance": "sampled",
+  "model": "yolo (collection export)",
+  "frames": [
+    {
+      "frame_index": 0,
+      "t_sec": 0.0,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 2,
+          "label": "car",
+          "conf": null,
+          "xyxy": [
+            0.19633599999999998,
+            0.55,
+            0.536336,
+            0.77
+          ]
+        },
+        {
+          "cls": 0,
+          "label": "person",
+          "conf": null,
+          "xyxy": [
+            0.311336,
+            0.41000000000000003,
+            0.421336,
+            0.83
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 3,
+      "t_sec": 0.6,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 2,
+          "label": "car",
+          "conf": null,
+          "xyxy": [
+            0.246959,
+            0.55,
+            0.586959,
+            0.77
+          ]
+        },
+        {
+          "cls": 0,
+          "label": "person",
+          "conf": null,
+          "xyxy": [
+            0.36195900000000003,
+            0.41000000000000003,
+            0.471959,
+            0.83
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 6,
+      "t_sec": 1.2,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 2,
+          "label": "car",
+          "conf": null,
+          "xyxy": [
+            0.29758300000000004,
+            0.55,
+            0.637583,
+            0.77
+          ]
+        },
+        {
+          "cls": 0,
+          "label": "person",
+          "conf": null,
+          "xyxy": [
+            0.41258300000000003,
+            0.41000000000000003,
+            0.522583,
+            0.83
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 9,
+      "t_sec": 1.8,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 2,
+          "label": "car",
+          "conf": null,
+          "xyxy": [
+            0.34820699999999993,
+            0.55,
+            0.688207,
+            0.77
+          ]
+        },
+        {
+          "cls": 0,
+          "label": "person",
+          "conf": null,
+          "xyxy": [
+            0.463207,
+            0.41000000000000003,
+            0.573207,
+            0.83
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 12,
+      "t_sec": 2.4,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 2,
+          "label": "car",
+          "conf": null,
+          "xyxy": [
+            0.39883099999999994,
+            0.55,
+            0.738831,
+            0.77
+          ]
+        },
+        {
+          "cls": 0,
+          "label": "person",
+          "conf": null,
+          "xyxy": [
+            0.5138309999999999,
+            0.41000000000000003,
+            0.623831,
+            0.83
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 15,
+      "t_sec": 3.0,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 2,
+          "label": "car",
+          "conf": null,
+          "xyxy": [
+            0.4494539999999999,
+            0.55,
+            0.789454,
+            0.77
+          ]
+        },
+        {
+          "cls": 0,
+          "label": "person",
+          "conf": null,
+          "xyxy": [
+            0.5644539999999999,
+            0.41000000000000003,
+            0.674454,
+            0.83
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 18,
+      "t_sec": 3.6,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 0,
+          "label": "person",
+          "conf": null,
+          "xyxy": [
+            0.6150779999999999,
+            0.41000000000000003,
+            0.725078,
+            0.83
+          ]
+        }
+      ]
+    }
+  ]
+}

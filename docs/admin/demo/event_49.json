@@ -1,0 +1,137 @@
+{
+  "id": 49,
+  "site": "cohen_ramatgan",
+  "customer_id": 1,
+  "customer_name": "Dana Cohen",
+  "camera": "garden",
+  "kind": "random",
+  "start_utc": "2026-10-03T10:13:49.428401Z",
+  "end_utc": "2026-10-03T10:13:53.428401Z",
+  "summary": "",
+  "label": null,
+  "alert_command": null,
+  "detected": [
+    "car"
+  ],
+  "owner_verdicts": [],
+  "completeness": {
+    "video": true,
+    "boxes": "none",
+    "ai": "none",
+    "owner_feedback": false,
+    "expired": false,
+    "copies": [
+      "training"
+    ]
+  },
+  "reviewed": false,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/49/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": "2026-10-03 13:13:49",
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 49,
+      "purpose": "guard",
+      "status": "none",
+      "model": null,
+      "prompt_version": null,
+      "prompt": null,
+      "parsed": null,
+      "raw_text_artifact_id": null,
+      "input_frame_artifact_ids": []
+    }
+  ],
+  "feedback": [],
+  "artifacts": [
+    {
+      "id": 91,
+      "role": "original_video",
+      "s3_key": "dataset_cohen_ramatgan/clips/garden/2026-10-03/garden_1791022432_random.mp4",
+      "bytes": 3319,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 139,
+      "role": "meta",
+      "s3_key": "dataset_cohen_ramatgan/meta/garden/2026-10-03/garden_1791022432_random.meta.json",
+      "bytes": 535,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1352,
+      "role": "thumbnail",
+      "s3_key": "admin_cache/thumbs/49.jpg",
+      "bytes": 3451,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "src_etag": "329ae1d5590314bfce1162a2bc27f8e4",
+        "needs_rendition": false
+      }
+    },
+    {
+      "id": 1353,
+      "role": "filmstrip",
+      "s3_key": "admin_cache/filmstrips/49.jpg",
+      "bytes": 3106,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "count": 4,
+        "tile_h": 90,
+        "tile_w": 160,
+        "src_etag": "329ae1d5590314bfce1162a2bc27f8e4"
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "random",
+    "yolo": {
+      "class_counts": {
+        "car": 1
+      },
+      "class_max_conf": {
+        "car": 0.766
+      },
+      "trigger_classes": [
+        "car"
+      ],
+      "trigger_detected": true
+    },
+    "codec": "h264",
+    "buffer": {
+      "store_fps": 5.0,
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "clip_path": "clips\\garden\\2026-10-03\\garden_1791022432_random.mp4",
+    "camera_name": "garden",
+    "clip_end_ts": 1791022433.4284012,
+    "duration_sec": 4.0,
+    "clip_start_ts": 1791022429.4284012,
+    "fps_estimated": 5.0,
+    "clip_end_local": "2026-10-03 13:13:53",
+    "frames_written": 20,
+    "clip_start_local": "2026-10-03 13:13:49"
+  }
+}

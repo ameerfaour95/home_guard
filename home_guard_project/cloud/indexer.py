@@ -18,21 +18,27 @@ A pass over one device:
    command) comes from the best revision ever seen of either copy -- a later, poorer copy (A7: training meta
    recreated from production without the teacher) never replaces it -- and owner feedback is the union over
    every retained revision of both copies. Delivery (`dispatch`, `muted`) comes only from the production copy;
-5. refreshes `expired` for events whose 14-day production retention passed with no video left;
-6. fills the labelers' redacted search text (`Event.summary_redacted`) for every event that lacks it.
+5. refreshes `expired` for events whose 14-day production retention passed with no copy of the video left (a
+   training copy that outlives the production one keeps the event unexpired and exportable);
+6. records the household's current names as identity aliases and fills the labelers' redacted search text
+   (`Event.summary_redacted`) for every event that lacks it (for every event when a new name appeared).
+
+Concurrent writers (two API processes, or a lock bug) never abort a pass: every row the indexer creates is
+inserted with INSERT ... ON CONFLICT on its unique key and then re-read, so a row another writer created first is
+taken over instead of raising a unique violation.
 """
 from __future__ import annotations
 
 import json
 import logging
 import math
-import os
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Optional
 
 from sqlalchemy import and_, exists, or_, select, tuple_
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from home_guard_project.fleet_contract._time import parse_utc
@@ -58,6 +64,9 @@ INVALID_JSON = "_invalid_json"  # RawRevision body marker for an object that is 
 HEARTBEAT_SUFFIX = "/_status/heartbeat.json"
 RACE_LIMIT = 3  # consecutive passes an object may change between LIST and GET before it is a problem
 CHUNK = 2000  # keys per IN (...) list
+INSERT_ROWS = 1000  # rows per multi-row INSERT (stays far below PostgreSQL's 65535 parameters)
+_ARTIFACT_COLUMNS = ("role", "s3_key", "etag", "bytes", "mime", "available", "provenance", "detail", "camera",
+                     "stem", "last_modified", "etag_mismatches")
 MIN_TS = datetime(2020, 1, 1, tzinfo=timezone.utc).timestamp()
 MAX_TS = datetime(2100, 1, 1, tzinfo=timezone.utc).timestamp()
 MIME = {".mp4": "video/mp4", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".json": "application/json",
@@ -171,8 +180,9 @@ def _raw_muted(body: Any) -> Optional[bool]:
     return muted if isinstance(muted, bool) else None
 
 
-def _expired(ev: Event, prod_clip_available: bool, now: datetime) -> bool:
-    return ev.expires_at is not None and not prod_clip_available and ev.expires_at < now
+def _expired(ev: Event, any_clip_available: bool, now: datetime) -> bool:
+    """Expired = the production retention has passed and no copy of the video is left (production or training)."""
+    return ev.expires_at is not None and not any_clip_available and ev.expires_at < now
 
 
 class _Run:
@@ -185,6 +195,7 @@ class _Run:
         self.prefixes = [_prefix(root, self.site) for root in ROOTS]
         self.stats = IndexStats()
         self.arts: dict[str, Artifact] = {}  # only keys parse_key accepts
+        self.new_arts: dict[str, Artifact] = {}  # listed keys with no row yet (transient until inserted)
         self.legacy: set[str] = set()  # persisted artifact keys parse_key now rejects (quarantined)
         self.problems: dict[str, IndexProblem] = {}
         self.cursors: dict[str, S3Cursor] = {}
@@ -251,8 +262,12 @@ class _Run:
         if row is not None and row.reason == reason and row.etag == etag:
             return
         if row is None:
-            row = IndexProblem(s3_key=key, reason=reason, seen_at=self.now, etag=etag)
-            self.session.add(row)
+            self.session.flush()  # a pending delete of this key (cleared earlier in the pass) goes first
+            self.session.execute(pg_insert(IndexProblem).values(s3_key=key, reason=reason, seen_at=self.now,
+                                                                etag=etag)
+                                 .on_conflict_do_update(index_elements=[IndexProblem.s3_key],
+                                                        set_={"reason": reason, "seen_at": self.now, "etag": etag}))
+            row = self.session.get(IndexProblem, key, populate_existing=True)
             self.problems[key] = row
         else:
             row.reason, row.etag, row.seen_at = reason, etag, self.now
@@ -296,13 +311,13 @@ class _Run:
             seen.add(obj.key)
             camera, stem = info.camera, info.stem
             art = self.arts.get(obj.key)
-            if art is None:
+            if art is None:  # inserted (conflict-safe) once both prefixes are listed
                 art = Artifact(role=role, s3_key=obj.key, etag=obj.etag, bytes=obj.size,
                                mime=MIME.get(info.ext.lower()), available=True, provenance="box",
                                detail={"copy": COPY_NAME[root]}, camera=camera, stem=stem,
                                last_modified=obj.last_modified, etag_mismatches=0)
-                self.session.add(art)
                 self.arts[obj.key] = art
+                self.new_arts[obj.key] = art
                 changed = revision_changed = True
             else:
                 revision_changed = art.etag != obj.etag or not art.available
@@ -327,8 +342,9 @@ class _Run:
     def disappearance_check(self, prefix: str, seen: set[str]) -> None:
         cursor = self.cursors.get(prefix)
         if cursor is None:
-            cursor = S3Cursor(prefix=prefix)
-            self.session.add(cursor)
+            self.session.execute(pg_insert(S3Cursor).values(prefix=prefix)
+                                 .on_conflict_do_nothing(index_elements=[S3Cursor.prefix]))
+            cursor = self.session.get(S3Cursor, prefix, populate_existing=True)
             self.cursors[prefix] = cursor
         last = cursor.last_full_scan
         if not (self.full_scan or last is None or self.now - last >= FULL_SCAN_EVERY):
@@ -339,6 +355,29 @@ class _Run:
                 if art.event_id is not None:
                     self.dirty_ids.add(art.event_id)
         cursor.last_full_scan = self.now
+
+    def insert_new_artifacts(self) -> None:
+        """Insert the listed keys that had no row (multi-row INSERT ... ON CONFLICT DO NOTHING), then re-read them:
+        a row another writer created meanwhile is taken over with what this listing saw."""
+        if not self.new_arts:
+            return
+        keys = list(self.new_arts)  # listing order (every writer lists in the same order)
+        rows = [{c: getattr(self.new_arts[k], c) for c in _ARTIFACT_COLUMNS} for k in keys]
+        for chunk in _chunks(rows, INSERT_ROWS):
+            self.session.execute(pg_insert(Artifact).values(chunk)
+                                 .on_conflict_do_nothing(index_elements=[Artifact.s3_key]))
+        loaded: dict[str, Artifact] = {}
+        for chunk in _chunks(keys):
+            for art in self.session.scalars(select(Artifact).where(Artifact.s3_key.in_(chunk))):
+                loaded[art.s3_key] = art
+        for key in keys:
+            new, art = self.new_arts[key], loaded[key]
+            if (art.etag, art.bytes, art.available) != (new.etag, new.bytes, True):
+                art.etag, art.bytes, art.last_modified, art.available = new.etag, new.bytes, new.last_modified, True
+            self.arts[key] = art
+        self.work = [(self.arts[a.s3_key] if a.s3_key in self.new_arts else a, info, role, etag)
+                     for a, info, role, etag in self.work]
+        self.new_arts.clear()
 
     # ------------------------------------------------------------ JSON bodies
 
@@ -352,6 +391,7 @@ class _Run:
                         select(RawRevision.s3_key, RawRevision.etag, RawRevision.body)
                         .where(tuple_(RawRevision.s3_key, RawRevision.etag).in_(chunk))):
                     bodies[(key, etag)] = body
+        fetched: list[dict] = []
         for art, _, _, etag in self.work:
             key = art.s3_key
             if (key, etag) in bodies:
@@ -368,8 +408,11 @@ class _Run:
                 continue
             art.etag_mismatches = 0
             body = _decode(text)
-            self.session.add(RawRevision(s3_key=key, etag=etag, fetched_at=self.now, body=body))
+            fetched.append({"s3_key": key, "etag": etag, "fetched_at": self.now, "body": body})
             bodies[(key, etag)] = body
+        for chunk in _chunks(fetched, INSERT_ROWS):  # a revision another writer stored meanwhile is the same body
+            self.session.execute(pg_insert(RawRevision).values(chunk)
+                                 .on_conflict_do_nothing(index_elements=[RawRevision.s3_key, RawRevision.etag]))
         return bodies
 
     def parse(self, key: str, etag: str, body: Any) -> tuple[ClipRecord, Optional[ClipRecord], list[str]]:
@@ -379,6 +422,8 @@ class _Run:
             return cached
         rec = parse_meta(key, body)
         problems = list(rec.problems)
+        if _sanitise_verdicts(rec.owner_feedback):
+            problems.append("invalid verdict")
         bad = [name for name, ts in (("clip_start_ts", rec.start_ts), ("clip_end_ts", rec.end_ts),
                                      ("stem trigger time", rec.trigger_ts)) if ts is not None and not _in_range(ts)]
         no_start = rec.start_ts is None and rec.trigger_ts is None
@@ -437,14 +482,16 @@ class _Run:
         for art, etag, rec in items:
             fb = rows.get(art.s3_key)
             if fb is None:
-                fb = Feedback(s3_key=art.s3_key, device_pk=self.device.id)
-                self.session.add(fb)
+                self.session.execute(pg_insert(Feedback).values(s3_key=art.s3_key, device_pk=self.device.id)
+                                     .on_conflict_do_nothing(index_elements=[Feedback.s3_key]))
+                fb = self.session.scalars(select(Feedback).where(Feedback.s3_key == art.s3_key)).one()
                 rows[art.s3_key] = fb
             elif fb.event_id is not None:
                 self.dirty_ids.add(fb.event_id)  # the event it was linked to recomputes its verdicts
             alert_stem = rec.alert_id if rec.alert_id and len(rec.alert_id) <= 255 else None
             fb.alert_stem = alert_stem
-            fb.verdict, fb.action = _cut(rec.verdict, 64), _cut(rec.action, 64)
+            invalid = bool(rec.verdict) and rec.verdict not in redact.VERDICTS
+            fb.verdict, fb.action = redact.verdict(rec.verdict) if rec.verdict else "", _cut(rec.action, 64)
             fb.note, fb.raw_text, fb.source = rec.note, rec.raw_text, _cut(rec.source, 64)
             fb.scope_camera = _cut(rec.scope_camera, 128)
             fb.received_at = rec.time_utc
@@ -453,7 +500,7 @@ class _Run:
             art.event_id = fb.event_id  # the feedback artifact follows its row, including to no event
             if ev is not None:
                 self.dirty_ids.add(ev.id)
-            self.applied(art, etag)
+            self.applied(art, etag, ["invalid verdict"] if invalid else ())
             self.stats.feedback += 1
 
     # ------------------------------------------------------------ events
@@ -491,6 +538,7 @@ class _Run:
                 runs[run.event_id] = run  # descending ids: the oldest run per event is kept
 
         plans = []
+        fresh: dict[tuple[str, str], Event] = {}  # new events, transient until inserted below
         for pair in sorted(targets):
             arts = by_pair.get(pair, [])
             metas = sorted((a for a in arts if a.role == "meta"), key=lambda a: ROOTS.index(parse_key(a.s3_key).root))
@@ -511,9 +559,7 @@ class _Run:
             if ev is None:
                 ev = Event(device_pk=self.device.id, site=self.site, camera=pair[0], stem=pair[1],
                            created_at=self.now)
-                session.add(ev)
-                self.events[pair] = ev
-                self.stats.new_events += 1
+                fresh[pair] = ev
             else:
                 self.stats.updated_events += 1
             winner = self.best_ai(current, metas, history)
@@ -523,11 +569,19 @@ class _Run:
             meta_feedback = _union_owner_feedback(
                 self.parse(a.s3_key, etag, body)[0]
                 for a in metas for _, etag, body in history.get(a.s3_key, ()) if not _is_invalid(body))
-            plans.append((ev, arts, metas, current, winner, meta_feedback))
-        session.flush()  # ids for new events
+            plans.append([ev, arts, metas, current, winner, meta_feedback, pair])
+        if fresh:
+            stored = self.insert_new_events(fresh, runs)
+            for plan in plans:
+                pair = plan[6]
+                if pair in stored:
+                    ev = plan[0] = stored[pair]
+                    if plan[3]:
+                        self.merge(ev, plan[3], plan[4])
+                    ev.updated_at = self.now
+        session.flush()
 
-        prod_prefix = _prefix("production", self.site)
-        for ev, arts, metas, current, winner, meta_feedback in plans:
+        for ev, arts, metas, current, winner, meta_feedback, _ in plans:
             for art in arts:
                 if art.event_id != ev.id:
                     art.event_id = ev.id
@@ -539,17 +593,49 @@ class _Run:
                     fb_art.event_id = ev.id
             run = self.upsert_ai_run(ev, runs.get(ev.id), winner)
             ev.owner_verdicts = _owner_verdicts(feedback, meta_feedback)
-            prod_clip = any(a.role == "original_video" and a.available and a.s3_key.startswith(prod_prefix)
-                            for a in arts)
+            any_clip = any(a.role == "original_video" and a.available for a in arts)
             ev.completeness = {
-                "video": any(a.role == "original_video" and a.available for a in arts),
+                "video": any_clip,
                 "boxes": ("sampled" if any(c.rec.sampled_frames for c in current.values())
                           and any(a.role == "yolo_label" and a.available for a in arts) else "none"),
                 "ai": run.status if run is not None else "none",
                 "owner_feedback": bool(feedback) or bool(meta_feedback),
-                "expired": _expired(ev, prod_clip, self.now),
+                "expired": _expired(ev, any_clip, self.now),
                 "copies": sorted(COPY_NAME[parse_key(a.s3_key).root] for a in metas),
             }
+
+    def insert_new_events(self, fresh: dict[tuple[str, str], Event], runs: dict[int, AiRun]
+                          ) -> dict[tuple[str, str], Event]:
+        """Insert new events (multi-row INSERT ... ON CONFLICT DO NOTHING on (device, camera, stem)) and re-read
+        them. An event another writer created meanwhile is counted as updated, and its AI run is loaded so it is
+        updated rather than duplicated."""
+        session = self.session
+        pairs = sorted(fresh)
+        rows = [{"device_pk": self.device.id, "site": self.site, "camera": cam, "stem": stem,
+                 "start_ts": fresh[(cam, stem)].start_ts, "kind": fresh[(cam, stem)].kind or "unknown",
+                 "created_at": self.now} for cam, stem in pairs]
+        inserted: set[tuple[str, str]] = set()
+        for chunk in _chunks(rows, INSERT_ROWS):
+            stmt = (pg_insert(Event).values(chunk)
+                    .on_conflict_do_nothing(index_elements=[Event.device_pk, Event.camera, Event.stem])
+                    .returning(Event.camera, Event.stem))
+            inserted |= {(cam, stem) for cam, stem in session.execute(stmt)}
+        stored: dict[tuple[str, str], Event] = {}
+        for chunk in _chunks(pairs):
+            for ev in session.scalars(select(Event).where(Event.device_pk == self.device.id,
+                                                          tuple_(Event.camera, Event.stem).in_(chunk))):
+                stored[(ev.camera, ev.stem)] = ev
+        for pair, ev in stored.items():
+            self.events[pair] = ev
+            self.events_by_id[ev.id] = ev
+        self.stats.new_events += len(inserted)
+        taken_over = [stored[p].id for p in pairs if p not in inserted and p in stored]
+        self.stats.updated_events += len(taken_over)
+        for chunk in _chunks(taken_over):
+            for run in session.scalars(select(AiRun).where(AiRun.event_id.in_(chunk), AiRun.purpose == "guard")
+                                       .order_by(AiRun.id.desc())):
+                runs[run.event_id] = run
+        return stored
 
     def recover_applied(self, art: Artifact, revisions) -> None:
         """A meta with no applied revision (migration 0003 left every existing artifact NULL) takes its last
@@ -602,8 +688,8 @@ class _Run:
         source = winner.rec if winner is not None and winner.rec.ai.status != "none" else recs[0]
         ev.summary = source.summary or ""
         ev.summary_redacted = None  # refilled from the new summary at the end of the pass (redact.backfill)
-        ev.label = _cut(source.label, 64)
-        ev.alert_command = _cut(source.alert_command, 32)
+        ev.label = redact.label(source.label)  # enum fields: anything else is stored as null
+        ev.alert_command = redact.alert_command(source.alert_command)
         ev.alert_reason = source.alert_reason or ""
         # delivery is what the production copy recorded; without a production copy it is unknown
         prod = current.get("production")
@@ -614,9 +700,9 @@ class _Run:
         ev.duration_sec = first("duration_sec")
         ev.fps = first("fps")
         ev.frame_size = first("frame_size")
-        ev.clip_start_local = next((_cut(c.body.get("clip_start_local"), 64) for c in ordered
+        ev.clip_start_local = next((redact.clip_start_local(c.body.get("clip_start_local")) for c in ordered
                                     if isinstance(c.body, dict) and isinstance(c.body.get("clip_start_local"), str)),
-                                   None)
+                                   None)  # a timestamp or nothing: free text here would bypass every projection
         ev.expires_at = (datetime.fromtimestamp(ev.start_ts, timezone.utc) + PRODUCTION_RETENTION
                          if prod is not None else None)
 
@@ -647,6 +733,7 @@ class _Run:
         self.load()
         for root in ROOTS:
             self.list_prefix(root)
+        self.insert_new_artifacts()
         bodies = self.obtain_bodies()
         feedback = self.apply_bodies(bodies)
         stems = {rec.alert_id for _, _, rec in feedback if rec.alert_id and len(rec.alert_id) <= 255}
@@ -658,9 +745,22 @@ class _Run:
         self.apply_feedback(feedback)
         self.rebuild_all()
         refresh_expiry(self.session, self.device, self.now)
-        redact.backfill(self.session, self.device)  # labelers' search text for new, changed and old events
+        # the names this pass saw (cameras, display names, heartbeat host) join the identity history; a new name
+        # means every stored labeler search text is recomputed, else only the missing ones are filled
+        new_names = redact.remember(self.session, self.device, now=self.now)
+        redact.backfill(self.session, self.device, everything=bool(new_names))
         self.session.commit()
         return self.stats
+
+
+def _sanitise_verdicts(entries: list[dict]) -> bool:
+    """Replace verdicts outside the vocabulary by "unknown" in place; True when any entry was changed."""
+    changed = False
+    for entry in entries:
+        if entry.get("verdict") not in (None, "") and redact.verdict(entry.get("verdict")) != entry.get("verdict"):
+            entry["verdict"] = redact.UNKNOWN_VERDICT
+            changed = True
+    return changed
 
 
 def _union_owner_feedback(records: Iterable[ClipRecord]) -> list[dict]:
@@ -691,14 +791,13 @@ def _owner_verdicts(feedback: list[Feedback], meta_feedback: list[dict]) -> list
 def refresh_expiry(session: Session, device: Device, now: datetime) -> int:
     """Set `completeness.expired` on the device's events as of `now`; returns how many changed.
 
-    Expired = the production copy's 14-day retention (`expires_at`) has passed and no production video is
-    available. It runs at the end of every pass, so time alone moves an event to expired (and a video that
-    reappears moves it back) even when nothing in S3 changed.
+    Expired = the production copy's 14-day retention (`expires_at`) has passed and no copy of the video
+    (production or training) is available. It runs at the end of every pass, so time alone moves an event to
+    expired (and a video that reappears moves it back) even when nothing in S3 changed.
     """
-    prod_clip = exists().where(Artifact.event_id == Event.id, Artifact.role == "original_video",
-                               Artifact.available.is_(True),
-                               _like_prefix(Artifact.s3_key, _prefix("production", device.site)))
-    due = and_(Event.expires_at.is_not(None), Event.expires_at < now, ~prod_clip)
+    any_clip = exists().where(Artifact.event_id == Event.id, Artifact.role == "original_video",
+                              Artifact.available.is_(True))
+    due = and_(Event.expires_at.is_not(None), Event.expires_at < now, ~any_clip)
     flagged = Event.completeness["expired"].as_boolean()
     changed = 0
     for ev, is_due in session.execute(
@@ -729,16 +828,3 @@ def index_all(session: Session, s3: S3, full_scan: bool = False) -> dict[str, In
     return out
 
 
-def run_once(engine) -> int:
-    """`manage index-once`: one pass over every device using env AWS credentials."""
-    import boto3
-
-    from .db import session_scope
-
-    client = boto3.client("s3", region_name=os.environ.get("HG_CLOUD_REGION", "us-east-1"))
-    s3 = S3(client, os.environ.get("HG_CLOUD_BUCKET", "security-camera-project-v1"))
-    with session_scope(engine) as session:
-        results = index_all(session, s3)
-    for site, stats in results.items():
-        print(f"{site}: {stats}")
-    return 0

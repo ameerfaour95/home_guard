@@ -1,0 +1,379 @@
+{
+  "id": 80,
+  "site": "customer-3e7e2d",
+  "customer_id": 0,
+  "customer_name": "customer-3e7e2d",
+  "camera": "cam-837a19",
+  "kind": "alert",
+  "start_utc": "2026-10-02T15:19:29.681816Z",
+  "end_utc": "2026-10-02T15:19:33.681816Z",
+  "summary": "A woman wheels a bin through the cam-837a19 and leaves it by the wall.",
+  "label": "normal",
+  "alert_command": "[send_message]",
+  "detected": [
+    "person"
+  ],
+  "owner_verdicts": [],
+  "completeness": {
+    "video": true,
+    "boxes": "sampled",
+    "ai": "real",
+    "owner_feedback": false,
+    "expired": false,
+    "copies": [
+      "production",
+      "training"
+    ]
+  },
+  "reviewed": false,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/80/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": null,
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 80,
+      "purpose": "guard",
+      "status": "real",
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "prompt": null,
+      "parsed": {
+        "label": "normal",
+        "people": 1,
+        "summary": "A woman wheels a bin through the cam-837a19 and leaves it by the wall.",
+        "vehicle_moving": false
+      },
+      "raw_text_artifact_id": 585,
+      "input_frame_artifact_ids": [
+        638,
+        639,
+        640,
+        641,
+        642
+      ]
+    }
+  ],
+  "feedback": [],
+  "artifacts": [
+    {
+      "id": 483,
+      "role": "original_video",
+      "s3_key": "artifact-483",
+      "bytes": 3458,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 504,
+      "role": "meta",
+      "s3_key": "artifact-504",
+      "bytes": 934,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 536,
+      "role": "original_video",
+      "s3_key": "artifact-536",
+      "bytes": 3458,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 571,
+      "role": "meta",
+      "s3_key": "artifact-571",
+      "bytes": 3599,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 585,
+      "role": "raw_answer",
+      "s3_key": "artifact-585",
+      "bytes": 141,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 638,
+      "role": "teacher_frame",
+      "s3_key": "artifact-638",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 639,
+      "role": "teacher_frame",
+      "s3_key": "artifact-639",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 640,
+      "role": "teacher_frame",
+      "s3_key": "artifact-640",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 641,
+      "role": "teacher_frame",
+      "s3_key": "artifact-641",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 642,
+      "role": "teacher_frame",
+      "s3_key": "artifact-642",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 716,
+      "role": "yolo_image",
+      "s3_key": "artifact-716",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 717,
+      "role": "yolo_image",
+      "s3_key": "artifact-717",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 718,
+      "role": "yolo_image",
+      "s3_key": "artifact-718",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 719,
+      "role": "yolo_image",
+      "s3_key": "artifact-719",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 720,
+      "role": "yolo_image",
+      "s3_key": "artifact-720",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 721,
+      "role": "yolo_image",
+      "s3_key": "artifact-721",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 722,
+      "role": "yolo_image",
+      "s3_key": "artifact-722",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 812,
+      "role": "yolo_label",
+      "s3_key": "artifact-812",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 813,
+      "role": "yolo_label",
+      "s3_key": "artifact-813",
+      "bytes": 0,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 814,
+      "role": "yolo_label",
+      "s3_key": "artifact-814",
+      "bytes": 0,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 815,
+      "role": "yolo_label",
+      "s3_key": "artifact-815",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 816,
+      "role": "yolo_label",
+      "s3_key": "artifact-816",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 817,
+      "role": "yolo_label",
+      "s3_key": "artifact-817",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1426,
+      "role": "thumbnail",
+      "s3_key": "artifact-1426",
+      "bytes": 3514,
+      "available": true,
+      "provenance": "cloud",
+      "detail": null
+    },
+    {
+      "id": 1427,
+      "role": "filmstrip",
+      "s3_key": "artifact-1427",
+      "bytes": 3081,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "tile_w": 160,
+        "tile_h": 90,
+        "count": 4
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "alert",
+    "duration_sec": 4.0,
+    "fps_estimated": 5.0,
+    "frames_written": 20,
+    "codec": "h264",
+    "buffer": {
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "yolo": {
+      "class_counts": {
+        "person": 1
+      },
+      "class_max_conf": {
+        "person": 0.499
+      },
+      "trigger_classes": [
+        "person"
+      ]
+    },
+    "model_response": {
+      "label": "normal",
+      "people": 1,
+      "summary": "A woman wheels a bin through the cam-837a19 and leaves it by the wall.",
+      "vehicle_moving": false
+    },
+    "teacher": {
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "temperature": 0
+    }
+  }
+}

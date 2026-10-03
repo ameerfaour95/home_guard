@@ -1,0 +1,242 @@
+{
+  "id": 45,
+  "site": "customer-1fc0de",
+  "customer_id": 0,
+  "customer_name": "customer-1fc0de",
+  "camera": "cam-64ca24",
+  "kind": "alert",
+  "start_utc": "2026-10-03T04:04:21.524468Z",
+  "end_utc": "2026-10-03T04:04:25.524468Z",
+  "summary": "A person was detected near the camera.",
+  "label": "normal",
+  "alert_command": "[send_message]",
+  "detected": [
+    "person"
+  ],
+  "owner_verdicts": [
+    "true_alert"
+  ],
+  "completeness": {
+    "video": true,
+    "boxes": "none",
+    "ai": "fallback",
+    "owner_feedback": true,
+    "expired": false,
+    "copies": [
+      "production",
+      "training"
+    ]
+  },
+  "reviewed": false,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/45/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": null,
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 45,
+      "purpose": "guard",
+      "status": "fallback",
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "prompt": null,
+      "parsed": {
+        "summary": ""
+      },
+      "raw_text_artifact_id": null,
+      "input_frame_artifact_ids": [
+        242,
+        243,
+        244,
+        245,
+        246
+      ]
+    }
+  ],
+  "feedback": [
+    {
+      "id": 10,
+      "verdict": "true_alert",
+      "action": "none",
+      "note": "",
+      "raw_text": "",
+      "source": "text",
+      "received_utc": "2026-10-03T04:08:05Z"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": 15,
+      "role": "original_video",
+      "s3_key": "artifact-15",
+      "bytes": 3600,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 27,
+      "role": "feedback",
+      "s3_key": "artifact-27",
+      "bytes": 404,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 43,
+      "role": "meta",
+      "s3_key": "artifact-43",
+      "bytes": 894,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 87,
+      "role": "original_video",
+      "s3_key": "artifact-87",
+      "bytes": 3600,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 135,
+      "role": "meta",
+      "s3_key": "artifact-135",
+      "bytes": 1432,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 242,
+      "role": "teacher_frame",
+      "s3_key": "artifact-242",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 243,
+      "role": "teacher_frame",
+      "s3_key": "artifact-243",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 244,
+      "role": "teacher_frame",
+      "s3_key": "artifact-244",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 245,
+      "role": "teacher_frame",
+      "s3_key": "artifact-245",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 246,
+      "role": "teacher_frame",
+      "s3_key": "artifact-246",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1378,
+      "role": "thumbnail",
+      "s3_key": "artifact-1378",
+      "bytes": 3578,
+      "available": true,
+      "provenance": "cloud",
+      "detail": null
+    },
+    {
+      "id": 1379,
+      "role": "filmstrip",
+      "s3_key": "artifact-1379",
+      "bytes": 3174,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "tile_w": 160,
+        "tile_h": 90,
+        "count": 4
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "alert",
+    "duration_sec": 4.0,
+    "fps_estimated": 5.0,
+    "frames_written": 20,
+    "codec": "h264",
+    "buffer": {
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "yolo": {
+      "class_counts": {
+        "person": 1
+      },
+      "class_max_conf": {
+        "person": 0.744
+      },
+      "trigger_classes": [
+        "person"
+      ]
+    },
+    "model_response": {
+      "summary": ""
+    },
+    "teacher": {
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "temperature": 0
+    }
+  }
+}

@@ -1,0 +1,295 @@
+{
+  "id": 76,
+  "site": "levi_haifa",
+  "customer_id": 2,
+  "customer_name": "Yossi Levi",
+  "camera": "side_gate",
+  "kind": "false_positive",
+  "start_utc": "2026-10-01T19:03:20.516061Z",
+  "end_utc": "2026-10-01T19:03:24.516061Z",
+  "summary": "Tree branches sway in the wind and cast moving shadows; nothing else is visible.",
+  "label": "normal",
+  "alert_command": "[none]",
+  "detected": [
+    "person"
+  ],
+  "owner_verdicts": [
+    "false_alarm"
+  ],
+  "completeness": {
+    "video": true,
+    "boxes": "none",
+    "ai": "real",
+    "owner_feedback": true,
+    "expired": false,
+    "copies": [
+      "production",
+      "training"
+    ]
+  },
+  "reviewed": true,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/76/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": "2026-10-01 22:03:20",
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 76,
+      "purpose": "guard",
+      "status": "real",
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"side_gate\", local time 22:03:23.\n\nWrite \"summary\": what happ",
+      "parsed": {
+        "label": "normal",
+        "people": 1,
+        "summary": "Tree branches sway in the wind and cast moving shadows; nothing else is visible.",
+        "vehicle_moving": false
+      },
+      "raw_text_artifact_id": 583,
+      "input_frame_artifact_ids": [
+        628,
+        629,
+        630,
+        631,
+        632
+      ]
+    }
+  ],
+  "feedback": [
+    {
+      "id": 19,
+      "verdict": "false_alarm",
+      "action": "none",
+      "note": "Just the neighbour.",
+      "raw_text": "Just the neighbour.",
+      "source": "text",
+      "received_utc": "2026-10-01T19:06:46Z"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": 482,
+      "role": "original_video",
+      "s3_key": "production_levi_haifa/clips/side_gate/2026-10-01/side_gate_1790881403_fp.mp4",
+      "bytes": 3396,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 493,
+      "role": "feedback",
+      "s3_key": "production_levi_haifa/feedback/side_gate/2026-10-01/side_gate_1790881403_fp_1790881606000.feedback.json",
+      "bytes": 455,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 502,
+      "role": "meta",
+      "s3_key": "production_levi_haifa/meta/side_gate/2026-10-01/side_gate_1790881403_fp.meta.json",
+      "bytes": 838,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 532,
+      "role": "original_video",
+      "s3_key": "dataset_levi_haifa/clips/side_gate/2026-10-01/side_gate_1790881403_fp.mp4",
+      "bytes": 3396,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 567,
+      "role": "meta",
+      "s3_key": "dataset_levi_haifa/meta/side_gate/2026-10-01/side_gate_1790881403_fp.meta.json",
+      "bytes": 1775,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 583,
+      "role": "raw_answer",
+      "s3_key": "dataset_levi_haifa/responses/side_gate/2026-10-01/side_gate_1790881403_fp.model_raw.txt",
+      "bytes": 152,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 628,
+      "role": "teacher_frame",
+      "s3_key": "dataset_levi_haifa/vlm_crops/side_gate/2026-10-01/side_gate_1790881403_fp_f0.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 629,
+      "role": "teacher_frame",
+      "s3_key": "dataset_levi_haifa/vlm_crops/side_gate/2026-10-01/side_gate_1790881403_fp_f1.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 630,
+      "role": "teacher_frame",
+      "s3_key": "dataset_levi_haifa/vlm_crops/side_gate/2026-10-01/side_gate_1790881403_fp_f2.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 631,
+      "role": "teacher_frame",
+      "s3_key": "dataset_levi_haifa/vlm_crops/side_gate/2026-10-01/side_gate_1790881403_fp_f3.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 632,
+      "role": "teacher_frame",
+      "s3_key": "dataset_levi_haifa/vlm_crops/side_gate/2026-10-01/side_gate_1790881403_fp_f4.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1512,
+      "role": "thumbnail",
+      "s3_key": "admin_cache/thumbs/76.jpg",
+      "bytes": 2800,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "src_etag": "4ccda7e14622a80b8de10bed60da72e7",
+        "needs_rendition": false
+      }
+    },
+    {
+      "id": 1513,
+      "role": "filmstrip",
+      "s3_key": "admin_cache/filmstrips/76.jpg",
+      "bytes": 2496,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "count": 4,
+        "tile_h": 90,
+        "tile_w": 160,
+        "src_etag": "4ccda7e14622a80b8de10bed60da72e7"
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "false_positive",
+    "yolo": {
+      "class_counts": {
+        "person": 1
+      },
+      "class_max_conf": {
+        "person": 0.45
+      },
+      "trigger_classes": [
+        "person"
+      ],
+      "trigger_detected": true
+    },
+    "alert": {
+      "vlm": {
+        "people": 0,
+        "vehicle_moving": false
+      },
+      "label": "normal",
+      "muted": false,
+      "labels": [
+        "person"
+      ],
+      "summary": "Tree branches sway in the wind and cast moving shadows; nothing else is visible.",
+      "alert_reason": "",
+      "alert_command": "[none]",
+      "false_positive": true
+    },
+    "codec": "h264",
+    "buffer": {
+      "store_fps": 5.0,
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "teacher": {
+      "model": "gpt-4o",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"side_gate\", local time 22:03:23.\n\nWrite \"summary\": what happ",
+      "raw_path": "responses\\side_gate\\2026-10-01\\side_gate_1790881403_fp.model_raw.txt",
+      "temperature": 0,
+      "input_frames": [
+        "vlm_crops\\side_gate\\2026-10-01\\side_gate_1790881403_fp_f0.jpg",
+        "vlm_crops\\side_gate\\2026-10-01\\side_gate_1790881403_fp_f1.jpg",
+        "vlm_crops\\side_gate\\2026-10-01\\side_gate_1790881403_fp_f2.jpg",
+        "vlm_crops\\side_gate\\2026-10-01\\side_gate_1790881403_fp_f3.jpg",
+        "vlm_crops\\side_gate\\2026-10-01\\side_gate_1790881403_fp_f4.jpg"
+      ],
+      "prompt_version": "2026-10-03.tagged-rules-label"
+    },
+    "clip_path": "clips\\side_gate\\2026-10-01\\side_gate_1790881403_fp.mp4",
+    "camera_name": "side_gate",
+    "clip_end_ts": 1790881404.5874186,
+    "duration_sec": 4.0,
+    "clip_start_ts": 1790881400.5874186,
+    "fps_estimated": 5.0,
+    "clip_end_local": "2026-10-01 22:03:24",
+    "frames_written": 20,
+    "model_response": {
+      "label": "normal",
+      "people": 1,
+      "summary": "Tree branches sway in the wind and cast moving shadows; nothing else is visible.",
+      "vehicle_moving": false
+    },
+    "clip_start_local": "2026-10-01 22:03:20"
+  }
+}

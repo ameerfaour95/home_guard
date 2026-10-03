@@ -111,7 +111,8 @@ def test_labeler_needs_training_consent_and_creates_no_notice(client, staff_fact
     _, device_id = _setup(client, s3client)
     _, _, _, h = staff_factory("labeler")
     aid = _art(client, b.PROD_CLIP)
-    assert client.post(f"/v1/artifacts/{aid}/access", json={"purpose": "training"}, headers=h).status_code == 403
+    # without consent the artifact is invisible to a labeler: the same 404 as a missing one
+    assert client.post(f"/v1/artifacts/{aid}/access", json={"purpose": "training"}, headers=h).status_code == 404
     with session_scope(client.app.state.engine) as s:
         for c in s.scalars(select(m.Customer)):
             c.consent_training = True

@@ -1,0 +1,14 @@
+[
+  {
+    "id": 1,
+    "name": "night-visitors-v1",
+    "version": 1,
+    "state": "ready",
+    "item_count": 11,
+    "s3_prefix": "training_exports/night-visitors-v1/v1/",
+    "manifest_url": "https://security-camera-project-v1.s3.amazonaws.com/training_exports/night-visitors-v1/v1/manifest.json",
+    "error": null,
+    "created_utc": "2026-10-03T08:55:00Z",
+    "created_by": "Ameer Faour"
+  }
+]

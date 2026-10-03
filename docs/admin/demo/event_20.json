@@ -1,0 +1,309 @@
+{
+  "id": 20,
+  "site": "cohen_ramatgan",
+  "customer_id": 1,
+  "customer_name": "Dana Cohen",
+  "camera": "front_door",
+  "kind": "alert",
+  "start_utc": "2026-10-01T18:36:54.618888Z",
+  "end_utc": "2026-10-01T18:36:58.618888Z",
+  "summary": "A person with a face covering crouches at the front door lock for several seconds.",
+  "label": "suspicious",
+  "alert_command": "[call_owner]",
+  "detected": [
+    "person"
+  ],
+  "owner_verdicts": [
+    "expected"
+  ],
+  "completeness": {
+    "video": true,
+    "boxes": "none",
+    "ai": "real",
+    "owner_feedback": true,
+    "expired": false,
+    "copies": [
+      "production",
+      "training"
+    ]
+  },
+  "reviewed": false,
+  "flagged": true,
+  "thumbnail_url": "/v1/events/20/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": "2026-10-01 21:36:54",
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "Person tampering with the door lock.",
+  "dispatch": {
+    "channel": "telegram",
+    "sent": true,
+    "detail": {
+      "channel": "telegram",
+      "telegram": {
+        "command": "[call_owner]",
+        "telegram": {
+          "sent": true,
+          "results": [
+            {
+              "ok": true,
+              "chat_id": "-100100",
+              "message_id": 418
+            }
+          ]
+        }
+      }
+    }
+  },
+  "ai_runs": [
+    {
+      "id": 20,
+      "purpose": "guard",
+      "status": "real",
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"front_door\", local time 21:36:57.\n\nWrite \"summary\": what happ",
+      "parsed": {
+        "label": "suspicious",
+        "people": 1,
+        "summary": "A person with a face covering crouches at the front door lock for several seconds.",
+        "vehicle_moving": false
+      },
+      "raw_text_artifact_id": 146,
+      "input_frame_artifact_ids": [
+        187,
+        188,
+        189,
+        190,
+        191
+      ]
+    }
+  ],
+  "feedback": [
+    {
+      "id": 7,
+      "verdict": "expected",
+      "action": "none",
+      "note": "That is the cleaner.",
+      "raw_text": "That is the cleaner.",
+      "source": "text",
+      "received_utc": "2026-10-01T18:53:43Z"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": 8,
+      "role": "original_video",
+      "s3_key": "production_cohen_ramatgan/clips/front_door/2026-10-01/front_door_1790879817_alert.mp4",
+      "bytes": 3347,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 24,
+      "role": "feedback",
+      "s3_key": "production_cohen_ramatgan/feedback/front_door/2026-10-01/front_door_1790879817_alert_1790880823000.feedback.json",
+      "bytes": 459,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 36,
+      "role": "meta",
+      "s3_key": "production_cohen_ramatgan/meta/front_door/2026-10-01/front_door_1790879817_alert.meta.json",
+      "bytes": 986,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 63,
+      "role": "original_video",
+      "s3_key": "dataset_cohen_ramatgan/clips/front_door/2026-10-01/front_door_1790879817_alert.mp4",
+      "bytes": 3347,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 110,
+      "role": "meta",
+      "s3_key": "dataset_cohen_ramatgan/meta/front_door/2026-10-01/front_door_1790879817_alert.meta.json",
+      "bytes": 1787,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 146,
+      "role": "raw_answer",
+      "s3_key": "dataset_cohen_ramatgan/responses/front_door/2026-10-01/front_door_1790879817_alert.model_raw.txt",
+      "bytes": 158,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 187,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/front_door/2026-10-01/front_door_1790879817_alert_f0.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 188,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/front_door/2026-10-01/front_door_1790879817_alert_f1.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 189,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/front_door/2026-10-01/front_door_1790879817_alert_f2.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 190,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/front_door/2026-10-01/front_door_1790879817_alert_f3.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 191,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/front_door/2026-10-01/front_door_1790879817_alert_f4.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1514,
+      "role": "thumbnail",
+      "s3_key": "admin_cache/thumbs/20.jpg",
+      "bytes": 2751,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "src_etag": "1c844fb10ba946e4f5ef4e5c6a4755c5",
+        "needs_rendition": false
+      }
+    },
+    {
+      "id": 1515,
+      "role": "filmstrip",
+      "s3_key": "admin_cache/filmstrips/20.jpg",
+      "bytes": 2725,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "count": 4,
+        "tile_h": 90,
+        "tile_w": 160,
+        "src_etag": "1c844fb10ba946e4f5ef4e5c6a4755c5"
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "alert",
+    "yolo": {
+      "class_counts": {
+        "person": 1
+      },
+      "class_max_conf": {
+        "person": 0.713
+      },
+      "trigger_classes": [
+        "person"
+      ],
+      "trigger_detected": true
+    },
+    "alert": {
+      "label": "suspicious",
+      "muted": false,
+      "labels": [
+        "person"
+      ],
+      "summary": "A person with a face covering crouches at the front door lock for several seconds.",
+      "alert_reason": "Person tampering with the door lock.",
+      "alert_command": "[call_owner]"
+    },
+    "codec": "h264",
+    "buffer": {
+      "store_fps": 5.0,
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "teacher": {
+      "model": "gpt-4o",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"front_door\", local time 21:36:57.\n\nWrite \"summary\": what happ",
+      "raw_path": "responses\\front_door\\2026-10-01\\front_door_1790879817_alert.model_raw.txt",
+      "temperature": 0,
+      "input_frames": [
+        "vlm_crops\\front_door\\2026-10-01\\front_door_1790879817_alert_f0.jpg",
+        "vlm_crops\\front_door\\2026-10-01\\front_door_1790879817_alert_f1.jpg",
+        "vlm_crops\\front_door\\2026-10-01\\front_door_1790879817_alert_f2.jpg",
+        "vlm_crops\\front_door\\2026-10-01\\front_door_1790879817_alert_f3.jpg",
+        "vlm_crops\\front_door\\2026-10-01\\front_door_1790879817_alert_f4.jpg"
+      ],
+      "prompt_version": "2026-10-03.tagged-rules-label"
+    },
+    "clip_path": "clips\\front_door\\2026-10-01\\front_door_1790879817_alert.mp4",
+    "camera_name": "front_door",
+    "clip_end_ts": 1790879818.5748434,
+    "duration_sec": 4.0,
+    "clip_start_ts": 1790879814.5748434,
+    "fps_estimated": 5.0,
+    "clip_end_local": "2026-10-01 21:36:58",
+    "frames_written": 20,
+    "model_response": {
+      "label": "suspicious",
+      "people": 1,
+      "summary": "A person with a face covering crouches at the front door lock for several seconds.",
+      "vehicle_moving": false
+    },
+    "clip_start_local": "2026-10-01 21:36:54"
+  }
+}

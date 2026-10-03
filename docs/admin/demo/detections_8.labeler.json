@@ -1,0 +1,132 @@
+{
+  "provenance": "sampled",
+  "model": "yolo (collection export)",
+  "frames": [
+    {
+      "frame_index": 0,
+      "t_sec": 0.0,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 15,
+          "label": "cat",
+          "conf": null,
+          "xyxy": [
+            0.307272,
+            0.73,
+            0.427272,
+            0.8300000000000001
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 3,
+      "t_sec": 0.6,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 15,
+          "label": "cat",
+          "conf": null,
+          "xyxy": [
+            0.342388,
+            0.73,
+            0.462388,
+            0.8300000000000001
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 6,
+      "t_sec": 1.2,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 15,
+          "label": "cat",
+          "conf": null,
+          "xyxy": [
+            0.377503,
+            0.73,
+            0.497503,
+            0.8300000000000001
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 9,
+      "t_sec": 1.8,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 15,
+          "label": "cat",
+          "conf": null,
+          "xyxy": [
+            0.412619,
+            0.73,
+            0.532619,
+            0.8300000000000001
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 12,
+      "t_sec": 2.4,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 15,
+          "label": "cat",
+          "conf": null,
+          "xyxy": [
+            0.44773500000000005,
+            0.73,
+            0.5677350000000001,
+            0.8300000000000001
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 15,
+      "t_sec": 3.0,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 15,
+          "label": "cat",
+          "conf": null,
+          "xyxy": [
+            0.482851,
+            0.73,
+            0.602851,
+            0.8300000000000001
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 18,
+      "t_sec": 3.6,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 15,
+          "label": "cat",
+          "conf": null,
+          "xyxy": [
+            0.5179670000000001,
+            0.73,
+            0.637967,
+            0.8300000000000001
+          ]
+        }
+      ]
+    }
+  ]
+}

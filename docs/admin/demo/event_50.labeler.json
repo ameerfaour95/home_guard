@@ -1,0 +1,390 @@
+{
+  "id": 50,
+  "site": "customer-1fc0de",
+  "customer_id": 0,
+  "customer_name": "customer-1fc0de",
+  "camera": "cam-64ca24",
+  "kind": "alert",
+  "start_utc": "2026-10-03T11:04:25.660905Z",
+  "end_utc": "2026-10-03T11:04:29.660905Z",
+  "summary": "A child kicks a ball across the lawn while an adult watches from the patio.",
+  "label": "normal",
+  "alert_command": "[send_message]",
+  "detected": [
+    "person"
+  ],
+  "owner_verdicts": [],
+  "completeness": {
+    "video": true,
+    "boxes": "sampled",
+    "ai": "real",
+    "owner_feedback": false,
+    "expired": false,
+    "copies": [
+      "production",
+      "training"
+    ]
+  },
+  "reviewed": false,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/50/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": null,
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 50,
+      "purpose": "guard",
+      "status": "real",
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "prompt": null,
+      "parsed": {
+        "label": "normal",
+        "people": 1,
+        "summary": "A child kicks a ball across the lawn while an adult watches from the patio.",
+        "vehicle_moving": false
+      },
+      "raw_text_artifact_id": 156,
+      "input_frame_artifact_ids": [
+        252,
+        253,
+        254,
+        255,
+        256
+      ]
+    }
+  ],
+  "feedback": [],
+  "artifacts": [
+    {
+      "id": 17,
+      "role": "original_video",
+      "s3_key": "artifact-17",
+      "bytes": 3378,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 45,
+      "role": "meta",
+      "s3_key": "artifact-45",
+      "bytes": 931,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 92,
+      "role": "original_video",
+      "s3_key": "artifact-92",
+      "bytes": 3378,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 140,
+      "role": "meta",
+      "s3_key": "artifact-140",
+      "bytes": 3479,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 156,
+      "role": "raw_answer",
+      "s3_key": "artifact-156",
+      "bytes": 147,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 252,
+      "role": "teacher_frame",
+      "s3_key": "artifact-252",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 253,
+      "role": "teacher_frame",
+      "s3_key": "artifact-253",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 254,
+      "role": "teacher_frame",
+      "s3_key": "artifact-254",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 255,
+      "role": "teacher_frame",
+      "s3_key": "artifact-255",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 256,
+      "role": "teacher_frame",
+      "s3_key": "artifact-256",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 362,
+      "role": "yolo_image",
+      "s3_key": "artifact-362",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 363,
+      "role": "yolo_image",
+      "s3_key": "artifact-363",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 364,
+      "role": "yolo_image",
+      "s3_key": "artifact-364",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 365,
+      "role": "yolo_image",
+      "s3_key": "artifact-365",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 366,
+      "role": "yolo_image",
+      "s3_key": "artifact-366",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 367,
+      "role": "yolo_image",
+      "s3_key": "artifact-367",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 368,
+      "role": "yolo_image",
+      "s3_key": "artifact-368",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 468,
+      "role": "yolo_label",
+      "s3_key": "artifact-468",
+      "bytes": 0,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 469,
+      "role": "yolo_label",
+      "s3_key": "artifact-469",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 470,
+      "role": "yolo_label",
+      "s3_key": "artifact-470",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 471,
+      "role": "yolo_label",
+      "s3_key": "artifact-471",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 472,
+      "role": "yolo_label",
+      "s3_key": "artifact-472",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 473,
+      "role": "yolo_label",
+      "s3_key": "artifact-473",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 474,
+      "role": "yolo_label",
+      "s3_key": "artifact-474",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1342,
+      "role": "thumbnail",
+      "s3_key": "artifact-1342",
+      "bytes": 3553,
+      "available": true,
+      "provenance": "cloud",
+      "detail": null
+    },
+    {
+      "id": 1343,
+      "role": "filmstrip",
+      "s3_key": "artifact-1343",
+      "bytes": 3254,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "tile_w": 160,
+        "tile_h": 90,
+        "count": 4
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "alert",
+    "duration_sec": 4.0,
+    "fps_estimated": 5.0,
+    "frames_written": 20,
+    "codec": "h264",
+    "buffer": {
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "yolo": {
+      "class_counts": {
+        "person": 1
+      },
+      "class_max_conf": {
+        "person": 0.723
+      },
+      "trigger_classes": [
+        "person"
+      ]
+    },
+    "model_response": {
+      "label": "normal",
+      "people": 1,
+      "summary": "A child kicks a ball across the lawn while an adult watches from the patio.",
+      "vehicle_moving": false
+    },
+    "teacher": {
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "temperature": 0
+    }
+  }
+}

@@ -1,0 +1,137 @@
+{
+  "id": 16,
+  "site": "cohen_ramatgan",
+  "customer_id": 1,
+  "customer_name": "Dana Cohen",
+  "camera": "driveway",
+  "kind": "trigger",
+  "start_utc": "2026-10-03T10:42:04.434916Z",
+  "end_utc": "2026-10-03T10:42:08.434916Z",
+  "summary": "",
+  "label": null,
+  "alert_command": null,
+  "detected": [
+    "cat"
+  ],
+  "owner_verdicts": [],
+  "completeness": {
+    "video": true,
+    "boxes": "none",
+    "ai": "none",
+    "owner_feedback": false,
+    "expired": false,
+    "copies": [
+      "training"
+    ]
+  },
+  "reviewed": false,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/16/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": "2026-10-03 13:42:04",
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 16,
+      "purpose": "guard",
+      "status": "none",
+      "model": null,
+      "prompt_version": null,
+      "prompt": null,
+      "parsed": null,
+      "raw_text_artifact_id": null,
+      "input_frame_artifact_ids": []
+    }
+  ],
+  "feedback": [],
+  "artifacts": [
+    {
+      "id": 60,
+      "role": "original_video",
+      "s3_key": "dataset_cohen_ramatgan/clips/driveway/2026-10-03/driveway_1791024127_trigger.mp4",
+      "bytes": 2898,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 106,
+      "role": "meta",
+      "s3_key": "dataset_cohen_ramatgan/meta/driveway/2026-10-03/driveway_1791024127_trigger.meta.json",
+      "bytes": 543,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1344,
+      "role": "thumbnail",
+      "s3_key": "admin_cache/thumbs/16.jpg",
+      "bytes": 3020,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "src_etag": "9f35cef3a19db71442ad20605f33a610",
+        "needs_rendition": false
+      }
+    },
+    {
+      "id": 1345,
+      "role": "filmstrip",
+      "s3_key": "admin_cache/filmstrips/16.jpg",
+      "bytes": 2580,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "count": 4,
+        "tile_h": 90,
+        "tile_w": 160,
+        "src_etag": "9f35cef3a19db71442ad20605f33a610"
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "trigger",
+    "yolo": {
+      "class_counts": {
+        "cat": 1
+      },
+      "class_max_conf": {
+        "cat": 0.809
+      },
+      "trigger_classes": [
+        "cat"
+      ],
+      "trigger_detected": true
+    },
+    "codec": "h264",
+    "buffer": {
+      "store_fps": 5.0,
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "clip_path": "clips\\driveway\\2026-10-03\\driveway_1791024127_trigger.mp4",
+    "camera_name": "driveway",
+    "clip_end_ts": 1791024128.4349163,
+    "duration_sec": 4.0,
+    "clip_start_ts": 1791024124.4349163,
+    "fps_estimated": 5.0,
+    "clip_end_local": "2026-10-03 13:42:08",
+    "frames_written": 20,
+    "clip_start_local": "2026-10-03 13:42:04"
+  }
+}

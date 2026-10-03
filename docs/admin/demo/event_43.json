@@ -1,0 +1,309 @@
+{
+  "id": 43,
+  "site": "cohen_ramatgan",
+  "customer_id": 1,
+  "customer_name": "Dana Cohen",
+  "camera": "garden",
+  "kind": "alert",
+  "start_utc": "2026-10-02T13:19:05.364727Z",
+  "end_utc": "2026-10-02T13:19:09.364727Z",
+  "summary": "A woman walks across the lawn with a laundry basket toward the clothes line.",
+  "label": "normal",
+  "alert_command": "[send_message]",
+  "detected": [
+    "person"
+  ],
+  "owner_verdicts": [
+    "true_alert"
+  ],
+  "completeness": {
+    "video": true,
+    "boxes": "none",
+    "ai": "real",
+    "owner_feedback": true,
+    "expired": false,
+    "copies": [
+      "production",
+      "training"
+    ]
+  },
+  "reviewed": false,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/43/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": "2026-10-02 16:19:05",
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": {
+    "channel": "telegram",
+    "sent": true,
+    "detail": {
+      "channel": "telegram",
+      "telegram": {
+        "command": "[send_message]",
+        "telegram": {
+          "sent": true,
+          "results": [
+            {
+              "ok": true,
+              "chat_id": "-100100",
+              "message_id": 249
+            }
+          ]
+        }
+      }
+    }
+  },
+  "ai_runs": [
+    {
+      "id": 43,
+      "purpose": "guard",
+      "status": "real",
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"garden\", local time 16:19:08.\n\nWrite \"summary\": what happ",
+      "parsed": {
+        "label": "normal",
+        "people": 1,
+        "summary": "A woman walks across the lawn with a laundry basket toward the clothes line.",
+        "vehicle_moving": false
+      },
+      "raw_text_artifact_id": 153,
+      "input_frame_artifact_ids": [
+        232,
+        233,
+        234,
+        235,
+        236
+      ]
+    }
+  ],
+  "feedback": [
+    {
+      "id": 9,
+      "verdict": "true_alert",
+      "action": "none",
+      "note": "",
+      "raw_text": "👍",
+      "source": "text",
+      "received_utc": "2026-10-02T13:31:01Z"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": 14,
+      "role": "original_video",
+      "s3_key": "production_cohen_ramatgan/clips/garden/2026-10-02/garden_1790947148_alert.mp4",
+      "bytes": 3249,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 26,
+      "role": "feedback",
+      "s3_key": "production_cohen_ramatgan/feedback/garden/2026-10-02/garden_1790947148_alert_1790947861000.feedback.json",
+      "bytes": 421,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 42,
+      "role": "meta",
+      "s3_key": "production_cohen_ramatgan/meta/garden/2026-10-02/garden_1790947148_alert.meta.json",
+      "bytes": 932,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 85,
+      "role": "original_video",
+      "s3_key": "dataset_cohen_ramatgan/clips/garden/2026-10-02/garden_1790947148_alert.mp4",
+      "bytes": 3249,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 133,
+      "role": "meta",
+      "s3_key": "dataset_cohen_ramatgan/meta/garden/2026-10-02/garden_1790947148_alert.meta.json",
+      "bytes": 1667,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 153,
+      "role": "raw_answer",
+      "s3_key": "dataset_cohen_ramatgan/responses/garden/2026-10-02/garden_1790947148_alert.model_raw.txt",
+      "bytes": 148,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 232,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/garden/2026-10-02/garden_1790947148_alert_f0.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 233,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/garden/2026-10-02/garden_1790947148_alert_f1.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 234,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/garden/2026-10-02/garden_1790947148_alert_f2.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 235,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/garden/2026-10-02/garden_1790947148_alert_f3.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 236,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/garden/2026-10-02/garden_1790947148_alert_f4.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1446,
+      "role": "thumbnail",
+      "s3_key": "admin_cache/thumbs/43.jpg",
+      "bytes": 3615,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "src_etag": "d80ff7cbb4baafccd2870a1949529f75",
+        "needs_rendition": false
+      }
+    },
+    {
+      "id": 1447,
+      "role": "filmstrip",
+      "s3_key": "admin_cache/filmstrips/43.jpg",
+      "bytes": 3217,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "count": 4,
+        "tile_h": 90,
+        "tile_w": 160,
+        "src_etag": "d80ff7cbb4baafccd2870a1949529f75"
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "alert",
+    "yolo": {
+      "class_counts": {
+        "person": 1
+      },
+      "class_max_conf": {
+        "person": 0.684
+      },
+      "trigger_classes": [
+        "person"
+      ],
+      "trigger_detected": true
+    },
+    "alert": {
+      "label": "normal",
+      "muted": false,
+      "labels": [
+        "person"
+      ],
+      "summary": "A woman walks across the lawn with a laundry basket toward the clothes line.",
+      "alert_reason": "",
+      "alert_command": "[send_message]"
+    },
+    "codec": "h264",
+    "buffer": {
+      "store_fps": 5.0,
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "teacher": {
+      "model": "gpt-4o",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"garden\", local time 16:19:08.\n\nWrite \"summary\": what happ",
+      "raw_path": "responses\\garden\\2026-10-02\\garden_1790947148_alert.model_raw.txt",
+      "temperature": 0,
+      "input_frames": [
+        "vlm_crops\\garden\\2026-10-02\\garden_1790947148_alert_f0.jpg",
+        "vlm_crops\\garden\\2026-10-02\\garden_1790947148_alert_f1.jpg",
+        "vlm_crops\\garden\\2026-10-02\\garden_1790947148_alert_f2.jpg",
+        "vlm_crops\\garden\\2026-10-02\\garden_1790947148_alert_f3.jpg",
+        "vlm_crops\\garden\\2026-10-02\\garden_1790947148_alert_f4.jpg"
+      ],
+      "prompt_version": "2026-10-03.tagged-rules-label"
+    },
+    "clip_path": "clips\\garden\\2026-10-02\\garden_1790947148_alert.mp4",
+    "camera_name": "garden",
+    "clip_end_ts": 1790947149.362481,
+    "duration_sec": 4.0,
+    "clip_start_ts": 1790947145.362481,
+    "fps_estimated": 5.0,
+    "clip_end_local": "2026-10-02 16:19:09",
+    "frames_written": 20,
+    "model_response": {
+      "label": "normal",
+      "people": 1,
+      "summary": "A woman walks across the lawn with a laundry basket toward the clothes line.",
+      "vehicle_moving": false
+    },
+    "clip_start_local": "2026-10-02 16:19:05"
+  }
+}

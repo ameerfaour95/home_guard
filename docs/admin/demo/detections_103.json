@@ -1,0 +1,176 @@
+{
+  "provenance": "sampled",
+  "model": "yolo (collection export)",
+  "frames": [
+    {
+      "frame_index": 0,
+      "t_sec": 0.0,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 0,
+          "label": "person",
+          "conf": null,
+          "xyxy": [
+            0.158669,
+            0.41000000000000003,
+            0.268669,
+            0.83
+          ]
+        },
+        {
+          "cls": 7,
+          "label": "truck",
+          "conf": null,
+          "xyxy": [
+            0.043668999999999986,
+            0.55,
+            0.38366900000000004,
+            0.77
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 3,
+      "t_sec": 0.6,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 0,
+          "label": "person",
+          "conf": null,
+          "xyxy": [
+            0.25635800000000003,
+            0.41000000000000003,
+            0.366358,
+            0.83
+          ]
+        },
+        {
+          "cls": 7,
+          "label": "truck",
+          "conf": null,
+          "xyxy": [
+            0.141358,
+            0.55,
+            0.48135800000000006,
+            0.77
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 6,
+      "t_sec": 1.2,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 0,
+          "label": "person",
+          "conf": null,
+          "xyxy": [
+            0.354046,
+            0.41000000000000003,
+            0.464046,
+            0.83
+          ]
+        },
+        {
+          "cls": 7,
+          "label": "truck",
+          "conf": null,
+          "xyxy": [
+            0.239046,
+            0.55,
+            0.5790460000000001,
+            0.77
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 9,
+      "t_sec": 1.8,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 0,
+          "label": "person",
+          "conf": null,
+          "xyxy": [
+            0.45173500000000005,
+            0.41000000000000003,
+            0.5617350000000001,
+            0.83
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 12,
+      "t_sec": 2.4,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 7,
+          "label": "truck",
+          "conf": null,
+          "xyxy": [
+            0.4344239999999999,
+            0.55,
+            0.774424,
+            0.77
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 15,
+      "t_sec": 3.0,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 7,
+          "label": "truck",
+          "conf": null,
+          "xyxy": [
+            0.532113,
+            0.55,
+            0.872113,
+            0.77
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 18,
+      "t_sec": 3.6,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 0,
+          "label": "person",
+          "conf": null,
+          "xyxy": [
+            0.744802,
+            0.41000000000000003,
+            0.8548020000000001,
+            0.83
+          ]
+        },
+        {
+          "cls": 7,
+          "label": "truck",
+          "conf": null,
+          "xyxy": [
+            0.629802,
+            0.55,
+            0.969802,
+            0.77
+          ]
+        }
+      ]
+    }
+  ]
+}

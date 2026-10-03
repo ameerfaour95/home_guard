@@ -1,0 +1,211 @@
+{
+  "id": 93,
+  "site": "mizrahi_beersheva",
+  "customer_id": 3,
+  "customer_name": "Tamar Mizrahi",
+  "camera": "garage",
+  "kind": "false_positive",
+  "start_utc": "2026-10-01T16:59:58.620053Z",
+  "end_utc": "2026-10-01T17:00:02.620053Z",
+  "summary": "Headlights sweep across the wall as a vehicle turns on the road; no people are visible.",
+  "label": "normal",
+  "alert_command": "[none]",
+  "detected": [
+    "car"
+  ],
+  "owner_verdicts": [],
+  "completeness": {
+    "video": false,
+    "boxes": "none",
+    "ai": "real",
+    "owner_feedback": false,
+    "expired": false,
+    "copies": [
+      "training"
+    ]
+  },
+  "reviewed": true,
+  "flagged": false,
+  "thumbnail_url": null,
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": "2026-10-01 19:59:58",
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 93,
+      "purpose": "guard",
+      "status": "real",
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"garage\", local time 20:00:01.\n\nWrite \"summary\": what happ",
+      "parsed": {
+        "label": "normal",
+        "people": 0,
+        "summary": "Headlights sweep across the wall as a vehicle turns on the road; no people are visible.",
+        "vehicle_moving": true
+      },
+      "raw_text_artifact_id": 923,
+      "input_frame_artifact_ids": [
+        946,
+        947,
+        948,
+        949,
+        950
+      ]
+    }
+  ],
+  "feedback": [],
+  "artifacts": [
+    {
+      "id": 904,
+      "role": "meta",
+      "s3_key": "dataset_mizrahi_beersheva/meta/garage/2026-10-01/garage_1790874001_fp.meta.json",
+      "bytes": 1729,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 923,
+      "role": "raw_answer",
+      "s3_key": "dataset_mizrahi_beersheva/responses/garage/2026-10-01/garage_1790874001_fp.model_raw.txt",
+      "bytes": 158,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 946,
+      "role": "teacher_frame",
+      "s3_key": "dataset_mizrahi_beersheva/vlm_crops/garage/2026-10-01/garage_1790874001_fp_f0.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 947,
+      "role": "teacher_frame",
+      "s3_key": "dataset_mizrahi_beersheva/vlm_crops/garage/2026-10-01/garage_1790874001_fp_f1.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 948,
+      "role": "teacher_frame",
+      "s3_key": "dataset_mizrahi_beersheva/vlm_crops/garage/2026-10-01/garage_1790874001_fp_f2.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 949,
+      "role": "teacher_frame",
+      "s3_key": "dataset_mizrahi_beersheva/vlm_crops/garage/2026-10-01/garage_1790874001_fp_f3.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 950,
+      "role": "teacher_frame",
+      "s3_key": "dataset_mizrahi_beersheva/vlm_crops/garage/2026-10-01/garage_1790874001_fp_f4.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "false_positive",
+    "yolo": {
+      "class_counts": {
+        "car": 1
+      },
+      "class_max_conf": {
+        "car": 0.805
+      },
+      "trigger_classes": [
+        "car"
+      ],
+      "trigger_detected": true
+    },
+    "alert": {
+      "vlm": {
+        "people": 0,
+        "vehicle_moving": false
+      },
+      "label": "normal",
+      "muted": false,
+      "labels": [
+        "car"
+      ],
+      "summary": "Headlights sweep across the wall as a vehicle turns on the road; no people are visible.",
+      "alert_reason": "",
+      "alert_command": "[none]",
+      "false_positive": true
+    },
+    "codec": "h264",
+    "buffer": {
+      "store_fps": 5.0,
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "teacher": {
+      "model": "gpt-4o",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"garage\", local time 20:00:01.\n\nWrite \"summary\": what happ",
+      "raw_path": "responses\\garage\\2026-10-01\\garage_1790874001_fp.model_raw.txt",
+      "temperature": 0,
+      "input_frames": [
+        "vlm_crops\\garage\\2026-10-01\\garage_1790874001_fp_f0.jpg",
+        "vlm_crops\\garage\\2026-10-01\\garage_1790874001_fp_f1.jpg",
+        "vlm_crops\\garage\\2026-10-01\\garage_1790874001_fp_f2.jpg",
+        "vlm_crops\\garage\\2026-10-01\\garage_1790874001_fp_f3.jpg",
+        "vlm_crops\\garage\\2026-10-01\\garage_1790874001_fp_f4.jpg"
+      ],
+      "prompt_version": "2026-10-03.tagged-rules-label"
+    },
+    "clip_path": "clips\\garage\\2026-10-01\\garage_1790874001_fp.mp4",
+    "camera_name": "garage",
+    "clip_end_ts": 1790874002.6200526,
+    "duration_sec": 4.0,
+    "clip_start_ts": 1790873998.6200526,
+    "fps_estimated": 5.0,
+    "clip_end_local": "2026-10-01 20:00:02",
+    "frames_written": 20,
+    "model_response": {
+      "label": "normal",
+      "people": 0,
+      "summary": "Headlights sweep across the wall as a vehicle turns on the road; no people are visible.",
+      "vehicle_moving": true
+    },
+    "clip_start_local": "2026-10-01 19:59:58"
+  }
+}

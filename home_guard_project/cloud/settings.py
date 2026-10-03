@@ -14,6 +14,7 @@ class Settings:
     region: str = "us-east-1"
     access_ttl: int = 900
     refresh_ttl: int = 43200
+    run_loops: bool = False
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -27,6 +28,7 @@ class Settings:
             region=os.environ.get("HG_CLOUD_REGION", "us-east-1"),
             access_ttl=int(os.environ.get("HG_CLOUD_ACCESS_TTL", "900")),
             refresh_ttl=int(os.environ.get("HG_CLOUD_REFRESH_TTL", "43200")),
+            run_loops=os.environ.get("HG_CLOUD_RUN_LOOPS", "").lower() in ("1", "true", "yes"),
         )
 
     @classmethod

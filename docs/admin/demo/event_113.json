@@ -1,0 +1,205 @@
+{
+  "id": 113,
+  "site": "mizrahi_eilat",
+  "customer_id": 3,
+  "customer_name": "Tamar Mizrahi",
+  "camera": "front_door",
+  "kind": "alert",
+  "start_utc": "2026-10-01T15:25:27.645476Z",
+  "end_utc": "2026-10-01T15:25:31.645476Z",
+  "summary": "Two people in dark jackets stand at the front door talking while one of them knocks twice.",
+  "label": "normal",
+  "alert_command": "[send_message]",
+  "detected": [
+    "person"
+  ],
+  "owner_verdicts": [
+    "expected"
+  ],
+  "completeness": {
+    "video": true,
+    "boxes": "none",
+    "ai": "none",
+    "owner_feedback": true,
+    "expired": false,
+    "copies": [
+      "production"
+    ]
+  },
+  "reviewed": true,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/113/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": "2026-10-01 18:25:27",
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": {
+    "channel": "telegram",
+    "sent": true,
+    "detail": {
+      "channel": "telegram",
+      "telegram": {
+        "command": "[send_message]",
+        "telegram": {
+          "sent": true,
+          "results": [
+            {
+              "ok": true,
+              "chat_id": "-100100",
+              "message_id": 631
+            }
+          ]
+        }
+      }
+    }
+  },
+  "ai_runs": [
+    {
+      "id": 113,
+      "purpose": "guard",
+      "status": "none",
+      "model": null,
+      "prompt_version": null,
+      "prompt": null,
+      "parsed": null,
+      "raw_text_artifact_id": null,
+      "input_frame_artifact_ids": []
+    }
+  ],
+  "feedback": [
+    {
+      "id": 30,
+      "verdict": "expected",
+      "action": "none",
+      "note": "That is the cleaner.",
+      "raw_text": "That is the cleaner.",
+      "source": "text",
+      "received_utc": "2026-10-01T15:47:06Z"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": 1159,
+      "role": "original_video",
+      "s3_key": "production_mizrahi_eilat/clips/front_door/2026-10-01/front_door_1790868330_alert.mp4",
+      "bytes": 3498,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 1165,
+      "role": "feedback",
+      "s3_key": "production_mizrahi_eilat/feedback/front_door/2026-10-01/front_door_1790868330_alert_1790869626000.feedback.json",
+      "bytes": 459,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 1169,
+      "role": "meta",
+      "s3_key": "production_mizrahi_eilat/meta/front_door/2026-10-01/front_door_1790868330_alert.meta.json",
+      "bytes": 958,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 1554,
+      "role": "thumbnail",
+      "s3_key": "admin_cache/thumbs/113.jpg",
+      "bytes": 3627,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "src_etag": "bd236c2216a3eaac87da3b2770aabca7",
+        "needs_rendition": false
+      }
+    },
+    {
+      "id": 1555,
+      "role": "filmstrip",
+      "s3_key": "admin_cache/filmstrips/113.jpg",
+      "bytes": 3289,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "count": 4,
+        "tile_h": 90,
+        "tile_w": 160,
+        "src_etag": "bd236c2216a3eaac87da3b2770aabca7"
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "alert",
+    "yolo": {
+      "class_counts": {
+        "person": 2
+      },
+      "class_max_conf": {
+        "person": 0.875
+      },
+      "trigger_classes": [
+        "person"
+      ],
+      "trigger_detected": true
+    },
+    "alert": {
+      "label": "normal",
+      "muted": false,
+      "labels": [
+        "person"
+      ],
+      "summary": "Two people in dark jackets stand at the front door talking while one of them knocks twice.",
+      "dispatch": {
+        "channel": "telegram",
+        "telegram": {
+          "command": "[send_message]",
+          "telegram": {
+            "sent": true,
+            "results": [
+              {
+                "ok": true,
+                "chat_id": "-100100",
+                "message_id": 631
+              }
+            ]
+          }
+        }
+      },
+      "alert_reason": "",
+      "alert_command": "[send_message]"
+    },
+    "codec": "h264",
+    "buffer": {
+      "store_fps": 5.0,
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "clip_path": "clips\\front_door\\2026-10-01\\front_door_1790868330_alert.mp4",
+    "camera_name": "front_door",
+    "clip_end_ts": 1790868331.6454763,
+    "duration_sec": 4.0,
+    "clip_start_ts": 1790868327.6454763,
+    "fps_estimated": 5.0,
+    "clip_end_local": "2026-10-01 18:25:31",
+    "frames_written": 20,
+    "clip_start_local": "2026-10-01 18:25:27"
+  }
+}

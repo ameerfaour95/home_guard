@@ -1,0 +1,498 @@
+{
+  "id": 26,
+  "site": "cohen_ramatgan",
+  "customer_id": 1,
+  "customer_name": "Dana Cohen",
+  "camera": "front_door",
+  "kind": "alert",
+  "start_utc": "2026-10-02T12:35:42.400500Z",
+  "end_utc": "2026-10-02T12:35:46.400500Z",
+  "summary": "A teenager in a school uniform steps out of the front door, locks it and walks toward the gate.",
+  "label": "normal",
+  "alert_command": "[send_message]",
+  "detected": [
+    "person"
+  ],
+  "owner_verdicts": [],
+  "completeness": {
+    "video": true,
+    "boxes": "sampled",
+    "ai": "real",
+    "owner_feedback": false,
+    "expired": false,
+    "copies": [
+      "production",
+      "training"
+    ]
+  },
+  "reviewed": false,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/26/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": "2026-10-02 15:35:42",
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": {
+    "channel": "telegram",
+    "sent": true,
+    "detail": {
+      "channel": "telegram",
+      "telegram": {
+        "command": "[send_message]",
+        "telegram": {
+          "sent": true,
+          "results": [
+            {
+              "ok": true,
+              "chat_id": "-100100",
+              "message_id": 346
+            }
+          ]
+        }
+      }
+    }
+  },
+  "ai_runs": [
+    {
+      "id": 26,
+      "purpose": "guard",
+      "status": "real",
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"front_door\", local time 15:35:45.\n\nWrite \"summary\": what happ",
+      "parsed": {
+        "label": "normal",
+        "people": 1,
+        "summary": "A teenager in a school uniform steps out of the front door, locks it and walks toward the gate.",
+        "vehicle_moving": false
+      },
+      "raw_text_artifact_id": 148,
+      "input_frame_artifact_ids": [
+        197,
+        198,
+        199,
+        200,
+        201
+      ]
+    }
+  ],
+  "feedback": [],
+  "artifacts": [
+    {
+      "id": 10,
+      "role": "original_video",
+      "s3_key": "production_cohen_ramatgan/clips/front_door/2026-10-02/front_door_1790944545_alert.mp4",
+      "bytes": 3322,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 38,
+      "role": "meta",
+      "s3_key": "production_cohen_ramatgan/meta/front_door/2026-10-02/front_door_1790944545_alert.meta.json",
+      "bytes": 963,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 69,
+      "role": "original_video",
+      "s3_key": "dataset_cohen_ramatgan/clips/front_door/2026-10-02/front_door_1790944545_alert.mp4",
+      "bytes": 3322,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 117,
+      "role": "meta",
+      "s3_key": "dataset_cohen_ramatgan/meta/front_door/2026-10-02/front_door_1790944545_alert.meta.json",
+      "bytes": 3695,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 148,
+      "role": "raw_answer",
+      "s3_key": "dataset_cohen_ramatgan/responses/front_door/2026-10-02/front_door_1790944545_alert.model_raw.txt",
+      "bytes": 167,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 197,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/front_door/2026-10-02/front_door_1790944545_alert_f0.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 198,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/front_door/2026-10-02/front_door_1790944545_alert_f1.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 199,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/front_door/2026-10-02/front_door_1790944545_alert_f2.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 200,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/front_door/2026-10-02/front_door_1790944545_alert_f3.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 201,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/front_door/2026-10-02/front_door_1790944545_alert_f4.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 299,
+      "role": "yolo_image",
+      "s3_key": "dataset_cohen_ramatgan/yolo/images/front_door/2026-10-02/front_door_1790944545_alert_f0000.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 300,
+      "role": "yolo_image",
+      "s3_key": "dataset_cohen_ramatgan/yolo/images/front_door/2026-10-02/front_door_1790944545_alert_f0003.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 301,
+      "role": "yolo_image",
+      "s3_key": "dataset_cohen_ramatgan/yolo/images/front_door/2026-10-02/front_door_1790944545_alert_f0006.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 302,
+      "role": "yolo_image",
+      "s3_key": "dataset_cohen_ramatgan/yolo/images/front_door/2026-10-02/front_door_1790944545_alert_f0009.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 303,
+      "role": "yolo_image",
+      "s3_key": "dataset_cohen_ramatgan/yolo/images/front_door/2026-10-02/front_door_1790944545_alert_f0012.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 304,
+      "role": "yolo_image",
+      "s3_key": "dataset_cohen_ramatgan/yolo/images/front_door/2026-10-02/front_door_1790944545_alert_f0015.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 305,
+      "role": "yolo_image",
+      "s3_key": "dataset_cohen_ramatgan/yolo/images/front_door/2026-10-02/front_door_1790944545_alert_f0018.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 409,
+      "role": "yolo_label",
+      "s3_key": "dataset_cohen_ramatgan/yolo/labels/front_door/2026-10-02/front_door_1790944545_alert_f0000.txt",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 410,
+      "role": "yolo_label",
+      "s3_key": "dataset_cohen_ramatgan/yolo/labels/front_door/2026-10-02/front_door_1790944545_alert_f0003.txt",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 411,
+      "role": "yolo_label",
+      "s3_key": "dataset_cohen_ramatgan/yolo/labels/front_door/2026-10-02/front_door_1790944545_alert_f0006.txt",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 412,
+      "role": "yolo_label",
+      "s3_key": "dataset_cohen_ramatgan/yolo/labels/front_door/2026-10-02/front_door_1790944545_alert_f0009.txt",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 413,
+      "role": "yolo_label",
+      "s3_key": "dataset_cohen_ramatgan/yolo/labels/front_door/2026-10-02/front_door_1790944545_alert_f0012.txt",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 414,
+      "role": "yolo_label",
+      "s3_key": "dataset_cohen_ramatgan/yolo/labels/front_door/2026-10-02/front_door_1790944545_alert_f0015.txt",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 415,
+      "role": "yolo_label",
+      "s3_key": "dataset_cohen_ramatgan/yolo/labels/front_door/2026-10-02/front_door_1790944545_alert_f0018.txt",
+      "bytes": 0,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1450,
+      "role": "thumbnail",
+      "s3_key": "admin_cache/thumbs/26.jpg",
+      "bytes": 3607,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "src_etag": "aa4815bc3c5379842f210b95d3884135",
+        "needs_rendition": false
+      }
+    },
+    {
+      "id": 1451,
+      "role": "filmstrip",
+      "s3_key": "admin_cache/filmstrips/26.jpg",
+      "bytes": 3269,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "count": 4,
+        "tile_h": 90,
+        "tile_w": 160,
+        "src_etag": "aa4815bc3c5379842f210b95d3884135"
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "alert",
+    "yolo": {
+      "class_counts": {
+        "person": 1
+      },
+      "class_max_conf": {
+        "person": 0.479
+      },
+      "trigger_classes": [
+        "person"
+      ],
+      "trigger_detected": true
+    },
+    "alert": {
+      "label": "normal",
+      "muted": false,
+      "labels": [
+        "person"
+      ],
+      "summary": "A teenager in a school uniform steps out of the front door, locks it and walks toward the gate.",
+      "alert_reason": "",
+      "alert_command": "[send_message]"
+    },
+    "codec": "h264",
+    "buffer": {
+      "store_fps": 5.0,
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "teacher": {
+      "model": "gpt-4o",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"front_door\", local time 15:35:45.\n\nWrite \"summary\": what happ",
+      "raw_path": "responses\\front_door\\2026-10-02\\front_door_1790944545_alert.model_raw.txt",
+      "temperature": 0,
+      "input_frames": [
+        "vlm_crops\\front_door\\2026-10-02\\front_door_1790944545_alert_f0.jpg",
+        "vlm_crops\\front_door\\2026-10-02\\front_door_1790944545_alert_f1.jpg",
+        "vlm_crops\\front_door\\2026-10-02\\front_door_1790944545_alert_f2.jpg",
+        "vlm_crops\\front_door\\2026-10-02\\front_door_1790944545_alert_f3.jpg",
+        "vlm_crops\\front_door\\2026-10-02\\front_door_1790944545_alert_f4.jpg"
+      ],
+      "prompt_version": "2026-10-03.tagged-rules-label"
+    },
+    "clip_path": "clips\\front_door\\2026-10-02\\front_door_1790944545_alert.mp4",
+    "camera_name": "front_door",
+    "clip_end_ts": 1790944546.3674028,
+    "yolo_export": {
+      "conf": 0.25,
+      "enabled": true,
+      "export_fps": 1.7,
+      "images_root": "yolo\\images",
+      "labels_root": "yolo\\labels",
+      "exported_frames": [
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\front_door\\2026-10-02\\front_door_1790944545_alert_f0000.jpg",
+          "label_path": "yolo\\labels\\front_door\\2026-10-02\\front_door_1790944545_alert_f0000.txt",
+          "frame_index": 0,
+          "approx_time_offset_sec": 0.0
+        },
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\front_door\\2026-10-02\\front_door_1790944545_alert_f0003.jpg",
+          "label_path": "yolo\\labels\\front_door\\2026-10-02\\front_door_1790944545_alert_f0003.txt",
+          "frame_index": 3,
+          "approx_time_offset_sec": 0.6
+        },
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\front_door\\2026-10-02\\front_door_1790944545_alert_f0006.jpg",
+          "label_path": "yolo\\labels\\front_door\\2026-10-02\\front_door_1790944545_alert_f0006.txt",
+          "frame_index": 6,
+          "approx_time_offset_sec": 1.2
+        },
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\front_door\\2026-10-02\\front_door_1790944545_alert_f0009.jpg",
+          "label_path": "yolo\\labels\\front_door\\2026-10-02\\front_door_1790944545_alert_f0009.txt",
+          "frame_index": 9,
+          "approx_time_offset_sec": 1.8
+        },
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\front_door\\2026-10-02\\front_door_1790944545_alert_f0012.jpg",
+          "label_path": "yolo\\labels\\front_door\\2026-10-02\\front_door_1790944545_alert_f0012.txt",
+          "frame_index": 12,
+          "approx_time_offset_sec": 2.4
+        },
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\front_door\\2026-10-02\\front_door_1790944545_alert_f0015.jpg",
+          "label_path": "yolo\\labels\\front_door\\2026-10-02\\front_door_1790944545_alert_f0015.txt",
+          "frame_index": 15,
+          "approx_time_offset_sec": 3.0
+        },
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\front_door\\2026-10-02\\front_door_1790944545_alert_f0018.jpg",
+          "label_path": "yolo\\labels\\front_door\\2026-10-02\\front_door_1790944545_alert_f0018.txt",
+          "frame_index": 18,
+          "approx_time_offset_sec": 3.6
+        }
+      ]
+    },
+    "duration_sec": 4.0,
+    "clip_start_ts": 1790944542.3674028,
+    "fps_estimated": 5.0,
+    "clip_end_local": "2026-10-02 15:35:46",
+    "frames_written": 20,
+    "model_response": {
+      "label": "normal",
+      "people": 1,
+      "summary": "A teenager in a school uniform steps out of the front door, locks it and walks toward the gate.",
+      "vehicle_moving": false
+    },
+    "clip_start_local": "2026-10-02 15:35:42"
+  }
+}

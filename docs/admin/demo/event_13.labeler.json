@@ -1,0 +1,152 @@
+{
+  "id": 13,
+  "site": "customer-1fc0de",
+  "customer_id": 0,
+  "customer_name": "customer-1fc0de",
+  "camera": "cam-0157f7",
+  "kind": "alert",
+  "start_utc": "2026-10-02T18:26:52.474433Z",
+  "end_utc": "2026-10-02T18:26:56.474433Z",
+  "summary": "A white hatchback pulls into the cam-0157f7 and a woman steps out and opens the trunk.",
+  "label": "normal",
+  "alert_command": "[send_message]",
+  "detected": [
+    "car",
+    "person"
+  ],
+  "owner_verdicts": [
+    "true_alert"
+  ],
+  "completeness": {
+    "video": true,
+    "boxes": "none",
+    "ai": "none",
+    "owner_feedback": true,
+    "expired": false,
+    "copies": [
+      "production"
+    ]
+  },
+  "reviewed": false,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/13/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": null,
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 13,
+      "purpose": "guard",
+      "status": "none",
+      "model": null,
+      "prompt_version": null,
+      "prompt": null,
+      "parsed": null,
+      "raw_text_artifact_id": null,
+      "input_frame_artifact_ids": []
+    }
+  ],
+  "feedback": [
+    {
+      "id": 6,
+      "verdict": "true_alert",
+      "action": "none",
+      "note": "",
+      "raw_text": "",
+      "source": "text",
+      "received_utc": "2026-10-02T18:29:53Z"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": 6,
+      "role": "original_video",
+      "s3_key": "artifact-6",
+      "bytes": 4158,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 23,
+      "role": "feedback",
+      "s3_key": "artifact-23",
+      "bytes": 429,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 34,
+      "role": "meta",
+      "s3_key": "artifact-34",
+      "bytes": 984,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 1396,
+      "role": "thumbnail",
+      "s3_key": "artifact-1396",
+      "bytes": 3772,
+      "available": true,
+      "provenance": "cloud",
+      "detail": null
+    },
+    {
+      "id": 1397,
+      "role": "filmstrip",
+      "s3_key": "artifact-1397",
+      "bytes": 3407,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "tile_w": 160,
+        "tile_h": 90,
+        "count": 4
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "alert",
+    "duration_sec": 4.0,
+    "fps_estimated": 5.0,
+    "frames_written": 20,
+    "codec": "h264",
+    "buffer": {
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "yolo": {
+      "class_counts": {
+        "car": 1,
+        "person": 1
+      },
+      "class_max_conf": {
+        "car": 0.438,
+        "person": 0.539
+      },
+      "trigger_classes": [
+        "car",
+        "person"
+      ]
+    }
+  }
+}

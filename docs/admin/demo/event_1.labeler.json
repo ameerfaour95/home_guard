@@ -1,0 +1,259 @@
+{
+  "id": 1,
+  "site": "customer-1fc0de",
+  "customer_id": 0,
+  "customer_name": "customer-1fc0de",
+  "camera": "cam-0157f7",
+  "kind": "false_positive",
+  "start_utc": "2026-10-01T16:35:23.381890Z",
+  "end_utc": "2026-10-01T16:35:27.381890Z",
+  "summary": "A bird lands on the railing and flies away.",
+  "label": "normal",
+  "alert_command": "[none]",
+  "detected": [
+    "bird"
+  ],
+  "owner_verdicts": [
+    "true_alert"
+  ],
+  "completeness": {
+    "video": true,
+    "boxes": "none",
+    "ai": "real",
+    "owner_feedback": true,
+    "expired": false,
+    "copies": [
+      "production",
+      "training"
+    ]
+  },
+  "reviewed": true,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/1/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": null,
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 1,
+      "purpose": "guard",
+      "status": "real",
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "prompt": null,
+      "parsed": {
+        "label": "normal",
+        "people": 0,
+        "summary": "A bird lands on the railing and flies away.",
+        "vehicle_moving": false
+      },
+      "raw_text_artifact_id": 141,
+      "input_frame_artifact_ids": [
+        157,
+        158,
+        159,
+        160,
+        161
+      ]
+    }
+  ],
+  "feedback": [
+    {
+      "id": 2,
+      "verdict": "true_alert",
+      "action": "none",
+      "note": "",
+      "raw_text": "",
+      "source": "text",
+      "received_utc": "2026-10-01T16:52:00Z"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": 1,
+      "role": "original_video",
+      "s3_key": "artifact-1",
+      "bytes": 2960,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 19,
+      "role": "feedback",
+      "s3_key": "artifact-19",
+      "bytes": 389,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 29,
+      "role": "meta",
+      "s3_key": "artifact-29",
+      "bytes": 790,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 47,
+      "role": "original_video",
+      "s3_key": "artifact-47",
+      "bytes": 2960,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 93,
+      "role": "meta",
+      "s3_key": "artifact-93",
+      "bytes": 1674,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 141,
+      "role": "raw_answer",
+      "s3_key": "artifact-141",
+      "bytes": 115,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 157,
+      "role": "teacher_frame",
+      "s3_key": "artifact-157",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 158,
+      "role": "teacher_frame",
+      "s3_key": "artifact-158",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 159,
+      "role": "teacher_frame",
+      "s3_key": "artifact-159",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 160,
+      "role": "teacher_frame",
+      "s3_key": "artifact-160",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 161,
+      "role": "teacher_frame",
+      "s3_key": "artifact-161",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1532,
+      "role": "thumbnail",
+      "s3_key": "artifact-1532",
+      "bytes": 2968,
+      "available": true,
+      "provenance": "cloud",
+      "detail": null
+    },
+    {
+      "id": 1533,
+      "role": "filmstrip",
+      "s3_key": "artifact-1533",
+      "bytes": 2597,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "tile_w": 160,
+        "tile_h": 90,
+        "count": 4
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "false_positive",
+    "duration_sec": 4.0,
+    "fps_estimated": 5.0,
+    "frames_written": 20,
+    "codec": "h264",
+    "buffer": {
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "yolo": {
+      "class_counts": {
+        "bird": 1
+      },
+      "class_max_conf": {
+        "bird": 0.647
+      },
+      "trigger_classes": [
+        "bird"
+      ]
+    },
+    "model_response": {
+      "label": "normal",
+      "people": 0,
+      "summary": "A bird lands on the railing and flies away.",
+      "vehicle_moving": false
+    },
+    "teacher": {
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "temperature": 0
+    }
+  }
+}

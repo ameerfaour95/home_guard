@@ -10,7 +10,9 @@ from sqlalchemy.orm import Session, sessionmaker
 def make_engine(url: str) -> Engine:
     if url.startswith("postgresql://"):
         url = "postgresql+psycopg://" + url[len("postgresql://"):]
-    return create_engine(url, pool_pre_ping=True)
+    if url.startswith("sqlite"):  # tests only: SQLite pools take no size arguments
+        return create_engine(url, pool_pre_ping=True)
+    return create_engine(url, pool_pre_ping=True, pool_size=10, max_overflow=10)
 
 
 @contextmanager

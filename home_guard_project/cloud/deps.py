@@ -59,3 +59,30 @@ def require_role(*roles: str) -> Callable[..., Staff]:
         return staff
 
     return dep
+
+
+# ---------------------------------------------------------------- bounds at the API boundary
+# Database ids are 32-bit integers and text columns have widths: values outside them are answered here (404 for
+# an id that cannot exist, 422 for an over-long string) and never reach PostgreSQL as a 500. These are checked in
+# the routes, not in schemas.py, so the frozen OpenAPI document does not change.
+
+MAX_DB_ID = 2 ** 31 - 1
+NAME_MAX = 120
+NOTES_MAX = 4000
+TEXT_MAX = 200
+
+
+def id_in_range(value: Optional[int]) -> bool:
+    return value is not None and 1 <= value <= MAX_DB_ID
+
+
+def require_id(value: int, not_found: str) -> int:
+    """`value` when it can be a database id, else the same 404 a missing row gets."""
+    if not id_in_range(value):
+        raise HTTPException(status_code=404, detail=not_found)
+    return value
+
+
+def check_length(field: str, value: Optional[str], limit: int = TEXT_MAX) -> None:
+    if value is not None and len(value) > limit:
+        raise HTTPException(status_code=422, detail=f"{field} is too long (at most {limit} characters)")

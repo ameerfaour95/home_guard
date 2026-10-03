@@ -1,0 +1,129 @@
+{
+  "id": 54,
+  "site": "levi_haifa",
+  "customer_id": 2,
+  "customer_name": "Yossi Levi",
+  "camera": "main_entrance",
+  "kind": "random",
+  "start_utc": "2026-10-01T19:10:04.582623Z",
+  "end_utc": "2026-10-01T19:10:08.582623Z",
+  "summary": "",
+  "label": null,
+  "alert_command": null,
+  "detected": [],
+  "owner_verdicts": [],
+  "completeness": {
+    "video": true,
+    "boxes": "none",
+    "ai": "none",
+    "owner_feedback": false,
+    "expired": false,
+    "copies": [
+      "training"
+    ]
+  },
+  "reviewed": false,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/54/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": "2026-10-01 22:10:04",
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 54,
+      "purpose": "guard",
+      "status": "none",
+      "model": null,
+      "prompt_version": null,
+      "prompt": null,
+      "parsed": null,
+      "raw_text_artifact_id": null,
+      "input_frame_artifact_ids": []
+    }
+  ],
+  "feedback": [],
+  "artifacts": [
+    {
+      "id": 511,
+      "role": "original_video",
+      "s3_key": "dataset_levi_haifa/clips/main_entrance/2026-10-01/main_entrance_1790881807_random.mp4",
+      "bytes": 2362,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 545,
+      "role": "meta",
+      "s3_key": "dataset_levi_haifa/meta/main_entrance/2026-10-01/main_entrance_1790881807_random.meta.json",
+      "bytes": 530,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1510,
+      "role": "thumbnail",
+      "s3_key": "admin_cache/thumbs/54.jpg",
+      "bytes": 1849,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "src_etag": "9edd4e7f3e0252460cb2c4f2a407c61a",
+        "needs_rendition": false
+      }
+    },
+    {
+      "id": 1511,
+      "role": "filmstrip",
+      "s3_key": "admin_cache/filmstrips/54.jpg",
+      "bytes": 1539,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "count": 4,
+        "tile_h": 90,
+        "tile_w": 160,
+        "src_etag": "9edd4e7f3e0252460cb2c4f2a407c61a"
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "random",
+    "yolo": {
+      "class_counts": {},
+      "class_max_conf": {},
+      "trigger_classes": [],
+      "trigger_detected": false
+    },
+    "codec": "h264",
+    "buffer": {
+      "store_fps": 5.0,
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "clip_path": "clips\\main_entrance\\2026-10-01\\main_entrance_1790881807_random.mp4",
+    "camera_name": "main_entrance",
+    "clip_end_ts": 1790881808.582623,
+    "duration_sec": 4.0,
+    "clip_start_ts": 1790881804.582623,
+    "fps_estimated": 5.0,
+    "clip_end_local": "2026-10-01 22:10:08",
+    "frames_written": 20,
+    "clip_start_local": "2026-10-01 22:10:04"
+  }
+}

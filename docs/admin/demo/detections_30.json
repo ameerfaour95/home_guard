@@ -1,0 +1,132 @@
+{
+  "provenance": "sampled",
+  "model": "yolo (collection export)",
+  "frames": [
+    {
+      "frame_index": 0,
+      "t_sec": 0.0,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 16,
+          "label": "dog",
+          "conf": null,
+          "xyxy": [
+            0.6484030000000001,
+            0.73,
+            0.768403,
+            0.8300000000000001
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 3,
+      "t_sec": 0.6,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 16,
+          "label": "dog",
+          "conf": null,
+          "xyxy": [
+            0.5922160000000001,
+            0.73,
+            0.712216,
+            0.8300000000000001
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 6,
+      "t_sec": 1.2,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 16,
+          "label": "dog",
+          "conf": null,
+          "xyxy": [
+            0.536028,
+            0.73,
+            0.6560280000000001,
+            0.8300000000000001
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 9,
+      "t_sec": 1.8,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 16,
+          "label": "dog",
+          "conf": null,
+          "xyxy": [
+            0.479841,
+            0.73,
+            0.5998410000000001,
+            0.8300000000000001
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 12,
+      "t_sec": 2.4,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 16,
+          "label": "dog",
+          "conf": null,
+          "xyxy": [
+            0.423654,
+            0.73,
+            0.543654,
+            0.8300000000000001
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 15,
+      "t_sec": 3.0,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 16,
+          "label": "dog",
+          "conf": null,
+          "xyxy": [
+            0.367467,
+            0.73,
+            0.487467,
+            0.8300000000000001
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 18,
+      "t_sec": 3.6,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 16,
+          "label": "dog",
+          "conf": null,
+          "xyxy": [
+            0.31128,
+            0.73,
+            0.43128,
+            0.8300000000000001
+          ]
+        }
+      ]
+    }
+  ]
+}

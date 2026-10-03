@@ -4,9 +4,13 @@ Labelers see only events of customers who gave training consent, with the custom
 pseudonyms (`customer-<6 hex>` for the customer and site, `cam-<6 hex>` for each camera), and without delivery
 details or the owner's words. Their responses are built from allowlisted projections, never by deleting fields
 from real data: free text (summaries, reasons, prompts, AI output) passes through `redact`, storage keys become
-opaque `artifact-<id>` references, and `raw_meta` keeps only a fixed set of non-identifying fields. Their search
-runs over the redacted summaries, and a query naming the household returns nothing. Admin and support see
-everything.
+opaque `artifact-<id>` references, `raw_meta` keeps only a fixed set of non-identifying fields, enum fields
+(`alert_command`, `label`) outside their value sets are null, and `clip_start_local` is never shown. Labelers get
+no prompt text and cannot search (any `q` is one uniform 400): capabilities they do not need are removed, and
+redaction is only defence in depth. Admin and support see everything.
+
+Labelers never get a real customer id: `customer_id` is 0 in every labeler response, and a labeler's
+`customer_id` filter is one uniform 400 (sequential ids would tell which clips come from a known household).
 """
 from __future__ import annotations
 
@@ -20,22 +24,24 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Literal, Optional, get_args
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import (BigInteger, Float, Integer, and_, case, cast, false, func, literal, or_, select, text, true,
-                        tuple_, type_coerce)
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import BigInteger, Integer, and_, cast, false, func, literal, or_, select, text, true, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from home_guard_project.fleet_contract.classes import COCO_NAMES
 from home_guard_project.fleet_contract.keys import parse_key
 from home_guard_project.fleet_contract.legacy import parse_heartbeat, parse_meta
+from home_guard_project.fleet_contract.yolo_labels import parse_label
 
 from .. import audit, pseudonym, redact
-from ..deps import SessionDep, current_staff
-from ..models import (AiRun, Artifact, AuditLog, Camera, CollectionItem, Customer, Device, Event, Feedback, RawRevision, ReviewState,
-                      Staff)
+from .. import studio as studio_logic
+from ..access import may_see_thumbnail
+from ..deps import TEXT_MAX, SessionDep, check_length, current_staff, id_in_range, require_id
+from ..models import (AiRun, Artifact, AuditLog, Camera, CollectionItem, Customer, Device, Event, Feedback,
+                      IndexProblem, RawRevision, ReviewState, Staff)
+from ..s3 import ETagMismatch
 from ..schemas import (AiRunOut, ArtifactOut, Box, DensityOut, DensityRow, DetectionsOut, DispatchOut, EventDetail,
-                       EventKind, EventPage, EventSummary, FeedbackOut, FrameBoxes, ReviewCount, ReviewUpdate)
+                       AiStatus, EventKind, EventPage, EventSummary, FeedbackOut, FrameBoxes, ReviewCount, ReviewUpdate)
 
 router = APIRouter(tags=["events"], dependencies=[Depends(current_staff)])
 
@@ -50,7 +56,7 @@ _LABELER_ARTIFACT_DETAIL = ("fps", "tile_w", "tile_h", "count", "copy")
 _LABELER_META = {
     "kind": None, "duration_sec": None, "fps_estimated": None, "frames_written": None, "codec": None,
     "buffer": ("store_size",), "yolo": ("class_counts", "class_max_conf", "trigger_classes"),
-    "model_response": None, "teacher": ("model", "prompt_version", "temperature", "prompt"),
+    "model_response": None, "teacher": ("model", "prompt_version", "temperature"),
 }
 
 
@@ -100,6 +106,20 @@ class _Viewer:
     def camera(self, site: str, camera: str) -> str:
         return pseudonym.camera(self.secret, site, camera) if self.labeler else camera
 
+    def customer_id(self, customer_id: int) -> int:
+        return 0 if self.labeler else customer_id
+
+
+CUSTOMER_FILTER_REFUSED = "Filtering by customer is not available for this role"
+
+
+def _customer_condition(viewer: _Viewer, customer_id: Optional[int]):
+    """The `customer_id` filter: refused for labelers (one 400, whatever the id); an id that cannot exist matches
+    nothing."""
+    if viewer.labeler:
+        raise HTTPException(status_code=400, detail=CUSTOMER_FILTER_REFUSED)
+    return Device.customer_id == customer_id if id_in_range(customer_id) else false()
+
 
 def _scoped(stmt):
     """Join Device and Customer onto a statement selecting from Event."""
@@ -126,31 +146,21 @@ def _camera_condition(session: Session, viewer: _Viewer, camera: str):
     return tuple_(Event.site, Event.camera).in_(pairs) if pairs else false()
 
 
-def _has_verdict(verdict: str):
-    return type_coerce(Event.owner_verdicts, JSONB).contains([verdict])
+_has_verdict = studio_logic.has_verdict
+
+# The only values `kind`, `ai` and `verdict` can take; anything else is a 400 for every role before any query.
+_AI_STATUSES = frozenset(get_args(AiStatus))
 
 
-def _max_class_conf():
-    conf = type_coerce(Event.class_max_conf, JSONB)
-    each = func.jsonb_each_text(conf).table_valued("key", "value")
-    best = select(func.max(cast(each.c.value, Float))).select_from(each).scalar_subquery()
-    return case((func.jsonb_typeof(conf) == "object", best), else_=None)
+def _check_vocabulary(kind: Optional[str] = None, ai: Optional[str] = None, verdict: Optional[str] = None) -> None:
+    for name, value, allowed in (("kind", kind, _KINDS), ("ai", ai, _AI_STATUSES),
+                                 ("verdict", verdict, redact.VERDICTS | {redact.UNKNOWN_VERDICT})):
+        if value is not None and value not in allowed:
+            raise HTTPException(status_code=400, detail=f"Unknown {name}")
 
 
 _reviewed = func.coalesce(ReviewState.reviewed, false())
 _flagged = func.coalesce(ReviewState.flagged, false())
-
-# Built-in saved filters. Task 13 moves them into studio.BUILTIN_FILTERS with these same meanings.
-BUILTIN_FILTERS = {
-    "false_alarm": lambda: _has_verdict("false_alarm"),
-    "ai_dismissed_person": lambda: and_(Event.kind == "false_positive",
-                                        type_coerce(Event.detected, JSONB).contains(["person"])),
-    "ai_failed": lambda: Event.completeness["ai"].as_string().in_(["failed", "fallback"]),
-    "real_but_wrong": lambda: _has_verdict("real_but_wrong"),
-    "low_conf": lambda: _max_class_conf() < 0.45,
-    "paused": lambda: Event.kind == "paused",
-}
-
 
 # ---------------------------------------------------------------- cursor
 
@@ -194,25 +204,30 @@ def _summary_fields(session: Session, viewer: _Viewer, ev: Event, customer_id: i
     completeness = {**_COMPLETENESS_DEFAULT, **(ev.completeness if isinstance(ev.completeness, dict) else {})}
     shown = lambda value: viewer.text(session, ev.device_pk, value)  # noqa: E731
     return dict(
-        id=ev.id, site=viewer.site(customer_id, ev.site), customer_id=customer_id,
+        id=ev.id, site=viewer.site(customer_id, ev.site), customer_id=viewer.customer_id(customer_id),
         customer_name=viewer.customer_name(customer_id, customer_name), camera=viewer.camera(ev.site, ev.camera),
         kind=ev.kind if ev.kind in _KINDS else "unknown",
         start_utc=_ts_utc(ev.start_ts), end_utc=_ts_utc(ev.end_ts), summary=shown(ev.summary),
-        label=shown(ev.label) if ev.label is not None else None,
-        alert_command=ev.alert_command,
+        label=redact.label(ev.label) if viewer.labeler else ev.label,
+        alert_command=redact.alert_command(ev.alert_command) if viewer.labeler else ev.alert_command,
         detected=[shown(d) for d in (ev.detected or []) if isinstance(d, str)],
-        owner_verdicts=[shown(v) for v in (ev.owner_verdicts or []) if isinstance(v, str)],
+        owner_verdicts=[(redact.verdict(v) if viewer.labeler else shown(v))
+                        for v in (ev.owner_verdicts or []) if isinstance(v, str)],
         completeness=completeness, reviewed=bool(reviewed), flagged=bool(flagged),
         thumbnail_url=f"/v1/events/{ev.id}/thumbnail" if has_thumbnail else None,
         timezone=tz or "UTC",
     )
 
 
-def _thumbnail_ids(session: Session, ids: list[int]) -> set[int]:
+def _thumbnail_ids(session: Session, viewer: _Viewer, ids: list[int]) -> set[int]:
+    """Events among `ids` with a thumbnail this viewer may open (access.may_see_thumbnail)."""
     if not ids:
         return set()
-    return set(session.scalars(select(Artifact.event_id).where(
-        Artifact.event_id.in_(ids), Artifact.role == "thumbnail", Artifact.available.is_(True)).distinct()))
+    has_thumb = select(Artifact.event_id).where(Artifact.event_id.in_(ids), Artifact.role == "thumbnail",
+                                                Artifact.available.is_(True))
+    rows = session.execute(_scoped(select(Event.id, Customer.consent_recordings, Customer.consent_training)
+                                   .select_from(Event)).where(Event.id.in_(ids), Event.id.in_(has_thumb))).all()
+    return {eid for eid, rec, train in rows if may_see_thumbnail(viewer.staff.role, bool(rec), bool(train))}
 
 
 def _load_one(session: Session, viewer: _Viewer, event_id: int):
@@ -226,7 +241,7 @@ def _load_one(session: Session, viewer: _Viewer, event_id: int):
 def _summary_of(session: Session, viewer: _Viewer, row) -> dict[str, Any]:
     ev, cid, name, tz, reviewed, flagged = row
     return _summary_fields(session, viewer, ev, cid, name, tz, reviewed, flagged,
-                           ev.id in _thumbnail_ids(session, [ev.id]))
+                           ev.id in _thumbnail_ids(session, viewer, [ev.id]))
 
 
 def _device_id(session: Session, ev: Event) -> Optional[str]:
@@ -260,11 +275,23 @@ def list_events(
     """Event history, newest first. `with_total=true` also fills `total` (counted up to 10000; beyond that
     `total` is 10000 and `total_capped` is true). `collection_id` keeps only events in that collection."""
     viewer = _Viewer(staff, request)
+    # Everything a request can be refused for is decided here, before any query: the answer never depends on
+    # what is stored. Labelers cannot search at all (any query text, whatever it says, is the same 400).
+    for field, value in (("site", site), ("camera", camera), ("q", q), ("filter", filter)):
+        check_length(field, value, TEXT_MAX)
+    if q and viewer.labeler:
+        raise HTTPException(status_code=400, detail="Search is not available for this role")
+    customer_cond = _customer_condition(viewer, customer_id) if customer_id is not None else None
+    if filter is not None and studio_logic.builtin_condition(filter) is None:  # studio.BUILTIN_FILTERS
+        raise HTTPException(status_code=400, detail=f"Unknown filter: {filter}")
+    if cursor is not None:
+        _decode_cursor(cursor)
+    _check_vocabulary(kind=kind, ai=ai, verdict=verdict)
     conds = [viewer.visible()]
     if site is not None:
         conds.append(_site_condition(session, viewer, site))
-    if customer_id is not None:
-        conds.append(Device.customer_id == customer_id)
+    if customer_cond is not None:
+        conds.append(customer_cond)
     if camera is not None:
         conds.append(_camera_condition(session, viewer, camera))
     if kind is not None:
@@ -273,13 +300,8 @@ def list_events(
         conds.append(Event.completeness["ai"].as_string() == ai)
     if verdict is not None:
         conds.append(_has_verdict(verdict))
-    if q:
-        if viewer.labeler:
-            if _names_household(session, viewer, q):  # no identity oracle: such a query matches nothing
-                return EventPage(items=[], next_cursor=None, total=0 if with_total else None, total_capped=False)
-            conds.append(Event.search_redacted.op("@@")(func.websearch_to_tsquery("simple", q)))
-        else:
-            conds.append(Event.search.op("@@")(func.websearch_to_tsquery("simple", q)))
+    if q:  # admin and support only (labelers were refused above)
+        conds.append(Event.search.op("@@")(func.websearch_to_tsquery("simple", q)))
     if from_utc is not None:
         conds.append(Event.start_ts >= _utc(from_utc).timestamp())
     if to_utc is not None:
@@ -289,10 +311,7 @@ def list_events(
     if flagged is not None:
         conds.append(_flagged.is_(flagged))
     if filter is not None:
-        builder = BUILTIN_FILTERS.get(filter)
-        if builder is None:
-            raise HTTPException(status_code=400, detail=f"Unknown filter: {filter}")
-        conds.append(builder())
+        conds.append(studio_logic.builtin_condition(filter))
     if collection_id is not None:
         conds.append(_in_collection(collection_id))
     return event_page(session, viewer, conds, cursor, limit, with_total)
@@ -301,14 +320,9 @@ def list_events(
 TOTAL_CAP = 10_000
 
 
-def _names_household(session: Session, viewer: _Viewer, q: str) -> bool:
-    """Whether a labeler's query contains an identity term of any device the labeler may see."""
-    pks = session.scalars(select(Device.id).join(Customer, Customer.id == Device.customer_id)
-                          .where(viewer.visible()).order_by(Device.id)).all()
-    return any(viewer.identity(session, pk).mentions(q) for pk in pks)
-
-
 def _in_collection(collection_id: int):
+    if not id_in_range(collection_id):
+        return false()
     return Event.id.in_(select(CollectionItem.event_id).where(CollectionItem.collection_id == collection_id))
 
 
@@ -316,21 +330,22 @@ def event_page(session: Session, viewer: _Viewer, conds: list, cursor: Optional[
                with_total: bool = False) -> EventPage:
     """One keyset page of events matching `conds` (which already include viewer.visible()), newest first.
     Shared by /events and the studio collection items route so both show identical rows and pseudonyms."""
+    after = _decode_cursor(cursor) if cursor is not None else None  # absent: the first page; bad: 400, no query
     total, capped = None, False
     if with_total:
         counted = session.scalar(select(func.count()).select_from(
             _event_select().where(*conds).order_by(None).limit(TOTAL_CAP + 1).subquery()))
         capped = counted > TOTAL_CAP
         total = TOTAL_CAP if capped else counted
-    if cursor is not None:  # absent: the first page; present but empty or malformed: 400
-        ts, last_id = _decode_cursor(cursor)
+    if after is not None:
+        ts, last_id = after
         last = literal(last_id, BigInteger)  # compared as bigint: any id of the cursor domain is a valid bound
         conds = [*conds, or_(Event.start_ts < ts, and_(Event.start_ts == ts, Event.id < last))]
     rows = session.execute(_event_select().where(*conds)
                            .order_by(Event.start_ts.desc(), Event.id.desc()).limit(limit + 1)).all()
     more = len(rows) > limit
     rows = rows[:limit]
-    thumbs = _thumbnail_ids(session, [r[0].id for r in rows])
+    thumbs = _thumbnail_ids(session, viewer, [r[0].id for r in rows])
     items = [EventSummary(**_summary_fields(session, viewer, ev, cid, name, tz, rv, fl, ev.id in thumbs))
              for ev, cid, name, tz, rv, fl in rows]
     next_cursor = _encode_cursor(rows[-1][0].start_ts, rows[-1][0].id) if more and rows else None
@@ -377,9 +392,13 @@ def events_density(
     # Counts per camera per hour/day bucket covering [from_utc, to_utc). Buckets are aligned to the hour/day in
     # UTC (not the customer's timezone); `timezone` is the customer's when exactly one customer is in scope, else
     # "UTC". Every known camera of the devices in scope gets a row (Camera rows, cameras seen in events, heartbeat
-    # cameras), even with zero counts. With more than one device in scope an admin/support row is named
+    # cameras), even with zero counts -- except for labelers, who get only cameras with events in the interval. With more than one device in scope an admin/support row is named
     # `<site>/<camera>`; a labeler's row is the camera pseudonym. (Comments, not a docstring: the OpenAPI is frozen.)
     viewer = _Viewer(staff, request)
+    _check_vocabulary(kind=kind)
+    for field, value in (("site", site), ("camera", camera)):
+        check_length(field, value, TEXT_MAX)
+    customer_cond = _customer_condition(viewer, customer_id) if customer_id is not None else None
     step = 3600 if bucket == "hour" else 86400
     begin, finish = _utc(from_utc), _utc(to_utc)  # naive endpoints are UTC
     if finish <= begin:  # the requested interval, before any rounding to buckets
@@ -394,8 +413,8 @@ def events_density(
              .join(Customer, Customer.id == Device.customer_id).where(viewer.visible()))
     if site is not None:
         dev_q = dev_q.where(_site_condition(session, viewer, site))
-    if customer_id is not None:
-        dev_q = dev_q.where(Device.customer_id == customer_id)
+    if customer_cond is not None:
+        dev_q = dev_q.where(customer_cond)
     devices = session.execute(dev_q.order_by(Device.site)).all()
     timezones = {d.customer_id: d.timezone for d in devices}
     tz = (next(iter(timezones.values())) or "UTC") if len(timezones) == 1 else "UTC"
@@ -427,6 +446,8 @@ def events_density(
     counts = _bucket_counts(session, start, step, n, conds, by=(Event.device_pk, Event.camera))
     rows = []
     for pk, cam in known:
+        if viewer.labeler and (pk, cam) not in counts:
+            continue  # a labeler sees only cameras with events here: the row list is not the camera inventory
         events, alerts, false_alarms = counts.get((pk, cam), [[0] * n, [0] * n, [0] * n])
         rows.append(DensityRow(camera=label(pk, cam), events=events, alerts=alerts, false_alarms=false_alarms))
     rows.sort(key=lambda r: r.camera)
@@ -541,10 +562,11 @@ def _audit_view(session: Session, request: Request, staff: Staff, ev: Event, cus
     session.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:k, 0))"),
                     {"k": f"event_view:{staff.id}:{ev.id}"})
     now = _now(request)
-    last = session.scalar(select(AuditLog.ts).where(
-        AuditLog.action == "event_view", AuditLog.staff_id == staff.id, AuditLog.target == target)
-        .order_by(AuditLog.ts.desc()).limit(1))
-    if last is not None and last > now - VIEW_AUDIT_WINDOW:
+    # bounded by the window (index staff_id, action, target, ts): only the last 10 minutes are ever read
+    seen = session.scalar(select(AuditLog.id).where(
+        AuditLog.staff_id == staff.id, AuditLog.action == "event_view", AuditLog.target == target,
+        AuditLog.ts > now - VIEW_AUDIT_WINDOW).limit(1))
+    if seen is not None:
         return
     audit.record(session, staff.id, "event_view", target=target, customer_id=customer_id,
                  device_id=_device_id(session, ev), ts=now)
@@ -553,6 +575,7 @@ def _audit_view(session: Session, request: Request, staff: Staff, ev: Event, cus
 @router.get("/events/{event_id}", response_model=EventDetail)
 def get_event(event_id: int, request: Request, staff: Staff = Depends(current_staff),
               session: Session = SessionDep):
+    require_id(event_id, "Event not found")
     viewer = _Viewer(staff, request)
     row = _load_one(session, viewer, event_id)
     ev, customer_id = row[0], row[1]
@@ -569,10 +592,10 @@ def get_event(event_id: int, request: Request, staff: Staff = Depends(current_st
         ident = viewer.identity(session, ev.device_pk)
         optional = lambda value: ident.text(value) if value is not None else None  # noqa: E731
         ai_runs = [AiRunOut(id=r.id, purpose="guard", status=r.status, model=optional(r.model),
-                            prompt_version=optional(r.prompt_version), prompt=optional(r.prompt),
+                            prompt_version=optional(r.prompt_version), prompt=None,  # never prompt text
                             parsed=ident.json(parsed(r)), raw_text_artifact_id=r.raw_artifact_id,
                             input_frame_artifact_ids=frame_ids(r)) for r in runs]
-        feedback_out = [FeedbackOut(id=f.id, verdict=ident.text(f.verdict), action=ident.text(f.action), note="",
+        feedback_out = [FeedbackOut(id=f.id, verdict=redact.verdict(f.verdict) if f.verdict else "", action=ident.text(f.action), note="",
                                     raw_text="", source=ident.text(f.source),
                                     received_utc=f.received_at or fields["start_utc"]) for f in feedback]
         artifacts = [ArtifactOut(id=a.id, role=a.role, s3_key=labeler_artifact_ref(a.id), bytes=a.bytes,
@@ -594,7 +617,7 @@ def get_event(event_id: int, request: Request, staff: Staff = Depends(current_st
         alert_reason = ev.alert_reason or ""
     detail = EventDetail(
         **fields,
-        clip_start_local=ev.clip_start_local, duration_sec=ev.duration_sec, fps=ev.fps,
+        clip_start_local=None if viewer.labeler else ev.clip_start_local, duration_sec=ev.duration_sec, fps=ev.fps,
         frame_size=ev.frame_size if isinstance(ev.frame_size, list) else None,
         alert_reason=alert_reason,
         dispatch=None if viewer.labeler else _dispatch_out(ev.dispatch),
@@ -660,40 +683,53 @@ def _clamp(v: float) -> float:
     return min(1.0, max(0.0, v))
 
 
-def _parse_label(text: str) -> list[Box]:
-    """YOLO `cls xc yc w h` lines (COCO ids, normalised) -> boxes with normalised xyxy; bad lines are skipped."""
-    boxes = []
-    for line in text.splitlines():
-        parts = line.split()
-        if len(parts) < 5:
-            continue
-        try:
-            cls = int(float(parts[0]))
-            xc, yc, w, h = (float(p) for p in parts[1:5])
-        except (ValueError, OverflowError):
-            continue
-        if not all(math.isfinite(v) for v in (xc, yc, w, h)):
-            continue
-        boxes.append(Box(cls=cls, label=COCO_NAMES.get(cls, str(cls)), conf=None,
-                         xyxy=[_clamp(xc - w / 2), _clamp(yc - h / 2), _clamp(xc + w / 2), _clamp(yc + h / 2)]))
-    return boxes
+def _boxes(text: str) -> Optional[list[Box]]:
+    """YOLO `cls xc yc w h` lines (COCO ids, normalised) -> boxes with normalised xyxy; None when the file is
+    malformed (the one strict validator of fleet_contract.yolo_labels, shared with the training exporter)."""
+    rows, problem = parse_label(text)
+    if problem is not None:
+        return None
+    return [Box(cls=r.cls, label=COCO_NAMES.get(r.cls, str(r.cls)), conf=None,
+                xyxy=[_clamp(r.xc - r.w / 2), _clamp(r.yc - r.h / 2), _clamp(r.xc + r.w / 2), _clamp(r.yc + r.h / 2)])
+            for r in rows]
+
+
+BAD_LABEL = "invalid yolo label"
+
+
+def _label_problem(session: Session, key: str, etag: Optional[str], now: datetime, bad: bool) -> None:
+    """Record (or, once the file reads cleanly, clear) the problem of a malformed label file."""
+    if bad:
+        session.execute(pg_insert(IndexProblem).values(s3_key=key, reason=BAD_LABEL, seen_at=now, etag=etag)
+                        .on_conflict_do_update(index_elements=[IndexProblem.s3_key],
+                                               set_={"reason": BAD_LABEL, "seen_at": now, "etag": etag}))
+    else:
+        row = session.get(IndexProblem, key)
+        if row is not None and row.reason == BAD_LABEL:
+            session.delete(row)
 
 
 def _read_label(s3, key: str, etag: Optional[str]) -> Optional[str]:
+    """The label file's text of the indexed revision (`etag`, a conditional read), cached by (key, etag); None when
+    it cannot be read or was replaced since indexing (the next index pass picks the new revision up)."""
     cached = LABEL_CACHE.get((key, etag))
     if cached is not None:
         return cached
     try:
-        text = s3.get_text(key)
+        text = s3.get_text(key, if_match=etag) if etag else s3.get_text(key)
+    except ETagMismatch:
+        return None
     except Exception:  # deleted since indexing, throttled, ...: the frame shows as not run
         return None
-    LABEL_CACHE.put((key, etag), text)
+    if etag:
+        LABEL_CACHE.put((key, etag), text)
     return text
 
 
 @router.get("/events/{event_id}/detections", response_model=DetectionsOut)
 def get_detections(event_id: int, request: Request, staff: Staff = Depends(current_staff),
                    session: Session = SessionDep):
+    require_id(event_id, "Event not found")
     viewer = _Viewer(staff, request)
     ev = _load_one(session, viewer, event_id)[0]
     completeness = ev.completeness if isinstance(ev.completeness, dict) else {}
@@ -721,10 +757,12 @@ def get_detections(event_id: int, request: Request, staff: Staff = Depends(curre
         key = prefix + f["label_path"] if isinstance(f.get("label_path"), str) else None
         art = labels.get(key) if key else None
         text = _read_label(s3, key, art.etag) if art is not None and art.available else None
-        if text is None:
+        boxes = _boxes(text) if text is not None else None
+        if text is not None:
+            _label_problem(session, key, art.etag, _now(request), bad=boxes is None)
+        if boxes is None:  # unreadable, replaced since indexing, or malformed: never shown as an empty scene
             frames[index] = FrameBoxes(frame_index=index, t_sec=t_sec, status="not_run", boxes=[])
             continue
-        boxes = _parse_label(text)
         frames[index] = FrameBoxes(frame_index=index, t_sec=t_sec, status="ran" if boxes else "ran_empty",
                                    boxes=boxes)
     return DetectionsOut(provenance="sampled", model=SAMPLED_MODEL, frames=[frames[i] for i in sorted(frames)])
@@ -735,6 +773,7 @@ def get_detections(event_id: int, request: Request, staff: Staff = Depends(curre
 @router.patch("/events/{event_id}/review", response_model=EventSummary)
 def review_event(event_id: int, body: ReviewUpdate, request: Request, staff: Staff = Depends(current_staff),
                  session: Session = SessionDep):
+    require_id(event_id, "Event not found")
     viewer = _Viewer(staff, request)
     row = _load_one(session, viewer, event_id)
     ev, customer_id = row[0], row[1]
@@ -744,7 +783,7 @@ def review_event(event_id: int, body: ReviewUpdate, request: Request, staff: Sta
         session.execute(pg_insert(ReviewState).values(**values).on_conflict_do_update(
             index_elements=[ReviewState.event_id], set_={k: v for k, v in values.items() if k != "event_id"}))
         audit.record(session, staff.id, "review", target=f"event/{ev.id}", customer_id=customer_id,
-                     device_id=_device_id(session, ev), detail=changes)
+                     device_id=_device_id(session, ev), detail=changes, ts=_now(request))
         session.expire_all()
         row = _load_one(session, viewer, event_id)
     return EventSummary(**_summary_of(session, viewer, row))

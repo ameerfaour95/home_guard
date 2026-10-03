@@ -1,0 +1,237 @@
+{
+  "id": 65,
+  "site": "customer-3e7e2d",
+  "customer_id": 0,
+  "customer_name": "customer-3e7e2d",
+  "camera": "cam-050ee8",
+  "kind": "alert",
+  "start_utc": "2026-10-02T16:33:48.443298Z",
+  "end_utc": "2026-10-02T16:33:52.443298Z",
+  "summary": "",
+  "label": "normal",
+  "alert_command": "[send_message]",
+  "detected": [
+    "person"
+  ],
+  "owner_verdicts": [
+    "false_alarm"
+  ],
+  "completeness": {
+    "video": true,
+    "boxes": "none",
+    "ai": "failed",
+    "owner_feedback": true,
+    "expired": false,
+    "copies": [
+      "production",
+      "training"
+    ]
+  },
+  "reviewed": false,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/65/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": null,
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "AI unavailable; sent as a precaution",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 65,
+      "purpose": "guard",
+      "status": "failed",
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "prompt": null,
+      "parsed": null,
+      "raw_text_artifact_id": null,
+      "input_frame_artifact_ids": [
+        608,
+        609,
+        610,
+        611,
+        612
+      ]
+    }
+  ],
+  "feedback": [
+    {
+      "id": 16,
+      "verdict": "false_alarm",
+      "action": "none",
+      "note": "",
+      "raw_text": "",
+      "source": "text",
+      "received_utc": "2026-10-02T16:42:31Z"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": 479,
+      "role": "original_video",
+      "s3_key": "artifact-479",
+      "bytes": 3359,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 490,
+      "role": "feedback",
+      "s3_key": "artifact-490",
+      "bytes": 461,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 499,
+      "role": "meta",
+      "s3_key": "artifact-499",
+      "bytes": 911,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 522,
+      "role": "original_video",
+      "s3_key": "artifact-522",
+      "bytes": 3359,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 556,
+      "role": "meta",
+      "s3_key": "artifact-556",
+      "bytes": 1492,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 608,
+      "role": "teacher_frame",
+      "s3_key": "artifact-608",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 609,
+      "role": "teacher_frame",
+      "s3_key": "artifact-609",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 610,
+      "role": "teacher_frame",
+      "s3_key": "artifact-610",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 611,
+      "role": "teacher_frame",
+      "s3_key": "artifact-611",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 612,
+      "role": "teacher_frame",
+      "s3_key": "artifact-612",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1408,
+      "role": "thumbnail",
+      "s3_key": "artifact-1408",
+      "bytes": 3574,
+      "available": true,
+      "provenance": "cloud",
+      "detail": null
+    },
+    {
+      "id": 1409,
+      "role": "filmstrip",
+      "s3_key": "artifact-1409",
+      "bytes": 3363,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "tile_w": 160,
+        "tile_h": 90,
+        "count": 4
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "alert",
+    "duration_sec": 4.0,
+    "fps_estimated": 5.0,
+    "frames_written": 20,
+    "codec": "h264",
+    "buffer": {
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "yolo": {
+      "class_counts": {
+        "person": 1
+      },
+      "class_max_conf": {
+        "person": 0.49
+      },
+      "trigger_classes": [
+        "person"
+      ]
+    },
+    "teacher": {
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "temperature": 0
+    }
+  }
+}

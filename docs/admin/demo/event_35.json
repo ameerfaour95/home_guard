@@ -1,0 +1,182 @@
+{
+  "id": 35,
+  "site": "cohen_ramatgan",
+  "customer_id": 1,
+  "customer_name": "Dana Cohen",
+  "camera": "front_door",
+  "kind": "alert",
+  "start_utc": "2026-10-03T09:12:46.679606Z",
+  "end_utc": "2026-10-03T09:12:50.679606Z",
+  "summary": "A woman carrying two grocery bags walks up the path and unlocks the front door with a key.",
+  "label": "normal",
+  "alert_command": "[send_message]",
+  "detected": [
+    "person"
+  ],
+  "owner_verdicts": [],
+  "completeness": {
+    "video": true,
+    "boxes": "none",
+    "ai": "none",
+    "owner_feedback": false,
+    "expired": false,
+    "copies": [
+      "production"
+    ]
+  },
+  "reviewed": true,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/35/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": "2026-10-03 12:12:46",
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": {
+    "channel": "telegram",
+    "sent": true,
+    "detail": {
+      "channel": "telegram",
+      "telegram": {
+        "command": "[send_message]",
+        "telegram": {
+          "sent": true,
+          "results": [
+            {
+              "ok": true,
+              "chat_id": "-100100",
+              "message_id": 770
+            }
+          ]
+        }
+      }
+    }
+  },
+  "ai_runs": [
+    {
+      "id": 35,
+      "purpose": "guard",
+      "status": "none",
+      "model": null,
+      "prompt_version": null,
+      "prompt": null,
+      "parsed": null,
+      "raw_text_artifact_id": null,
+      "input_frame_artifact_ids": []
+    }
+  ],
+  "feedback": [],
+  "artifacts": [
+    {
+      "id": 12,
+      "role": "original_video",
+      "s3_key": "production_cohen_ramatgan/clips/front_door/2026-10-03/front_door_1791018769_alert.mp4",
+      "bytes": 3362,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 40,
+      "role": "meta",
+      "s3_key": "production_cohen_ramatgan/meta/front_door/2026-10-03/front_door_1791018769_alert.meta.json",
+      "bytes": 958,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 1360,
+      "role": "thumbnail",
+      "s3_key": "admin_cache/thumbs/35.jpg",
+      "bytes": 3699,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "src_etag": "64ff48f7bcaaece17606197021ab070e",
+        "needs_rendition": false
+      }
+    },
+    {
+      "id": 1361,
+      "role": "filmstrip",
+      "s3_key": "admin_cache/filmstrips/35.jpg",
+      "bytes": 3354,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "count": 4,
+        "tile_h": 90,
+        "tile_w": 160,
+        "src_etag": "64ff48f7bcaaece17606197021ab070e"
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "alert",
+    "yolo": {
+      "class_counts": {
+        "person": 1
+      },
+      "class_max_conf": {
+        "person": 0.673
+      },
+      "trigger_classes": [
+        "person"
+      ],
+      "trigger_detected": true
+    },
+    "alert": {
+      "label": "normal",
+      "muted": false,
+      "labels": [
+        "person"
+      ],
+      "summary": "A woman carrying two grocery bags walks up the path and unlocks the front door with a key.",
+      "dispatch": {
+        "channel": "telegram",
+        "telegram": {
+          "command": "[send_message]",
+          "telegram": {
+            "sent": true,
+            "results": [
+              {
+                "ok": true,
+                "chat_id": "-100100",
+                "message_id": 770
+              }
+            ]
+          }
+        }
+      },
+      "alert_reason": "",
+      "alert_command": "[send_message]"
+    },
+    "codec": "h264",
+    "buffer": {
+      "store_fps": 5.0,
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "clip_path": "clips\\front_door\\2026-10-03\\front_door_1791018769_alert.mp4",
+    "camera_name": "front_door",
+    "clip_end_ts": 1791018770.6796057,
+    "duration_sec": 4.0,
+    "clip_start_ts": 1791018766.6796057,
+    "fps_estimated": 5.0,
+    "clip_end_local": "2026-10-03 12:12:50",
+    "frames_written": 20,
+    "clip_start_local": "2026-10-03 12:12:46"
+  }
+}

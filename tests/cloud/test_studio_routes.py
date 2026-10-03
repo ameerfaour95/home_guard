@@ -147,8 +147,8 @@ def test_assign_splits_group_aware_deterministic_and_proportional():
         for k in range(3):
             items.append(SimpleNamespace(id=g * 10 + k, site="s" if g % 2 else "t", day=f"2026-{g // 28 + 1:02d}-{g % 28 + 1:02d}",
                                          start_ts=0.0))
-    out = studio.assign_splits(items, "v1", split)
-    assert out == studio.assign_splits(list(reversed(items)), "v1", split)
+    out = studio.assign_splits(items, "v1", split, secret="s")
+    assert out == studio.assign_splits(list(reversed(items)), "v1", split, secret="s")
     by_group = {}
     for e in items:
         by_group.setdefault((e.site, e.day), set()).add(out[e.id])
@@ -156,6 +156,6 @@ def test_assign_splits_group_aware_deterministic_and_proportional():
     share = sum(1 for v in out.values() if v == "train") / len(out)
     assert 0.65 < share < 0.95
     assert set(out.values()) <= {"train", "val", "test"}
-    assert studio.assign_splits(items, "v2", split) != out
-    assert set(studio.assign_splits(items, "v1", {"train": 1.0}).values()) == {"train"}
+    assert studio.assign_splits(items, "v2", split, secret="s") != out
+    assert set(studio.assign_splits(items, "v1", {"train": 1.0}, secret="s").values()) == {"train"}
     assert studio.group_count(items) == len(by_group)

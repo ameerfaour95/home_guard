@@ -1,0 +1,286 @@
+{
+  "id": 21,
+  "site": "cohen_ramatgan",
+  "customer_id": 1,
+  "customer_name": "Dana Cohen",
+  "camera": "front_door",
+  "kind": "alert",
+  "start_utc": "2026-10-02T08:45:55.526699Z",
+  "end_utc": "2026-10-02T08:45:59.526699Z",
+  "summary": "A woman carrying two grocery bags walks up the path and unlocks the front door with a key.",
+  "label": "normal",
+  "alert_command": "[send_message]",
+  "detected": [
+    "person"
+  ],
+  "owner_verdicts": [],
+  "completeness": {
+    "video": true,
+    "boxes": "none",
+    "ai": "real",
+    "owner_feedback": false,
+    "expired": false,
+    "copies": [
+      "production",
+      "training"
+    ]
+  },
+  "reviewed": true,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/21/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": "2026-10-02 11:45:55",
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": {
+    "channel": "telegram",
+    "sent": true,
+    "detail": {
+      "channel": "telegram",
+      "telegram": {
+        "command": "[send_message]",
+        "telegram": {
+          "sent": true,
+          "results": [
+            {
+              "ok": true,
+              "chat_id": "-100100",
+              "message_id": 59
+            }
+          ]
+        }
+      }
+    }
+  },
+  "ai_runs": [
+    {
+      "id": 21,
+      "purpose": "guard",
+      "status": "real",
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"front_door\", local time 11:45:58.\n\nWrite \"summary\": what happ",
+      "parsed": {
+        "label": "normal",
+        "people": 2,
+        "summary": "A woman carrying two grocery bags walks up the path and unlocks the front door with a key.",
+        "vehicle_moving": false
+      },
+      "raw_text_artifact_id": 147,
+      "input_frame_artifact_ids": [
+        192,
+        193,
+        194,
+        195,
+        196
+      ]
+    }
+  ],
+  "feedback": [],
+  "artifacts": [
+    {
+      "id": 9,
+      "role": "original_video",
+      "s3_key": "production_cohen_ramatgan/clips/front_door/2026-10-02/front_door_1790930758_alert.mp4",
+      "bytes": 3258,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 37,
+      "role": "meta",
+      "s3_key": "production_cohen_ramatgan/meta/front_door/2026-10-02/front_door_1790930758_alert.meta.json",
+      "bytes": 957,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 64,
+      "role": "original_video",
+      "s3_key": "dataset_cohen_ramatgan/clips/front_door/2026-10-02/front_door_1790930758_alert.mp4",
+      "bytes": 3258,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 111,
+      "role": "meta",
+      "s3_key": "dataset_cohen_ramatgan/meta/front_door/2026-10-02/front_door_1790930758_alert.meta.json",
+      "bytes": 1761,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 147,
+      "role": "raw_answer",
+      "s3_key": "dataset_cohen_ramatgan/responses/front_door/2026-10-02/front_door_1790930758_alert.model_raw.txt",
+      "bytes": 162,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 192,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/front_door/2026-10-02/front_door_1790930758_alert_f0.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 193,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/front_door/2026-10-02/front_door_1790930758_alert_f1.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 194,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/front_door/2026-10-02/front_door_1790930758_alert_f2.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 195,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/front_door/2026-10-02/front_door_1790930758_alert_f3.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 196,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/front_door/2026-10-02/front_door_1790930758_alert_f4.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1480,
+      "role": "thumbnail",
+      "s3_key": "admin_cache/thumbs/21.jpg",
+      "bytes": 3610,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "src_etag": "aff7ff4f011ee85a35aa6e88e5565ab6",
+        "needs_rendition": false
+      }
+    },
+    {
+      "id": 1481,
+      "role": "filmstrip",
+      "s3_key": "admin_cache/filmstrips/21.jpg",
+      "bytes": 3316,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "count": 4,
+        "tile_h": 90,
+        "tile_w": 160,
+        "src_etag": "aff7ff4f011ee85a35aa6e88e5565ab6"
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "alert",
+    "yolo": {
+      "class_counts": {
+        "person": 2
+      },
+      "class_max_conf": {
+        "person": 0.846
+      },
+      "trigger_classes": [
+        "person"
+      ],
+      "trigger_detected": true
+    },
+    "alert": {
+      "label": "normal",
+      "muted": false,
+      "labels": [
+        "person"
+      ],
+      "summary": "A woman carrying two grocery bags walks up the path and unlocks the front door with a key.",
+      "alert_reason": "",
+      "alert_command": "[send_message]"
+    },
+    "codec": "h264",
+    "buffer": {
+      "store_fps": 5.0,
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "teacher": {
+      "model": "gpt-4o",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"front_door\", local time 11:45:58.\n\nWrite \"summary\": what happ",
+      "raw_path": "responses\\front_door\\2026-10-02\\front_door_1790930758_alert.model_raw.txt",
+      "temperature": 0,
+      "input_frames": [
+        "vlm_crops\\front_door\\2026-10-02\\front_door_1790930758_alert_f0.jpg",
+        "vlm_crops\\front_door\\2026-10-02\\front_door_1790930758_alert_f1.jpg",
+        "vlm_crops\\front_door\\2026-10-02\\front_door_1790930758_alert_f2.jpg",
+        "vlm_crops\\front_door\\2026-10-02\\front_door_1790930758_alert_f3.jpg",
+        "vlm_crops\\front_door\\2026-10-02\\front_door_1790930758_alert_f4.jpg"
+      ],
+      "prompt_version": "2026-10-03.tagged-rules-label"
+    },
+    "clip_path": "clips\\front_door\\2026-10-02\\front_door_1790930758_alert.mp4",
+    "camera_name": "front_door",
+    "clip_end_ts": 1790930759.6894648,
+    "duration_sec": 4.0,
+    "clip_start_ts": 1790930755.6894648,
+    "fps_estimated": 5.0,
+    "clip_end_local": "2026-10-02 11:45:59",
+    "frames_written": 20,
+    "model_response": {
+      "label": "normal",
+      "people": 2,
+      "summary": "A woman carrying two grocery bags walks up the path and unlocks the front door with a key.",
+      "vehicle_moving": false
+    },
+    "clip_start_local": "2026-10-02 11:45:55"
+  }
+}

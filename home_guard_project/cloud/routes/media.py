@@ -7,6 +7,11 @@ Labelers therefore never get the real key: on first access the file is copied se
 `admin_cache/opaque/<hmac(artifact id, etag)>.<ext>` (recorded as an `opaque_copy` artifact with provenance
 "cloud", never shown to labelers) and that copy is presigned, without any filename hint. Owner documents and raw
 AI text (meta, feedback, raw answers) are not media and are refused to labelers outright.
+
+For a labeler, an artifact they may not see (no training consent, an owner document, an opaque copy, no known
+household) is indistinguishable from a missing one: visibility is decided before existence, availability or any
+consent-specific message, and the answer is always the same 404. The real reason is audited (`media_denied`);
+the audit is not visible to labelers.
 """
 from __future__ import annotations
 
@@ -18,12 +23,13 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from .. import audit
-from ..deps import SessionDep, current_staff
+from ..access import media_refusal, may_see_thumbnail
+from ..deps import SessionDep, current_staff, require_id
 from ..models import Artifact, AuditLog, Customer, Device, Event, Staff
 from ..schemas import MediaAccess, MediaAccessRequest
 from .events import _Viewer, _load_one
@@ -95,40 +101,57 @@ def _device_of(session: Session, art: Artifact, ev: Optional[Event]) -> Optional
     return found[0] if len(found) == 1 else None  # none or ambiguous: the caller answers 404
 
 
-def _deny(session: Session, staff: Staff, art: Artifact, customer: Customer, device: Device, purpose: str,
-          reason: str, status: int = 403):
-    """Audit a refused access (committed now: the raise below would roll the request back), then refuse."""
-    audit.record(session, staff.id, "media_denied", target=art.s3_key, reason=reason, customer_id=customer.id,
-                 device_id=device.device_id, detail={"reason": reason, "purpose": purpose})
+_NOT_FOUND = "Artifact not found"
+
+
+def _deny(session: Session, staff: Staff, target: str, customer: Optional[Customer], device: Optional[Device],
+          purpose: str, reason: str, status: int = 403, shown: Optional[str] = None):
+    """Audit a refused access (committed now: the raise below would roll the request back), then refuse with
+    `shown` (default: the reason itself)."""
+    audit.record(session, staff.id, "media_denied", target=target, reason=reason,
+                 customer_id=customer.id if customer is not None else None,
+                 device_id=device.device_id if device is not None else None,
+                 detail={"reason": reason, "purpose": purpose})
     session.commit()
-    raise HTTPException(status_code=status, detail=reason)
+    raise HTTPException(status_code=status, detail=shown or reason)
+
+
+def _labeler_lookup(session: Session, artifact_id: int):
+    """(artifact, event, device, customer) when a labeler may see the artifact, else None: one SELECT with the
+    visibility predicates (event, device, training consent, openable role) in its WHERE, so a hidden artifact and a
+    missing one cost exactly the same."""
+    row = session.execute(
+        select(Artifact, Event, Device, Customer)
+        .join(Event, Event.id == Artifact.event_id)
+        .join(Device, Device.id == Event.device_pk)
+        .join(Customer, Customer.id == Device.customer_id)
+        .where(Artifact.id == artifact_id, Customer.consent_training.is_(True),
+               Artifact.role.not_in(sorted(LABELER_HIDDEN_ROLES)))).first()
+    return tuple(row) if row is not None else None
 
 
 @router.post("/artifacts/{artifact_id}/access", response_model=MediaAccess)
 def artifact_access(artifact_id: int, body: MediaAccessRequest, request: Request,
                     staff: Staff = Depends(current_staff), session: Session = SessionDep):
-    art = session.get(Artifact, artifact_id)
-    if art is None:
-        raise HTTPException(status_code=404, detail="Artifact not found")
+    require_id(artifact_id, _NOT_FOUND)
+    if staff.role == "labeler":  # visibility first: hidden and missing artifacts get the same 404, the same work
+        found = _labeler_lookup(session, artifact_id)
+        if found is None:
+            _deny(session, staff, f"artifact/{artifact_id}", None, None, body.purpose, "not_visible", status=404,
+                  shown=_NOT_FOUND)
+        art, ev, device, customer = found
+    else:
+        art = session.get(Artifact, artifact_id)
+        ev = session.get(Event, art.event_id) if art is not None and art.event_id is not None else None
+        device = _device_of(session, art, ev) if art is not None else None
+        customer = session.get(Customer, device.customer_id) if device is not None else None
+    if art is None or customer is None:
+        raise HTTPException(status_code=404, detail=_NOT_FOUND)
     if not art.available:
         raise HTTPException(status_code=410, detail="This file is no longer available")
-    ev = session.get(Event, art.event_id) if art.event_id is not None else None
-    device = _device_of(session, art, ev)
-    customer = session.get(Customer, device.customer_id) if device is not None else None
-    if customer is None:
-        raise HTTPException(status_code=404, detail="Artifact not found")
-    if body.purpose == "training":
-        if staff.role not in ("labeler", "admin"):
-            _deny(session, staff, art, customer, device, body.purpose, "Your role cannot open training data")
-        if not customer.consent_training:
-            _deny(session, staff, art, customer, device, body.purpose, "This customer has not agreed to training use")
-        if staff.role == "labeler" and art.role in LABELER_HIDDEN_ROLES:
-            _deny(session, staff, art, customer, device, body.purpose, "Your role cannot open this file")
-    else:
-        if staff.role == "labeler":
-            _deny(session, staff, art, customer, device, body.purpose, "Your role cannot do this")
-        if not customer.consent_recordings:
-            _deny(session, staff, art, customer, device, body.purpose, "This customer has not agreed to recordings access")
+    refusal = media_refusal(staff.role, body.purpose, customer.consent_recordings, customer.consent_training)
+    if refusal is not None:
+        _deny(session, staff, art.s3_key, customer, device, body.purpose, refusal)
     s3 = _s3(request)
     now: datetime = request.app.state.clock()
     camera = art.camera or (ev.camera if ev is not None else None)
@@ -152,9 +175,15 @@ def artifact_access(artifact_id: int, body: MediaAccessRequest, request: Request
 )
 def event_thumbnail(event_id: int, request: Request, staff: Staff = Depends(current_staff),
                     session: Session = SessionDep):
+    require_id(event_id, "Event not found")
     viewer = _Viewer(staff, request)
     row = _load_one(session, viewer, event_id)  # 404 for events a labeler may not see
     ev, customer_id = row[0], row[1]
+    customer = session.get(Customer, customer_id)
+    if not may_see_thumbnail(staff.role, customer.consent_recordings, customer.consent_training):
+        # labelers never get here (no training consent = not visible = 404 above); a thumbnail is a frame of the
+        # recording, so staff need the same consent as for the recording itself
+        raise HTTPException(status_code=403, detail="This customer has not agreed to recordings access")
     art = session.scalar(select(Artifact).where(Artifact.event_id == ev.id, Artifact.role == "thumbnail",
                                                 Artifact.available.is_(True)).order_by(Artifact.id).limit(1))
     if art is None:
@@ -162,10 +191,13 @@ def event_thumbnail(event_id: int, request: Request, staff: Staff = Depends(curr
     s3 = _s3(request)
     now: datetime = request.app.state.clock()
     target = f"event/{ev.id}"
-    last = session.scalar(select(AuditLog.ts).where(
-        AuditLog.action == "thumbnail_view", AuditLog.staff_id == staff.id, AuditLog.target == target)
-        .order_by(AuditLog.ts.desc()).limit(1))
-    if last is None or last <= now - THUMBNAIL_AUDIT_WINDOW:
+    # serialise concurrent views of one (staff, event): the check and the insert act as one step
+    session.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:k, 0))"),
+                    {"k": f"thumbnail_view:{staff.id}:{ev.id}"})
+    seen = session.scalar(select(AuditLog.id).where(
+        AuditLog.staff_id == staff.id, AuditLog.action == "thumbnail_view", AuditLog.target == target,
+        AuditLog.ts > now - THUMBNAIL_AUDIT_WINDOW).limit(1))
+    if seen is None:
         device_id = session.scalar(select(Device.device_id).where(Device.id == ev.device_pk))
         audit.record(session, staff.id, "thumbnail_view", target=target, customer_id=customer_id,
                      device_id=device_id, ts=now)

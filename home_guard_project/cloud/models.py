@@ -227,12 +227,19 @@ class Export(Base):
     request: Mapped[Any] = mapped_column(JSONType, default=dict, server_default=text("'{}'::jsonb"))
     created_by: Mapped[int] = mapped_column(ForeignKey("staff.id"))
     created_at: Mapped[datetime] = mapped_column(TS)
+    # the lease of the worker building it (migration 0006): claimed atomically, refreshed while it runs
+    worker_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    heartbeat_at: Mapped[Optional[datetime]] = mapped_column(TS, nullable=True)
 
 
 class AuditLog(Base):
     """Append-only: DB triggers reject UPDATE, DELETE and TRUNCATE."""
     __tablename__ = "audit_log"
-    __table_args__ = (Index("ix_audit_log_action_ts", "action", "ts"),)
+    __table_args__ = (
+        Index("ix_audit_log_action_ts", "action", "ts"),
+        # view de-duplication: "has this staff seen this target in the last window?" (migration 0007)
+        Index("ix_audit_log_staff_action_target_ts", "staff_id", "action", "target", "ts"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     ts: Mapped[datetime] = mapped_column(TS)
     staff_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # no FK: log outlives staff
@@ -254,6 +261,22 @@ class IndexProblem(Base):
     reason: Mapped[str] = mapped_column(Text)
     seen_at: Mapped[datetime] = mapped_column(TS)
     etag: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)  # the revision it is about
+    # media retries (migration 0007): attempts so far; next_retry_at NULL = not retried (permanent or given up)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    next_retry_at: Mapped[Optional[datetime]] = mapped_column(TS, nullable=True)
+
+
+class IdentityAlias(Base):
+    """Every name a device's household has been known by (migration 0007): the customer name before and after
+    each rename, the site, every camera name and owner display name, every host. Labeler redaction uses the union,
+    so a rename never brings an old name back into what labelers see."""
+    __tablename__ = "identity_aliases"
+    __table_args__ = (UniqueConstraint("device_pk", "kind", "value"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    device_pk: Mapped[int] = mapped_column(ForeignKey("devices.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(16))  # customer|site|camera|display_name|host
+    value: Mapped[str] = mapped_column(Text)
+    first_seen: Mapped[datetime] = mapped_column(TS)
 
 
 class S3Cursor(Base):

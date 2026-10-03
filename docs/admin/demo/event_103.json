@@ -1,0 +1,461 @@
+{
+  "id": 103,
+  "site": "mizrahi_beersheva",
+  "customer_id": 3,
+  "customer_name": "Tamar Mizrahi",
+  "camera": "garage",
+  "kind": "alert",
+  "start_utc": "2026-10-02T14:46:26.413525Z",
+  "end_utc": "2026-10-02T14:46:30.413525Z",
+  "summary": "A man carries cardboard boxes from the garage to a parked van.",
+  "label": "normal",
+  "alert_command": "[send_message]",
+  "detected": [
+    "person",
+    "truck"
+  ],
+  "owner_verdicts": [],
+  "completeness": {
+    "video": true,
+    "boxes": "sampled",
+    "ai": "real",
+    "owner_feedback": false,
+    "expired": false,
+    "copies": [
+      "training"
+    ]
+  },
+  "reviewed": false,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/103/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": "2026-10-02 17:46:26",
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 103,
+      "purpose": "guard",
+      "status": "real",
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"garage\", local time 17:46:29.\n\nWrite \"summary\": what happ",
+      "parsed": {
+        "label": "normal",
+        "people": 1,
+        "summary": "A man carries cardboard boxes from the garage to a parked van.",
+        "vehicle_moving": true
+      },
+      "raw_text_artifact_id": 927,
+      "input_frame_artifact_ids": [
+        966,
+        967,
+        968,
+        969,
+        970
+      ]
+    }
+  ],
+  "feedback": [],
+  "artifacts": [
+    {
+      "id": 893,
+      "role": "original_video",
+      "s3_key": "dataset_mizrahi_beersheva/clips/garage/2026-10-02/garage_1790952389_alert.mp4",
+      "bytes": 4549,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 914,
+      "role": "meta",
+      "s3_key": "dataset_mizrahi_beersheva/meta/garage/2026-10-02/garage_1790952389_alert.meta.json",
+      "bytes": 3498,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 927,
+      "role": "raw_answer",
+      "s3_key": "dataset_mizrahi_beersheva/responses/garage/2026-10-02/garage_1790952389_alert.model_raw.txt",
+      "bytes": 133,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 966,
+      "role": "teacher_frame",
+      "s3_key": "dataset_mizrahi_beersheva/vlm_crops/garage/2026-10-02/garage_1790952389_alert_f0.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 967,
+      "role": "teacher_frame",
+      "s3_key": "dataset_mizrahi_beersheva/vlm_crops/garage/2026-10-02/garage_1790952389_alert_f1.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 968,
+      "role": "teacher_frame",
+      "s3_key": "dataset_mizrahi_beersheva/vlm_crops/garage/2026-10-02/garage_1790952389_alert_f2.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 969,
+      "role": "teacher_frame",
+      "s3_key": "dataset_mizrahi_beersheva/vlm_crops/garage/2026-10-02/garage_1790952389_alert_f3.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 970,
+      "role": "teacher_frame",
+      "s3_key": "dataset_mizrahi_beersheva/vlm_crops/garage/2026-10-02/garage_1790952389_alert_f4.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1045,
+      "role": "yolo_image",
+      "s3_key": "dataset_mizrahi_beersheva/yolo/images/garage/2026-10-02/garage_1790952389_alert_f0000.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1046,
+      "role": "yolo_image",
+      "s3_key": "dataset_mizrahi_beersheva/yolo/images/garage/2026-10-02/garage_1790952389_alert_f0003.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1047,
+      "role": "yolo_image",
+      "s3_key": "dataset_mizrahi_beersheva/yolo/images/garage/2026-10-02/garage_1790952389_alert_f0006.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1048,
+      "role": "yolo_image",
+      "s3_key": "dataset_mizrahi_beersheva/yolo/images/garage/2026-10-02/garage_1790952389_alert_f0009.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1049,
+      "role": "yolo_image",
+      "s3_key": "dataset_mizrahi_beersheva/yolo/images/garage/2026-10-02/garage_1790952389_alert_f0012.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1050,
+      "role": "yolo_image",
+      "s3_key": "dataset_mizrahi_beersheva/yolo/images/garage/2026-10-02/garage_1790952389_alert_f0015.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1051,
+      "role": "yolo_image",
+      "s3_key": "dataset_mizrahi_beersheva/yolo/images/garage/2026-10-02/garage_1790952389_alert_f0018.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1125,
+      "role": "yolo_label",
+      "s3_key": "dataset_mizrahi_beersheva/yolo/labels/garage/2026-10-02/garage_1790952389_alert_f0000.txt",
+      "bytes": 76,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1126,
+      "role": "yolo_label",
+      "s3_key": "dataset_mizrahi_beersheva/yolo/labels/garage/2026-10-02/garage_1790952389_alert_f0003.txt",
+      "bytes": 76,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1127,
+      "role": "yolo_label",
+      "s3_key": "dataset_mizrahi_beersheva/yolo/labels/garage/2026-10-02/garage_1790952389_alert_f0006.txt",
+      "bytes": 76,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1128,
+      "role": "yolo_label",
+      "s3_key": "dataset_mizrahi_beersheva/yolo/labels/garage/2026-10-02/garage_1790952389_alert_f0009.txt",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1129,
+      "role": "yolo_label",
+      "s3_key": "dataset_mizrahi_beersheva/yolo/labels/garage/2026-10-02/garage_1790952389_alert_f0012.txt",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1130,
+      "role": "yolo_label",
+      "s3_key": "dataset_mizrahi_beersheva/yolo/labels/garage/2026-10-02/garage_1790952389_alert_f0015.txt",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1131,
+      "role": "yolo_label",
+      "s3_key": "dataset_mizrahi_beersheva/yolo/labels/garage/2026-10-02/garage_1790952389_alert_f0018.txt",
+      "bytes": 76,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1434,
+      "role": "thumbnail",
+      "s3_key": "admin_cache/thumbs/103.jpg",
+      "bytes": 4258,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "src_etag": "0bad6f2ec4f608a4971cc7646a9f95ea",
+        "needs_rendition": false
+      }
+    },
+    {
+      "id": 1435,
+      "role": "filmstrip",
+      "s3_key": "admin_cache/filmstrips/103.jpg",
+      "bytes": 3874,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "count": 4,
+        "tile_h": 90,
+        "tile_w": 160,
+        "src_etag": "0bad6f2ec4f608a4971cc7646a9f95ea"
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "alert",
+    "yolo": {
+      "class_counts": {
+        "truck": 1,
+        "person": 1
+      },
+      "class_max_conf": {
+        "truck": 0.634,
+        "person": 0.613
+      },
+      "trigger_classes": [
+        "person",
+        "truck"
+      ],
+      "trigger_detected": true
+    },
+    "alert": {
+      "label": "normal",
+      "muted": false,
+      "labels": [
+        "person",
+        "truck"
+      ],
+      "summary": "A man carries cardboard boxes from the garage to a parked van.",
+      "alert_reason": "",
+      "alert_command": "[send_message]"
+    },
+    "codec": "h264",
+    "buffer": {
+      "store_fps": 5.0,
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "teacher": {
+      "model": "gpt-4o",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"garage\", local time 17:46:29.\n\nWrite \"summary\": what happ",
+      "raw_path": "responses\\garage\\2026-10-02\\garage_1790952389_alert.model_raw.txt",
+      "temperature": 0,
+      "input_frames": [
+        "vlm_crops\\garage\\2026-10-02\\garage_1790952389_alert_f0.jpg",
+        "vlm_crops\\garage\\2026-10-02\\garage_1790952389_alert_f1.jpg",
+        "vlm_crops\\garage\\2026-10-02\\garage_1790952389_alert_f2.jpg",
+        "vlm_crops\\garage\\2026-10-02\\garage_1790952389_alert_f3.jpg",
+        "vlm_crops\\garage\\2026-10-02\\garage_1790952389_alert_f4.jpg"
+      ],
+      "prompt_version": "2026-10-03.tagged-rules-label"
+    },
+    "clip_path": "clips\\garage\\2026-10-02\\garage_1790952389_alert.mp4",
+    "camera_name": "garage",
+    "clip_end_ts": 1790952390.4135246,
+    "yolo_export": {
+      "conf": 0.25,
+      "enabled": true,
+      "export_fps": 1.7,
+      "images_root": "yolo\\images",
+      "labels_root": "yolo\\labels",
+      "exported_frames": [
+        {
+          "num_boxes": 2,
+          "image_path": "yolo\\images\\garage\\2026-10-02\\garage_1790952389_alert_f0000.jpg",
+          "label_path": "yolo\\labels\\garage\\2026-10-02\\garage_1790952389_alert_f0000.txt",
+          "frame_index": 0,
+          "approx_time_offset_sec": 0.0
+        },
+        {
+          "num_boxes": 2,
+          "image_path": "yolo\\images\\garage\\2026-10-02\\garage_1790952389_alert_f0003.jpg",
+          "label_path": "yolo\\labels\\garage\\2026-10-02\\garage_1790952389_alert_f0003.txt",
+          "frame_index": 3,
+          "approx_time_offset_sec": 0.6
+        },
+        {
+          "num_boxes": 2,
+          "image_path": "yolo\\images\\garage\\2026-10-02\\garage_1790952389_alert_f0006.jpg",
+          "label_path": "yolo\\labels\\garage\\2026-10-02\\garage_1790952389_alert_f0006.txt",
+          "frame_index": 6,
+          "approx_time_offset_sec": 1.2
+        },
+        {
+          "num_boxes": 2,
+          "image_path": "yolo\\images\\garage\\2026-10-02\\garage_1790952389_alert_f0009.jpg",
+          "label_path": "yolo\\labels\\garage\\2026-10-02\\garage_1790952389_alert_f0009.txt",
+          "frame_index": 9,
+          "approx_time_offset_sec": 1.8
+        },
+        {
+          "num_boxes": 2,
+          "image_path": "yolo\\images\\garage\\2026-10-02\\garage_1790952389_alert_f0012.jpg",
+          "label_path": "yolo\\labels\\garage\\2026-10-02\\garage_1790952389_alert_f0012.txt",
+          "frame_index": 12,
+          "approx_time_offset_sec": 2.4
+        },
+        {
+          "num_boxes": 2,
+          "image_path": "yolo\\images\\garage\\2026-10-02\\garage_1790952389_alert_f0015.jpg",
+          "label_path": "yolo\\labels\\garage\\2026-10-02\\garage_1790952389_alert_f0015.txt",
+          "frame_index": 15,
+          "approx_time_offset_sec": 3.0
+        },
+        {
+          "num_boxes": 2,
+          "image_path": "yolo\\images\\garage\\2026-10-02\\garage_1790952389_alert_f0018.jpg",
+          "label_path": "yolo\\labels\\garage\\2026-10-02\\garage_1790952389_alert_f0018.txt",
+          "frame_index": 18,
+          "approx_time_offset_sec": 3.6
+        }
+      ]
+    },
+    "duration_sec": 4.0,
+    "clip_start_ts": 1790952386.4135246,
+    "fps_estimated": 5.0,
+    "clip_end_local": "2026-10-02 17:46:30",
+    "frames_written": 20,
+    "model_response": {
+      "label": "normal",
+      "people": 1,
+      "summary": "A man carries cardboard boxes from the garage to a parked van.",
+      "vehicle_moving": true
+    },
+    "clip_start_local": "2026-10-02 17:46:26"
+  }
+}

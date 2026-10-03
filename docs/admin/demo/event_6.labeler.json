@@ -1,0 +1,390 @@
+{
+  "id": 6,
+  "site": "customer-1fc0de",
+  "customer_id": 0,
+  "customer_name": "customer-1fc0de",
+  "camera": "cam-0157f7",
+  "kind": "alert",
+  "start_utc": "2026-10-02T10:10:28.341443Z",
+  "end_utc": "2026-10-02T10:10:32.341443Z",
+  "summary": "A dark SUV reverses out of the cam-0157f7 and drives off down the street.",
+  "label": "normal",
+  "alert_command": "[send_message]",
+  "detected": [
+    "car"
+  ],
+  "owner_verdicts": [],
+  "completeness": {
+    "video": true,
+    "boxes": "sampled",
+    "ai": "real",
+    "owner_feedback": false,
+    "expired": false,
+    "copies": [
+      "production",
+      "training"
+    ]
+  },
+  "reviewed": true,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/6/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": null,
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 6,
+      "purpose": "guard",
+      "status": "real",
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "prompt": null,
+      "parsed": {
+        "label": "normal",
+        "people": 0,
+        "summary": "A dark SUV reverses out of the cam-0157f7 and drives off down the street.",
+        "vehicle_moving": true
+      },
+      "raw_text_artifact_id": 143,
+      "input_frame_artifact_ids": [
+        167,
+        168,
+        169,
+        170,
+        171
+      ]
+    }
+  ],
+  "feedback": [],
+  "artifacts": [
+    {
+      "id": 3,
+      "role": "original_video",
+      "s3_key": "artifact-3",
+      "bytes": 3535,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 31,
+      "role": "meta",
+      "s3_key": "artifact-31",
+      "bytes": 921,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 52,
+      "role": "original_video",
+      "s3_key": "artifact-52",
+      "bytes": 3535,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 98,
+      "role": "meta",
+      "s3_key": "artifact-98",
+      "bytes": 3546,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 143,
+      "role": "raw_answer",
+      "s3_key": "artifact-143",
+      "bytes": 142,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 167,
+      "role": "teacher_frame",
+      "s3_key": "artifact-167",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 168,
+      "role": "teacher_frame",
+      "s3_key": "artifact-168",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 169,
+      "role": "teacher_frame",
+      "s3_key": "artifact-169",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 170,
+      "role": "teacher_frame",
+      "s3_key": "artifact-170",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 171,
+      "role": "teacher_frame",
+      "s3_key": "artifact-171",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 257,
+      "role": "yolo_image",
+      "s3_key": "artifact-257",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 258,
+      "role": "yolo_image",
+      "s3_key": "artifact-258",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 259,
+      "role": "yolo_image",
+      "s3_key": "artifact-259",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 260,
+      "role": "yolo_image",
+      "s3_key": "artifact-260",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 261,
+      "role": "yolo_image",
+      "s3_key": "artifact-261",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 262,
+      "role": "yolo_image",
+      "s3_key": "artifact-262",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 263,
+      "role": "yolo_image",
+      "s3_key": "artifact-263",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 369,
+      "role": "yolo_label",
+      "s3_key": "artifact-369",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 370,
+      "role": "yolo_label",
+      "s3_key": "artifact-370",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 371,
+      "role": "yolo_label",
+      "s3_key": "artifact-371",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 372,
+      "role": "yolo_label",
+      "s3_key": "artifact-372",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 373,
+      "role": "yolo_label",
+      "s3_key": "artifact-373",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 374,
+      "role": "yolo_label",
+      "s3_key": "artifact-374",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 375,
+      "role": "yolo_label",
+      "s3_key": "artifact-375",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1466,
+      "role": "thumbnail",
+      "s3_key": "artifact-1466",
+      "bytes": 3447,
+      "available": true,
+      "provenance": "cloud",
+      "detail": null
+    },
+    {
+      "id": 1467,
+      "role": "filmstrip",
+      "s3_key": "artifact-1467",
+      "bytes": 3045,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "tile_w": 160,
+        "tile_h": 90,
+        "count": 4
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "alert",
+    "duration_sec": 4.0,
+    "fps_estimated": 5.0,
+    "frames_written": 20,
+    "codec": "h264",
+    "buffer": {
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "yolo": {
+      "class_counts": {
+        "car": 1
+      },
+      "class_max_conf": {
+        "car": 0.764
+      },
+      "trigger_classes": [
+        "car"
+      ]
+    },
+    "model_response": {
+      "label": "normal",
+      "people": 0,
+      "summary": "A dark SUV reverses out of the cam-0157f7 and drives off down the street.",
+      "vehicle_moving": true
+    },
+    "teacher": {
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "temperature": 0
+    }
+  }
+}

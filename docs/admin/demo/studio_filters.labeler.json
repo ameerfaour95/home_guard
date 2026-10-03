@@ -1,0 +1,56 @@
+[
+  {
+    "key": "false_alarm",
+    "title": "Owner said false alarm",
+    "description": "Events the owner marked as a false alarm.",
+    "builtin": true,
+    "query": {
+      "filter": "false_alarm"
+    }
+  },
+  {
+    "key": "ai_dismissed_person",
+    "title": "AI dismissed, YOLO saw a person",
+    "description": "The AI called it a false positive although the detector saw a person.",
+    "builtin": true,
+    "query": {
+      "filter": "ai_dismissed_person"
+    }
+  },
+  {
+    "key": "ai_failed",
+    "title": "AI call failed or fell back",
+    "description": "The AI answer failed or a fallback answer was used.",
+    "builtin": true,
+    "query": {
+      "filter": "ai_failed"
+    }
+  },
+  {
+    "key": "real_but_wrong",
+    "title": "Owner said real but wrong",
+    "description": "The owner said the alert was real but the description or action was wrong.",
+    "builtin": true,
+    "query": {
+      "filter": "real_but_wrong"
+    }
+  },
+  {
+    "key": "low_conf",
+    "title": "Low detector confidence",
+    "description": "The detector's best class confidence is below 0.45.",
+    "builtin": true,
+    "query": {
+      "filter": "low_conf"
+    }
+  },
+  {
+    "key": "paused",
+    "title": "Paused-camera footage",
+    "description": "Clips recorded while the camera's alerts were paused.",
+    "builtin": true,
+    "query": {
+      "filter": "paused"
+    }
+  }
+]

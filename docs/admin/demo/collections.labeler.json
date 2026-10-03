@@ -1,0 +1,18 @@
+[
+  {
+    "name": "Deliveries and couriers",
+    "description": "Couriers and parcel drop-offs, plus a few ordinary arrivals as negatives.",
+    "id": 2,
+    "event_count": 6,
+    "created_by": "Eden Peretz",
+    "created_utc": "2026-10-02T07:00:00Z"
+  },
+  {
+    "name": "Night-time visitors",
+    "description": "Events after 19:00 or before 07:00, or labelled suspicious, with a real AI description.",
+    "id": 1,
+    "event_count": 11,
+    "created_by": "Ameer Faour",
+    "created_utc": "2026-10-01T09:00:00Z"
+  }
+]

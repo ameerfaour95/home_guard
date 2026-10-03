@@ -1,0 +1,137 @@
+{
+  "id": 24,
+  "site": "cohen_ramatgan",
+  "customer_id": 1,
+  "customer_name": "Dana Cohen",
+  "camera": "front_door",
+  "kind": "random",
+  "start_utc": "2026-10-02T12:08:55.367404Z",
+  "end_utc": "2026-10-02T12:08:59.367404Z",
+  "summary": "",
+  "label": null,
+  "alert_command": null,
+  "detected": [
+    "car"
+  ],
+  "owner_verdicts": [],
+  "completeness": {
+    "video": true,
+    "boxes": "none",
+    "ai": "none",
+    "owner_feedback": false,
+    "expired": false,
+    "copies": [
+      "training"
+    ]
+  },
+  "reviewed": false,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/24/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": "2026-10-02 15:08:55",
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 24,
+      "purpose": "guard",
+      "status": "none",
+      "model": null,
+      "prompt_version": null,
+      "prompt": null,
+      "parsed": null,
+      "raw_text_artifact_id": null,
+      "input_frame_artifact_ids": []
+    }
+  ],
+  "feedback": [],
+  "artifacts": [
+    {
+      "id": 67,
+      "role": "original_video",
+      "s3_key": "dataset_cohen_ramatgan/clips/front_door/2026-10-02/front_door_1790942938_random.mp4",
+      "bytes": 3486,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 115,
+      "role": "meta",
+      "s3_key": "dataset_cohen_ramatgan/meta/front_door/2026-10-02/front_door_1790942938_random.meta.json",
+      "bytes": 545,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1458,
+      "role": "thumbnail",
+      "s3_key": "admin_cache/thumbs/24.jpg",
+      "bytes": 3614,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "src_etag": "29dbcafb8770b81422860ec8ac7e9e4f",
+        "needs_rendition": false
+      }
+    },
+    {
+      "id": 1459,
+      "role": "filmstrip",
+      "s3_key": "admin_cache/filmstrips/24.jpg",
+      "bytes": 3229,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "count": 4,
+        "tile_h": 90,
+        "tile_w": 160,
+        "src_etag": "29dbcafb8770b81422860ec8ac7e9e4f"
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "random",
+    "yolo": {
+      "class_counts": {
+        "car": 1
+      },
+      "class_max_conf": {
+        "car": 0.603
+      },
+      "trigger_classes": [
+        "car"
+      ],
+      "trigger_detected": true
+    },
+    "codec": "h264",
+    "buffer": {
+      "store_fps": 5.0,
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "clip_path": "clips\\front_door\\2026-10-02\\front_door_1790942938_random.mp4",
+    "camera_name": "front_door",
+    "clip_end_ts": 1790942939.367404,
+    "duration_sec": 4.0,
+    "clip_start_ts": 1790942935.367404,
+    "fps_estimated": 5.0,
+    "clip_end_local": "2026-10-02 15:08:59",
+    "frames_written": 20,
+    "clip_start_local": "2026-10-02 15:08:55"
+  }
+}

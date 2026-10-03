@@ -111,6 +111,7 @@ def test_thumbnail_url_when_thumbnail_artifact_exists(client, staff_factory, ind
     eid = _event_id(client, b.STEM)
     with session_scope(client.app.state.engine) as s:
         s.add(m.Artifact(event_id=eid, role="thumbnail", s3_key="admin_cache/test/thumb.jpg", provenance="cloud"))
+        s.scalars(select(m.Customer)).one().consent_recordings = True  # staff see thumbnails like recordings
     items = client.get("/v1/events", headers=h).json()["items"]
     by_id = {it["id"]: it for it in items}
     assert by_id[eid]["thumbnail_url"] == f"/v1/events/{eid}/thumbnail"
@@ -261,7 +262,7 @@ def test_labeler_sees_pseudonyms_and_no_dispatch(client, staff_factory, indexed_
     text = r.text
     assert d["camera"] == cam_p and d["dispatch"] is None
     assert "dispatch" not in json.dumps(d["raw_meta"])
-    assert d["raw_meta"]["teacher"]["prompt"].startswith("You are the eyes")
+    assert "prompt" not in d["raw_meta"]["teacher"] and all(r["prompt"] is None for r in d["ai_runs"])
     assert all(f["raw_text"] == "" and f["note"] == "" for f in d["feedback"]) and d["feedback"]
     assert "Acme" not in text and "-100100" not in text and "test message" not in text
     assert all(not a["s3_key"].startswith(("dataset_test/", "production_test/")) for a in d["artifacts"])
@@ -554,3 +555,15 @@ def test_event_view_audit_is_race_free(client, staff_factory, indexed, monkeypat
     with session_scope(client.app.state.engine) as s:
         rows = s.scalars(select(m.AuditLog).where(m.AuditLog.action == "event_view")).all()
     assert len(rows) == 1 and rows[0].ts == NOW  # the batching clock is also the audit row's clock
+
+
+def test_density_for_labelers_omits_all_zero_cameras(client, staff_factory, indexed_consent):
+    """Privacy pass 3 C: the row count was the household's camera inventory, events or not."""
+    _, _, _, lab = staff_factory("labeler")
+    _, _, _, adm = staff_factory("admin")
+    quiet = {"from_utc": "2001-01-01T00:00:00Z", "to_utc": "2001-01-01T01:00:00Z"}
+    assert client.get("/v1/events/density", params=quiet, headers=lab).json()["rows"] == []
+    assert client.get("/v1/events/density", params=quiet, headers=adm).json()["rows"]  # silent cameras stay visible
+    busy = client.get("/v1/events/density", params={"from_utc": "2026-10-03T00:00:00Z",
+                                                    "to_utc": "2026-10-03T12:00:00Z"}, headers=lab).json()
+    assert busy["rows"] and all(any(row["events"]) for row in busy["rows"])

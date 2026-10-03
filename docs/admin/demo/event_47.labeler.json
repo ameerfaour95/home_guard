@@ -1,0 +1,413 @@
+{
+  "id": 47,
+  "site": "customer-1fc0de",
+  "customer_id": 0,
+  "customer_name": "customer-1fc0de",
+  "camera": "cam-64ca24",
+  "kind": "alert",
+  "start_utc": "2026-10-03T06:14:27.425722Z",
+  "end_utc": "2026-10-03T06:14:31.425722Z",
+  "summary": "A woman walks across the lawn with a laundry basket toward the clothes line.",
+  "label": "normal",
+  "alert_command": "[send_message]",
+  "detected": [
+    "person"
+  ],
+  "owner_verdicts": [
+    "true_alert"
+  ],
+  "completeness": {
+    "video": true,
+    "boxes": "sampled",
+    "ai": "real",
+    "owner_feedback": true,
+    "expired": false,
+    "copies": [
+      "production",
+      "training"
+    ]
+  },
+  "reviewed": false,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/47/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": null,
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 47,
+      "purpose": "guard",
+      "status": "real",
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "prompt": null,
+      "parsed": {
+        "label": "normal",
+        "people": 1,
+        "summary": "A woman walks across the lawn with a laundry basket toward the clothes line.",
+        "vehicle_moving": false
+      },
+      "raw_text_artifact_id": 155,
+      "input_frame_artifact_ids": [
+        247,
+        248,
+        249,
+        250,
+        251
+      ]
+    }
+  ],
+  "feedback": [
+    {
+      "id": 11,
+      "verdict": "true_alert",
+      "action": "none",
+      "note": "",
+      "raw_text": "",
+      "source": "text",
+      "received_utc": "2026-10-03T06:31:52Z"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": 16,
+      "role": "original_video",
+      "s3_key": "artifact-16",
+      "bytes": 3434,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 28,
+      "role": "feedback",
+      "s3_key": "artifact-28",
+      "bytes": 421,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 44,
+      "role": "meta",
+      "s3_key": "artifact-44",
+      "bytes": 932,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 89,
+      "role": "original_video",
+      "s3_key": "artifact-89",
+      "bytes": 3434,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 137,
+      "role": "meta",
+      "s3_key": "artifact-137",
+      "bytes": 3480,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 155,
+      "role": "raw_answer",
+      "s3_key": "artifact-155",
+      "bytes": 148,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 247,
+      "role": "teacher_frame",
+      "s3_key": "artifact-247",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 248,
+      "role": "teacher_frame",
+      "s3_key": "artifact-248",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 249,
+      "role": "teacher_frame",
+      "s3_key": "artifact-249",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 250,
+      "role": "teacher_frame",
+      "s3_key": "artifact-250",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 251,
+      "role": "teacher_frame",
+      "s3_key": "artifact-251",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 355,
+      "role": "yolo_image",
+      "s3_key": "artifact-355",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 356,
+      "role": "yolo_image",
+      "s3_key": "artifact-356",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 357,
+      "role": "yolo_image",
+      "s3_key": "artifact-357",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 358,
+      "role": "yolo_image",
+      "s3_key": "artifact-358",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 359,
+      "role": "yolo_image",
+      "s3_key": "artifact-359",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 360,
+      "role": "yolo_image",
+      "s3_key": "artifact-360",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 361,
+      "role": "yolo_image",
+      "s3_key": "artifact-361",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 461,
+      "role": "yolo_label",
+      "s3_key": "artifact-461",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 462,
+      "role": "yolo_label",
+      "s3_key": "artifact-462",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 463,
+      "role": "yolo_label",
+      "s3_key": "artifact-463",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 464,
+      "role": "yolo_label",
+      "s3_key": "artifact-464",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 465,
+      "role": "yolo_label",
+      "s3_key": "artifact-465",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 466,
+      "role": "yolo_label",
+      "s3_key": "artifact-466",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 467,
+      "role": "yolo_label",
+      "s3_key": "artifact-467",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1374,
+      "role": "thumbnail",
+      "s3_key": "artifact-1374",
+      "bytes": 3632,
+      "available": true,
+      "provenance": "cloud",
+      "detail": null
+    },
+    {
+      "id": 1375,
+      "role": "filmstrip",
+      "s3_key": "artifact-1375",
+      "bytes": 3215,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "tile_w": 160,
+        "tile_h": 90,
+        "count": 4
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "alert",
+    "duration_sec": 4.0,
+    "fps_estimated": 5.0,
+    "frames_written": 20,
+    "codec": "h264",
+    "buffer": {
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "yolo": {
+      "class_counts": {
+        "person": 1
+      },
+      "class_max_conf": {
+        "person": 0.74
+      },
+      "trigger_classes": [
+        "person"
+      ]
+    },
+    "model_response": {
+      "label": "normal",
+      "people": 1,
+      "summary": "A woman walks across the lawn with a laundry basket toward the clothes line.",
+      "vehicle_moving": false
+    },
+    "teacher": {
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "temperature": 0
+    }
+  }
+}

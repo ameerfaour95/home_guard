@@ -1,0 +1,210 @@
+{
+  "id": 13,
+  "site": "cohen_ramatgan",
+  "customer_id": 1,
+  "customer_name": "Dana Cohen",
+  "camera": "driveway",
+  "kind": "alert",
+  "start_utc": "2026-10-02T18:26:52.474433Z",
+  "end_utc": "2026-10-02T18:26:56.474433Z",
+  "summary": "A white hatchback pulls into the driveway and a woman steps out and opens the trunk.",
+  "label": "normal",
+  "alert_command": "[send_message]",
+  "detected": [
+    "car",
+    "person"
+  ],
+  "owner_verdicts": [
+    "true_alert"
+  ],
+  "completeness": {
+    "video": true,
+    "boxes": "none",
+    "ai": "none",
+    "owner_feedback": true,
+    "expired": false,
+    "copies": [
+      "production"
+    ]
+  },
+  "reviewed": false,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/13/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": "2026-10-02 21:26:52",
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": {
+    "channel": "telegram",
+    "sent": true,
+    "detail": {
+      "channel": "telegram",
+      "telegram": {
+        "command": "[send_message]",
+        "telegram": {
+          "sent": true,
+          "results": [
+            {
+              "ok": true,
+              "chat_id": "-100100",
+              "message_id": 716
+            }
+          ]
+        }
+      }
+    }
+  },
+  "ai_runs": [
+    {
+      "id": 13,
+      "purpose": "guard",
+      "status": "none",
+      "model": null,
+      "prompt_version": null,
+      "prompt": null,
+      "parsed": null,
+      "raw_text_artifact_id": null,
+      "input_frame_artifact_ids": []
+    }
+  ],
+  "feedback": [
+    {
+      "id": 6,
+      "verdict": "true_alert",
+      "action": "none",
+      "note": "",
+      "raw_text": "👍",
+      "source": "text",
+      "received_utc": "2026-10-02T18:29:53Z"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": 6,
+      "role": "original_video",
+      "s3_key": "production_cohen_ramatgan/clips/driveway/2026-10-02/driveway_1790965615_alert.mp4",
+      "bytes": 4158,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 23,
+      "role": "feedback",
+      "s3_key": "production_cohen_ramatgan/feedback/driveway/2026-10-02/driveway_1790965615_alert_1790965793000.feedback.json",
+      "bytes": 429,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 34,
+      "role": "meta",
+      "s3_key": "production_cohen_ramatgan/meta/driveway/2026-10-02/driveway_1790965615_alert.meta.json",
+      "bytes": 984,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 1396,
+      "role": "thumbnail",
+      "s3_key": "admin_cache/thumbs/13.jpg",
+      "bytes": 3772,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "src_etag": "c7af264f81d09d91e426601f4a5d4145",
+        "needs_rendition": false
+      }
+    },
+    {
+      "id": 1397,
+      "role": "filmstrip",
+      "s3_key": "admin_cache/filmstrips/13.jpg",
+      "bytes": 3407,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "count": 4,
+        "tile_h": 90,
+        "tile_w": 160,
+        "src_etag": "c7af264f81d09d91e426601f4a5d4145"
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "alert",
+    "yolo": {
+      "class_counts": {
+        "car": 1,
+        "person": 1
+      },
+      "class_max_conf": {
+        "car": 0.438,
+        "person": 0.539
+      },
+      "trigger_classes": [
+        "car",
+        "person"
+      ],
+      "trigger_detected": true
+    },
+    "alert": {
+      "label": "normal",
+      "muted": false,
+      "labels": [
+        "car",
+        "person"
+      ],
+      "summary": "A white hatchback pulls into the driveway and a woman steps out and opens the trunk.",
+      "dispatch": {
+        "channel": "telegram",
+        "telegram": {
+          "command": "[send_message]",
+          "telegram": {
+            "sent": true,
+            "results": [
+              {
+                "ok": true,
+                "chat_id": "-100100",
+                "message_id": 716
+              }
+            ]
+          }
+        }
+      },
+      "alert_reason": "",
+      "alert_command": "[send_message]"
+    },
+    "codec": "h264",
+    "buffer": {
+      "store_fps": 5.0,
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "clip_path": "clips\\driveway\\2026-10-02\\driveway_1790965615_alert.mp4",
+    "camera_name": "driveway",
+    "clip_end_ts": 1790965616.4744334,
+    "duration_sec": 4.0,
+    "clip_start_ts": 1790965612.4744334,
+    "fps_estimated": 5.0,
+    "clip_end_local": "2026-10-02 21:26:56",
+    "frames_written": 20,
+    "clip_start_local": "2026-10-02 21:26:52"
+  }
+}

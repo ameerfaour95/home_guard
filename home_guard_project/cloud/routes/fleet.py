@@ -12,14 +12,15 @@ from sqlalchemy.orm import Session
 from home_guard_project.fleet_contract import health
 from home_guard_project.fleet_contract.legacy import parse_heartbeat
 
-from .. import audit
-from ..deps import SessionDep, require_role
+from .. import audit, redact
+from ..deps import TEXT_MAX, SessionDep, check_length, require_id, require_role
 from ..models import Camera, Customer, Device, Event, Feedback, Staff
 from ..schemas import DensityOut, DeviceSummary, EnrollRequest, FleetResponse, HealthReason
 from .events import fleet_activity_density
 
 router = APIRouter(tags=["fleet"])
 
+SITE_MAX = 64  # the column's width (sites and ssh users)
 _SEVERITY_RANK = {"offline": 0, "critical": 1, "warning": 2, "unknown": 3, "healthy": 4}
 
 
@@ -86,7 +87,10 @@ def fleet_activity(request: Request, hours: int = Query(24, ge=1, le=168), sessi
 @router.post("/devices/enroll", response_model=DeviceSummary)
 def enroll(body: EnrollRequest, request: Request, staff: Staff = Depends(require_role("admin")),
            session: Session = SessionDep):
-    customer = session.get(Customer, body.customer_id)
+    check_length("site", body.site, SITE_MAX)
+    check_length("ssh_user", body.ssh_user, SITE_MAX)
+    check_length("tailscale_host", body.tailscale_host, TEXT_MAX)
+    customer = session.get(Customer, require_id(body.customer_id, "Customer not found"))
     if customer is None:
         raise HTTPException(status_code=404, detail="Customer not found")
     if session.scalar(select(Device.id).where(Device.site == body.site)) is not None:
@@ -99,5 +103,7 @@ def enroll(body: EnrollRequest, request: Request, staff: Staff = Depends(require
     except IntegrityError:  # lost a race on the unique site
         session.rollback()
         raise HTTPException(status_code=409, detail="That site is already assigned to a device")
-    audit.record(session, staff.id, "device_enroll", target=dev.site, customer_id=customer.id, device_id=dev.device_id)
+    redact.remember(session, dev, now=now_of(request))  # the household's names, for labeler redaction
+    audit.record(session, staff.id, "device_enroll", target=dev.site, customer_id=customer.id, device_id=dev.device_id,
+                 ts=now_of(request))
     return build_summaries(session, now_of(request), device_pks=[dev.id])[0]
