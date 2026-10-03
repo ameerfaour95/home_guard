@@ -3,7 +3,7 @@
     {
       "id": 27,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-b42d16",
       "kind": "alert",
@@ -34,7 +34,7 @@
     {
       "id": 43,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-64ca24",
       "kind": "alert",
@@ -68,7 +68,7 @@
     {
       "id": 79,
       "site": "customer-3e7e2d",
-      "customer_id": 2,
+      "customer_id": 0,
       "customer_name": "customer-3e7e2d",
       "camera": "cam-837a19",
       "kind": "alert",
@@ -99,7 +99,7 @@
     {
       "id": 26,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-b42d16",
       "kind": "alert",
@@ -131,7 +131,7 @@
     {
       "id": 6,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-0157f7",
       "kind": "alert",
@@ -163,7 +163,7 @@
     {
       "id": 21,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-b42d16",
       "kind": "alert",

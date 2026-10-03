@@ -1,7 +1,7 @@
 {
   "id": 32,
   "site": "customer-1fc0de",
-  "customer_id": 1,
+  "customer_id": 0,
   "customer_name": "customer-1fc0de",
   "camera": "cam-b42d16",
   "kind": "alert",

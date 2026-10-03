@@ -3,7 +3,7 @@
     {
       "id": 38,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-b42d16",
       "kind": "trigger",
@@ -34,7 +34,7 @@
     {
       "id": 50,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-64ca24",
       "kind": "alert",
@@ -66,7 +66,7 @@
     {
       "id": 16,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-0157f7",
       "kind": "trigger",
@@ -97,7 +97,7 @@
     {
       "id": 37,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-b42d16",
       "kind": "trigger",
@@ -128,7 +128,7 @@
     {
       "id": 86,
       "site": "customer-3e7e2d",
-      "customer_id": 2,
+      "customer_id": 0,
       "customer_name": "customer-3e7e2d",
       "camera": "cam-837a19",
       "kind": "false_positive",
@@ -159,7 +159,7 @@
     {
       "id": 72,
       "site": "customer-3e7e2d",
-      "customer_id": 2,
+      "customer_id": 0,
       "customer_name": "customer-3e7e2d",
       "camera": "cam-050ee8",
       "kind": "random",
@@ -190,7 +190,7 @@
     {
       "id": 49,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-64ca24",
       "kind": "random",
@@ -221,7 +221,7 @@
     {
       "id": 71,
       "site": "customer-3e7e2d",
-      "customer_id": 2,
+      "customer_id": 0,
       "customer_name": "customer-3e7e2d",
       "camera": "cam-050ee8",
       "kind": "trigger",
@@ -252,7 +252,7 @@
     {
       "id": 48,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-64ca24",
       "kind": "trigger",
@@ -284,7 +284,7 @@
     {
       "id": 36,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-b42d16",
       "kind": "random",
@@ -313,7 +313,7 @@
     {
       "id": 15,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-0157f7",
       "kind": "trigger",
@@ -345,7 +345,7 @@
     {
       "id": 35,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-b42d16",
       "kind": "alert",
@@ -376,7 +376,7 @@
     {
       "id": 34,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-b42d16",
       "kind": "false_positive",
@@ -407,7 +407,7 @@
     {
       "id": 85,
       "site": "customer-3e7e2d",
-      "customer_id": 2,
+      "customer_id": 0,
       "customer_name": "customer-3e7e2d",
       "camera": "cam-837a19",
       "kind": "trigger",
@@ -438,7 +438,7 @@
     {
       "id": 33,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-b42d16",
       "kind": "alert",
@@ -469,7 +469,7 @@
     {
       "id": 70,
       "site": "customer-3e7e2d",
-      "customer_id": 2,
+      "customer_id": 0,
       "customer_name": "customer-3e7e2d",
       "camera": "cam-050ee8",
       "kind": "false_positive",
@@ -503,7 +503,7 @@
     {
       "id": 14,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-0157f7",
       "kind": "alert",
@@ -535,7 +535,7 @@
     {
       "id": 32,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-b42d16",
       "kind": "alert",
@@ -566,7 +566,7 @@
     {
       "id": 47,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-64ca24",
       "kind": "alert",
@@ -600,7 +600,7 @@
     {
       "id": 46,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-64ca24",
       "kind": "trigger",
@@ -631,7 +631,7 @@
     {
       "id": 45,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-64ca24",
       "kind": "alert",
@@ -665,7 +665,7 @@
     {
       "id": 31,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-b42d16",
       "kind": "alert",
@@ -699,7 +699,7 @@
     {
       "id": 30,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-b42d16",
       "kind": "trigger",
@@ -730,7 +730,7 @@
     {
       "id": 69,
       "site": "customer-3e7e2d",
-      "customer_id": 2,
+      "customer_id": 0,
       "customer_name": "customer-3e7e2d",
       "camera": "cam-050ee8",
       "kind": "false_positive",
@@ -764,7 +764,7 @@
     {
       "id": 68,
       "site": "customer-3e7e2d",
-      "customer_id": 2,
+      "customer_id": 0,
       "customer_name": "customer-3e7e2d",
       "camera": "cam-050ee8",
       "kind": "false_positive",
@@ -795,7 +795,7 @@
     {
       "id": 67,
       "site": "customer-3e7e2d",
-      "customer_id": 2,
+      "customer_id": 0,
       "customer_name": "customer-3e7e2d",
       "camera": "cam-050ee8",
       "kind": "random",
@@ -826,7 +826,7 @@
     {
       "id": 13,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-0157f7",
       "kind": "alert",
@@ -860,7 +860,7 @@
     {
       "id": 84,
       "site": "customer-3e7e2d",
-      "customer_id": 2,
+      "customer_id": 0,
       "customer_name": "customer-3e7e2d",
       "camera": "cam-837a19",
       "kind": "trigger",
@@ -891,7 +891,7 @@
     {
       "id": 83,
       "site": "customer-3e7e2d",
-      "customer_id": 2,
+      "customer_id": 0,
       "customer_name": "customer-3e7e2d",
       "camera": "cam-837a19",
       "kind": "alert",
@@ -925,7 +925,7 @@
     {
       "id": 12,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-0157f7",
       "kind": "random",
@@ -956,7 +956,7 @@
     {
       "id": 66,
       "site": "customer-3e7e2d",
-      "customer_id": 2,
+      "customer_id": 0,
       "customer_name": "customer-3e7e2d",
       "camera": "cam-050ee8",
       "kind": "trigger",
@@ -987,7 +987,7 @@
     {
       "id": 65,
       "site": "customer-3e7e2d",
-      "customer_id": 2,
+      "customer_id": 0,
       "customer_name": "customer-3e7e2d",
       "camera": "cam-050ee8",
       "kind": "alert",
@@ -1021,7 +1021,7 @@
     {
       "id": 11,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-0157f7",
       "kind": "alert",
@@ -1055,7 +1055,7 @@
     {
       "id": 82,
       "site": "customer-3e7e2d",
-      "customer_id": 2,
+      "customer_id": 0,
       "customer_name": "customer-3e7e2d",
       "camera": "cam-837a19",
       "kind": "trigger",
@@ -1086,7 +1086,7 @@
     {
       "id": 29,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-b42d16",
       "kind": "paused",
@@ -1117,7 +1117,7 @@
     {
       "id": 81,
       "site": "customer-3e7e2d",
-      "customer_id": 2,
+      "customer_id": 0,
       "customer_name": "customer-3e7e2d",
       "camera": "cam-837a19",
       "kind": "alert",
@@ -1148,7 +1148,7 @@
     {
       "id": 64,
       "site": "customer-3e7e2d",
-      "customer_id": 2,
+      "customer_id": 0,
       "customer_name": "customer-3e7e2d",
       "camera": "cam-050ee8",
       "kind": "paused",
@@ -1179,7 +1179,7 @@
     {
       "id": 28,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-b42d16",
       "kind": "paused",
@@ -1210,7 +1210,7 @@
     {
       "id": 80,
       "site": "customer-3e7e2d",
-      "customer_id": 2,
+      "customer_id": 0,
       "customer_name": "customer-3e7e2d",
       "camera": "cam-837a19",
       "kind": "alert",
@@ -1242,7 +1242,7 @@
     {
       "id": 63,
       "site": "customer-3e7e2d",
-      "customer_id": 2,
+      "customer_id": 0,
       "customer_name": "customer-3e7e2d",
       "camera": "cam-050ee8",
       "kind": "alert",
@@ -1276,7 +1276,7 @@
     {
       "id": 27,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-b42d16",
       "kind": "alert",
@@ -1307,7 +1307,7 @@
     {
       "id": 62,
       "site": "customer-3e7e2d",
-      "customer_id": 2,
+      "customer_id": 0,
       "customer_name": "customer-3e7e2d",
       "camera": "cam-050ee8",
       "kind": "trigger",
@@ -1338,7 +1338,7 @@
     {
       "id": 44,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-64ca24",
       "kind": "false_positive",
@@ -1369,7 +1369,7 @@
     {
       "id": 61,
       "site": "customer-3e7e2d",
-      "customer_id": 2,
+      "customer_id": 0,
       "customer_name": "customer-3e7e2d",
       "camera": "cam-050ee8",
       "kind": "paused",
@@ -1400,7 +1400,7 @@
     {
       "id": 10,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-0157f7",
       "kind": "false_positive",
@@ -1434,7 +1434,7 @@
     {
       "id": 43,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-64ca24",
       "kind": "alert",
@@ -1468,7 +1468,7 @@
     {
       "id": 79,
       "site": "customer-3e7e2d",
-      "customer_id": 2,
+      "customer_id": 0,
       "customer_name": "customer-3e7e2d",
       "camera": "cam-837a19",
       "kind": "alert",
@@ -1499,7 +1499,7 @@
     {
       "id": 26,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-b42d16",
       "kind": "alert",
@@ -1531,7 +1531,7 @@
     {
       "id": 9,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-0157f7",
       "kind": "paused",
@@ -1562,7 +1562,7 @@
     {
       "id": 25,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-b42d16",
       "kind": "trigger",
@@ -1593,7 +1593,7 @@
     {
       "id": 42,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-64ca24",
       "kind": "random",
@@ -1622,7 +1622,7 @@
     {
       "id": 24,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-b42d16",
       "kind": "random",
@@ -1653,7 +1653,7 @@
     {
       "id": 23,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-b42d16",
       "kind": "paused",
@@ -1684,7 +1684,7 @@
     {
       "id": 8,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-0157f7",
       "kind": "trigger",
@@ -1715,7 +1715,7 @@
     {
       "id": 7,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-0157f7",
       "kind": "trigger",
@@ -1746,7 +1746,7 @@
     {
       "id": 6,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-0157f7",
       "kind": "alert",
@@ -1778,7 +1778,7 @@
     {
       "id": 5,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-0157f7",
       "kind": "random",
@@ -1809,7 +1809,7 @@
     {
       "id": 22,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-b42d16",
       "kind": "trigger",
@@ -1841,7 +1841,7 @@
     {
       "id": 78,
       "site": "customer-3e7e2d",
-      "customer_id": 2,
+      "customer_id": 0,
       "customer_name": "customer-3e7e2d",
       "camera": "cam-837a19",
       "kind": "paused",
@@ -1872,7 +1872,7 @@
     {
       "id": 21,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-b42d16",
       "kind": "alert",
@@ -1904,7 +1904,7 @@
     {
       "id": 4,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-0157f7",
       "kind": "random",
@@ -1935,7 +1935,7 @@
     {
       "id": 60,
       "site": "customer-3e7e2d",
-      "customer_id": 2,
+      "customer_id": 0,
       "customer_name": "customer-3e7e2d",
       "camera": "cam-050ee8",
       "kind": "trigger",
@@ -1966,7 +1966,7 @@
     {
       "id": 3,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-0157f7",
       "kind": "random",
@@ -1997,7 +1997,7 @@
     {
       "id": 59,
       "site": "customer-3e7e2d",
-      "customer_id": 2,
+      "customer_id": 0,
       "customer_name": "customer-3e7e2d",
       "camera": "cam-050ee8",
       "kind": "random",
@@ -2028,7 +2028,7 @@
     {
       "id": 58,
       "site": "customer-3e7e2d",
-      "customer_id": 2,
+      "customer_id": 0,
       "customer_name": "customer-3e7e2d",
       "camera": "cam-050ee8",
       "kind": "false_positive",
@@ -2062,7 +2062,7 @@
     {
       "id": 57,
       "site": "customer-3e7e2d",
-      "customer_id": 2,
+      "customer_id": 0,
       "customer_name": "customer-3e7e2d",
       "camera": "cam-050ee8",
       "kind": "alert",
@@ -2096,7 +2096,7 @@
     {
       "id": 56,
       "site": "customer-3e7e2d",
-      "customer_id": 2,
+      "customer_id": 0,
       "customer_name": "customer-3e7e2d",
       "camera": "cam-050ee8",
       "kind": "trigger",
@@ -2127,7 +2127,7 @@
     {
       "id": 55,
       "site": "customer-3e7e2d",
-      "customer_id": 2,
+      "customer_id": 0,
       "customer_name": "customer-3e7e2d",
       "camera": "cam-050ee8",
       "kind": "alert",
@@ -2161,7 +2161,7 @@
     {
       "id": 77,
       "site": "customer-3e7e2d",
-      "customer_id": 2,
+      "customer_id": 0,
       "customer_name": "customer-3e7e2d",
       "camera": "cam-837a19",
       "kind": "paused",
@@ -2192,7 +2192,7 @@
     {
       "id": 54,
       "site": "customer-3e7e2d",
-      "customer_id": 2,
+      "customer_id": 0,
       "customer_name": "customer-3e7e2d",
       "camera": "cam-050ee8",
       "kind": "random",
@@ -2221,7 +2221,7 @@
     {
       "id": 76,
       "site": "customer-3e7e2d",
-      "customer_id": 2,
+      "customer_id": 0,
       "customer_name": "customer-3e7e2d",
       "camera": "cam-837a19",
       "kind": "false_positive",
@@ -2255,7 +2255,7 @@
     {
       "id": 20,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-b42d16",
       "kind": "alert",
@@ -2289,7 +2289,7 @@
     {
       "id": 41,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-64ca24",
       "kind": "trigger",
@@ -2320,7 +2320,7 @@
     {
       "id": 2,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-0157f7",
       "kind": "false_positive",
@@ -2354,7 +2354,7 @@
     {
       "id": 75,
       "site": "customer-3e7e2d",
-      "customer_id": 2,
+      "customer_id": 0,
       "customer_name": "customer-3e7e2d",
       "camera": "cam-837a19",
       "kind": "trigger",
@@ -2385,7 +2385,7 @@
     {
       "id": 1,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-0157f7",
       "kind": "false_positive",
@@ -2419,7 +2419,7 @@
     {
       "id": 40,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-64ca24",
       "kind": "trigger",
@@ -2450,7 +2450,7 @@
     {
       "id": 74,
       "site": "customer-3e7e2d",
-      "customer_id": 2,
+      "customer_id": 0,
       "customer_name": "customer-3e7e2d",
       "camera": "cam-837a19",
       "kind": "random",
@@ -2481,7 +2481,7 @@
     {
       "id": 19,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-b42d16",
       "kind": "alert",
@@ -2512,7 +2512,7 @@
     {
       "id": 53,
       "site": "customer-3e7e2d",
-      "customer_id": 2,
+      "customer_id": 0,
       "customer_name": "customer-3e7e2d",
       "camera": "cam-050ee8",
       "kind": "paused",
@@ -2543,7 +2543,7 @@
     {
       "id": 52,
       "site": "customer-3e7e2d",
-      "customer_id": 2,
+      "customer_id": 0,
       "customer_name": "customer-3e7e2d",
       "camera": "cam-050ee8",
       "kind": "trigger",
@@ -2574,7 +2574,7 @@
     {
       "id": 39,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-64ca24",
       "kind": "alert",
@@ -2606,7 +2606,7 @@
     {
       "id": 18,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-b42d16",
       "kind": "trigger",
@@ -2637,7 +2637,7 @@
     {
       "id": 73,
       "site": "customer-3e7e2d",
-      "customer_id": 2,
+      "customer_id": 0,
       "customer_name": "customer-3e7e2d",
       "camera": "cam-837a19",
       "kind": "random",
@@ -2666,7 +2666,7 @@
     {
       "id": 17,
       "site": "customer-1fc0de",
-      "customer_id": 1,
+      "customer_id": 0,
       "customer_name": "customer-1fc0de",
       "camera": "cam-b42d16",
       "kind": "trigger",
@@ -2697,7 +2697,7 @@
     {
       "id": 51,
       "site": "customer-3e7e2d",
-      "customer_id": 2,
+      "customer_id": 0,
       "customer_name": "customer-3e7e2d",
       "camera": "cam-050ee8",
       "kind": "paused",
