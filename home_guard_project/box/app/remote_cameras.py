@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 import threading
 import time
-from .camera_controls import Camera,changes_payload
+from .camera_controls import Camera,changes_payload,zone_operation,zone_points
 from .engine_backend import ProcessRunner
 
 def target_user(target):
@@ -45,6 +45,27 @@ class RemoteCameras:
         self.box=SimpleNamespace(demo=False,is_stopped=lambda:False)
         self.records=[Camera(name) for name in dict.fromkeys(names)]
         self.directory=None;self.cancelled=False
+        self._zones={}
+
+    def zones(self):
+        if self.box.demo:
+            return {c.name: [p[:] for p in self._zones.get(c.name, [])] for c in self.records}
+        data=self.parse(self.command(self.ssh('zones')),'cameras')
+        return {row['name']: zone_points(row['points']) for row in data['cameras']}
+
+    def set_zone(self,name,points):
+        args=zone_operation(name,points)
+        if self.box.demo:
+            self._zones[name]=zone_points(points)
+            return [p[:] for p in self._zones[name]]
+        return zone_points(self.parse(self.command(self.ssh(' '.join(args))),'points')['points'])
+
+    def clear_zone(self,name):
+        args=zone_operation(name)
+        if self.box.demo:
+            self._zones.pop(name,None)
+            return []
+        return zone_points(self.parse(self.command(self.ssh(' '.join(args))),'points')['points'])
     def load(self): return list(self.records)
     def local_directory(self):
         if self.directory is None: self.directory=tempfile.TemporaryDirectory(prefix='homeguard-cameras-')
@@ -115,6 +136,7 @@ class RemoteCameras:
             expected_active=[row['new_name'] for row in payload['cameras'] if row['enabled']]
             expected_disabled=[row['new_name'] for row in payload['cameras'] if not row['enabled']]
             if set(data['active'])!=set(expected_active) or set(data['disabled'])!=set(expected_disabled): raise RuntimeError('Camera result changed')
+            self._zones={row['new_name']:self._zones.get(row['name'],[]) for row in payload['cameras']}
             self.records=[replace(old[row['name']],name=row['new_name'],enabled=row['enabled']) for row in payload['cameras']]
             return list(self.records)
         finally:
@@ -125,3 +147,5 @@ class RemoteCameras:
         if hasattr(self.runner,'cancel'): self.runner.cancel()
     def cleanup(self):
         if self.directory is not None: self.directory.cleanup();self.directory=None
+
+RemoteCameraControls = RemoteCameras

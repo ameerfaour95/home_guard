@@ -80,6 +80,11 @@ class CameraPage:
         self.rows = []
         self.row_busy={}
         self.loaded = False
+        self.zone_values = {}
+        self.zones_loaded = False
+        self.zone_load_failed = False
+        self.zone_widgets = {}
+        self.zone_dialog = None
         self.timer = QTimer(self.widget)
         self.timer.timeout.connect(self.poll)
         self.timer.start(100)
@@ -100,12 +105,22 @@ class CameraPage:
             self.note.setText(tr('camera_login_help'));return
         self.search_password.clear()
         self.searching=True
-        self.begin(lambda:self.controls.search(user,password))
+        self.begin(lambda:self.read_zones(self.controls.search(user,password)))
         self.note.setText(tr('camera_search_working'))
 
     def load_photos(self):
         self.controls.load()
-        return self.controls.snapshots()
+        return self.read_zones(self.controls.snapshots())
+
+    def read_zones(self, records):
+        # One zone request after snapshots, never one request per card or UI tick.
+        try:
+            self.zone_values = self.controls.zones()
+            self.zones_loaded = True
+            self.zone_load_failed = False
+        except Exception:
+            self.zone_load_failed = True
+        return records
 
     def begin(self, task):
         self.check_state.clear_failure()
@@ -118,6 +133,7 @@ class CameraPage:
         for _, field, enabled in self.rows:
             field.setEnabled(False)
             enabled.setEnabled(False)
+        for button, _, _ in self.zone_widgets.values(): button.setEnabled(False)
         from .motion import busy
         busy(self.search_start if getattr(self,'searching',False) else self.save if getattr(self,'saving',False) else self.refresh,True)
         self.progress.hide()
@@ -127,10 +143,10 @@ class CameraPage:
 
     def refresh_clicked(self):
         if self.future is None:
-            self.begin(self.controls.snapshots if self.loaded else self.load_photos)
+            self.begin(lambda:self.read_zones(self.controls.snapshots()) if self.loaded else self.load_photos())
 
     def poll(self):
-        if self.future is None and not self.wizard and not self.controls.box.demo and self.widget.isVisible():
+        if self.future is None and not self.wizard and not self.controls.box.demo and self.widget.isVisible() and not (self.zone_dialog and self.zone_dialog.isVisible()):
             import time
             if time.monotonic()-getattr(self,'last_names_poll',0)>=1:
                 self.last_names_poll=time.monotonic()
@@ -188,22 +204,34 @@ class CameraPage:
         grid.setContentsMargins(0, 0, 12, 0)
         grid.setSpacing(16)
         self.rows = []
+        self.zone_widgets = {}
         self.record_signature=tuple((r.name,r.enabled) for r in records)
         if not records:
             grid.addWidget(label(tr("camera_empty"), "muted"), 0, 0)
         for i, camera in enumerate(records):
             tile = card()
             layout = layout_for(tile, 16)
-            from .ai_activity_ui import AlertPicture
-            photo=AlertPicture(camera.file if camera.ok else None);photo.height_limit=200
+            from .zone_picture import ZonePicture
+            photo=ZonePicture(camera.file if camera.ok else None,self.zone_values.get(camera.name, []));photo.height_limit=200
             if self.controls.box.demo and camera.ok: photo.pix=demo_picture(i)
             if photo.pix.isNull():
                 photo=label(tr("camera_snapshot_failed" if self.wizard else "camera_no_photo"),"muted")
                 photo.setMinimumHeight(180)
             layout.addWidget(photo)
-            # Reserved for the next camera action and one status line. Keep empty.
+            # Keep the reserved row and card geometry stable.
             slot=QWidget();slot.setObjectName('cameraActionSlot');slot.setFixedHeight(36)
-            QHBoxLayout(slot).setContentsMargins(0,0,0,0);layout.addWidget(slot)
+            actions=QHBoxLayout(slot);actions.setContentsMargins(0,0,0,0);actions.setSpacing(8);layout.addWidget(slot)
+            if self.zones_loaded or self.zone_load_failed:
+                from .zone_editor import ZonePill, colors
+                from .zone_picture import WatchingStatus
+                zone_button=ZonePill(tr('camera_zone_button'),compact=True)
+                zone_button.setEnabled(isinstance(photo,ZonePicture) and not photo.pix.isNull() and not self.zone_load_failed)
+                zone_button.clicked.connect(lambda checked=False,n=camera.name,p=photo:self.open_zone(n,p))
+                status=WatchingStatus(tr('camera_error') if self.zone_load_failed else tr('camera_zone_drawn' if self.zone_values.get(camera.name) else 'camera_zone_whole'), bool(self.zone_values.get(camera.name)))
+                status.setStyleSheet(f'color: {colors(self.widget)["secondary"]}; font-size: 13px;')
+                status.setAccessibleName(status.text())
+                actions.addWidget(zone_button);actions.addWidget(status,1)
+                self.zone_widgets[camera.name]=(zone_button,status,photo)
             line = QHBoxLayout()
             name = QLineEdit(camera.name)
             name.setAccessibleName(tr("camera_name"))
@@ -224,6 +252,27 @@ class CameraPage:
         grid.setRowStretch((len(records)+(1 if self.wizard else 2))//(2 if self.wizard else 3), 1)
         self.scroll.setWidget(content)
         self.validate()
+
+    def open_zone(self, name, photo):
+        if self.future is not None or self.zone_load_failed or not self.zones_loaded: return
+        from .zone_editor import ZoneEditorDialog
+        dialog=ZoneEditorDialog(self.controls,name,photo.pix,self.zone_values.get(name,[]),self.widget)
+        self.zone_dialog=dialog
+        dialog.zone_saved.connect(lambda points:self.zone_saved(name,points))
+        def finished(result):
+            self.zone_dialog=None
+            dialog.deleteLater()
+        dialog.finished.connect(finished)
+        dialog.open()
+
+    def zone_saved(self, name, points):
+        self.zone_values[name]=points
+        if name in self.zone_widgets:
+            _,status,photo=self.zone_widgets[name]
+            status.drawn = bool(points)
+            status.change(tr('camera_zone_drawn' if points else 'camera_zone_whole'))
+            status.setAccessibleName(status.text())
+            photo.set_zone(points)
 
     def set_camera_enabled(self,name,enabled):
         if self.future is not None: return
@@ -278,7 +327,11 @@ class CameraPage:
     def save_clicked(self):
         changes = self.changes()
         self.saving = True
-        self.begin(lambda: self.controls.save(changes))
+        def save():
+            records=self.controls.save(changes)
+            self.zone_values={new:self.zone_values.get(old,[]) for old,new,_ in changes}
+            return records
+        self.begin(save)
 
     def close(self):
         self.timer.stop()

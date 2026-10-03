@@ -1,5 +1,24 @@
 # Home Guard desktop app handoff
 
+## Round Z — watch areas (2026-10-03)
+
+1. Fast-forwarded `origin/beelink-collector-box` to `bf88b0d`, then built three UI commits on `box-app-ui`; no push.
+2. Local and SSH controls load, set and clear zones; demo controls keep independent in-memory zones without commands.
+3. The split dialog edits the raw snapshot, with a blurred ambient enclosure, animated handles and live outside dimming.
+4. Click up to 32 corners, drag to adjust, snap to the first, Undo with right-click/Backspace/Ctrl+Z, or Clear; coordinates use four-decimal picture fractions.
+5. Empty saves the whole picture, one or two corners disable Save, and areas under 5% show a quiet warning; Enter saves and Escape cancels.
+6. Saving runs off the UI thread with disabled controls and a thin bar; failures keep the drawing open, and success closes with an Area saved toast.
+7. The reserved 36px tile row gains a pill and crossfading status after snapshots; saved polygons dim and outline thumbnails without modifying the raw image.
+8. `python -m unittest discover -s tests/box`: 560 tests pass using this checkout's Python, with `VIRTUAL_ENV` and inherited antivirus `SSLKEYLOGFILE` unset for that process.
+9. Fourteen synthetic screenshots at 1366×768 and 1920×1080 were opened and reviewed; see [SCREENSHOTS.md](SCREENSHOTS.md); RTL geometry is tested and copy remains in the existing English-only catalog.
+10. No real box, camera, SSH or Telegram was contacted; real restart/masking, remote latency and native desktop animation remain unverified; engine scripts/runtime were not edited after the merge.
+
+11. Round Z2: merged `origin/beelink-collector-box` (`a0afb2a`); thumbnails share the image crop transform, dim outside with 60% palette background, and show 13px status with a 6px dot (`53f4dab`).
+12. Round Z2: aligned the column to the stage, added animated polygon coverage and corner count, unified warning/error chips, and kept Undo/Clear legible at 32px (`8e10987`).
+13. Round Z2: dialog opens at 88% of the screen (minimum 1100x700), with a 360px column and 32px margins/gap; all 14 zone screenshots recaptured and reviewed at both sizes; 587 box tests pass; no push or real box/camera/Telegram contact.
+
+## Earlier handoff
+
 Built on `box-app-ui`, without pushing or merging. The five protected engine files are unchanged: `setup_customer.ps1`, `setup_network.ps1`, `check_box.ps1`, `build_exe.ps1`, and `inference.py`.
 
 `CLAUDE.md` is absent from this working copy and from its tracked file list. The box README and the current setup script were read before implementation. Existing clip, metadata, outbox and heartbeat formats were left unchanged.

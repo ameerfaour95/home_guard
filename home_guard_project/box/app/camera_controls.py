@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+import math
 import os
 import re
 import subprocess
@@ -28,12 +29,57 @@ def changes_payload(changes):
         rows.append({"name": old, "new_name": new, "enabled": enabled})
     return {"cameras": rows}
 
+def zone_points(points):
+    result = [[round(float(x), 4), round(float(y), 4)] for x, y in points]
+    if len(result) not in (0, *range(3, 33)) or any(not math.isfinite(v) or not 0 <= v <= 1 for point in result for v in point):
+        raise ValueError("Invalid zone points")
+    return result
+
+def zone_operation(name, points=None):
+    if not re.fullmatch(r"[a-z0-9_]+", name):
+        raise ValueError("Invalid camera name")
+    if points is None:
+        return ["clear-zone", "--camera", name]
+    values = zone_points(points)
+    if not values:
+        raise ValueError("A zone needs at least three corners")
+    return ["set-zone", "--camera", name, "--points", ";".join(f"{x:.4f},{y:.4f}" for x, y in values)]
+
 class CameraControls:
     def __init__(self, box, names=(), runner=None):
         self.box = box
         self.runner = runner or subprocess.run
         self.records = [Camera(name.lower().replace(" ", "_"), True, ok=True) for name in names]
         self.out = Path(boxconfig.LOG_DIR) / "app_snapshots"
+        self._zones = {}
+
+    def zones(self):
+        if self.box.demo:
+            return {c.name: [p[:] for p in self._zones.get(c.name, [])] for c in self.records}
+        code, data = self.command("zones")
+        if code or not isinstance(data.get("cameras"), list):
+            raise ValueError("Invalid zone result")
+        return {row["name"]: zone_points(row["points"]) for row in data["cameras"]}
+
+    def set_zone(self, name, points):
+        args = zone_operation(name, points)
+        if self.box.demo:
+            self._zones[name] = zone_points(points)
+            return [p[:] for p in self._zones[name]]
+        return self._write_zone(args)
+
+    def clear_zone(self, name):
+        args = zone_operation(name)
+        if self.box.demo:
+            self._zones.pop(name, None)
+            return []
+        return self._write_zone(args)
+
+    def _write_zone(self, args):
+        code, data = self.command(*args)
+        if code or not isinstance(data.get("points"), list):
+            raise ValueError("Invalid zone result")
+        return zone_points(data["points"])
 
     def command(self, *args):
         env = os.environ.copy()
@@ -107,6 +153,7 @@ class CameraControls:
                 if code != 0 or not isinstance(data.get("active"), list) or not isinstance(data.get("disabled"), list):
                     raise ValueError("Invalid apply result")
         old = {c.name: c for c in self.records}
+        self._zones = {row["new_name"]: self._zones.get(row["name"], []) for row in payload["cameras"]}
         self.records = [replace(old[row["name"]], name=row["new_name"], enabled=row["enabled"]) for row in payload["cameras"]]
         if not self.box.is_stopped():
             self.box.pending_at = requested

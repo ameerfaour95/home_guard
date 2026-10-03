@@ -420,5 +420,27 @@ TEXT.update({"demo_chat_hebrew_answer": "\u05d1\u05d5\u05d5\u05d3\u05d0\u05d9. \
 
 TEXT.update(quiet_paused_description="{text}; alerts paused")
 
+TEXT.update(
+    camera_zone_button="Set the area to watch",
+    camera_zone_whole="Watching: the whole picture",
+    camera_zone_drawn="Watching: the area you drew",
+    camera_zone_eyebrow="Camera · {camera}",
+    camera_zone_title="Draw the area to watch",
+    camera_zone_help="Click the corners of the area the camera should watch. Everything outside it is ignored by the box.",
+    camera_zone_status_empty="Watching the whole picture",
+    camera_zone_status_drawing="Add at least 3 corners",
+    camera_zone_status_closed="Watching {percent} % of the picture",
+    camera_zone_corners="{count} corners",
+    camera_zone_one_corner="1 corner",
+    camera_zone_small="This area is very small; the camera will see almost nothing.",
+    camera_zone_undo="Undo",
+    camera_zone_clear="Clear",
+    camera_zone_save="Save",
+    camera_zone_saving="Saving…",
+    camera_zone_cancel="Cancel",
+    camera_zone_save_failed="The area could not be saved. Try again.",
+    camera_zone_saved="Area saved",
+)
+
 def tr(key, **values):
     return TEXT[key].format(**values)
