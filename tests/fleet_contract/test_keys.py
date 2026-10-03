@@ -65,3 +65,34 @@ def test_stem_kind_with_underscores_and_unknown_kind():
     assert stem_kind("back_door_1791013299_custom") == ("back_door", 1791013299, None)
     assert stem_kind("back_door_bad_alert") == ("back_door_bad_alert", None, "alert")
 
+
+
+def test_parse_key_rejects_traversal_and_bad_layouts():
+    good = "production_test/meta/front_side/2026-10-03/front_side_1791020177_alert.meta.json"
+    assert parse_key(good) is not None
+    for key in [
+        "production_test/meta/front_side/2026-10-03/../front_side_1791020177_alert.meta.json",
+        "production_test/meta/../../dataset_other/meta/a/2026-10-03/a_1_alert.meta.json",
+        "production_test/meta/front_side\\2026-10-03/front_side_1791020177_alert.meta.json",
+        "production_test/meta/front_side//front_side_1791020177_alert.meta.json",
+        "production_test/meta/front_side/2026-10-03/",
+        "production_test/meta/front_side/2026-10-03/extra/front_side_1791020177_alert.meta.json",
+        "production_test/meta/front_side/front_side_1791020177_alert.meta.json",
+        "production_test/clips/front_side/2026-10-03" + "9" * 300 + "/front_side_1791020177_alert.mp4",
+        "production_test/clips/front_side/26-10-03/front_side_1791020177_alert.mp4",
+        "production_test/clips/front side!/2026-10-03/x_1_alert.mp4",
+        "production_test/clips/" + "c" * 81 + "/2026-10-03/x_1_alert.mp4",
+        "production_test/clips/./2026-10-03/x_1_alert.mp4",
+        "production_test/clips/../2026-10-03/x_1_alert.mp4",
+        "dataset_test/yolo/labels/back_door/2026-10-02/extra/x_f0000.txt",
+        "dataset_test/_status/sub/heartbeat.json",
+        "dataset_test/_status/",
+        "dataset_test/unrecognised/../a.tmp",
+        "dataset_test//a.tmp",
+    ]:
+        assert parse_key(key) is None, key
+
+
+def test_parse_key_accepts_the_general_feedback_camera_and_dotted_names():
+    assert parse_key("production_test/feedback/_general/2026-10-03/general_1.feedback.json").camera == "_general"
+    assert parse_key("production_test/clips/cam.v2-a/2026-10-03/cam.v2-a_1_alert.mp4").camera == "cam.v2-a"

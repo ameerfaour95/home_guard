@@ -51,11 +51,24 @@ def normalize_rel(path: str) -> Optional[str]:
     return "/".join(part for part in parts if part not in ("", ".")) or None
 
 
+_CAMERA = re.compile(r"[A-Za-z0-9_.-]{1,80}")
+_DAY = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+_FILENAME = re.compile(r"[^\x00-\x1f\x7f]{1,255}")
+# Exact key depth of each indexed area: <root>_<site>/<area>[/<sub>]/<camera>/<day>/<file>.
+_DEPTH = {"meta": 5, "clips": 5, "feedback": 5, "responses": 5, "vlm_crops": 5,
+          "yolo_images": 6, "yolo_labels": 6, "status": 3}
+
+
 def parse_key(key: str) -> Optional[KeyInfo]:
-    if not isinstance(key, str):
+    """Parse a legacy S3 key; None for keys outside the layout.
+
+    Keys with `..`, backslashes, NULs, empty or `.` segments are rejected anywhere. Keys in an indexed area must
+    also have that area's exact depth, a camera matching `[A-Za-z0-9_.-]{1,80}` and a `YYYY-MM-DD` day.
+    """
+    if not isinstance(key, str) or ".." in key or "\\" in key or "\x00" in key:
         return None
     parts = key.split("/")
-    if len(parts) < 2:
+    if len(parts) < 2 or any(part in ("", ".") for part in parts):
         return None
     prefix = re.fullmatch(r"(dataset|production)_(.+)", parts[0])
     if prefix is None:
@@ -68,13 +81,16 @@ def parse_key(key: str) -> Optional[KeyInfo]:
     if parts[1] == "yolo" and len(parts) > 2 and parts[2] in ("images", "labels"):
         area = "yolo_" + parts[2]
         camera_index = 3
+    if area != "other" and len(parts) != _DEPTH[area]:
+        return None
     camera = day = None
-    if area not in ("status", "other"):
-        if len(parts) > camera_index + 1:
-            camera = parts[camera_index] or None
-        if len(parts) > camera_index + 2:
-            day = parts[camera_index + 1] or None
+    if area != "status" and area != "other":
+        camera, day = parts[camera_index], parts[camera_index + 1]
+        if not _CAMERA.fullmatch(camera) or not _DAY.fullmatch(day):
+            return None
     filename = parts[-1]
+    if not _FILENAME.fullmatch(filename):
+        return None
     ext = PurePosixPath(filename).suffix
     stem = None
     if filename:
