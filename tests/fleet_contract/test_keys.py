@@ -96,3 +96,33 @@ def test_parse_key_rejects_traversal_and_bad_layouts():
 def test_parse_key_accepts_the_general_feedback_camera_and_dotted_names():
     assert parse_key("production_test/feedback/_general/2026-10-03/general_1.feedback.json").camera == "_general"
     assert parse_key("production_test/clips/cam.v2-a/2026-10-03/cam.v2-a_1_alert.mp4").camera == "cam.v2-a"
+
+
+def test_parse_key_rejects_impossible_calendar_dates():
+    for day in ["2026-99-99", "2026-02-30", "2026-13-01", "2026-00-10", "2025-02-29"]:
+        assert parse_key(f"production_test/meta/front_side/{day}/front_side_1791020177_alert.meta.json") is None, day
+        assert parse_key(f"dataset_test/yolo/labels/front_side/{day}/front_side_1791020177_alert_f0000.txt") is None
+    assert parse_key("production_test/meta/front_side/2028-02-29/front_side_1791020177_alert.meta.json") is not None
+
+
+def test_parse_key_requires_the_folder_cameras_stem_with_an_epoch():
+    for key in [
+        "production_test/meta/front_side/2026-10-03/back_door_1791020177_alert.meta.json",  # other camera
+        "production_test/clips/front_side/2026-10-03/front_side_alert.mp4",  # no epoch
+        "production_test/clips/front_side/2026-10-03/front_sidex_1791020177_alert.mp4",
+        "dataset_test/responses/front_side/2026-10-03/notes.model_raw.txt",
+        "dataset_test/vlm_crops/front_side/2026-10-03/back_door_1791020177_alert_f0.jpg",
+        "dataset_test/yolo/images/front_side/2026-10-03/x_f0000.jpg",
+        "production_test/feedback/front_side/2026-10-03/back_door_1791020177_alert_1791020300000.feedback.json",
+        "production_test/feedback/front_side/2026-10-03/front_side_1791020300000.feedback.json",
+    ]:
+        assert parse_key(key) is None, key
+    for key in [
+        "production_test/feedback/_general/2026-10-03/general_1791013449968.feedback.json",
+        "production_test/feedback/_general/2026-10-03/anything.feedback.json",
+        "production_test/feedback/front_side/2026-10-03/general_1791013449968.feedback.json",  # camera, no alert id
+        "production_test/feedback/test_ch6/2026-10-03/test_ch6_1790979739_alert_1790979837338.feedback.json",
+        "dataset_test/clips/left_side_1/2026-10-03/left_side_1_1791019693_alert.mp4",
+        "dataset_test/meta/back_door/2026-10-03/back_door_1791013299_custom.meta.json",
+    ]:
+        assert parse_key(key) is not None, key

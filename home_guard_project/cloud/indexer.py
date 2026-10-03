@@ -182,7 +182,8 @@ class _Run:
         self.site = device.site
         self.prefixes = [_prefix(root, self.site) for root in ROOTS]
         self.stats = IndexStats()
-        self.arts: dict[str, Artifact] = {}
+        self.arts: dict[str, Artifact] = {}  # only keys parse_key accepts
+        self.legacy: set[str] = set()  # persisted artifact keys parse_key now rejects (quarantined)
         self.problems: dict[str, IndexProblem] = {}
         self.cursors: dict[str, S3Cursor] = {}
         self.feedback: Optional[dict[str, Feedback]] = None
@@ -203,6 +204,19 @@ class _Run:
             or_(*(_like_prefix(IndexProblem.s3_key, p) for p in self.prefixes))))}
         self.cursors = {c.prefix: c for c in session.scalars(
             select(S3Cursor).where(S3Cursor.prefix.in_(self.prefixes)))}
+        self.quarantine_legacy()
+
+    def quarantine_legacy(self) -> None:
+        """Artifacts an earlier indexer created for keys parse_key now rejects (traversal, impossible day, a
+        stem of another camera): made unavailable, detached from their event (which is rebuilt) and recorded
+        as a problem, so no later step ever parses them."""
+        for key in [k for k in self.arts if parse_key(k) is None]:
+            art = self.arts.pop(key)
+            self.legacy.add(key)
+            if art.event_id is not None:
+                self.dirty_ids.add(art.event_id)
+            art.available, art.event_id = False, None
+            self.problem(key, "invalid key layout (legacy)", art.etag)
 
     def load_feedback(self) -> dict[str, Feedback]:
         if self.feedback is None:
@@ -267,6 +281,8 @@ class _Run:
         for obj in self.s3.list(prefix):
             info = parse_key(obj.key)
             if info is None:
+                if obj.key in self.legacy:
+                    continue  # already quarantined with its own problem
                 if obj.key.startswith(prefix) and _in_indexed_dir(obj.key):
                     self.problem(obj.key, "invalid key layout", obj.etag)
                 continue
@@ -300,7 +316,9 @@ class _Run:
                 if art.event_id is not None:
                     self.dirty_ids.add(art.event_id)
             is_json = role in ("meta", "feedback") or (role == "status" and obj.key.endswith(HEARTBEAT_SUFFIX))
-            if is_json and art.applied_etag != obj.etag:
+            stale = self.problems.get(obj.key)
+            # A -> unusable B -> A again: A is still applied, but B's problem must go, so A is replayed (cached)
+            if is_json and (art.applied_etag != obj.etag or (stale is not None and stale.etag != obj.etag)):
                 self.work.append((art, info, role, obj.etag))
         self.disappearance_check(prefix, seen)
 
@@ -459,6 +477,9 @@ class _Run:
                 history[key].append((rid, etag, body))
         feedback_by_stem: dict[str, list[Feedback]] = defaultdict(list)
         for fb in self.load_feedback().values():
+            if fb.s3_key in self.legacy:  # quarantined key: its verdict no longer counts
+                fb.event_id = None
+                continue
             if fb.alert_stem:
                 feedback_by_stem[fb.alert_stem].append(fb)
         runs: dict[int, AiRun] = {}
@@ -473,6 +494,8 @@ class _Run:
             metas = sorted((a for a in arts if a.role == "meta"), key=lambda a: ROOTS.index(parse_key(a.s3_key).root))
             current: dict[str, _Copy] = {}
             for art in metas:
+                if art.applied_etag is None:  # e.g. every artifact right after migration 0003
+                    self.recover_applied(art, history.get(art.s3_key, ()))
                 revs = {etag: body for _, etag, body in history.get(art.s3_key, ())}
                 if art.applied_etag not in revs:
                     continue
@@ -525,6 +548,15 @@ class _Run:
                 "expired": _expired(ev, prod_clip, self.now),
                 "copies": sorted(COPY_NAME[parse_key(a.s3_key).root] for a in metas),
             }
+
+    def recover_applied(self, art: Artifact, revisions) -> None:
+        """A meta with no applied revision (migration 0003 left every existing artifact NULL) takes its last
+        usable stored revision, listed or not, available or not -- so a production copy that has since
+        disappeared keeps supplying dispatch, muted and expires_at."""
+        for _, etag, body in reversed(list(revisions)):
+            if not _is_invalid(body) and self.parse(art.s3_key, etag, body)[1] is not None:
+                art.applied_etag = etag
+                return
 
     def best_ai(self, current: dict[str, _Copy], metas: list[Artifact],
                 history: dict[str, list[tuple[int, str, Any]]]) -> Optional[_Copy]:

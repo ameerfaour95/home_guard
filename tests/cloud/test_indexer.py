@@ -816,3 +816,100 @@ def test_feedback_artifact_follows_feedback_event(session, s3client, s3, device)
     session.expire_all()
     fb = session.scalars(select(m.Feedback).where(m.Feedback.s3_key == b.FEEDBACK)).one()
     assert fb.event_id is None and _artifact(session, b.FEEDBACK).event_id is None
+
+
+# ================================================================ fix round 2 (Codex re-review of Task 8)
+
+# ---- 8: a key with an impossible calendar day never reaches the event it collides with
+
+@pytest.mark.parametrize("day", ["2026-99-99", "2026-02-30"])
+def test_invalid_calendar_day_colliding_with_a_real_event_is_a_problem(session, s3client, s3, device, day):
+    b.seed_bucket(s3client)
+    _index(session, s3, device)
+    key = f"production_test/meta/front_side/{day}/{b.STEM}.meta.json"  # same camera + stem as the real event
+    evil = b.fixture_json("prod_alert.meta.json")
+    evil["alert"]["summary"] = "Injected summary"
+    b.put(s3client, key, evil)
+    _index(session, s3, device)
+    session.expire_all()
+    assert session.get(m.IndexProblem, key).reason == "invalid key layout"
+    assert session.scalars(select(m.Artifact).where(m.Artifact.s3_key == key)).all() == []
+    ev = _event(session, device)
+    assert ev.day == "2026-10-03" and ev.summary.startswith("A person appears")
+
+
+# ---- 9: A -> invalid B -> A, where A is still the applied revision, replays cached A and clears B's problem
+
+@pytest.mark.parametrize("key", [b.TRAIN_META, b.FEEDBACK, b.HEARTBEAT])
+def test_return_to_the_applied_revision_after_an_invalid_one_clears_the_problem(session, s3client, s3, device,
+                                                                                 monkeypatch, key):
+    objects = b.seed_bucket(s3client)
+    _index(session, s3, device)
+    applied = _artifact(session, key).applied_etag
+    b.put(s3client, key, "{not json")
+    _index(session, s3, device)
+    session.expire_all()
+    assert session.get(m.IndexProblem, key).reason == "invalid json"
+    assert _artifact(session, key).applied_etag == applied  # B never applied
+    b.put(s3client, key, objects[key])  # back to A
+    gets = _get_counter(monkeypatch, s3client)
+    _index(session, s3, device)
+    session.expire_all()
+    assert session.get(m.IndexProblem, key) is None
+    art = _artifact(session, key)
+    assert art.etag == art.applied_etag == applied
+    assert gets == []
+    assert _event(session, device).summary.startswith("A person appears")
+
+
+# ---- N1: persisted artifacts whose keys parse_key now rejects are quarantined, never a crashed rebuild
+
+LEGACY = {"production_test/meta/front_side/2026-10-03/../front_side_1791020177_alert.meta.json": "meta",
+          "production_test/clips/front_side/2026-02-30/front_side_1791020177_alert.mp4": "original_video"}
+
+
+def test_legacy_artifacts_with_now_invalid_keys_are_quarantined(session, s3client, s3, device):
+    b.seed_bucket(s3client)
+    _index(session, s3, device)
+    ev = _event(session, device)
+    for key, role in LEGACY.items():  # rows a pre-validation indexer created
+        session.add(m.Artifact(role=role, s3_key=key, etag="legacy", bytes=10, available=True, provenance="box",
+                               detail={"copy": "production"}, camera="front_side", stem=b.STEM, event_id=ev.id,
+                               applied_etag="legacy" if role == "meta" else None, etag_mismatches=0))
+    session.commit()
+    b.put(s3client, next(iter(LEGACY)), b.fixture_json("prod_alert.meta.json"))  # one is still listed
+    _index(session, s3, device, full_scan=True)
+    session.expire_all()
+    for key in LEGACY:
+        art = _artifact(session, key)
+        assert art.available is False and art.event_id is None
+        assert session.get(m.IndexProblem, key).reason == "invalid key layout (legacy)"
+    ev = _event(session, device)
+    assert ev.summary.startswith("A person appears") and ev.completeness["copies"] == ["production", "training"]
+    again = _index(session, s3, device, full_scan=True)
+    assert again.problems == 0
+
+
+# ---- N2: after migration 0003 (applied_etag NULL), a vanished production meta is recovered from its revision
+
+def test_upgrade_replays_the_stored_production_meta_after_it_disappeared(session, s3client, s3, device):
+    from sqlalchemy import update
+
+    b.seed_bucket(s3client, exclude={b.PROD_META})
+    prod = b.fixture_json("prod_alert.meta.json")
+    prod["alert"]["muted"] = True
+    prod_etag = _put_etag(s3client, b.PROD_META, prod)
+    _index(session, s3, device, now=BASE + timedelta(days=1))
+    ev = _event(session, device)
+    before = (ev.dispatch, ev.muted, ev.expires_at)
+    assert ev.dispatch["channel"] == "telegram" and ev.muted is True and ev.expires_at is not None
+    session.execute(update(m.Artifact).values(applied_etag=None))  # the state migration 0003 leaves behind
+    session.commit()
+    s3client.delete_object(Bucket=b.BUCKET, Key=b.PROD_META)
+    _index(session, s3, device, full_scan=True, now=BASE + timedelta(days=2))
+    session.expire_all()
+    ev = _event(session, device)
+    assert (ev.dispatch, ev.muted, ev.expires_at) == before
+    assert ev.completeness["copies"] == ["production", "training"]
+    art = _artifact(session, b.PROD_META)
+    assert art.available is False and art.applied_etag == prod_etag

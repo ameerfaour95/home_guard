@@ -1,6 +1,7 @@
 """Parse legacy S3 keys and site-relative artifact paths without filesystem I/O."""
 
 from dataclasses import dataclass
+import datetime
 import ntpath
 from pathlib import PurePosixPath
 import re
@@ -57,13 +58,43 @@ _FILENAME = re.compile(r"[^\x00-\x1f\x7f]{1,255}")
 # Exact key depth of each indexed area: <root>_<site>/<area>[/<sub>]/<camera>/<day>/<file>.
 _DEPTH = {"meta": 5, "clips": 5, "feedback": 5, "responses": 5, "vlm_crops": 5,
           "yolo_images": 6, "yolo_labels": 6, "status": 3}
+_CLIP_AREAS = {"meta", "clips", "responses", "vlm_crops", "yolo_images", "yolo_labels"}
+
+
+def _real_day(day: str) -> bool:
+    """`YYYY-MM-DD` that is a real calendar date (not 2026-99-99 or 2026-02-30)."""
+    if not _DAY.fullmatch(day):
+        return False
+    try:
+        datetime.date.fromisoformat(day)
+    except ValueError:
+        return False
+    return True
+
+
+def _clip_stem(camera: str, stem: str) -> bool:
+    """`<camera>_<epoch>_<kind>`: the stem belongs to its folder's camera and carries a trigger time."""
+    return stem.startswith(camera + "_") and stem_kind(stem)[1] is not None
+
+
+def _stem_fits(area: str, camera: str, stem: str) -> bool:
+    if area in _CLIP_AREAS:
+        return _clip_stem(camera, stem)
+    if area == "feedback":  # `<alert stem>_<ms>`; general feedback (`_general/` or `general_<ms>`) is exempt
+        if camera == "_general" or re.fullmatch(r"general_[0-9]+", stem):
+            return True
+        alert = re.fullmatch(r"(.+)_[0-9]+", stem)
+        return alert is not None and _clip_stem(camera, alert.group(1))
+    return True
 
 
 def parse_key(key: str) -> Optional[KeyInfo]:
     """Parse a legacy S3 key; None for keys outside the layout.
 
     Keys with `..`, backslashes, NULs, empty or `.` segments are rejected anywhere. Keys in an indexed area must
-    also have that area's exact depth, a camera matching `[A-Za-z0-9_.-]{1,80}` and a `YYYY-MM-DD` day.
+    also have that area's exact depth, a camera matching `[A-Za-z0-9_.-]{1,80}`, a `YYYY-MM-DD` day that is a
+    real calendar date, and a stem of that camera: `<camera>_<epoch>_<kind>` (feedback: `<that stem>_<ms>`,
+    except general feedback).
     """
     if not isinstance(key, str) or ".." in key or "\\" in key or "\x00" in key:
         return None
@@ -86,7 +117,7 @@ def parse_key(key: str) -> Optional[KeyInfo]:
     camera = day = None
     if area != "status" and area != "other":
         camera, day = parts[camera_index], parts[camera_index + 1]
-        if not _CAMERA.fullmatch(camera) or not _DAY.fullmatch(day):
+        if not _CAMERA.fullmatch(camera) or not _real_day(day):
             return None
     filename = parts[-1]
     if not _FILENAME.fullmatch(filename):
@@ -103,5 +134,7 @@ def parse_key(key: str) -> Optional[KeyInfo]:
             stem = filename[:-len(ext)] if ext else filename
             if ext in (".jpg", ".txt"):
                 stem = re.sub(r"_f[0-9]+$", "", stem)
+    if camera is not None and not _stem_fits(area, camera, stem):
+        return None
     kind = stem_kind(stem)[2] if stem else None
     return KeyInfo(key, root, site, area, camera, day, stem, kind, ext)
