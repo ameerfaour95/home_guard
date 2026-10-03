@@ -69,6 +69,9 @@ class DeviceSummary(BaseModel):
     events_24h: int
     alerts_24h: int
     false_alarms_7d: int
+    needs_details: bool = False
+    enrolled_by: Literal["admin", "setup", "discovered"] = "admin"
+    app_version: Optional[str] = None
 
 
 class FleetResponse(BaseModel):

@@ -71,6 +71,8 @@ def update_customer(customer_id: int, body: CustomerIn, request: Request,
         if getattr(c, f) != new:
             changed.append(f)
             setattr(c, f, new)
+    if "name" in changed:
+        c.name_source = "admin"  # a person named it: discovery never renames it again
     session.flush()
     if "name" in changed:
         # the old name stays an identity term of every device of this customer (labeler redaction), and the

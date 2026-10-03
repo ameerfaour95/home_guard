@@ -18,8 +18,11 @@ NOTICE_WINDOW = timedelta(minutes=30)
 
 def record(session: Session, staff_id: Optional[int], action: str, target: str = "", reason: str = "",
            customer_id: Optional[int] = None, device_id: Optional[str] = None,
-           detail: Optional[dict[str, Any]] = None, ts: Optional[datetime] = None) -> AuditLog:
-    staff_name = session.scalar(select(Staff.name).where(Staff.id == staff_id)) if staff_id is not None else None
+           detail: Optional[dict[str, Any]] = None, ts: Optional[datetime] = None,
+           staff_name: Optional[str] = None) -> AuditLog:
+    """`staff_name` names a non-staff actor (the box's setup program) when `staff_id` is None."""
+    if staff_id is not None:
+        staff_name = session.scalar(select(Staff.name).where(Staff.id == staff_id))
     row = AuditLog(ts=ts or datetime.now(timezone.utc), staff_id=staff_id, staff_name=staff_name, action=action, target=target,
                    reason=reason, customer_id=customer_id, device_id=device_id, detail=detail)
     session.add(row)

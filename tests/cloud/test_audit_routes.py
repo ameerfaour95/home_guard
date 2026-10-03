@@ -196,7 +196,7 @@ def test_build_loops_wiring(db_engine, monkeypatch):
     sm = loops.sessionmaker(db_engine)
     built = loops.build_loops(sm, object(), engine=db_engine)
     names = [lp.name for lp in built.loops]
-    assert names[:3] == ["indexer", "media", "notices"]
+    assert names[:3] == ["indexer", "media", "notices"] and "discovery" in names
     assert all(lp.engine is db_engine for lp in built.loops)
     assert (("exports" in names) == hasattr(studio, "sweep_stale_exports"))
     old = loops.build_loops(sm, object())  # backward compatible: engine comes from the sessionmaker

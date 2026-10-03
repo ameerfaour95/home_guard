@@ -51,6 +51,10 @@ class Customer(Base):
     consent_recordings: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
     consent_training: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
     notes: Mapped[str] = mapped_column(Text, default="", server_default="")
+    # "admin" (a person named it) | "setup" (the box's registration) | "discovered" (guessed from the site)
+    name_source: Mapped[str] = mapped_column(String(16), default="admin", server_default="admin")
+    owner_phone: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)  # admin/support only, never exposed
+    consent_recorded_utc: Mapped[Optional[datetime]] = mapped_column(TS, nullable=True)  # newest owner answer applied
 
 
 class Device(Base):
@@ -64,6 +68,8 @@ class Device(Base):
     enrolled_at: Mapped[Optional[datetime]] = mapped_column(TS, nullable=True)
     last_heartbeat: Mapped[Optional[Any]] = mapped_column(JSONType, nullable=True)
     last_heartbeat_at: Mapped[Optional[datetime]] = mapped_column(TS, nullable=True)
+    enrolled_by: Mapped[str] = mapped_column(String(16), default="admin", server_default="admin")
+    app_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 
 
 class Camera(Base):

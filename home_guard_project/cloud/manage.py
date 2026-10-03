@@ -147,6 +147,27 @@ def cmd_index_once(args) -> int:
     return 0
 
 
+def cmd_discover_once(args) -> int:
+    """One discovery pass (boxes that registered themselves), under the same lock as the server's loop."""
+    from . import discovery
+    from .db import session_scope
+    from .loops import loop_lock
+
+    engine = _engine()
+    with loop_lock(engine, "discovery") as got:
+        if not got:
+            print("the server is already discovering boxes; try again in a few minutes")
+            return 0
+        s3 = _s3()
+        with session_scope(engine) as s:
+            results = discovery.discover(s, s3)
+    for site, what in results.items():
+        print(f"{site}: {what}")
+    if not results:
+        print("nothing new")
+    return 0
+
+
 def cmd_media_once(args) -> int:
     """One media pass, under the same lock as the server's media loop."""
     from . import media
@@ -244,6 +265,8 @@ def build_parser() -> argparse.ArgumentParser:
     i = sub.add_parser("index-once")
     i.add_argument("--full", action="store_true", help="full scan instead of incremental")
     i.set_defaults(fn=cmd_index_once)
+    sub.add_parser("discover-once", help="enrol boxes that registered themselves in S3").set_defaults(
+        fn=cmd_discover_once)
     mo = sub.add_parser("media-once")
     mo.add_argument("--limit", type=int, default=50)
     mo.set_defaults(fn=cmd_media_once)

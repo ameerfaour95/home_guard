@@ -638,6 +638,17 @@
             "title": "Alerts 24H",
             "type": "integer"
           },
+          "app_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "App Version"
+          },
           "cameras_stale": {
             "title": "Cameras Stale",
             "type": "integer"
@@ -680,6 +691,16 @@
             ],
             "title": "Disk Free Gb"
           },
+          "enrolled_by": {
+            "default": "admin",
+            "enum": [
+              "admin",
+              "setup",
+              "discovered"
+            ],
+            "title": "Enrolled By",
+            "type": "string"
+          },
           "events_24h": {
             "title": "Events 24H",
             "type": "integer"
@@ -721,6 +742,11 @@
               }
             ],
             "title": "Mode"
+          },
+          "needs_details": {
+            "default": false,
+            "title": "Needs Details",
+            "type": "boolean"
           },
           "newest_clip_utc": {
             "anyOf": [

@@ -25,7 +25,10 @@
       "newest_clip_utc": "2026-10-03T11:09:48Z",
       "events_24h": 32,
       "alerts_24h": 13,
-      "false_alarms_7d": 2
+      "false_alarms_7d": 2,
+      "needs_details": false,
+      "enrolled_by": "admin",
+      "app_version": null
     }
   ]
 }

@@ -45,3 +45,13 @@ def test_contract_amendment_2_additions():
     assert "/v1/studio/exports/preview" in doc["paths"]
     names = [p["name"] for p in doc["paths"]["/v1/events"]["get"]["parameters"]]
     assert "with_total" in names and "collection_id" in names
+
+
+def test_contract_amendment_2d_device_summary_fields():
+    app = create_app(Settings.for_tests(db_url="sqlite://"), s3=None, init_db=False)
+    schemas = app.openapi()["components"]["schemas"]
+    props = schemas["DeviceSummary"]["properties"]
+    assert props["needs_details"]["default"] is False
+    assert props["enrolled_by"]["enum"] == ["admin", "setup", "discovered"] and props["enrolled_by"]["default"] == "admin"
+    assert "app_version" not in schemas["DeviceSummary"]["required"] and "needs_details" not in schemas["DeviceSummary"]["required"]
+    assert "owner_phone" not in schemas["CustomerOut"]["properties"]

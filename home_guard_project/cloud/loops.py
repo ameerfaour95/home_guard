@@ -22,7 +22,9 @@ log = logging.getLogger(__name__)
 LOCK_BASE = 0x48470000  # "HG" namespace for advisory-lock keys
 INDEXER_LOCK, MEDIA_LOCK, NOTICES_LOCK = LOCK_BASE + 1, LOCK_BASE + 2, LOCK_BASE + 3
 EXPORTS_LOCK = LOCK_BASE + 4
-LOCKS = {"indexer": INDEXER_LOCK, "media": MEDIA_LOCK, "notices": NOTICES_LOCK, "exports": EXPORTS_LOCK}
+DISCOVERY_LOCK = LOCK_BASE + 5
+LOCKS = {"indexer": INDEXER_LOCK, "media": MEDIA_LOCK, "notices": NOTICES_LOCK, "exports": EXPORTS_LOCK,
+         "discovery": DISCOVERY_LOCK}
 
 
 @contextmanager
@@ -143,6 +145,12 @@ def _exports_job(session, s3):
     studio.sweep_stale_exports(session, datetime.now(timezone.utc))
 
 
+def _discovery_job(session, s3):
+    from . import discovery
+
+    discovery.discover(session, s3)
+
+
 def build_loops(sm, s3, engine=None) -> Loops:
     """The background loops; `engine` (the app's) defaults to the sessionmaker's bind."""
     from . import studio
@@ -152,6 +160,7 @@ def build_loops(sm, s3, engine=None) -> Loops:
         Loop("indexer", 120, _index_job, sm, s3, INDEXER_LOCK, engine=engine),
         Loop("media", 60, _media_job, sm, s3, MEDIA_LOCK, engine=engine),
         Loop("notices", 300, _notices_job, sm, s3, NOTICES_LOCK, engine=engine),
+        Loop("discovery", 300, _discovery_job, sm, s3, DISCOVERY_LOCK, engine=engine),
     ]
     if hasattr(studio, "sweep_stale_exports"):
         built.append(Loop("exports", 60, _exports_job, sm, s3, EXPORTS_LOCK, engine=engine))
