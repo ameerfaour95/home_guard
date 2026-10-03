@@ -163,7 +163,37 @@ def _known_streams(path: str) -> Tuple[Dict[str, str], Set[str]]:
     return known, off
 
 
-def write_found(found: Found, prefix: str, path: Optional[str] = None) -> Dict[str, Any]:
+def _aliases_beside(cameras_path: str) -> str:
+    """The camera alias file that belongs with *cameras_path* (on the box: brain.aliases.ALIASES_PATH)."""
+    return os.path.join(os.path.dirname(os.path.abspath(cameras_path)), "camera_aliases.yaml")
+
+
+def alias_old_names(renames: Dict[str, str], cameras: Sequence[str], aliases_path: str) -> None:
+    """Keep each renamed camera's old name as an alias of its new name ({old: new}).
+
+    The assistant can then map an old name - still on every alert saved before
+    the rename - to the camera it now is. An old name that is another camera's
+    name now (a swap) is refused by add_alias and only logged: a name file must
+    never block a camera change.
+    """
+    if not renames:
+        return
+    try:
+        from .brain.aliases import add_alias  # noqa: PLC0415
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Old camera names not kept as aliases: %s", exc)
+        return
+    for old, new in renames.items():
+        try:
+            add_alias(new, old, list(cameras), aliases_path)
+        except ValueError as exc:
+            log.warning("Old name %s not kept as an alias of %s: %s", old, new, exc)
+        except Exception as exc:  # noqa: BLE001 - an unwritable alias file must not block the change
+            log.warning("Old name %s not kept as an alias of %s: %s", old, new, exc)
+
+
+def write_found(found: Found, prefix: str, path: Optional[str] = None,
+                aliases_path: Optional[str] = None) -> Dict[str, Any]:
     """Save a search's streams to cameras.yaml, keeping the name and on/off state of every stream it knows.
 
     A stream is known by :func:`stream_key` (its address without the login), so
@@ -173,12 +203,26 @@ def write_found(found: Found, prefix: str, path: Optional[str] = None) -> Dict[s
     """
     path = path or CAMERAS_PATH
     known, off = _known_streams(path)
+    old_names: Dict[str, List[str]] = {}   # stream key -> every name the file gave it
+    try:
+        raw = _read_cameras_raw(path)
+        for section in ("cameras", "disabled"):
+            for name, url in dict(raw.get(section) or {}).items():
+                old_names.setdefault(stream_key(str(url)), []).append(str(name))
+    except (OSError, ValueError, TypeError, yaml.YAMLError):
+        pass  # _known_streams already logged it
     active: Dict[str, str] = {}
     disabled: Dict[str, str] = {}
+    renames: Dict[str, str] = {}
     for name, _, stream in _named(found, prefix, known):
-        (disabled if stream_key(stream["url"]) in off else active)[name] = stream["url"]
+        key = stream_key(stream["url"])
+        (disabled if key in off else active)[name] = stream["url"]
+        renames.update({old: name for old in old_names.get(key, []) if old != name})
     _write_cameras(active, disabled, path)
     log.info("Wrote %d cameras (%d off) to %s", len(active) + len(disabled), len(disabled), path)
+    final = [*active, *disabled]
+    alias_old_names({old: new for old, new in renames.items() if old not in final}, final,
+                    aliases_path or _aliases_beside(path))
     return {"active": sorted(active), "disabled": sorted(disabled)}
 
 
@@ -248,11 +292,12 @@ def apply_changes(changes: Dict[str, Any], path: str = CAMERAS_PATH, zones_path:
         _write_cameras(new_active, new_disabled, path)
     if renames:
         try:
-            from .brain.aliases import ALIASES_PATH, remap_aliases  # noqa: PLC0415
+            from .brain.aliases import remap_aliases  # noqa: PLC0415
 
-            remap_aliases(renames, aliases_path or ALIASES_PATH)
+            remap_aliases(renames, aliases_path or _aliases_beside(path))
         except Exception as exc:  # noqa: BLE001 - a name file must never block a camera change
             log.warning("Camera aliases not carried over the rename: %s", exc)
+        alias_old_names(renames, [*new_active, *new_disabled], aliases_path or _aliases_beside(path))
     if restart:
         _restart_running_mode()
     return {"active": sorted(new_active), "disabled": sorted(new_disabled)}

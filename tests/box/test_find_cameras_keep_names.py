@@ -88,5 +88,65 @@ class KeepKnownNamesTest(unittest.TestCase):
         self.assertEqual(self._saved()["cameras"]["main_entrance"], NEW_1)
 
 
+class OldNameBecomesAliasTest(unittest.TestCase):
+    """A camera that IS renamed keeps its old name as an alias, so the assistant maps old -> new."""
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = tmp.name
+        self.cameras = os.path.join(tmp.name, "cameras.yaml")
+        self.aliases = os.path.join(tmp.name, "camera_aliases.yaml")
+
+    def _cameras_file(self, data: dict) -> None:
+        with open(self.cameras, "w", encoding="utf-8") as f:
+            yaml.safe_dump(data, f)
+
+    def _rename(self, *pairs: tuple) -> dict:
+        return find_cameras.apply_changes(
+            {"cameras": [{"name": old, "new_name": new, "enabled": True} for old, new in pairs]},
+            self.cameras, zones_path=os.path.join(self.dir, "zones.yaml"), restart=False,
+            alerts_path=os.path.join(self.dir, "camera_alerts.yaml"), aliases_path=self.aliases)
+
+    def test_a_rename_keeps_the_old_name_as_an_alias_of_the_new_camera(self) -> None:
+        from home_guard_project.box.brain.aliases import add_alias, load_aliases
+
+        self._cameras_file({"cameras": {"main_entrance": OLD_1, "front_side": OLD_3}})
+        add_alias("main_entrance", "the door", ["main_entrance", "front_side"], self.aliases)
+        self._rename(("main_entrance", "ameer_test_ch2"))
+        self.assertEqual(load_aliases(self.aliases), {"ameer_test_ch2": ["the door", "main_entrance"]})
+
+    def test_a_swap_never_makes_one_cameras_name_an_alias_of_another(self) -> None:
+        from home_guard_project.box.brain.aliases import load_aliases
+
+        self._cameras_file({"cameras": {"main_entrance": OLD_1, "front_side": OLD_3}})
+        with self.assertLogs("box.cameras", level="WARNING"):
+            result = self._rename(("main_entrance", "front_side"), ("front_side", "main_entrance"))
+        self.assertEqual(result["active"], ["front_side", "main_entrance"])        # the swap itself went through
+        self.assertEqual(load_aliases(self.aliases), {})
+
+    def test_a_search_that_drops_a_duplicate_name_keeps_it_as_an_alias(self) -> None:
+        from home_guard_project.box.brain.aliases import load_aliases
+
+        # The same stream listed twice (on, and once more as an old disabled entry): one name survives.
+        self._cameras_file({"cameras": {"main_entrance": OLD_1}, "disabled": {"entrance_old": NEW_1}})
+        write_found({"192.168.1.50": [stream(1, NEW_1)]}, "ameer_test", self.cameras, aliases_path=self.aliases)
+        self.assertEqual(load_aliases(self.aliases), {"main_entrance": ["entrance_old"]})
+
+    def test_without_an_alias_path_the_file_beside_the_cameras_file_is_used(self) -> None:
+        from home_guard_project.box.brain.aliases import load_aliases
+
+        self._cameras_file({"cameras": {"main_entrance": OLD_1}})
+        find_cameras.apply_changes({"cameras": [{"name": "main_entrance", "new_name": "ameer_test_ch2"}]},
+                                   self.cameras, zones_path=os.path.join(self.dir, "zones.yaml"), restart=False,
+                                   alerts_path=os.path.join(self.dir, "camera_alerts.yaml"))
+        self.assertEqual(load_aliases(self.aliases), {"ameer_test_ch2": ["main_entrance"]})
+
+    def test_a_search_that_keeps_every_name_adds_no_alias(self) -> None:
+        self._cameras_file({"cameras": {"main_entrance": OLD_1}})
+        write_found(FOUND, "ameer_test", self.cameras, aliases_path=self.aliases)
+        self.assertFalse(os.path.exists(self.aliases))
+
+
 if __name__ == "__main__":
     unittest.main()
