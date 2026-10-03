@@ -24,6 +24,9 @@ class SettingsTest(unittest.TestCase):
                       "inference_conf": 0.4, "owner_language": "en"}
 
     def set_option(self, key, value):
+        if key == "quiet_log":
+            self.store[key] = str(value).lower() in ("true", "yes", "on", "1")
+            return
         if key == "inference_conf" and not 0.05 <= float(value) <= 0.95:
             raise ValueError("inference_conf must be a number from 0.05 to 0.95")
         text = str(value)
@@ -44,7 +47,15 @@ class SettingsTest(unittest.TestCase):
     def test_settings_line(self) -> None:
         self.assertEqual(settings_line(self.store),
                          "SETTINGS: alert hours 22:00–06:00 · time between alerts per camera 2 min · "
-                         "detector sensitivity medium (0.40) · box language English (alerts and announcements)")
+                         "detector sensitivity medium (0.40) · box language English (alerts and announcements)"
+                         " · quiet log outside the hours off")
+
+    def test_quiet_log_receipt(self) -> None:
+        ctx = self.ctx("turn on quiet logging")
+        out = change_setting(ctx, {"setting": "quiet_log", "value": "on", "owner_words": "turn on quiet logging"})
+        self.assertEqual(out["status"], DONE)
+        self.assertIs(self.store["quiet_log"], True)
+        self.assertEqual(receipt_line(ctx.receipts[0], "en"), "✓ Quiet log outside the alert hours: off → on")
 
     def test_alert_hours_need_the_owners_words(self) -> None:
         ctx = self.ctx("from now on watch from 23 to 7")

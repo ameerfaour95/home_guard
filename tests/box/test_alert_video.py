@@ -200,7 +200,7 @@ class WorkerReportsTest(unittest.TestCase):
                         {"channel": "telegram", "telegram": {"telegram": {"sent": True}}})
         self.assertEqual((got["summary"], got["command"], got["sent"], got["error"], got["labels"]),
                          ("A person is walking in the driveway.", "[send_message]", True, "", ["person"]))
-        self.assertEqual(got["label"], "normal")                      # no label given: normal
+        self.assertEqual(got["label"], "")                            # no label given: do not guess normal
 
     def test_the_models_label_decides_how_loud_the_alert_is(self) -> None:
         with mock.patch.object(inf, "frame_to_jpeg_bytes", return_value=b"jpg"):

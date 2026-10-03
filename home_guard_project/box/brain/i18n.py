@@ -69,6 +69,7 @@ TEMPLATES: Dict[str, Dict[str, str]] = {
     "setting_cooldown_minutes": {"en": "Time between alerts", "he": "זמן בין התראות", "ar": "الوقت بين التنبيهات"},
     "setting_sensitivity": {"en": "Detector sensitivity", "he": "רגישות הזיהוי", "ar": "حساسية الكشف"},
     "setting_language": {"en": "Box language", "he": "שפת המערכת", "ar": "لغة النظام"},
+    "setting_quiet_log": {"en": "Quiet log outside the alert hours", "he": "תיעוד שקט מחוץ לשעות ההתראה", "ar": "سجل هادئ خارج ساعات التنبيه"},
     "what_change_setting": {"en": "Changing the setting", "he": "שינוי ההגדרה", "ar": "تغيير الإعداد"},
     # -- receipts that succeeded ------------------------------------------------
     "sent_video": {"en": "✓ Video sent ({bounds})",

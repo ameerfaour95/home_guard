@@ -712,7 +712,7 @@ def set_alias(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     return _result(_issue(ctx, "set_alias", DONE, camera, {"camera": camera, "alias": alias}))
 
 # -- settings --------------------------------------------------------------------
-SETTING_NAMES = ("alert_hours", "cooldown_minutes", "sensitivity", "language")
+SETTING_NAMES = ("alert_hours", "cooldown_minutes", "sensitivity", "language", "quiet_log")
 SENSITIVITY_LEVELS = {"low": 0.6, "medium": 0.4, "high": 0.25}   # detector confidence: lower = more sensitive
 LANGUAGE_WORDS = {"en": "en", "english": "en", "אנגלית": "en", "he": "he", "hebrew": "he", "עברית": "he"}
 
@@ -751,13 +751,15 @@ def settings_view(settings: Dict[str, Any]) -> Dict[str, str]:
         "cooldown_minutes": f"{cooldown / 60:g} min",
         "sensitivity": f"{level} ({conf:.2f})",
         "language": LANGUAGE_NAMES[code],
+        "quiet_log": "on" if source.get("quiet_log", False) else "off",
     }
 
 
 def settings_line(settings: Dict[str, Any]) -> str:
     v = settings_view(settings)
     return (f"SETTINGS: alert hours {v['alert_hours']} · time between alerts per camera {v['cooldown_minutes']} · "
-            f"detector sensitivity {v['sensitivity']} · box language {v['language']} (alerts and announcements)")
+            f"detector sensitivity {v['sensitivity']} · box language {v['language']} (alerts and announcements)"
+            f" · quiet log outside the hours {v['quiet_log']}")
 
 
 _ALL_DAY_WORDS = ("all day", "24h", "always", "כל היום", "طوال اليوم")
@@ -793,7 +795,7 @@ def change_setting(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
                     "copied from it (two words or more).")
     name = str(args.get("setting") or "")
     if name not in SETTING_NAMES:
-        return _err("setting must be one of alert_hours, cooldown_minutes, sensitivity, language")
+        return _err("setting must be one of alert_hours, cooldown_minutes, sensitivity, language, quiet_log")
     if ctx.services.set_option is None or ctx.services.read_settings is None:
         return _err("settings cannot be changed on this box")
     value = args.get("value")
@@ -855,6 +857,14 @@ def change_setting(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
                 return _err("cooldown_minutes must be between 0.2 and 1440")
             wrote = {"alert_cooldown_sec": str(seconds)}
             ctx.services.set_option("alert_cooldown_sec", str(seconds))
+        elif name == "quiet_log":
+            word = str(value).strip().lower()
+            words = {"on": "true", "true": "true", "yes": "true", "כן": "true", "להפעיל": "true",
+                     "off": "false", "false": "false", "no": "false", "לא": "false", "לכבות": "false"}
+            if word not in words:
+                return _err('quiet_log must be "on" or "off"')
+            wrote = {"quiet_log": words[word]}
+            ctx.services.set_option("quiet_log", wrote["quiet_log"])
         elif name == "sensitivity":
             text = str(value).strip().lower()
             conf = SENSITIVITY_LEVELS.get(text)
