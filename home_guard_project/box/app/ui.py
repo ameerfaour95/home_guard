@@ -614,10 +614,10 @@ class Window(QMainWindow):
             tile.detector_note.setToolTip(text)
             if not tile.hero: text=tile.detector_note.fontMetrics().elidedText(text,Qt.TextElideMode.ElideRight,max(120,tile.width()-48))
             tile.detector_note.setText(text)
-            from .detector_view import fade_opacity
+            from .detector_view import entry_opacity
             entries=self.ai_data.get("cameras",{})
             entry=entries.get(tile.name,{}) if isinstance(entries,dict) else {}
-            tile.box_opacity=fade_opacity(entry.get("ts"),now) if tile.show_detections and isinstance(entry,dict) else 1
+            tile.box_opacity=entry_opacity(entry,now) if tile.show_detections and isinstance(entry,dict) else 1
             tile.update()
 
     def apply_state(self, state, show, events):

@@ -33,13 +33,23 @@ def object_name(name,count=1):
     key='object_'+name.replace(' ','_')+('_plural' if count!=1 else '')
     return tr(key) if key in TEXT else name
 
+LOOK_SECONDS=10   # a camera not looked at for longer: the detector is not looking
+
+def still_seen(entry,now):
+    """The camera's latest look found the objects: on a slow box the next look can be seconds away."""
+    return timestamp(entry.get('ts'))>0 and timestamp(entry.get('ts'))>=timestamp(entry.get('checked_ts')) and fresh(entry.get('checked_ts'),now,LOOK_SECONDS)
+
+def entry_opacity(entry,now):
+    """Full while the latest look still finds the objects, then a short fade."""
+    return 1 if still_seen(entry,now) else fade_opacity(entry.get('ts'),now)
+
 def camera_view(data,name,now,stopped=False):
     if stopped: return (),tr('stopped')
     cameras=data.get('cameras',{}) if isinstance(data,dict) else {}
     entry=cameras.get(name,{}) if isinstance(cameras,dict) else {}
     if not isinstance(entry,dict): entry={}
     found=[]
-    if fresh(data.get('updated'),now,15) and fresh(entry.get('ts'),now,3):
+    if fresh(data.get('updated'),now,15) and (fresh(entry.get('ts'),now,3) or still_seen(entry,now)):
         objects=entry.get('objects',[])
         for obj in objects if isinstance(objects,list) else []:
             if not isinstance(obj,dict): continue
@@ -53,7 +63,7 @@ def camera_view(data,name,now,stopped=False):
     if found:
         counts=Counter(d.label for d in found)
         return tuple(found),tr('detector_sees',objects=', '.join(tr('object_count',count=n,label=object_name(label,n)) for label,n in counts.items()))
-    return (),tr('detector_nothing') if fresh(entry.get('checked_ts'),now,10) else tr('detector_not_looking')
+    return (),tr('detector_nothing') if fresh(entry.get('checked_ts'),now,LOOK_SECONDS) else tr('detector_not_looking')
 
 def fade_opacity(ts,now):
     age=now-timestamp(ts)
