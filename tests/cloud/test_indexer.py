@@ -698,6 +698,81 @@ def test_fixed_feedback_and_heartbeat_clear_their_problem(session, s3client, s3,
     assert session.get(m.IndexProblem, key) is None
 
 
+# ---- 10: bulk-loaded passes: bounded statements, measured on a 5,000-key site
+
+class _FakeS3:
+    """In-memory listing/GET with the S3 semantics the indexer relies on (ETag = md5 of the body)."""
+
+    def __init__(self, objects: dict):
+        import hashlib
+
+        self.objects = {k: (v, hashlib.md5(v).hexdigest()) for k, v in objects.items()}
+        self.gets = 0
+
+    def list(self, prefix):
+        from home_guard_project.cloud.s3 import ObjInfo
+
+        for key in sorted(self.objects):
+            if key.startswith(prefix):
+                body, etag = self.objects[key]
+                yield ObjInfo(key, etag, len(body), BASE)
+
+    def get_text(self, key, if_match=None):
+        self.gets += 1
+        return self.objects[key][0].decode("utf-8")
+
+
+def _synthetic_site(n_events: int) -> dict:
+    """n events x 5 keys: production + training meta, production + training clip, one teacher crop."""
+    prod = (b.FIXTURES / "prod_alert.meta.json").read_text(encoding="utf-8")
+    train = (b.FIXTURES / "train_alert.meta.json").read_text(encoding="utf-8")
+    objects = {}
+    for i in range(n_events):
+        camera, ts = f"cam{i % 10}", 1791020177 + i * 60
+        stem, day = f"{camera}_{ts}_alert", "2026-10-03"
+        for root, text in (("production", prod), ("dataset", train)):
+            body = text.replace("front_side_1791020177_alert", stem).replace("front_side", camera)
+            body = body.replace("1791020174.1329982", f"{ts - 3}.5").replace("1791020183.9285913", f"{ts + 6}.5")
+            objects[f"{root}_test/meta/{camera}/{day}/{stem}.meta.json"] = body.encode("utf-8")
+            objects[f"{root}_test/clips/{camera}/{day}/{stem}.mp4"] = b.FAKE_MP4
+        objects[f"dataset_test/vlm_crops/{camera}/{day}/{stem}_f0.jpg"] = b.FAKE_JPG
+    return objects
+
+
+def test_index_pass_statement_count_is_bounded(session, device, db_engine):
+    import time
+
+    from sqlalchemy import event as sa_event
+
+    n = 1000
+    fake = _FakeS3(_synthetic_site(n))
+    statements = []
+
+    def count(conn, cursor, statement, params, context, executemany):
+        statements.append(statement)
+
+    sa_event.listen(db_engine, "before_cursor_execute", count)
+    try:
+        t0 = time.perf_counter()
+        stats = _index(session, fake, device)
+        first_secs = time.perf_counter() - t0
+        first = len(statements)
+        statements.clear()
+        t0 = time.perf_counter()
+        again = _index(session, fake, device)
+        second_secs = time.perf_counter() - t0
+        second = len(statements)
+    finally:
+        sa_event.remove(db_engine, "before_cursor_execute", count)
+    print(f"\n5,000-key site: first pass {first} statements in {first_secs:.2f}s; "
+          f"unchanged re-pass {second} statements in {second_secs:.2f}s")
+    assert stats.new_events == n and again.new_events == again.updated_events == 0
+    assert first <= 60 * n // 100, first
+    assert second <= 20, second
+    assert fake.gets == 2 * n  # each meta fetched exactly once
+    assert session.scalar(select(func.count()).select_from(m.AiRun)) == n
+
+
 # ---- 11: a size-only change is still a change
 
 class _ResizingS3:

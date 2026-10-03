@@ -326,11 +326,12 @@ class _Run:
         """Body of each pending (key, listed ETag): its stored revision, else a GET conditioned on that ETag."""
         bodies: dict[tuple[str, str], Any] = {}
         wanted = sorted({(art.s3_key, etag) for art, _, _, etag in self.work})
-        for chunk in _chunks(wanted):
-            for key, etag, body in self.session.execute(
-                    select(RawRevision.s3_key, RawRevision.etag, RawRevision.body)
-                    .where(tuple_(RawRevision.s3_key, RawRevision.etag).in_(chunk))):
-                bodies[(key, etag)] = body
+        with self.session.no_autoflush:  # new artifacts are inserted once, after their revision is applied
+            for chunk in _chunks(wanted):
+                for key, etag, body in self.session.execute(
+                        select(RawRevision.s3_key, RawRevision.etag, RawRevision.body)
+                        .where(tuple_(RawRevision.s3_key, RawRevision.etag).in_(chunk))):
+                    bodies[(key, etag)] = body
         for art, _, _, etag in self.work:
             key = art.s3_key
             if (key, etag) in bodies:
