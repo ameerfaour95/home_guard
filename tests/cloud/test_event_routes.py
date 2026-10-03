@@ -111,6 +111,7 @@ def test_thumbnail_url_when_thumbnail_artifact_exists(client, staff_factory, ind
     eid = _event_id(client, b.STEM)
     with session_scope(client.app.state.engine) as s:
         s.add(m.Artifact(event_id=eid, role="thumbnail", s3_key="admin_cache/test/thumb.jpg", provenance="cloud"))
+        s.scalars(select(m.Customer)).one().consent_recordings = True  # staff see thumbnails like recordings
     items = client.get("/v1/events", headers=h).json()["items"]
     by_id = {it["id"]: it for it in items}
     assert by_id[eid]["thumbnail_url"] == f"/v1/events/{eid}/thumbnail"

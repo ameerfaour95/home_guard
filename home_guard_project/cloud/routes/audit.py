@@ -5,10 +5,10 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, false, or_, select
 from sqlalchemy.orm import Session
 
-from ..deps import SessionDep, current_staff, require_role
+from ..deps import TEXT_MAX, SessionDep, check_length, current_staff, id_in_range, require_role
 from ..models import AuditLog, IndexProblem as IndexProblemRow, Staff
 from ..schemas import AuditEntry, AuditPage, IndexProblem
 
@@ -51,15 +51,17 @@ def list_audit(
     cursor: Optional[str] = None,
     session: Session = SessionDep,
 ):
+    check_length("staff", staff, TEXT_MAX)
+    check_length("action", action, TEXT_MAX)
     after = _decode(cursor) if cursor is not None else None
     q = select(AuditLog, Staff.email).outerjoin(Staff, Staff.id == AuditLog.staff_id)
     if staff:
         if staff.isdigit() and len(staff) <= 18:
-            q = q.where(AuditLog.staff_id == int(staff))
+            q = q.where(AuditLog.staff_id == int(staff) if id_in_range(int(staff)) else false())
         else:
             q = q.where(AuditLog.staff_id.in_(select(Staff.id).where(Staff.email == staff)))
     if customer_id is not None:
-        q = q.where(AuditLog.customer_id == customer_id)
+        q = q.where(AuditLog.customer_id == customer_id if id_in_range(customer_id) else false())
     if action:
         q = q.where(AuditLog.action == action)
     if after is not None:

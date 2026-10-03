@@ -110,6 +110,5 @@ def test_customer_crud_and_patch_audit(client, staff_factory):
     with session_scope(client.app.state.engine) as s:
         row = s.scalars(select(AuditLog).where(AuditLog.action == "customer_update")).one()
     assert row.customer_id == cid
-    assert set(row.detail["changed"]) == {"name", "consent_live", "notes"}
-    assert "secret" not in str(row.detail)
-    assert row.detail["changed"]["name"] == ["Acme", "Acme 2"]
+    assert row.detail == {"changed": ["consent_live", "name", "notes"]}  # field names only, never values
+    assert "secret" not in str(row.detail) and "Acme" not in str(row.detail)
