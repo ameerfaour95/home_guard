@@ -34,7 +34,17 @@ def sweep_exports(app: FastAPI) -> int:
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     sweep_exports(app)
-    yield
+    running = None
+    if app.state.settings.run_loops and app.state.s3 is not None:
+        from .loops import build_loops
+
+        running = build_loops(app.state.sessionmaker, app.state.s3)
+        running.start()
+    try:
+        yield
+    finally:
+        if running is not None:
+            running.stop(5.0)
 
 
 def create_app(settings: Settings, s3=None, init_db: bool = True) -> FastAPI:
@@ -52,3 +62,14 @@ def create_app(settings: Settings, s3=None, init_db: bool = True) -> FastAPI:
     for module in (auth, fleet, customers, events, media, studio, audit):
         app.include_router(module.router, prefix="/v1")
     return app
+
+
+def create_app_from_env() -> FastAPI:
+    """uvicorn factory: settings from HG_CLOUD_*, S3 from the ambient AWS credentials."""
+    import boto3
+
+    from .s3 import S3
+
+    settings = Settings.from_env()
+    s3 = S3(boto3.client("s3", region_name=settings.region), settings.bucket)
+    return create_app(settings, s3=s3, init_db=False)

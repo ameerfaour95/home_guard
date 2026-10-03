@@ -107,12 +107,38 @@ def cmd_enroll(args) -> int:
     return 0
 
 
+def _s3():
+    import os
+
+    import boto3
+
+    from .s3 import S3
+
+    client = boto3.client("s3", region_name=os.environ.get("HG_CLOUD_REGION", "us-east-1"))
+    return S3(client, os.environ.get("HG_CLOUD_BUCKET", "security-camera-project-v1"))
+
+
 def cmd_index_once(args) -> int:
-    indexer = _optional("indexer")  # Task 8
-    if indexer is None:
-        print("index-once: not available yet")
-        return 0
-    return indexer.run_once(_engine())
+    from . import indexer
+    from .db import session_scope
+
+    s3 = _s3()
+    with session_scope(_engine()) as s:
+        results = indexer.index_all(s, s3, full_scan=args.full)
+    for site, stats in results.items():
+        print(f"{site}: {stats}")
+    return 0
+
+
+def cmd_media_once(args) -> int:
+    from . import media
+    from .db import session_scope
+
+    s3 = _s3()
+    with session_scope(_engine()) as s:
+        n = media.process_pending(s, s3, limit=args.limit)
+    print(f"media: {n} event(s) gained artifacts")
+    return 0
 
 
 def cmd_redact_backfill(args) -> int:
@@ -135,7 +161,7 @@ def cmd_serve(args) -> int:
     if _optional("app") is None:
         print("serve: not available yet")
         return 0
-    uvicorn.run("home_guard_project.cloud.app:create_app", factory=True, host="0.0.0.0", port=args.port)
+    uvicorn.run("home_guard_project.cloud.app:create_app_from_env", factory=True, host="0.0.0.0", port=args.port)
     return 0
 
 
@@ -153,7 +179,12 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--site", required=True)
     e.add_argument("--tailscale-host", default="")
     e.set_defaults(fn=cmd_enroll)
-    sub.add_parser("index-once").set_defaults(fn=cmd_index_once)
+    i = sub.add_parser("index-once")
+    i.add_argument("--full", action="store_true", help="full scan instead of incremental")
+    i.set_defaults(fn=cmd_index_once)
+    mo = sub.add_parser("media-once")
+    mo.add_argument("--limit", type=int, default=50)
+    mo.set_defaults(fn=cmd_media_once)
     r = sub.add_parser("redact-backfill")
     r.add_argument("--all", action="store_true", help="recompute every event, not only missing ones")
     r.set_defaults(fn=cmd_redact_backfill)
