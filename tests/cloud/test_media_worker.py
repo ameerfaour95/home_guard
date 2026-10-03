@@ -115,3 +115,87 @@ def test_corrupt_clip_records_problem_and_is_not_retried(session, s3, s3client):
     assert process_pending(session, s3) == 0
     session.expire_all()
     assert {p.s3_key: p.seen_at for p in session.scalars(q).all()} == stamps  # skipped, not re-run
+
+
+# ---- fix round ----
+def test_rendition_failure_keeps_thumbnail_and_filmstrip(session, s3, s3client, tmp_path, monkeypatch):
+    from home_guard_project.cloud import media
+
+    _setup(session, s3client, s3, _mp4v_clip(tmp_path / "c.mp4"))
+    calls = []
+
+    def boom(*a, **k):
+        calls.append(1)
+        raise media.MediaError("ffmpeg exit 1: encoder exploded")
+
+    monkeypatch.setattr(media, "_make_rendition", boom)
+    assert media.process_pending(session, s3) == 1
+    session.expire_all()
+    assert set(_media(session)) == {"thumbnail", "filmstrip"}
+    ev = _good_events(session)
+    prob = session.get(m.IndexProblem, f"admin_cache/renditions/{ev.id}.mp4")
+    clip = session.scalars(select(m.Artifact).where(m.Artifact.event_id == ev.id,
+                                                    m.Artifact.role == "original_video")).first()
+    assert prob is not None and prob.reason.startswith("media:") and prob.etag == clip.etag
+    assert media.process_pending(session, s3) == 0
+    assert len(calls) == 1  # not retried for the same clip etag
+
+
+def test_replaced_clip_regenerates_and_retires_stale_rendition(session, s3, s3client, tmp_path):
+    from home_guard_project.cloud.media import process_pending
+
+    _setup(session, s3client, s3, _mp4v_clip(tmp_path / "c.mp4"))
+    process_pending(session, s3)
+    old = _media(session)
+    assert set(old) == {"thumbnail", "filmstrip", "rendition"}
+    old_src = old["thumbnail"].detail["src_etag"]
+    assert old["thumbnail"].detail["needs_rendition"] is True
+    s3client.put_object(Bucket=b.BUCKET, Key=b.PROD_CLIP, Body=_h264_clip(tmp_path / "f.mp4", faststart=True))
+    from home_guard_project.cloud.indexer import index_device
+
+    dev = session.scalars(select(m.Device)).one()
+    index_device(session, s3, dev, full_scan=True)
+    assert process_pending(session, s3) == 1
+    session.expire_all()
+    arts = {a.role: a for a in session.scalars(select(m.Artifact).where(m.Artifact.provenance == "cloud"))}
+    assert arts["thumbnail"].detail["src_etag"] != old_src
+    assert arts["filmstrip"].detail["src_etag"] == arts["thumbnail"].detail["src_etag"]
+    assert arts["thumbnail"].detail["needs_rendition"] is False
+    assert arts["rendition"].available is False
+    assert process_pending(session, s3) == 0
+
+
+def test_limit_bounds_attempts_including_failures(session, s3, s3client, monkeypatch):
+    from home_guard_project.cloud import media
+
+    b.seed_bucket(s3client, exclude=[b.TRAIN_CLIP])
+    b.index_fixture_bucket(session, s3)
+    attempts = []
+    real = media.ensure_media
+    monkeypatch.setattr(media, "ensure_media", lambda *a, **k: (attempts.append(1), real(*a, **k))[1])
+    media.process_pending(session, s3, limit=1)
+    assert len(attempts) <= 1
+
+
+def test_moov_first_survives_truncated_and_huge_boxes(tmp_path):
+    import struct
+
+    from home_guard_project.cloud.media import moov_first
+
+    trunc = tmp_path / "t.mp4"
+    trunc.write_bytes(struct.pack(">I4s", 24, b"ftyp") + b"isom")  # box claims 24 bytes, file ends
+    assert moov_first(trunc) is False
+    huge = tmp_path / "h.mp4"
+    huge.write_bytes(struct.pack(">I4sQ", 1, b"free", 2 ** 63 + 5) + b"\0" * 8)
+    assert moov_first(huge) is False
+    loop = tmp_path / "l.mp4"
+    loop.write_bytes(struct.pack(">I4s", 8, b"free") * 20000 + struct.pack(">I4s", 8, b"moov"))
+    assert moov_first(loop) is False  # box loop capped
+    assert moov_first(tmp_path / "missing.mp4") is False
+
+
+def test_upload_file_rejects_keys_outside_writable_prefixes(s3, tmp_path):
+    f = tmp_path / "x.jpg"
+    f.write_bytes(b"x")
+    with pytest.raises(ValueError):
+        s3.upload_file(f, "dataset_house/clips/x.jpg", "image/jpeg")
