@@ -442,6 +442,8 @@ if ($DoCameras) {
             } else {
                 if ($refused.Count -gt 0) {
                     $msg = "$($refused.Count) of $devices cameras answered but refused this login. Use the cameras' own user name and password."
+                } elseif ($j.network_ready -eq $false) {
+                    $msg = 'the box had no home-network address yet (it was still joining the network). Wait a minute and search again.'
                 } else {
                     $msg = 'no cameras were found. Check the camera login, and that the box is on the same network as the cameras.'
                 }

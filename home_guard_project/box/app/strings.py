@@ -363,7 +363,7 @@ TEXT.update({
  "failure_login_title": "This login was refused by {count} of {total} devices",
  "failure_location": "The box is on the Wi-Fi {network} ({address})",
  "failure_location_unknown": "Nothing on the box's network answers as a camera",
- "failure_cameras_body": "{location}. Usually the recorder is off or plugged into a different router. Check its power and that it shares the box's home network, then search again.",
+ "failure_cameras_body": "{location}. If the box has just joined the network, wait a minute and search again. If no camera answers after that, check that the recorder is on and connected to the same home network.",
  "failure_network_title": "The box did not come back on {network}",
  "failure_home_network": "the home network",
  "failure_network_body": "The box may still be joining the network. Check the Wi-Fi name and password, and keep the box powered on. If it stays offline, use the rescue Wi-Fi to reconnect.",
@@ -391,7 +391,7 @@ TEXT.update({
  "camera_search_user": "Camera user name", "camera_search_password": "Camera password",
  "camera_search_working": "Searching the home network for cameras…", "camera_search_empty": "No cameras answered. Check the recorder's power and home network, then try again.",
  "camera_search_error": "The camera search could not finish. Check the network and camera login, then try again.",
- "failure_cameras_body": "{location}, and nothing on that network answers as a camera. Usually the recorder is off or plugged into a different router. Check its power and that it shares the box's home network, then search again.",
+ "failure_cameras_body": "{location}, and no camera answered yet. If the box has just joined this network, wait a minute and search again. If no camera answers after that, check that the recorder is on and connected to the same home network.",
 })
 
 TEXT.update(ready_for_cameras="Ready for your cameras", finishing_without_cameras="Finishing setup without cameras. Confirming the earlier steps, then checking that the box is ready.")
