@@ -49,6 +49,32 @@ class HostScanTest(unittest.TestCase):
         self.assertEqual(hosts, {554: [], 8554: []})
         self.assertEqual(len(waited), find_cameras.SETTLE_SCANS - 1)
 
+    def test_an_address_that_arrives_late_is_still_scanned(self) -> None:
+        # 2026-10-03 20:34: the Wi-Fi step re-joined the network; the search began before the
+        # box had its address back and scanned only the VPN's network, three times.
+        from home_guard_project.data_collection import discover
+
+        looks = iter([[], [], ["192.168.68.120"]])
+        with mock.patch.object(find_cameras, "lan_addresses", side_effect=lambda: next(looks, ["192.168.68.120"])),                 mock.patch.object(discover, "_get_local_ip", return_value="100.121.29.9"),                 mock.patch.object(discover, "subnet_scan",
+                                  side_effect=lambda subnet, port: ["192.168.68.109"]
+                                  if subnet.startswith("192.168.68") and port == 554 else []):
+            hosts = find_cameras.rtsp_hosts(sleep=lambda s: None)
+        self.assertEqual(hosts[554], ["192.168.68.109"])
+
+    def test_the_search_waits_for_the_box_to_have_a_local_address(self) -> None:
+        looks = iter([[], [], ["192.168.68.120"]])
+        waited = []
+        with mock.patch.object(find_cameras, "lan_addresses", side_effect=lambda: next(looks)):
+            self.assertEqual(find_cameras.wait_for_lan(sleep=waited.append, clock=lambda: len(waited) * 2.0),
+                             ["192.168.68.120"])
+        self.assertEqual(len(waited), 2)
+
+    def test_waiting_for_the_network_gives_up_and_says_so(self) -> None:
+        waited = []
+        with mock.patch.object(find_cameras, "lan_addresses", return_value=[]):
+            self.assertEqual(find_cameras.wait_for_lan(sleep=waited.append, clock=lambda: len(waited) * 2.0), [])
+        self.assertLessEqual(len(waited) * 2.0, find_cameras.LAN_WAIT_SEC + 2.0)
+
     def test_two_local_networks_are_both_scanned(self) -> None:
         from home_guard_project.data_collection import discover
 

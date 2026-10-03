@@ -779,6 +779,28 @@ def lan_addresses() -> List[str]:
 
 SETTLE_SCANS = 3          # scans of an empty network before giving up ...
 SETTLE_WAIT_SEC = 4.0     # ... this long apart: ARP and a fresh Wi-Fi link need a few seconds
+LAN_WAIT_SEC = 45.0       # how long the search waits for the box to get a local address back
+LAN_POLL_SEC = 2.0
+
+
+def wait_for_lan(sleep: Any = None, clock: Any = None, timeout: float = LAN_WAIT_SEC) -> List[str]:
+    """This machine's local addresses, waiting up to *timeout* for one to appear.
+
+    The setup's network step re-joins the Wi-Fi just before the search (2026-10-03
+    20:34: Wi-Fi down at :02, back at :06, an address only after that). Searching
+    before the address is back scans the wrong network and says "no cameras".
+    Returns [] when no local address came back in time.
+    """
+    import time
+
+    sleep, clock = sleep or time.sleep, clock or time.monotonic
+    start = clock()
+    while True:
+        addresses = lan_addresses()
+        if addresses or clock() - start >= timeout:
+            return addresses
+        log.info("Waiting for the box to get its network address back...")
+        sleep(LAN_POLL_SEC)
 
 
 def rtsp_hosts(addresses: Optional[Sequence[str]] = None, sleep: Any = None) -> Dict[int, List[str]]:
@@ -792,14 +814,19 @@ def rtsp_hosts(addresses: Optional[Sequence[str]] = None, sleep: Any = None) -> 
     from home_guard_project.data_collection import discover
 
     sleep = sleep or time.sleep
-    addresses = list(addresses) if addresses is not None else (lan_addresses() or [discover._get_local_ip() or ""])
-    subnets = [discover._subnet_from_ip(ip) for ip in addresses if ip]
-    jobs = [(subnet, port) for subnet in subnets for port in RTSP_PORTS]
+    fixed = list(addresses) if addresses is not None else None
     hosts: Dict[int, List[str]] = {port: [] for port in RTSP_PORTS}
     for attempt in range(SETTLE_SCANS):
         if attempt:
             log.info("No device answered yet; the network may still be settling. Scanning again...")
             sleep(SETTLE_WAIT_SEC)
+        # Read the addresses again on every look: right after the Wi-Fi re-joins, the
+        # box's local address may only arrive between two scans.
+        current = fixed if fixed is not None else (lan_addresses() or [discover._get_local_ip() or ""])
+        subnets = [discover._subnet_from_ip(ip) for ip in current if ip]
+        jobs = [(subnet, port) for subnet in subnets for port in RTSP_PORTS]
+        if not jobs:
+            continue
         with ThreadPoolExecutor(max_workers=max(1, len(jobs))) as pool:
             results = list(pool.map(lambda job: discover.subnet_scan(subnet=job[0], port=job[1]), jobs))
         for (subnet, port), answering in zip(jobs, results):
@@ -818,14 +845,20 @@ def search(user: str, password: str) -> Tuple[Found, Dict[str, Any]]:
     """
     from home_guard_project.data_collection import discover
 
-    addresses = lan_addresses()
-    targets = [(host, port) for port, hosts in rtsp_hosts(addresses or None).items() for host in hosts]
-    local_ip = addresses[0] if addresses else discover._get_local_ip()
+    addresses = wait_for_lan()
+    if not addresses:
+        log.warning("The box has no local network address (it may still be joining the Wi-Fi). "
+                    "Not searching; try again in a minute.")
+        return {}, {"local_ip": discover._get_local_ip(), "hosts_tried": [], "devices_found": 0,
+                    "login_refused": [], "no_answer": [], "network_ready": False}
+    targets = [(host, port) for port, hosts in rtsp_hosts().items() for host in hosts]
+    addresses = lan_addresses() or addresses
+    local_ip = addresses[0]
     if not targets:
         log.warning("No device answers on the camera port (scanned %s from %s). Is the box on the cameras' network?",
-                    ", ".join(discover._subnet_from_ip(ip) for ip in addresses) or "no local network", local_ip)
+                    ", ".join(discover._subnet_from_ip(ip) for ip in addresses), local_ip)
         return {}, {"local_ip": local_ip, "hosts_tried": [], "devices_found": 0,
-                    "login_refused": [], "no_answer": []}
+                    "login_refused": [], "no_answer": [], "network_ready": True}
 
     paths = first_stream_paths()
     with ThreadPoolExecutor(max_workers=min(8, len(targets))) as pool:
@@ -848,6 +881,7 @@ def search(user: str, password: str) -> Tuple[Found, Dict[str, Any]]:
         "devices_found": len(targets),
         "login_refused": refused,
         "no_answer": silent,
+        "network_ready": True,
     }
 
 
