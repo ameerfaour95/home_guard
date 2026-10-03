@@ -2,6 +2,24 @@
 
 Every screen and state is saved at both target resolutions. Click a file to view it at full size. All content is synthetic; no camera, box or account was contacted.
 
+## Round Z — watch areas
+
+Fourteen offline captures cover every dialog state and a camera page with one saved area and one whole-picture camera. Dialog captures show the real 1280×800 opening size (height clamped at 1366×768), centred on a canvas of the stated screen size; the picture and controls within the dialog use the split layout. All fourteen were opened and visually reviewed. The pass corrected clipped compact pills, softened the warning chip, and kept the saving label readable with its bar directly below Save.
+
+Regenerate only this round with `.venv\Scripts\python.exe docs/ui/capture.py --zones-only`; the normal capture command also includes these cases.
+
+| Screen / state | 1366 × 768 | 1920 × 1080 |
+| --- | --- | --- |
+| Empty — whole picture | [PNG](screenshots/zone-empty-1366x768.png) | [PNG](screenshots/zone-empty-1920x1080.png) |
+| Drawing — two corners, Save disabled | [PNG](screenshots/zone-drawing-1366x768.png) | [PNG](screenshots/zone-drawing-1920x1080.png) |
+| Closed — outside dimmed live | [PNG](screenshots/zone-closed-1366x768.png) | [PNG](screenshots/zone-closed-1920x1080.png) |
+| Tiny area — warning chip | [PNG](screenshots/zone-tiny-warning-1366x768.png) | [PNG](screenshots/zone-tiny-warning-1920x1080.png) |
+| Saving — disabled controls, thin progress bar | [PNG](screenshots/zone-saving-1366x768.png) | [PNG](screenshots/zone-saving-1920x1080.png) |
+| Error — inline retry guidance | [PNG](screenshots/zone-error-1366x768.png) | [PNG](screenshots/zone-error-1920x1080.png) |
+| Camera page — zoned and whole picture | [PNG](screenshots/zone-camera-page-1366x768.png) | [PNG](screenshots/zone-camera-page-1920x1080.png) |
+
+## Earlier rounds
+
 | Screen / state | 1366 x 768 | 1920 x 1080 |
 | --- | --- | --- |
 | box-1-cameras | [PNG](screenshots/box-1-cameras-1366x768.png) | [PNG](screenshots/box-1-cameras-1920x1080.png) |

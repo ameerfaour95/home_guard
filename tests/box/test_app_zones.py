@@ -128,3 +128,68 @@ class ZoneEditorTests(unittest.TestCase):
         QTest.qWait(motion.TOGGLE_MS + 30)
         self.assertFalse(self.dialog.isVisible())
         self.controls.set_zone.assert_not_called(); self.controls.clear_zone.assert_not_called()
+
+
+class ZoneTileTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+
+    def setUp(self):
+        from home_guard_project.box.app.box_controls import BoxControls
+        from home_guard_project.box.app.camera_controls import CameraControls
+        from home_guard_project.box.app.camera_ui import CameraPage
+        from home_guard_project.box.app.theme import stylesheet
+        self.controls = CameraControls(BoxControls(demo=True), ['yard', 'street', 'door'])
+        self.page = CameraPage(self.controls, lambda: None)
+        self.page.widget.setStyleSheet(stylesheet())
+        self.page.widget.resize(1200, 650); self.page.widget.show()
+
+    def tearDown(self):
+        if self.page.zone_dialog:
+            self.page.zone_dialog.reject(); QTest.qWait(motion.TOGGLE_MS+30)
+        self.page.close(); self.page.widget.close(); self.page.widget.deleteLater()
+        self.app.processEvents()
+
+    def test_load_once_after_snapshots_and_success_updates_tile(self):
+        calls = []
+        snapshots, zones = self.controls.snapshots, self.controls.zones
+        self.controls.snapshots = lambda: (calls.append('snapshots'), snapshots())[1]
+        self.controls.zones = lambda: (calls.append('zones'), zones())[1]
+        records = self.page.load_photos(); self.page.render(records)
+        self.assertEqual(calls, ['snapshots', 'zones'])
+        button, status, photo = self.page.zone_widgets['yard']
+        self.app.processEvents()
+        self.assertEqual(button.parentWidget().height(), 36)
+        self.assertLessEqual(button.height(), 36)
+        self.assertEqual(status.text(), tr('camera_zone_whole'))
+        raw_key = photo.pix.cacheKey()
+        button.click()
+        dialog = self.page.zone_dialog
+        self.assertEqual(dialog.stage.pix.cacheKey(), raw_key)
+        points = [[.1, .2], [.9, .2], [.5, .9]]
+        dialog.stage.set_points(points); dialog.save()
+        dialog.future.result(timeout=3); dialog.poll()
+        self.assertEqual(status.text(), tr('camera_zone_drawn'))
+        self.assertEqual(photo.points, points)
+        self.assertEqual(photo.pix.cacheKey(), raw_key)
+        self.assertEqual(calls, ['snapshots', 'zones'])
+        QTest.qWait(motion.PANE_MS+30)
+        self.assertIsNone(self.page.zone_dialog)
+        # Reopening restores the saved polygon, clearing restores the whole image.
+        button.click(); dialog = self.page.zone_dialog
+        self.assertEqual(dialog.stage.points, points)
+        dialog.stage.clear(); dialog.save(); dialog.future.result(timeout=3); dialog.poll()
+        self.assertEqual(status.text(), tr('camera_zone_whole'))
+        self.assertEqual(photo.points, [])
+
+    def test_zone_load_failure_preserves_photos_and_refresh_can_recover(self):
+        zones = self.controls.zones
+        self.controls.zones = Mock(side_effect=RuntimeError('offline'))
+        self.page.render(self.page.load_photos())
+        button, status, photo = self.page.zone_widgets['yard']
+        self.assertFalse(button.isEnabled())
+        self.assertFalse(photo.pix.isNull())
+        self.controls.zones = zones
+        self.page.render(self.page.load_photos())
+        self.assertTrue(self.page.zone_widgets['yard'][0].isEnabled())

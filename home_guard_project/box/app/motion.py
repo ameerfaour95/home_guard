@@ -120,6 +120,7 @@ class InteractionOverlay(QWidget):
 
 def busy(button,working):
     if button.property('busyIndicator') == 'bar':
+        button.setProperty('working', working)
         reveal(button._busy_bar, working)
         button.setEnabled(not working)
         return
