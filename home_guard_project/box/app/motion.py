@@ -119,6 +119,10 @@ class InteractionOverlay(QWidget):
             p.setBrush(Qt.BrushStyle.NoBrush);p.setPen(QPen(QColor(ACTION),2));p.drawRoundedRect(QRectF(self.rect()).adjusted(1,1,-1,-1),8,8)
 
 def busy(button,working):
+    if button.property('busyIndicator') == 'bar':
+        reveal(button._busy_bar, working)
+        button.setEnabled(not working)
+        return
     if working and not getattr(button,'_busy_timer',None):
         button._saved_icon=button.icon();button._angle=0
         timer=QTimer(button);button._busy_timer=timer
@@ -137,7 +141,7 @@ class MotionSystem(QObject):
         if isinstance(obj,(QAbstractButton,QComboBox,QSlider)):
             if kind==QEvent.Type.Show:
                 obj.setCursor(Qt.CursorShape.PointingHandCursor)
-                if not isinstance(obj,Switch) and not hasattr(obj,'_motion_overlay'):
+                if not isinstance(obj,Switch) and not obj.property('handlesMotion') and not hasattr(obj,'_motion_overlay'):
                     obj._motion_overlay=InteractionOverlay(obj)
             overlay=getattr(obj,'_motion_overlay',None)
             if overlay:
