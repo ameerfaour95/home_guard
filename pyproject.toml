@@ -36,6 +36,7 @@ dependencies = [
     "langgraph>=1.2.12",
     "langchain-openai>=1.1.9",
     "langchain>=1.4.3",
+    "anthropic>=1.11.0",
 ]
 
 [tool.uv]

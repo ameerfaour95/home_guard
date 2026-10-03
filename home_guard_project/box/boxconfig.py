@@ -124,7 +124,8 @@ NUMBER_OPTIONS = {"alert_start_hour": (0, 23), "alert_end_hour": (0, 23), "alert
 DECIMAL_OPTIONS = {"inference_conf": (0.05, 0.95)}
 # Kept apart from DECIMAL_OPTIONS (the app's Settings mirrors that table field by field).
 TYPE_CONF_OPTIONS = {"conf_person": (0.05, 0.95), "conf_vehicle": (0.05, 0.95), "conf_animal": (0.05, 0.95)}
-CHOICE_OPTIONS = {"mode": MODES, "alert_channel": ("telegram", "twilio", "both")}
+#   owner_language: the language of alerts and announcements, en or he (replies follow each person's own language).
+CHOICE_OPTIONS = {"mode": MODES, "alert_channel": ("telegram", "twilio", "both"), "owner_language": ("en", "he")}
 CHAT_IDS_OPTION = "telegram_chat_ids"
 # Options holding a set of choices, written comma-separated in a fixed order (e.g. person,vehicle).
 SET_OPTIONS = {"alert_on": ("person", "vehicle", "animal")}
@@ -133,7 +134,7 @@ OPTIONS = (BOOLEAN_OPTIONS + tuple(NUMBER_OPTIONS) + tuple(DECIMAL_OPTIONS) + tu
 # Options the running program re-reads while it runs (inference.LiveSettings): a change applies
 # within seconds, without a restart.
 LIVE_OPTIONS = ("alert_start_hour", "alert_end_hour", "alert_cooldown_sec", "inference_conf", "alert_on",
-                "conf_person", "conf_vehicle", "conf_animal")
+                "conf_person", "conf_vehicle", "conf_animal", "owner_language")
 # Options the running program reads only when it starts. show_cameras is read by the screen, not by it.
 RESTART_OPTIONS = tuple(key for key in OPTIONS if key != "show_cameras" and key not in LIVE_OPTIONS)
 

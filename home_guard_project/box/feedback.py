@@ -17,6 +17,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+import math
 import os
 import re
 import shutil
@@ -322,18 +323,53 @@ def _read_json(path: str) -> Dict[str, Any]:
     try:
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
-        return data if isinstance(data, dict) else {}
-    except (OSError, ValueError):
+        if not isinstance(data, dict):
+            raise ValueError("state must be an object")
+        return data
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError, TypeError) as exc:
+        log.warning("Cannot read feedback state: %s", exc)
         return {}
 
 
 def _write_json(path: str, data: Any) -> None:
     """Write through a temp file, so a reader never sees half a file."""
+    payload = json.dumps(data, indent=2)
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     tmp = f"{path}.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
+        f.write(payload)
     os.replace(tmp, path)
+
+
+def _finite_number(value: Any) -> float:
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError("number must be finite")
+    return number
+
+
+def _pause_state(data: Any) -> Tuple[float, Dict[str, float]]:
+    """Keep usable pause values and warn once per malformed snapshot/file."""
+    bad = not isinstance(data, dict)
+    data = data if isinstance(data, dict) else {}
+    try:
+        all_until = _finite_number(data.get("all", 0))
+    except (TypeError, ValueError, OverflowError):
+        all_until, bad = 0.0, True
+    cameras = data.get("cameras", {})
+    if not isinstance(cameras, dict):
+        cameras, bad = {}, True
+    cleaned: Dict[str, float] = {}
+    for name, value in cameras.items():
+        try:
+            cleaned[str(name)] = _finite_number(value)
+        except (TypeError, ValueError, OverflowError):
+            bad = True
+    if bad:
+        log.warning("Invalid pause state values skipped")
+    return all_until, cleaned
 
 
 class MuteState:
@@ -341,12 +377,21 @@ class MuteState:
 
     def __init__(self, path: str) -> None:
         self.path = path
-        data = _read_json(path)
-        self._all = float(data.get("all") or 0)
-        cameras = data.get("cameras")
-        self._cameras: Dict[str, float] = {
-            str(k): float(v) for k, v in (cameras.items() if isinstance(cameras, dict) else []) if v
-        }
+        self._mtime = self._stamp()
+        self._all, self._cameras = _pause_state(_read_json(path))
+
+    def _stamp(self):
+        try:
+            stat = os.stat(self.path)
+            return stat.st_mtime_ns, stat.st_size, stat.st_ino
+        except OSError:
+            return None
+
+    def _refresh(self) -> None:
+        stamp = self._stamp()
+        if stamp != self._mtime:
+            self._all, self._cameras = _pause_state(_read_json(self.path))
+            self._mtime = stamp
 
     def muted_until(self, now: float, camera: str) -> Optional[float]:
         until = max(self._all, self._cameras.get(camera, 0.0))
@@ -357,17 +402,108 @@ class MuteState:
 
     def apply(self, feedback: Feedback, now: float) -> None:
         """Carry out a pause or a resume. Any other feedback changes nothing."""
+        self._refresh()
+        try:
+            now = _finite_number(now)
+            if not isinstance(feedback, Feedback):
+                raise ValueError("feedback must be Feedback")
+            if feedback.camera is not None and not isinstance(feedback.camera, str):
+                raise ValueError("camera must be a name")
+            until = _finite_number(feedback.mute_until or 0)
+        except (TypeError, ValueError, OverflowError) as exc:
+            log.warning("Cannot pause alerts: %s", exc)
+            return
         if feedback.action == "mute" and feedback.mute_until:
             if feedback.camera:
-                self._cameras[feedback.camera] = feedback.mute_until
+                self._cameras[feedback.camera] = until
             else:
-                self._all = feedback.mute_until
+                self._all = until
         elif feedback.action == "resume":
             self._all, self._cameras = 0.0, {}
         else:
             return
         self._cameras = {k: v for k, v in self._cameras.items() if v > now}
-        _write_json(self.path, {"all": self._all, "cameras": self._cameras})
+        self._save()
+
+    def resume(self, camera: Optional[str], now: float, cameras: Sequence[str] = ()) -> None:
+        """Turn alerts back on for *camera*, or for every camera when None.
+
+        Resuming one camera while all cameras are paused keeps the others paused:
+        the all-camera pause becomes a pause per camera (*cameras* lists them).
+        """
+        self._refresh()
+        try:
+            now = _finite_number(now)
+            if camera is not None and (not isinstance(camera, str) or not camera):
+                raise ValueError("camera must be a name or None")
+            if not isinstance(cameras, Sequence) or isinstance(cameras, (str, bytes)):
+                raise ValueError("cameras must be a sequence of names")
+            if any(not isinstance(name, str) or not name for name in cameras):
+                raise ValueError("cameras must contain names")
+        except (TypeError, ValueError, OverflowError) as exc:
+            log.warning("Cannot resume alerts: %s", exc)
+            return
+        if camera is None:
+            self._all, self._cameras = 0.0, {}
+        else:
+            if self._all > now:
+                for other in cameras:
+                    if other != camera:
+                        self._cameras[other] = max(self._cameras.get(other, 0.0), self._all)
+                self._all = 0.0
+            self._cameras.pop(camera, None)
+        self._cameras = {k: v for k, v in self._cameras.items() if v > now}
+        self._save()
+
+    def snapshot(self) -> Dict[str, Any]:
+        """The whole pause state, to put back later (Undo)."""
+        self._refresh()
+        return {"all": self._all, "cameras": dict(self._cameras)}
+
+    def restore(self, snapshot: Dict[str, Any], now: float) -> None:
+        self._refresh()
+        try:
+            now = _finite_number(now)
+        except (TypeError, ValueError, OverflowError) as exc:
+            log.warning("Cannot restore alerts: %s", exc)
+            return
+        self._all, cameras = _pause_state(snapshot)
+        self._cameras = {k: v for k, v in cameras.items() if v > now}
+        self._save()
+
+    def set_entry(self, camera: Optional[str], until: float, now: float) -> bool:
+        """Set one pause entry - *camera*'s, or the whole house's when None - to *until*; a past *until* removes it.
+        Every other entry is left alone. Returns False if persistence fails; raises ValueError on bad input."""
+        self._refresh()
+        now, until = _finite_number(now), _finite_number(until)
+        if camera is not None and (not isinstance(camera, str) or not camera):
+            raise ValueError("camera must be a name or None")
+        if camera is None:
+            self._all = until if until > now else 0.0
+        elif until > now:
+            self._cameras[camera] = until
+        else:
+            self._cameras.pop(camera, None)
+        self._cameras = {k: v for k, v in self._cameras.items() if v > now}
+        saved = self._save()
+        if not saved:
+            # Keep failed Undo retryable against the state that actually survived on disk.
+            self._all, self._cameras = _pause_state(_read_json(self.path))
+            self._mtime = self._stamp()
+        return saved
+
+    def _save(self) -> bool:
+        try:
+            desired = {"all": self._all, "cameras": dict(self._cameras)}
+            _write_json(self.path, desired)
+            with open(self.path, encoding="utf-8") as f:
+                if json.load(f) != desired:
+                    raise ValueError("pause state read-back differs")
+            self._mtime = self._stamp()
+            return True
+        except Exception as exc:  # noqa: BLE001 - pause persistence must not stop polling
+            log.warning("Pause state not saved: %s", exc)
+            return False
 
 
 class AlertIndex:
@@ -376,13 +512,21 @@ class AlertIndex:
     def __init__(self, path: str, keep: int = 500) -> None:
         self.path = path
         self.keep = keep
-        entries = _read_json(path).get("alerts")
+        entries = _read_json(path).get("alerts", [])
+        if not isinstance(entries, list):
+            log.warning("Invalid alert index collection; using an empty list")
         self._entries: List[Dict[str, Any]] = entries if isinstance(entries, list) else []
 
     def remember(self, chat_id: Any, message_id: Any, alert: Dict[str, Any]) -> None:
-        self._entries.append({"chat_id": str(chat_id), "message_id": int(message_id), "alert": alert})
-        self._entries = self._entries[-self.keep:]
-        _write_json(self.path, {"alerts": self._entries})
+        try:
+            if not isinstance(alert, dict):
+                raise ValueError("alert must be an object")
+            json.dumps(alert, allow_nan=False)
+            entries = (self._entries + [{"chat_id": str(chat_id), "message_id": int(message_id), "alert": alert}])[-self.keep:]
+            _write_json(self.path, {"alerts": entries})
+            self._entries = entries
+        except Exception as exc:  # noqa: BLE001 - malformed/nonserializable entries and disk errors
+            log.warning("Alert index entry not saved: %s", exc)
 
     def lookup(self, chat_id: Any, message_id: Any) -> Optional[Dict[str, Any]]:
         """The alert that was sent as *message_id* in *chat_id* (the owner replied to it or tapped its button)."""
@@ -403,6 +547,41 @@ class AlertIndex:
                 alert = entry["alert"]
                 return alert if now - float(alert.get("ts") or 0) <= max_age_sec else None
         return None
+
+    def recent(self, chat_id: Any, now: float, max_age_sec: float = 1800) -> List[Dict[str, Any]]:
+        """Alerts sent to *chat_id* in the last *max_age_sec*, newest first, one per alert id."""
+        try:
+            now, max_age_sec = _finite_number(now), _finite_number(max_age_sec)
+            chat_id = str(chat_id)
+        except (TypeError, ValueError, OverflowError) as exc:
+            log.warning("Cannot list recent alerts: %s", exc)
+            return []
+        out: List[Dict[str, Any]] = []
+        seen = set()
+        bad = False
+        for entry in reversed(self._entries):
+            if not isinstance(entry, dict) or "chat_id" not in entry or not isinstance(entry.get("alert"), dict):
+                bad = True
+                continue
+            if entry["chat_id"] != chat_id:
+                continue
+            alert = entry["alert"]
+            try:
+                stamp = _finite_number(alert.get("ts"))
+            except (TypeError, ValueError, OverflowError):
+                bad = True
+                continue
+            key = alert.get("alert_id")
+            if not isinstance(key, str) or not key:
+                bad = True
+                continue
+            if now - stamp > max_age_sec or key in seen:
+                continue
+            seen.add(key)
+            out.append(alert)
+        if bad:
+            log.warning("Invalid recent alert entries skipped")
+        return out
 
 
 def save_feedback(

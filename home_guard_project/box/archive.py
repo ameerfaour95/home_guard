@@ -13,6 +13,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+import math
 import os
 import re
 import time
@@ -37,14 +38,25 @@ class AlertRecord:
     command: str
     clip_path: Optional[str]    # the mp4, if it is still on the box
     verdicts: Tuple[str, ...]   # what the owner answered, oldest first
+    kind: str = "alert"                      # "alert" (guard hours) or "quiet" (outside them)
+    label: str = ""                          # the AI's normal / suspicious / escalation, when it looked
+    people: Optional[int] = None             # how many people the AI counted
+    mode: str = ""                           # "guard" or "assistant" when the event happened
+    detector_labels: Tuple[str, ...] = ()    # what the detector fired on
+    described: bool = False                  # True when some AI description exists
+    clip_start_ts: Optional[float] = None
+    trigger_ts: Optional[float] = None       # when the detector fired (inside the clip)
 
 
 def _load_json(path: str) -> Optional[Dict[str, Any]]:
     try:
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
-        return data if isinstance(data, dict) else None
-    except (OSError, ValueError):
+        if not isinstance(data, dict):
+            raise ValueError("saved record must be an object")
+        return data
+    except (OSError, ValueError, RecursionError) as exc:
+        log.warning("Could not read saved record %s: %s", path, exc)
         return None
 
 
@@ -55,10 +67,48 @@ def _verdicts(roots: Sequence[str]) -> Dict[str, List[Tuple[str, str]]]:
         for dirpath, _, filenames in os.walk(os.path.join(root, "feedback")):
             for name in filenames:
                 data = _load_json(os.path.join(dirpath, name)) if name.endswith(FEEDBACK_SUFFIX) else None
-                alert_id = ((data or {}).get("alert") or {}).get("alert_id")
+                if data is None:
+                    continue
+                alert = data.get("alert")
+                if not isinstance(alert, dict) or not isinstance(alert.get("alert_id"), str):
+                    log.warning("Skipping malformed feedback %s", name)
+                    continue
+                alert_id = alert["alert_id"]
+                if not isinstance(data.get("verdict"), (str, type(None))):
+                    log.warning("Skipping malformed feedback %s", name)
+                    continue
                 if alert_id and data.get("verdict") not in (None, "none"):
                     found.setdefault(alert_id, []).append((str(data.get("time_utc")), data["verdict"]))
     return found
+
+
+def _finite(value: Any) -> float:
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError("timestamp must be finite")
+    # Check platform-supported dates before records reach a renderer.
+    dt.datetime.fromtimestamp(number)
+    return number
+
+
+def _optional_ts(value: Any) -> Optional[float]:
+    """A usable timestamp, or None when the field is missing or bad (one bad field never hides an alert)."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return _finite(value)
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
+
+
+def _text(value: Any, default: str) -> str:
+    return value if isinstance(value, str) and value else default
+
+
+def _people(value: Any) -> Optional[int]:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return None
+    return int(value)
 
 
 def load_records(roots: Sequence[str]) -> List[AlertRecord]:
@@ -76,16 +126,37 @@ def load_records(roots: Sequence[str]) -> List[AlertRecord]:
                     continue
                 alert_id = name[: -len(META_SUFFIX)]
                 alert = meta.get("alert") if isinstance(meta.get("alert"), dict) else {}
-                clip = os.path.join(root, str(meta.get("clip_path") or "").replace("\\", os.sep))
-                records.append(AlertRecord(
-                    alert_id=alert_id,
-                    camera=str(meta.get("camera_name") or ""),
-                    ts=float(meta.get("clip_end_ts") or os.path.getmtime(meta_path)),
-                    summary=str(alert.get("summary") or ""),
-                    command=str(alert.get("alert_command") or ""),
-                    clip_path=clip if meta.get("clip_path") and os.path.isfile(clip) else None,
-                    verdicts=tuple(v for _, v in sorted(verdicts.get(alert_id, []))),
-                ))
+                try:
+                    # Falsy or missing falls back to the file time; a present but unusable value is a bad record.
+                    ts = _finite(meta.get("clip_end_ts") or os.path.getmtime(meta_path))
+                    clip = os.path.join(root, str(meta.get("clip_path") or "").replace("\\", os.sep))
+                    summary = str(alert.get("summary") or "")
+                    yolo = meta.get("yolo") if isinstance(meta.get("yolo"), dict) else {}
+                    people = alert.get("people")
+                    if people is None:
+                        people = (alert.get("vlm") or {}).get("people") if isinstance(alert.get("vlm"), dict) else None
+                    detector_labels = yolo.get("trigger_classes") or alert.get("labels") or []
+                    if not isinstance(detector_labels, (list, tuple)):
+                        detector_labels = []
+                    records.append(AlertRecord(
+                        alert_id=alert_id,
+                        camera=_text(meta.get("camera_name"), ""),
+                        ts=ts,
+                        summary=summary,
+                        command=_text(alert.get("alert_command"), ""),
+                        clip_path=clip if meta.get("clip_path") and os.path.isfile(clip) else None,
+                        verdicts=tuple(v for _, v in sorted(verdicts.get(alert_id, []))),
+                        kind=_text(meta.get("kind"), "alert"),
+                        label=_text(alert.get("label"), ""),
+                        people=_people(people),
+                        mode=_text(meta.get("mode"), ""),
+                        detector_labels=tuple(str(x) for x in detector_labels),
+                        described=bool(summary),
+                        clip_start_ts=_optional_ts(meta.get("clip_start_ts")),
+                        trigger_ts=_optional_ts(meta.get("trigger_ts")),
+                    ))
+                except (OSError, TypeError, ValueError, OverflowError) as exc:
+                    log.warning("Skipping damaged meta %s: %s", meta_path, exc)
     return sorted(records, key=lambda r: r.ts)
 
 
