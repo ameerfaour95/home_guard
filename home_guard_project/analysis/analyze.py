@@ -87,6 +87,19 @@ class ParsedTask:
 # Parse export
 # ---------------------------------------------------------------------------
 
+def check_admin_center_ready(export_path: str) -> None:
+    """Refuse a batch whose ``_admin_center.json`` (next to the export) is not ready."""
+    marker = os.path.join(os.path.dirname(os.path.abspath(export_path)), "_admin_center.json")
+    if not os.path.isfile(marker):
+        return
+    with open(marker, "r", encoding="utf-8") as f:
+        state = json.load(f).get("state")
+    if state != "ready":
+        raise SystemExit(
+            f"This Admin Center batch is not ready (state: {state}) — publish it again under a new name"
+        )
+
+
 def parse_export(
     export_path: str, cfg: AnalysisConfig,
 ) -> List[ParsedTask]:
@@ -739,9 +752,13 @@ def write_yolo_labels(
         cam_date_dir = os.path.join(labels_dir, pt.camera_name, pt.date)
         os.makedirs(cam_date_dir, exist_ok=True)
 
-        ls_count = max([t.frames_count for t in pt.tracks] + [pt.frames_count, 0])
-        if ls_count <= 0:
-            ls_count = int(round(pt.duration_sec * pt.fps))
+        if pt.frame_space == "native":
+            # Exact decoded count; never duration*fps (rounding adds/drops frames).
+            ls_count = pt.frames_count or max([t.frames_count for t in pt.tracks] + [0])
+        else:
+            ls_count = max([t.frames_count for t in pt.tracks] + [pt.frames_count, 0])
+            if ls_count <= 0:
+                ls_count = int(round(pt.duration_sec * pt.fps))
         fmap, kf_fps = _frame_map(pt, ls_count, dataset_dir)
 
         frame_boxes: Dict[int, List[str]] = {n: [] for n, _ in fmap}
@@ -849,6 +866,7 @@ def run(
     skip_vlm: bool = False,
 ) -> None:
     """Run the full analysis pipeline."""
+    check_admin_center_ready(export_path)
     tasks = parse_export(export_path, cfg)
 
     if not tasks:

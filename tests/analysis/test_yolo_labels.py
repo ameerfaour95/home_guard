@@ -151,3 +151,37 @@ def test_fps_capped_at_10_with_meta_recovers(tmp_path):
     # Should have labels for the clip
     assert len(files) > 0
     assert any(f != "" for f in files.values())
+
+
+def test_native_zero_track_clip_gets_exactly_frames_count_files(tmp_path):
+    result = [{"type": "choices", "value": {"choices": ["x"]}}]
+    task = {"id": 1, "data": dict(meta_path=META, fps=30, duration_sec=1.5, frame_space="native",
+                                  frames_count=30), "annotations": [{"result": result}]}
+    exp = tmp_path / "export.json"
+    exp.write_text(json.dumps([task]))
+    write_yolo_labels(parse_export(str(exp), CFG), CFG, str(tmp_path / "out"))
+    d = tmp_path / "out" / "yolo" / "labels" / "cam" / "2026-01-01"
+    assert len(list(d.iterdir())) == 30
+
+
+def _batch(tmp_path, state):
+    exp = tmp_path / "batch.json"
+    exp.write_text("[]")
+    if state is not None:
+        (tmp_path / "_admin_center.json").write_text(json.dumps({"state": state}))
+    return str(exp)
+
+
+def test_admin_center_batch_not_ready_is_refused(tmp_path):
+    import pytest
+    from home_guard_project.analysis.analyze import run as analyze_run
+    with pytest.raises(SystemExit) as e:
+        analyze_run(_batch(tmp_path, "publishing"), CFG, str(tmp_path / "o"))
+    assert "not ready (state: publishing)" in str(e.value)
+
+
+def test_admin_center_ready_or_absent_marker_is_allowed(tmp_path):
+    from home_guard_project.analysis.analyze import check_admin_center_ready
+    check_admin_center_ready(_batch(tmp_path, "ready"))
+    d2 = tmp_path / "x"; d2.mkdir()
+    check_admin_center_ready(_batch(d2, None))
