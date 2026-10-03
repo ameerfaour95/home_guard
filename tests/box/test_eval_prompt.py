@@ -318,7 +318,7 @@ class RunTest(PreparedDirMixin, unittest.TestCase):
         rows = read_jsonl(os.path.join(results, f"{tag}.jsonl"))
         self.assertEqual([r["clip_id"] for r in rows], [
             "cam_a_1771696897_trigger", "cam_a_1771696900_trigger", "cam_b_1771700000_trigger"])
-        self.assertEqual(set(rows[0]), set(ev.RESULT_COLUMNS))
+        self.assertEqual(set(rows[0]), set(ev.ANSWER_COLUMNS), "the answer only; our truth comes from the manifest")
         by_id = {r["clip_id"]: r for r in rows}
         self.assertEqual(by_id["cam_a_1771696897_trigger"]["ai_label"], "normal")
         self.assertEqual(by_id["cam_a_1771696897_trigger"]["ai_summary"], "A person walks to the door.")
@@ -361,8 +361,9 @@ class RunTest(PreparedDirMixin, unittest.TestCase):
         summary = ev.run_eval(self.out, retry, tag="t1")
         self.assertEqual(retry.calls, 1)
         self.assertEqual(summary["errors"], 0)
-        rows = read_jsonl(os.path.join(self.out, "results", "t1.jsonl"))
-        self.assertEqual(len(rows), 3)
+        path = os.path.join(self.out, "results", "t1.jsonl")
+        self.assertEqual(len(read_jsonl(path)), 4, "the failed attempt stays in the file")
+        self.assertEqual(len(last_by_clip(path)), 3)
 
     def test_a_different_prompt_or_model_is_asked_again(self) -> None:
         ev.run_eval(self.out, ev.FakeBackend(), tag="t2")
@@ -650,6 +651,225 @@ class PromptFileTest(PreparedDirMixin, unittest.TestCase):
         with open(self.prompt_file, encoding="utf-8") as f:
             tag = ev.default_tag(f.read(), "fake", fake=True)
         self.assertTrue(os.path.isfile(os.path.join(self.out, "results", f"{tag}.jsonl")))
+
+
+def last_by_clip(path: str) -> Dict[str, dict]:
+    """The last line per clip, as resume reads it."""
+    out: Dict[str, dict] = {}
+    for r in read_jsonl(path):
+        out[r["clip_id"]] = r
+    return out
+
+
+class Interrupt(BaseException):
+    """Stands in for Ctrl+C or a killed process after one answer was written."""
+
+
+def stop_after_first_answer(line: str) -> None:
+    if line.startswith("["):
+        raise Interrupt(line)
+
+
+class ReviewFixTest(PreparedDirMixin, unittest.TestCase):
+    """The independent review's findings: the score always comes from the latest answer per clip
+    and the current tags, malformed answers are errors, and no saved answer is ever lost."""
+
+    NORMAL, EMPTY, ALERT = "cam_a_1771696897_trigger", "cam_a_1771696900_trigger", "cam_b_1771700000_trigger"
+
+    def setUp(self) -> None:
+        self.s3 = self.make_bucket()
+        ev.prepare(self.out, client=self.s3)
+        self.manifest_path = os.path.join(self.out, "manifest.jsonl")
+        self.original_prompt = inference.build_prompt
+
+    def tearDown(self) -> None:
+        inference.build_prompt = self.original_prompt
+        self.cleanup()
+
+    def results(self, tag: str, ext: str = "jsonl") -> str:
+        return os.path.join(self.out, "results", f"{tag}.{ext}")
+
+    def rewrite_manifest(self, change) -> None:
+        rows = [change(dict(r)) for r in read_jsonl(self.manifest_path)]
+        with open(self.manifest_path, "w", encoding="utf-8") as f:
+            for r in rows:
+                if r is not None:
+                    f.write(json.dumps(r) + "\n")
+
+    def interrupted_retry(self, tag: str) -> None:
+        """A first run with one failed clip, then a retry killed right after it saved the answer."""
+        ev.run_eval(self.out, ev.FakeBackend(fail_ids={self.EMPTY}), tag=tag)
+        with self.assertRaises(Interrupt):
+            ev.run_eval(self.out, ev.FakeBackend(), tag=tag, progress=stop_after_first_answer)
+        self.assertEqual(len(read_jsonl(self.results(tag))), 4, "the error row and its retry are both in the file")
+
+    # 1. The summary is derived from the answers, never trusted on its own.
+    def test_summary_is_recomputed_after_answers_were_added(self) -> None:
+        self.interrupted_retry("s1")
+        with open(self.results("s1", "summary.json"), encoding="utf-8") as f:
+            self.assertEqual(json.load(f)["errors"], 1, "the killed retry never rewrote the summary")
+        summary = ev.load_summary(self.out, "s1")
+        self.assertEqual((summary["rows"], summary["errors"]), (3, 0))
+        with open(self.results("s1", "summary.json"), encoding="utf-8") as f:
+            self.assertEqual(json.load(f)["errors"], 0, "the summary file is rewritten from the answers")
+
+    def test_summary_without_a_saved_one_counts_each_clip_once(self) -> None:
+        self.interrupted_retry("s2")
+        os.remove(self.results("s2", "summary.json"))
+        summary = ev.load_summary(self.out, "s2")
+        self.assertEqual((summary["rows"], summary["errors"]), (3, 0))
+        self.assertEqual(summary["empty_total"], 1)
+
+    def test_writes_never_use_a_fixed_temp_name(self) -> None:
+        ev.run_eval(self.out, ev.FakeBackend(), tag="tmp")
+        for name in ("tmp.jsonl", "tmp.csv", "tmp.summary.json"):
+            os.makedirs(os.path.join(self.out, "results", name + ".part"))
+        ev.run_eval(self.out, ev.FakeBackend(), tag="tmp")
+        ev.load_summary(self.out, "tmp")
+
+    # 2. Truth comes from the current manifest; changed inputs are asked again.
+    def test_a_changed_tag_is_scored_with_the_new_truth_without_asking(self) -> None:
+        first = ev.run_eval(self.out, ev.FakeBackend(), tag="truth")
+        self.assertEqual((first["alerts_total"], first["normal_total"]), (1, 1))
+
+        def retag(r: dict) -> dict:
+            if r["clip_id"] == self.NORMAL:
+                r["ours_label"], r["ours_text"] = "alert", "A man forces the gate."
+            return r
+
+        self.rewrite_manifest(retag)
+        again = ev.FakeBackend()
+        summary = ev.run_eval(self.out, again, tag="truth")
+        self.assertEqual(again.calls, 0, "a new tag needs no new answer")
+        self.assertEqual((summary["alerts_total"], summary["alerts_caught"], summary["normal_total"]), (2, 1, 0))
+        with open(self.results("truth", "csv"), encoding="utf-8", newline="") as f:
+            table = {r["clip_id"]: r for r in csv.DictReader(f)}
+        self.assertEqual(table[self.NORMAL]["ours_label"], "alert")
+        self.assertEqual(table[self.NORMAL]["ours_text"], "A man forces the gate.")
+        self.assertEqual(ev.load_summary(self.out, "truth")["alerts_total"], 2)
+
+    def test_changed_frames_are_asked_again_and_the_old_answer_kept(self) -> None:
+        import cv2
+
+        ev.run_eval(self.out, ev.FakeBackend(), tag="fp")
+        cv2.imwrite(os.path.join(self.out, "frames", f"{self.ALERT}_2.jpg"), np.full((48, 64, 3), 200, np.uint8))
+        again = ev.FakeBackend()
+        ev.run_eval(self.out, again, tag="fp")
+        self.assertEqual(again.calls, 1)
+        lines = read_jsonl(self.results("fp"))
+        self.assertEqual(len(lines), 4, "the answer to the old frames is kept")
+        old, new = [r for r in lines if r["clip_id"] == self.ALERT]
+        self.assertNotEqual(old["input_sha12"], new["input_sha12"])
+        self.assertRegex(new["input_sha12"], r"^[0-9a-f]{12}$")
+
+    def test_a_changed_camera_or_clip_time_is_asked_again(self) -> None:
+        ev.run_eval(self.out, ev.FakeBackend(), tag="cam")
+
+        def move(r: dict) -> dict:
+            if r["clip_id"] == self.NORMAL:
+                r["camera"] = "porch"
+            if r["clip_id"] == self.EMPTY:
+                r["local_time"] = "03:00:00"
+            return r
+
+        self.rewrite_manifest(move)
+        again = ev.FakeBackend()
+        ev.run_eval(self.out, again, tag="cam")
+        self.assertEqual(again.calls, 2)
+
+    # 3. Answers that are not a JSON object are errors; {} is "normal", as in production.
+    def test_malformed_answers(self) -> None:
+        answers = {self.NORMAL: ("{}", {}), self.EMPTY: ('["bad"]', ["bad"]), self.ALERT: ('"bad"', "bad")}
+
+        class Odd(ev.FakeBackend):
+            def ask(self, row, frames):
+                self.calls += 1
+                return answers[row["clip_id"]]
+
+        summary = ev.run_eval(self.out, Odd(), tag="odd")
+        rows = last_by_clip(self.results("odd"))
+        self.assertEqual((rows[self.NORMAL]["error"], rows[self.NORMAL]["ai_label"]), ("", inference.label_of({})))
+        self.assertEqual(rows[self.NORMAL]["ai_label"], "normal")
+        for clip_id, raw in ((self.EMPTY, '["bad"]'), (self.ALERT, '"bad"')):
+            self.assertEqual(rows[clip_id]["error"], "answer is not a JSON object")
+            self.assertEqual(rows[clip_id]["raw"], raw)
+        self.assertEqual(summary["errors"], 2)
+        self.assertEqual(summary["normal_flagged"], 0)
+
+    # 4. A smaller manifest never deletes answers.
+    def test_a_smaller_manifest_keeps_every_answer(self) -> None:
+        ev.run_eval(self.out, ev.FakeBackend(), tag="small")
+        self.rewrite_manifest(lambda r: None if r["clip_id"] == self.ALERT else r)
+        again = ev.FakeBackend()
+        summary = ev.run_eval(self.out, again, tag="small")
+        self.assertEqual(again.calls, 0)
+        self.assertEqual(set(last_by_clip(self.results("small"))), {self.NORMAL, self.EMPTY, self.ALERT})
+        self.assertEqual((summary["rows"], summary["alerts_total"]), (2, 0))
+        self.assertEqual(ev.load_summary(self.out, "small")["rows"], 2)
+
+    # 5. One writer per results file.
+    def test_a_held_lock_stops_a_second_run_before_any_call(self) -> None:
+        os.makedirs(os.path.join(self.out, "results"), exist_ok=True)
+        lock = self.results("busy", "lock")
+        with open(lock, "w", encoding="utf-8") as f:
+            f.write(str(os.getpid()))
+        backend = ev.FakeBackend()
+        with self.assertRaises(ev.ResultsLocked) as ctx:
+            ev.run_eval(self.out, backend, tag="busy")
+        self.assertIn(str(os.getpid()), str(ctx.exception))
+        self.assertEqual(backend.calls, 0)
+        self.assertTrue(os.path.isfile(lock), "the other run's lock is left alone")
+        self.assertEqual(ev.main(["run", "--dir", self.out, "--fake", "--tag", "busy"]), 3)
+        self.assertFalse(os.path.exists(self.results("busy")))
+
+    def test_the_lock_is_removed_after_a_run_and_after_an_interrupt(self) -> None:
+        ev.run_eval(self.out, ev.FakeBackend(fail_ids={self.EMPTY}), tag="lk")
+        self.assertFalse(os.path.exists(self.results("lk", "lock")))
+        with self.assertRaises(Interrupt):
+            ev.run_eval(self.out, ev.FakeBackend(), tag="lk", progress=stop_after_first_answer)
+        self.assertFalse(os.path.exists(self.results("lk", "lock")))
+
+    def test_a_stale_lock_is_reported_not_taken(self) -> None:
+        try:
+            import psutil  # noqa: F401
+        except ImportError:
+            self.skipTest("psutil is not installed")
+        import subprocess
+        import sys
+
+        done = subprocess.Popen([sys.executable, "-c", "pass"])
+        done.wait()
+        os.makedirs(os.path.join(self.out, "results"), exist_ok=True)
+        lock = self.results("stale", "lock")
+        with open(lock, "w", encoding="utf-8") as f:
+            f.write(str(done.pid))
+        backend = ev.FakeBackend()
+        with self.assertRaises(ev.ResultsLocked) as ctx:
+            ev.run_eval(self.out, backend, tag="stale")
+        self.assertIn("no longer running", str(ctx.exception))
+        self.assertIn(lock, str(ctx.exception))
+        self.assertEqual(backend.calls, 0)
+        self.assertTrue(os.path.isfile(lock))
+
+    # 6. A record cut inside a multibyte character.
+    def test_a_last_line_cut_inside_a_multibyte_character_is_skipped(self) -> None:
+        path = os.path.join(self.out, "cut.jsonl")
+        with open(path, "wb") as f:
+            f.write(b'{"clip_id": "a"}\n{"clip_id": "caf\xe2\x80')
+        with self.assertLogs("box.eval_prompt", level="WARNING"):
+            self.assertEqual(ev.read_jsonl(path), [{"clip_id": "a"}])
+        with open(path, "wb") as f:
+            f.write(b'{"clip_id": "a"}\n{"clip_id": "caf\xe2\x80"}\n{"clip_id": "c"}\n')
+        with self.assertRaises(ValueError):
+            ev.read_jsonl(path)
+
+    # 7. The prompt override takes the coming owner_language argument.
+    def test_override_accepts_owner_language(self) -> None:
+        with ev.prompt_override("cam={camera_name} lang={owner_language}"):
+            self.assertEqual(inference.build_prompt("porch", 0, "10:00:00", 0, 0, owner_language="he"),
+                             "cam=porch lang=he")
+            self.assertEqual(inference.build_prompt("porch", 0, "10:00:00", 0, 0), "cam=porch lang=en")
+        self.assertIs(inference.build_prompt, self.original_prompt)
 
 
 def row(ours: str, ai: str, summary: str = "A man walks.", ours_text: str = "A man walks by.", error: str = "") -> dict:

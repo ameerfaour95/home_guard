@@ -329,7 +329,9 @@ scp -i ~/.ssh/homeguard_box -r eval_set <user>@<box-ip>:C:/home_guard/eval_set
 .venv\Scripts\python.exe -m home_guard_project.box.eval_prompt summary --dir eval_set --tag <tag>
 ```
 
-`--prompt-file` tries a new wording without touching `inference.py`; `{camera_name}` and `{local_time_str}` in the file are filled in. Results go to `eval_set/results/<tag>.jsonl`, `.csv` and `.summary.json`, named by the tag. A stopped run continues where it left off, and a clip that failed is asked again. `--fake` checks the setup without calling the AI.
+`--prompt-file` tries a new wording without touching `inference.py`; `{camera_name}`, `{local_time_str}` and `{owner_language}` (default `en`) in the file are filled in. Results go to `eval_set/results/<tag>.jsonl`, `.csv` and `.summary.json`, named by the tag. A stopped run continues where it left off, and a clip that failed is asked again. `--fake` checks the setup without calling the AI.
+
+The `.jsonl` holds the AI's answers only, and answers are only ever appended. The score, the `.csv` and the `.summary.json` are rebuilt every time from the last answer per clip and the tags in the current `manifest.jsonl`. So after re-tagging clips, re-run `prepare` and then `run` or `summary`: the new tags are scored without any new AI call. Each answer also records a fingerprint of what the AI saw (camera name, the clip's time of day, the frame files). If any of these changed, that clip is asked again; the old answer stays in the file. Answers for clips that left the manifest are kept, just not scored. Only one run at a time may write a results file: a second run on the same tag exits with code 3 before asking anything. If a run crashed and left `results/<tag>.lock` behind, the message says so; delete the lock and run again.
 
 Paid answers are never deleted silently. The default tag is `<prompt version or file-hash>__<model>`, so a second model gets its own file. Every row also stores a hash of the prompt wording, so editing the prompt in `inference.py` without bumping its version is noticed. If a results file (usually one picked with `--tag`) holds answers from another prompt, wording or model, `run` prints which and exits with code 2 without touching it; pass `--overwrite` to replace them. A cut-off last line left by a killed run is skipped with a warning.
 
@@ -348,6 +350,7 @@ What the score means:
 | padding | Summaries that mention what is absent or the background ("without", "no one", "visible", "background", "parked") |
 | words per summary | The AI's length against ours |
 | errors | Clips the AI could not answer; they are left out of the other lines |
+| outdated | Shown only when some saved answers were for other frames, camera or time (not yet asked again); they are left out |
 
 ## Troubleshooting
 
