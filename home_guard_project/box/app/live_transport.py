@@ -26,8 +26,9 @@ class _Reader(QObject):
     @Slot()
     def start(self):
         self.directory.mkdir(parents=True, exist_ok=True)
-        self.watcher = QFileSystemWatcher([str(self.directory)], self)
+        self.watcher = QFileSystemWatcher([str(self.directory), str(self.directory.parent)], self)
         self.watcher.directoryChanged.connect(self.scan)
+        self.watcher.fileChanged.connect(self.scan)
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.scan)
         self.timer.start(250)
@@ -52,10 +53,28 @@ class _Reader(QObject):
                 self.last_touch = now
             except OSError:
                 pass
-        if self.inflight or not self.visible:
+        if self.inflight:
             return
+        status = {}
+        for filename, key in (("ai_status.json", "status"), ("telegram_chat.jsonl", "chat")):
+            path = self.directory.parent/filename
+            try:
+                stamp = (path.stat().st_mtime_ns, path.stat().st_size)
+                if str(path) not in self.watcher.files(): self.watcher.addPath(str(path))
+                if self.stamps.get(filename) == stamp: continue
+                if key == "status":
+                    from ..ai_status import read_status
+                    data = read_status(str(path))
+                    if not data: continue  # retry a partial/malformed write
+                else:
+                    from ..chat_feed import read_feed
+                    data = read_feed(str(path), limit=200)
+                status[key] = data
+                self.stamps[filename] = stamp
+            except (OSError, ValueError, UnicodeError):
+                continue
         frames = {}
-        for name in self.names:
+        for name in self.names if self.visible else ():
             path = self.directory/(camera_key(name)+".jpg")
             try:
                 stamp = path.stat().st_mtime_ns
@@ -68,9 +87,9 @@ class _Reader(QObject):
                 frames[name] = (image, stamp/1e9)
             except OSError:
                 continue
-        if frames:
+        if frames or status:
             self.inflight = True
-            self.ready.emit(frames)
+            self.ready.emit(dict(status, frames=frames))
 
     @Slot()
     def stop(self):
@@ -81,6 +100,7 @@ class _Reader(QObject):
 
 class LiveTransport(QObject):
     frames = Signal(object)
+    status = Signal(object)
     request = Signal(object)
     ack = Signal()
     stopping = Signal()
@@ -99,8 +119,9 @@ class LiveTransport(QObject):
         self.thread.start()
 
     @Slot(object)
-    def deliver(self, frames):
-        self.frames.emit(frames)
+    def deliver(self, packet):
+        if "status" in packet or "chat" in packet: self.status.emit(packet)
+        self.frames.emit(packet["frames"])
         self.ack.emit()
 
     def demand(self, names, hero, visible):

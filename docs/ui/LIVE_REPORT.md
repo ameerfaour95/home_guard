@@ -23,6 +23,8 @@ Remote correction: `backend.py` models setup; `engine_backend.py` runs setup
 processes. `remote_cameras.py` executes SSH snapshot commands and SCP copies for
 camera setup. There is no remote live-dashboard frame or `ai_status.json` transport.
 The dashboard reads local `LOG_DIR` even when a previous setup used a remote box.
+Further inspection found an existing HTTP file/status server in `serve.py`, but
+no Qt dashboard consumer. Its old `/viewer` contract only carries the hero name.
 
 The permitted environment is this Windows workstation. Actual N150 CPU and YOLO
 loop rate with/without the app cannot be claimed from this replay. No box or camera
@@ -58,3 +60,35 @@ Intermediate replay: [live_frames.json](live_frames.json): 16.14 hero fps,
 5.43–5.57 thumbnail fps, 7.23 ms median / 17.12 ms p95 file-to-paint,
 23.46 ms maximum scheduling lateness. Publisher CPU 11.72% of one workstation
 core, versus baseline 4.16%: **+7.56 percentage points**. This is not an N150 claim.
+
+## Part 3: live status and visible freshness
+
+The worker watches both AI-status atomic replacements and chat file appends, with
+re-arming and a recovery scan. Changed status is delivered before the associated
+frame batch. Alert-picture decoding also runs off the GUI thread. The dashboard's
+one-second timer is now for age/status housekeeping, not video delivery.
+
+Each camera shows a pulsing LIVE badge only for a recent distinct frame. After
+three seconds, its retained last picture dims and a `Reconnecting… N s` badge
+counts the outage. Fullscreen shares the original frame timestamp. Timeline
+timestamps update every second, including quiet groups. AI thinking retains the
+existing pulse. New rows use the shared 240 ms slide/fade, while unchanged rows,
+group expansion state and the scroll content survive updates. A retained visible
+row anchors scroll position; following the bottom continues to follow new rows.
+
+Laptop path: `python -m home_guard_project.box.app --remote-box USER@BOX` explicitly
+opens one existing-key SSH tunnel to loopback port 8765. `app/live_server.py`
+extends the existing read-only server with the new visibility lease; protected
+`serve.py` is unchanged. The remote worker requests hero frames every 90 ms and
+thumbnails every 180 ms, status every 350 ms, chat every 500 ms. Requests and
+decoding are off the GUI; each resource has at most one request in flight, GUI
+delivery is bounded, repeated image versions cannot refresh LIVE, and timeouts
+back off. Alert image downloads are limited to two and don't delay chat text.
+This remote dashboard is read only; existing setup/camera management remains in
+the setup flow. Both machines need this checkout's app code. No SSH or remote
+network request was made during development; remote ≥8 fps is not yet certified.
+
+After status changes, a 12-second local replay measured hero 16.07 fps,
+thumbnails 5.45–5.54 fps, AI write-to-paint 28.27 ms median / 52.15 ms maximum,
+and maximum UI scheduling lateness 21.98 ms. Final proof below supersedes these
+intermediate measurements.
