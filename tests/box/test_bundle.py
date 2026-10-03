@@ -13,6 +13,7 @@ MUST_INCLUDE = [
     "home_guard_project/data_collection/config.yaml",
     "home_guard_project/data_collection/data_collection.py",
     "home_guard_project/data_collection/discover.py",
+    "home_guard_project/data_collection/zones.py",
     "home_guard_project/s3_upload/s3_upload.py",
     "home_guard_project/s3_upload/config.yaml",
     "home_guard_project/labeling/utils/ffmpeg.py",
