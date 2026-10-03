@@ -178,6 +178,23 @@ TEMPLATES: Dict[str, Dict[str, str]] = {
     "btn_false": {"en": "Nothing there", "he": "אין שם כלום", "ar": "لا يوجد شيء"},
     "btn_expected": {"en": "It was expected", "he": "זה היה צפוי", "ar": "كان متوقعًا"},
     "btn_mute60": {"en": "Pause 1 hour", "he": "השתק לשעה", "ar": "إيقاف لمدة ساعة"},
+    "button_unused": {"en": "That button is no longer in use.", "he": "הכפתור הזה כבר לא בשימוש.",
+                      "ar": "هذا الزر لم يعد مستخدمًا."},
+    # -- tagging an alert from Telegram ------------------------------------------
+    "btn_tag_normal": {"en": "Normal", "he": "תקין", "ar": "طبيعي"},
+    "btn_tag_suspicious": {"en": "Suspicious", "he": "חשוד", "ar": "مريب"},
+    "btn_tag_escalation": {"en": "Escalation", "he": "אירוע חמור", "ar": "تصعيد"},
+    "btn_tag_empty": {"en": "Nothing there", "he": "אין שם כלום", "ar": "لا يوجد شيء"},
+    "btn_tag_other": {"en": "Other…", "he": "אחר…", "ar": "غير ذلك…"},
+    "tag_ask_text": {"en": "Write the correct tag for this clip.", "he": "כתבו את התיוג הנכון לסרטון הזה.",
+                     "ar": "اكتب الوسم الصحيح لهذا المقطع."},
+    "tag_saved": {"en": "✓ Saved as {label}.", "he": "✓ נשמר בתור {label}.", "ar": "✓ تم الحفظ كـ {label}."},
+    "tag_saved_text": {"en": "✓ Saved as: \"{text}\"", "he": "✓ נשמר בתור: \"{text}\"",
+                       "ar": "✓ تم الحفظ كـ: \"{text}\""},
+    "tag_undone": {"en": "Tag removed.", "he": "התיוג הוסר.", "ar": "تمت إزالة الوسم."},
+    "tag_expired": {"en": "That tag request expired; tap Other… again.",
+                    "he": "בקשת התיוג פגה; לחצו שוב על אחר…",
+                    "ar": "انتهت صلاحية طلب الوسم؛ اضغط على غير ذلك… مرة أخرى."},
 }
 
 

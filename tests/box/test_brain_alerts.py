@@ -58,7 +58,9 @@ class GradedAlertTest(unittest.TestCase):
         self.assertEqual(posts[1]["disable_notification"], "true")
         self.assertTrue(posts[1]["text"].endswith(t("feedback_question", "he")))
         labels = [b["text"] for row in json.loads(feedback_keyboard("en"))["inline_keyboard"] for b in row]
-        self.assertEqual(labels, ["Real alert", "Nothing there", "It was expected", "Pause 1 hour"])
+        # Task 18b: the tag buttons replaced the four verdict buttons; the pause stays.
+        self.assertEqual(labels, ["🟢 Normal", "🟡 Suspicious", "🔴 Escalation",
+                                  "⚪ Nothing there", "✏️ Other…", "⏸ Pause 1 hour"])
 
     def test_dispatch_uses_the_graded_text_and_silence(self) -> None:
         seen = {}
@@ -245,7 +247,9 @@ class GradedAlertWiringTest(unittest.TestCase):
 
     def test_buttons_speak_hebrew(self) -> None:
         labels = [b["text"] for row in json.loads(feedback_keyboard("he"))["inline_keyboard"] for b in row]
-        self.assertEqual(labels, [t(k, "he") for k in ("btn_true", "btn_false", "btn_expected", "btn_mute60")])
+        self.assertEqual([label.split(" ", 1)[1] for label in labels],
+                         [t(k, "he") for k in ("btn_tag_normal", "btn_tag_suspicious", "btn_tag_escalation",
+                                               "btn_tag_empty", "btn_tag_other", "btn_mute60")])
         self.assertEqual(t("feedback_question", "en"), FEEDBACK_QUESTION)
 
 

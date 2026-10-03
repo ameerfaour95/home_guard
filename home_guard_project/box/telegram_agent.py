@@ -16,8 +16,10 @@ One bot token can have only one poller. Each box therefore needs its own bot
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import logging
+import math
 import os
 import threading
 import time
@@ -29,17 +31,24 @@ from typing import Any, Callable, Dict, List, Optional, Sequence
 from . import telegram_notify
 from .agent import UNAVAILABLE_REPLY, AgentContext, OwnerAgent, make_chat_model
 from .chat_feed import ChatFeed
+from .brain.i18n import LANGS
 from .brain.i18n import t as tr
 from .brain.deliver import choice_keyboard
 from .boxconfig import LOG_DIR, PRODUCTION_ARCHIVE_DIR, PRODUCTION_LIVE_DIR, PRODUCTION_RETENTION_DAYS
 from .feedback import (
     FEEDBACK_BUTTONS,
+    MAX_TAG_TEXT_CHARS,
+    OWNER_LABELS,
+    TAG_UNDONE_NOTE,
     AlertIndex,
     Feedback,
     MuteState,
+    _read_json,
+    _write_json,
     button_feedback,
-    confirmation_text,
     save_feedback,
+    undo_training_tag,
+    verdict_for,
 )
 from .telegram_notify import TelegramConfig
 
@@ -54,21 +63,129 @@ Post = Callable[..., Dict[str, Any]]
 BUTTON_LABELS = {code: label for row in FEEDBACK_BUTTONS for label, code in row}
 
 REMIND_SEC = 300.0   # an escalation nobody answered is sent once more, loud, after this long
-# The i18n key of each button's label; a button not listed here keeps its English label.
-_BUTTON_KEYS = {"fb:true": "btn_true", "fb:false": "btn_false", "fb:expected": "btn_expected", "fb:mute60": "btn_mute60"}
+TAG_WAIT_SEC = 600.0  # how long "Other…" waits for the owner's words
+CALLBACK_DATA_LIMIT = 64  # Telegram refuses a button whose callback data is longer (bytes)
+
+# The buttons under an alert: (emoji, i18n key, callback code). The owner tags the clip with one of
+# OWNER_LABELS; "Other…" waits for their own words; fb:mute60 stays the pause.
+_ALERT_BUTTONS = (
+    (("🟢", "btn_tag_normal", "tag:normal"), ("🟡", "btn_tag_suspicious", "tag:suspicious"),
+     ("🔴", "btn_tag_escalation", "tag:escalation")),
+    (("⚪", "btn_tag_empty", "tag:empty"), ("✏️", "btn_tag_other", "tag:other"), ("⏸", "btn_mute60", "fb:mute60")),
+)
 
 
-def _button_label(label: str, code: str, lang: str) -> str:
-    key = _BUTTON_KEYS.get(code)
-    return tr(key, lang) if key else label
+def feedback_keyboard(lang: str = "en", ai_label: str = "") -> str:
+    """The buttons under an alert, as Telegram's ``reply_markup`` JSON, in the box language.
 
+    The label the AI gave the clip (*ai_label*) carries a leading "✓ ", so tagging what the AI already
+    said is one glance away.
+    """
+    def text(emoji: str, key: str, code: str) -> str:
+        words = f"{emoji} {tr(key, lang)}"
+        return f"✓ {words}" if ai_label and code == f"tag:{ai_label}" else words
 
-def feedback_keyboard(lang: str = "en") -> str:
-    """The buttons under an alert, as Telegram's ``reply_markup`` JSON, in the box language."""
     return json.dumps({"inline_keyboard": [
-        [{"text": _button_label(label, code, lang), "callback_data": code} for label, code in row]
-        for row in FEEDBACK_BUTTONS
+        [{"text": text(*button), "callback_data": button[2]} for button in row] for row in _ALERT_BUTTONS
     ]})
+
+
+def box_language() -> str:
+    """The box language (``owner_language`` in box.yaml), read each time: it changes without a restart."""
+    try:
+        from .boxconfig import load_box_settings  # noqa: PLC0415
+
+        code = str(load_box_settings().get("owner_language") or "en")
+    except Exception:  # noqa: BLE001
+        return "en"
+    return code if code in LANGS else "en"
+
+
+class PendingTags:
+    """Who tapped "Other…" on which alert: that person's next message in that chat is the tag.
+
+    Kept as JSON (``<feedback_dir>/.pending_tags.json``) so a restart does not lose a wait. A wait
+    ends after *ttl* seconds; the question it asked is remembered for a day, so a late reply to it
+    can be told that it expired. Never raises: a damaged file is an empty store.
+    """
+
+    KEEP_EXPIRED_SEC = 86400.0
+    KEEP_EXPIRED_MAX = 100
+
+    def __init__(self, path: str, ttl: float = TAG_WAIT_SEC) -> None:
+        self.path, self.ttl = path, float(ttl)
+        data = _read_json(path)
+        pending = data.get("pending") if isinstance(data.get("pending"), dict) else {}
+        expired = data.get("expired_prompts") if isinstance(data.get("expired_prompts"), dict) else {}
+        self._pending: Dict[str, Dict[str, Any]] = {
+            str(k): v for k, v in pending.items() if isinstance(v, dict) and self._valid(v)}
+        self._expired: Dict[str, float] = {}
+        for key, ts in expired.items():
+            try:
+                stamp = float(ts)
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if math.isfinite(stamp):
+                self._expired[str(key)] = stamp
+
+    @staticmethod
+    def _valid(entry: Dict[str, Any]) -> bool:
+        try:
+            return isinstance(entry.get("alert_id"), str) and bool(entry["alert_id"]) and math.isfinite(
+                float(entry.get("ts")))
+        except (TypeError, ValueError, OverflowError):
+            return False
+
+    @staticmethod
+    def _key(chat_id: Any, user_id: Any) -> str:
+        return f"{chat_id}:{user_id}"
+
+    def _save(self) -> None:
+        try:
+            _write_json(self.path, {"pending": self._pending, "expired_prompts": self._expired})
+        except Exception as exc:  # noqa: BLE001 - a tag wait must never stop the inbox
+            log.warning("Pending tags not saved: %s", exc)
+
+    def _purge(self, now: float) -> bool:
+        changed = False
+        for key, entry in list(self._pending.items()):
+            if now - float(entry["ts"]) > self.ttl:
+                del self._pending[key]
+                if entry.get("prompt_id") is not None:
+                    self._expired[f"{entry.get('chat_id')}:{entry.get('prompt_id')}"] = now
+                changed = True
+        keep = sorted(((k, v) for k, v in self._expired.items() if now - v <= self.KEEP_EXPIRED_SEC),
+                      key=lambda kv: kv[1])[-self.KEEP_EXPIRED_MAX:]
+        if len(keep) != len(self._expired):
+            self._expired = dict(keep)
+            changed = True
+        return changed
+
+    def add(self, chat_id: Any, user_id: Any, alert_id: str, now: float, prompt_id: Optional[int] = None) -> None:
+        self._purge(now)
+        self._pending[self._key(chat_id, user_id)] = {"chat_id": str(chat_id), "alert_id": str(alert_id),
+                                                      "ts": float(now), "prompt_id": prompt_id}
+        self._save()
+
+    def take(self, chat_id: Any, user_id: Any, now: float) -> Optional[str]:
+        """The alert *user_id* is tagging in *chat_id*, removed from the store; None when nothing waits."""
+        changed = self._purge(now)
+        entry = self._pending.pop(self._key(chat_id, user_id), None)
+        if changed or entry is not None:
+            self._save()
+        return str(entry["alert_id"]) if entry else None
+
+    def cancel(self, chat_id: Any, user_id: Any) -> None:
+        if self._pending.pop(self._key(chat_id, user_id), None) is not None:
+            self._save()
+
+    def expired_prompt(self, chat_id: Any, message_id: Any, now: float) -> bool:
+        """True (once) when *message_id* is an "Other…" question whose wait ran out."""
+        changed = self._purge(now)
+        found = self._expired.pop(f"{chat_id}:{message_id}", None) is not None
+        if changed or found:
+            self._save()
+        return found
 
 
 def owner_reacted(feedback_dir: str, alert_id: str) -> bool:
@@ -108,7 +225,7 @@ def send_alert(
         log.info("Telegram alert not sent (%s): %s", reason, text)
         return {"sent": False, "reason": reason}
     body = f"{text}\n\n{tr('feedback_question', lang)}"
-    keyboard = feedback_keyboard(lang)
+    keyboard = feedback_keyboard(lang, ai_label=str((alert.get("label") if isinstance(alert, dict) else "") or ""))
     quiet = {"disable_notification": "true"} if silent else {}
     results = []
     for chat_id in cfg.chat_ids:
@@ -337,7 +454,7 @@ def start(
     except Exception as exc:  # noqa: BLE001 - a missing library must not stop the alerts
         log.warning("Owner agent not available (%s); buttons still work.", exc)
     inbox = TelegramInbox(cfg, agent, index, mute, live_dir, os.path.join(log_dir, "telegram_offset.json"),
-                          feed=feed, deliverer=deliverer)
+                          feed=feed, deliverer=deliverer, archive_dir=archive_dir, lang=box_language)
     assistant = OwnerAssistant(cfg=cfg, index=index, mute=mute, inbox=inbox, feed=feed, deliverer=deliverer,
                                feedback_dir=live_dir, archive_dir=archive_dir)
     if cfg.enabled and not cfg.dry_run:
@@ -379,9 +496,16 @@ class TelegramInbox:
         now: Callable[[], float] = time.time,
         feed: Optional[ChatFeed] = None,
         deliverer: Any = None,
+        training_dir: Optional[str] = None,
+        archive_dir: Optional[str] = None,
+        lang: Optional[Callable[[], str]] = None,
     ) -> None:
         self.feed = feed
         self.deliverer = deliverer
+        # Where a tagged clip is copied for training, and the archive searched for it (None: the box's own).
+        self.training_dir, self.archive_dir = training_dir, archive_dir
+        self._lang_source = lang          # the box language for what the code writes; None: English
+        self.pending = PendingTags(os.path.join(feedback_dir, ".pending_tags.json"))
         self._seen = deque(maxlen=200)
         self.answered: set = set()       # alert ids the owner answered in this run (the reminder checks it first)
         self.cfg, self.agent, self.index, self.mute = cfg, agent, index, mute
@@ -407,12 +531,18 @@ class TelegramInbox:
     # -- sending ----------------------------------------------------------------
     def _say(self, chat_id: str, text: str, reply_to: Optional[int] = None,
              buttons: Sequence[str] = (), undo_token: str = "", lang: str = "en",
-             question_token: str = "") -> None:
+             question_token: str = "", undo_data: str = "", markup: Optional[Dict[str, Any]] = None,
+             entities: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+        """Send *text* (with retries) and return Telegram's answer. *undo_data* is a whole Undo callback
+        code (``tu:...``); *markup* is used when there are no buttons (a ``force_reply``)."""
         fields = {"chat_id": chat_id, "text": text}
         if reply_to is not None:
             fields["reply_to_message_id"] = str(reply_to)
             fields["allow_sending_without_reply"] = "true"
-        undo_row = [{"text": tr("undo_button", lang), "callback_data": f"u:{undo_token}"}] if undo_token else None
+        if entities:
+            fields["entities"] = json.dumps(entities)
+        undo_code = undo_data or (f"u:{undo_token}" if undo_token else "")
+        undo_row = [{"text": tr("undo_button", lang), "callback_data": undo_code}] if undo_code else None
         if buttons:
             # A question asked after something was already changed: the choices, then the Undo row.
             markup = json.loads(choice_keyboard(buttons, question_token))
@@ -421,11 +551,14 @@ class TelegramInbox:
             fields["reply_markup"] = json.dumps(markup)
         elif undo_row:
             fields["reply_markup"] = json.dumps({"inline_keyboard": [undo_row]})
+        elif markup:
+            fields["reply_markup"] = json.dumps(markup)
         # A dropped connection (WinError 10054) once swallowed the confirmation of a pause:
         # the owner never learned the house was unwatched. Try again before giving up.
+        resp: Any = {}
         for attempt in range(3):
             try:
-                self._post(self.cfg.bot_token, "sendMessage", fields)
+                resp = self._post(self.cfg.bot_token, "sendMessage", fields)
                 break
             except (urllib.error.URLError, OSError) as exc:
                 if attempt == 2:
@@ -433,6 +566,7 @@ class TelegramInbox:
                 log.warning("Telegram answer not sent (%s); trying again.", exc)
                 time.sleep(2 * (attempt + 1))
         self._note("assistant", "answer", text)
+        return resp if isinstance(resp, dict) else {}
 
     def _after(self, reply: Any) -> None:
         for action in getattr(reply, "after", ()) or ():
@@ -490,6 +624,10 @@ class TelegramInbox:
         if not self._allowed(chat_id):
             return
         code = str(query.get("data") or "")
+        if code.startswith(("tag:", "tu:")):          # tagging: before the v1/v2 split, both agents share it
+            self._on_tag_button(query, message, chat_id, code)
+            return
+        self._cancel_tag(chat_id, (query.get("from") or {}).get("id"))   # any other tap ends an "Other…" wait
         if getattr(self.agent, "version", 1) == 2 and (code.startswith("cl:") or code.startswith("u:")):
             try:   # only stops the button's spinner: a dropped connection here must not lose the tap
                 self._post(self.cfg.bot_token, "answerCallbackQuery", {"callback_query_id": str(query.get("id"))})
@@ -512,23 +650,178 @@ class TelegramInbox:
                 self._send_v2(chat_id, reply, message.get("message_id"))
             return
         feedback = button_feedback(code, self._now())
-        answer = confirmation_text(feedback) if feedback else "That button is no longer in use."
+        answer = self._button_answer(feedback, self._language())
         tapped_alert = self.index.lookup(chat_id, message.get("message_id"))
         self._note("owner", "button", BUTTON_LABELS.get(code, code), _who(query.get("from") or {})["name"], tapped_alert)
         if feedback:
             alert = tapped_alert
             self._mark_answered(alert)
             self.mute.apply(feedback, self._now())
-            save_feedback(self.feedback_dir, alert, feedback, "", _who(query.get("from") or {}), chat_id, self._now())
+            save_feedback(self.feedback_dir, alert, feedback, "", _who(query.get("from") or {}), chat_id, self._now(),
+                          training_dir=self.training_dir, archive_dir=self.archive_dir)
         # Stops the button's spinner, then leaves a visible line in the chat.
         self._post(self.cfg.bot_token, "answerCallbackQuery", {"callback_query_id": str(query.get("id"))})
         self._say(chat_id, answer, reply_to=message.get("message_id"))
+
+    # -- tagging an alert ------------------------------------------------------------
+    def _language(self) -> str:
+        try:
+            code = self._lang_source() if self._lang_source is not None else "en"
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Box language not read: %s", exc)
+            return "en"
+        return code if code in LANGS else "en"
+
+    @staticmethod
+    def _button_answer(feedback: Optional[Feedback], lang: str) -> str:
+        """The confirmation of an old ``fb:`` button, in the box language."""
+        if feedback is None:
+            return tr("button_unused", lang)
+        if feedback.action == "mute" and feedback.mute_until:
+            return tr("paused_all", lang, until=dt.datetime.fromtimestamp(feedback.mute_until).strftime("%H:%M"))
+        if feedback.verdict in ("true_alert", "false_alarm", "real_but_wrong", "expected", "missed_event"):
+            return tr("verdict_saved", lang, verdict=tr(f"verdict_{feedback.verdict}", lang))
+        return tr("button_unused", lang)
+
+    def _cancel_tag(self, chat_id: str, user_id: Any) -> None:
+        try:
+            self.pending.cancel(chat_id, user_id)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Pending tag not cancelled: %s", exc)
+
+    @staticmethod
+    def _undo_code(alert_id: str) -> str:
+        code = f"tu:{alert_id}"
+        return code if len(code.encode("utf-8")) <= CALLBACK_DATA_LIMIT else ""
+
+    def _answer_callback(self, query: Dict[str, Any], text: str = "") -> None:
+        fields = {"callback_query_id": str(query.get("id"))}
+        if text:
+            fields["text"] = text[:200]
+        self._post(self.cfg.bot_token, "answerCallbackQuery", fields)
+
+    def _ask_for_tag(self, chat_id: str, sender: Dict[str, Any], reply_to: Any, lang: str) -> Dict[str, Any]:
+        """Ask the tapping person for their own words, as a forced reply only they are prompted for.
+
+        Telegram's ``selective`` targets the people mentioned in the text, so the question names them.
+        """
+        ask = tr("tag_ask_text", lang)
+        force = {"force_reply": True, "selective": True}
+        username = str(sender.get("username") or "")
+        if username:
+            return self._say(chat_id, f"@{username} {ask}", reply_to=reply_to, markup=force)
+        name = str(sender.get("first_name") or "") or "🙂"
+        mention = {"type": "text_mention", "offset": 0, "length": len(name.encode("utf-16-le")) // 2,
+                   "user": {"id": sender.get("id"), "is_bot": False, "first_name": name}}
+        return self._say(chat_id, f"{name} {ask}", reply_to=reply_to, markup=force, entities=[mention])
+
+    def _on_tag_button(self, query: Dict[str, Any], message: Dict[str, Any], chat_id: str, code: str) -> None:
+        """``tag:<label>`` and ``tu:<alert_id>``. A tag never pauses or changes a setting, and never raises."""
+        lang = self._language()
+        sender = query.get("from") or {}
+        who = _who(sender)
+        user_id = sender.get("id")
+        answered = False
+        try:
+            now = self._now()
+            if code.startswith("tu:"):
+                self._cancel_tag(chat_id, user_id)
+                alert_id = code[3:]
+                alert = self.index.alert(alert_id) or {"alert_id": alert_id}
+                self._note("owner", "button", _button_text(message, code, tr("undo_button", lang)), who["name"], alert)
+                save_feedback(self.feedback_dir, alert, Feedback(verdict="none", note=TAG_UNDONE_NOTE, source="button"),
+                              "", who, chat_id, now, training_dir=self.training_dir, archive_dir=self.archive_dir)
+                undo_training_tag(alert, "", who, now, self.training_dir)
+                self._answer_callback(query)
+                answered = True
+                self._say(chat_id, tr("tag_undone", lang), reply_to=message.get("message_id"))
+                return
+            label = code[4:]
+            known = label in OWNER_LABELS
+            alert = self.index.lookup(chat_id, message.get("message_id")) if known else None
+            self._note("owner", "button", _button_text(message, code, tr(f"btn_tag_{label}", lang) if known else code),
+                       who["name"], alert)
+            if not alert or not alert.get("alert_id"):
+                self._cancel_tag(chat_id, user_id)
+                self._answer_callback(query)
+                answered = True
+                self._say(chat_id, tr("button_unused", lang), reply_to=message.get("message_id"))
+                return
+            alert_id = str(alert["alert_id"])
+            self._mark_answered(alert)
+            if label == "other":
+                self._answer_callback(query)
+                answered = True
+                resp = self._ask_for_tag(chat_id, sender, message.get("message_id"), lang)
+                self.pending.add(chat_id, user_id, alert_id, now, prompt_id=(resp.get("result") or {}).get("message_id"))
+                return
+            self._cancel_tag(chat_id, user_id)
+            feedback = Feedback(verdict=verdict_for(label, str(alert.get("label") or "")), owner_label=label,
+                                tagged_by=who["name"] or str(user_id or ""), source="button")
+            save_feedback(self.feedback_dir, alert, feedback, "", who, chat_id, now,
+                          training_dir=self.training_dir, archive_dir=self.archive_dir)
+            self._answer_callback(query)
+            answered = True
+            self._say(chat_id, tr("tag_saved", lang, label=tr(f"btn_tag_{label}", lang)),
+                      reply_to=message.get("message_id"), undo_data=self._undo_code(alert_id), lang=lang)
+        except Exception as exc:  # noqa: BLE001 - a tag must never stop the inbox
+            log.warning("Tag %s not saved: %s", code, exc)
+            if not answered:
+                try:
+                    self._answer_callback(query, tr("failed", lang, what=tr("what_record_verdict", lang),
+                                                    reason=tr("reason_error", lang)))
+                except Exception as exc2:  # noqa: BLE001
+                    log.warning("Could not answer the tag button: %s", exc2)
+
+    def _take_tag_text(self, chat_id: str, sender: Dict[str, Any], text: str, message: Dict[str, Any]) -> bool:
+        """True when *text* was handled as the words of an "Other…" tag (or a late reply to its question):
+        then neither agent sees it. A command ("/...") ends the wait and goes on as usual."""
+        user_id = sender.get("id")
+        if text.startswith("/"):
+            self._cancel_tag(chat_id, user_id)
+            return False
+        lang = self._language()
+        taken = False
+        try:
+            now = self._now()
+            alert_id = self.pending.take(chat_id, user_id, now)
+            who = _who(sender)
+            if not alert_id:
+                replied = (message.get("reply_to_message") or {}).get("message_id")
+                if replied is not None and self.pending.expired_prompt(chat_id, replied, now):
+                    self._note("owner", "message", text, who["name"])
+                    self._say(chat_id, tr("tag_expired", lang), reply_to=message.get("message_id"))
+                    return True
+                return False
+            taken = True
+            alert = self.index.alert(alert_id) or {"alert_id": alert_id}
+            self._note("owner", "message", text, who["name"], alert)
+            self._mark_answered(alert)
+            words = text[:MAX_TAG_TEXT_CHARS]
+            feedback = Feedback(verdict=verdict_for("other", str(alert.get("label") or "")), owner_label="other",
+                                owner_text=words, tagged_by=who["name"] or str(user_id or ""), source="text")
+            save_feedback(self.feedback_dir, alert, feedback, text, who, chat_id, now,
+                          training_dir=self.training_dir, archive_dir=self.archive_dir)
+            self._say(chat_id, tr("tag_saved_text", lang, text=words), reply_to=message.get("message_id"),
+                      undo_data=self._undo_code(alert_id), lang=lang)
+            return True
+        except Exception as exc:  # noqa: BLE001 - a tag must never stop the inbox
+            log.warning("Tag text not saved: %s", exc)
+            if taken:
+                try:
+                    self._say(chat_id, tr("failed", lang, what=tr("what_record_verdict", lang),
+                                          reason=tr("reason_error", lang)), reply_to=message.get("message_id"))
+                except Exception as exc2:  # noqa: BLE001
+                    log.warning("Could not say the tag failed: %s", exc2)
+            return taken
 
     def _on_message(self, message: Dict[str, Any]) -> None:
         chat_id = str((message.get("chat") or {}).get("id"))
         sender = message.get("from") or {}
         text = str(message.get("text") or "").strip()
         if not self._allowed(chat_id) or sender.get("is_bot") or not text:
+            return
+        if self._take_tag_text(chat_id, sender, text, message):
             return
         replied = (message.get("reply_to_message") or {}).get("message_id")
         alert = self.index.lookup(chat_id, replied) if replied is not None else None

@@ -54,7 +54,13 @@ FIND_SPAN_SEC = 3600.0  # "the video from 3pm" searches the hour from 15:00
 
 FEEDBACK_QUESTION = "Was this alert right? Tap a button, or just reply in your own words."
 
-# Rows of (label, code) for the buttons under every alert.
+# The labels the owner tags an alert with from Telegram (telegram_agent.feedback_keyboard).
+OWNER_LABELS = ("normal", "suspicious", "escalation", "empty", "other")
+MAX_TAG_TEXT_CHARS = 500
+TAG_UNDONE_NOTE = "tag undone"
+
+# Rows of (label, code) of the first buttons under an alert. Alerts already sent carry them, so the
+# codes stay accepted (button_feedback); new alerts carry the tag buttons, and fb:mute60 stays the pause.
 FEEDBACK_BUTTONS: Tuple[Tuple[Tuple[str, str], ...], ...] = (
     (("Real alert", "fb:true"), ("Nothing there", "fb:false")),
     (("It was expected", "fb:expected"), ("Pause 1 hour", "fb:mute60")),
@@ -80,8 +86,24 @@ class Feedback:
     mute_until: Optional[float] = None  # epoch seconds; set only when action is "mute"
     camera: Optional[str] = None        # the camera a pause applies to; None means all cameras
     note: str = ""
-    source: str = "text"                # "text" (through the model) or "button"
+    source: str = "text"                # "text" (written by the owner) or "button"
     query: Optional[Query] = None       # set only when action is "find"
+    owner_label: str = ""               # a tag from Telegram: one of OWNER_LABELS
+    owner_text: str = ""                # the owner's own words for an "other" tag
+    tagged_by: str = ""                 # who tagged it (name, or Telegram user id)
+
+
+def verdict_for(owner_label: str, ai_label: str) -> str:
+    """The verdict an owner's tag means, given the AI's label. The one mapping every tagging path uses."""
+    if owner_label == "empty":
+        return "false_alarm"
+    if owner_label == "normal":
+        return "expected"
+    if owner_label in ("suspicious", "escalation"):
+        return "true_alert" if owner_label == ai_label else "real_but_wrong"
+    if owner_label == "other":
+        return "real_but_wrong"
+    return "none"
 
 
 # ----------------------------------------------------------------------------
@@ -540,6 +562,14 @@ class AlertIndex:
         return [(entry["chat_id"], entry["message_id"]) for entry in self._entries
                 if (entry.get("alert") or {}).get("alert_id") == alert_id]
 
+    def alert(self, alert_id: str) -> Optional[Dict[str, Any]]:
+        """The newest stored record of the alert *alert_id*, or None."""
+        for entry in reversed(self._entries):
+            alert = entry.get("alert") if isinstance(entry, dict) else None
+            if isinstance(alert, dict) and alert.get("alert_id") == alert_id:
+                return alert
+        return None
+
     def latest(self, chat_id: Any, now: float, max_age_sec: float = 6 * 3600) -> Optional[Dict[str, Any]]:
         """The newest alert sent to *chat_id*, for a message that replies to nothing. None if it is too old to guess."""
         for entry in reversed(self._entries):
@@ -625,6 +655,9 @@ def save_feedback(
         "raw_text": raw_text,
         "from": who,
         "chat_id": str(chat_id),
+        "owner_label": feedback.owner_label,
+        "owner_text": feedback.owner_text,
+        "tagged_by": feedback.tagged_by,
     })
     if feedback.verdict in LABELLING_VERDICTS and (alert or {}).get("alert_id"):
         try:
@@ -688,6 +721,10 @@ def keep_for_training(
         "raw_text": raw_text,
         "source": feedback.source,
         "from": (who or {}).get("name") or "",
+        "owner_label": feedback.owner_label,
+        "owner_text": feedback.owner_text,
+        "tagged_by": feedback.tagged_by,
+        "ai_label": str(alert.get("label") or ""),
     }
     kept = _alert_files(alert_id, [training_dir])
     if kept:
@@ -717,3 +754,57 @@ def keep_for_training(
     _write_json(new_meta, meta)
     log.info("Kept the clip of %s for training with the owner's answer (%s).", alert_id, feedback.verdict)
     return new_meta
+
+
+def _is_tag_answer(answer: Any) -> bool:
+    return isinstance(answer, dict) and bool(answer.get("owner_label") or answer.get("note") == TAG_UNDONE_NOTE)
+
+
+def undo_training_tag(
+    alert: Dict[str, Any],
+    raw_text: str,
+    who: Dict[str, Any],
+    now: float,
+    training_dir: Optional[str] = None,
+) -> str:
+    """Take back a Telegram tag's training example. Returns ``"removed"``, ``"noted"`` or ``"none"``.
+
+    A copy that only tags ever answered was created by a tag (``kind`` is ``owner_feedback``): the clip
+    and its meta are removed. A copy that was there anyway - inference keeps every real alert, and an
+    earlier button or written answer may have made it - stays, and gets an undo answer at the end of
+    ``owner_feedback`` (the newest answer wins, as for the feedback records).
+    """
+    from .boxconfig import LIVE_DIR  # noqa: PLC0415
+
+    training_dir = training_dir or LIVE_DIR
+    alert_id = str((alert or {}).get("alert_id") or "")
+    if not alert_id:
+        return "none"
+    kept = _alert_files(alert_id, [training_dir])
+    if not kept:
+        return "none"
+    meta_path, clip_path = kept
+    with open(meta_path, encoding="utf-8") as f:
+        meta = json.load(f)
+    answers = meta.get("owner_feedback") if isinstance(meta.get("owner_feedback"), list) else []
+    if meta.get("kind") == "owner_feedback" and answers and all(_is_tag_answer(a) for a in answers):
+        os.remove(meta_path)                                  # the meta first: a clip without a meta is ignored
+        os.remove(clip_path)
+        log.info("Removed the training copy of %s: its tag was undone.", alert_id)
+        return "removed"
+    answers.append({
+        "time_utc": dt.datetime.fromtimestamp(now, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "verdict": "none",
+        "note": TAG_UNDONE_NOTE,
+        "raw_text": raw_text,
+        "source": "button",
+        "from": (who or {}).get("name") or "",
+        "owner_label": "",
+        "owner_text": "",
+        "tagged_by": "",
+        "ai_label": str((alert or {}).get("label") or ""),
+    })
+    meta["owner_feedback"] = answers
+    _write_json(meta_path, meta)
+    return "noted"
+
