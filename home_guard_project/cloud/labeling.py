@@ -219,7 +219,8 @@ def _compute_suggestions(session: Session, s3, ev: Event, fps: Optional[float],
     return tracks, complete
 
 
-def suggestions(session: Session, s3, ev: Event, fps: Optional[float], now: datetime) -> list[ft.Track]:
+def suggestions(session: Session, s3, ev: Event, fps: Optional[float], now: datetime,
+                store: bool = True) -> list[ft.Track]:
     """Suggestion tracks linked from the event's YOLO weak labels (fleet_contract.tracks.tracks_from_weak_labels).
     Frames whose label file could not be read are left out (unknown, not empty); classes outside the nine are
     dropped. Precomputed by the media loop (annotation_suggestions) and used while their sources are current;
@@ -232,7 +233,7 @@ def suggestions(session: Session, s3, ev: Event, fps: Optional[float], now: date
     if row is not None and row.sources == sources:
         return to_tracks(row.tracks)
     tracks, complete = _compute_suggestions(session, s3, ev, fps, now)
-    if complete:
+    if complete and store:  # a long job (the publish) never holds the row: it only reads
         _store_suggestions(session, ev.id, tracks, sources, now)
     return tracks
 

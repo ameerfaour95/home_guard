@@ -306,20 +306,6 @@ def test_existing_batches_are_never_touched(client, s3client, labeled):
     assert _publish(client, adm, cid, "Bad-Name").status_code == 422
 
 
-@needs_ffmpeg
-def test_an_admin_center_batch_is_rewritten(client, s3client, labeled):
-    adm, cid = labeled["adm"], labeled["cid"]
-    b.put(s3client, P + "_admin_center.json", {"created_by": "earlier"})
-    b.put(s3client, P + "analysis_output/yolo/labels/old/2026-01-01/gone_f0000.txt", "0 0.5 0.5 0.1 0.1\n")
-    r = _publish(client, adm, cid)
-    assert r.status_code == 200 and r.json()["state"] == "ready", r.text
-    keys = _all_keys(s3client)
-    assert P + "analysis_output/yolo/labels/old/2026-01-01/gone_f0000.txt" not in keys  # stale file removed
-    assert json.loads(_get(s3client, P + "_admin_center.json"))["state"] == "ready"
-    pubs = client.get("/v1/studio/publishes", headers=adm).json()
-    assert [p["batch_name"] for p in pubs] == [BATCH] and pubs[0]["tasks"] == 3
-
-
 def test_publish_is_admin_only(client, s3client, staff_factory):
     _seed(client, s3client)
     _, _, _, adm = staff_factory("admin")
@@ -385,3 +371,237 @@ def test_a_crash_marks_the_publish_failed_without_paths(client, s3client, labele
     with session_scope(client.app.state.engine) as s:
         error = s.scalar(select(m.TaggingPublish.error))
     assert error.startswith("RuntimeError") and "secret" not in error
+
+
+# ---------------------------------------------------------------- fix round (fix-label.md D1, D3, D4, D7, D8)
+
+def _labeled_at(client, s3client, staff_factory, tmp_path, rate, frames):
+    """The collection clip as a `frames`-frame clip at `rate` fps (event, meta and the video agree)."""
+    from home_guard_project.cloud.models import Event, RawRevision
+
+    clip = make_clip(tmp_path, frames=frames, rate=rate)
+    _seed(client, s3client, overrides={b.COLLECT_CLIP: clip})
+    collect = _event_id(client, b.COLLECT_STEM)
+    with session_scope(client.app.state.engine) as s:
+        ev = s.get(Event, collect)
+        ev.fps, ev.duration_sec = float(rate), frames / rate
+        for rev in s.scalars(select(RawRevision).where(RawRevision.s3_key == b.COLLECT_META)):
+            rev.body = {**rev.body, "frames_written": frames, "fps_estimated": float(rate)}
+    labeler, _, _, lab = staff_factory("labeler")
+    _, _, _, adm = staff_factory("admin")
+    return collect, lab, adm
+
+
+@needs_ffmpeg
+def test_native_frame_space_at_30_fps(client, s3client, staff_factory, tmp_path):
+    # D1: at 30 fps, adjacent keyframes on native frames 0 and 1 stay two LS frames (the old 10 fps cap merged them)
+    collect, lab, adm = _labeled_at(client, s3client, staff_factory, tmp_path, rate=30, frames=30)
+    track = {"track_id": "x", "label": "person", "source": "human", "keyframes": [
+        {"frame": 0, "t_sec": 0.0, "xyxy": [0.1, 0.1, 0.3, 0.5], "enabled": True},
+        {"frame": 1, "t_sec": 1 / 30, "xyxy": [0.5, 0.1, 0.7, 0.5], "enabled": True},
+        {"frame": 2, "t_sec": 2 / 30, "xyxy": [0.5, 0.1, 0.7, 0.5], "enabled": False}]}
+    _annotate(client, lab, collect, tracks=[track], description="A person.")
+    cid = _make_collection(client, adm, [collect], name="thirty")
+    out = _publish(client, adm, cid, "thirty_fps").json()
+    assert out["state"] == "ready", out
+    p = "tagging/thirty_fps/"
+    [task] = json.loads(_get(s3client, f"{p}thirty_fps.json"))
+    assert task["data"]["fps"] == 30.0 and task["data"]["frame_space"] == "native"
+    [rect] = [r for r in task["annotations"][0]["result"] if r["type"] == "videorectangle"]
+    assert rect["value"]["framesCount"] == 30
+    seq = rect["value"]["sequence"]
+    assert [(k["frame"], k["enabled"]) for k in seq] == [(1, True), (2, True), (3, False)]
+    assert [k["time"] for k in seq] == pytest.approx([0.0, 1 / 30, 2 / 30])
+    assert [k["x"] for k in seq[:2]] == [10.0, 50.0]
+    assert json.loads(_get(s3client, p + "_admin_center.json"))["frame_space"] == "native"
+    day, stem = "back_door/2026-10-02", b.COLLECT_STEM
+    keys = _all_keys(s3client)
+    images = sorted(k.rsplit("/", 1)[1][:-4] for k in keys if k.startswith(f"{p}analysis_output/yolo/images/{day}/"))
+    labels = sorted(k.rsplit("/", 1)[1][:-4] for k in keys if k.startswith(f"{p}analysis_output/yolo/labels/{day}/"))
+    assert images == labels == [f"{stem}_f{n:04d}" for n in range(30)]  # every native frame n: image + label
+    label = lambda n: _get(s3client, f"{p}analysis_output/yolo/labels/{day}/{stem}_f{n:04d}.txt").decode()  # noqa
+    assert label(0).startswith("0 0.200000 ") and label(1).startswith("0 0.600000 ") and label(2) == ""
+
+
+@needs_ffmpeg
+def test_a_published_batch_is_immutable(client, s3client, labeled):
+    # D3: a ready batch is never rewritten
+    assert _publish(client, labeled["adm"], labeled["cid"]).json()["state"] == "ready"
+    before = {k: _get(s3client, k) for k in _all_keys(s3client)}
+    r = _publish(client, labeled["adm"], labeled["cid"])
+    assert r.status_code == 409 and r.json()["detail"] == "This batch is published; choose a new name"
+    assert {k: _get(s3client, k) for k in _all_keys(s3client)} == before
+
+
+class _Writes:
+    """Records every key the S3 wrapper writes (put, upload, copy, delete)."""
+
+    def __init__(self, monkeypatch):
+        from home_guard_project.cloud.s3 import S3
+
+        self.keys: list[str] = []
+        self.deleted: list[str] = []
+        for name, pos in (("put_bytes", 0), ("upload_file", 1), ("copy", 1)):
+            real = getattr(S3, name)
+
+            def wrapper(this, *a, _real=real, _pos=pos, **k):
+                self.keys.append(a[_pos])
+                return _real(this, *a, **k)
+
+            monkeypatch.setattr(S3, name, wrapper)
+        real_delete = S3.delete_keys
+
+        def delete(this, keys, _real=real_delete):
+            self.deleted += list(keys)
+            return _real(this, keys)
+
+        monkeypatch.setattr(S3, "delete_keys", delete)
+        monkeypatch.setattr(S3, "delete_prefix", lambda this, prefix: self.deleted.append(prefix) or 0)
+
+
+@needs_ffmpeg
+def test_a_failed_publish_resumes_without_rewriting_or_deleting(client, s3client, labeled, monkeypatch):
+    # D3: failed -> resumed: objects already there with the recorded hash are skipped, nothing is deleted, and the
+    # result equals a clean publish
+    from home_guard_project.cloud import labeling
+
+    adm, cid = labeled["adm"], labeled["cid"]
+    real = labeling.extract_frames
+    calls = []
+
+    def second_fails(*a, **k):
+        calls.append(1)
+        if len(calls) == 2:
+            raise RuntimeError("disk full")
+        return real(*a, **k)
+
+    monkeypatch.setattr(labeling, "extract_frames", second_fails)
+    assert _publish(client, adm, cid).json()["state"] == "failed"
+    marker = json.loads(_get(s3client, P + "_admin_center.json"))
+    assert marker["state"] == "failed"
+    first_frames = {k for k in _all_keys(s3client) if k.startswith(P + "analysis_output/yolo/")}
+    assert len(first_frames) == 2 * FRAMES  # the first clip's images and labels were written
+    assert {P + rel for rel in marker["objects"]} >= first_frames  # with their sha256
+    b.put(s3client, P + "notes/keep_me.txt", "an earlier file")
+    monkeypatch.setattr(labeling, "extract_frames", real)
+    writes = _Writes(monkeypatch)
+    out = _publish(client, adm, cid).json()
+    assert out["state"] == "ready", out
+    assert not (set(writes.keys) & first_frames), sorted(set(writes.keys) & first_frames)[:3]
+    assert writes.deleted == [] and P + "notes/keep_me.txt" in _all_keys(s3client)
+    assert json.loads(_get(s3client, P + "_admin_center.json"))["state"] == "ready"
+    assert _publish(client, adm, cid, "clean_copy").json()["state"] == "ready"
+
+    def frames_of(prefix):
+        return {k[len(prefix):]: _get(s3client, k) for k in _all_keys(s3client)
+                if k.startswith(prefix + "analysis_output/yolo/")}
+
+    assert frames_of(P) == frames_of("tagging/clean_copy/")
+
+
+@needs_ffmpeg
+def test_an_unfinished_admin_center_batch_is_resumed_and_nothing_deleted(client, s3client, labeled):
+    adm, cid = labeled["adm"], labeled["cid"]
+    b.put(s3client, P + "_admin_center.json", {"created_by": "earlier", "state": "partial"})
+    b.put(s3client, P + "analysis_output/yolo/labels/old/2026-01-01/gone_f0000.txt", "0 0.5 0.5 0.1 0.1\n")
+    r = _publish(client, adm, cid)
+    assert r.status_code == 200 and r.json()["state"] == "ready", r.text
+    assert P + "analysis_output/yolo/labels/old/2026-01-01/gone_f0000.txt" in _all_keys(s3client)  # never deleted
+    assert json.loads(_get(s3client, P + "_admin_center.json"))["state"] == "ready"
+
+
+@needs_ffmpeg
+def test_a_swept_worker_never_writes_after_a_new_worker_took_over(client, s3client, labeled, monkeypatch):
+    # D4: worker A misses its heartbeats and is swept; B publishes the same batch to the end; A wakes up inside its
+    # run and must stop without writing anything
+    from sqlalchemy import update
+
+    engine, adm, cid = client.app.state.engine, labeled["adm"], labeled["cid"]
+    client.app.state.export_runner = lambda job: None  # A stays queued
+    assert _publish(client, adm, cid).json()["state"] == "queued"
+    with session_scope(engine) as s:
+        a_id = s.scalar(select(m.TaggingPublish.id).where(m.TaggingPublish.batch_name == BATCH))
+    real_clip = tagging._Batch.clip
+    seen = {"a": 0}
+
+    def clip(self, info):
+        if self.pub.id == a_id:
+            seen["a"] += 1
+            if seen["a"] == 2:
+                with session_scope(engine) as s:
+                    s.execute(update(m.TaggingPublish).where(m.TaggingPublish.id == a_id)
+                              .values(state="failed", error="stale"))
+                client.app.state.export_runner = lambda job: job()
+                assert _publish(client, adm, cid).json()["state"] == "ready"
+                seen["after_b"] = {k: _get(s3client, k) for k in _all_keys(s3client)}
+        return real_clip(self, info)
+
+    monkeypatch.setattr(tagging._Batch, "clip", clip)
+    session = client.app.state.sessionmaker()
+    try:
+        tagging.build_publish(session, client.app.state.s3, a_id, worker_id="worker-a")
+    finally:
+        session.close()
+    assert "after_b" in seen
+    assert {k: _get(s3client, k) for k in _all_keys(s3client)} == seen["after_b"]  # A wrote nothing after B
+    marker = json.loads(_get(s3client, P + "_admin_center.json"))
+    assert marker["state"] == "ready" and marker["publish_id"] != a_id
+    with session_scope(engine) as s:
+        assert s.get(m.TaggingPublish, a_id).state == "failed"
+
+
+@needs_ffmpeg
+def test_a_clip_missing_at_download_is_listed_and_the_rest_published(client, s3client, labeled, monkeypatch):
+    # D7: the clip vanished between the copy and the frame download: listed in missing, the job goes on
+    from botocore.exceptions import ClientError
+
+    from home_guard_project.cloud.s3 import S3
+
+    real = S3.download_to
+
+    def download(this, key, path, if_match=None, **k):
+        if key == b.COLLECT_CLIP:
+            raise ClientError({"Error": {"Code": "NoSuchKey", "Message": "gone"},
+                               "ResponseMetadata": {"HTTPStatusCode": 404}}, "GetObject")
+        return real(this, key, path, if_match=if_match, **k)
+
+    monkeypatch.setattr(S3, "download_to", download)
+    out = _publish(client, labeled["adm"], labeled["cid"]).json()
+    assert out["state"] == "partial", out
+    assert {"event_id": labeled["collect"], "reason": "source missing"} in out["missing"]
+    assert out["tasks"] == 3 and out["yolo_frames"] == FRAMES  # the alert clip's frames are still there
+
+
+@needs_ffmpeg
+def test_a_publish_over_budget_is_refused_with_the_estimate(client, s3client, labeled, monkeypatch):
+    # D8: frames and bytes are estimated before anything is queued
+    adm, cid = labeled["adm"], labeled["cid"]
+    before = _all_keys(s3client)
+    monkeypatch.setattr(tagging, "MAX_FRAMES", 50)
+    r = _publish(client, adm, cid)
+    assert r.status_code == 400 and "frames" in r.json()["detail"] and "about" in r.json()["detail"], r.text
+    monkeypatch.setattr(tagging, "MAX_FRAMES", 300_000)
+    monkeypatch.setattr(tagging, "MAX_BYTES", 1000)
+    r = _publish(client, adm, cid)
+    assert r.status_code == 400 and "GB" in r.json()["detail"], r.text
+    assert _all_keys(s3client) == before
+    with session_scope(client.app.state.engine) as s:
+        assert s.scalar(select(m.TaggingPublish.id)) is None
+    assert tagging.MAX_FRAMES == 300_000 and tagging.MAX_BYTES == 1000
+
+
+@needs_ffmpeg
+def test_publish_counts_update_while_it_runs(client, s3client, labeled, monkeypatch):
+    # D8: PublishOut counts follow the job, clip by clip
+    real_clip = tagging._Batch.clip
+    seen = []
+
+    def clip(self, info):
+        with session_scope(client.app.state.engine) as s:
+            row = s.get(m.TaggingPublish, self.pub.id)
+            seen.append((row.state, row.tasks, row.yolo_frames))
+        return real_clip(self, info)
+
+    monkeypatch.setattr(tagging._Batch, "clip", clip)
+    assert _publish(client, labeled["adm"], labeled["cid"]).json()["state"] == "ready"
+    assert seen == [("running", 0, 0), ("running", 1, FRAMES), ("running", 2, 2 * FRAMES)]

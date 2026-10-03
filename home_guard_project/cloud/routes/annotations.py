@@ -205,7 +205,8 @@ def _publish_out(session: Session, pub: TaggingPublish) -> PublishOut:
              dependencies=[Depends(require_role("admin"))])
 def publish_collection(collection_id: int, body: PublishRequest, request: Request,
                        staff: Staff = Depends(current_staff), session: Session = SessionDep):
-    # runs in the training-export worker pool; 409 for a read-only batch, a folder not made here, or a run in flight
+    # runs in the training-export worker pool; 409 for a read-only batch, a folder not made here, a published
+    # batch or a run in flight; 400 over the frame/byte budget
     check_length("batch_name", body.batch_name, 64)
     from .studio import _load_collection, _run_job
 
@@ -218,6 +219,8 @@ def publish_collection(collection_id: int, body: PublishRequest, request: Reques
         pub = tagging.create_publish(session, s3, col, body.batch_name, staff, now)
     except tagging.PublishRefused as e:
         raise HTTPException(status_code=409, detail=str(e))
+    except tagging.PublishTooBig as e:
+        raise HTTPException(status_code=400, detail=str(e))
     audit.record(session, staff.id, "tagging_publish", target=f"tagging/{body.batch_name}", ts=now,
                  detail={"collection_id": col.id, "publish_id": pub.id,
                          "events": len((pub.snapshot or {}).get("events", []))})

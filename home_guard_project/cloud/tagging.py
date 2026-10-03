@@ -21,17 +21,26 @@ Only clips whose current annotation is submitted or reviewed are published (the 
 but is left out of analysis_output. The existing Label Studio batches are read-only forever: a name that exists on
 S3 without the marker is refused, and the build writes only under `tagging/<batch>/` (a scoped S3 writer).
 
-Label Studio frame numbers are 1-based and in LS's frame space (frameRate capped at 10, as labeling/tasks.py sets
-it): LS frame = round(native index x ls_fps / fps) + 1, which is native index + 1 for clips at 10 fps or less.
+Batches are immutable once published: a marker in state "ready" refuses any rewrite. A `failed` or `partial` batch
+(or one whose worker died while `building`) is resumed: an object already there with the content hash the marker
+recorded for it is skipped, missing ones are written, nothing is ever deleted. Marker states: building -> ready |
+partial | failed. The worker checks it still owns the job (worker id + running state) before each clip, every
+FENCE_EVERY frames and before the final marker; a worker that lost its lease stops without writing.
+
+Frames are in the clip's NATIVE frame space (`data.frame_space` = "native"): `data.fps` is the clip's real decoded
+fps, a keyframe on native frame n is Label Studio frame n + 1 (LS frames are 1-based), `framesCount` is the native
+frame count and `time` the keyframe's real timestamp. Image and label files use the native 0-based index.
 """
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import logging
 import re
 import statistics
 import tempfile
+import time
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -53,10 +62,22 @@ ROOT = "tagging/"
 MARKER = "_admin_center.json"
 PROTECTED = frozenset({"ameer_house_batch_1", "ameer_house_batch_2", "uca_dataset_batch", "smarthome_dataset_batch"})
 NAME = re.compile(r"[a-z0-9_]{1,64}")
-LS_FPS_CAP = 10.0
+FALLBACK_FPS = 10.0  # only when the clip's frame rate is unknown
+FRAME_SPACE = "native"
 DELETE_MARKER = "[delete]"
 NOT_LABELED = "not labeled"
 NO_CONSENT = "no training consent"
+SOURCE_MISSING = "source missing"
+PUBLISHED = "This batch is published; choose a new name"
+# budget (estimated before anything is queued)
+MAX_FRAMES = 300_000
+MAX_BYTES = 30 * 10 ** 9
+JPEG_BYTES_PER_PIXEL = 0.25  # -q:v 2 JPEGs: ~0.5 MB for a 1080p frame
+FALLBACK_JPEG_BYTES = 200_000
+FALLBACK_FRAMES = 300  # a clip whose length is unknown
+LABEL_BYTES = 64
+CHECKPOINT_EVERY = 30.0  # seconds between marker checkpoints (the per-key hashes a resume relies on)
+FENCE_EVERY = 100  # frames between ownership checks inside one clip
 _COPY_ROLES = ("original_video", "meta", "raw_answer", "teacher_frame", "crop_video", "yolo_image", "yolo_label")
 _MIME = {".mp4": "video/mp4", ".json": "application/json", ".txt": "text/plain", ".jpg": "image/jpeg",
          ".jpeg": "image/jpeg", ".png": "image/png"}
@@ -101,18 +122,33 @@ class PublishRefused(Exception):
     """A publish request the server refuses (HTTP 409); the message is shown as is."""
 
 
+class PublishTooBig(Exception):
+    """A publish over the frame/byte budget (HTTP 400); the message carries the estimate."""
+
+
 # ---------------------------------------------------------------- request
 
-def _check_name(s3, name: str) -> str:
+def _check_name(s3, name: str) -> tuple[str, Optional[dict]]:
+    """(prefix, the existing marker or None); PublishRefused for a read-only, foreign or published batch."""
     if not NAME.fullmatch(name or ""):
         raise PublishRefused("A batch name is 1-64 characters: a-z, 0-9 and _")
     if name in PROTECTED:
         raise PublishRefused(f"tagging/{name}/ is a Label Studio batch and is read-only")
     prefix = batch_prefix(name)
-    if s3.any_under(prefix) and not s3.exists(prefix + MARKER):
+    if not s3.any_under(prefix):
+        return prefix, None
+    if not s3.exists(prefix + MARKER):
         raise PublishRefused(f"tagging/{name}/ already exists and was not written by the Admin Center; "
                              "choose another name")
-    return prefix
+    try:
+        marker = json.loads(s3.get_bytes(prefix + MARKER))
+    except (ValueError, UnicodeDecodeError):
+        marker = None
+    if not isinstance(marker, dict):
+        raise PublishRefused(f"tagging/{name}/ has an unreadable marker; choose another name")
+    if marker.get("state") == "ready":
+        raise PublishRefused(PUBLISHED)
+    return prefix, marker
 
 
 def take_snapshot(session: Session, collection_id: int) -> dict:
@@ -138,18 +174,60 @@ def take_snapshot(session: Session, collection_id: int) -> dict:
     return {"events": events, "missing": missing}
 
 
+def _sources(session: Session, ev_id: int) -> dict[str, Artifact]:
+    """{relative path under the box root: artifact} of the clip's box files, training copy first."""
+    out: dict[str, Artifact] = {}
+    arts = session.scalars(select(Artifact).where(Artifact.event_id == ev_id, Artifact.role.in_(_COPY_ROLES),
+                                                  Artifact.available.is_(True))).all()
+    for art in sorted(arts, key=lambda a: (not a.s3_key.startswith("dataset_"), a.s3_key)):
+        rel = art.s3_key.split("/", 1)[1] if "/" in art.s3_key else None
+        if rel and rel not in out:
+            out[rel] = art
+    return out
+
+
+def estimate(session: Session, snapshot: dict) -> tuple[int, int]:
+    """(frames, bytes) the batch would write: every frame of each kept clip (a JPEG sized by the clip's frame size,
+    plus its label) and the copies of the clips' box files."""
+    frames = size = 0
+    for info in snapshot.get("events", []):
+        ev = session.get(Event, info["id"])
+        if ev is None:
+            continue
+        size += sum(a.bytes or 0 for a in _sources(session, ev.id).values())
+        if info.get("drop_clip"):
+            continue
+        fps, count, duration = labeling.clip_timing(ev, labeling.meta_body(session, ev.id))
+        n = count or (int(round(duration * fps)) if duration and fps else FALLBACK_FRAMES)
+        fs = ev.frame_size if isinstance(ev.frame_size, list) and len(ev.frame_size) == 2 else None
+        per = (int(fs[0] * fs[1] * JPEG_BYTES_PER_PIXEL)
+               if fs and all(isinstance(v, int) and v > 0 for v in fs) else FALLBACK_JPEG_BYTES)
+        frames += n
+        size += n * (per + LABEL_BYTES)
+    return frames, size
+
+
+def _check_budget(frames: int, size: int) -> None:
+    if frames > MAX_FRAMES or size > MAX_BYTES:
+        raise PublishTooBig(
+            f"This batch is too big to publish: about {frames:,} frames and {size / 1e9:.1f} GB "
+            f"(the limits are {MAX_FRAMES:,} frames and {MAX_BYTES / 1e9:.0f} GB). Split the collection.")
+
+
 def create_publish(session: Session, s3, col: Collection, batch_name: str, staff: Staff,
                    now: datetime) -> TaggingPublish:
-    """A queued publish of `col` as `batch_name`, or PublishRefused (read-only batch, a folder not made here, or
-    a publish of this name still running). The caller commits and hands the job to the worker pool."""
+    """A queued publish of `col` as `batch_name`; PublishRefused (read-only batch, a folder not made here, a
+    published batch, or a publish of this name still running) or PublishTooBig (over the frame/byte budget). The
+    caller commits and hands the job to the worker pool."""
     session.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:k, 0))"),
                     {"k": f"tagging_publish:{batch_name}"})
-    prefix = _check_name(s3, batch_name)
+    prefix, _ = _check_name(s3, batch_name)
     busy = session.scalar(select(TaggingPublish.id).where(TaggingPublish.batch_name == batch_name,
                                                           TaggingPublish.state.in_(("queued", "running"))))
     if busy is not None:
         raise PublishRefused(f"A publish of {batch_name} is already running")
     snap = take_snapshot(session, col.id)
+    _check_budget(*estimate(session, snap))
     pub = TaggingPublish(batch_name=batch_name, collection_id=col.id, state="queued", s3_prefix=prefix,
                          missing=list(snap["missing"]), snapshot=snap, created_by=staff.id, created_at=now)
     session.add(pub)
@@ -163,34 +241,26 @@ def _iso(dt: Optional[datetime]) -> Optional[str]:
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ") if dt else None
 
 
-def ls_space(fps: Optional[float], frame_count: Optional[int]) -> tuple[float, float, int]:
-    """(native fps, LS fps, LS framesCount): LS plays the clip at min(fps, 10), as labeling/tasks.py sets it."""
-    native = fps if fps and fps > 0 else LS_FPS_CAP
-    ls_fps = min(native, LS_FPS_CAP)
-    count = frame_count or 0
-    return native, ls_fps, int(round(count * ls_fps / native)) if count else 0
+def ls_frame(index: int) -> int:
+    """Label Studio frame number of native 0-based frame `index`: LS frames are 1-based, in the clip's native
+    frame space (data.fps is the real decoded fps)."""
+    return int(index) + 1
 
 
-def ls_frame(index: int, native: float, ls_fps: float) -> int:
-    """LS frame number (1-based, in LS's frame space) of native frame `index` (labeling/utils/yolo.py)."""
-    return int(round(index * ls_fps / native)) + 1
-
-
-def ls_sequence(track, native: float, ls_fps: float) -> list[dict]:
+def ls_sequence(track) -> list[dict]:
     seq = []
     for k in track.keyframes:
         x1, y1, x2, y2 = k.xyxy
-        seq.append({"frame": ls_frame(k.frame, native, ls_fps), "x": round(x1 * 100, 4), "y": round(y1 * 100, 4),
+        seq.append({"frame": ls_frame(k.frame), "x": round(x1 * 100, 4), "y": round(y1 * 100, 4),
                     "width": round((x2 - x1) * 100, 4), "height": round((y2 - y1) * 100, 4),
                     "time": k.t_sec, "enabled": bool(k.enabled), "rotation": 0})
     return seq
 
 
-def ls_results(tracks, description: Optional[str], native: float, ls_fps: float, frames_count: int,
-               duration: float, origin: str) -> list[dict]:
+def ls_results(tracks, description: Optional[str], frames_count: int, duration: float, origin: str) -> list[dict]:
     """One videorectangle per track and the vlm_description textarea, as Label Studio exports them."""
     out = [{"value": {"framesCount": frames_count, "duration": round(duration, 6),
-                      "sequence": ls_sequence(t, native, ls_fps), "labels": [t.label]},
+                      "sequence": ls_sequence(t), "labels": [t.label]},
             "id": t.track_id, "from_name": "bbox", "to_name": "video_full", "type": "videorectangle",
             "origin": origin} for t in tracks]
     if description is not None:
@@ -201,15 +271,29 @@ def ls_results(tracks, description: Optional[str], native: float, ls_fps: float,
 
 # ---------------------------------------------------------------- the build
 
+def _sha(body: bytes) -> str:
+    return hashlib.sha256(body).hexdigest()
+
+
 class _Batch:
-    """One publish run: copies sources, writes analysis_output files and collects the JSON documents."""
+    """One publish run: copies sources, writes analysis_output files and collects the JSON documents.
+
+    Every object written is recorded in `objects` (path relative to the batch -> sha256 of its bytes, or
+    "etag:<source etag>" for a server-side copy) and checkpointed into the marker; a resumed run skips an object
+    that is still there with the recorded hash."""
 
     def __init__(self, session: Session, s3, pub: TaggingPublish, lease):
         self.session, self.s3, self.pub, self.lease = session, s3, pub, lease
         self.prefix = pub.s3_prefix
         self.w = s3.scoped(self.prefix)  # every write of the build goes through this: tagging/<batch>/ only
         self.bucket = s3.bucket
-        self.written: set[str] = set()
+        self.objects: dict[str, str] = {}  # what this batch holds (relative path -> content hash)
+        self.previous: dict[str, str] = {}  # the hashes an earlier, unfinished run recorded
+        self.present: set[str] = set()  # relative paths under the batch when this run started
+        self.skipped = 0
+        self.claimed = False  # this run wrote its "building" marker (only then may it mark the batch failed)
+        self.marker: dict = {}
+        self.last_checkpoint = time.monotonic()
         self.missing: list[dict] = []
         self.tasks: list[dict] = []
         self.vlm_lines: list[dict] = []
@@ -226,44 +310,84 @@ class _Batch:
         if entry not in self.missing:
             self.missing.append(entry)
 
+    # ------------------------------------------------------------ ownership (fencing) and progress
+
+    def counts(self) -> dict:
+        return {"tasks": len(self.tasks), "yolo_frames": self.yolo_frames, "vlm_lines": len(self.vlm_lines),
+                "missing": list(self.pub.missing or []) + self.missing}
+
+    def fence(self) -> None:
+        """Raise LeaseLost unless this worker still owns the running publish; records the progress counts and the
+        heartbeat in the same statement (its own connection, committed at once)."""
+        from . import studio
+
+        m = TaggingPublish
+        with self.lease.engine.begin() as conn:
+            n = conn.execute(update(m).where(m.id == self.pub.id, m.worker_id == self.lease.worker_id,
+                                             m.state == "running")
+                             .values(heartbeat_at=func.now(), **self.counts())).rowcount
+        if not n:
+            self.lease.lost.set()
+            raise studio.LeaseLost(self.pub.id)
+
+    def write_marker(self, **values) -> None:
+        self.marker.update(values, objects=dict(sorted(self.objects.items())))
+        self.w.put_bytes(self.prefix + MARKER, json.dumps(self.marker, indent=2).encode("utf-8"), "application/json")
+        self.last_checkpoint = time.monotonic()
+
+    def checkpoint(self) -> None:
+        if time.monotonic() - self.last_checkpoint >= CHECKPOINT_EVERY:
+            self.write_marker(state="building")
+
+    # ------------------------------------------------------------ writes (skipped when already there)
+
+    def _same(self, rel: str, digest: str) -> bool:
+        return self.previous.get(rel) == digest and rel in self.present
+
     def put(self, rel: str, body: bytes, mime: str) -> None:
-        self.w.put_bytes(self.prefix + rel, body, mime)
-        self.written.add(self.prefix + rel)
+        digest = _sha(body)
+        if self._same(rel, digest):
+            self.skipped += 1
+        else:
+            self.w.put_bytes(self.prefix + rel, body, mime)
+        self.objects[rel] = digest
 
     def upload(self, path: Path, rel: str, mime: str) -> None:
-        self.w.upload_file(path, self.prefix + rel, mime)
-        self.written.add(self.prefix + rel)
+        digest = _sha(path.read_bytes())
+        if self._same(rel, digest):
+            self.skipped += 1
+        else:
+            self.w.upload_file(path, self.prefix + rel, mime)
+        self.objects[rel] = digest
 
     # ------------------------------------------------------------ per clip
 
     def sources(self, ev: Event) -> dict[str, Artifact]:
-        """{relative path under the box root: artifact} of the clip's box files, training copy first."""
-        out: dict[str, Artifact] = {}
-        arts = self.session.scalars(select(Artifact).where(Artifact.event_id == ev.id, Artifact.role.in_(_COPY_ROLES),
-                                                           Artifact.available.is_(True))).all()
-        for art in sorted(arts, key=lambda a: (not a.s3_key.startswith("dataset_"), a.s3_key)):
-            rel = art.s3_key.split("/", 1)[1] if "/" in art.s3_key else None
-            if rel and rel not in out:
-                out[rel] = art
-        return out
+        return _sources(self.session, ev.id)
 
     def copy_sources(self, ev: Event, sources: dict[str, Artifact]) -> set[str]:
-        """Server-side copies to dataset_multi/<rel>; returns the relative paths copied."""
+        """Server-side copies to dataset_multi/<rel>; returns the relative paths copied (or already there)."""
         done = set()
         for rel, art in sorted(sources.items()):
-            dest = f"{self.prefix}dataset_multi/{rel}"
+            dest_rel = f"dataset_multi/{rel}"
+            digest = f"etag:{art.etag or ''}"
+            if art.etag and self._same(dest_rel, digest):
+                self.skipped += 1
+                self.objects[dest_rel] = digest
+                done.add(rel)
+                continue
             try:
-                self.w.copy(art.s3_key, dest, content_type=_MIME.get(PurePosixPath(rel).suffix.lower()),
-                            if_match=art.etag or None)
+                self.w.copy(art.s3_key, self.prefix + dest_rel,
+                            content_type=_MIME.get(PurePosixPath(rel).suffix.lower()), if_match=art.etag or None)
             except ETagMismatch:
                 self.miss(ev.id, f"changed since indexing: {rel}")
                 continue
             except Exception as e:  # noqa: BLE001 -- a missing source is recorded, anything else fails the build
                 if not _not_found(e):
                     raise
-                self.miss(ev.id, f"source missing: {rel}")
+                self.miss(ev.id, f"{SOURCE_MISSING}: {rel}")
                 continue
-            self.written.add(dest)
+            self.objects[dest_rel] = digest
             done.add(rel)
         return done
 
@@ -274,11 +398,22 @@ class _Batch:
             work = Path(tmp)
             try:
                 self.s3.download_to(clip.s3_key, work / "src.mp4", if_match=clip.etag or None)
+            except ETagMismatch as e:
+                self.miss(ev.id, f"frames unavailable: {type(e).__name__}")
+                return 0
+            except Exception as e:  # noqa: BLE001 -- gone since the copy: listed, the job goes on
+                if not _not_found(e):
+                    raise
+                self.miss(ev.id, SOURCE_MISSING)
+                return 0
+            try:
                 frames = labeling.extract_frames(work / "src.mp4", work, ev.fps)
-            except (ETagMismatch, media.MediaError) as e:
+            except media.MediaError as e:
                 self.miss(ev.id, f"frames unavailable: {type(e).__name__}")
                 return 0
             for index, t_sec, path in frames:
+                if n and n % FENCE_EVERY == 0:
+                    self.fence()
                 stem = f"{ev.stem}_f{index:04d}"
                 self.upload(path, f"analysis_output/yolo/images/{camera}/{day}/{stem}.jpg", "image/jpeg")
                 self.put(f"analysis_output/yolo/labels/{camera}/{day}/{stem}.txt",
@@ -287,6 +422,7 @@ class _Batch:
         return n
 
     def clip(self, info: dict) -> None:
+        self.fence()  # never write a clip for a publish this worker no longer owns
         ev = self.session.get(Event, info["id"])
         if ev is None:
             self.miss(info["id"], "event deleted")
@@ -311,7 +447,8 @@ class _Batch:
         self.versions[str(ev.id)] = row.version
         meta = labeling.meta_body(self.session, ev.id)
         fps, frame_count, duration = labeling.clip_timing(ev, meta)
-        native, ls_fps, frames_count = ls_space(fps, frame_count)
+        native = fps if fps and fps > 0 else FALLBACK_FPS  # the clip's real decoded fps: no cap
+        frames_count = frame_count or (int(round(duration * native)) if duration else 0)
         ls_duration = (frame_count / native) if frame_count else (duration or 0.0)
         camera = ev.camera
         day = ev.day or datetime.fromtimestamp(ev.start_ts, timezone.utc).strftime("%Y-%m-%d")
@@ -327,8 +464,8 @@ class _Batch:
         crop = meta.get("vlm_crop") if isinstance(meta.get("vlm_crop"), dict) else {}
         task_id = len(self.tasks) + 1
         data = {
-            "video_url": video_url, "vlm_crop_url": crop_url, "fps": ls_fps,
-            "vlm_fps": main.get("store_fps", crop.get("fps", ls_fps)),
+            "video_url": video_url, "vlm_crop_url": crop_url, "fps": native, "frame_space": FRAME_SPACE,
+            "vlm_fps": main.get("store_fps", crop.get("fps", native)),
             "header_info": f"{camera} | {kind} | {start_local} - {end_local.split(' ')[-1]}",
             "vlm_crop_header": "VLM Crop (high-res)" if crop_rel else "No VLM Crop — showing full frame",
             "has_vlm_crop": bool(crop_rel), "camera_name": camera, "kind": kind,
@@ -341,7 +478,7 @@ class _Batch:
         author = self.session.get(Staff, row.author_id) if row.author_id is not None else None
         first = self.session.scalar(select(func.min(Annotation.created_at)).where(Annotation.event_id == ev.id))
         lead = max(0.0, (row.created_at - first).total_seconds()) if first and row.created_at else 0.0
-        result = ls_results(tracks, text_value, native, ls_fps, frames_count, ls_duration, "manual")
+        result = ls_results(tracks, text_value, frames_count, ls_duration, "manual")
         annotation = {
             "id": task_id, "completed_by": row.author_id if row.author_id is not None else 0,
             "created_username": f"{author.email}, {author.id}" if author is not None else (row.author_name or ""),
@@ -349,11 +486,10 @@ class _Batch:
             "created_at": _iso(first or row.created_at), "updated_at": _iso(row.created_at), "lead_time": lead,
             "result_count": len(result), "task": task_id,
         }
-        suggestions = labeling.suggestions(self.session, self.s3, ev, fps, self.now)
+        suggestions = labeling.suggestions(self.session, self.s3, ev, fps, self.now, store=False)
         run = labeling.guard_run(self.session, ev.id)
         predictions = []
-        pred_result = ls_results(suggestions, ev.summary or None, native, ls_fps, frames_count, ls_duration,
-                                 "prediction")
+        pred_result = ls_results(suggestions, ev.summary or None, frames_count, ls_duration, "prediction")
         if pred_result:
             predictions.append({"id": task_id, "model_version": labeling.SUGGESTION_MODEL, "score": None,
                                 "result": pred_result, "task": task_id})
@@ -485,20 +621,29 @@ def _not_found(exc: Exception) -> bool:
     return nf(exc)
 
 
-def _run(session: Session, s3, pub: TaggingPublish, lease) -> tuple[str, dict]:
+def _run(batch: _Batch) -> tuple[str, dict]:
+    session, s3, pub = batch.session, batch.s3, batch.pub
     if s3 is None:
         raise RuntimeError("Storage is not configured")
-    prefix = _check_name(s3, pub.batch_name)  # again at build time: never write into a folder not made here
-    previous = {o.key for o in s3.list(prefix)}
-    batch = _Batch(session, s3, pub, lease)
+    prefix, marker = _check_name(s3, pub.batch_name)  # again at build time: never a published or foreign folder
+    if marker is not None:  # an unfinished Admin Center batch: resume it
+        recorded = marker.get("objects")
+        batch.previous = {k: v for k, v in recorded.items() if isinstance(k, str) and isinstance(v, str)} \
+            if isinstance(recorded, dict) else {}
+        batch.objects = dict(batch.previous)
+        batch.present = {o.key[len(prefix):] for o in s3.list(prefix)}
     creator = session.get(Staff, pub.created_by)
     creator_name = creator.name if creator is not None else ""
-    marker = {"created_by": creator_name, "created_utc": _iso(pub.created_at), "collection_id": pub.collection_id,
-              "publish_id": pub.id, "batch_name": pub.batch_name, "state": "building"}
-    batch.put(MARKER, json.dumps(marker, indent=2).encode("utf-8"), "application/json")  # first: claims the folder
+    batch.marker = {"created_by": creator_name, "created_utc": _iso(pub.created_at),
+                    "collection_id": pub.collection_id, "publish_id": pub.id, "batch_name": pub.batch_name,
+                    "frame_space": FRAME_SPACE}
+    batch.fence()
+    batch.write_marker(state="building")  # first: claims the folder
+    batch.claimed = True
     for info in (pub.snapshot or {}).get("events", []):
-        lease.check()
         batch.clip(info)
+        batch.fence()  # progress counts, and the worker still owns the job
+        batch.checkpoint()
     tasks = batch.tasks
     batch.put(f"{pub.batch_name}.json", json.dumps(tasks, ensure_ascii=False, indent=2).encode("utf-8"),
               "application/json")
@@ -513,19 +658,12 @@ def _run(session: Session, s3, pub: TaggingPublish, lease) -> tuple[str, dict]:
     batch.put("analysis_output/summary_report.md", batch.report(creator_name).encode("utf-8"), "text/markdown")
     batch.put("analysis_output/analysis.xlsx", batch.workbook(),
               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    stale = sorted(previous - batch.written)  # files of an earlier publish of this batch that are gone now
-    if stale:
-        failed = batch.w.delete_keys(stale)
-        if failed:
-            raise RuntimeError(f"{len(failed)} old file(s) of the batch could not be deleted")
-    lease.beat()
-    lease.check()
+    batch.fence()  # last check before the marker that makes the batch final
     state = "partial" if batch.missing else "ready"
-    marker.update(state=state, finished_utc=_iso(datetime.now(timezone.utc)), annotations=batch.versions,
-                  tasks=len(tasks), yolo_frames=batch.yolo_frames, vlm_lines=len(batch.vlm_lines))
-    batch.put(MARKER, json.dumps(marker, indent=2).encode("utf-8"), "application/json")
-    return state, {"tasks": len(tasks), "yolo_frames": batch.yolo_frames, "vlm_lines": len(batch.vlm_lines),
-                   "missing": list(pub.missing or []) + batch.missing}
+    batch.write_marker(state=state, finished_utc=_iso(datetime.now(timezone.utc)), annotations=batch.versions,
+                       tasks=len(tasks), yolo_frames=batch.yolo_frames, vlm_lines=len(batch.vlm_lines),
+                       skipped=batch.skipped)
+    return state, batch.counts()
 
 
 # ---------------------------------------------------------------- the job (export worker pool, leased)
@@ -548,18 +686,26 @@ def build_publish(session: Session, s3, publish_id: int, worker_id: Optional[str
     pub = session.get(TaggingPublish, publish_id, populate_existing=True)
     lease = studio._Lease(session.get_bind(), publish_id, worker_id, model=TaggingPublish)
     lease.start()
+    batch = _Batch(session, s3, pub, lease) if s3 is not None else None
     try:
-        state, counts = _run(session, s3, pub, lease)
+        if batch is None:
+            raise RuntimeError("Storage is not configured")
+        state, counts = _run(batch)
         studio._finish(session, publish_id, worker_id, model=TaggingPublish, state=state, error=None,
                        heartbeat_at=func.now(), **counts)
-    except studio.LeaseLost:
+    except studio.LeaseLost:  # swept as stale and maybe taken over: stop without writing anything more
         session.rollback()
         log.warning("publish %s: lease lost (swept as stale); stopped", publish_id)
     except Exception as e:  # noqa: BLE001 -- any failure ends the publish as failed, never stuck in running
         log.exception("publish %s failed", publish_id)
         session.rollback()
-        studio._finish(session, publish_id, worker_id, model=TaggingPublish, state="failed",
-                       error=studio.error_text(e))
+        owned = studio._finish(session, publish_id, worker_id, model=TaggingPublish, state="failed",
+                               error=studio.error_text(e), **(batch.counts() if batch is not None else {}))
+        if owned and batch is not None and batch.claimed:
+            try:  # the hashes written so far: a new publish of this name resumes from them
+                batch.write_marker(state="failed", finished_utc=_iso(datetime.now(timezone.utc)))
+            except Exception:  # noqa: BLE001 -- the batch stays "building"; a resume rewrites what it cannot verify
+                log.exception("publish %s: could not write the failed marker", publish_id)
     finally:
         lease.stop()
     return session.get(TaggingPublish, publish_id, populate_existing=True)
