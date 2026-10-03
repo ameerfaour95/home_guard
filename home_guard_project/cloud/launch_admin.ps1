@@ -3,7 +3,7 @@
 param(
     [string]$App = "",
     [int]$Port = 8610,
-    [int]$WaitSeconds = 90
+    [int]$WaitSeconds = 180
 )
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Windows.Forms
