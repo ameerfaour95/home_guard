@@ -863,6 +863,55 @@ class ReviewFixTest(PreparedDirMixin, unittest.TestCase):
         with self.assertRaises(ValueError):
             ev.read_jsonl(path)
 
+    # 8. Re-review: an answer that was paid for is never lost or hidden.
+    def test_a_lone_surrogate_in_an_answer_is_saved_and_scored(self) -> None:
+        raw = '{"summary": "caf\ud800 x", "people": 0}'
+
+        class Odd(ev.FakeBackend):
+            def ask(self, row, frames):
+                self.calls += 1
+                return raw, json.loads(raw)
+
+        backend = Odd()
+        summary = ev.run_eval(self.out, backend, tag="sur")
+        self.assertEqual(backend.calls, 3)
+        rows = read_jsonl(self.results("sur"))
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[0]["raw"], raw)
+        self.assertEqual(summary["errors"], 0)
+        self.assertEqual(ev.load_summary(self.out, "sur")["rows"], 3)
+        self.assertEqual(ev.main(["summary", "--dir", self.out, "--tag", "sur"]), 0)
+
+    def test_summary_takes_the_writer_lock(self) -> None:
+        ev.run_eval(self.out, ev.FakeBackend(), tag="sl")
+        summary_path = self.results("sl", "summary.json")
+        os.remove(summary_path)
+        with open(self.results("sl", "lock"), "w", encoding="utf-8") as f:
+            f.write(str(os.getpid()))
+        self.assertEqual(ev.main(["summary", "--dir", self.out, "--tag", "sl"]), 3)
+        self.assertFalse(os.path.exists(summary_path))
+        self.assertTrue(os.path.isfile(self.results("sl", "lock")))
+        os.remove(self.results("sl", "lock"))
+        self.assertEqual(ev.main(["summary", "--dir", self.out, "--tag", "sl"]), 0)
+        self.assertTrue(os.path.isfile(summary_path))
+        self.assertFalse(os.path.exists(self.results("sl", "lock")))
+
+    def test_a_valid_answer_survives_a_later_error_for_the_same_inputs(self) -> None:
+        frame = os.path.join(self.out, "frames", "cam_a_1771696897_trigger_3.jpg")
+        with open(frame, "rb") as f:
+            data = f.read()
+        ev.run_eval(self.out, ev.FakeBackend(), tag="tmp")
+        os.remove(frame)
+        broken = ev.run_eval(self.out, ev.FakeBackend(), tag="tmp")
+        self.assertEqual(broken["errors"], 1)
+        with open(frame, "wb") as f:
+            f.write(data)
+        backend = ev.FakeBackend()
+        summary = ev.run_eval(self.out, backend, tag="tmp")
+        self.assertEqual(backend.calls, 0)
+        self.assertEqual((summary["rows"], summary["errors"], summary["outdated"]), (3, 0, 0))
+        self.assertEqual(ev.load_summary(self.out, "tmp")["rows"], 3)
+
     # 7. The prompt override takes the coming owner_language argument.
     def test_override_accepts_owner_language(self) -> None:
         with ev.prompt_override("cam={camera_name} lang={owner_language}"):

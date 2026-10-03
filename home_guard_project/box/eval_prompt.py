@@ -403,7 +403,7 @@ def _write_jsonl(path: str, rows: Iterable[Dict[str, Any]]) -> None:
 
     def write(f: Any) -> None:
         for row in rows:
-            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+            f.write(json.dumps(row, ensure_ascii=True) + "\n")
 
     _atomic_write(path, write)
 
@@ -715,6 +715,18 @@ def _results_lock(path: str) -> Iterator[None]:
             os.remove(path)
 
 
+def current_answers(rows: Iterable[Dict[str, Any]], fingerprints: Dict[str, str]) -> Dict[str, Dict[str, Any]]:
+    """Per clip, the latest answer without an error that was given for the CURRENT inputs; when there
+    is none, the latest line. So a later error (a frame briefly missing) never hides a valid answer."""
+    rows = list(rows)
+    latest = latest_answers(rows)
+    for r in rows:
+        clip_id = str(r.get("clip_id", ""))
+        if not r.get("error") and clip_id in fingerprints and r.get("input_sha12") == fingerprints[clip_id]:
+            latest[clip_id] = r
+    return latest
+
+
 def latest_answers(rows: Iterable[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     """The last line per clip. Answers are only ever appended, so a later line (a retry, or a
     re-ask after the inputs changed) replaces an earlier one; the earlier one stays in the file."""
@@ -743,12 +755,17 @@ def score_rows(manifest: Sequence[Dict[str, Any]], latest: Dict[str, Dict[str, A
     return scored, outdated
 
 
+def _utf8_safe(value: Any) -> Any:
+    """A string with any lone surrogate replaced, so it can be written as UTF-8."""
+    return value.encode("utf-8", "replace").decode("utf-8") if isinstance(value, str) else value
+
+
 def _write_csv(path: str, rows: Sequence[Dict[str, Any]]) -> None:
     def write(f: Any) -> None:
         writer = csv.DictWriter(f, fieldnames=list(RESULT_COLUMNS))
         writer.writeheader()
         for row in rows:
-            writer.writerow({k: row.get(k) for k in RESULT_COLUMNS})
+            writer.writerow({k: _utf8_safe(row.get(k)) for k in RESULT_COLUMNS})
 
     _atomic_write(path, write)
 
@@ -812,8 +829,8 @@ def run_eval(out_dir: str, backend: Any, prompt_text: Optional[str] = None, mode
             history = [r for r in history
                        if (r.get("prompt_id"), r.get("prompt_sha12"), r.get("model")) == mine]
 
-        latest = latest_answers(history)
         fingerprints = _fingerprints(out_dir, manifest)
+        latest = current_answers(history, fingerprints)
 
         def reusable(m: Dict[str, Any]) -> bool:
             r = latest.get(m["clip_id"])
@@ -850,7 +867,7 @@ def run_eval(out_dir: str, backend: Any, prompt_text: Optional[str] = None, mode
                     result = _answer_row(clip_id, raw, None, f"{type(exc).__name__}: {exc}", prompt_id, model,
                                          sha12, fingerprints[clip_id])
                 latest[clip_id] = result
-                out.write(json.dumps(result, ensure_ascii=False) + "\n")
+                out.write(json.dumps(result, ensure_ascii=True) + "\n")
                 out.flush()
                 asked += 1
                 error = result["error"]
@@ -881,12 +898,13 @@ def load_summary(out_dir: str, tag: str) -> Dict[str, Any]:
     """The score of results file *tag*, always recomputed from its answers (latest per clip) and the
     current manifest; the ``.summary.json`` and ``.csv`` are rewritten from it, never trusted."""
     jsonl_path, _, _ = _results_paths(out_dir, tag)
-    manifest = read_jsonl(os.path.join(out_dir, MANIFEST))
-    latest = latest_answers(read_jsonl(jsonl_path))
-    fingerprints = _fingerprints(out_dir, manifest)
-    scored, _ = score_rows(manifest, latest, fingerprints)
-    meta = {k: _one_value(scored, k) for k in ("prompt_id", "model", "prompt_sha12")}
-    return _score(out_dir, tag, manifest, latest, fingerprints, meta)
+    with _results_lock(_lock_path(out_dir, tag)):        # the derived files have one writer too
+        manifest = read_jsonl(os.path.join(out_dir, MANIFEST))
+        fingerprints = _fingerprints(out_dir, manifest)
+        latest = current_answers(read_jsonl(jsonl_path), fingerprints)
+        scored, _ = score_rows(manifest, latest, fingerprints)
+        meta = {k: _one_value(scored, k) for k in ("prompt_id", "model", "prompt_sha12")}
+        return _score(out_dir, tag, manifest, latest, fingerprints, meta)
 
 
 # ----------------------------------------------------------------------------
@@ -998,7 +1016,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"Error: {os.path.join(args.dir, MANIFEST)} not found; the score needs our current tags.",
               file=sys.stderr)
         return 1
-    summary = load_summary(args.dir, args.tag)
+    try:
+        summary = load_summary(args.dir, args.tag)
+    except ResultsLocked as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 3
     print(format_summary(summary))
     return 0
 
