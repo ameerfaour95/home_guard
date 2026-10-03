@@ -9,6 +9,7 @@ import tempfile
 from dataclasses import dataclass, replace
 
 from .. import boxconfig
+from .alert_types import CameraAlertsBackend
 
 @dataclass(frozen=True)
 class Camera:
@@ -45,7 +46,7 @@ def zone_operation(name, points=None):
         raise ValueError("A zone needs at least three corners")
     return ["set-zone", "--camera", name, "--points", ";".join(f"{x:.4f},{y:.4f}" for x, y in values)]
 
-class CameraControls:
+class CameraControls(CameraAlertsBackend):
     def __init__(self, box, names=(), runner=None):
         self.box = box
         self.runner = runner or subprocess.run
@@ -87,7 +88,7 @@ class CameraControls:
         result = self.runner([sys.executable, "-m", "home_guard_project.box.find_cameras", "--json", *map(str, args)], env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding="utf-8", timeout=480, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         data = json.loads(result.stdout)
         if "error" in data:
-            raise ValueError("Camera command failed")
+            raise ValueError(str(data["error"]) if args and args[0] in ("camera-alerts", "set-camera-alerts") else "Camera command failed")
         return result.returncode, data
 
     def load(self):

@@ -108,7 +108,8 @@ class SettingsPage:
             self.note.setStyleSheet('color: '+ERROR);self.note.setText(tr('control_error'))
 
     def save_clicked(self):
-        settings = Settings("inference" if self.alerts.isChecked() else "data_collection", *self.hours.values(), minutes_to_seconds(self.cooldown.value()), self.pictures.isChecked(),slider_conf(self.sensitivity.value()))
+        start, end = self.hours.values()
+        settings = Settings(mode="inference" if self.alerts.isChecked() else "data_collection", alert_start_hour=start, alert_end_hour=end, alert_cooldown_sec=minutes_to_seconds(self.cooldown.value()), show_cameras=self.pictures.isChecked(), inference_conf=slider_conf(self.sensitivity.value()), alert_on=self.box.load_settings().alert_on)
         try:
             before=self.box.load_settings()
             self.box.save_settings(settings)

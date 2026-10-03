@@ -15,7 +15,11 @@ class Settings:
     show_cameras: bool = False
     inference_conf: float = 0.4
 
+    alert_on: str = "person"
+
     def __post_init__(self):
+        from .alert_types import ordered_types
+        object.__setattr__(self, "alert_on", ",".join(ordered_types(self.alert_on)))
         if self.mode not in boxconfig.MODES or type(self.show_cameras) is not bool:
             raise ValueError("Invalid settings")
         for key, limits in boxconfig.NUMBER_OPTIONS.items():
@@ -27,7 +31,7 @@ class Settings:
             if type(value) not in (int,float) or not low<=value<=high: raise ValueError('Invalid settings')
 
     def options(self):
-        return {key: getattr(self, key) for key in ("mode", "alert_start_hour", "alert_end_hour", "alert_cooldown_sec", "show_cameras", "inference_conf")}
+        return {key: getattr(self, key) for key in ("mode", "alert_start_hour", "alert_end_hour", "alert_cooldown_sec", "show_cameras", "inference_conf", "alert_on")}
 
     @classmethod
     def from_options(cls, options):
@@ -49,6 +53,7 @@ class BoxControls:
         self.clock = clock
         self._settings = settings or Settings(show_cameras=True)
         self.pending_at = None
+        self.camera_alert_on = {}
 
     def is_stopped(self):
         return self._stopped if self.demo else control.is_stopped()
@@ -73,7 +78,7 @@ class BoxControls:
     def reported_status(self):
         if self.demo:
             s=self._settings
-            return {'updated':self.clock(),'settings':dict(conf=s.inference_conf,alert_start_hour=s.alert_start_hour,alert_end_hour=s.alert_end_hour,cooldown_sec=s.alert_cooldown_sec)}
+            return {'updated':self.clock(),'settings':dict(conf=s.inference_conf,alert_start_hour=s.alert_start_hour,alert_end_hour=s.alert_end_hour,cooldown_sec=s.alert_cooldown_sec,alert_on=s.alert_on.split(","),camera_alert_on={k:list(v) for k,v in self.camera_alert_on.items()})}
         from ..ai_status import read_status
         return read_status(Path(boxconfig.LOG_DIR)/'ai_status.json')
 
