@@ -109,7 +109,8 @@ def _write_cameras(active: Dict[str, str], disabled: Dict[str, str], path: str =
 
 
 def apply_changes(changes: Dict[str, Any], path: str = CAMERAS_PATH, zones_path: str = ZONES_PATH,
-                  restart: bool = True, alerts_path: Optional[str] = None) -> Dict[str, Any]:
+                  restart: bool = True, alerts_path: Optional[str] = None,
+                  aliases_path: Optional[str] = None) -> Dict[str, Any]:
     """Rewrite cameras.yaml from {"cameras":[{"name","new_name","enabled"}]}.
 
     A disabled camera is kept (recoverable) in a 'disabled:' section the loader
@@ -171,6 +172,13 @@ def apply_changes(changes: Dict[str, Any], path: str = CAMERAS_PATH, zones_path:
             log.warning("Alert choices not carried over the rename: %s", exc)
     else:
         _write_cameras(new_active, new_disabled, path)
+    if renames:
+        try:
+            from .brain.aliases import ALIASES_PATH, remap_aliases  # noqa: PLC0415
+
+            remap_aliases(renames, aliases_path or ALIASES_PATH)
+        except Exception as exc:  # noqa: BLE001 - a name file must never block a camera change
+            log.warning("Camera aliases not carried over the rename: %s", exc)
     if restart:
         _restart_running_mode()
     return {"active": sorted(new_active), "disabled": sorted(new_disabled)}

@@ -45,7 +45,8 @@ INCLUDE_FILES = (
 )
 
 # Per-machine or secret files that must never be bundled.
-EXCLUDE_NAMES = frozenset({"cameras.yaml", "zones.yaml", "camera_alerts.yaml", "box.yaml", "network.json", "api_key.env"})
+EXCLUDE_NAMES = frozenset({"cameras.yaml", "zones.yaml", "camera_alerts.yaml", "camera_aliases.yaml", "box.yaml",
+                           "network.json", "api_key.env"})
 EXCLUDE_SUFFIXES = (".pyc", ".pt", ".log", ".zip")
 
 # An RTSP URL carrying user and password. A placeholder password such as "pass" still matches,
