@@ -8,6 +8,11 @@ from .fleet import FleetScreen
 from .customer import CustomerScreen
 from .widgets.common import label, button, EmptyState
 from .widgets.palette import CommandPalette
+from .widgets.icons import icon
+from .workers import TaskRunner
+from .backend import all_events
+from .formatting import utcnow
+from datetime import timedelta
 
 
 class SearchField(QLineEdit):
@@ -50,6 +55,14 @@ class Shell(QWidget):
         allowed = ['Review', 'Studio'] if staff.role == 'labeler' else ['Fleet', 'Review', 'Studio'] + (['Audit'] if staff.role == 'admin' else [])
         for title in allowed:
             nav = button(title, lambda checked=False, name=title: self.navigate(name), 'nav')
+            nav.setIcon(icon(title, theme))
+            if title == 'Review':
+                self.review_badge = label('…', 'countBadge')
+                self.review_badge.setParent(nav)
+                self.review_badge.setGeometry(112, 12, 28, 22)
+                self.review_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.review_badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+                nav.setToolTip('Unreviewed events in the last 24 hours')
             nav.setCheckable(True)
             nav_layout.addWidget(nav)
             self.navigation[title] = nav
@@ -58,6 +71,10 @@ class Shell(QWidget):
                 self.fleet = page
                 page.customer_requested.connect(self.open_customer)
                 page.loaded.connect(self.fleet_loaded)
+                page.session_expired.connect(self.session_expired)
+            elif title == 'Review':
+                page = CustomerScreen(backend, theme, staff.role, review=True)
+                self.review_page = page
                 page.session_expired.connect(self.session_expired)
             else:
                 descriptions = {'Review': 'Review AI decisions alongside the camera footage and owner feedback.',
@@ -97,13 +114,28 @@ class Shell(QWidget):
         layout.addLayout(main, 1)
         self.customer_page = None
         if staff.role != 'labeler':
-            self.customer_page = CustomerScreen(backend, theme)
+            self.customer_page = CustomerScreen(backend, theme, staff.role)
             self.customer_page.back.connect(lambda: self.navigate('Fleet'))
             self.customer_page.session_expired.connect(self.session_expired)
             self.pages.addWidget(self.customer_page)
         shortcut = QShortcut(QKeySequence('Ctrl+K'), self)
         shortcut.activated.connect(self.open_palette)
         self.navigate('Studio' if staff.role == 'labeler' else 'Fleet')
+        self.badge_runner = TaskRunner(self)
+        self.badge_runner.finished.connect(self.badge_loaded)
+        self.update_badge()
+        self.review_page.timeline.review_runner.finished.connect(lambda *_: self.update_badge())
+        self.review_page.event_view.review_changed.connect(lambda *_: self.update_badge())
+        if self.customer_page:
+            self.customer_page.timeline.review_runner.finished.connect(lambda *_: self.update_badge())
+            self.customer_page.event_view.review_changed.connect(lambda *_: self.update_badge())
+
+    def update_badge(self):
+        end = getattr(self.backend, 'now', None) or utcnow()
+        self.badge_runner.start(lambda: all_events(self.backend, reviewed=False, from_utc=(end-timedelta(hours=24)).isoformat(), to_utc=end.isoformat()))
+
+    def badge_loaded(self, events, error):
+        self.review_badge.setText('—' if error else str(len(events)))
 
     def navigate(self, title):
         if title not in self.screens:

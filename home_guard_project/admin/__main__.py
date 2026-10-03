@@ -33,15 +33,38 @@ def main():
     window.setWindowIcon(QIcon(str(icon)))
     window.show()
     if args.smoke_test:
+        import time
+        started = time.monotonic()
+        stage = [0]
         def verify():
+            if time.monotonic()-started > 15:
+                app.exit(2)
+                return
             ok = window.signin is not None and not window.windowIcon().isNull()
-            if args.demo:
-                ok = ok and window.shell and window.shell.fleet.snapshot and len(window.shell.fleet.model.rows) == 4
-            if args.demo and ok:
-                window.shell.fleet.table.setCurrentIndex(window.shell.fleet.model.index(1, 0))
-                ok = window.shell.fleet.detail.device.device_id == 'hg-pine-01' and not window.windowIcon().isNull()
-            app.exit(0 if ok else 2)
-        QTimer.singleShot(1500, verify)
+            if not args.demo:
+                app.exit(0 if ok else 2)
+                return
+            shell = window.shell
+            if not ok or not shell or not shell.fleet.snapshot:
+                return
+            customer = shell.customer_page
+            if stage[0] == 0:
+                if len(shell.fleet.model.rows) != 4:
+                    app.exit(2); return
+                shell.open_customer(1); stage[0] = 1
+            elif stage[0] == 1 and customer.timeline.model.rows:
+                customer.open_event(101); stage[0] = 2
+            elif stage[0] == 2:
+                player = customer.event_view.player
+                if player.player.duration() > 0:
+                    player.player.play(); player.player.setPosition(3000); stage[0] = 3
+            elif stage[0] == 3:
+                player = customer.event_view.player
+                if not player.canvas.image.isNull() and player.canvas.overlay.position_ms >= 3000:
+                    player.player.pause()
+                    app.exit(0 if player.canvas.overlay.frames else 2)
+        smoke_timer = QTimer(window)
+        smoke_timer.setInterval(100); smoke_timer.timeout.connect(verify); smoke_timer.start()
     result = app.exec()
     QThreadPool.globalInstance().waitForDone()
     if hasattr(backend, 'close'):

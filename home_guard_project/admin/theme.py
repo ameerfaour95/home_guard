@@ -34,9 +34,11 @@ QLabel#muted { color: @muted; }
 QLabel#eyebrow { color: @action; font-size: 12px; font-weight: 600; }
 QLabel#error { color: @error; }
 QLabel#badge { color: @action; background: @bubble; padding: 5px 10px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+QLabel#countBadge { color: @action; background: @bubble; border-radius: 4px; font-size: 11px; }
 QFrame#rail, QFrame#topbar, QFrame#card, QFrame#detail { background: @surface; border: 1px solid @border; }
 QFrame#card { border-radius: 12px; }
 QFrame#rail QWidget, QFrame#topbar QWidget, QFrame#detail QLabel, QFrame#card QLabel { background: transparent; }
+QFrame#rail QLabel#countBadge { background: @bubble; }
 QLineEdit { background: @surface; border: 1px solid @border; border-radius: 6px; padding: 10px 12px; min-height: 20px; selection-background-color: @bubble; }
 QLineEdit:focus { border-color: @action; }
 QPushButton { background: @raised; color: @text; border: 1px solid @border; border-radius: 6px; padding: 8px 16px; min-height: 20px; }
@@ -59,6 +61,18 @@ QScrollBar::handle { background: @border; border-radius: 4px; min-height: 24px; 
 QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }
 QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
 QToolTip { background: @raised; color: @text; border: 1px solid @border; padding: 8px; }
+QComboBox { background: @surface; border: 1px solid @border; border-radius: 5px; padding: 7px 8px; min-height: 20px; }
+QComboBox::drop-down { border: none; width: 16px; }
+QComboBox QAbstractItemView { background: @surface; selection-background-color: @raised; }
+QTabWidget::pane { border: none; }
+QTabBar::tab { background: transparent; color: @muted; padding: 10px 16px; margin-bottom: 8px; border-bottom: 2px solid @border; }
+QTabBar::tab:selected { color: @action; border-bottom: 2px solid @action; }
+QTabBar::tab:disabled { color: @muted; }
+QPlainTextEdit { background: @surface; border: 1px solid @border; padding: 8px; }
+QSlider::groove:horizontal { height: 4px; background: @border; border-radius: 2px; }
+QSlider::sub-page:horizontal { background: @action; }
+QSlider::handle:horizontal { width: 12px; margin: -4px 0; background: @action; border-radius: 6px; }
+QSplitter::handle { background: @border; width: 1px; }
 QProgressBar { background: @raised; border: none; height: 4px; }
 QProgressBar::chunk { background: @action; }
 QScrollArea { border: none; background: transparent; }
