@@ -468,3 +468,11 @@ TEXT.update(
 
 def tr(key, **values):
     return TEXT[key].format(**values)
+
+TEXT.update(catches_more="Catches more", reset_sensitivity="Reset to recommended",
+            sensitivity_house="Use the house values", sensitivity_camera="Set for this camera",
+            sensitivity_choose_hint="Move a slider to set it for this camera. Other types keep the house values.",
+            sensitivity_unavailable="Sensitivity values are unavailable. Update the box program to use these controls.",
+            sensitivity_custom="Own sensitivity", alert_types_custom="Own alert types")
+
+TEXT.update(camera_detection_title="{camera} · Alerts & detection")

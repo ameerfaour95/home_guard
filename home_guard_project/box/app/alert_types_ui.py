@@ -3,12 +3,13 @@ from concurrent.futures import ThreadPoolExecutor
 import time
 from PySide6.QtCore import Qt, QRectF, QSize, Signal, QTimer, QVariantAnimation
 from PySide6.QtGui import QPainter, QPen, QColor, QFont, QPainterPath
-from PySide6.QtWidgets import QWidget, QAbstractButton, QVBoxLayout, QHBoxLayout, QBoxLayout, QLabel, QDialog, QRadioButton, QPushButton, QSizePolicy
+from PySide6.QtWidgets import QWidget, QAbstractButton, QVBoxLayout, QHBoxLayout, QBoxLayout, QLabel, QDialog, QRadioButton, QPushButton, QSizePolicy, QButtonGroup, QScrollArea
 from .alert_types import TYPES, ordered_types
 from .live_settings import AppliedState
 from .strings import tr
 from .zone_editor import colors, alpha, ZonePill
 from . import motion
+from .type_icons import draw_type_icon
 
 
 def type_names(value):
@@ -112,19 +113,7 @@ class AlertTile(QAbstractButton):
         p.save(); p.translate(18, 24 if self.compact else 18)
         p.setPen(QPen(QColor(t['action'] if selected else t['secondary']), 2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
         p.setBrush(Qt.BrushStyle.NoBrush)
-        if self.kind == 'person':
-            p.drawEllipse(QRectF(10, 0, 12, 12))
-            p.drawRoundedRect(QRectF(5, 17, 22, 17), 7, 7)
-        elif self.kind == 'vehicle':
-            p.drawRoundedRect(QRectF(1, 13, 32, 16), 4, 4)
-            p.drawLine(5, 13, 10, 4); p.drawLine(10, 4, 25, 4); p.drawLine(25, 4, 30, 13)
-            p.drawLine(7, 19, 10, 19); p.drawLine(24, 19, 27, 19)
-            p.drawLine(7, 29, 7, 33); p.drawLine(27, 29, 27, 33)
-        else:
-            for x, y in ((1, 10), (9, 1), (21, 1), (29, 10)):
-                p.drawEllipse(QRectF(x, y, 6, 9))
-            paw = QPainterPath(); paw.moveTo(8, 29); paw.cubicTo(7, 22, 14, 16, 18, 17); paw.cubicTo(23, 16, 30, 25, 27, 30); paw.cubicTo(24, 35, 20, 30, 18, 31); paw.cubicTo(13, 34, 8, 34, 8, 29)
-            p.drawPath(paw)
+        draw_type_icon(p, self.kind)
         p.restore()
         x, y = (68, 16) if self.compact else (18, 65)
         font = QFont(self.font()); font.setPixelSize(17); font.setWeight(QFont.Weight.DemiBold); p.setFont(font)
@@ -171,19 +160,21 @@ class AlertTiles(QWidget):
 
 
 class CameraAlertButton(QAbstractButton):
-    def __init__(self, house, own):
+    def __init__(self, house, own, sensitivity=None):
         super().__init__()
         self.setProperty('handlesMotion', True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.setMinimumWidth(80); self.setFixedHeight(32)
-        self.refresh(house, own)
+        self.refresh(house, own, sensitivity)
 
-    def refresh(self, house, own):
-        self.custom = own is not None
-        self.setText(tr('alert_camera_custom' if self.custom else 'alert_camera_default', types=type_names(own if self.custom else house)))
-        self.setToolTip(self.text()); self.setAccessibleName(self.text()); self.update()
+    def refresh(self, house, own, sensitivity=None):
+        self.custom = own is not None or sensitivity is not None
+        self.setText(tr('alert_camera_custom' if own is not None else 'alert_camera_default', types=type_names(own if own is not None else house)))
+        details = [tr(key) for key, present in (('alert_types_custom', own is not None), ('sensitivity_custom', sensitivity is not None)) if present]
+        description = self.text() + (' ? ' + ', '.join(details) if details else '')
+        self.setToolTip(description); self.setAccessibleName(description); self.update()
 
     def sizeHint(self): return QSize(240, 32)
     def keyPressEvent(self, event):
@@ -218,20 +209,31 @@ class CameraAlertsDialog(QDialog):
                           f'QRadioButton:checked {{ background: {t["raised"]}; border-color: {t["action"]}; }} '
                           f'QRadioButton::indicator {{ width: 16px; height: 16px; border: 1px solid {t["secondary"]}; border-radius: 9px; background: {t["surface"]}; }} '
                           f'QRadioButton::indicator:checked {{ background: {t["action"]}; border: 3px solid {t["surface"]}; }}')
-        self.setWindowTitle(tr('alert_camera_title', camera=name.replace('_', ' ').title()) if name else tr('alert_house_title'))
-        self.setModal(True); self.resize(760, 420)
+        self.setWindowTitle(tr('camera_detection_title', camera=name.replace('_', ' ').title()) if name else tr('alert_house_title'))
+        self.setModal(True); self.resize(800, 680)
         root = QVBoxLayout(self); root.setContentsMargins(28, 24, 28, 24); root.setSpacing(14)
         title = QLabel(self.windowTitle()); title.setObjectName('section'); root.addWidget(title)
+        outer = root
+        scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        content = QWidget(); root = QVBoxLayout(content); root.setContentsMargins(0, 0, 8, 0); root.setSpacing(10)
+        scroll.setWidget(content); outer.addWidget(scroll, 1)
+        heading = QLabel(tr('alert_types_title')); heading.setObjectName('section'); root.addWidget(heading)
         self.default = QRadioButton(tr('alert_use_default')); self.custom = QRadioButton(tr('alert_choose_camera'))
+        group = QButtonGroup(self); group.addButton(self.default); group.addButton(self.custom)
         self.house_note = QLabel(tr('alert_house_value', types=type_names(house))); self.house_note.setObjectName('muted'); self.house_note.setWordWrap(True)
         if name:
-            root.addWidget(self.default); root.addWidget(self.house_note); root.addWidget(self.custom)
+            choices = QHBoxLayout(); choices.addWidget(self.default, 1); choices.addWidget(self.custom, 1)
+            root.addLayout(choices); root.addWidget(self.house_note)
         else:
             self.default.hide(); self.custom.hide(); self.house_note.setText(tr('alert_house_caption')); root.addWidget(self.house_note)
         self.tiles = AlertTiles(); self.tiles.set_value(own or house); root.addWidget(self.tiles)
         self.default.setChecked(own is None); self.custom.setChecked(own is not None)
         self.tiles.setVisible(own is not None or name is None)
         self.note = QLabel(tr('alert_loading')); self.note.setWordWrap(True); self.note.setTextFormat(Qt.TextFormat.PlainText); self.note.setObjectName('muted'); root.addWidget(self.note)
+        from .sensitivity_ui import CameraSensitivityPanel
+        self.sensitivity_panel = CameraSensitivityPanel(controls, name); root.addWidget(self.sensitivity_panel)
+        root.addStretch()
+        root = outer
         buttons = QHBoxLayout(); self.retry = ZonePill(tr('retry'), compact=True); self.retry.hide(); buttons.addWidget(self.retry); buttons.addStretch()
         self.done_button = ZonePill(tr('alert_done'), primary=True, compact=True); buttons.addWidget(self.done_button); root.addLayout(buttons)
         self.done_button.clicked.connect(self.accept); self.retry.clicked.connect(self.retry_action)
@@ -254,7 +256,7 @@ class CameraAlertsDialog(QDialog):
         if (self.future is not None and self.operation != 'status') or self.loading: return
         self.pending = value
         self.tiles.setVisible(value is not None or self.name is None)
-        self.note.setText(tr('applying'))
+        self.note.show(); self.note.setText(tr('applying'))
         self.requested = time.time()
         self.submit('save', lambda: self.controls.set_house_alerts(value) if self.name is None else self.controls.set_camera_alerts(self.name, value))
 
@@ -266,13 +268,14 @@ class CameraAlertsDialog(QDialog):
             try:
                 result = future.result()
                 if self.operation == 'load':
+                    if self.sensitivity_panel: self.sensitivity_panel.load(result)
                     self.house = result['house']
                     self.own = next((r['alert_on'] for r in result['cameras'] if r['name'] == self.name), None)
                     self.house_note.setText(tr('alert_house_value', types=type_names(self.house)) if self.name else tr('alert_house_caption'))
                     self.tiles.set_value(self.own or self.house)
                     self.default.setChecked(self.own is None); self.custom.setChecked(self.own is not None)
                     self.tiles.setVisible(self.own is not None or self.name is None)
-                    self.loading = False; self.note.setText('')
+                    self.loading = False; self.note.setText(''); self.note.hide()
                 elif self.operation == 'save':
                     if self.name is None:
                         self.ack.expected['alert_on'] = result; self.ack.requested = self.requested
@@ -286,7 +289,7 @@ class CameraAlertsDialog(QDialog):
                 if self.operation == 'status':
                     status = self.ack.status({}, time.time()); self.note.setText(tr(status))
                 else:
-                    self.note.setText(str(exc)); self.retry.show()
+                    self.note.show(); self.note.setText(str(exc)); self.retry.show()
                 self.note.setStyleSheet('color: ' + colors(self)['error'])
             else:
                 self.note.setStyleSheet('color: ' + colors(self)['secondary'])
@@ -298,7 +301,9 @@ class CameraAlertsDialog(QDialog):
 
     def shutdown(self):
         self.timer.stop(); self.pool.shutdown(wait=False, cancel_futures=True)
+        if self.sensitivity_panel: self.sensitivity_panel.shutdown()
 
     def done(self, result):
         if self.future is not None and self.operation == 'save': return
+        if self.sensitivity_panel and self.sensitivity_panel.saving(): return
         super().done(result)

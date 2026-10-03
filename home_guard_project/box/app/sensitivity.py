@@ -12,6 +12,22 @@ def camera_sensitivity_operation(name, values):
 
 
 class CameraSensitivityBackend:
+    def set_house_sensitivity(self, values):
+        from dataclasses import replace
+        from .box_controls import RemoteSettingsBackend, Settings
+        values = parse_thresholds(values)
+        if getattr(self, 'remote', False) and not self.box.demo:
+            house = self.camera_alerts()['house_sensitivity']
+            if house is None:
+                raise ValueError('Sensitivity values are unavailable. Update the box program.')
+            backend = RemoteSettingsBackend(self.target, Settings(**{'conf_'+k: v for k, v in house.items()}),
+                                            self.runner, self.alert_reported_status, key=self.key)
+        else:
+            backend = self.box
+        after = replace(backend.load_settings(), **{'conf_'+k: v for k, v in values.items()})
+        backend.save_settings(after)
+        return after.effective_sensitivity()
+
     def set_camera_sensitivity(self, name, values):
         args = camera_sensitivity_operation(name, values)
         if self.box.demo:

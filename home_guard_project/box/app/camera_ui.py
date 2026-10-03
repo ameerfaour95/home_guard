@@ -91,6 +91,7 @@ class CameraPage:
         self.alert_dialog = None
         self.alert_house = ["person"]
         self.alert_values = {}
+        self.sensitivity_values = {}
         self.alert_widgets = {}
         self.alert_load_failed = False
         self.timer = QTimer(self.widget)
@@ -135,6 +136,7 @@ class CameraPage:
             alerts = self.controls.camera_alerts()
             self.alert_house = alerts['house']
             self.alert_values = {row['name']: row['alert_on'] for row in alerts['cameras']}
+            self.sensitivity_values = {row['name']: row.get('sensitivity') for row in alerts['cameras']}
             self.alert_load_failed = False
         except Exception:
             self.alert_load_failed = True
@@ -253,7 +255,7 @@ class CameraPage:
                 actions.addWidget(zone_button);status.hide();zone_button.setToolTip(status.text())
                 self.zone_widgets[camera.name]=(zone_button,status,photo)
             from .alert_types_ui import CameraAlertButton
-            alert_button=CameraAlertButton(self.alert_house,self.alert_values.get(camera.name))
+            alert_button=CameraAlertButton(self.alert_house,self.alert_values.get(camera.name),self.sensitivity_values.get(camera.name))
             if self.alert_load_failed: alert_button.setToolTip(tr('alert_read_error'))
             alert_button.clicked.connect(lambda checked=False,n=camera.name:self.open_alerts(n))
             actions.addWidget(alert_button,1);self.alert_widgets[camera.name]=alert_button
@@ -288,9 +290,13 @@ class CameraPage:
         self.alert_dialog=dialog
         dialog.saved.connect(lambda value:self.alert_saved(name,value))
         dialog.house_saved.connect(self.house_alert_saved)
+        if dialog.sensitivity_panel:
+            dialog.sensitivity_panel.saved.connect(lambda value:self.sensitivity_saved(name,value))
         def finished(result):
             self.alert_house=dialog.house
-            if name is not None: self.alert_values[name]=dialog.own
+            if name is not None:
+                self.alert_values[name]=dialog.own
+                self.sensitivity_values[name]=dialog.sensitivity_panel.own
             self.refresh_alert_labels()
             self.alert_dialog=None
             dialog.deleteLater()
@@ -299,7 +305,11 @@ class CameraPage:
 
     def refresh_alert_labels(self):
         for name,button in self.alert_widgets.items():
-            button.refresh(self.alert_house,self.alert_values.get(name))
+            button.refresh(self.alert_house,self.alert_values.get(name),self.sensitivity_values.get(name))
+
+    def sensitivity_saved(self,name,value):
+        self.sensitivity_values[name]=value
+        self.refresh_alert_labels();self.changed()
 
     def alert_saved(self,name,value):
         self.alert_values[name]=value
@@ -387,6 +397,7 @@ class CameraPage:
             records=self.controls.save(changes)
             self.zone_values={new:self.zone_values.get(old,[]) for old,new,_ in changes}
             self.alert_values={new:self.alert_values.get(old) for old,new,_ in changes}
+            self.sensitivity_values={new:self.sensitivity_values.get(old) for old,new,_ in changes}
             return records
         self.begin(save)
 
