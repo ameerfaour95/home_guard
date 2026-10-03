@@ -260,7 +260,7 @@ class AgentTest(unittest.TestCase):
         self.assertIn("[ALREADY DONE THIS TURN]", big.seen[0][0][-1])
 
     def test_malformed_tool_calls_do_not_run(self) -> None:
-        for args in ([], {"handle": object()}, {"seconds": float("nan")}, {"camera": []}):
+        for args in ([], {"handle": object()}, {"seconds": float("nan")}, {"camera": object()}):
             with self.subTest(args=args):
                 self.calls.clear()
                 big = Scripted([ModelMessage(tool_calls=(ToolCall("bad", "send_media", args),)), reply("Hello.")])
@@ -322,6 +322,147 @@ class AgentTest(unittest.TestCase):
                 agent, deliverer = build_owner_agent(settings, {}, None, Mock(), self.root, self.root, self.root)
                 self.assertIsNotNone(agent)
                 self.assertIsNotNone(deliverer)
+
+
+    # -- Fix 1 ---------------------------------------------------------------------------
+    def counting(self, ctx, name, args):
+        self.calls.append(name)
+        from home_guard_project.box.brain.tools import TOOLS, _issue, _result  # noqa: PLC0415
+
+        if name == "pause_alerts":
+            return _result(_issue(ctx, name, DONE, "front_side", {}))
+        return TOOLS[name](ctx, args)
+
+    def test_nulls_and_empty_optionals_do_not_make_a_new_operation(self) -> None:
+        fast = Scripted([call("find_events", last_hours=24), call("send_media", handle="E1"),
+                         call("hand_off", reason="x")], "fast")
+        big = Scripted([call("send_media", handle="E1", from_sec=None, seconds=None), reply("Here it is.")], "big")
+        out = self.agent(big, fast=fast, run_tool=self.fake_send).handle("send the last video", "-5", {"user_id": 1})
+        self.assertEqual(self.calls.count("send_media"), 1)
+        self.assertEqual(len(out.receipts), 1)
+
+    def test_camera_and_cameras_are_one_operation(self) -> None:
+        big = Scripted([call("record_clip", camera="front"), call("record_clip", camera="front_side", seconds=10),
+                        reply("Recording.")])
+        self.agent(big, run_tool=self.counting).handle("record the front camera", "-5", {"user_id": 1})
+        self.assertEqual(self.calls.count("record_clip"), 1)
+        self.calls.clear()
+        words = "pause alerts for now"
+        big = Scripted([call("pause_alerts", camera="front", owner_words=words),
+                        call("pause_alerts", cameras=["front_side"], owner_words=words), reply("Paused.")])
+        self.agent(big, run_tool=self.counting).handle(words, "-6", {"user_id": 1})
+        self.assertEqual(self.calls.count("pause_alerts"), 1)
+
+    def test_verdict_handle_defaults_to_the_alert_and_clip_seconds_to_ten(self) -> None:
+        from home_guard_project.box.brain.agent import _effective  # noqa: PLC0415
+        from home_guard_project.box.brain.tools import ToolContext  # noqa: PLC0415
+
+        ctx = ToolContext(turn_id="t", chat_id="1", speaker={}, text="", lang="en", mode="guard",
+                          snapshot=snapshot("guard"), state=None, services=None, book=None, threaded=False)
+        ctx.alert_handle = "E3"
+        self.assertEqual(_effective(ctx, "record_verdict", {"verdict": "ok"}),
+                         _effective(ctx, "record_verdict", {"verdict": "ok", "handle": "e3"}))
+        self.assertEqual(_effective(ctx, "record_clip", {"camera": "front"}),
+                         _effective(ctx, "record_clip", {"camera": "front", "seconds": 10}))
+
+    def question_with_send(self):
+        return ModelMessage(tool_calls=(
+            ToolCall(id="p", name="send_media", arguments={"handle": "E1"}),
+            ToolCall(id="q", name="ask_clarification", arguments={"question": "Which?", "choices": ["a", "b"]})))
+
+    def test_a_question_still_reports_what_was_done(self) -> None:
+        big = Scripted([call("find_events", last_hours=24), self.question_with_send()])
+        out = self.agent(big, run_tool=self.fake_send).handle("send it", "-5", {"user_id": 1})
+        self.assertIn("✓ Video sent", out.text)
+        self.assertTrue(out.text.endswith("\n\nWhich?"))
+        self.assertEqual(out.buttons, ("a", "b"))
+
+    def test_a_failed_receipt_before_a_question_is_shown(self) -> None:
+        def failing(ctx, name, args):
+            if name == "send_media":
+                from home_guard_project.box.brain.tools import _issue, _result  # noqa: PLC0415
+
+                return _result(_issue(ctx, "send_media", FAILED, "E1", {"kind": "video"}, "telegram"))
+            return self.counting(ctx, name, args)
+
+        big = Scripted([call("find_events", last_hours=24), self.question_with_send()])
+        out = self.agent(big, run_tool=failing).handle("send it", "-5", {"user_id": 1})
+        self.assertIn("✗", out.text)
+        self.assertTrue(out.text.endswith("Which?"))
+
+    def test_a_used_question_token_does_nothing_the_second_time(self) -> None:
+        big = Scripted([call("ask_clarification", question="Which?", choices=["a", "b"]), reply("ok")])
+        agent = self.agent(big)
+        first = agent.handle("hi", "-5")
+        self.assertIsNotNone(agent.handle_choice("-5", first.question_token, 0))
+        seen = len(big.seen)
+        self.assertIsNone(agent.handle_choice("-5", first.question_token, 0))
+        self.assertEqual(len(big.seen), seen)
+
+    def test_the_token_is_checked_inside_the_turn_lock(self) -> None:
+        big = Scripted([call("ask_clarification", question="Which?", choices=["a", "b"]), reply("ok")])
+        agent = self.agent(big)
+        first = agent.handle("hi", "-5")
+        real, loads = agent.memory.load, {"n": 0}
+
+        def load(chat_id):                 # another tap wins between the early check and the turn
+            loads["n"] += 1
+            state = real(chat_id)
+            if loads["n"] > 1:
+                state.pending = None
+            return state
+
+        agent.memory.load = load
+        seen = len(big.seen)
+        self.assertIsNone(agent.handle_choice("-5", first.question_token, 0))
+        self.assertEqual(len(big.seen), seen)
+
+    def test_the_rewrite_request_contains_the_bad_answer(self) -> None:
+        big = Scripted([ModelMessage(content="I sent you the video."), reply("There was one event.")])
+        out = self.agent(big).handle("send the video", "-5", {"user_id": 1})
+        self.assertEqual(out.text, "There was one event.")
+        sent = big.seen[1][0]
+        self.assertEqual(sent[-2], "I sent you the video.")
+        self.assertIn("[BOX] Your answer describes actions", sent[-1])
+
+    def test_an_empty_fast_answer_is_a_handoff(self) -> None:
+        bad = ToolCall("x", "reply", {"answer": object()}, valid=False)
+        for fast_msg in (ModelMessage(), ModelMessage(tool_calls=(bad,))):
+            with self.subTest(fast=fast_msg):
+                out = self.agent(Scripted([reply("Hello.")]), Scripted([fast_msg], "fast")).handle("hi", "-5")
+                self.assertEqual((out.text, out.tier, out.escalated), ("Hello.", "big", True))
+
+    def test_a_failure_after_tools_ran_keeps_receipts_and_after_actions(self) -> None:
+        big = Scripted([call("set_camera_active", camera="front_side", active=False,
+                             owner_words="turn off the front"), reply("Done.")])
+        agent = self.agent(big)
+        agent.services.set_camera = lambda camera, active: {"ok": True}
+        agent.services.request_restart = lambda: None
+        agent.memory.save = Mock(side_effect=OSError("disk"))
+        out = agent.handle("turn off the front camera", "-5", {"user_id": 1})
+        self.assertTrue(out.receipts)
+        self.assertTrue(out.after)
+        self.assertEqual(len(glob.glob(os.path.join(self.root, "feedback", "**", "*.feedback.json"),
+                                       recursive=True)), 1)
+
+    def test_builder_wires_services(self) -> None:
+        from home_guard_project.box import find_cameras  # noqa: PLC0415
+        from home_guard_project.box.brain.vision import BudgetedVision  # noqa: PLC0415
+
+        with patch("home_guard_project.box.brain.models.make_model", return_value=Scripted([])), \
+                patch("home_guard_project.box.brain.vision.make_vision", return_value=Mock()), \
+                patch("home_guard_project.box.embeddings.make_embedder", return_value=None):
+            with patch.object(find_cameras, "apply_changes") as apply:
+                agent, _ = build_owner_agent({}, {"OPENAI_API_KEY": "k"}, None, Mock(), self.root, self.root,
+                                             self.root)
+                agent.services.set_camera("front_side", False)
+        services = agent.services
+        self.assertIs(services.request_restart, find_cameras._restart_running_mode)
+        self.assertEqual(services.feedback_dir, self.root)
+        self.assertIsInstance(services.vision, BudgetedVision)
+        self.assertTrue(os.path.abspath(services.vision.path).startswith(
+            os.path.abspath(os.path.join(self.root, ".registry"))))
+        self.assertIs(apply.call_args.kwargs["restart"], False)
 
 
 if __name__ == "__main__":

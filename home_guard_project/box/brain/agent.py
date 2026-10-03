@@ -142,20 +142,32 @@ def _default_run_tool(ctx: ToolContext, name: str, args: Dict[str, Any]) -> Dict
 _NOT_PART_OF_THE_ACTION = ("owner_words", "note", "uses", "reason")
 
 
-def _effective(ctx: ToolContext, args: Dict[str, Any]) -> str:
-    """The operation an acting call performs, for idempotency: camera words resolved to camera names, and the
+def _effective(ctx: ToolContext, name: str, args: Dict[str, Any]) -> str:
+    """The operation an acting call performs, for idempotency: empty optionals dropped, camera words resolved to a
+    sorted list of camera names (``camera`` and ``cameras`` are one operation), defaults filled in, and the
     explanatory fields left out - so "front" and "the front camera" are the same action."""
     out: Dict[str, Any] = {}
+    cameras: set = set()
     for key, value in args.items():
-        if key in _NOT_PART_OF_THE_ACTION:
+        if key in _NOT_PART_OF_THE_ACTION or value is None or value == "" or value == []:
+            continue
+        if key in ("camera", "cameras"):
+            items = value if isinstance(value, list) else [value]
+            for v in items:
+                if ctx.snapshot is not None:
+                    cameras.add(resolve_camera(ctx.snapshot, str(v)).camera or str(v))
+                else:
+                    cameras.add(str(v))
             continue
         if key == "handle":
-            value = str(value or "").strip().upper()
-        if key in ("camera", "cameras") and ctx.snapshot is not None:
-            items = value if isinstance(value, list) else [value]
-            names = sorted({resolve_camera(ctx.snapshot, str(v)).camera or str(v) for v in items})
-            value = names if key == "cameras" else names[0]
+            value = str(value).strip().upper()
         out[key] = value
+    if cameras:
+        out["cameras"] = sorted(cameras)
+    if name == "record_verdict" and not out.get("handle") and ctx.alert_handle:
+        out["handle"] = str(ctx.alert_handle).strip().upper()
+    if name == "record_clip" and "seconds" not in out:
+        out["seconds"] = 10
     return json.dumps(out, sort_keys=True, ensure_ascii=False, default=str)
 
 
@@ -183,7 +195,7 @@ class OwnerAgentV2:
             return {"ok": False, "error": f"{name} is not available now"}
         key = ""
         try:
-            key = f"{ctx.turn_id}:{name}:{_effective(ctx, args)}"
+            key = f"{ctx.turn_id}:{name}:{_effective(ctx, name, args)}"
             if name in ACTING_TOOLS:
                 if key in ctx.done_calls:
                     return dict(ctx.done_calls[key], note="already done in this turn; do not repeat it")
@@ -210,6 +222,8 @@ class OwnerAgentV2:
             msg = model.chat(messages, schemas)
             _check_message(msg, tier, usage)
             if not msg.tool_calls:
+                if tier == FAST and not (msg.content or "").strip():
+                    raise _HandOff("empty answer")
                 return (msg.content or "").strip()
             messages.append({
                 "role": "assistant", "content": msg.content or None, "_raw": msg.raw,
@@ -247,11 +261,15 @@ class OwnerAgentV2:
 
     # -- one message -------------------------------------------------------------------
     def handle(self, text: str, chat_id: Any, who: Optional[Dict[str, Any]] = None,
-               alert: Optional[Dict[str, Any]] = None, threaded: bool = False) -> AgentReply:
-        """Act on one owner message. Never raises; the message is always saved."""
+               alert: Optional[Dict[str, Any]] = None, threaded: bool = False,
+               choice: Optional[Tuple[str, int]] = None) -> Optional[AgentReply]:
+        """Act on one owner message. Never raises; the message is always saved. ``choice`` (token, index) makes
+        the message a tapped button: it is checked against the saved question under the lock, and a stale or
+        already-used token does nothing (None)."""
         with self._lock:
             try:
-                return self._handle(str(text or ""), str(chat_id), _object(who), _object(alert) or None, threaded)
+                return self._handle(str(text or ""), str(chat_id), _object(who), _object(alert) or None, threaded,
+                                    choice)
             except Exception as exc:  # the outer boundary also covers loading and saving state
                 log.warning("Owner message failed at the poll boundary: %s", exc)
                 lang = ChatState().language_for("", text if isinstance(text, str) else "")
@@ -277,15 +295,21 @@ class OwnerAgentV2:
             if (pending.get("token") != token or not isinstance(choices, list)
                     or not 0 <= index < len(choices) or not isinstance(choices[index], str)):
                 return None
-            return self.handle(choices[index], chat_id, who)
+            return self.handle(choices[index], chat_id, who, choice=(token, index))
         except Exception as exc:
             log.warning("Could not handle clarification callback: %s", exc)
             return None
 
     def _handle(self, text: str, chat_id: str, who: Dict[str, Any], alert: Optional[Dict[str, Any]],
-                threaded: bool) -> AgentReply:
+                threaded: bool, choice: Optional[Tuple[str, int]] = None) -> Optional[AgentReply]:
         now = _finite(self._now())
         state: ChatState = self.memory.load(chat_id)
+        if choice is not None:
+            pending_now = state.pending if isinstance(state.pending, dict) else {}
+            choices_now = pending_now.get("choices")
+            if (pending_now.get("token") != choice[0] or not isinstance(choices_now, list)
+                    or not 0 <= choice[1] < len(choices_now) or choices_now[choice[1]] != text):
+                return None
         speaker = str(who.get("user_id") or "")
         try:
             settings = _object(self.services.read_settings()) if self.services.read_settings else {}
@@ -348,6 +372,10 @@ class OwnerAgentV2:
                     raise
                 if ctx.clarification is not None:
                     break
+                if tier == FAST and not answer:
+                    log.info("Fast model gave an empty answer; asking the big model.")
+                    escalated = True
+                    continue
                 bad = unbacked_claims(answer, ctx.receipts)
                 if bad and tier == FAST:
                     log.warning("Fast answer claims %s with no receipt; asking the big model.", bad)
@@ -356,6 +384,8 @@ class OwnerAgentV2:
                     continue
                 if bad:
                     guard_hits += 1
+                    if answer:
+                        messages.append({"role": "assistant", "content": answer})
                     messages.append({"role": "user", "content": (
                         f"[BOX] Your answer describes actions that did not happen ({', '.join(bad)}). Write the "
                         "answer again with facts only and call reply. Do not call any other tool.")})
@@ -372,6 +402,10 @@ class OwnerAgentV2:
         buttons: Tuple[str, ...] = ()
         if ctx.clarification is not None:
             reply_text = ctx.clarification["question"]
+            if ctx.receipts:
+                done = render_reply("", ctx.receipts, lang, self.retention_days)
+                if done:
+                    reply_text = f"{done}\n\n{reply_text}"
             buttons = tuple(ctx.clarification["choices"])
             state.pending = dict(ctx.clarification, request=ctx.text, speaker=speaker,
                                  token=uuid.uuid4().hex[:8])
@@ -385,8 +419,11 @@ class OwnerAgentV2:
                 save_feedback(self.services.feedback_dir, alert, Feedback(), text, who, chat_id, now)
         except Exception as exc:  # noqa: BLE001
             log.warning("Could not save the owner's message: %s", exc)
-        state.add_turn(speaker, text, reply_text, ctx.shown, [r.summary() for r in ctx.receipts], now)
-        self.memory.save(chat_id, state)
+        try:
+            state.add_turn(speaker, text, reply_text, ctx.shown, [r.summary() for r in ctx.receipts], now)
+            self.memory.save(chat_id, state)
+        except Exception as exc:  # noqa: BLE001 - what was done is still reported, and its restart still runs
+            log.warning("Could not save the conversation: %s", exc)
         return AgentReply(text=reply_text, buttons=buttons,
                           question_token=(state.pending or {}).get("token", "") if buttons else "",
                           after=tuple(ctx.after_reply), lang=lang,
