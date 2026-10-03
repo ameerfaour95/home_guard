@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .config import AnalysisConfig
-from .utils.ls_convert import interpolate_keyframes, ls_rect_to_yolo
+from .utils.ls_convert import box_at, ls_rect_to_yolo
 from .utils.s3 import (
     meta_path_to_camera_date,
     meta_path_to_clip_id,
@@ -68,6 +68,9 @@ class ParsedTask:
     clip_id: str
 
     tracks: List[Track] = field(default_factory=list)
+    frame_space: str = "legacy"          # "native" (Admin Center) or "legacy" (capped LS fps)
+    native_fps: Optional[float] = None   # from task data when published
+    frames_count: int = 0                # from task data when published
     vlm_description: str = ""
     annotator_id: Optional[int] = None
     lead_time_sec: float = 0.0
@@ -114,6 +117,11 @@ def parse_export(
             s3_vlm_crop_url=meta_path_to_s3_vlm_crop(meta_path, cfg.s3_bucket, cfg.s3_prefix),
             clip_id=meta_path_to_clip_id(meta_path),
         )
+
+        pt.frame_space = "native" if data.get("frame_space") == "native" else "legacy"
+        nf = data.get("native_fps")
+        pt.native_fps = float(nf) if nf else None
+        pt.frames_count = int(data.get("framesCount", data.get("frames_count", 0)) or 0)
 
         annotations = raw.get("annotations", [])
         pt.num_annotations = len(annotations)
@@ -651,21 +659,56 @@ def _label_to_class_id(label: str, coco_labels: Dict[int, str]) -> Optional[int]
     return None
 
 
+def _native_fps_from_meta(pt: ParsedTask, dataset_dir: Optional[str]) -> Optional[float]:
+    """Native fps of the clip from its .meta.json (same keys labeling/tasks.py reads)."""
+    if not dataset_dir or not pt.meta_path:
+        return None
+    path = os.path.join(dataset_dir, pt.meta_path.replace("\\", "/"))
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+    except (OSError, ValueError):
+        return None
+    v = meta.get("fps_estimated", meta.get("buffer", {}).get("store_fps"))
+    return float(v) if v else None
+
+
+def _frame_map(
+    pt: ParsedTask, ls_count: int, dataset_dir: Optional[str],
+) -> Tuple[List[Tuple[int, int]], float]:
+    """[(native_index, ls_frame)] for every native frame of the clip, plus the fps LS keyframe times use."""
+    if pt.frame_space == "native":
+        return [(n, n + 1) for n in range(ls_count)], (pt.native_fps or pt.fps)
+    native_fps = pt.native_fps or _native_fps_from_meta(pt, dataset_dir) or pt.fps
+    ls_fps = min(native_fps, 10.0)  # as labeling/tasks.py computed it
+    ratio = ls_fps / max(native_fps, 1e-6)
+    out: List[Tuple[int, int]] = []
+    i = 0
+    while True:
+        ls_frame = round(i * ratio) + 1  # as labeling/utils/yolo.py maps image index -> LS frame
+        if ls_frame > ls_count:
+            break
+        out.append((i, ls_frame))
+        i += 1
+    return out, ls_fps
+
+
 def write_yolo_labels(
     tasks: List[ParsedTask], cfg: AnalysisConfig, output_dir: str,
+    dataset_dir: Optional[str] = None,
 ) -> str:
     """
-    Convert LS videorectangle annotations to per-frame YOLO label files.
+    Convert LS videorectangle annotations to per-frame YOLO label files named
+    by NATIVE frame index (``{clip_id}_f{native:04d}.txt``) so they line up with
+    ``images/.../{clip_id}_f{native:04d}.jpg``.
 
-    Interpolates between keyframes to produce a bounding box for every frame,
-    then writes one .txt label file per frame.  Class IDs are remapped to
-    sequential 0..N-1 matching the generated data.yaml.
+    Frames where nothing is visible get an empty file (a human negative).
+    Class IDs are remapped to sequential 0..N-1 matching data.yaml.
     """
     yolo_dir = os.path.join(output_dir, "yolo")
     labels_dir = os.path.join(yolo_dir, "labels")
     os.makedirs(labels_dir, exist_ok=True)
 
-    # Build class-ID remap: sparse COCO id -> sequential 0..N-1
     sorted_coco_ids = sorted(cfg.coco_labels.keys())
     coco_to_seq: Dict[int, int] = {
         cid: idx for idx, cid in enumerate(sorted_coco_ids)
@@ -677,10 +720,17 @@ def write_yolo_labels(
     skipped_labels: Counter = Counter()
 
     for pt in tasks:
+        if pt.num_annotations <= 0:
+            continue
         cam_date_dir = os.path.join(labels_dir, pt.camera_name, pt.date)
         os.makedirs(cam_date_dir, exist_ok=True)
 
-        frame_boxes: Dict[int, List[str]] = defaultdict(list)
+        ls_count = max([t.frames_count for t in pt.tracks] + [pt.frames_count, 0])
+        if ls_count <= 0:
+            ls_count = int(round(pt.duration_sec * pt.fps))
+        fmap, kf_fps = _frame_map(pt, ls_count, dataset_dir)
+
+        frame_boxes: Dict[int, List[str]] = {n: [] for n, _ in fmap}
 
         for trk in pt.tracks:
             coco_id = _label_to_class_id(trk.label, cfg.coco_labels)
@@ -689,38 +739,34 @@ def write_yolo_labels(
                 continue
             seq_id = coco_to_seq[coco_id]
 
-            frames_count = trk.frames_count or int(pt.duration_sec * pt.fps)
-            per_frame = interpolate_keyframes(trk.sequence, frames_count)
-
-            for frame_num, box in per_frame.items():
+            for native, ls_frame in fmap:
+                box = box_at(trk.sequence, ls_frame, kf_fps)
+                if box is None:
+                    continue
                 xc, yc, w, h = ls_rect_to_yolo(
                     box["x"], box["y"], box["width"], box["height"],
                 )
                 if w <= 0 or h <= 0:
                     continue
-                line = f"{seq_id} {xc:.6f} {yc:.6f} {w:.6f} {h:.6f}"
-                frame_boxes[frame_num].append(line)
+                frame_boxes[native].append(f"{seq_id} {xc:.6f} {yc:.6f} {w:.6f} {h:.6f}")
                 total_boxes += 1
 
-        for frame_num in sorted(frame_boxes):
-            fname = f"{pt.clip_id}_f{frame_num:04d}.txt"
-            fpath = os.path.join(cam_date_dir, fname)
+        for native in sorted(frame_boxes):
+            fpath = os.path.join(cam_date_dir, f"{pt.clip_id}_f{native:04d}.txt")
+            lines = frame_boxes[native]
             with open(fpath, "w", encoding="utf-8") as f:
-                f.write("\n".join(frame_boxes[frame_num]) + "\n")
+                f.write("\n".join(lines) + "\n" if lines else "")
             total_files += 1
 
     if skipped_labels:
         log.warning("Skipped labels not in COCO map: %s", dict(skipped_labels))
 
-    # Write data.yaml for Ultralytics
     import yaml
-    data_yaml = {
-        "path": os.path.abspath(yolo_dir),
-        "train": "labels",
-        "val": "labels",
-        "names": names_dict,
-        "nc": len(names_dict),
-    }
+    if os.path.isdir(os.path.join(yolo_dir, "images")):
+        data_yaml = {"path": ".", "train": "images", "val": "images"}
+    else:
+        data_yaml = {"path": os.path.abspath(yolo_dir), "train": "labels", "val": "labels"}
+    data_yaml.update({"names": names_dict, "nc": len(names_dict)})
     data_yaml_path = os.path.join(yolo_dir, "data.yaml")
     with open(data_yaml_path, "w", encoding="utf-8") as f:
         yaml.safe_dump(data_yaml, f, default_flow_style=False, sort_keys=False)
@@ -810,7 +856,7 @@ def run(
         write_excel(tasks, cfg, output_dir)
 
     if not skip_yolo:
-        write_yolo_labels(tasks, cfg, output_dir)
+        write_yolo_labels(tasks, cfg, output_dir, dataset_dir=dataset_dir)
 
     if not skip_vlm:
         write_vlm_jsonl(tasks, cfg, output_dir)
