@@ -10,8 +10,9 @@ import logging
 import random
 import threading
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Callable, Optional
+from typing import Callable, Iterator, Optional
 
 from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker  # noqa: F401  (re-exported for callers)
@@ -21,6 +22,32 @@ log = logging.getLogger(__name__)
 LOCK_BASE = 0x48470000  # "HG" namespace for advisory-lock keys
 INDEXER_LOCK, MEDIA_LOCK, NOTICES_LOCK = LOCK_BASE + 1, LOCK_BASE + 2, LOCK_BASE + 3
 EXPORTS_LOCK = LOCK_BASE + 4
+LOCKS = {"indexer": INDEXER_LOCK, "media": MEDIA_LOCK, "notices": NOTICES_LOCK, "exports": EXPORTS_LOCK}
+
+
+@contextmanager
+def loop_lock(engine, kind) -> Iterator[bool]:
+    """The session advisory lock of one loop kind ("indexer", "media", ... or a raw key), held on its own
+    connection for the duration of the block; yields False (and holds nothing) when someone else has it.
+
+    The background loops and the management CLI (`index-once`, `media-once`) take the same lock, so a manual run
+    never races the server's loop."""
+    key = LOCKS[kind] if isinstance(kind, str) else int(kind)
+    conn = engine.connect()
+    try:
+        got = bool(conn.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": key}).scalar())
+        conn.commit()
+        try:
+            yield got
+        finally:
+            if got:
+                try:
+                    conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": key})
+                    conn.commit()
+                except Exception:  # noqa: BLE001 -- a broken connection drops its session lock when closed
+                    conn.invalidate()
+    finally:
+        conn.close()
 
 
 class Loop:
@@ -59,33 +86,21 @@ class Loop:
 
     def run_once(self) -> bool:
         """One locked attempt; False when another process holds the lock."""
-        conn = self.engine.connect()
-        try:
-            got = conn.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": self.lock_key}).scalar()
-            conn.commit()
+        with loop_lock(self.engine, self.lock_key) as got:
             if not got:
                 self.skipped += 1
                 return False
+            session = self.sm()
             try:
-                session = self.sm()
-                try:
-                    self.job(session, self.s3)
-                    session.commit()
-                except Exception:
-                    session.rollback()
-                    raise
-                finally:
-                    session.close()
-                    self.runs += 1
+                self.job(session, self.s3)
+                session.commit()
+            except Exception:
+                session.rollback()
+                raise
             finally:
-                try:
-                    conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": self.lock_key})
-                    conn.commit()
-                except Exception:  # noqa: BLE001 -- a broken connection drops its session lock when closed
-                    conn.invalidate()
+                session.close()
+                self.runs += 1
             return True
-        finally:
-            conn.close()
 
 
 class Loops:

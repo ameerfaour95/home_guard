@@ -161,6 +161,17 @@ class S3:
                 "Objects": [{"Key": k} for k in keys[start:start + 1000]], "Quiet": True})
         return len(keys)
 
+    def delete_keys(self, keys) -> int:
+        """Delete these objects (each under a writable prefix); returns how many were asked for."""
+        keys = sorted(set(keys))
+        for key in keys:
+            if not key.startswith(WRITABLE_PREFIXES) or key in WRITABLE_PREFIXES:
+                raise ValueError(f"refusing to delete outside {WRITABLE_PREFIXES}: {key}")
+        for start in range(0, len(keys), 1000):
+            self.client.delete_objects(Bucket=self.bucket, Delete={
+                "Objects": [{"Key": k} for k in keys[start:start + 1000]], "Quiet": True})
+        return len(keys)
+
     def exists(self, key: str) -> bool:
         from botocore.exceptions import ClientError
 
