@@ -87,7 +87,7 @@ def apply_policy_override(parsed: Dict[str, Any], in_window: bool, person: bool,
 
 
 # Bumped whenever the prompt or the answer's schema changes, so training records can be told apart.
-PROMPT_VERSION = "2026-10-03.tagged-style-label-3"
+PROMPT_VERSION = "2026-10-03.tagged-rules-label"
 
 # The three labels the model gives a scene, and what the box does with each. The owner
 # chose them (this is also what a student model will be trained to answer):
@@ -131,10 +131,10 @@ VLM_RESPONSE_FORMAT: Dict[str, Any] = {
 
 
 def build_prompt(camera_name: str, t_sec: int, local_time_str: str, start_hour: int, end_hour: int) -> str:
-    # The summary is written the way our taggers wrote the training descriptions
-    # (tagging/*/analysis_output/vlm_training.jsonl): what happens, in order, with what
-    # people wear and hold, and "No special activity." for an empty scene. The examples
-    # are real tagged descriptions. The label replaces the taggers' "[alert]" mark and
+    # The summary follows the rules our taggers wrote by (tagging/*/analysis_output/
+    # vlm_training.jsonl): what happens, in order, with what people wear and hold, and
+    # "No special activity." for an empty scene. No example sentences, so the model does
+    # not copy their wording. The label replaces the taggers' "[alert]" mark and
     # decides what the box does (LABEL_COMMANDS); people/vehicle_moving decide whether
     # anything is sent at all (vlm_confirms).
     return f"""
@@ -142,8 +142,7 @@ You are the eyes of a home security system. These are sequential frames (one sho
 seconds) from the homeowner's own camera "{camera_name}", local time {local_time_str}.
 
 Write "summary": what happens in the clip, in one to three short sentences (usually 10 to 25 words).
-- Say who is there and what they do, in the order it happens: "Two men are standing near the steps,
-  appearing to be talking." / "A man takes a mop and looks at his phone while walking to the step."
+- Say who is there and what they do, in the order it happens.
 - Mention what matters for safety: clothing that hides the face (hood, mask, covered face), dark or
   covering clothes, and objects in the hands (phone, bag, tool, hammer, knife, gun, baby, mop).
 - Where something is uncertain, say "appears to" or "seems to".
@@ -153,20 +152,6 @@ Write "summary": what happens in the clip, in one to three short sentences (usua
   ethnicity or who the person is.
 - If nobody is there and nothing moves (parked cars, plants, light changes), write exactly:
   "No special activity."
-
-Examples of good summaries:
-- "Two men are standing next to each other, appearing to be engaged in conversation."
-- "A group of people are holding babies, standing outside, and talking."
-- "A woman enters the house while holding two babies simultaneously."
-- "A cat in the yard."
-- "No special activity."
-- "Three men walk slowly toward the entrance, obscuring their faces with hats, while the rear
-  individual uses his shirt to fully cover his face."
-- "A covered person is near a white car with an open door. He appears to be doing something
-  suspicious, looking around cautiously."
-- "Two people dressed in black try to break inside. They appear to be using a tool to break in."
-- "A man in a black hooded sweatshirt obscuring his face walks slowly, looking behind him while
-  holding a knife in his hand."
 
 Then give the clip ONE "label":
 - "normal": everyday life - family and visitors, people talking, walking, standing or waiting, looking
