@@ -41,6 +41,24 @@ def alert_result(output):
 
 
 class CameraAlertsBackend:
+    def set_house_alerts(self, value):
+        from dataclasses import replace
+        from .box_controls import RemoteSettingsBackend, Settings
+        value = ','.join(ordered_types(value))
+        if getattr(self, 'remote', False) and not self.box.demo:
+            backend = RemoteSettingsBackend(self.target, Settings(alert_on=','.join(self.camera_alerts()['house'])), self.runner, self.alert_reported_status, key=self.key)
+        else:
+            backend = self.box
+        backend.save_settings(replace(backend.load_settings(), alert_on=value))
+        return list(ordered_types(value))
+
+    def alert_reported_status(self):
+        if not getattr(self, 'remote', False) or self.box.demo:
+            return self.box.reported_status()
+        command = r'cd /d C:\home_guard && type logs\ai_status.json'
+        result = self.command(['ssh.exe', '-i', str(self.key), '-o', 'LogLevel=ERROR', self.target, command], allow_failed=True)
+        return alert_result(result.stdout) if not result.returncode else {}
+
     def _alert_command(self, args):
         if getattr(self, 'remote', False):
             result = self.command(self.ssh(' '.join(args)), allow_failed=True)

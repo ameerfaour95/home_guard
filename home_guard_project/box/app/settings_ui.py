@@ -7,6 +7,7 @@ from .strings import tr
 from .theme import OK, ERROR, WARNING
 from .box_controls import Settings, minutes_to_seconds
 from .ui import card, label, layout_for
+from .alert_types_ui import AlertTiles, ResponsiveColumns
 
 
 class SettingsPage:
@@ -16,11 +17,17 @@ class SettingsPage:
         self.loading=False;self.ack=AppliedState()
         self.widget=QWidget();layout=layout_for(self.widget,0);layout.setSpacing(16)
         layout.addWidget(label(tr("settings_title"),"title"));layout.addWidget(label(tr("settings_hint"),"muted"))
-        columns=QHBoxLayout();columns.setSpacing(16)
-        security=card();form=layout_for(security,24);form.setSpacing(16)
+        columns_widget=ResponsiveColumns();columns=columns_widget.row
+        security=card();form=layout_for(security,24);form.setSpacing(10)
         form.addWidget(label(tr("premium_security"),"section"))
         self.alerts=Switch(tr("security_alerts"));form.addWidget(self.alerts)
         form.addWidget(label(tr("security_alerts_hint"),"muted"))
+        form.addWidget(label(tr("alert_types_title"),"section"))
+        form.addWidget(label(tr("alert_house_caption"),"muted"))
+        self.alert_types=AlertTiles();form.addWidget(self.alert_types)
+        self.alert_note=label('', 'muted');self.alert_note.hide();form.addWidget(self.alert_note)
+        self.alert_types.changed.connect(lambda value:self.apply_live(alert_on=value))
+        self.alerts.toggled.connect(self.alert_types.setEnabled)
         from .alert_hours import AlertHours
         self.hours=AlertHours();self.start,self.end=self.hours.start,self.hours.end;form.addWidget(self.hours)
         form.addWidget(label(tr("cooldown")))
@@ -50,7 +57,8 @@ class SettingsPage:
         detect.addStretch()
         self.start.editingFinished.connect(self.live_hours);self.end.editingFinished.connect(self.live_hours);self.hours.all_day.toggled.connect(self.live_hours)
         self.cooldown.editingFinished.connect(self.live_cooldown)
-        columns.addWidget(security,8);columns.addWidget(viewing,6);columns.addWidget(detection,5);layout.addLayout(columns,1)
+        side=QWidget();side_layout=layout_for(side,0);side_layout.addWidget(viewing);side_layout.addWidget(detection)
+        columns.addWidget(security,7);columns.addWidget(side,3);layout.addWidget(columns_widget,1)
         footer=QHBoxLayout();self.note=label("","muted");footer.addWidget(self.note,1)
         self.save=QPushButton(tr("save_settings"));self.save.clicked.connect(self.save_clicked);footer.addWidget(self.save);layout.addLayout(footer)
         self.facts=label("","muted");layout.addWidget(self.facts)
@@ -67,11 +75,14 @@ class SettingsPage:
         try:
             settings = self.box.load_settings()
             self.alerts.setChecked(settings.mode == "inference")
+            self.alert_types.set_value(settings.alert_on)
+            self.alert_types.setEnabled(self.alerts.isChecked())
             self.hours.set_hours(settings.alert_start_hour, settings.alert_end_hour)
             self.cooldown.setValue(settings.alert_cooldown_sec/60)
             self.pictures.setChecked(settings.show_cameras)
             self.sensitivity.setValue(conf_slider(settings.inference_conf))
             self.note.setText("")
+            self.alert_note.hide()
         except Exception:
             self.note.setStyleSheet(f"color: {ERROR};")
             self.note.setText(tr("control_error"))
@@ -103,13 +114,18 @@ class SettingsPage:
             if before == after: return
             self.box.save_settings(after);self.ack.request(before,after,self.box.clock())
             self.note.setStyleSheet('color: '+WARNING);self.note.setText(tr('applying'))
+            if 'alert_on' in changes:
+                self.alert_note.setText(tr('applying'));self.alert_note.show()
             self.changed()
         except Exception:
             self.note.setStyleSheet('color: '+ERROR);self.note.setText(tr('control_error'))
+            if 'alert_on' in changes: self.alert_types.set_value(self.box.load_settings().alert_on)
+            if 'alert_on' in changes:
+                self.alert_note.setText(tr('control_error'));self.alert_note.show()
 
     def save_clicked(self):
         start, end = self.hours.values()
-        settings = Settings(mode="inference" if self.alerts.isChecked() else "data_collection", alert_start_hour=start, alert_end_hour=end, alert_cooldown_sec=minutes_to_seconds(self.cooldown.value()), show_cameras=self.pictures.isChecked(), inference_conf=slider_conf(self.sensitivity.value()), alert_on=self.box.load_settings().alert_on)
+        settings = Settings(mode="inference" if self.alerts.isChecked() else "data_collection", alert_start_hour=start, alert_end_hour=end, alert_cooldown_sec=minutes_to_seconds(self.cooldown.value()), show_cameras=self.pictures.isChecked(), inference_conf=slider_conf(self.sensitivity.value()), alert_on=self.alert_types.value())
         try:
             before=self.box.load_settings()
             self.box.save_settings(settings)
@@ -127,6 +143,8 @@ class SettingsPage:
         if self.ack.expected:
             status=self.ack.status(self.box.reported_status(),self.box.clock())
             self.note.setText(tr("live_applied" if status=="applied" else status));self.note.setStyleSheet('color: '+(OK if status=='applied' else WARNING))
+            if not self.alert_note.isHidden():
+                self.alert_note.setText(self.note.text());self.alert_note.setStyleSheet(self.note.styleSheet())
         if not self.waiting:
             return
         phase = self.box.phase()

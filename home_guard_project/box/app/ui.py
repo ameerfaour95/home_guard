@@ -214,7 +214,7 @@ class Window(QMainWindow):
         self.setWindowTitle(tr("setup_window_title") if args.setup else tr("brand"))
         self.setWindowIcon(QIcon(str(Path(__file__).parents[1] / "assets" / "home_guard.ico")))
         self.resize(*map(int, args.size.split("x")))
-        self.setMinimumSize(1000, 650)
+        self.setMinimumSize(640, 650)
         self.setStyleSheet(stylesheet(getattr(args,"theme","dark")))
         self.root = QWidget()
         self.setCentralWidget(self.root)
@@ -250,6 +250,8 @@ class Window(QMainWindow):
         if args.setup: titles.addWidget(self.header_hint)
         else:
             self.status_header=QHBoxLayout();self.status_header.setSpacing(16);self.status_header.addWidget(self.header_hint);self.status_header.addStretch();titles.addLayout(self.status_header)
+            from .alert_types_ui import ElidedLabel
+            self.alert_status=ElidedLabel();self.alert_status.setObjectName("muted");titles.addWidget(self.alert_status)
         header.addLayout(titles, 1)
         if args.setup: header.addStretch()
         if args.demo and args.setup:
@@ -680,6 +682,9 @@ class Window(QMainWindow):
         except Exception:
             from .box_controls import Settings
             settings=Settings()
+        from .alert_types_ui import alert_summary
+        self.alert_status.setText(hours_description(settings.alert_start_hour,settings.alert_end_hour) + " · " + alert_summary(self.ai_data,settings.alert_on))
+        self.alert_status.setVisible(state.mode == "inference")
         until, some = self.alert_pause.status(state.cameras) if state.mode == "inference" else (None,False)
         paused = tr("paused_some" if some else "paused_until", time=time.strftime("%H:%M",time.localtime(until))) if until else ""
         self.pause_label.setText(paused)

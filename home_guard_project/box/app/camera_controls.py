@@ -154,6 +154,8 @@ class CameraControls(CameraAlertsBackend):
                 if code != 0 or not isinstance(data.get("active"), list) or not isinstance(data.get("disabled"), list):
                     raise ValueError("Invalid apply result")
         old = {c.name: c for c in self.records}
+        if self.box.demo:
+            self.box.camera_alert_on = {row['new_name']: self.box.camera_alert_on[row['name']] for row in payload['cameras'] if row['name'] in self.box.camera_alert_on}
         self._zones = {row["new_name"]: self._zones.get(row["name"], []) for row in payload["cameras"]}
         self.records = [replace(old[row["name"]], name=row["new_name"], enabled=row["enabled"]) for row in payload["cameras"]]
         if not self.box.is_stopped():
