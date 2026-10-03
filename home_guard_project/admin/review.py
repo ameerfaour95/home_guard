@@ -11,13 +11,21 @@ from .formatting import local_time
 from .workers import TaskRunner
 from .backend import AuthError
 from .widgets.common import label, button
+from .widgets.icons import draw_icon
 
 
 class ReviewDelegate(TimelineDelegate):
     """The timeline's thumbnail, typography and evidence palette in a compact row."""
     def paint(self, painter, option, index):
         if index.column() != 1:
-            return super().paint(painter, option, index)
+            super().paint(painter, option, index)
+            if index.column() == 0:
+                e,t,p = index.data(Qt.ItemDataRole.UserRole),self.t,painter
+                p.save()
+                for i,(name,present) in enumerate([('video',e.completeness.video),('boxes',e.completeness.boxes != 'none'),('ai',e.completeness.ai == 'real')]):
+                    draw_icon(p,name,QRectF(option.rect.x()+12+i*25,option.rect.bottom()-24,16,16),t['action' if present else 'border'])
+                p.restore()
+            return
         from PySide6.QtWidgets import QStyle
         e, p, t = index.data(Qt.ItemDataRole.UserRole), painter, self.t
         p.save()
@@ -26,7 +34,8 @@ class ReviewDelegate(TimelineDelegate):
         rect = option.rect.adjusted(8, 10, -10, -8)
         lines = [f'{local_time(e.start_utc, e.timezone)[13:18]}  ·  {e.camera}', e.summary or 'No summary saved',
                  f'{KINDS[e.kind]} · '+{'real':'AI answer saved','failed':'AI failed','fallback':'Fallback AI','none':'No AI answer'}[e.completeness.ai],
-                 ('Reviewed' if e.reviewed else 'Unreviewed') + ('  ·  Flagged' if e.flagged else '')]
+                 ('Reviewed' if e.reviewed else 'Unreviewed') + ('  ·  Flagged' if e.flagged else '') +
+                 ('  ·  '+', '.join({'real':'Confirmed','false_alarm':'False alarm','real_but_wrong':'Wrong decision'}.get(v,v.replace('_',' ')) for v in e.owner_verdicts) if e.owner_verdicts else '')]
         for i, text in enumerate(lines):
             p.setFont(QFont('Segoe UI', 9 if i < 2 else 8))
             p.setPen(QColor(t['text' if i == 0 else 'action' if i == 3 and e.reviewed else 'muted']))

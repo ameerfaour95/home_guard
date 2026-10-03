@@ -83,7 +83,7 @@ class Shell(QWidget):
                 page.event_requested.connect(self.open_event)
                 page.session_expired.connect(self.session_expired)
             else:
-                page = AuditScreen(backend)
+                page = AuditScreen(backend, theme)
                 page.session_expired.connect(self.session_expired)
             self.screens[title] = page
             self.pages.addWidget(page)

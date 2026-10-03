@@ -1,11 +1,11 @@
 from PySide6.QtCore import Qt, Signal, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices, QColor, QFont
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QStackedWidget, QApplication, QStyledItemDelegate
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QStackedWidget, QApplication, QStyledItemDelegate, QSizePolicy
 from .workers import TaskRunner
 from .backend import AuthError
 from .formatting import local_time
 from .theme import PALETTES
-from .widgets.common import label, button
+from .widgets.common import label, button, Skeleton, EmptyState
 from .widgets.data_table import RowsModel, data_table
 from .collections import CollectionGrid, CreateCollection
 from .export_wizard import ExportWizard
@@ -43,7 +43,13 @@ class StudioScreen(QWidget):
         self.export_button = button('Export collection…',self.open_export,'primary'); self.export_button.setVisible(role != 'support'); top.addWidget(self.export_button)
         box.addLayout(top)
         self.message = label('Loading Studio…','muted',True); box.addWidget(self.message)
-        self.tabs = QTabWidget(); self.tabs.tabBar().setDrawBase(False); box.addWidget(self.tabs,1)
+        self.tabs = QTabWidget(); self.tabs.tabBar().setDrawBase(False)
+        self.content_stack = QStackedWidget(); self.content_stack.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Ignored)
+        self.content_stack.addWidget(self.tabs)
+        self.loading = Skeleton(theme); self.content_stack.addWidget(self.loading)
+        self.failure = EmptyState('Studio could not be loaded','Check your connection and try again.',eyebrow='UNAVAILABLE')
+        self.failure.action.show(); self.failure.action.clicked.connect(self.refresh); self.content_stack.addWidget(self.failure)
+        self.content_stack.setCurrentWidget(self.loading); box.addWidget(self.content_stack,1)
         filters_page = QWidget(); filters = QVBoxLayout(filters_page); filters.setContentsMargins(0,12,0,0); filters.setSpacing(14)
         filters.addWidget(label('A focused place to start','section'))
         filters.addWidget(label('Built-in views from Cloud. Select a view to check for matches; open it to begin reviewing.','muted',True))
@@ -107,9 +113,11 @@ class StudioScreen(QWidget):
         self.refresh_button.setEnabled(True)
         if error:
             self.message.setText(str(error)+' · Select Refresh to retry.'); self.message.show()
+            if not self.loaded_once: self.content_stack.setCurrentWidget(self.failure)
             if isinstance(error,AuthError): self.session_expired.emit()
             return
         self.loaded_once = True; self.filters,self.collections,self.exports = result
+        self.content_stack.setCurrentWidget(self.tabs)
         self.filter_model.replace(self.filters); self.collection_model.replace(self.collections)
         selected = self.current_export()
         self.export_model.replace(self.exports)

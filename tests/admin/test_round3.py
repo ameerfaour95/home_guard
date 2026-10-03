@@ -299,3 +299,16 @@ def test_audit_discards_late_filter_results(widgets,wait):
     finally: gate.set()
     wait(lambda:screen.loaded_once and not screen.runner.busy)
     assert len(b.calls) == 2 and all(e.staff == 'Dana Shalev' for e in screen.model.items)
+
+
+def test_studio_and_audit_failures_are_retryable(widgets,wait):
+    from home_guard_project.admin.backend import OfflineError
+    class Offline(DemoBackend):
+        def saved_filters(self): raise OfflineError()
+        def audit(self,**filters): raise OfflineError()
+    b = Offline(); studio = StudioScreen(b); audit = AuditScreen(b); widgets.extend([studio,audit])
+    studio.show(); audit.show()
+    wait(lambda:not studio.runner.busy and not audit.runner.busy)
+    assert studio.content_stack.currentWidget() is studio.failure and studio.failure.action.isVisible()
+    assert audit.stack.currentWidget() is audit.failure and audit.failure.action.isVisible()
+    assert "Can't reach" in studio.message.text() and "Can't reach" in audit.message.text()

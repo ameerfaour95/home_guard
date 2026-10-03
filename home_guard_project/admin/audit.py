@@ -1,8 +1,8 @@
 import json
 from dataclasses import asdict
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QSplitter, QPlainTextEdit
-from .widgets.common import label, button
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QSplitter, QPlainTextEdit, QStackedWidget, QSizePolicy
+from .widgets.common import label, button, Skeleton, EmptyState
 from .widgets.data_table import RowsModel, data_table
 from .workers import TaskRunner
 from .backend import AuthError
@@ -17,7 +17,7 @@ def action_words(action):
 class AuditScreen(QWidget):
     session_expired = Signal()
 
-    def __init__(self,backend):
+    def __init__(self,backend,theme='dark'):
         super().__init__(); self.backend = backend
         self.cursor,self.generation,self.loaded_once = None,0,False
         box = QVBoxLayout(self); box.setContentsMargins(32,24,32,20); box.setSpacing(16)
@@ -41,7 +41,14 @@ class AuditScreen(QWidget):
         drawer.addWidget(label('ENTRY JSON','eyebrow'))
         self.json = QPlainTextEdit(); self.json.setReadOnly(True); self.json.setStyleSheet('font-family: Consolas; font-size: 9pt;'); drawer.addWidget(self.json,1)
         drawer.addWidget(label('Additional detail JSON is not supplied by this server contract.','muted',True))
-        self.drawer.setMinimumWidth(320); split.addWidget(self.drawer); self.drawer.hide(); split.setSizes([1000,380]); box.addWidget(split,1)
+        self.drawer.setMinimumWidth(320); split.addWidget(self.drawer); self.drawer.hide(); split.setSizes([1000,380])
+        self.content = split; self.stack = QStackedWidget(); self.stack.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Ignored)
+        self.stack.addWidget(split); self.loading = Skeleton(theme); self.stack.addWidget(self.loading)
+        self.failure = EmptyState('Audit could not be loaded','Check your connection, then retry. Your filters are saved.',eyebrow='UNAVAILABLE')
+        self.failure.action.show(); self.failure.action.clicked.connect(self.reload); self.stack.addWidget(self.failure)
+        self.empty = EmptyState('No audit entries match','Try another staff member, customer or action.',eyebrow='AUDIT')
+        self.empty.action.setText('Reset filters'); self.empty.action.show(); self.empty.action.clicked.connect(self.reset); self.stack.addWidget(self.empty)
+        box.addWidget(self.stack,1)
         footer = QHBoxLayout(); self.count = label('','muted'); footer.addWidget(self.count); footer.addStretch()
         self.more = button('Load older',self.load_more); footer.addWidget(self.more); box.addLayout(footer)
         self.runner = TaskRunner(self); self.runner.finished.connect(self.loaded)
@@ -66,6 +73,7 @@ class AuditScreen(QWidget):
                 self.message.setText('Customer ID must be a number.'); return
         query['cursor'] = self.cursor if append else None
         self.pending = self.generation,append
+        if not append: self.stack.setCurrentWidget(self.loading)
         self.more.setEnabled(False); self.message.setText('Loading older entries…' if append else 'Loading audit…')
         self.runner.start(lambda:self.backend.audit(**query))
 
@@ -75,11 +83,13 @@ class AuditScreen(QWidget):
             self.request(False); return
         if error:
             self.message.setText(str(error)+' · Apply filters to retry.'); self.more.setEnabled(bool(self.cursor))
+            self.stack.setCurrentWidget(self.content if append else self.failure)
             if isinstance(error,AuthError): self.session_expired.emit()
             return
         self.loaded_once = True; self.cursor = page.next_cursor
         existing = {e.id for e in self.model.items} if append else set()
         self.model.replace([e for e in page.items if e.id not in existing],append)
+        self.stack.setCurrentWidget(self.content if self.model.items else self.empty)
         self.message.setText('Select a row to inspect the saved entry.' if self.model.items else 'No audit entries match these filters.')
         self.more.setEnabled(bool(self.cursor)); self.more.setText('Load older' if self.cursor else 'End of history')
         self.count.setText(f'{len(self.model.items)} entries loaded · Newest first')
