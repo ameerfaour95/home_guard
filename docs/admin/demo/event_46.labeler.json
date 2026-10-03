@@ -1,0 +1,125 @@
+{
+  "id": 46,
+  "site": "customer-1fc0de",
+  "customer_id": 1,
+  "customer_name": "customer-1fc0de",
+  "camera": "cam-64ca24",
+  "kind": "trigger",
+  "start_utc": "2026-10-03T04:51:38.393059Z",
+  "end_utc": "2026-10-03T04:51:42.393059Z",
+  "summary": "",
+  "label": null,
+  "alert_command": null,
+  "detected": [
+    "person"
+  ],
+  "owner_verdicts": [],
+  "completeness": {
+    "video": true,
+    "boxes": "none",
+    "ai": "none",
+    "owner_feedback": false,
+    "expired": false,
+    "copies": [
+      "training"
+    ]
+  },
+  "reviewed": false,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/46/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": null,
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 46,
+      "purpose": "guard",
+      "status": "none",
+      "model": null,
+      "prompt_version": null,
+      "prompt": null,
+      "parsed": null,
+      "raw_text_artifact_id": null,
+      "input_frame_artifact_ids": []
+    }
+  ],
+  "feedback": [],
+  "artifacts": [
+    {
+      "id": 88,
+      "role": "original_video",
+      "s3_key": "artifact-88",
+      "bytes": 3517,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 136,
+      "role": "meta",
+      "s3_key": "artifact-136",
+      "bytes": 545,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1376,
+      "role": "thumbnail",
+      "s3_key": "artifact-1376",
+      "bytes": 3532,
+      "available": true,
+      "provenance": "cloud",
+      "detail": null
+    },
+    {
+      "id": 1377,
+      "role": "filmstrip",
+      "s3_key": "artifact-1377",
+      "bytes": 3123,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "tile_w": 160,
+        "tile_h": 90,
+        "count": 4
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "trigger",
+    "duration_sec": 4.0,
+    "fps_estimated": 5.0,
+    "frames_written": 20,
+    "codec": "h264",
+    "buffer": {
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "yolo": {
+      "class_counts": {
+        "person": 1
+      },
+      "class_max_conf": {
+        "person": 0.64
+      },
+      "trigger_classes": [
+        "person"
+      ]
+    }
+  }
+}

@@ -1,0 +1,187 @@
+{
+  "id": 14,
+  "site": "cohen_ramatgan",
+  "customer_id": 1,
+  "customer_name": "Dana Cohen",
+  "camera": "driveway",
+  "kind": "alert",
+  "start_utc": "2026-10-03T06:38:38.320153Z",
+  "end_utc": "2026-10-03T06:38:42.320153Z",
+  "summary": "A delivery van stops at the end of the driveway and the driver walks up with a parcel.",
+  "label": "normal",
+  "alert_command": "[send_message]",
+  "detected": [
+    "truck",
+    "person"
+  ],
+  "owner_verdicts": [],
+  "completeness": {
+    "video": true,
+    "boxes": "none",
+    "ai": "none",
+    "owner_feedback": false,
+    "expired": false,
+    "copies": [
+      "production"
+    ]
+  },
+  "reviewed": false,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/14/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": "2026-10-03 09:38:38",
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": {
+    "channel": "telegram",
+    "sent": true,
+    "detail": {
+      "channel": "telegram",
+      "telegram": {
+        "command": "[send_message]",
+        "telegram": {
+          "sent": true,
+          "results": [
+            {
+              "ok": true,
+              "chat_id": "-100100",
+              "message_id": 522
+            }
+          ]
+        }
+      }
+    }
+  },
+  "ai_runs": [
+    {
+      "id": 14,
+      "purpose": "guard",
+      "status": "none",
+      "model": null,
+      "prompt_version": null,
+      "prompt": null,
+      "parsed": null,
+      "raw_text_artifact_id": null,
+      "input_frame_artifact_ids": []
+    }
+  ],
+  "feedback": [],
+  "artifacts": [
+    {
+      "id": 7,
+      "role": "original_video",
+      "s3_key": "production_cohen_ramatgan/clips/driveway/2026-10-03/driveway_1791009521_alert.mp4",
+      "bytes": 4131,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 35,
+      "role": "meta",
+      "s3_key": "production_cohen_ramatgan/meta/driveway/2026-10-03/driveway_1791009521_alert.meta.json",
+      "bytes": 994,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 1370,
+      "role": "thumbnail",
+      "s3_key": "admin_cache/thumbs/14.jpg",
+      "bytes": 4184,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "src_etag": "946926dabaf872636d38880f0781ad8b",
+        "needs_rendition": false
+      }
+    },
+    {
+      "id": 1371,
+      "role": "filmstrip",
+      "s3_key": "admin_cache/filmstrips/14.jpg",
+      "bytes": 3753,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "count": 4,
+        "tile_h": 90,
+        "tile_w": 160,
+        "src_etag": "946926dabaf872636d38880f0781ad8b"
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "alert",
+    "yolo": {
+      "class_counts": {
+        "truck": 1,
+        "person": 1
+      },
+      "class_max_conf": {
+        "truck": 0.519,
+        "person": 0.429
+      },
+      "trigger_classes": [
+        "person",
+        "truck"
+      ],
+      "trigger_detected": true
+    },
+    "alert": {
+      "label": "normal",
+      "muted": false,
+      "labels": [
+        "person",
+        "truck"
+      ],
+      "summary": "A delivery van stops at the end of the driveway and the driver walks up with a parcel.",
+      "dispatch": {
+        "channel": "telegram",
+        "telegram": {
+          "command": "[send_message]",
+          "telegram": {
+            "sent": true,
+            "results": [
+              {
+                "ok": true,
+                "chat_id": "-100100",
+                "message_id": 522
+              }
+            ]
+          }
+        }
+      },
+      "alert_reason": "",
+      "alert_command": "[send_message]"
+    },
+    "codec": "h264",
+    "buffer": {
+      "store_fps": 5.0,
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "clip_path": "clips\\driveway\\2026-10-03\\driveway_1791009521_alert.mp4",
+    "camera_name": "driveway",
+    "clip_end_ts": 1791009522.3201525,
+    "duration_sec": 4.0,
+    "clip_start_ts": 1791009518.3201525,
+    "fps_estimated": 5.0,
+    "clip_end_local": "2026-10-03 09:38:42",
+    "frames_written": 20,
+    "clip_start_local": "2026-10-03 09:38:38"
+  }
+}

@@ -1,0 +1,484 @@
+{
+  "id": 119,
+  "site": "mizrahi_eilat",
+  "customer_id": 3,
+  "customer_name": "Tamar Mizrahi",
+  "camera": "front_door",
+  "kind": "false_positive",
+  "start_utc": "2026-10-01T19:30:54.565397Z",
+  "end_utc": "2026-10-01T19:30:58.565397Z",
+  "summary": "Headlights sweep across the wall as a vehicle turns on the road; no people are visible.",
+  "label": "normal",
+  "alert_command": "[none]",
+  "detected": [
+    "car"
+  ],
+  "owner_verdicts": [],
+  "completeness": {
+    "video": true,
+    "boxes": "sampled",
+    "ai": "real",
+    "owner_feedback": false,
+    "expired": false,
+    "copies": [
+      "production",
+      "training"
+    ]
+  },
+  "reviewed": true,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/119/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": "2026-10-01 22:30:54",
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 119,
+      "purpose": "guard",
+      "status": "real",
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"front_door\", local time 22:30:57.\n\nWrite \"summary\": what happ",
+      "parsed": {
+        "label": "normal",
+        "people": 0,
+        "summary": "Headlights sweep across the wall as a vehicle turns on the road; no people are visible.",
+        "vehicle_moving": true
+      },
+      "raw_text_artifact_id": 1200,
+      "input_frame_artifact_ids": [
+        1237,
+        1238,
+        1239,
+        1240,
+        1241
+      ]
+    }
+  ],
+  "feedback": [],
+  "artifacts": [
+    {
+      "id": 1163,
+      "role": "original_video",
+      "s3_key": "production_mizrahi_eilat/clips/front_door/2026-10-01/front_door_1790883057_fp.mp4",
+      "bytes": 3614,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 1173,
+      "role": "meta",
+      "s3_key": "production_mizrahi_eilat/meta/front_door/2026-10-01/front_door_1790883057_fp.meta.json",
+      "bytes": 836,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 1183,
+      "role": "original_video",
+      "s3_key": "dataset_mizrahi_eilat/clips/front_door/2026-10-01/front_door_1790883057_fp.mp4",
+      "bytes": 3614,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1192,
+      "role": "meta",
+      "s3_key": "dataset_mizrahi_eilat/meta/front_door/2026-10-01/front_door_1790883057_fp.meta.json",
+      "bytes": 3675,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1200,
+      "role": "raw_answer",
+      "s3_key": "dataset_mizrahi_eilat/responses/front_door/2026-10-01/front_door_1790883057_fp.model_raw.txt",
+      "bytes": 158,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1237,
+      "role": "teacher_frame",
+      "s3_key": "dataset_mizrahi_eilat/vlm_crops/front_door/2026-10-01/front_door_1790883057_fp_f0.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1238,
+      "role": "teacher_frame",
+      "s3_key": "dataset_mizrahi_eilat/vlm_crops/front_door/2026-10-01/front_door_1790883057_fp_f1.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1239,
+      "role": "teacher_frame",
+      "s3_key": "dataset_mizrahi_eilat/vlm_crops/front_door/2026-10-01/front_door_1790883057_fp_f2.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1240,
+      "role": "teacher_frame",
+      "s3_key": "dataset_mizrahi_eilat/vlm_crops/front_door/2026-10-01/front_door_1790883057_fp_f3.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1241,
+      "role": "teacher_frame",
+      "s3_key": "dataset_mizrahi_eilat/vlm_crops/front_door/2026-10-01/front_door_1790883057_fp_f4.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1282,
+      "role": "yolo_image",
+      "s3_key": "dataset_mizrahi_eilat/yolo/images/front_door/2026-10-01/front_door_1790883057_fp_f0000.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1283,
+      "role": "yolo_image",
+      "s3_key": "dataset_mizrahi_eilat/yolo/images/front_door/2026-10-01/front_door_1790883057_fp_f0003.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1284,
+      "role": "yolo_image",
+      "s3_key": "dataset_mizrahi_eilat/yolo/images/front_door/2026-10-01/front_door_1790883057_fp_f0006.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1285,
+      "role": "yolo_image",
+      "s3_key": "dataset_mizrahi_eilat/yolo/images/front_door/2026-10-01/front_door_1790883057_fp_f0009.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1286,
+      "role": "yolo_image",
+      "s3_key": "dataset_mizrahi_eilat/yolo/images/front_door/2026-10-01/front_door_1790883057_fp_f0012.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1287,
+      "role": "yolo_image",
+      "s3_key": "dataset_mizrahi_eilat/yolo/images/front_door/2026-10-01/front_door_1790883057_fp_f0015.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1288,
+      "role": "yolo_image",
+      "s3_key": "dataset_mizrahi_eilat/yolo/images/front_door/2026-10-01/front_door_1790883057_fp_f0018.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1326,
+      "role": "yolo_label",
+      "s3_key": "dataset_mizrahi_eilat/yolo/labels/front_door/2026-10-01/front_door_1790883057_fp_f0000.txt",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1327,
+      "role": "yolo_label",
+      "s3_key": "dataset_mizrahi_eilat/yolo/labels/front_door/2026-10-01/front_door_1790883057_fp_f0003.txt",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1328,
+      "role": "yolo_label",
+      "s3_key": "dataset_mizrahi_eilat/yolo/labels/front_door/2026-10-01/front_door_1790883057_fp_f0006.txt",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1329,
+      "role": "yolo_label",
+      "s3_key": "dataset_mizrahi_eilat/yolo/labels/front_door/2026-10-01/front_door_1790883057_fp_f0009.txt",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1330,
+      "role": "yolo_label",
+      "s3_key": "dataset_mizrahi_eilat/yolo/labels/front_door/2026-10-01/front_door_1790883057_fp_f0012.txt",
+      "bytes": 0,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1331,
+      "role": "yolo_label",
+      "s3_key": "dataset_mizrahi_eilat/yolo/labels/front_door/2026-10-01/front_door_1790883057_fp_f0015.txt",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1332,
+      "role": "yolo_label",
+      "s3_key": "dataset_mizrahi_eilat/yolo/labels/front_door/2026-10-01/front_door_1790883057_fp_f0018.txt",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1508,
+      "role": "thumbnail",
+      "s3_key": "admin_cache/thumbs/119.jpg",
+      "bytes": 2938,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "src_etag": "6b8a1e3648d53de0954d33845ec4ff3b",
+        "needs_rendition": false
+      }
+    },
+    {
+      "id": 1509,
+      "role": "filmstrip",
+      "s3_key": "admin_cache/filmstrips/119.jpg",
+      "bytes": 2717,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "count": 4,
+        "tile_h": 90,
+        "tile_w": 160,
+        "src_etag": "6b8a1e3648d53de0954d33845ec4ff3b"
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "false_positive",
+    "yolo": {
+      "class_counts": {
+        "car": 1
+      },
+      "class_max_conf": {
+        "car": 0.623
+      },
+      "trigger_classes": [
+        "car"
+      ],
+      "trigger_detected": true
+    },
+    "alert": {
+      "vlm": {
+        "people": 0,
+        "vehicle_moving": false
+      },
+      "label": "normal",
+      "muted": false,
+      "labels": [
+        "car"
+      ],
+      "summary": "Headlights sweep across the wall as a vehicle turns on the road; no people are visible.",
+      "alert_reason": "",
+      "alert_command": "[none]",
+      "false_positive": true
+    },
+    "codec": "h264",
+    "buffer": {
+      "store_fps": 5.0,
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "teacher": {
+      "model": "gpt-4o",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"front_door\", local time 22:30:57.\n\nWrite \"summary\": what happ",
+      "raw_path": "responses\\front_door\\2026-10-01\\front_door_1790883057_fp.model_raw.txt",
+      "temperature": 0,
+      "input_frames": [
+        "vlm_crops\\front_door\\2026-10-01\\front_door_1790883057_fp_f0.jpg",
+        "vlm_crops\\front_door\\2026-10-01\\front_door_1790883057_fp_f1.jpg",
+        "vlm_crops\\front_door\\2026-10-01\\front_door_1790883057_fp_f2.jpg",
+        "vlm_crops\\front_door\\2026-10-01\\front_door_1790883057_fp_f3.jpg",
+        "vlm_crops\\front_door\\2026-10-01\\front_door_1790883057_fp_f4.jpg"
+      ],
+      "prompt_version": "2026-10-03.tagged-rules-label"
+    },
+    "clip_path": "clips\\front_door\\2026-10-01\\front_door_1790883057_fp.mp4",
+    "camera_name": "front_door",
+    "clip_end_ts": 1790883058.3521519,
+    "yolo_export": {
+      "conf": 0.25,
+      "enabled": true,
+      "export_fps": 1.7,
+      "images_root": "yolo\\images",
+      "labels_root": "yolo\\labels",
+      "exported_frames": [
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\front_door\\2026-10-01\\front_door_1790883057_fp_f0000.jpg",
+          "label_path": "yolo\\labels\\front_door\\2026-10-01\\front_door_1790883057_fp_f0000.txt",
+          "frame_index": 0,
+          "approx_time_offset_sec": 0.0
+        },
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\front_door\\2026-10-01\\front_door_1790883057_fp_f0003.jpg",
+          "label_path": "yolo\\labels\\front_door\\2026-10-01\\front_door_1790883057_fp_f0003.txt",
+          "frame_index": 3,
+          "approx_time_offset_sec": 0.6
+        },
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\front_door\\2026-10-01\\front_door_1790883057_fp_f0006.jpg",
+          "label_path": "yolo\\labels\\front_door\\2026-10-01\\front_door_1790883057_fp_f0006.txt",
+          "frame_index": 6,
+          "approx_time_offset_sec": 1.2
+        },
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\front_door\\2026-10-01\\front_door_1790883057_fp_f0009.jpg",
+          "label_path": "yolo\\labels\\front_door\\2026-10-01\\front_door_1790883057_fp_f0009.txt",
+          "frame_index": 9,
+          "approx_time_offset_sec": 1.8
+        },
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\front_door\\2026-10-01\\front_door_1790883057_fp_f0012.jpg",
+          "label_path": "yolo\\labels\\front_door\\2026-10-01\\front_door_1790883057_fp_f0012.txt",
+          "frame_index": 12,
+          "approx_time_offset_sec": 2.4
+        },
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\front_door\\2026-10-01\\front_door_1790883057_fp_f0015.jpg",
+          "label_path": "yolo\\labels\\front_door\\2026-10-01\\front_door_1790883057_fp_f0015.txt",
+          "frame_index": 15,
+          "approx_time_offset_sec": 3.0
+        },
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\front_door\\2026-10-01\\front_door_1790883057_fp_f0018.jpg",
+          "label_path": "yolo\\labels\\front_door\\2026-10-01\\front_door_1790883057_fp_f0018.txt",
+          "frame_index": 18,
+          "approx_time_offset_sec": 3.6
+        }
+      ]
+    },
+    "duration_sec": 4.0,
+    "clip_start_ts": 1790883054.3521519,
+    "fps_estimated": 5.0,
+    "clip_end_local": "2026-10-01 22:30:58",
+    "frames_written": 20,
+    "model_response": {
+      "label": "normal",
+      "people": 0,
+      "summary": "Headlights sweep across the wall as a vehicle turns on the road; no people are visible.",
+      "vehicle_moving": true
+    },
+    "clip_start_local": "2026-10-01 22:30:54"
+  }
+}

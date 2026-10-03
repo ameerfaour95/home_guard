@@ -1,0 +1,498 @@
+{
+  "id": 92,
+  "site": "mizrahi_beersheva",
+  "customer_id": 3,
+  "customer_name": "Tamar Mizrahi",
+  "camera": "garage",
+  "kind": "alert",
+  "start_utc": "2026-10-01T16:58:52.415751Z",
+  "end_utc": "2026-10-01T16:58:56.415751Z",
+  "summary": "A car was detected near the camera.",
+  "label": "normal",
+  "alert_command": "[send_message]",
+  "detected": [
+    "car",
+    "person"
+  ],
+  "owner_verdicts": [
+    "true_alert"
+  ],
+  "completeness": {
+    "video": true,
+    "boxes": "sampled",
+    "ai": "fallback",
+    "owner_feedback": true,
+    "expired": false,
+    "copies": [
+      "production",
+      "training"
+    ]
+  },
+  "reviewed": true,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/92/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": "2026-10-01 19:58:52",
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": {
+    "channel": "telegram",
+    "sent": true,
+    "detail": {
+      "channel": "telegram",
+      "telegram": {
+        "command": "[send_message]",
+        "telegram": {
+          "sent": true,
+          "results": [
+            {
+              "ok": true,
+              "chat_id": "-100100",
+              "message_id": 836
+            }
+          ]
+        }
+      }
+    }
+  },
+  "ai_runs": [
+    {
+      "id": 92,
+      "purpose": "guard",
+      "status": "fallback",
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"garage\", local time 19:58:55.\n\nWrite \"summary\": what happ",
+      "parsed": {
+        "summary": ""
+      },
+      "raw_text_artifact_id": null,
+      "input_frame_artifact_ids": [
+        941,
+        942,
+        943,
+        944,
+        945
+      ]
+    }
+  ],
+  "feedback": [
+    {
+      "id": 23,
+      "verdict": "true_alert",
+      "action": "none",
+      "note": "",
+      "raw_text": "👍",
+      "source": "text",
+      "received_utc": "2026-10-01T17:16:03Z"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": 850,
+      "role": "original_video",
+      "s3_key": "production_mizrahi_beersheva/clips/garage/2026-10-01/garage_1790873935_alert.mp4",
+      "bytes": 4396,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 860,
+      "role": "feedback",
+      "s3_key": "production_mizrahi_beersheva/feedback/garage/2026-10-01/garage_1790873935_alert_1790874963000.feedback.json",
+      "bytes": 421,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 871,
+      "role": "meta",
+      "s3_key": "production_mizrahi_beersheva/meta/garage/2026-10-01/garage_1790873935_alert.meta.json",
+      "bytes": 927,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 883,
+      "role": "original_video",
+      "s3_key": "dataset_mizrahi_beersheva/clips/garage/2026-10-01/garage_1790873935_alert.mp4",
+      "bytes": 4396,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 903,
+      "role": "meta",
+      "s3_key": "dataset_mizrahi_beersheva/meta/garage/2026-10-01/garage_1790873935_alert.meta.json",
+      "bytes": 3278,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 941,
+      "role": "teacher_frame",
+      "s3_key": "dataset_mizrahi_beersheva/vlm_crops/garage/2026-10-01/garage_1790873935_alert_f0.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 942,
+      "role": "teacher_frame",
+      "s3_key": "dataset_mizrahi_beersheva/vlm_crops/garage/2026-10-01/garage_1790873935_alert_f1.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 943,
+      "role": "teacher_frame",
+      "s3_key": "dataset_mizrahi_beersheva/vlm_crops/garage/2026-10-01/garage_1790873935_alert_f2.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 944,
+      "role": "teacher_frame",
+      "s3_key": "dataset_mizrahi_beersheva/vlm_crops/garage/2026-10-01/garage_1790873935_alert_f3.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 945,
+      "role": "teacher_frame",
+      "s3_key": "dataset_mizrahi_beersheva/vlm_crops/garage/2026-10-01/garage_1790873935_alert_f4.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1010,
+      "role": "yolo_image",
+      "s3_key": "dataset_mizrahi_beersheva/yolo/images/garage/2026-10-01/garage_1790873935_alert_f0000.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1011,
+      "role": "yolo_image",
+      "s3_key": "dataset_mizrahi_beersheva/yolo/images/garage/2026-10-01/garage_1790873935_alert_f0003.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1012,
+      "role": "yolo_image",
+      "s3_key": "dataset_mizrahi_beersheva/yolo/images/garage/2026-10-01/garage_1790873935_alert_f0006.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1013,
+      "role": "yolo_image",
+      "s3_key": "dataset_mizrahi_beersheva/yolo/images/garage/2026-10-01/garage_1790873935_alert_f0009.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1014,
+      "role": "yolo_image",
+      "s3_key": "dataset_mizrahi_beersheva/yolo/images/garage/2026-10-01/garage_1790873935_alert_f0012.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1015,
+      "role": "yolo_image",
+      "s3_key": "dataset_mizrahi_beersheva/yolo/images/garage/2026-10-01/garage_1790873935_alert_f0015.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1016,
+      "role": "yolo_image",
+      "s3_key": "dataset_mizrahi_beersheva/yolo/images/garage/2026-10-01/garage_1790873935_alert_f0018.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1093,
+      "role": "yolo_label",
+      "s3_key": "dataset_mizrahi_beersheva/yolo/labels/garage/2026-10-01/garage_1790873935_alert_f0000.txt",
+      "bytes": 76,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1094,
+      "role": "yolo_label",
+      "s3_key": "dataset_mizrahi_beersheva/yolo/labels/garage/2026-10-01/garage_1790873935_alert_f0003.txt",
+      "bytes": 76,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1095,
+      "role": "yolo_label",
+      "s3_key": "dataset_mizrahi_beersheva/yolo/labels/garage/2026-10-01/garage_1790873935_alert_f0006.txt",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1096,
+      "role": "yolo_label",
+      "s3_key": "dataset_mizrahi_beersheva/yolo/labels/garage/2026-10-01/garage_1790873935_alert_f0009.txt",
+      "bytes": 76,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1097,
+      "role": "yolo_label",
+      "s3_key": "dataset_mizrahi_beersheva/yolo/labels/garage/2026-10-01/garage_1790873935_alert_f0012.txt",
+      "bytes": 76,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1098,
+      "role": "yolo_label",
+      "s3_key": "dataset_mizrahi_beersheva/yolo/labels/garage/2026-10-01/garage_1790873935_alert_f0018.txt",
+      "bytes": 76,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1526,
+      "role": "thumbnail",
+      "s3_key": "admin_cache/thumbs/92.jpg",
+      "bytes": 4173,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "src_etag": "9c93498c62af86b7ad3147c72d746496",
+        "needs_rendition": false
+      }
+    },
+    {
+      "id": 1527,
+      "role": "filmstrip",
+      "s3_key": "admin_cache/filmstrips/92.jpg",
+      "bytes": 3725,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "count": 4,
+        "tile_h": 90,
+        "tile_w": 160,
+        "src_etag": "9c93498c62af86b7ad3147c72d746496"
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "alert",
+    "yolo": {
+      "class_counts": {
+        "car": 1,
+        "person": 2
+      },
+      "class_max_conf": {
+        "car": 0.588,
+        "person": 0.59
+      },
+      "trigger_classes": [
+        "car",
+        "person"
+      ],
+      "trigger_detected": true
+    },
+    "alert": {
+      "label": "normal",
+      "muted": false,
+      "labels": [
+        "car",
+        "person"
+      ],
+      "summary": "A car was detected near the camera.",
+      "alert_reason": "",
+      "alert_command": "[send_message]"
+    },
+    "codec": "h264",
+    "buffer": {
+      "store_fps": 5.0,
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "teacher": {
+      "model": "gpt-4o",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"garage\", local time 19:58:55.\n\nWrite \"summary\": what happ",
+      "raw_path": null,
+      "temperature": 0,
+      "input_frames": [
+        "vlm_crops\\garage\\2026-10-01\\garage_1790873935_alert_f0.jpg",
+        "vlm_crops\\garage\\2026-10-01\\garage_1790873935_alert_f1.jpg",
+        "vlm_crops\\garage\\2026-10-01\\garage_1790873935_alert_f2.jpg",
+        "vlm_crops\\garage\\2026-10-01\\garage_1790873935_alert_f3.jpg",
+        "vlm_crops\\garage\\2026-10-01\\garage_1790873935_alert_f4.jpg"
+      ],
+      "prompt_version": "2026-10-03.tagged-rules-label"
+    },
+    "clip_path": "clips\\garage\\2026-10-01\\garage_1790873935_alert.mp4",
+    "camera_name": "garage",
+    "clip_end_ts": 1790873936.5060503,
+    "yolo_export": {
+      "conf": 0.25,
+      "enabled": true,
+      "export_fps": 1.7,
+      "images_root": "yolo\\images",
+      "labels_root": "yolo\\labels",
+      "exported_frames": [
+        {
+          "num_boxes": 2,
+          "image_path": "yolo\\images\\garage\\2026-10-01\\garage_1790873935_alert_f0000.jpg",
+          "label_path": "yolo\\labels\\garage\\2026-10-01\\garage_1790873935_alert_f0000.txt",
+          "frame_index": 0,
+          "approx_time_offset_sec": 0.0
+        },
+        {
+          "num_boxes": 2,
+          "image_path": "yolo\\images\\garage\\2026-10-01\\garage_1790873935_alert_f0003.jpg",
+          "label_path": "yolo\\labels\\garage\\2026-10-01\\garage_1790873935_alert_f0003.txt",
+          "frame_index": 3,
+          "approx_time_offset_sec": 0.6
+        },
+        {
+          "num_boxes": 2,
+          "image_path": "yolo\\images\\garage\\2026-10-01\\garage_1790873935_alert_f0006.jpg",
+          "label_path": "yolo\\labels\\garage\\2026-10-01\\garage_1790873935_alert_f0006.txt",
+          "frame_index": 6,
+          "approx_time_offset_sec": 1.2
+        },
+        {
+          "num_boxes": 2,
+          "image_path": "yolo\\images\\garage\\2026-10-01\\garage_1790873935_alert_f0009.jpg",
+          "label_path": "yolo\\labels\\garage\\2026-10-01\\garage_1790873935_alert_f0009.txt",
+          "frame_index": 9,
+          "approx_time_offset_sec": 1.8
+        },
+        {
+          "num_boxes": 2,
+          "image_path": "yolo\\images\\garage\\2026-10-01\\garage_1790873935_alert_f0012.jpg",
+          "label_path": "yolo\\labels\\garage\\2026-10-01\\garage_1790873935_alert_f0012.txt",
+          "frame_index": 12,
+          "approx_time_offset_sec": 2.4
+        },
+        {
+          "num_boxes": 2,
+          "image_path": "yolo\\images\\garage\\2026-10-01\\garage_1790873935_alert_f0015.jpg",
+          "label_path": "yolo\\labels\\garage\\2026-10-01\\garage_1790873935_alert_f0015.txt",
+          "frame_index": 15,
+          "approx_time_offset_sec": 3.0
+        },
+        {
+          "num_boxes": 2,
+          "image_path": "yolo\\images\\garage\\2026-10-01\\garage_1790873935_alert_f0018.jpg",
+          "label_path": "yolo\\labels\\garage\\2026-10-01\\garage_1790873935_alert_f0018.txt",
+          "frame_index": 18,
+          "approx_time_offset_sec": 3.6
+        }
+      ]
+    },
+    "duration_sec": 4.0,
+    "clip_start_ts": 1790873932.5060503,
+    "fps_estimated": 5.0,
+    "clip_end_local": "2026-10-01 19:58:56",
+    "frames_written": 20,
+    "model_response": {
+      "summary": ""
+    },
+    "clip_start_local": "2026-10-01 19:58:52"
+  }
+}

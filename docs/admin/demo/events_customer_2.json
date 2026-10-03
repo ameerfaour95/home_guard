@@ -1,0 +1,1147 @@
+{
+  "items": [
+    {
+      "id": 86,
+      "site": "levi_haifa",
+      "customer_id": 2,
+      "customer_name": "Yossi Levi",
+      "camera": "side_gate",
+      "kind": "false_positive",
+      "start_utc": "2026-10-03T10:27:33.562656Z",
+      "end_utc": "2026-10-03T10:27:37.562656Z",
+      "summary": "A car passes on the street in the background and does not stop.",
+      "label": "normal",
+      "alert_command": "[none]",
+      "detected": [
+        "car"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "real",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": true,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/86/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 72,
+      "site": "levi_haifa",
+      "customer_id": 2,
+      "customer_name": "Yossi Levi",
+      "camera": "main_entrance",
+      "kind": "random",
+      "start_utc": "2026-10-03T10:20:56.424164Z",
+      "end_utc": "2026-10-03T10:21:00.424164Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "car"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/72/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 71,
+      "site": "levi_haifa",
+      "customer_id": 2,
+      "customer_name": "Yossi Levi",
+      "camera": "main_entrance",
+      "kind": "trigger",
+      "start_utc": "2026-10-03T10:04:44.570627Z",
+      "end_utc": "2026-10-03T10:04:48.570627Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "car"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": false,
+        "boxes": "sampled",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": null,
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 85,
+      "site": "levi_haifa",
+      "customer_id": 2,
+      "customer_name": "Yossi Levi",
+      "camera": "side_gate",
+      "kind": "trigger",
+      "start_utc": "2026-10-03T07:34:32.688954Z",
+      "end_utc": "2026-10-03T07:34:36.688954Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "dog"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/85/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 70,
+      "site": "levi_haifa",
+      "customer_id": 2,
+      "customer_name": "Yossi Levi",
+      "camera": "main_entrance",
+      "kind": "false_positive",
+      "start_utc": "2026-10-03T07:13:19.345912Z",
+      "end_utc": "2026-10-03T07:13:23.345912Z",
+      "summary": "A car passes on the street in the background and does not stop.",
+      "label": "normal",
+      "alert_command": "[none]",
+      "detected": [
+        "car"
+      ],
+      "owner_verdicts": [
+        "false_alarm"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "real",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": true,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/70/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 69,
+      "site": "levi_haifa",
+      "customer_id": 2,
+      "customer_name": "Yossi Levi",
+      "camera": "main_entrance",
+      "kind": "false_positive",
+      "start_utc": "2026-10-03T01:20:13.458846Z",
+      "end_utc": "2026-10-03T01:20:17.458846Z",
+      "summary": "A person was detected near the camera.",
+      "label": "normal",
+      "alert_command": "[none]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [
+        "false_alarm"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "fallback",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": true,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/69/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 68,
+      "site": "levi_haifa",
+      "customer_id": 2,
+      "customer_name": "Yossi Levi",
+      "camera": "main_entrance",
+      "kind": "false_positive",
+      "start_utc": "2026-10-02T19:08:06.557028Z",
+      "end_utc": "2026-10-02T19:08:10.557028Z",
+      "summary": "Tree branches sway in the wind and cast moving shadows; nothing else is visible.",
+      "label": "normal",
+      "alert_command": "[none]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "real",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/68/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 67,
+      "site": "levi_haifa",
+      "customer_id": 2,
+      "customer_name": "Yossi Levi",
+      "camera": "main_entrance",
+      "kind": "random",
+      "start_utc": "2026-10-02T18:41:14.457472Z",
+      "end_utc": "2026-10-02T18:41:18.457472Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/67/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 84,
+      "site": "levi_haifa",
+      "customer_id": 2,
+      "customer_name": "Yossi Levi",
+      "camera": "side_gate",
+      "kind": "trigger",
+      "start_utc": "2026-10-02T18:25:31.369039Z",
+      "end_utc": "2026-10-02T18:25:35.369039Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/84/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 83,
+      "site": "levi_haifa",
+      "customer_id": 2,
+      "customer_name": "Yossi Levi",
+      "camera": "side_gate",
+      "kind": "alert",
+      "start_utc": "2026-10-02T17:24:09.448363Z",
+      "end_utc": "2026-10-02T17:24:13.448363Z",
+      "summary": "A man in work clothes opens the side gate with a key and carries a ladder inside.",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [
+        "expected"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "real",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": true,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/83/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 66,
+      "site": "levi_haifa",
+      "customer_id": 2,
+      "customer_name": "Yossi Levi",
+      "camera": "main_entrance",
+      "kind": "trigger",
+      "start_utc": "2026-10-02T16:34:38.462227Z",
+      "end_utc": "2026-10-02T16:34:42.462227Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "car"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/66/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 65,
+      "site": "levi_haifa",
+      "customer_id": 2,
+      "customer_name": "Yossi Levi",
+      "camera": "main_entrance",
+      "kind": "alert",
+      "start_utc": "2026-10-02T16:33:48.443298Z",
+      "end_utc": "2026-10-02T16:33:52.443298Z",
+      "summary": "",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [
+        "false_alarm"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "failed",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/65/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 82,
+      "site": "levi_haifa",
+      "customer_id": 2,
+      "customer_name": "Yossi Levi",
+      "camera": "side_gate",
+      "kind": "trigger",
+      "start_utc": "2026-10-02T15:50:13.618129Z",
+      "end_utc": "2026-10-02T15:50:17.618129Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/82/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 81,
+      "site": "levi_haifa",
+      "customer_id": 2,
+      "customer_name": "Yossi Levi",
+      "camera": "side_gate",
+      "kind": "alert",
+      "start_utc": "2026-10-02T15:37:05.510650Z",
+      "end_utc": "2026-10-02T15:37:09.510650Z",
+      "summary": "A person in a dark cap shakes the side gate lock and looks over the wall.",
+      "label": "suspicious",
+      "alert_command": "[call_owner]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "production"
+        ]
+      },
+      "reviewed": false,
+      "flagged": true,
+      "thumbnail_url": "/v1/events/81/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 64,
+      "site": "levi_haifa",
+      "customer_id": 2,
+      "customer_name": "Yossi Levi",
+      "camera": "main_entrance",
+      "kind": "paused",
+      "start_utc": "2026-10-02T15:36:37.607821Z",
+      "end_utc": "2026-10-02T15:36:41.607821Z",
+      "summary": "",
+      "label": null,
+      "alert_command": "[none]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/64/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 80,
+      "site": "levi_haifa",
+      "customer_id": 2,
+      "customer_name": "Yossi Levi",
+      "camera": "side_gate",
+      "kind": "alert",
+      "start_utc": "2026-10-02T15:19:29.681816Z",
+      "end_utc": "2026-10-02T15:19:33.681816Z",
+      "summary": "A woman wheels a bin through the side gate and leaves it by the wall.",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "real",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/80/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 63,
+      "site": "levi_haifa",
+      "customer_id": 2,
+      "customer_name": "Yossi Levi",
+      "camera": "main_entrance",
+      "kind": "alert",
+      "start_utc": "2026-10-02T15:08:41.651740Z",
+      "end_utc": "2026-10-02T15:08:45.651740Z",
+      "summary": "A man pushing a stroller waits at the entrance door until a neighbour holds it open.",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [
+        "real_but_wrong"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "real",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/63/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 62,
+      "site": "levi_haifa",
+      "customer_id": 2,
+      "customer_name": "Yossi Levi",
+      "camera": "main_entrance",
+      "kind": "trigger",
+      "start_utc": "2026-10-02T14:58:48.337647Z",
+      "end_utc": "2026-10-02T14:58:52.337647Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/62/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 61,
+      "site": "levi_haifa",
+      "customer_id": 2,
+      "customer_name": "Yossi Levi",
+      "camera": "main_entrance",
+      "kind": "paused",
+      "start_utc": "2026-10-02T13:41:01.682820Z",
+      "end_utc": "2026-10-02T13:41:05.682820Z",
+      "summary": "",
+      "label": null,
+      "alert_command": "[none]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/61/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 79,
+      "site": "levi_haifa",
+      "customer_id": 2,
+      "customer_name": "Yossi Levi",
+      "camera": "side_gate",
+      "kind": "alert",
+      "start_utc": "2026-10-02T13:07:02.321282Z",
+      "end_utc": "2026-10-02T13:07:06.321282Z",
+      "summary": "A woman wheels a bin through the side gate and leaves it by the wall.",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "real",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": true,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/79/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 78,
+      "site": "levi_haifa",
+      "customer_id": 2,
+      "customer_name": "Yossi Levi",
+      "camera": "side_gate",
+      "kind": "paused",
+      "start_utc": "2026-10-02T09:20:50.696013Z",
+      "end_utc": "2026-10-02T09:20:54.696013Z",
+      "summary": "",
+      "label": null,
+      "alert_command": "[none]",
+      "detected": [
+        "car"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/78/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 60,
+      "site": "levi_haifa",
+      "customer_id": 2,
+      "customer_name": "Yossi Levi",
+      "camera": "main_entrance",
+      "kind": "trigger",
+      "start_utc": "2026-10-02T06:33:57.382643Z",
+      "end_utc": "2026-10-02T06:34:01.382643Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/60/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 59,
+      "site": "levi_haifa",
+      "customer_id": 2,
+      "customer_name": "Yossi Levi",
+      "camera": "main_entrance",
+      "kind": "random",
+      "start_utc": "2026-10-02T04:01:19.301135Z",
+      "end_utc": "2026-10-02T04:01:23.301135Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/59/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 58,
+      "site": "levi_haifa",
+      "customer_id": 2,
+      "customer_name": "Yossi Levi",
+      "camera": "main_entrance",
+      "kind": "false_positive",
+      "start_utc": "2026-10-02T02:58:12.417158Z",
+      "end_utc": "2026-10-02T02:58:16.417158Z",
+      "summary": "Headlights sweep across the wall as a vehicle turns on the road; no people are visible.",
+      "label": "normal",
+      "alert_command": "[none]",
+      "detected": [
+        "car"
+      ],
+      "owner_verdicts": [
+        "false_alarm"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "real",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": true,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/58/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 57,
+      "site": "levi_haifa",
+      "customer_id": 2,
+      "customer_name": "Yossi Levi",
+      "camera": "main_entrance",
+      "kind": "alert",
+      "start_utc": "2026-10-02T02:41:29.654593Z",
+      "end_utc": "2026-10-02T02:41:33.654593Z",
+      "summary": "A person follows a resident through the door without a key and lingers in the doorway checking the mailboxes.",
+      "label": "suspicious",
+      "alert_command": "[call_owner]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [
+        "true_alert"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "real",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": true,
+      "thumbnail_url": "/v1/events/57/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 56,
+      "site": "levi_haifa",
+      "customer_id": 2,
+      "customer_name": "Yossi Levi",
+      "camera": "main_entrance",
+      "kind": "trigger",
+      "start_utc": "2026-10-01T21:47:33.415194Z",
+      "end_utc": "2026-10-01T21:47:37.415194Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "car"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/56/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 55,
+      "site": "levi_haifa",
+      "customer_id": 2,
+      "customer_name": "Yossi Levi",
+      "camera": "main_entrance",
+      "kind": "alert",
+      "start_utc": "2026-10-01T20:32:44.364223Z",
+      "end_utc": "2026-10-01T20:32:48.364223Z",
+      "summary": "A man pushing a stroller waits at the entrance door until a neighbour holds it open.",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [
+        "false_alarm"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "real",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/55/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 77,
+      "site": "levi_haifa",
+      "customer_id": 2,
+      "customer_name": "Yossi Levi",
+      "camera": "side_gate",
+      "kind": "paused",
+      "start_utc": "2026-10-01T19:36:26.397762Z",
+      "end_utc": "2026-10-01T19:36:30.397762Z",
+      "summary": "",
+      "label": null,
+      "alert_command": "[none]",
+      "detected": [
+        "car"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/77/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 54,
+      "site": "levi_haifa",
+      "customer_id": 2,
+      "customer_name": "Yossi Levi",
+      "camera": "main_entrance",
+      "kind": "random",
+      "start_utc": "2026-10-01T19:10:04.582623Z",
+      "end_utc": "2026-10-01T19:10:08.582623Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/54/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 76,
+      "site": "levi_haifa",
+      "customer_id": 2,
+      "customer_name": "Yossi Levi",
+      "camera": "side_gate",
+      "kind": "false_positive",
+      "start_utc": "2026-10-01T19:03:20.516061Z",
+      "end_utc": "2026-10-01T19:03:24.516061Z",
+      "summary": "Tree branches sway in the wind and cast moving shadows; nothing else is visible.",
+      "label": "normal",
+      "alert_command": "[none]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [
+        "false_alarm"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "real",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": true,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/76/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 75,
+      "site": "levi_haifa",
+      "customer_id": 2,
+      "customer_name": "Yossi Levi",
+      "camera": "side_gate",
+      "kind": "trigger",
+      "start_utc": "2026-10-01T16:43:54.538118Z",
+      "end_utc": "2026-10-01T16:43:58.538118Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "car"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/75/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 74,
+      "site": "levi_haifa",
+      "customer_id": 2,
+      "customer_name": "Yossi Levi",
+      "camera": "side_gate",
+      "kind": "random",
+      "start_utc": "2026-10-01T16:13:36.497325Z",
+      "end_utc": "2026-10-01T16:13:40.497325Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "car"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/74/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 53,
+      "site": "levi_haifa",
+      "customer_id": 2,
+      "customer_name": "Yossi Levi",
+      "camera": "main_entrance",
+      "kind": "paused",
+      "start_utc": "2026-10-01T16:01:14.526722Z",
+      "end_utc": "2026-10-01T16:01:18.526722Z",
+      "summary": "",
+      "label": null,
+      "alert_command": "[none]",
+      "detected": [
+        "car"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/53/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 52,
+      "site": "levi_haifa",
+      "customer_id": 2,
+      "customer_name": "Yossi Levi",
+      "camera": "main_entrance",
+      "kind": "trigger",
+      "start_utc": "2026-10-01T15:27:37.411915Z",
+      "end_utc": "2026-10-01T15:27:41.411915Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "dog"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/52/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 73,
+      "site": "levi_haifa",
+      "customer_id": 2,
+      "customer_name": "Yossi Levi",
+      "camera": "side_gate",
+      "kind": "random",
+      "start_utc": "2026-10-01T14:53:25.516145Z",
+      "end_utc": "2026-10-01T14:53:29.516145Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/73/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 51,
+      "site": "levi_haifa",
+      "customer_id": 2,
+      "customer_name": "Yossi Levi",
+      "camera": "main_entrance",
+      "kind": "paused",
+      "start_utc": "2026-10-01T13:29:20.656989Z",
+      "end_utc": "2026-10-01T13:29:24.656989Z",
+      "summary": "",
+      "label": null,
+      "alert_command": "[none]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/51/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    }
+  ],
+  "next_cursor": null,
+  "total": null,
+  "total_capped": false
+}

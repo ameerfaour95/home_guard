@@ -1,0 +1,295 @@
+{
+  "id": 70,
+  "site": "levi_haifa",
+  "customer_id": 2,
+  "customer_name": "Yossi Levi",
+  "camera": "main_entrance",
+  "kind": "false_positive",
+  "start_utc": "2026-10-03T07:13:19.345912Z",
+  "end_utc": "2026-10-03T07:13:23.345912Z",
+  "summary": "A car passes on the street in the background and does not stop.",
+  "label": "normal",
+  "alert_command": "[none]",
+  "detected": [
+    "car"
+  ],
+  "owner_verdicts": [
+    "false_alarm"
+  ],
+  "completeness": {
+    "video": true,
+    "boxes": "none",
+    "ai": "real",
+    "owner_feedback": true,
+    "expired": false,
+    "copies": [
+      "production",
+      "training"
+    ]
+  },
+  "reviewed": true,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/70/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": "2026-10-03 10:13:19",
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 70,
+      "purpose": "guard",
+      "status": "real",
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"main_entrance\", local time 10:13:22.\n\nWrite \"summary\": what happ",
+      "parsed": {
+        "label": "normal",
+        "people": 0,
+        "summary": "A car passes on the street in the background and does not stop.",
+        "vehicle_moving": true
+      },
+      "raw_text_artifact_id": 582,
+      "input_frame_artifact_ids": [
+        623,
+        624,
+        625,
+        626,
+        627
+      ]
+    }
+  ],
+  "feedback": [
+    {
+      "id": 18,
+      "verdict": "false_alarm",
+      "action": "none",
+      "note": "Just the neighbour.",
+      "raw_text": "Just the neighbour.",
+      "source": "text",
+      "received_utc": "2026-10-03T07:20:43Z"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": 481,
+      "role": "original_video",
+      "s3_key": "production_levi_haifa/clips/main_entrance/2026-10-03/main_entrance_1791011602_fp.mp4",
+      "bytes": 3725,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 492,
+      "role": "feedback",
+      "s3_key": "production_levi_haifa/feedback/main_entrance/2026-10-03/main_entrance_1791011602_fp_1791012043000.feedback.json",
+      "bytes": 446,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 501,
+      "role": "meta",
+      "s3_key": "production_levi_haifa/meta/main_entrance/2026-10-03/main_entrance_1791011602_fp.meta.json",
+      "bytes": 819,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 527,
+      "role": "original_video",
+      "s3_key": "dataset_levi_haifa/clips/main_entrance/2026-10-03/main_entrance_1791011602_fp.mp4",
+      "bytes": 3725,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 561,
+      "role": "meta",
+      "s3_key": "dataset_levi_haifa/meta/main_entrance/2026-10-03/main_entrance_1791011602_fp.meta.json",
+      "bytes": 1791,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 582,
+      "role": "raw_answer",
+      "s3_key": "dataset_levi_haifa/responses/main_entrance/2026-10-03/main_entrance_1791011602_fp.model_raw.txt",
+      "bytes": 134,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 623,
+      "role": "teacher_frame",
+      "s3_key": "dataset_levi_haifa/vlm_crops/main_entrance/2026-10-03/main_entrance_1791011602_fp_f0.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 624,
+      "role": "teacher_frame",
+      "s3_key": "dataset_levi_haifa/vlm_crops/main_entrance/2026-10-03/main_entrance_1791011602_fp_f1.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 625,
+      "role": "teacher_frame",
+      "s3_key": "dataset_levi_haifa/vlm_crops/main_entrance/2026-10-03/main_entrance_1791011602_fp_f2.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 626,
+      "role": "teacher_frame",
+      "s3_key": "dataset_levi_haifa/vlm_crops/main_entrance/2026-10-03/main_entrance_1791011602_fp_f3.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 627,
+      "role": "teacher_frame",
+      "s3_key": "dataset_levi_haifa/vlm_crops/main_entrance/2026-10-03/main_entrance_1791011602_fp_f4.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1368,
+      "role": "thumbnail",
+      "s3_key": "admin_cache/thumbs/70.jpg",
+      "bytes": 3618,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "src_etag": "6d1b885edfa0c92674a1fc9e161aaf10",
+        "needs_rendition": false
+      }
+    },
+    {
+      "id": 1369,
+      "role": "filmstrip",
+      "s3_key": "admin_cache/filmstrips/70.jpg",
+      "bytes": 3225,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "count": 4,
+        "tile_h": 90,
+        "tile_w": 160,
+        "src_etag": "6d1b885edfa0c92674a1fc9e161aaf10"
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "false_positive",
+    "yolo": {
+      "class_counts": {
+        "car": 1
+      },
+      "class_max_conf": {
+        "car": 0.634
+      },
+      "trigger_classes": [
+        "car"
+      ],
+      "trigger_detected": true
+    },
+    "alert": {
+      "vlm": {
+        "people": 0,
+        "vehicle_moving": false
+      },
+      "label": "normal",
+      "muted": false,
+      "labels": [
+        "car"
+      ],
+      "summary": "A car passes on the street in the background and does not stop.",
+      "alert_reason": "",
+      "alert_command": "[none]",
+      "false_positive": true
+    },
+    "codec": "h264",
+    "buffer": {
+      "store_fps": 5.0,
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "teacher": {
+      "model": "gpt-4o",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"main_entrance\", local time 10:13:22.\n\nWrite \"summary\": what happ",
+      "raw_path": "responses\\main_entrance\\2026-10-03\\main_entrance_1791011602_fp.model_raw.txt",
+      "temperature": 0,
+      "input_frames": [
+        "vlm_crops\\main_entrance\\2026-10-03\\main_entrance_1791011602_fp_f0.jpg",
+        "vlm_crops\\main_entrance\\2026-10-03\\main_entrance_1791011602_fp_f1.jpg",
+        "vlm_crops\\main_entrance\\2026-10-03\\main_entrance_1791011602_fp_f2.jpg",
+        "vlm_crops\\main_entrance\\2026-10-03\\main_entrance_1791011602_fp_f3.jpg",
+        "vlm_crops\\main_entrance\\2026-10-03\\main_entrance_1791011602_fp_f4.jpg"
+      ],
+      "prompt_version": "2026-10-03.tagged-rules-label"
+    },
+    "clip_path": "clips\\main_entrance\\2026-10-03\\main_entrance_1791011602_fp.mp4",
+    "camera_name": "main_entrance",
+    "clip_end_ts": 1791011603.361556,
+    "duration_sec": 4.0,
+    "clip_start_ts": 1791011599.361556,
+    "fps_estimated": 5.0,
+    "clip_end_local": "2026-10-03 10:13:23",
+    "frames_written": 20,
+    "model_response": {
+      "label": "normal",
+      "people": 0,
+      "summary": "A car passes on the street in the background and does not stop.",
+      "vehicle_moving": true
+    },
+    "clip_start_local": "2026-10-03 10:13:19"
+  }
+}

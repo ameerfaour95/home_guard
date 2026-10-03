@@ -1,0 +1,213 @@
+{
+  "id": 34,
+  "site": "customer-1fc0de",
+  "customer_id": 1,
+  "customer_name": "customer-1fc0de",
+  "camera": "cam-b42d16",
+  "kind": "false_positive",
+  "start_utc": "2026-10-03T07:35:53.317125Z",
+  "end_utc": "2026-10-03T07:35:57.317125Z",
+  "summary": "Headlights sweep across the wall as a vehicle turns on the road; no people are visible.",
+  "label": "normal",
+  "alert_command": "[none]",
+  "detected": [
+    "car"
+  ],
+  "owner_verdicts": [],
+  "completeness": {
+    "video": true,
+    "boxes": "none",
+    "ai": "real",
+    "owner_feedback": false,
+    "expired": false,
+    "copies": [
+      "training"
+    ]
+  },
+  "reviewed": true,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/34/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": null,
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 34,
+      "purpose": "guard",
+      "status": "real",
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "prompt": null,
+      "parsed": {
+        "label": "normal",
+        "people": 0,
+        "summary": "Headlights sweep across the wall as a vehicle turns on the road; no people are visible.",
+        "vehicle_moving": true
+      },
+      "raw_text_artifact_id": 152,
+      "input_frame_artifact_ids": [
+        222,
+        223,
+        224,
+        225,
+        226
+      ]
+    }
+  ],
+  "feedback": [],
+  "artifacts": [
+    {
+      "id": 77,
+      "role": "original_video",
+      "s3_key": "artifact-77",
+      "bytes": 3675,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 125,
+      "role": "meta",
+      "s3_key": "artifact-125",
+      "bytes": 1793,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 152,
+      "role": "raw_answer",
+      "s3_key": "artifact-152",
+      "bytes": 158,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 222,
+      "role": "teacher_frame",
+      "s3_key": "artifact-222",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 223,
+      "role": "teacher_frame",
+      "s3_key": "artifact-223",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 224,
+      "role": "teacher_frame",
+      "s3_key": "artifact-224",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 225,
+      "role": "teacher_frame",
+      "s3_key": "artifact-225",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 226,
+      "role": "teacher_frame",
+      "s3_key": "artifact-226",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1362,
+      "role": "thumbnail",
+      "s3_key": "artifact-1362",
+      "bytes": 3630,
+      "available": true,
+      "provenance": "cloud",
+      "detail": null
+    },
+    {
+      "id": 1363,
+      "role": "filmstrip",
+      "s3_key": "artifact-1363",
+      "bytes": 3203,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "tile_w": 160,
+        "tile_h": 90,
+        "count": 4
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "false_positive",
+    "duration_sec": 4.0,
+    "fps_estimated": 5.0,
+    "frames_written": 20,
+    "codec": "h264",
+    "buffer": {
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "yolo": {
+      "class_counts": {
+        "car": 1
+      },
+      "class_max_conf": {
+        "car": 0.876
+      },
+      "trigger_classes": [
+        "car"
+      ]
+    },
+    "model_response": {
+      "label": "normal",
+      "people": 0,
+      "summary": "Headlights sweep across the wall as a vehicle turns on the road; no people are visible.",
+      "vehicle_moving": true
+    },
+    "teacher": {
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "temperature": 0
+    }
+  }
+}

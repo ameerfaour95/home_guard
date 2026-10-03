@@ -1,0 +1,244 @@
+{
+  "id": 115,
+  "site": "mizrahi_eilat",
+  "customer_id": 3,
+  "customer_name": "Tamar Mizrahi",
+  "camera": "front_door",
+  "kind": "alert",
+  "start_utc": "2026-10-01T15:53:36.375261Z",
+  "end_utc": "2026-10-01T15:53:40.375261Z",
+  "summary": "A man in a grey hoodie approaches the front door, rings the bell, waits about ten seconds and then walks away.",
+  "label": "normal",
+  "alert_command": "[send_message]",
+  "detected": [
+    "person"
+  ],
+  "owner_verdicts": [],
+  "completeness": {
+    "video": true,
+    "boxes": "none",
+    "ai": "real",
+    "owner_feedback": false,
+    "expired": false,
+    "copies": [
+      "training"
+    ]
+  },
+  "reviewed": true,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/115/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": "2026-10-01 18:53:36",
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 115,
+      "purpose": "guard",
+      "status": "real",
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"front_door\", local time 18:53:39.\n\nWrite \"summary\": what happ",
+      "parsed": {
+        "label": "normal",
+        "people": 1,
+        "summary": "A man in a grey hoodie approaches the front door, rings the bell, waits about ten seconds and then walks away.",
+        "vehicle_moving": false
+      },
+      "raw_text_artifact_id": 1197,
+      "input_frame_artifact_ids": [
+        1217,
+        1218,
+        1219,
+        1220,
+        1221
+      ]
+    }
+  ],
+  "feedback": [],
+  "artifacts": [
+    {
+      "id": 1179,
+      "role": "original_video",
+      "s3_key": "dataset_mizrahi_eilat/clips/front_door/2026-10-01/front_door_1790870019_alert.mp4",
+      "bytes": 3399,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1188,
+      "role": "meta",
+      "s3_key": "dataset_mizrahi_eilat/meta/front_door/2026-10-01/front_door_1790870019_alert.meta.json",
+      "bytes": 1799,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1197,
+      "role": "raw_answer",
+      "s3_key": "dataset_mizrahi_eilat/responses/front_door/2026-10-01/front_door_1790870019_alert.model_raw.txt",
+      "bytes": 182,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1217,
+      "role": "teacher_frame",
+      "s3_key": "dataset_mizrahi_eilat/vlm_crops/front_door/2026-10-01/front_door_1790870019_alert_f0.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1218,
+      "role": "teacher_frame",
+      "s3_key": "dataset_mizrahi_eilat/vlm_crops/front_door/2026-10-01/front_door_1790870019_alert_f1.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1219,
+      "role": "teacher_frame",
+      "s3_key": "dataset_mizrahi_eilat/vlm_crops/front_door/2026-10-01/front_door_1790870019_alert_f2.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1220,
+      "role": "teacher_frame",
+      "s3_key": "dataset_mizrahi_eilat/vlm_crops/front_door/2026-10-01/front_door_1790870019_alert_f3.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1221,
+      "role": "teacher_frame",
+      "s3_key": "dataset_mizrahi_eilat/vlm_crops/front_door/2026-10-01/front_door_1790870019_alert_f4.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1546,
+      "role": "thumbnail",
+      "s3_key": "admin_cache/thumbs/115.jpg",
+      "bytes": 3560,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "src_etag": "71e70e2b49a3420e637ff1026cf1180c",
+        "needs_rendition": false
+      }
+    },
+    {
+      "id": 1547,
+      "role": "filmstrip",
+      "s3_key": "admin_cache/filmstrips/115.jpg",
+      "bytes": 3349,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "count": 4,
+        "tile_h": 90,
+        "tile_w": 160,
+        "src_etag": "71e70e2b49a3420e637ff1026cf1180c"
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "alert",
+    "yolo": {
+      "class_counts": {
+        "person": 1
+      },
+      "class_max_conf": {
+        "person": 0.831
+      },
+      "trigger_classes": [
+        "person"
+      ],
+      "trigger_detected": true
+    },
+    "alert": {
+      "label": "normal",
+      "muted": false,
+      "labels": [
+        "person"
+      ],
+      "summary": "A man in a grey hoodie approaches the front door, rings the bell, waits about ten seconds and then walks away.",
+      "alert_reason": "",
+      "alert_command": "[send_message]"
+    },
+    "codec": "h264",
+    "buffer": {
+      "store_fps": 5.0,
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "teacher": {
+      "model": "gpt-4o",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"front_door\", local time 18:53:39.\n\nWrite \"summary\": what happ",
+      "raw_path": "responses\\front_door\\2026-10-01\\front_door_1790870019_alert.model_raw.txt",
+      "temperature": 0,
+      "input_frames": [
+        "vlm_crops\\front_door\\2026-10-01\\front_door_1790870019_alert_f0.jpg",
+        "vlm_crops\\front_door\\2026-10-01\\front_door_1790870019_alert_f1.jpg",
+        "vlm_crops\\front_door\\2026-10-01\\front_door_1790870019_alert_f2.jpg",
+        "vlm_crops\\front_door\\2026-10-01\\front_door_1790870019_alert_f3.jpg",
+        "vlm_crops\\front_door\\2026-10-01\\front_door_1790870019_alert_f4.jpg"
+      ],
+      "prompt_version": "2026-10-03.tagged-rules-label"
+    },
+    "clip_path": "clips\\front_door\\2026-10-01\\front_door_1790870019_alert.mp4",
+    "camera_name": "front_door",
+    "clip_end_ts": 1790870020.375261,
+    "duration_sec": 4.0,
+    "clip_start_ts": 1790870016.375261,
+    "fps_estimated": 5.0,
+    "clip_end_local": "2026-10-01 18:53:40",
+    "frames_written": 20,
+    "model_response": {
+      "label": "normal",
+      "people": 1,
+      "summary": "A man in a grey hoodie approaches the front door, rings the bell, waits about ten seconds and then walks away.",
+      "vehicle_moving": false
+    },
+    "clip_start_local": "2026-10-01 18:53:36"
+  }
+}

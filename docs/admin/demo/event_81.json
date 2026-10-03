@@ -1,0 +1,182 @@
+{
+  "id": 81,
+  "site": "levi_haifa",
+  "customer_id": 2,
+  "customer_name": "Yossi Levi",
+  "camera": "side_gate",
+  "kind": "alert",
+  "start_utc": "2026-10-02T15:37:05.510650Z",
+  "end_utc": "2026-10-02T15:37:09.510650Z",
+  "summary": "A person in a dark cap shakes the side gate lock and looks over the wall.",
+  "label": "suspicious",
+  "alert_command": "[call_owner]",
+  "detected": [
+    "person"
+  ],
+  "owner_verdicts": [],
+  "completeness": {
+    "video": true,
+    "boxes": "none",
+    "ai": "none",
+    "owner_feedback": false,
+    "expired": false,
+    "copies": [
+      "production"
+    ]
+  },
+  "reviewed": false,
+  "flagged": true,
+  "thumbnail_url": "/v1/events/81/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": "2026-10-02 18:37:05",
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "Unknown person tried to open the side gate.",
+  "dispatch": {
+    "channel": "telegram",
+    "sent": true,
+    "detail": {
+      "channel": "telegram",
+      "telegram": {
+        "command": "[call_owner]",
+        "telegram": {
+          "sent": true,
+          "results": [
+            {
+              "ok": true,
+              "chat_id": "-100100",
+              "message_id": 429
+            }
+          ]
+        }
+      }
+    }
+  },
+  "ai_runs": [
+    {
+      "id": 81,
+      "purpose": "guard",
+      "status": "none",
+      "model": null,
+      "prompt_version": null,
+      "prompt": null,
+      "parsed": null,
+      "raw_text_artifact_id": null,
+      "input_frame_artifact_ids": []
+    }
+  ],
+  "feedback": [],
+  "artifacts": [
+    {
+      "id": 484,
+      "role": "original_video",
+      "s3_key": "production_levi_haifa/clips/side_gate/2026-10-02/side_gate_1790955428_alert.mp4",
+      "bytes": 3209,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 505,
+      "role": "meta",
+      "s3_key": "production_levi_haifa/meta/side_gate/2026-10-02/side_gate_1790955428_alert.meta.json",
+      "bytes": 977,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 1418,
+      "role": "thumbnail",
+      "s3_key": "admin_cache/thumbs/81.jpg",
+      "bytes": 3584,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "src_etag": "36929d0d7e40f15ff1603810565d5c39",
+        "needs_rendition": false
+      }
+    },
+    {
+      "id": 1419,
+      "role": "filmstrip",
+      "s3_key": "admin_cache/filmstrips/81.jpg",
+      "bytes": 3135,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "count": 4,
+        "tile_h": 90,
+        "tile_w": 160,
+        "src_etag": "36929d0d7e40f15ff1603810565d5c39"
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "alert",
+    "yolo": {
+      "class_counts": {
+        "person": 1
+      },
+      "class_max_conf": {
+        "person": 0.524
+      },
+      "trigger_classes": [
+        "person"
+      ],
+      "trigger_detected": true
+    },
+    "alert": {
+      "label": "suspicious",
+      "muted": false,
+      "labels": [
+        "person"
+      ],
+      "summary": "A person in a dark cap shakes the side gate lock and looks over the wall.",
+      "dispatch": {
+        "channel": "telegram",
+        "telegram": {
+          "command": "[call_owner]",
+          "telegram": {
+            "sent": true,
+            "results": [
+              {
+                "ok": true,
+                "chat_id": "-100100",
+                "message_id": 429
+              }
+            ]
+          }
+        }
+      },
+      "alert_reason": "Unknown person tried to open the side gate.",
+      "alert_command": "[call_owner]"
+    },
+    "codec": "h264",
+    "buffer": {
+      "store_fps": 5.0,
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "clip_path": "clips\\side_gate\\2026-10-02\\side_gate_1790955428_alert.mp4",
+    "camera_name": "side_gate",
+    "clip_end_ts": 1790955429.51065,
+    "duration_sec": 4.0,
+    "clip_start_ts": 1790955425.51065,
+    "fps_estimated": 5.0,
+    "clip_end_local": "2026-10-02 18:37:09",
+    "frames_written": 20,
+    "clip_start_local": "2026-10-02 18:37:05"
+  }
+}

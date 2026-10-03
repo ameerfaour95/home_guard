@@ -1,0 +1,259 @@
+{
+  "id": 11,
+  "site": "customer-1fc0de",
+  "customer_id": 1,
+  "customer_name": "customer-1fc0de",
+  "camera": "cam-0157f7",
+  "kind": "alert",
+  "start_utc": "2026-10-02T16:00:03.397949Z",
+  "end_utc": "2026-10-02T16:00:07.397949Z",
+  "summary": "A man walks down the cam-0157f7 toward the street carrying a gym bag.",
+  "label": "normal",
+  "alert_command": "[send_message]",
+  "detected": [
+    "person"
+  ],
+  "owner_verdicts": [
+    "true_alert"
+  ],
+  "completeness": {
+    "video": true,
+    "boxes": "none",
+    "ai": "real",
+    "owner_feedback": true,
+    "expired": false,
+    "copies": [
+      "production",
+      "training"
+    ]
+  },
+  "reviewed": false,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/11/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": null,
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 11,
+      "purpose": "guard",
+      "status": "real",
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "prompt": null,
+      "parsed": {
+        "label": "normal",
+        "people": 1,
+        "summary": "A man walks down the cam-0157f7 toward the street carrying a gym bag.",
+        "vehicle_moving": false
+      },
+      "raw_text_artifact_id": 144,
+      "input_frame_artifact_ids": [
+        177,
+        178,
+        179,
+        180,
+        181
+      ]
+    }
+  ],
+  "feedback": [
+    {
+      "id": 5,
+      "verdict": "true_alert",
+      "action": "none",
+      "note": "",
+      "raw_text": "",
+      "source": "text",
+      "received_utc": "2026-10-02T16:14:54Z"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": 5,
+      "role": "original_video",
+      "s3_key": "artifact-5",
+      "bytes": 3388,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 22,
+      "role": "feedback",
+      "s3_key": "artifact-22",
+      "bytes": 416,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 33,
+      "role": "meta",
+      "s3_key": "artifact-33",
+      "bytes": 925,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 57,
+      "role": "original_video",
+      "s3_key": "artifact-57",
+      "bytes": 3388,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 103,
+      "role": "meta",
+      "s3_key": "artifact-103",
+      "bytes": 1683,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 144,
+      "role": "raw_answer",
+      "s3_key": "artifact-144",
+      "bytes": 139,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 177,
+      "role": "teacher_frame",
+      "s3_key": "artifact-177",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 178,
+      "role": "teacher_frame",
+      "s3_key": "artifact-178",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 179,
+      "role": "teacher_frame",
+      "s3_key": "artifact-179",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 180,
+      "role": "teacher_frame",
+      "s3_key": "artifact-180",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 181,
+      "role": "teacher_frame",
+      "s3_key": "artifact-181",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1412,
+      "role": "thumbnail",
+      "s3_key": "artifact-1412",
+      "bytes": 3498,
+      "available": true,
+      "provenance": "cloud",
+      "detail": null
+    },
+    {
+      "id": 1413,
+      "role": "filmstrip",
+      "s3_key": "artifact-1413",
+      "bytes": 3019,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "tile_w": 160,
+        "tile_h": 90,
+        "count": 4
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "alert",
+    "duration_sec": 4.0,
+    "fps_estimated": 5.0,
+    "frames_written": 20,
+    "codec": "h264",
+    "buffer": {
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "yolo": {
+      "class_counts": {
+        "person": 1
+      },
+      "class_max_conf": {
+        "person": 0.743
+      },
+      "trigger_classes": [
+        "person"
+      ]
+    },
+    "model_response": {
+      "label": "normal",
+      "people": 1,
+      "summary": "A man walks down the cam-0157f7 toward the street carrying a gym bag.",
+      "vehicle_moving": false
+    },
+    "teacher": {
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "temperature": 0
+    }
+  }
+}

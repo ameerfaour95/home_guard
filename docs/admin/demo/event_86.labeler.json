@@ -1,0 +1,213 @@
+{
+  "id": 86,
+  "site": "customer-3e7e2d",
+  "customer_id": 2,
+  "customer_name": "customer-3e7e2d",
+  "camera": "cam-837a19",
+  "kind": "false_positive",
+  "start_utc": "2026-10-03T10:27:33.562656Z",
+  "end_utc": "2026-10-03T10:27:37.562656Z",
+  "summary": "A car passes on the street in the background and does not stop.",
+  "label": "normal",
+  "alert_command": "[none]",
+  "detected": [
+    "car"
+  ],
+  "owner_verdicts": [],
+  "completeness": {
+    "video": true,
+    "boxes": "none",
+    "ai": "real",
+    "owner_feedback": false,
+    "expired": false,
+    "copies": [
+      "training"
+    ]
+  },
+  "reviewed": true,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/86/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": null,
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 86,
+      "purpose": "guard",
+      "status": "real",
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "prompt": null,
+      "parsed": {
+        "label": "normal",
+        "people": 0,
+        "summary": "A car passes on the street in the background and does not stop.",
+        "vehicle_moving": true
+      },
+      "raw_text_artifact_id": 587,
+      "input_frame_artifact_ids": [
+        648,
+        649,
+        650,
+        651,
+        652
+      ]
+    }
+  ],
+  "feedback": [],
+  "artifacts": [
+    {
+      "id": 541,
+      "role": "original_video",
+      "s3_key": "artifact-541",
+      "bytes": 3427,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 576,
+      "role": "meta",
+      "s3_key": "artifact-576",
+      "bytes": 1727,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 587,
+      "role": "raw_answer",
+      "s3_key": "artifact-587",
+      "bytes": 134,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 648,
+      "role": "teacher_frame",
+      "s3_key": "artifact-648",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 649,
+      "role": "teacher_frame",
+      "s3_key": "artifact-649",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 650,
+      "role": "teacher_frame",
+      "s3_key": "artifact-650",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 651,
+      "role": "teacher_frame",
+      "s3_key": "artifact-651",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 652,
+      "role": "teacher_frame",
+      "s3_key": "artifact-652",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1348,
+      "role": "thumbnail",
+      "s3_key": "artifact-1348",
+      "bytes": 3699,
+      "available": true,
+      "provenance": "cloud",
+      "detail": null
+    },
+    {
+      "id": 1349,
+      "role": "filmstrip",
+      "s3_key": "artifact-1349",
+      "bytes": 3057,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "tile_w": 160,
+        "tile_h": 90,
+        "count": 4
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "false_positive",
+    "duration_sec": 4.0,
+    "fps_estimated": 5.0,
+    "frames_written": 20,
+    "codec": "h264",
+    "buffer": {
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "yolo": {
+      "class_counts": {
+        "car": 1
+      },
+      "class_max_conf": {
+        "car": 0.579
+      },
+      "trigger_classes": [
+        "car"
+      ]
+    },
+    "model_response": {
+      "label": "normal",
+      "people": 0,
+      "summary": "A car passes on the street in the background and does not stop.",
+      "vehicle_moving": true
+    },
+    "teacher": {
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "temperature": 0
+    }
+  }
+}

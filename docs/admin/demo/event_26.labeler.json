@@ -1,0 +1,390 @@
+{
+  "id": 26,
+  "site": "customer-1fc0de",
+  "customer_id": 1,
+  "customer_name": "customer-1fc0de",
+  "camera": "cam-b42d16",
+  "kind": "alert",
+  "start_utc": "2026-10-02T12:35:42.400500Z",
+  "end_utc": "2026-10-02T12:35:46.400500Z",
+  "summary": "A teenager in a school uniform steps out of the cam-b42d16, locks it and walks toward the gate.",
+  "label": "normal",
+  "alert_command": "[send_message]",
+  "detected": [
+    "person"
+  ],
+  "owner_verdicts": [],
+  "completeness": {
+    "video": true,
+    "boxes": "sampled",
+    "ai": "real",
+    "owner_feedback": false,
+    "expired": false,
+    "copies": [
+      "production",
+      "training"
+    ]
+  },
+  "reviewed": false,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/26/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": null,
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 26,
+      "purpose": "guard",
+      "status": "real",
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "prompt": null,
+      "parsed": {
+        "label": "normal",
+        "people": 1,
+        "summary": "A teenager in a school uniform steps out of the cam-b42d16, locks it and walks toward the gate.",
+        "vehicle_moving": false
+      },
+      "raw_text_artifact_id": 148,
+      "input_frame_artifact_ids": [
+        197,
+        198,
+        199,
+        200,
+        201
+      ]
+    }
+  ],
+  "feedback": [],
+  "artifacts": [
+    {
+      "id": 10,
+      "role": "original_video",
+      "s3_key": "artifact-10",
+      "bytes": 3322,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 38,
+      "role": "meta",
+      "s3_key": "artifact-38",
+      "bytes": 963,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 69,
+      "role": "original_video",
+      "s3_key": "artifact-69",
+      "bytes": 3322,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 117,
+      "role": "meta",
+      "s3_key": "artifact-117",
+      "bytes": 3695,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 148,
+      "role": "raw_answer",
+      "s3_key": "artifact-148",
+      "bytes": 167,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 197,
+      "role": "teacher_frame",
+      "s3_key": "artifact-197",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 198,
+      "role": "teacher_frame",
+      "s3_key": "artifact-198",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 199,
+      "role": "teacher_frame",
+      "s3_key": "artifact-199",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 200,
+      "role": "teacher_frame",
+      "s3_key": "artifact-200",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 201,
+      "role": "teacher_frame",
+      "s3_key": "artifact-201",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 299,
+      "role": "yolo_image",
+      "s3_key": "artifact-299",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 300,
+      "role": "yolo_image",
+      "s3_key": "artifact-300",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 301,
+      "role": "yolo_image",
+      "s3_key": "artifact-301",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 302,
+      "role": "yolo_image",
+      "s3_key": "artifact-302",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 303,
+      "role": "yolo_image",
+      "s3_key": "artifact-303",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 304,
+      "role": "yolo_image",
+      "s3_key": "artifact-304",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 305,
+      "role": "yolo_image",
+      "s3_key": "artifact-305",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 409,
+      "role": "yolo_label",
+      "s3_key": "artifact-409",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 410,
+      "role": "yolo_label",
+      "s3_key": "artifact-410",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 411,
+      "role": "yolo_label",
+      "s3_key": "artifact-411",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 412,
+      "role": "yolo_label",
+      "s3_key": "artifact-412",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 413,
+      "role": "yolo_label",
+      "s3_key": "artifact-413",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 414,
+      "role": "yolo_label",
+      "s3_key": "artifact-414",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 415,
+      "role": "yolo_label",
+      "s3_key": "artifact-415",
+      "bytes": 0,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1450,
+      "role": "thumbnail",
+      "s3_key": "artifact-1450",
+      "bytes": 3607,
+      "available": true,
+      "provenance": "cloud",
+      "detail": null
+    },
+    {
+      "id": 1451,
+      "role": "filmstrip",
+      "s3_key": "artifact-1451",
+      "bytes": 3269,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "tile_w": 160,
+        "tile_h": 90,
+        "count": 4
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "alert",
+    "duration_sec": 4.0,
+    "fps_estimated": 5.0,
+    "frames_written": 20,
+    "codec": "h264",
+    "buffer": {
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "yolo": {
+      "class_counts": {
+        "person": 1
+      },
+      "class_max_conf": {
+        "person": 0.479
+      },
+      "trigger_classes": [
+        "person"
+      ]
+    },
+    "model_response": {
+      "label": "normal",
+      "people": 1,
+      "summary": "A teenager in a school uniform steps out of the cam-b42d16, locks it and walks toward the gate.",
+      "vehicle_moving": false
+    },
+    "teacher": {
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "temperature": 0
+    }
+  }
+}

@@ -1,0 +1,1105 @@
+{
+  "items": [
+    {
+      "id": 110,
+      "site": "mizrahi_beersheva",
+      "customer_id": 3,
+      "customer_name": "Tamar Mizrahi",
+      "camera": "garage",
+      "kind": "false_positive",
+      "start_utc": "2026-10-03T03:10:01.522501Z",
+      "end_utc": "2026-10-03T03:10:05.522501Z",
+      "summary": "Headlights sweep across the wall as a vehicle turns on the road; no people are visible.",
+      "label": "normal",
+      "alert_command": "[none]",
+      "detected": [
+        "car"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "real",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/110/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 109,
+      "site": "mizrahi_beersheva",
+      "customer_id": 3,
+      "customer_name": "Tamar Mizrahi",
+      "camera": "garage",
+      "kind": "false_positive",
+      "start_utc": "2026-10-02T22:32:16.547158Z",
+      "end_utc": "2026-10-02T22:32:20.547158Z",
+      "summary": "A cat was detected near the camera.",
+      "label": "normal",
+      "alert_command": "[none]",
+      "detected": [
+        "cat"
+      ],
+      "owner_verdicts": [
+        "false_alarm"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "fallback",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": true,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/109/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 108,
+      "site": "mizrahi_beersheva",
+      "customer_id": 3,
+      "customer_name": "Tamar Mizrahi",
+      "camera": "garage",
+      "kind": "alert",
+      "start_utc": "2026-10-02T20:24:55.493366Z",
+      "end_utc": "2026-10-02T20:24:59.493366Z",
+      "summary": "A person forces the garage side door with a tool while a second person watches the street.",
+      "label": "suspicious",
+      "alert_command": "[call_owner]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "real",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": true,
+      "thumbnail_url": "/v1/events/108/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 107,
+      "site": "mizrahi_beersheva",
+      "customer_id": 3,
+      "customer_name": "Tamar Mizrahi",
+      "camera": "garage",
+      "kind": "paused",
+      "start_utc": "2026-10-02T19:57:12.497488Z",
+      "end_utc": "2026-10-02T19:57:16.497488Z",
+      "summary": "",
+      "label": null,
+      "alert_command": "[none]",
+      "detected": [
+        "car"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": false,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": null,
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 106,
+      "site": "mizrahi_beersheva",
+      "customer_id": 3,
+      "customer_name": "Tamar Mizrahi",
+      "camera": "garage",
+      "kind": "trigger",
+      "start_utc": "2026-10-02T16:38:10.343815Z",
+      "end_utc": "2026-10-02T16:38:14.343815Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "dog"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/106/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 105,
+      "site": "mizrahi_beersheva",
+      "customer_id": 3,
+      "customer_name": "Tamar Mizrahi",
+      "camera": "garage",
+      "kind": "false_positive",
+      "start_utc": "2026-10-02T16:13:59.470861Z",
+      "end_utc": "2026-10-02T16:14:03.470861Z",
+      "summary": "A bird was detected near the camera.",
+      "label": "normal",
+      "alert_command": "[none]",
+      "detected": [
+        "bird"
+      ],
+      "owner_verdicts": [
+        "false_alarm"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "fallback",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/105/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 104,
+      "site": "mizrahi_beersheva",
+      "customer_id": 3,
+      "customer_name": "Tamar Mizrahi",
+      "camera": "garage",
+      "kind": "alert",
+      "start_utc": "2026-10-02T15:35:20.380577Z",
+      "end_utc": "2026-10-02T15:35:24.380577Z",
+      "summary": "A man carries cardboard boxes from the garage to a parked van.",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "person",
+        "truck"
+      ],
+      "owner_verdicts": [
+        "true_alert"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "real",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": true,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/104/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 103,
+      "site": "mizrahi_beersheva",
+      "customer_id": 3,
+      "customer_name": "Tamar Mizrahi",
+      "camera": "garage",
+      "kind": "alert",
+      "start_utc": "2026-10-02T14:46:26.413525Z",
+      "end_utc": "2026-10-02T14:46:30.413525Z",
+      "summary": "A man carries cardboard boxes from the garage to a parked van.",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "person",
+        "truck"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "real",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/103/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 102,
+      "site": "mizrahi_beersheva",
+      "customer_id": 3,
+      "customer_name": "Tamar Mizrahi",
+      "camera": "garage",
+      "kind": "trigger",
+      "start_utc": "2026-10-02T13:36:45.668627Z",
+      "end_utc": "2026-10-02T13:36:49.668627Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/102/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 101,
+      "site": "mizrahi_beersheva",
+      "customer_id": 3,
+      "customer_name": "Tamar Mizrahi",
+      "camera": "garage",
+      "kind": "alert",
+      "start_utc": "2026-10-02T13:34:42.385234Z",
+      "end_utc": "2026-10-02T13:34:46.385234Z",
+      "summary": "A grey sedan pulls up to the garage door and the driver gets out and lifts the door by hand.",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "car",
+        "person"
+      ],
+      "owner_verdicts": [
+        "true_alert"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "real",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/101/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 100,
+      "site": "mizrahi_beersheva",
+      "customer_id": 3,
+      "customer_name": "Tamar Mizrahi",
+      "camera": "garage",
+      "kind": "trigger",
+      "start_utc": "2026-10-02T09:50:16.638066Z",
+      "end_utc": "2026-10-02T09:50:20.638066Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "car"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/100/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 99,
+      "site": "mizrahi_beersheva",
+      "customer_id": 3,
+      "customer_name": "Tamar Mizrahi",
+      "camera": "garage",
+      "kind": "random",
+      "start_utc": "2026-10-02T09:24:39.474596Z",
+      "end_utc": "2026-10-02T09:24:43.474596Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/99/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 98,
+      "site": "mizrahi_beersheva",
+      "customer_id": 3,
+      "customer_name": "Tamar Mizrahi",
+      "camera": "garage",
+      "kind": "trigger",
+      "start_utc": "2026-10-02T09:13:48.630120Z",
+      "end_utc": "2026-10-02T09:13:52.630120Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "dog"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/98/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 97,
+      "site": "mizrahi_beersheva",
+      "customer_id": 3,
+      "customer_name": "Tamar Mizrahi",
+      "camera": "garage",
+      "kind": "alert",
+      "start_utc": "2026-10-02T08:39:02.347099Z",
+      "end_utc": "2026-10-02T08:39:06.347099Z",
+      "summary": "A grey sedan pulls up to the garage door and the driver gets out and lifts the door by hand.",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "car",
+        "person"
+      ],
+      "owner_verdicts": [
+        "true_alert"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "real",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/97/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 96,
+      "site": "mizrahi_beersheva",
+      "customer_id": 3,
+      "customer_name": "Tamar Mizrahi",
+      "camera": "garage",
+      "kind": "trigger",
+      "start_utc": "2026-10-02T06:59:44.669293Z",
+      "end_utc": "2026-10-02T06:59:48.669293Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/96/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 95,
+      "site": "mizrahi_beersheva",
+      "customer_id": 3,
+      "customer_name": "Tamar Mizrahi",
+      "camera": "garage",
+      "kind": "random",
+      "start_utc": "2026-10-01T21:03:18.684173Z",
+      "end_utc": "2026-10-01T21:03:22.684173Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/95/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 120,
+      "site": "mizrahi_eilat",
+      "customer_id": 3,
+      "customer_name": "Tamar Mizrahi",
+      "camera": "front_door",
+      "kind": "alert",
+      "start_utc": "2026-10-01T20:41:10.531436Z",
+      "end_utc": "2026-10-01T20:41:14.531436Z",
+      "summary": "A person in a dark hooded jacket and gloves tries the front door handle twice and looks up at the camera before walking away.",
+      "label": "suspicious",
+      "alert_command": "[call_owner]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [
+        "true_alert"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "real",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": true,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/120/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 119,
+      "site": "mizrahi_eilat",
+      "customer_id": 3,
+      "customer_name": "Tamar Mizrahi",
+      "camera": "front_door",
+      "kind": "false_positive",
+      "start_utc": "2026-10-01T19:30:54.565397Z",
+      "end_utc": "2026-10-01T19:30:58.565397Z",
+      "summary": "Headlights sweep across the wall as a vehicle turns on the road; no people are visible.",
+      "label": "normal",
+      "alert_command": "[none]",
+      "detected": [
+        "car"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "real",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": true,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/119/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 94,
+      "site": "mizrahi_beersheva",
+      "customer_id": 3,
+      "customer_name": "Tamar Mizrahi",
+      "camera": "garage",
+      "kind": "alert",
+      "start_utc": "2026-10-01T18:06:43.331092Z",
+      "end_utc": "2026-10-01T18:06:47.331092Z",
+      "summary": "A woman parks a small car in front of the garage and walks toward the house.",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "car",
+        "person"
+      ],
+      "owner_verdicts": [
+        "true_alert"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "real",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": true,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/94/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 118,
+      "site": "mizrahi_eilat",
+      "customer_id": 3,
+      "customer_name": "Tamar Mizrahi",
+      "camera": "front_door",
+      "kind": "alert",
+      "start_utc": "2026-10-01T18:01:46.583299Z",
+      "end_utc": "2026-10-01T18:01:50.583299Z",
+      "summary": "A courier in a yellow vest places a parcel on the doorstep, rings the bell and walks back toward the street.",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "real",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": true,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/118/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 117,
+      "site": "mizrahi_eilat",
+      "customer_id": 3,
+      "customer_name": "Tamar Mizrahi",
+      "camera": "front_door",
+      "kind": "alert",
+      "start_utc": "2026-10-01T17:36:21.494232Z",
+      "end_utc": "2026-10-01T17:36:25.494232Z",
+      "summary": "A teenager in a school uniform steps out of the front door, locks it and walks toward the gate.",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [
+        "expected"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "real",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": true,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/117/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 93,
+      "site": "mizrahi_beersheva",
+      "customer_id": 3,
+      "customer_name": "Tamar Mizrahi",
+      "camera": "garage",
+      "kind": "false_positive",
+      "start_utc": "2026-10-01T16:59:58.620053Z",
+      "end_utc": "2026-10-01T17:00:02.620053Z",
+      "summary": "Headlights sweep across the wall as a vehicle turns on the road; no people are visible.",
+      "label": "normal",
+      "alert_command": "[none]",
+      "detected": [
+        "car"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": false,
+        "boxes": "none",
+        "ai": "real",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": true,
+      "flagged": false,
+      "thumbnail_url": null,
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 92,
+      "site": "mizrahi_beersheva",
+      "customer_id": 3,
+      "customer_name": "Tamar Mizrahi",
+      "camera": "garage",
+      "kind": "alert",
+      "start_utc": "2026-10-01T16:58:52.415751Z",
+      "end_utc": "2026-10-01T16:58:56.415751Z",
+      "summary": "A car was detected near the camera.",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "car",
+        "person"
+      ],
+      "owner_verdicts": [
+        "true_alert"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "fallback",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": true,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/92/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 116,
+      "site": "mizrahi_eilat",
+      "customer_id": 3,
+      "customer_name": "Tamar Mizrahi",
+      "camera": "front_door",
+      "kind": "alert",
+      "start_utc": "2026-10-01T16:46:51.426127Z",
+      "end_utc": "2026-10-01T16:46:55.426127Z",
+      "summary": "",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "failed",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": true,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/116/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 91,
+      "site": "mizrahi_beersheva",
+      "customer_id": 3,
+      "customer_name": "Tamar Mizrahi",
+      "camera": "garage",
+      "kind": "alert",
+      "start_utc": "2026-10-01T16:24:24.417821Z",
+      "end_utc": "2026-10-01T16:24:28.417821Z",
+      "summary": "",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "car",
+        "person"
+      ],
+      "owner_verdicts": [
+        "true_alert"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "failed",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/91/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 90,
+      "site": "mizrahi_beersheva",
+      "customer_id": 3,
+      "customer_name": "Tamar Mizrahi",
+      "camera": "garage",
+      "kind": "false_positive",
+      "start_utc": "2026-10-01T16:19:30.494765Z",
+      "end_utc": "2026-10-01T16:19:34.494765Z",
+      "summary": "Tree branches sway in the wind and cast moving shadows; nothing else is visible.",
+      "label": "normal",
+      "alert_command": "[none]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "real",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/90/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 115,
+      "site": "mizrahi_eilat",
+      "customer_id": 3,
+      "customer_name": "Tamar Mizrahi",
+      "camera": "front_door",
+      "kind": "alert",
+      "start_utc": "2026-10-01T15:53:36.375261Z",
+      "end_utc": "2026-10-01T15:53:40.375261Z",
+      "summary": "A man in a grey hoodie approaches the front door, rings the bell, waits about ten seconds and then walks away.",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "real",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": true,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/115/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 114,
+      "site": "mizrahi_eilat",
+      "customer_id": 3,
+      "customer_name": "Tamar Mizrahi",
+      "camera": "front_door",
+      "kind": "alert",
+      "start_utc": "2026-10-01T15:42:05.465000Z",
+      "end_utc": "2026-10-01T15:42:09.465000Z",
+      "summary": "A woman carrying two grocery bags walks up the path and unlocks the front door with a key.",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "real",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": true,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/114/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 113,
+      "site": "mizrahi_eilat",
+      "customer_id": 3,
+      "customer_name": "Tamar Mizrahi",
+      "camera": "front_door",
+      "kind": "alert",
+      "start_utc": "2026-10-01T15:25:27.645476Z",
+      "end_utc": "2026-10-01T15:25:31.645476Z",
+      "summary": "Two people in dark jackets stand at the front door talking while one of them knocks twice.",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [
+        "expected"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production"
+        ]
+      },
+      "reviewed": true,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/113/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 89,
+      "site": "mizrahi_beersheva",
+      "customer_id": 3,
+      "customer_name": "Tamar Mizrahi",
+      "camera": "garage",
+      "kind": "random",
+      "start_utc": "2026-10-01T15:22:54.667018Z",
+      "end_utc": "2026-10-01T15:22:58.667018Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/89/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 112,
+      "site": "mizrahi_eilat",
+      "customer_id": 3,
+      "customer_name": "Tamar Mizrahi",
+      "camera": "front_door",
+      "kind": "false_positive",
+      "start_utc": "2026-10-01T15:21:07.665619Z",
+      "end_utc": "2026-10-01T15:21:11.665619Z",
+      "summary": "Nothing notable is happening.",
+      "label": "normal",
+      "alert_command": "[none]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "real",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": true,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/112/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 111,
+      "site": "mizrahi_eilat",
+      "customer_id": 3,
+      "customer_name": "Tamar Mizrahi",
+      "camera": "front_door",
+      "kind": "false_positive",
+      "start_utc": "2026-10-01T14:33:38.423612Z",
+      "end_utc": "2026-10-01T14:33:42.423612Z",
+      "summary": "Headlights sweep across the wall as a vehicle turns on the road; no people are visible.",
+      "label": "normal",
+      "alert_command": "[none]",
+      "detected": [
+        "car"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "real",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": true,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/111/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 88,
+      "site": "mizrahi_beersheva",
+      "customer_id": 3,
+      "customer_name": "Tamar Mizrahi",
+      "camera": "garage",
+      "kind": "alert",
+      "start_utc": "2026-10-01T14:16:29.654146Z",
+      "end_utc": "2026-10-01T14:16:33.654146Z",
+      "summary": "A person forces the garage side door with a tool while a second person watches the street.",
+      "label": "suspicious",
+      "alert_command": "[call_owner]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [
+        "true_alert"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/88/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 87,
+      "site": "mizrahi_beersheva",
+      "customer_id": 3,
+      "customer_name": "Tamar Mizrahi",
+      "camera": "garage",
+      "kind": "alert",
+      "start_utc": "2026-10-01T13:22:44.334067Z",
+      "end_utc": "2026-10-01T13:22:48.334067Z",
+      "summary": "A man carries cardboard boxes from the garage to a parked van.",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "person",
+        "truck"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "production"
+        ]
+      },
+      "reviewed": true,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/87/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    }
+  ],
+  "next_cursor": null,
+  "total": null,
+  "total_capped": false
+}

@@ -1,0 +1,12 @@
+[
+  {
+    "s3_key": "dataset_cohen_ramatgan/meta/front_door/2026-10-02/front_door_1790935000_trigger.meta.json",
+    "reason": "invalid json",
+    "seen_utc": "2026-10-03T12:00:00Z"
+  },
+  {
+    "s3_key": "production_levi_haifa/meta/side_gate/2026-10-02/side_gate_1790936000_alert.meta.json",
+    "reason": "invalid json",
+    "seen_utc": "2026-10-03T12:00:00Z"
+  }
+]

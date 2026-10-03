@@ -1,0 +1,338 @@
+{
+  "id": 75,
+  "site": "levi_haifa",
+  "customer_id": 2,
+  "customer_name": "Yossi Levi",
+  "camera": "side_gate",
+  "kind": "trigger",
+  "start_utc": "2026-10-01T16:43:54.538118Z",
+  "end_utc": "2026-10-01T16:43:58.538118Z",
+  "summary": "",
+  "label": null,
+  "alert_command": null,
+  "detected": [
+    "car"
+  ],
+  "owner_verdicts": [],
+  "completeness": {
+    "video": true,
+    "boxes": "sampled",
+    "ai": "none",
+    "owner_feedback": false,
+    "expired": false,
+    "copies": [
+      "training"
+    ]
+  },
+  "reviewed": false,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/75/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": "2026-10-01 19:43:54",
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 75,
+      "purpose": "guard",
+      "status": "none",
+      "model": null,
+      "prompt_version": null,
+      "prompt": null,
+      "parsed": null,
+      "raw_text_artifact_id": null,
+      "input_frame_artifact_ids": []
+    }
+  ],
+  "feedback": [],
+  "artifacts": [
+    {
+      "id": 531,
+      "role": "original_video",
+      "s3_key": "dataset_levi_haifa/clips/side_gate/2026-10-01/side_gate_1790873037_trigger.mp4",
+      "bytes": 3580,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 566,
+      "role": "meta",
+      "s3_key": "dataset_levi_haifa/meta/side_gate/2026-10-01/side_gate_1790873037_trigger.meta.json",
+      "bytes": 2467,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 709,
+      "role": "yolo_image",
+      "s3_key": "dataset_levi_haifa/yolo/images/side_gate/2026-10-01/side_gate_1790873037_trigger_f0000.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 710,
+      "role": "yolo_image",
+      "s3_key": "dataset_levi_haifa/yolo/images/side_gate/2026-10-01/side_gate_1790873037_trigger_f0003.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 711,
+      "role": "yolo_image",
+      "s3_key": "dataset_levi_haifa/yolo/images/side_gate/2026-10-01/side_gate_1790873037_trigger_f0006.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 712,
+      "role": "yolo_image",
+      "s3_key": "dataset_levi_haifa/yolo/images/side_gate/2026-10-01/side_gate_1790873037_trigger_f0009.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 713,
+      "role": "yolo_image",
+      "s3_key": "dataset_levi_haifa/yolo/images/side_gate/2026-10-01/side_gate_1790873037_trigger_f0012.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 714,
+      "role": "yolo_image",
+      "s3_key": "dataset_levi_haifa/yolo/images/side_gate/2026-10-01/side_gate_1790873037_trigger_f0015.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 715,
+      "role": "yolo_image",
+      "s3_key": "dataset_levi_haifa/yolo/images/side_gate/2026-10-01/side_gate_1790873037_trigger_f0018.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 806,
+      "role": "yolo_label",
+      "s3_key": "dataset_levi_haifa/yolo/labels/side_gate/2026-10-01/side_gate_1790873037_trigger_f0000.txt",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 807,
+      "role": "yolo_label",
+      "s3_key": "dataset_levi_haifa/yolo/labels/side_gate/2026-10-01/side_gate_1790873037_trigger_f0006.txt",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 808,
+      "role": "yolo_label",
+      "s3_key": "dataset_levi_haifa/yolo/labels/side_gate/2026-10-01/side_gate_1790873037_trigger_f0009.txt",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 809,
+      "role": "yolo_label",
+      "s3_key": "dataset_levi_haifa/yolo/labels/side_gate/2026-10-01/side_gate_1790873037_trigger_f0012.txt",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 810,
+      "role": "yolo_label",
+      "s3_key": "dataset_levi_haifa/yolo/labels/side_gate/2026-10-01/side_gate_1790873037_trigger_f0015.txt",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 811,
+      "role": "yolo_label",
+      "s3_key": "dataset_levi_haifa/yolo/labels/side_gate/2026-10-01/side_gate_1790873037_trigger_f0018.txt",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1530,
+      "role": "thumbnail",
+      "s3_key": "admin_cache/thumbs/75.jpg",
+      "bytes": 3458,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "src_etag": "3fadebec9b177f47b8280eb6c1c0f0eb",
+        "needs_rendition": false
+      }
+    },
+    {
+      "id": 1531,
+      "role": "filmstrip",
+      "s3_key": "admin_cache/filmstrips/75.jpg",
+      "bytes": 3057,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "count": 4,
+        "tile_h": 90,
+        "tile_w": 160,
+        "src_etag": "3fadebec9b177f47b8280eb6c1c0f0eb"
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "trigger",
+    "yolo": {
+      "class_counts": {
+        "car": 1
+      },
+      "class_max_conf": {
+        "car": 0.57
+      },
+      "trigger_classes": [
+        "car"
+      ],
+      "trigger_detected": true
+    },
+    "codec": "h264",
+    "buffer": {
+      "store_fps": 5.0,
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "clip_path": "clips\\side_gate\\2026-10-01\\side_gate_1790873037_trigger.mp4",
+    "camera_name": "side_gate",
+    "clip_end_ts": 1790873038.538118,
+    "yolo_export": {
+      "conf": 0.25,
+      "enabled": true,
+      "export_fps": 1.7,
+      "images_root": "yolo\\images",
+      "labels_root": "yolo\\labels",
+      "exported_frames": [
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\side_gate\\2026-10-01\\side_gate_1790873037_trigger_f0000.jpg",
+          "label_path": "yolo\\labels\\side_gate\\2026-10-01\\side_gate_1790873037_trigger_f0000.txt",
+          "frame_index": 0,
+          "approx_time_offset_sec": 0.0
+        },
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\side_gate\\2026-10-01\\side_gate_1790873037_trigger_f0003.jpg",
+          "label_path": "yolo\\labels\\side_gate\\2026-10-01\\side_gate_1790873037_trigger_f0003.txt",
+          "frame_index": 3,
+          "approx_time_offset_sec": 0.6
+        },
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\side_gate\\2026-10-01\\side_gate_1790873037_trigger_f0006.jpg",
+          "label_path": "yolo\\labels\\side_gate\\2026-10-01\\side_gate_1790873037_trigger_f0006.txt",
+          "frame_index": 6,
+          "approx_time_offset_sec": 1.2
+        },
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\side_gate\\2026-10-01\\side_gate_1790873037_trigger_f0009.jpg",
+          "label_path": "yolo\\labels\\side_gate\\2026-10-01\\side_gate_1790873037_trigger_f0009.txt",
+          "frame_index": 9,
+          "approx_time_offset_sec": 1.8
+        },
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\side_gate\\2026-10-01\\side_gate_1790873037_trigger_f0012.jpg",
+          "label_path": "yolo\\labels\\side_gate\\2026-10-01\\side_gate_1790873037_trigger_f0012.txt",
+          "frame_index": 12,
+          "approx_time_offset_sec": 2.4
+        },
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\side_gate\\2026-10-01\\side_gate_1790873037_trigger_f0015.jpg",
+          "label_path": "yolo\\labels\\side_gate\\2026-10-01\\side_gate_1790873037_trigger_f0015.txt",
+          "frame_index": 15,
+          "approx_time_offset_sec": 3.0
+        },
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\side_gate\\2026-10-01\\side_gate_1790873037_trigger_f0018.jpg",
+          "label_path": "yolo\\labels\\side_gate\\2026-10-01\\side_gate_1790873037_trigger_f0018.txt",
+          "frame_index": 18,
+          "approx_time_offset_sec": 3.6
+        }
+      ]
+    },
+    "duration_sec": 4.0,
+    "clip_start_ts": 1790873034.538118,
+    "fps_estimated": 5.0,
+    "clip_end_local": "2026-10-01 19:43:58",
+    "frames_written": 20,
+    "clip_start_local": "2026-10-01 19:43:54"
+  }
+}

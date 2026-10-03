@@ -71,3 +71,6 @@ dist/
 # Inference-mode clips waiting for S3 (box)
 production_multi/
 production_archive/
+
+# demo thumbnails for the admin exe are small synthetic images that belong in the repo
+!docs/admin/demo/media/*.jpg

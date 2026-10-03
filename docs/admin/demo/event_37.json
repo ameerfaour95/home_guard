@@ -1,0 +1,137 @@
+{
+  "id": 37,
+  "site": "cohen_ramatgan",
+  "customer_id": 1,
+  "customer_name": "Dana Cohen",
+  "camera": "front_door",
+  "kind": "trigger",
+  "start_utc": "2026-10-03T10:42:02.377824Z",
+  "end_utc": "2026-10-03T10:42:06.377824Z",
+  "summary": "",
+  "label": null,
+  "alert_command": null,
+  "detected": [
+    "person"
+  ],
+  "owner_verdicts": [],
+  "completeness": {
+    "video": true,
+    "boxes": "none",
+    "ai": "none",
+    "owner_feedback": false,
+    "expired": false,
+    "copies": [
+      "training"
+    ]
+  },
+  "reviewed": false,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/37/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": "2026-10-03 13:42:02",
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 37,
+      "purpose": "guard",
+      "status": "none",
+      "model": null,
+      "prompt_version": null,
+      "prompt": null,
+      "parsed": null,
+      "raw_text_artifact_id": null,
+      "input_frame_artifact_ids": []
+    }
+  ],
+  "feedback": [],
+  "artifacts": [
+    {
+      "id": 79,
+      "role": "original_video",
+      "s3_key": "dataset_cohen_ramatgan/clips/front_door/2026-10-03/front_door_1791024125_trigger.mp4",
+      "bytes": 3290,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 127,
+      "role": "meta",
+      "s3_key": "dataset_cohen_ramatgan/meta/front_door/2026-10-03/front_door_1791024125_trigger.meta.json",
+      "bytes": 558,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1346,
+      "role": "thumbnail",
+      "s3_key": "admin_cache/thumbs/37.jpg",
+      "bytes": 3583,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "src_etag": "5ea0142c30de13727f7f4517c949a8b6",
+        "needs_rendition": false
+      }
+    },
+    {
+      "id": 1347,
+      "role": "filmstrip",
+      "s3_key": "admin_cache/filmstrips/37.jpg",
+      "bytes": 3353,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "count": 4,
+        "tile_h": 90,
+        "tile_w": 160,
+        "src_etag": "5ea0142c30de13727f7f4517c949a8b6"
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "trigger",
+    "yolo": {
+      "class_counts": {
+        "person": 1
+      },
+      "class_max_conf": {
+        "person": 0.725
+      },
+      "trigger_classes": [
+        "person"
+      ],
+      "trigger_detected": true
+    },
+    "codec": "h264",
+    "buffer": {
+      "store_fps": 5.0,
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "clip_path": "clips\\front_door\\2026-10-03\\front_door_1791024125_trigger.mp4",
+    "camera_name": "front_door",
+    "clip_end_ts": 1791024126.3778238,
+    "duration_sec": 4.0,
+    "clip_start_ts": 1791024122.3778238,
+    "fps_estimated": 5.0,
+    "clip_end_local": "2026-10-03 13:42:06",
+    "frames_written": 20,
+    "clip_start_local": "2026-10-03 13:42:02"
+  }
+}

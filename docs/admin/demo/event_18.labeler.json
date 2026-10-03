@@ -1,0 +1,245 @@
+{
+  "id": 18,
+  "site": "customer-1fc0de",
+  "customer_id": 1,
+  "customer_name": "customer-1fc0de",
+  "camera": "cam-b42d16",
+  "kind": "trigger",
+  "start_utc": "2026-10-01T15:07:38.428757Z",
+  "end_utc": "2026-10-01T15:07:42.428757Z",
+  "summary": "",
+  "label": null,
+  "alert_command": null,
+  "detected": [
+    "dog"
+  ],
+  "owner_verdicts": [],
+  "completeness": {
+    "video": false,
+    "boxes": "sampled",
+    "ai": "none",
+    "owner_feedback": false,
+    "expired": false,
+    "copies": [
+      "training"
+    ]
+  },
+  "reviewed": false,
+  "flagged": false,
+  "thumbnail_url": null,
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": null,
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 18,
+      "purpose": "guard",
+      "status": "none",
+      "model": null,
+      "prompt_version": null,
+      "prompt": null,
+      "parsed": null,
+      "raw_text_artifact_id": null,
+      "input_frame_artifact_ids": []
+    }
+  ],
+  "feedback": [],
+  "artifacts": [
+    {
+      "id": 108,
+      "role": "meta",
+      "s3_key": "artifact-108",
+      "bytes": 2501,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 278,
+      "role": "yolo_image",
+      "s3_key": "artifact-278",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 279,
+      "role": "yolo_image",
+      "s3_key": "artifact-279",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 280,
+      "role": "yolo_image",
+      "s3_key": "artifact-280",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 281,
+      "role": "yolo_image",
+      "s3_key": "artifact-281",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 282,
+      "role": "yolo_image",
+      "s3_key": "artifact-282",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 283,
+      "role": "yolo_image",
+      "s3_key": "artifact-283",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 284,
+      "role": "yolo_image",
+      "s3_key": "artifact-284",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 388,
+      "role": "yolo_label",
+      "s3_key": "artifact-388",
+      "bytes": 39,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 389,
+      "role": "yolo_label",
+      "s3_key": "artifact-389",
+      "bytes": 39,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 390,
+      "role": "yolo_label",
+      "s3_key": "artifact-390",
+      "bytes": 39,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 391,
+      "role": "yolo_label",
+      "s3_key": "artifact-391",
+      "bytes": 39,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 392,
+      "role": "yolo_label",
+      "s3_key": "artifact-392",
+      "bytes": 0,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 393,
+      "role": "yolo_label",
+      "s3_key": "artifact-393",
+      "bytes": 39,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 394,
+      "role": "yolo_label",
+      "s3_key": "artifact-394",
+      "bytes": 39,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "trigger",
+    "duration_sec": 4.0,
+    "fps_estimated": 5.0,
+    "frames_written": 20,
+    "codec": "h264",
+    "buffer": {
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "yolo": {
+      "class_counts": {
+        "dog": 1
+      },
+      "class_max_conf": {
+        "dog": 0.806
+      },
+      "trigger_classes": [
+        "dog"
+      ]
+    }
+  }
+}

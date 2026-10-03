@@ -1,0 +1,498 @@
+{
+  "id": 50,
+  "site": "cohen_ramatgan",
+  "customer_id": 1,
+  "customer_name": "Dana Cohen",
+  "camera": "garden",
+  "kind": "alert",
+  "start_utc": "2026-10-03T11:04:25.660905Z",
+  "end_utc": "2026-10-03T11:04:29.660905Z",
+  "summary": "A child kicks a ball across the lawn while an adult watches from the patio.",
+  "label": "normal",
+  "alert_command": "[send_message]",
+  "detected": [
+    "person"
+  ],
+  "owner_verdicts": [],
+  "completeness": {
+    "video": true,
+    "boxes": "sampled",
+    "ai": "real",
+    "owner_feedback": false,
+    "expired": false,
+    "copies": [
+      "production",
+      "training"
+    ]
+  },
+  "reviewed": false,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/50/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": "2026-10-03 14:04:25",
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": {
+    "channel": "telegram",
+    "sent": true,
+    "detail": {
+      "channel": "telegram",
+      "telegram": {
+        "command": "[send_message]",
+        "telegram": {
+          "sent": true,
+          "results": [
+            {
+              "ok": true,
+              "chat_id": "-100100",
+              "message_id": 269
+            }
+          ]
+        }
+      }
+    }
+  },
+  "ai_runs": [
+    {
+      "id": 50,
+      "purpose": "guard",
+      "status": "real",
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"garden\", local time 14:04:28.\n\nWrite \"summary\": what happ",
+      "parsed": {
+        "label": "normal",
+        "people": 1,
+        "summary": "A child kicks a ball across the lawn while an adult watches from the patio.",
+        "vehicle_moving": false
+      },
+      "raw_text_artifact_id": 156,
+      "input_frame_artifact_ids": [
+        252,
+        253,
+        254,
+        255,
+        256
+      ]
+    }
+  ],
+  "feedback": [],
+  "artifacts": [
+    {
+      "id": 17,
+      "role": "original_video",
+      "s3_key": "production_cohen_ramatgan/clips/garden/2026-10-03/garden_1791025468_alert.mp4",
+      "bytes": 3378,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 45,
+      "role": "meta",
+      "s3_key": "production_cohen_ramatgan/meta/garden/2026-10-03/garden_1791025468_alert.meta.json",
+      "bytes": 931,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 92,
+      "role": "original_video",
+      "s3_key": "dataset_cohen_ramatgan/clips/garden/2026-10-03/garden_1791025468_alert.mp4",
+      "bytes": 3378,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 140,
+      "role": "meta",
+      "s3_key": "dataset_cohen_ramatgan/meta/garden/2026-10-03/garden_1791025468_alert.meta.json",
+      "bytes": 3479,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 156,
+      "role": "raw_answer",
+      "s3_key": "dataset_cohen_ramatgan/responses/garden/2026-10-03/garden_1791025468_alert.model_raw.txt",
+      "bytes": 147,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 252,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/garden/2026-10-03/garden_1791025468_alert_f0.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 253,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/garden/2026-10-03/garden_1791025468_alert_f1.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 254,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/garden/2026-10-03/garden_1791025468_alert_f2.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 255,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/garden/2026-10-03/garden_1791025468_alert_f3.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 256,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/garden/2026-10-03/garden_1791025468_alert_f4.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 362,
+      "role": "yolo_image",
+      "s3_key": "dataset_cohen_ramatgan/yolo/images/garden/2026-10-03/garden_1791025468_alert_f0000.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 363,
+      "role": "yolo_image",
+      "s3_key": "dataset_cohen_ramatgan/yolo/images/garden/2026-10-03/garden_1791025468_alert_f0003.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 364,
+      "role": "yolo_image",
+      "s3_key": "dataset_cohen_ramatgan/yolo/images/garden/2026-10-03/garden_1791025468_alert_f0006.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 365,
+      "role": "yolo_image",
+      "s3_key": "dataset_cohen_ramatgan/yolo/images/garden/2026-10-03/garden_1791025468_alert_f0009.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 366,
+      "role": "yolo_image",
+      "s3_key": "dataset_cohen_ramatgan/yolo/images/garden/2026-10-03/garden_1791025468_alert_f0012.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 367,
+      "role": "yolo_image",
+      "s3_key": "dataset_cohen_ramatgan/yolo/images/garden/2026-10-03/garden_1791025468_alert_f0015.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 368,
+      "role": "yolo_image",
+      "s3_key": "dataset_cohen_ramatgan/yolo/images/garden/2026-10-03/garden_1791025468_alert_f0018.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 468,
+      "role": "yolo_label",
+      "s3_key": "dataset_cohen_ramatgan/yolo/labels/garden/2026-10-03/garden_1791025468_alert_f0000.txt",
+      "bytes": 0,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 469,
+      "role": "yolo_label",
+      "s3_key": "dataset_cohen_ramatgan/yolo/labels/garden/2026-10-03/garden_1791025468_alert_f0003.txt",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 470,
+      "role": "yolo_label",
+      "s3_key": "dataset_cohen_ramatgan/yolo/labels/garden/2026-10-03/garden_1791025468_alert_f0006.txt",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 471,
+      "role": "yolo_label",
+      "s3_key": "dataset_cohen_ramatgan/yolo/labels/garden/2026-10-03/garden_1791025468_alert_f0009.txt",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 472,
+      "role": "yolo_label",
+      "s3_key": "dataset_cohen_ramatgan/yolo/labels/garden/2026-10-03/garden_1791025468_alert_f0012.txt",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 473,
+      "role": "yolo_label",
+      "s3_key": "dataset_cohen_ramatgan/yolo/labels/garden/2026-10-03/garden_1791025468_alert_f0015.txt",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 474,
+      "role": "yolo_label",
+      "s3_key": "dataset_cohen_ramatgan/yolo/labels/garden/2026-10-03/garden_1791025468_alert_f0018.txt",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1342,
+      "role": "thumbnail",
+      "s3_key": "admin_cache/thumbs/50.jpg",
+      "bytes": 3553,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "src_etag": "488b3fe1ccc59877f24cef989a7cfe92",
+        "needs_rendition": false
+      }
+    },
+    {
+      "id": 1343,
+      "role": "filmstrip",
+      "s3_key": "admin_cache/filmstrips/50.jpg",
+      "bytes": 3254,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "count": 4,
+        "tile_h": 90,
+        "tile_w": 160,
+        "src_etag": "488b3fe1ccc59877f24cef989a7cfe92"
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "alert",
+    "yolo": {
+      "class_counts": {
+        "person": 1
+      },
+      "class_max_conf": {
+        "person": 0.723
+      },
+      "trigger_classes": [
+        "person"
+      ],
+      "trigger_detected": true
+    },
+    "alert": {
+      "label": "normal",
+      "muted": false,
+      "labels": [
+        "person"
+      ],
+      "summary": "A child kicks a ball across the lawn while an adult watches from the patio.",
+      "alert_reason": "",
+      "alert_command": "[send_message]"
+    },
+    "codec": "h264",
+    "buffer": {
+      "store_fps": 5.0,
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "teacher": {
+      "model": "gpt-4o",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"garden\", local time 14:04:28.\n\nWrite \"summary\": what happ",
+      "raw_path": "responses\\garden\\2026-10-03\\garden_1791025468_alert.model_raw.txt",
+      "temperature": 0,
+      "input_frames": [
+        "vlm_crops\\garden\\2026-10-03\\garden_1791025468_alert_f0.jpg",
+        "vlm_crops\\garden\\2026-10-03\\garden_1791025468_alert_f1.jpg",
+        "vlm_crops\\garden\\2026-10-03\\garden_1791025468_alert_f2.jpg",
+        "vlm_crops\\garden\\2026-10-03\\garden_1791025468_alert_f3.jpg",
+        "vlm_crops\\garden\\2026-10-03\\garden_1791025468_alert_f4.jpg"
+      ],
+      "prompt_version": "2026-10-03.tagged-rules-label"
+    },
+    "clip_path": "clips\\garden\\2026-10-03\\garden_1791025468_alert.mp4",
+    "camera_name": "garden",
+    "clip_end_ts": 1791025469.3725774,
+    "yolo_export": {
+      "conf": 0.25,
+      "enabled": true,
+      "export_fps": 1.7,
+      "images_root": "yolo\\images",
+      "labels_root": "yolo\\labels",
+      "exported_frames": [
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\garden\\2026-10-03\\garden_1791025468_alert_f0000.jpg",
+          "label_path": "yolo\\labels\\garden\\2026-10-03\\garden_1791025468_alert_f0000.txt",
+          "frame_index": 0,
+          "approx_time_offset_sec": 0.0
+        },
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\garden\\2026-10-03\\garden_1791025468_alert_f0003.jpg",
+          "label_path": "yolo\\labels\\garden\\2026-10-03\\garden_1791025468_alert_f0003.txt",
+          "frame_index": 3,
+          "approx_time_offset_sec": 0.6
+        },
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\garden\\2026-10-03\\garden_1791025468_alert_f0006.jpg",
+          "label_path": "yolo\\labels\\garden\\2026-10-03\\garden_1791025468_alert_f0006.txt",
+          "frame_index": 6,
+          "approx_time_offset_sec": 1.2
+        },
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\garden\\2026-10-03\\garden_1791025468_alert_f0009.jpg",
+          "label_path": "yolo\\labels\\garden\\2026-10-03\\garden_1791025468_alert_f0009.txt",
+          "frame_index": 9,
+          "approx_time_offset_sec": 1.8
+        },
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\garden\\2026-10-03\\garden_1791025468_alert_f0012.jpg",
+          "label_path": "yolo\\labels\\garden\\2026-10-03\\garden_1791025468_alert_f0012.txt",
+          "frame_index": 12,
+          "approx_time_offset_sec": 2.4
+        },
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\garden\\2026-10-03\\garden_1791025468_alert_f0015.jpg",
+          "label_path": "yolo\\labels\\garden\\2026-10-03\\garden_1791025468_alert_f0015.txt",
+          "frame_index": 15,
+          "approx_time_offset_sec": 3.0
+        },
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\garden\\2026-10-03\\garden_1791025468_alert_f0018.jpg",
+          "label_path": "yolo\\labels\\garden\\2026-10-03\\garden_1791025468_alert_f0018.txt",
+          "frame_index": 18,
+          "approx_time_offset_sec": 3.6
+        }
+      ]
+    },
+    "duration_sec": 4.0,
+    "clip_start_ts": 1791025465.3725774,
+    "fps_estimated": 5.0,
+    "clip_end_local": "2026-10-03 14:04:29",
+    "frames_written": 20,
+    "model_response": {
+      "label": "normal",
+      "people": 1,
+      "summary": "A child kicks a ball across the lawn while an adult watches from the patio.",
+      "vehicle_moving": false
+    },
+    "clip_start_local": "2026-10-03 14:04:25"
+  }
+}

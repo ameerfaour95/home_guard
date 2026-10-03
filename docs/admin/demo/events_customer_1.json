@@ -1,0 +1,1592 @@
+{
+  "items": [
+    {
+      "id": 38,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "front_door",
+      "kind": "trigger",
+      "start_utc": "2026-10-03T11:09:45.368293Z",
+      "end_utc": "2026-10-03T11:09:49.368293Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/38/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 50,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "garden",
+      "kind": "alert",
+      "start_utc": "2026-10-03T11:04:25.660905Z",
+      "end_utc": "2026-10-03T11:04:29.660905Z",
+      "summary": "A child kicks a ball across the lawn while an adult watches from the patio.",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "real",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/50/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 16,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "driveway",
+      "kind": "trigger",
+      "start_utc": "2026-10-03T10:42:04.434916Z",
+      "end_utc": "2026-10-03T10:42:08.434916Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "cat"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/16/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 37,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "front_door",
+      "kind": "trigger",
+      "start_utc": "2026-10-03T10:42:02.377824Z",
+      "end_utc": "2026-10-03T10:42:06.377824Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/37/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 49,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "garden",
+      "kind": "random",
+      "start_utc": "2026-10-03T10:13:49.428401Z",
+      "end_utc": "2026-10-03T10:13:53.428401Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "car"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/49/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 48,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "garden",
+      "kind": "trigger",
+      "start_utc": "2026-10-03T09:47:23.676710Z",
+      "end_utc": "2026-10-03T09:47:27.676710Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "person",
+        "car"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/48/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 36,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "front_door",
+      "kind": "random",
+      "start_utc": "2026-10-03T09:22:55.357240Z",
+      "end_utc": "2026-10-03T09:22:59.357240Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/36/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 15,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "driveway",
+      "kind": "trigger",
+      "start_utc": "2026-10-03T09:20:28.315063Z",
+      "end_utc": "2026-10-03T09:20:32.315063Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "person",
+        "car"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/15/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 35,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "front_door",
+      "kind": "alert",
+      "start_utc": "2026-10-03T09:12:46.679606Z",
+      "end_utc": "2026-10-03T09:12:50.679606Z",
+      "summary": "A woman carrying two grocery bags walks up the path and unlocks the front door with a key.",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "production"
+        ]
+      },
+      "reviewed": true,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/35/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 34,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "front_door",
+      "kind": "false_positive",
+      "start_utc": "2026-10-03T07:35:53.317125Z",
+      "end_utc": "2026-10-03T07:35:57.317125Z",
+      "summary": "Headlights sweep across the wall as a vehicle turns on the road; no people are visible.",
+      "label": "normal",
+      "alert_command": "[none]",
+      "detected": [
+        "car"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "real",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": true,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/34/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 33,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "front_door",
+      "kind": "alert",
+      "start_utc": "2026-10-03T07:21:47.411087Z",
+      "end_utc": "2026-10-03T07:21:51.411087Z",
+      "summary": "Two people in dark jackets stand at the front door talking while one of them knocks twice.",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "real",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/33/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 14,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "driveway",
+      "kind": "alert",
+      "start_utc": "2026-10-03T06:38:38.320153Z",
+      "end_utc": "2026-10-03T06:38:42.320153Z",
+      "summary": "A delivery van stops at the end of the driveway and the driver walks up with a parcel.",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "truck",
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "production"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/14/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 32,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "front_door",
+      "kind": "alert",
+      "start_utc": "2026-10-03T06:32:10.390534Z",
+      "end_utc": "2026-10-03T06:32:14.390534Z",
+      "summary": "Two people in dark jackets stand at the front door talking while one of them knocks twice.",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "real",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/32/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 47,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "garden",
+      "kind": "alert",
+      "start_utc": "2026-10-03T06:14:27.425722Z",
+      "end_utc": "2026-10-03T06:14:31.425722Z",
+      "summary": "A woman walks across the lawn with a laundry basket toward the clothes line.",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [
+        "true_alert"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "real",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/47/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 46,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "garden",
+      "kind": "trigger",
+      "start_utc": "2026-10-03T04:51:38.393059Z",
+      "end_utc": "2026-10-03T04:51:42.393059Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/46/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 45,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "garden",
+      "kind": "alert",
+      "start_utc": "2026-10-03T04:04:21.524468Z",
+      "end_utc": "2026-10-03T04:04:25.524468Z",
+      "summary": "A person was detected near the camera.",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [
+        "true_alert"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "fallback",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/45/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 31,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "front_door",
+      "kind": "alert",
+      "start_utc": "2026-10-03T03:38:27.437861Z",
+      "end_utc": "2026-10-03T03:38:31.437861Z",
+      "summary": "A person was detected near the camera.",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [
+        "false_alarm"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "fallback",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": true,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/31/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 30,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "front_door",
+      "kind": "trigger",
+      "start_utc": "2026-10-03T02:22:05.401537Z",
+      "end_utc": "2026-10-03T02:22:09.401537Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "dog"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/30/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 13,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "driveway",
+      "kind": "alert",
+      "start_utc": "2026-10-02T18:26:52.474433Z",
+      "end_utc": "2026-10-02T18:26:56.474433Z",
+      "summary": "A white hatchback pulls into the driveway and a woman steps out and opens the trunk.",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "car",
+        "person"
+      ],
+      "owner_verdicts": [
+        "true_alert"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/13/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 12,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "driveway",
+      "kind": "random",
+      "start_utc": "2026-10-02T16:59:16.632188Z",
+      "end_utc": "2026-10-02T16:59:20.632188Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "car"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/12/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 11,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "driveway",
+      "kind": "alert",
+      "start_utc": "2026-10-02T16:00:03.397949Z",
+      "end_utc": "2026-10-02T16:00:07.397949Z",
+      "summary": "A man walks down the driveway toward the street carrying a gym bag.",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [
+        "true_alert"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "real",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/11/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 29,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "front_door",
+      "kind": "paused",
+      "start_utc": "2026-10-02T15:44:35.326940Z",
+      "end_utc": "2026-10-02T15:44:39.326940Z",
+      "summary": "",
+      "label": null,
+      "alert_command": "[none]",
+      "detected": [
+        "car"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/29/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 28,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "front_door",
+      "kind": "paused",
+      "start_utc": "2026-10-02T15:30:49.571975Z",
+      "end_utc": "2026-10-02T15:30:53.571975Z",
+      "summary": "",
+      "label": null,
+      "alert_command": "[none]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/28/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 27,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "front_door",
+      "kind": "alert",
+      "start_utc": "2026-10-02T15:03:42.638965Z",
+      "end_utc": "2026-10-02T15:03:46.638965Z",
+      "summary": "Two people in dark jackets stand at the front door talking while one of them knocks twice.",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "real",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": true,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/27/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 44,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "garden",
+      "kind": "false_positive",
+      "start_utc": "2026-10-02T14:39:12.395160Z",
+      "end_utc": "2026-10-02T14:39:16.395160Z",
+      "summary": "Headlights sweep across the wall as a vehicle turns on the road; no people are visible.",
+      "label": "normal",
+      "alert_command": "[none]",
+      "detected": [
+        "car"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "real",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/44/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 10,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "driveway",
+      "kind": "false_positive",
+      "start_utc": "2026-10-02T13:25:30.388368Z",
+      "end_utc": "2026-10-02T13:25:34.388368Z",
+      "summary": "A car was detected near the camera.",
+      "label": "normal",
+      "alert_command": "[none]",
+      "detected": [
+        "car"
+      ],
+      "owner_verdicts": [
+        "true_alert"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "fallback",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": true,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/10/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 43,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "garden",
+      "kind": "alert",
+      "start_utc": "2026-10-02T13:19:05.364727Z",
+      "end_utc": "2026-10-02T13:19:09.364727Z",
+      "summary": "A woman walks across the lawn with a laundry basket toward the clothes line.",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [
+        "true_alert"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "real",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/43/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 26,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "front_door",
+      "kind": "alert",
+      "start_utc": "2026-10-02T12:35:42.400500Z",
+      "end_utc": "2026-10-02T12:35:46.400500Z",
+      "summary": "A teenager in a school uniform steps out of the front door, locks it and walks toward the gate.",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "real",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/26/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 9,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "driveway",
+      "kind": "paused",
+      "start_utc": "2026-10-02T12:33:32.655764Z",
+      "end_utc": "2026-10-02T12:33:36.655764Z",
+      "summary": "",
+      "label": null,
+      "alert_command": "[none]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/9/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 25,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "front_door",
+      "kind": "trigger",
+      "start_utc": "2026-10-02T12:29:44.641197Z",
+      "end_utc": "2026-10-02T12:29:48.641197Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/25/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 42,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "garden",
+      "kind": "random",
+      "start_utc": "2026-10-02T12:16:20.636670Z",
+      "end_utc": "2026-10-02T12:16:24.636670Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/42/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 24,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "front_door",
+      "kind": "random",
+      "start_utc": "2026-10-02T12:08:55.367404Z",
+      "end_utc": "2026-10-02T12:08:59.367404Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "car"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/24/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 23,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "front_door",
+      "kind": "paused",
+      "start_utc": "2026-10-02T11:18:30.480319Z",
+      "end_utc": "2026-10-02T11:18:34.480319Z",
+      "summary": "",
+      "label": null,
+      "alert_command": "[none]",
+      "detected": [
+        "car"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/23/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 8,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "driveway",
+      "kind": "trigger",
+      "start_utc": "2026-10-02T10:36:46.506466Z",
+      "end_utc": "2026-10-02T10:36:50.506466Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "cat"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/8/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 7,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "driveway",
+      "kind": "trigger",
+      "start_utc": "2026-10-02T10:13:03.437354Z",
+      "end_utc": "2026-10-02T10:13:07.437354Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "car"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/7/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 6,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "driveway",
+      "kind": "alert",
+      "start_utc": "2026-10-02T10:10:28.341443Z",
+      "end_utc": "2026-10-02T10:10:32.341443Z",
+      "summary": "A dark SUV reverses out of the driveway and drives off down the street.",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "car"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "real",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": true,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/6/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 5,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "driveway",
+      "kind": "random",
+      "start_utc": "2026-10-02T10:09:33.642017Z",
+      "end_utc": "2026-10-02T10:09:37.642017Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "car"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/5/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 22,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "front_door",
+      "kind": "trigger",
+      "start_utc": "2026-10-02T09:46:31.426365Z",
+      "end_utc": "2026-10-02T09:46:35.426365Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "person",
+        "car"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/22/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 21,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "front_door",
+      "kind": "alert",
+      "start_utc": "2026-10-02T08:45:55.526699Z",
+      "end_utc": "2026-10-02T08:45:59.526699Z",
+      "summary": "A woman carrying two grocery bags walks up the path and unlocks the front door with a key.",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "real",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": true,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/21/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 4,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "driveway",
+      "kind": "random",
+      "start_utc": "2026-10-02T07:36:25.634633Z",
+      "end_utc": "2026-10-02T07:36:29.634633Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/4/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 3,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "driveway",
+      "kind": "random",
+      "start_utc": "2026-10-02T06:32:51.584731Z",
+      "end_utc": "2026-10-02T06:32:55.584731Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/3/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 20,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "front_door",
+      "kind": "alert",
+      "start_utc": "2026-10-01T18:36:54.618888Z",
+      "end_utc": "2026-10-01T18:36:58.618888Z",
+      "summary": "A person with a face covering crouches at the front door lock for several seconds.",
+      "label": "suspicious",
+      "alert_command": "[call_owner]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [
+        "expected"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "real",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": true,
+      "thumbnail_url": "/v1/events/20/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 41,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "garden",
+      "kind": "trigger",
+      "start_utc": "2026-10-01T18:27:38.586663Z",
+      "end_utc": "2026-10-01T18:27:42.586663Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/41/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 2,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "driveway",
+      "kind": "false_positive",
+      "start_utc": "2026-10-01T17:41:38.617778Z",
+      "end_utc": "2026-10-01T17:41:42.617778Z",
+      "summary": "Headlights sweep across the wall as a vehicle turns on the road; no people are visible.",
+      "label": "normal",
+      "alert_command": "[none]",
+      "detected": [
+        "car"
+      ],
+      "owner_verdicts": [
+        "false_alarm"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "real",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/2/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 1,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "driveway",
+      "kind": "false_positive",
+      "start_utc": "2026-10-01T16:35:23.381890Z",
+      "end_utc": "2026-10-01T16:35:27.381890Z",
+      "summary": "A bird lands on the railing and flies away.",
+      "label": "normal",
+      "alert_command": "[none]",
+      "detected": [
+        "bird"
+      ],
+      "owner_verdicts": [
+        "true_alert"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "real",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": true,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/1/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 40,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "garden",
+      "kind": "trigger",
+      "start_utc": "2026-10-01T16:34:44.650487Z",
+      "end_utc": "2026-10-01T16:34:48.650487Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "car"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/40/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 19,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "front_door",
+      "kind": "alert",
+      "start_utc": "2026-10-01T16:04:28.454908Z",
+      "end_utc": "2026-10-01T16:04:32.454908Z",
+      "summary": "A teenager in a school uniform steps out of the front door, locks it and walks toward the gate.",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "real",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/19/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 39,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "garden",
+      "kind": "alert",
+      "start_utc": "2026-10-01T15:25:34.322901Z",
+      "end_utc": "2026-10-01T15:25:38.322901Z",
+      "summary": "A person was detected near the camera.",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "fallback",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": true,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/39/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 18,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "front_door",
+      "kind": "trigger",
+      "start_utc": "2026-10-01T15:07:38.428757Z",
+      "end_utc": "2026-10-01T15:07:42.428757Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "dog"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": false,
+        "boxes": "sampled",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": null,
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 17,
+      "site": "cohen_ramatgan",
+      "customer_id": 1,
+      "customer_name": "Dana Cohen",
+      "camera": "front_door",
+      "kind": "trigger",
+      "start_utc": "2026-10-01T14:04:22.525490Z",
+      "end_utc": "2026-10-01T14:04:26.525490Z",
+      "summary": "",
+      "label": null,
+      "alert_command": null,
+      "detected": [
+        "cat"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "none",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/17/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    }
+  ],
+  "next_cursor": null,
+  "total": null,
+  "total_capped": false
+}

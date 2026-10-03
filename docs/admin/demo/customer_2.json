@@ -1,0 +1,37 @@
+{
+  "name": "Yossi Levi",
+  "timezone": "Asia/Jerusalem",
+  "consent_live": true,
+  "consent_recordings": true,
+  "consent_training": true,
+  "notes": "Ground-floor flat in Haifa with a shared building entrance.",
+  "id": 2,
+  "devices": [
+    {
+      "device_id": "7cdc4b44-de01-5ba8-8078-81b1a1072578",
+      "site": "levi_haifa",
+      "customer_id": 2,
+      "customer_name": "Yossi Levi",
+      "verdict": "warning",
+      "reasons": [
+        {
+          "code": "disk_low",
+          "message": "Only 38.2 GB of disk space free",
+          "severity": "warning"
+        }
+      ],
+      "last_seen_utc": "2026-10-03T11:51:00Z",
+      "mode": "inference",
+      "host": "hg-box-haifa",
+      "cameras_total": 2,
+      "cameras_stale": 0,
+      "disk_free_gb": 38.2,
+      "collector_running": true,
+      "stopped": false,
+      "newest_clip_utc": "2026-10-03T10:27:36Z",
+      "events_24h": 20,
+      "alerts_24h": 6,
+      "false_alarms_7d": 6
+    }
+  ]
+}

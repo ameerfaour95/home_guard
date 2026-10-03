@@ -1,0 +1,278 @@
+{
+  "id": 10,
+  "site": "cohen_ramatgan",
+  "customer_id": 1,
+  "customer_name": "Dana Cohen",
+  "camera": "driveway",
+  "kind": "false_positive",
+  "start_utc": "2026-10-02T13:25:30.388368Z",
+  "end_utc": "2026-10-02T13:25:34.388368Z",
+  "summary": "A car was detected near the camera.",
+  "label": "normal",
+  "alert_command": "[none]",
+  "detected": [
+    "car"
+  ],
+  "owner_verdicts": [
+    "true_alert"
+  ],
+  "completeness": {
+    "video": true,
+    "boxes": "none",
+    "ai": "fallback",
+    "owner_feedback": true,
+    "expired": false,
+    "copies": [
+      "production",
+      "training"
+    ]
+  },
+  "reviewed": true,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/10/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": "2026-10-02 16:25:30",
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 10,
+      "purpose": "guard",
+      "status": "fallback",
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"driveway\", local time 16:25:33.\n\nWrite \"summary\": what happ",
+      "parsed": {
+        "summary": ""
+      },
+      "raw_text_artifact_id": null,
+      "input_frame_artifact_ids": [
+        172,
+        173,
+        174,
+        175,
+        176
+      ]
+    }
+  ],
+  "feedback": [
+    {
+      "id": 4,
+      "verdict": "true_alert",
+      "action": "none",
+      "note": "",
+      "raw_text": "👍",
+      "source": "text",
+      "received_utc": "2026-10-02T13:27:50Z"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": 4,
+      "role": "original_video",
+      "s3_key": "production_cohen_ramatgan/clips/driveway/2026-10-02/driveway_1790947533_fp.mp4",
+      "bytes": 3498,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 21,
+      "role": "feedback",
+      "s3_key": "production_cohen_ramatgan/feedback/driveway/2026-10-02/driveway_1790947533_fp_1790947670000.feedback.json",
+      "bytes": 426,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 32,
+      "role": "meta",
+      "s3_key": "production_cohen_ramatgan/meta/driveway/2026-10-02/driveway_1790947533_fp.meta.json",
+      "bytes": 778,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 56,
+      "role": "original_video",
+      "s3_key": "dataset_cohen_ramatgan/clips/driveway/2026-10-02/driveway_1790947533_fp.mp4",
+      "bytes": 3498,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 102,
+      "role": "meta",
+      "s3_key": "dataset_cohen_ramatgan/meta/driveway/2026-10-02/driveway_1790947533_fp.meta.json",
+      "bytes": 1499,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 172,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/driveway/2026-10-02/driveway_1790947533_fp_f0.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 173,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/driveway/2026-10-02/driveway_1790947533_fp_f1.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 174,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/driveway/2026-10-02/driveway_1790947533_fp_f2.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 175,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/driveway/2026-10-02/driveway_1790947533_fp_f3.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 176,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/driveway/2026-10-02/driveway_1790947533_fp_f4.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1444,
+      "role": "thumbnail",
+      "s3_key": "admin_cache/thumbs/10.jpg",
+      "bytes": 3572,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "src_etag": "488617a13129d51546737112d3294d4c",
+        "needs_rendition": false
+      }
+    },
+    {
+      "id": 1445,
+      "role": "filmstrip",
+      "s3_key": "admin_cache/filmstrips/10.jpg",
+      "bytes": 3090,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "count": 4,
+        "tile_h": 90,
+        "tile_w": 160,
+        "src_etag": "488617a13129d51546737112d3294d4c"
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "false_positive",
+    "yolo": {
+      "class_counts": {
+        "car": 1
+      },
+      "class_max_conf": {
+        "car": 0.603
+      },
+      "trigger_classes": [
+        "car"
+      ],
+      "trigger_detected": true
+    },
+    "alert": {
+      "vlm": {
+        "people": 0,
+        "vehicle_moving": false
+      },
+      "label": "normal",
+      "muted": false,
+      "labels": [
+        "car"
+      ],
+      "summary": "A car was detected near the camera.",
+      "alert_reason": "",
+      "alert_command": "[none]",
+      "false_positive": true
+    },
+    "codec": "h264",
+    "buffer": {
+      "store_fps": 5.0,
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "teacher": {
+      "model": "gpt-4o",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"driveway\", local time 16:25:33.\n\nWrite \"summary\": what happ",
+      "raw_path": null,
+      "temperature": 0,
+      "input_frames": [
+        "vlm_crops\\driveway\\2026-10-02\\driveway_1790947533_fp_f0.jpg",
+        "vlm_crops\\driveway\\2026-10-02\\driveway_1790947533_fp_f1.jpg",
+        "vlm_crops\\driveway\\2026-10-02\\driveway_1790947533_fp_f2.jpg",
+        "vlm_crops\\driveway\\2026-10-02\\driveway_1790947533_fp_f3.jpg",
+        "vlm_crops\\driveway\\2026-10-02\\driveway_1790947533_fp_f4.jpg"
+      ],
+      "prompt_version": "2026-10-03.tagged-rules-label"
+    },
+    "clip_path": "clips\\driveway\\2026-10-02\\driveway_1790947533_fp.mp4",
+    "camera_name": "driveway",
+    "clip_end_ts": 1790947534.5410206,
+    "duration_sec": 4.0,
+    "clip_start_ts": 1790947530.5410206,
+    "fps_estimated": 5.0,
+    "clip_end_local": "2026-10-02 16:25:34",
+    "frames_written": 20,
+    "model_response": {
+      "summary": ""
+    },
+    "clip_start_local": "2026-10-02 16:25:30"
+  }
+}

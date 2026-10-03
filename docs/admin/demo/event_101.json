@@ -1,0 +1,314 @@
+{
+  "id": 101,
+  "site": "mizrahi_beersheva",
+  "customer_id": 3,
+  "customer_name": "Tamar Mizrahi",
+  "camera": "garage",
+  "kind": "alert",
+  "start_utc": "2026-10-02T13:34:42.385234Z",
+  "end_utc": "2026-10-02T13:34:46.385234Z",
+  "summary": "A grey sedan pulls up to the garage door and the driver gets out and lifts the door by hand.",
+  "label": "normal",
+  "alert_command": "[send_message]",
+  "detected": [
+    "car",
+    "person"
+  ],
+  "owner_verdicts": [
+    "true_alert"
+  ],
+  "completeness": {
+    "video": true,
+    "boxes": "none",
+    "ai": "real",
+    "owner_feedback": true,
+    "expired": false,
+    "copies": [
+      "production",
+      "training"
+    ]
+  },
+  "reviewed": false,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/101/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": "2026-10-02 16:34:42",
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": {
+    "channel": "telegram",
+    "sent": true,
+    "detail": {
+      "channel": "telegram",
+      "telegram": {
+        "command": "[send_message]",
+        "telegram": {
+          "sent": true,
+          "results": [
+            {
+              "ok": true,
+              "chat_id": "-100100",
+              "message_id": 286
+            }
+          ]
+        }
+      }
+    }
+  },
+  "ai_runs": [
+    {
+      "id": 101,
+      "purpose": "guard",
+      "status": "real",
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"garage\", local time 16:34:45.\n\nWrite \"summary\": what happ",
+      "parsed": {
+        "label": "normal",
+        "people": 1,
+        "summary": "A grey sedan pulls up to the garage door and the driver gets out and lifts the door by hand.",
+        "vehicle_moving": true
+      },
+      "raw_text_artifact_id": 926,
+      "input_frame_artifact_ids": [
+        961,
+        962,
+        963,
+        964,
+        965
+      ]
+    }
+  ],
+  "feedback": [
+    {
+      "id": 26,
+      "verdict": "true_alert",
+      "action": "none",
+      "note": "",
+      "raw_text": "👍",
+      "source": "text",
+      "received_utc": "2026-10-02T13:49:58Z"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": 853,
+      "role": "original_video",
+      "s3_key": "production_mizrahi_beersheva/clips/garage/2026-10-02/garage_1790948085_alert.mp4",
+      "bytes": 4329,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 863,
+      "role": "feedback",
+      "s3_key": "production_mizrahi_beersheva/feedback/garage/2026-10-02/garage_1790948085_alert_1790948998000.feedback.json",
+      "bytes": 425,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 874,
+      "role": "meta",
+      "s3_key": "production_mizrahi_beersheva/meta/garage/2026-10-02/garage_1790948085_alert.meta.json",
+      "bytes": 986,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 891,
+      "role": "original_video",
+      "s3_key": "dataset_mizrahi_beersheva/clips/garage/2026-10-02/garage_1790948085_alert.mp4",
+      "bytes": 4329,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 912,
+      "role": "meta",
+      "s3_key": "dataset_mizrahi_beersheva/meta/garage/2026-10-02/garage_1790948085_alert.meta.json",
+      "bytes": 1738,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 926,
+      "role": "raw_answer",
+      "s3_key": "dataset_mizrahi_beersheva/responses/garage/2026-10-02/garage_1790948085_alert.model_raw.txt",
+      "bytes": 163,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 961,
+      "role": "teacher_frame",
+      "s3_key": "dataset_mizrahi_beersheva/vlm_crops/garage/2026-10-02/garage_1790948085_alert_f0.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 962,
+      "role": "teacher_frame",
+      "s3_key": "dataset_mizrahi_beersheva/vlm_crops/garage/2026-10-02/garage_1790948085_alert_f1.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 963,
+      "role": "teacher_frame",
+      "s3_key": "dataset_mizrahi_beersheva/vlm_crops/garage/2026-10-02/garage_1790948085_alert_f2.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 964,
+      "role": "teacher_frame",
+      "s3_key": "dataset_mizrahi_beersheva/vlm_crops/garage/2026-10-02/garage_1790948085_alert_f3.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 965,
+      "role": "teacher_frame",
+      "s3_key": "dataset_mizrahi_beersheva/vlm_crops/garage/2026-10-02/garage_1790948085_alert_f4.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1442,
+      "role": "thumbnail",
+      "s3_key": "admin_cache/thumbs/101.jpg",
+      "bytes": 4309,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "src_etag": "86c175aff2b226b65364464ae28f089e",
+        "needs_rendition": false
+      }
+    },
+    {
+      "id": 1443,
+      "role": "filmstrip",
+      "s3_key": "admin_cache/filmstrips/101.jpg",
+      "bytes": 3781,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "count": 4,
+        "tile_h": 90,
+        "tile_w": 160,
+        "src_etag": "86c175aff2b226b65364464ae28f089e"
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "alert",
+    "yolo": {
+      "class_counts": {
+        "car": 1,
+        "person": 1
+      },
+      "class_max_conf": {
+        "car": 0.555,
+        "person": 0.917
+      },
+      "trigger_classes": [
+        "car",
+        "person"
+      ],
+      "trigger_detected": true
+    },
+    "alert": {
+      "label": "normal",
+      "muted": false,
+      "labels": [
+        "car",
+        "person"
+      ],
+      "summary": "A grey sedan pulls up to the garage door and the driver gets out and lifts the door by hand.",
+      "alert_reason": "",
+      "alert_command": "[send_message]"
+    },
+    "codec": "h264",
+    "buffer": {
+      "store_fps": 5.0,
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "teacher": {
+      "model": "gpt-4o",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"garage\", local time 16:34:45.\n\nWrite \"summary\": what happ",
+      "raw_path": "responses\\garage\\2026-10-02\\garage_1790948085_alert.model_raw.txt",
+      "temperature": 0,
+      "input_frames": [
+        "vlm_crops\\garage\\2026-10-02\\garage_1790948085_alert_f0.jpg",
+        "vlm_crops\\garage\\2026-10-02\\garage_1790948085_alert_f1.jpg",
+        "vlm_crops\\garage\\2026-10-02\\garage_1790948085_alert_f2.jpg",
+        "vlm_crops\\garage\\2026-10-02\\garage_1790948085_alert_f3.jpg",
+        "vlm_crops\\garage\\2026-10-02\\garage_1790948085_alert_f4.jpg"
+      ],
+      "prompt_version": "2026-10-03.tagged-rules-label"
+    },
+    "clip_path": "clips\\garage\\2026-10-02\\garage_1790948085_alert.mp4",
+    "camera_name": "garage",
+    "clip_end_ts": 1790948086.3802419,
+    "duration_sec": 4.0,
+    "clip_start_ts": 1790948082.3802419,
+    "fps_estimated": 5.0,
+    "clip_end_local": "2026-10-02 16:34:46",
+    "frames_written": 20,
+    "model_response": {
+      "label": "normal",
+      "people": 1,
+      "summary": "A grey sedan pulls up to the garage door and the driver gets out and lifts the door by hand.",
+      "vehicle_moving": true
+    },
+    "clip_start_local": "2026-10-02 16:34:42"
+  }
+}

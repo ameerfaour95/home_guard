@@ -1,0 +1,249 @@
+{
+  "id": 34,
+  "site": "cohen_ramatgan",
+  "customer_id": 1,
+  "customer_name": "Dana Cohen",
+  "camera": "front_door",
+  "kind": "false_positive",
+  "start_utc": "2026-10-03T07:35:53.317125Z",
+  "end_utc": "2026-10-03T07:35:57.317125Z",
+  "summary": "Headlights sweep across the wall as a vehicle turns on the road; no people are visible.",
+  "label": "normal",
+  "alert_command": "[none]",
+  "detected": [
+    "car"
+  ],
+  "owner_verdicts": [],
+  "completeness": {
+    "video": true,
+    "boxes": "none",
+    "ai": "real",
+    "owner_feedback": false,
+    "expired": false,
+    "copies": [
+      "training"
+    ]
+  },
+  "reviewed": true,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/34/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": "2026-10-03 10:35:53",
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 34,
+      "purpose": "guard",
+      "status": "real",
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"front_door\", local time 10:35:56.\n\nWrite \"summary\": what happ",
+      "parsed": {
+        "label": "normal",
+        "people": 0,
+        "summary": "Headlights sweep across the wall as a vehicle turns on the road; no people are visible.",
+        "vehicle_moving": true
+      },
+      "raw_text_artifact_id": 152,
+      "input_frame_artifact_ids": [
+        222,
+        223,
+        224,
+        225,
+        226
+      ]
+    }
+  ],
+  "feedback": [],
+  "artifacts": [
+    {
+      "id": 77,
+      "role": "original_video",
+      "s3_key": "dataset_cohen_ramatgan/clips/front_door/2026-10-03/front_door_1791012956_fp.mp4",
+      "bytes": 3675,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 125,
+      "role": "meta",
+      "s3_key": "dataset_cohen_ramatgan/meta/front_door/2026-10-03/front_door_1791012956_fp.meta.json",
+      "bytes": 1793,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 152,
+      "role": "raw_answer",
+      "s3_key": "dataset_cohen_ramatgan/responses/front_door/2026-10-03/front_door_1791012956_fp.model_raw.txt",
+      "bytes": 158,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 222,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/front_door/2026-10-03/front_door_1791012956_fp_f0.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 223,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/front_door/2026-10-03/front_door_1791012956_fp_f1.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 224,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/front_door/2026-10-03/front_door_1791012956_fp_f2.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 225,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/front_door/2026-10-03/front_door_1791012956_fp_f3.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 226,
+      "role": "teacher_frame",
+      "s3_key": "dataset_cohen_ramatgan/vlm_crops/front_door/2026-10-03/front_door_1791012956_fp_f4.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1362,
+      "role": "thumbnail",
+      "s3_key": "admin_cache/thumbs/34.jpg",
+      "bytes": 3630,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "src_etag": "6093577620e644ff83a18267812cf9c5",
+        "needs_rendition": false
+      }
+    },
+    {
+      "id": 1363,
+      "role": "filmstrip",
+      "s3_key": "admin_cache/filmstrips/34.jpg",
+      "bytes": 3203,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "count": 4,
+        "tile_h": 90,
+        "tile_w": 160,
+        "src_etag": "6093577620e644ff83a18267812cf9c5"
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "false_positive",
+    "yolo": {
+      "class_counts": {
+        "car": 1
+      },
+      "class_max_conf": {
+        "car": 0.876
+      },
+      "trigger_classes": [
+        "car"
+      ],
+      "trigger_detected": true
+    },
+    "alert": {
+      "vlm": {
+        "people": 0,
+        "vehicle_moving": false
+      },
+      "label": "normal",
+      "muted": false,
+      "labels": [
+        "car"
+      ],
+      "summary": "Headlights sweep across the wall as a vehicle turns on the road; no people are visible.",
+      "alert_reason": "",
+      "alert_command": "[none]",
+      "false_positive": true
+    },
+    "codec": "h264",
+    "buffer": {
+      "store_fps": 5.0,
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "teacher": {
+      "model": "gpt-4o",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"front_door\", local time 10:35:56.\n\nWrite \"summary\": what happ",
+      "raw_path": "responses\\front_door\\2026-10-03\\front_door_1791012956_fp.model_raw.txt",
+      "temperature": 0,
+      "input_frames": [
+        "vlm_crops\\front_door\\2026-10-03\\front_door_1791012956_fp_f0.jpg",
+        "vlm_crops\\front_door\\2026-10-03\\front_door_1791012956_fp_f1.jpg",
+        "vlm_crops\\front_door\\2026-10-03\\front_door_1791012956_fp_f2.jpg",
+        "vlm_crops\\front_door\\2026-10-03\\front_door_1791012956_fp_f3.jpg",
+        "vlm_crops\\front_door\\2026-10-03\\front_door_1791012956_fp_f4.jpg"
+      ],
+      "prompt_version": "2026-10-03.tagged-rules-label"
+    },
+    "clip_path": "clips\\front_door\\2026-10-03\\front_door_1791012956_fp.mp4",
+    "camera_name": "front_door",
+    "clip_end_ts": 1791012957.3171246,
+    "duration_sec": 4.0,
+    "clip_start_ts": 1791012953.3171246,
+    "fps_estimated": 5.0,
+    "clip_end_local": "2026-10-03 10:35:57",
+    "frames_written": 20,
+    "model_response": {
+      "label": "normal",
+      "people": 0,
+      "summary": "Headlights sweep across the wall as a vehicle turns on the road; no people are visible.",
+      "vehicle_moving": true
+    },
+    "clip_start_local": "2026-10-03 10:35:53"
+  }
+}

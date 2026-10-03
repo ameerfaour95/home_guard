@@ -1,0 +1,375 @@
+{
+  "items": [
+    {
+      "id": 68,
+      "site": "customer-3e7e2d",
+      "customer_id": 2,
+      "customer_name": "customer-3e7e2d",
+      "camera": "cam-050ee8",
+      "kind": "false_positive",
+      "start_utc": "2026-10-02T19:08:06.557028Z",
+      "end_utc": "2026-10-02T19:08:10.557028Z",
+      "summary": "Tree branches sway in the wind and cast moving shadows; nothing else is visible.",
+      "label": "normal",
+      "alert_command": "[none]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "real",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/68/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 83,
+      "site": "customer-3e7e2d",
+      "customer_id": 2,
+      "customer_name": "customer-3e7e2d",
+      "camera": "cam-837a19",
+      "kind": "alert",
+      "start_utc": "2026-10-02T17:24:09.448363Z",
+      "end_utc": "2026-10-02T17:24:13.448363Z",
+      "summary": "A man in work clothes opens the cam-837a19 with a key and carries a ladder inside.",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [
+        "expected"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "real",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": true,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/83/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 11,
+      "site": "customer-1fc0de",
+      "customer_id": 1,
+      "customer_name": "customer-1fc0de",
+      "camera": "cam-0157f7",
+      "kind": "alert",
+      "start_utc": "2026-10-02T16:00:03.397949Z",
+      "end_utc": "2026-10-02T16:00:07.397949Z",
+      "summary": "A man walks down the cam-0157f7 toward the street carrying a gym bag.",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [
+        "true_alert"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "real",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/11/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 58,
+      "site": "customer-3e7e2d",
+      "customer_id": 2,
+      "customer_name": "customer-3e7e2d",
+      "camera": "cam-050ee8",
+      "kind": "false_positive",
+      "start_utc": "2026-10-02T02:58:12.417158Z",
+      "end_utc": "2026-10-02T02:58:16.417158Z",
+      "summary": "Headlights sweep across the wall as a vehicle turns on the road; no people are visible.",
+      "label": "normal",
+      "alert_command": "[none]",
+      "detected": [
+        "car"
+      ],
+      "owner_verdicts": [
+        "false_alarm"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "real",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": true,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/58/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 57,
+      "site": "customer-3e7e2d",
+      "customer_id": 2,
+      "customer_name": "customer-3e7e2d",
+      "camera": "cam-050ee8",
+      "kind": "alert",
+      "start_utc": "2026-10-02T02:41:29.654593Z",
+      "end_utc": "2026-10-02T02:41:33.654593Z",
+      "summary": "A person follows a resident through the door without a key and lingers in the doorway checking the mailboxes.",
+      "label": "suspicious",
+      "alert_command": "[call_owner]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [
+        "true_alert"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "real",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": true,
+      "thumbnail_url": "/v1/events/57/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 55,
+      "site": "customer-3e7e2d",
+      "customer_id": 2,
+      "customer_name": "customer-3e7e2d",
+      "camera": "cam-050ee8",
+      "kind": "alert",
+      "start_utc": "2026-10-01T20:32:44.364223Z",
+      "end_utc": "2026-10-01T20:32:48.364223Z",
+      "summary": "A man pushing a stroller waits at the entrance door until a neighbour holds it open.",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [
+        "false_alarm"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "real",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/55/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 76,
+      "site": "customer-3e7e2d",
+      "customer_id": 2,
+      "customer_name": "customer-3e7e2d",
+      "camera": "cam-837a19",
+      "kind": "false_positive",
+      "start_utc": "2026-10-01T19:03:20.516061Z",
+      "end_utc": "2026-10-01T19:03:24.516061Z",
+      "summary": "Tree branches sway in the wind and cast moving shadows; nothing else is visible.",
+      "label": "normal",
+      "alert_command": "[none]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [
+        "false_alarm"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "real",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": true,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/76/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 20,
+      "site": "customer-1fc0de",
+      "customer_id": 1,
+      "customer_name": "customer-1fc0de",
+      "camera": "cam-b42d16",
+      "kind": "alert",
+      "start_utc": "2026-10-01T18:36:54.618888Z",
+      "end_utc": "2026-10-01T18:36:58.618888Z",
+      "summary": "A person with a face covering crouches at the cam-b42d16 lock for several seconds.",
+      "label": "suspicious",
+      "alert_command": "[call_owner]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [
+        "expected"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "real",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": true,
+      "thumbnail_url": "/v1/events/20/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 2,
+      "site": "customer-1fc0de",
+      "customer_id": 1,
+      "customer_name": "customer-1fc0de",
+      "camera": "cam-0157f7",
+      "kind": "false_positive",
+      "start_utc": "2026-10-01T17:41:38.617778Z",
+      "end_utc": "2026-10-01T17:41:42.617778Z",
+      "summary": "Headlights sweep across the wall as a vehicle turns on the road; no people are visible.",
+      "label": "normal",
+      "alert_command": "[none]",
+      "detected": [
+        "car"
+      ],
+      "owner_verdicts": [
+        "false_alarm"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "real",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/2/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 1,
+      "site": "customer-1fc0de",
+      "customer_id": 1,
+      "customer_name": "customer-1fc0de",
+      "camera": "cam-0157f7",
+      "kind": "false_positive",
+      "start_utc": "2026-10-01T16:35:23.381890Z",
+      "end_utc": "2026-10-01T16:35:27.381890Z",
+      "summary": "A bird lands on the railing and flies away.",
+      "label": "normal",
+      "alert_command": "[none]",
+      "detected": [
+        "bird"
+      ],
+      "owner_verdicts": [
+        "true_alert"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "none",
+        "ai": "real",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": true,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/1/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    },
+    {
+      "id": 19,
+      "site": "customer-1fc0de",
+      "customer_id": 1,
+      "customer_name": "customer-1fc0de",
+      "camera": "cam-b42d16",
+      "kind": "alert",
+      "start_utc": "2026-10-01T16:04:28.454908Z",
+      "end_utc": "2026-10-01T16:04:32.454908Z",
+      "summary": "A teenager in a school uniform steps out of the cam-b42d16, locks it and walks toward the gate.",
+      "label": "normal",
+      "alert_command": "[send_message]",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [],
+      "completeness": {
+        "video": true,
+        "boxes": "sampled",
+        "ai": "real",
+        "owner_feedback": false,
+        "expired": false,
+        "copies": [
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": "/v1/events/19/thumbnail",
+      "timezone": "Asia/Jerusalem"
+    }
+  ],
+  "next_cursor": null,
+  "total": null,
+  "total_capped": false
+}

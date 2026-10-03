@@ -1,0 +1,120 @@
+{
+  "provenance": "sampled",
+  "model": "yolo (collection export)",
+  "frames": [
+    {
+      "frame_index": 0,
+      "t_sec": 0.0,
+      "status": "ran_empty",
+      "boxes": []
+    },
+    {
+      "frame_index": 3,
+      "t_sec": 0.6,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 0,
+          "label": "person",
+          "conf": null,
+          "xyxy": [
+            0.59439,
+            0.41000000000000003,
+            0.7043900000000001,
+            0.83
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 6,
+      "t_sec": 1.2,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 0,
+          "label": "person",
+          "conf": null,
+          "xyxy": [
+            0.5443779999999999,
+            0.41000000000000003,
+            0.654378,
+            0.83
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 9,
+      "t_sec": 1.8,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 0,
+          "label": "person",
+          "conf": null,
+          "xyxy": [
+            0.494366,
+            0.41000000000000003,
+            0.6043660000000001,
+            0.83
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 12,
+      "t_sec": 2.4,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 0,
+          "label": "person",
+          "conf": null,
+          "xyxy": [
+            0.444354,
+            0.41000000000000003,
+            0.554354,
+            0.83
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 15,
+      "t_sec": 3.0,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 0,
+          "label": "person",
+          "conf": null,
+          "xyxy": [
+            0.394341,
+            0.41000000000000003,
+            0.504341,
+            0.83
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 18,
+      "t_sec": 3.6,
+      "status": "ran",
+      "boxes": [
+        {
+          "cls": 0,
+          "label": "person",
+          "conf": null,
+          "xyxy": [
+            0.344329,
+            0.41000000000000003,
+            0.454329,
+            0.83
+          ]
+        }
+      ]
+    }
+  ]
+}

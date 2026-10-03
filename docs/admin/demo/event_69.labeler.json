@@ -1,0 +1,385 @@
+{
+  "id": 69,
+  "site": "customer-3e7e2d",
+  "customer_id": 2,
+  "customer_name": "customer-3e7e2d",
+  "camera": "cam-050ee8",
+  "kind": "false_positive",
+  "start_utc": "2026-10-03T01:20:13.458846Z",
+  "end_utc": "2026-10-03T01:20:17.458846Z",
+  "summary": "A person was detected near the camera.",
+  "label": "normal",
+  "alert_command": "[none]",
+  "detected": [
+    "person"
+  ],
+  "owner_verdicts": [
+    "false_alarm"
+  ],
+  "completeness": {
+    "video": true,
+    "boxes": "sampled",
+    "ai": "fallback",
+    "owner_feedback": true,
+    "expired": false,
+    "copies": [
+      "production",
+      "training"
+    ]
+  },
+  "reviewed": true,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/69/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": null,
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 69,
+      "purpose": "guard",
+      "status": "fallback",
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "prompt": null,
+      "parsed": {
+        "summary": ""
+      },
+      "raw_text_artifact_id": null,
+      "input_frame_artifact_ids": [
+        618,
+        619,
+        620,
+        621,
+        622
+      ]
+    }
+  ],
+  "feedback": [
+    {
+      "id": 17,
+      "verdict": "false_alarm",
+      "action": "none",
+      "note": "",
+      "raw_text": "",
+      "source": "text",
+      "received_utc": "2026-10-03T01:31:16Z"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": 480,
+      "role": "original_video",
+      "s3_key": "artifact-480",
+      "bytes": 3033,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 491,
+      "role": "feedback",
+      "s3_key": "artifact-491",
+      "bytes": 463,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 500,
+      "role": "meta",
+      "s3_key": "artifact-500",
+      "bytes": 808,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 526,
+      "role": "original_video",
+      "s3_key": "artifact-526",
+      "bytes": 3033,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 560,
+      "role": "meta",
+      "s3_key": "artifact-560",
+      "bytes": 3550,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 618,
+      "role": "teacher_frame",
+      "s3_key": "artifact-618",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 619,
+      "role": "teacher_frame",
+      "s3_key": "artifact-619",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 620,
+      "role": "teacher_frame",
+      "s3_key": "artifact-620",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 621,
+      "role": "teacher_frame",
+      "s3_key": "artifact-621",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 622,
+      "role": "teacher_frame",
+      "s3_key": "artifact-622",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 695,
+      "role": "yolo_image",
+      "s3_key": "artifact-695",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 696,
+      "role": "yolo_image",
+      "s3_key": "artifact-696",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 697,
+      "role": "yolo_image",
+      "s3_key": "artifact-697",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 698,
+      "role": "yolo_image",
+      "s3_key": "artifact-698",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 699,
+      "role": "yolo_image",
+      "s3_key": "artifact-699",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 700,
+      "role": "yolo_image",
+      "s3_key": "artifact-700",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 701,
+      "role": "yolo_image",
+      "s3_key": "artifact-701",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 793,
+      "role": "yolo_label",
+      "s3_key": "artifact-793",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 794,
+      "role": "yolo_label",
+      "s3_key": "artifact-794",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 795,
+      "role": "yolo_label",
+      "s3_key": "artifact-795",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 796,
+      "role": "yolo_label",
+      "s3_key": "artifact-796",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 797,
+      "role": "yolo_label",
+      "s3_key": "artifact-797",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 798,
+      "role": "yolo_label",
+      "s3_key": "artifact-798",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1386,
+      "role": "thumbnail",
+      "s3_key": "artifact-1386",
+      "bytes": 2810,
+      "available": true,
+      "provenance": "cloud",
+      "detail": null
+    },
+    {
+      "id": 1387,
+      "role": "filmstrip",
+      "s3_key": "artifact-1387",
+      "bytes": 2743,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "tile_w": 160,
+        "tile_h": 90,
+        "count": 4
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "false_positive",
+    "duration_sec": 4.0,
+    "fps_estimated": 5.0,
+    "frames_written": 20,
+    "codec": "h264",
+    "buffer": {
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "yolo": {
+      "class_counts": {
+        "person": 2
+      },
+      "class_max_conf": {
+        "person": 0.852
+      },
+      "trigger_classes": [
+        "person"
+      ]
+    },
+    "model_response": {
+      "summary": ""
+    },
+    "teacher": {
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "temperature": 0
+    }
+  }
+}

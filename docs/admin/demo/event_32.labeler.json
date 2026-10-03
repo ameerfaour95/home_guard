@@ -1,0 +1,213 @@
+{
+  "id": 32,
+  "site": "customer-1fc0de",
+  "customer_id": 1,
+  "customer_name": "customer-1fc0de",
+  "camera": "cam-b42d16",
+  "kind": "alert",
+  "start_utc": "2026-10-03T06:32:10.390534Z",
+  "end_utc": "2026-10-03T06:32:14.390534Z",
+  "summary": "Two people in dark jackets stand at the cam-b42d16 talking while one of them knocks twice.",
+  "label": "normal",
+  "alert_command": "[send_message]",
+  "detected": [
+    "person"
+  ],
+  "owner_verdicts": [],
+  "completeness": {
+    "video": true,
+    "boxes": "none",
+    "ai": "real",
+    "owner_feedback": false,
+    "expired": false,
+    "copies": [
+      "training"
+    ]
+  },
+  "reviewed": false,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/32/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": null,
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 32,
+      "purpose": "guard",
+      "status": "real",
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "prompt": null,
+      "parsed": {
+        "label": "normal",
+        "people": 1,
+        "summary": "Two people in dark jackets stand at the cam-b42d16 talking while one of them knocks twice.",
+        "vehicle_moving": false
+      },
+      "raw_text_artifact_id": 150,
+      "input_frame_artifact_ids": [
+        212,
+        213,
+        214,
+        215,
+        216
+      ]
+    }
+  ],
+  "feedback": [],
+  "artifacts": [
+    {
+      "id": 75,
+      "role": "original_video",
+      "s3_key": "artifact-75",
+      "bytes": 3742,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 123,
+      "role": "meta",
+      "s3_key": "artifact-123",
+      "bytes": 1761,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 150,
+      "role": "raw_answer",
+      "s3_key": "artifact-150",
+      "bytes": 162,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 212,
+      "role": "teacher_frame",
+      "s3_key": "artifact-212",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 213,
+      "role": "teacher_frame",
+      "s3_key": "artifact-213",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 214,
+      "role": "teacher_frame",
+      "s3_key": "artifact-214",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 215,
+      "role": "teacher_frame",
+      "s3_key": "artifact-215",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 216,
+      "role": "teacher_frame",
+      "s3_key": "artifact-216",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1372,
+      "role": "thumbnail",
+      "s3_key": "artifact-1372",
+      "bytes": 3616,
+      "available": true,
+      "provenance": "cloud",
+      "detail": null
+    },
+    {
+      "id": 1373,
+      "role": "filmstrip",
+      "s3_key": "artifact-1373",
+      "bytes": 3233,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "tile_w": 160,
+        "tile_h": 90,
+        "count": 4
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "alert",
+    "duration_sec": 4.0,
+    "fps_estimated": 5.0,
+    "frames_written": 20,
+    "codec": "h264",
+    "buffer": {
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "yolo": {
+      "class_counts": {
+        "person": 1
+      },
+      "class_max_conf": {
+        "person": 0.671
+      },
+      "trigger_classes": [
+        "person"
+      ]
+    },
+    "model_response": {
+      "label": "normal",
+      "people": 1,
+      "summary": "Two people in dark jackets stand at the cam-b42d16 talking while one of them knocks twice.",
+      "vehicle_moving": false
+    },
+    "teacher": {
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "temperature": 0
+    }
+  }
+}

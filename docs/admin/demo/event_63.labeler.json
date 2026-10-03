@@ -1,0 +1,413 @@
+{
+  "id": 63,
+  "site": "customer-3e7e2d",
+  "customer_id": 2,
+  "customer_name": "customer-3e7e2d",
+  "camera": "cam-050ee8",
+  "kind": "alert",
+  "start_utc": "2026-10-02T15:08:41.651740Z",
+  "end_utc": "2026-10-02T15:08:45.651740Z",
+  "summary": "A man pushing a stroller waits at the entrance door until a neighbour holds it open.",
+  "label": "normal",
+  "alert_command": "[send_message]",
+  "detected": [
+    "person"
+  ],
+  "owner_verdicts": [
+    "real_but_wrong"
+  ],
+  "completeness": {
+    "video": true,
+    "boxes": "sampled",
+    "ai": "real",
+    "owner_feedback": true,
+    "expired": false,
+    "copies": [
+      "production",
+      "training"
+    ]
+  },
+  "reviewed": false,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/63/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": null,
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 63,
+      "purpose": "guard",
+      "status": "real",
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "prompt": null,
+      "parsed": {
+        "label": "normal",
+        "people": 1,
+        "summary": "A man pushing a stroller waits at the entrance door until a neighbour holds it open.",
+        "vehicle_moving": false
+      },
+      "raw_text_artifact_id": 580,
+      "input_frame_artifact_ids": [
+        603,
+        604,
+        605,
+        606,
+        607
+      ]
+    }
+  ],
+  "feedback": [
+    {
+      "id": 15,
+      "verdict": "real_but_wrong",
+      "action": "none",
+      "note": "",
+      "raw_text": "",
+      "source": "text",
+      "received_utc": "2026-10-02T15:25:17Z"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": 478,
+      "role": "original_video",
+      "s3_key": "artifact-478",
+      "bytes": 3404,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 489,
+      "role": "feedback",
+      "s3_key": "artifact-489",
+      "bytes": 503,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 498,
+      "role": "meta",
+      "s3_key": "artifact-498",
+      "bytes": 961,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 520,
+      "role": "original_video",
+      "s3_key": "artifact-520",
+      "bytes": 3404,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 554,
+      "role": "meta",
+      "s3_key": "artifact-554",
+      "bytes": 3805,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 580,
+      "role": "raw_answer",
+      "s3_key": "artifact-580",
+      "bytes": 156,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 603,
+      "role": "teacher_frame",
+      "s3_key": "artifact-603",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 604,
+      "role": "teacher_frame",
+      "s3_key": "artifact-604",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 605,
+      "role": "teacher_frame",
+      "s3_key": "artifact-605",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 606,
+      "role": "teacher_frame",
+      "s3_key": "artifact-606",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 607,
+      "role": "teacher_frame",
+      "s3_key": "artifact-607",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 681,
+      "role": "yolo_image",
+      "s3_key": "artifact-681",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 682,
+      "role": "yolo_image",
+      "s3_key": "artifact-682",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 683,
+      "role": "yolo_image",
+      "s3_key": "artifact-683",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 684,
+      "role": "yolo_image",
+      "s3_key": "artifact-684",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 685,
+      "role": "yolo_image",
+      "s3_key": "artifact-685",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 686,
+      "role": "yolo_image",
+      "s3_key": "artifact-686",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 687,
+      "role": "yolo_image",
+      "s3_key": "artifact-687",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 779,
+      "role": "yolo_label",
+      "s3_key": "artifact-779",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 780,
+      "role": "yolo_label",
+      "s3_key": "artifact-780",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 781,
+      "role": "yolo_label",
+      "s3_key": "artifact-781",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 782,
+      "role": "yolo_label",
+      "s3_key": "artifact-782",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 783,
+      "role": "yolo_label",
+      "s3_key": "artifact-783",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 784,
+      "role": "yolo_label",
+      "s3_key": "artifact-784",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 785,
+      "role": "yolo_label",
+      "s3_key": "artifact-785",
+      "bytes": 0,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1428,
+      "role": "thumbnail",
+      "s3_key": "artifact-1428",
+      "bytes": 3582,
+      "available": true,
+      "provenance": "cloud",
+      "detail": null
+    },
+    {
+      "id": 1429,
+      "role": "filmstrip",
+      "s3_key": "artifact-1429",
+      "bytes": 3293,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "tile_w": 160,
+        "tile_h": 90,
+        "count": 4
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "alert",
+    "duration_sec": 4.0,
+    "fps_estimated": 5.0,
+    "frames_written": 20,
+    "codec": "h264",
+    "buffer": {
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "yolo": {
+      "class_counts": {
+        "person": 1
+      },
+      "class_max_conf": {
+        "person": 0.607
+      },
+      "trigger_classes": [
+        "person"
+      ]
+    },
+    "model_response": {
+      "label": "normal",
+      "people": 1,
+      "summary": "A man pushing a stroller waits at the entrance door until a neighbour holds it open.",
+      "vehicle_moving": false
+    },
+    "teacher": {
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "temperature": 0
+    }
+  }
+}

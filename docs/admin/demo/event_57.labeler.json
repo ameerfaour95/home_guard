@@ -1,0 +1,413 @@
+{
+  "id": 57,
+  "site": "customer-3e7e2d",
+  "customer_id": 2,
+  "customer_name": "customer-3e7e2d",
+  "camera": "cam-050ee8",
+  "kind": "alert",
+  "start_utc": "2026-10-02T02:41:29.654593Z",
+  "end_utc": "2026-10-02T02:41:33.654593Z",
+  "summary": "A person follows a resident through the door without a key and lingers in the doorway checking the mailboxes.",
+  "label": "suspicious",
+  "alert_command": "[call_owner]",
+  "detected": [
+    "person"
+  ],
+  "owner_verdicts": [
+    "true_alert"
+  ],
+  "completeness": {
+    "video": true,
+    "boxes": "sampled",
+    "ai": "real",
+    "owner_feedback": true,
+    "expired": false,
+    "copies": [
+      "production",
+      "training"
+    ]
+  },
+  "reviewed": false,
+  "flagged": true,
+  "thumbnail_url": "/v1/events/57/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": null,
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "Unknown person entered behind a resident and loitered.",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 57,
+      "purpose": "guard",
+      "status": "real",
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "prompt": null,
+      "parsed": {
+        "label": "suspicious",
+        "people": 1,
+        "summary": "A person follows a resident through the door without a key and lingers in the doorway checking the mailboxes.",
+        "vehicle_moving": false
+      },
+      "raw_text_artifact_id": 578,
+      "input_frame_artifact_ids": [
+        593,
+        594,
+        595,
+        596,
+        597
+      ]
+    }
+  ],
+  "feedback": [
+    {
+      "id": 13,
+      "verdict": "true_alert",
+      "action": "none",
+      "note": "",
+      "raw_text": "",
+      "source": "text",
+      "received_utc": "2026-10-02T02:48:21Z"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": 476,
+      "role": "original_video",
+      "s3_key": "artifact-476",
+      "bytes": 3244,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 487,
+      "role": "feedback",
+      "s3_key": "artifact-487",
+      "bytes": 439,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 496,
+      "role": "meta",
+      "s3_key": "artifact-496",
+      "bytes": 1038,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 514,
+      "role": "original_video",
+      "s3_key": "artifact-514",
+      "bytes": 3244,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 548,
+      "role": "meta",
+      "s3_key": "artifact-548",
+      "bytes": 3914,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 578,
+      "role": "raw_answer",
+      "s3_key": "artifact-578",
+      "bytes": 185,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 593,
+      "role": "teacher_frame",
+      "s3_key": "artifact-593",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 594,
+      "role": "teacher_frame",
+      "s3_key": "artifact-594",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 595,
+      "role": "teacher_frame",
+      "s3_key": "artifact-595",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 596,
+      "role": "teacher_frame",
+      "s3_key": "artifact-596",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 597,
+      "role": "teacher_frame",
+      "s3_key": "artifact-597",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 660,
+      "role": "yolo_image",
+      "s3_key": "artifact-660",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 661,
+      "role": "yolo_image",
+      "s3_key": "artifact-661",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 662,
+      "role": "yolo_image",
+      "s3_key": "artifact-662",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 663,
+      "role": "yolo_image",
+      "s3_key": "artifact-663",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 664,
+      "role": "yolo_image",
+      "s3_key": "artifact-664",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 665,
+      "role": "yolo_image",
+      "s3_key": "artifact-665",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 666,
+      "role": "yolo_image",
+      "s3_key": "artifact-666",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 758,
+      "role": "yolo_label",
+      "s3_key": "artifact-758",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 759,
+      "role": "yolo_label",
+      "s3_key": "artifact-759",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 760,
+      "role": "yolo_label",
+      "s3_key": "artifact-760",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 761,
+      "role": "yolo_label",
+      "s3_key": "artifact-761",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 762,
+      "role": "yolo_label",
+      "s3_key": "artifact-762",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 763,
+      "role": "yolo_label",
+      "s3_key": "artifact-763",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 764,
+      "role": "yolo_label",
+      "s3_key": "artifact-764",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1496,
+      "role": "thumbnail",
+      "s3_key": "artifact-1496",
+      "bytes": 2761,
+      "available": true,
+      "provenance": "cloud",
+      "detail": null
+    },
+    {
+      "id": 1497,
+      "role": "filmstrip",
+      "s3_key": "artifact-1497",
+      "bytes": 2679,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "tile_w": 160,
+        "tile_h": 90,
+        "count": 4
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "alert",
+    "duration_sec": 4.0,
+    "fps_estimated": 5.0,
+    "frames_written": 20,
+    "codec": "h264",
+    "buffer": {
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "yolo": {
+      "class_counts": {
+        "person": 1
+      },
+      "class_max_conf": {
+        "person": 0.83
+      },
+      "trigger_classes": [
+        "person"
+      ]
+    },
+    "model_response": {
+      "label": "suspicious",
+      "people": 1,
+      "summary": "A person follows a resident through the door without a key and lingers in the doorway checking the mailboxes.",
+      "vehicle_moving": false
+    },
+    "teacher": {
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "temperature": 0
+    }
+  }
+}

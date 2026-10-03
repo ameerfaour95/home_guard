@@ -1,0 +1,259 @@
+{
+  "id": 55,
+  "site": "customer-3e7e2d",
+  "customer_id": 2,
+  "customer_name": "customer-3e7e2d",
+  "camera": "cam-050ee8",
+  "kind": "alert",
+  "start_utc": "2026-10-01T20:32:44.364223Z",
+  "end_utc": "2026-10-01T20:32:48.364223Z",
+  "summary": "A man pushing a stroller waits at the entrance door until a neighbour holds it open.",
+  "label": "normal",
+  "alert_command": "[send_message]",
+  "detected": [
+    "person"
+  ],
+  "owner_verdicts": [
+    "false_alarm"
+  ],
+  "completeness": {
+    "video": true,
+    "boxes": "none",
+    "ai": "real",
+    "owner_feedback": true,
+    "expired": false,
+    "copies": [
+      "production",
+      "training"
+    ]
+  },
+  "reviewed": false,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/55/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": null,
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 55,
+      "purpose": "guard",
+      "status": "real",
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "prompt": null,
+      "parsed": {
+        "label": "normal",
+        "people": 1,
+        "summary": "A man pushing a stroller waits at the entrance door until a neighbour holds it open.",
+        "vehicle_moving": false
+      },
+      "raw_text_artifact_id": 577,
+      "input_frame_artifact_ids": [
+        588,
+        589,
+        590,
+        591,
+        592
+      ]
+    }
+  ],
+  "feedback": [
+    {
+      "id": 12,
+      "verdict": "false_alarm",
+      "action": "none",
+      "note": "",
+      "raw_text": "",
+      "source": "text",
+      "received_utc": "2026-10-01T20:56:50Z"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": 475,
+      "role": "original_video",
+      "s3_key": "artifact-475",
+      "bytes": 3219,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 486,
+      "role": "feedback",
+      "s3_key": "artifact-486",
+      "bytes": 466,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 495,
+      "role": "meta",
+      "s3_key": "artifact-495",
+      "bytes": 961,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 512,
+      "role": "original_video",
+      "s3_key": "artifact-512",
+      "bytes": 3219,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 546,
+      "role": "meta",
+      "s3_key": "artifact-546",
+      "bytes": 1797,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 577,
+      "role": "raw_answer",
+      "s3_key": "artifact-577",
+      "bytes": 156,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 588,
+      "role": "teacher_frame",
+      "s3_key": "artifact-588",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 589,
+      "role": "teacher_frame",
+      "s3_key": "artifact-589",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 590,
+      "role": "teacher_frame",
+      "s3_key": "artifact-590",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 591,
+      "role": "teacher_frame",
+      "s3_key": "artifact-591",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 592,
+      "role": "teacher_frame",
+      "s3_key": "artifact-592",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1504,
+      "role": "thumbnail",
+      "s3_key": "artifact-1504",
+      "bytes": 2754,
+      "available": true,
+      "provenance": "cloud",
+      "detail": null
+    },
+    {
+      "id": 1505,
+      "role": "filmstrip",
+      "s3_key": "artifact-1505",
+      "bytes": 2737,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "tile_w": 160,
+        "tile_h": 90,
+        "count": 4
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "alert",
+    "duration_sec": 4.0,
+    "fps_estimated": 5.0,
+    "frames_written": 20,
+    "codec": "h264",
+    "buffer": {
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "yolo": {
+      "class_counts": {
+        "person": 1
+      },
+      "class_max_conf": {
+        "person": 0.552
+      },
+      "trigger_classes": [
+        "person"
+      ]
+    },
+    "model_response": {
+      "label": "normal",
+      "people": 1,
+      "summary": "A man pushing a stroller waits at the entrance door until a neighbour holds it open.",
+      "vehicle_moving": false
+    },
+    "teacher": {
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "temperature": 0
+    }
+  }
+}

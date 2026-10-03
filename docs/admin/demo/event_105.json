@@ -1,0 +1,278 @@
+{
+  "id": 105,
+  "site": "mizrahi_beersheva",
+  "customer_id": 3,
+  "customer_name": "Tamar Mizrahi",
+  "camera": "garage",
+  "kind": "false_positive",
+  "start_utc": "2026-10-02T16:13:59.470861Z",
+  "end_utc": "2026-10-02T16:14:03.470861Z",
+  "summary": "A bird was detected near the camera.",
+  "label": "normal",
+  "alert_command": "[none]",
+  "detected": [
+    "bird"
+  ],
+  "owner_verdicts": [
+    "false_alarm"
+  ],
+  "completeness": {
+    "video": true,
+    "boxes": "none",
+    "ai": "fallback",
+    "owner_feedback": true,
+    "expired": false,
+    "copies": [
+      "production",
+      "training"
+    ]
+  },
+  "reviewed": false,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/105/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": "2026-10-02 19:13:59",
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 105,
+      "purpose": "guard",
+      "status": "fallback",
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"garage\", local time 19:14:02.\n\nWrite \"summary\": what happ",
+      "parsed": {
+        "summary": ""
+      },
+      "raw_text_artifact_id": null,
+      "input_frame_artifact_ids": [
+        976,
+        977,
+        978,
+        979,
+        980
+      ]
+    }
+  ],
+  "feedback": [
+    {
+      "id": 28,
+      "verdict": "false_alarm",
+      "action": "none",
+      "note": "Just the neighbour.",
+      "raw_text": "Just the neighbour.",
+      "source": "text",
+      "received_utc": "2026-10-02T16:19:11Z"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": 855,
+      "role": "original_video",
+      "s3_key": "production_mizrahi_beersheva/clips/garage/2026-10-02/garage_1790957642_fp.mp4",
+      "bytes": 2805,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 865,
+      "role": "feedback",
+      "s3_key": "production_mizrahi_beersheva/feedback/garage/2026-10-02/garage_1790957642_fp_1790957951000.feedback.json",
+      "bytes": 412,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 876,
+      "role": "meta",
+      "s3_key": "production_mizrahi_beersheva/meta/garage/2026-10-02/garage_1790957642_fp.meta.json",
+      "bytes": 777,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 895,
+      "role": "original_video",
+      "s3_key": "dataset_mizrahi_beersheva/clips/garage/2026-10-02/garage_1790957642_fp.mp4",
+      "bytes": 2805,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 916,
+      "role": "meta",
+      "s3_key": "dataset_mizrahi_beersheva/meta/garage/2026-10-02/garage_1790957642_fp.meta.json",
+      "bytes": 1474,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 976,
+      "role": "teacher_frame",
+      "s3_key": "dataset_mizrahi_beersheva/vlm_crops/garage/2026-10-02/garage_1790957642_fp_f0.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 977,
+      "role": "teacher_frame",
+      "s3_key": "dataset_mizrahi_beersheva/vlm_crops/garage/2026-10-02/garage_1790957642_fp_f1.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 978,
+      "role": "teacher_frame",
+      "s3_key": "dataset_mizrahi_beersheva/vlm_crops/garage/2026-10-02/garage_1790957642_fp_f2.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 979,
+      "role": "teacher_frame",
+      "s3_key": "dataset_mizrahi_beersheva/vlm_crops/garage/2026-10-02/garage_1790957642_fp_f3.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 980,
+      "role": "teacher_frame",
+      "s3_key": "dataset_mizrahi_beersheva/vlm_crops/garage/2026-10-02/garage_1790957642_fp_f4.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1410,
+      "role": "thumbnail",
+      "s3_key": "admin_cache/thumbs/105.jpg",
+      "bytes": 3026,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "src_etag": "b1e4ed0aa8bef7a355e86f80a68d39b7",
+        "needs_rendition": false
+      }
+    },
+    {
+      "id": 1411,
+      "role": "filmstrip",
+      "s3_key": "admin_cache/filmstrips/105.jpg",
+      "bytes": 2702,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "count": 4,
+        "tile_h": 90,
+        "tile_w": 160,
+        "src_etag": "b1e4ed0aa8bef7a355e86f80a68d39b7"
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "false_positive",
+    "yolo": {
+      "class_counts": {
+        "bird": 1
+      },
+      "class_max_conf": {
+        "bird": 0.565
+      },
+      "trigger_classes": [
+        "bird"
+      ],
+      "trigger_detected": true
+    },
+    "alert": {
+      "vlm": {
+        "people": 0,
+        "vehicle_moving": false
+      },
+      "label": "normal",
+      "muted": false,
+      "labels": [
+        "bird"
+      ],
+      "summary": "A bird was detected near the camera.",
+      "alert_reason": "",
+      "alert_command": "[none]",
+      "false_positive": true
+    },
+    "codec": "h264",
+    "buffer": {
+      "store_fps": 5.0,
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "teacher": {
+      "model": "gpt-4o",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"garage\", local time 19:14:02.\n\nWrite \"summary\": what happ",
+      "raw_path": null,
+      "temperature": 0,
+      "input_frames": [
+        "vlm_crops\\garage\\2026-10-02\\garage_1790957642_fp_f0.jpg",
+        "vlm_crops\\garage\\2026-10-02\\garage_1790957642_fp_f1.jpg",
+        "vlm_crops\\garage\\2026-10-02\\garage_1790957642_fp_f2.jpg",
+        "vlm_crops\\garage\\2026-10-02\\garage_1790957642_fp_f3.jpg",
+        "vlm_crops\\garage\\2026-10-02\\garage_1790957642_fp_f4.jpg"
+      ],
+      "prompt_version": "2026-10-03.tagged-rules-label"
+    },
+    "clip_path": "clips\\garage\\2026-10-02\\garage_1790957642_fp.mp4",
+    "camera_name": "garage",
+    "clip_end_ts": 1790957643.504432,
+    "duration_sec": 4.0,
+    "clip_start_ts": 1790957639.504432,
+    "fps_estimated": 5.0,
+    "clip_end_local": "2026-10-02 19:14:03",
+    "frames_written": 20,
+    "model_response": {
+      "summary": ""
+    },
+    "clip_start_local": "2026-10-02 19:13:59"
+  }
+}

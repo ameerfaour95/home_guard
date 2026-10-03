@@ -1,0 +1,187 @@
+{
+  "id": 87,
+  "site": "mizrahi_beersheva",
+  "customer_id": 3,
+  "customer_name": "Tamar Mizrahi",
+  "camera": "garage",
+  "kind": "alert",
+  "start_utc": "2026-10-01T13:22:44.334067Z",
+  "end_utc": "2026-10-01T13:22:48.334067Z",
+  "summary": "A man carries cardboard boxes from the garage to a parked van.",
+  "label": "normal",
+  "alert_command": "[send_message]",
+  "detected": [
+    "person",
+    "truck"
+  ],
+  "owner_verdicts": [],
+  "completeness": {
+    "video": true,
+    "boxes": "none",
+    "ai": "none",
+    "owner_feedback": false,
+    "expired": false,
+    "copies": [
+      "production"
+    ]
+  },
+  "reviewed": true,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/87/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": "2026-10-01 16:22:44",
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": {
+    "channel": "telegram",
+    "sent": true,
+    "detail": {
+      "channel": "telegram",
+      "telegram": {
+        "command": "[send_message]",
+        "telegram": {
+          "sent": true,
+          "results": [
+            {
+              "ok": true,
+              "chat_id": "-100100",
+              "message_id": 468
+            }
+          ]
+        }
+      }
+    }
+  },
+  "ai_runs": [
+    {
+      "id": 87,
+      "purpose": "guard",
+      "status": "none",
+      "model": null,
+      "prompt_version": null,
+      "prompt": null,
+      "parsed": null,
+      "raw_text_artifact_id": null,
+      "input_frame_artifact_ids": []
+    }
+  ],
+  "feedback": [],
+  "artifacts": [
+    {
+      "id": 846,
+      "role": "original_video",
+      "s3_key": "production_mizrahi_beersheva/clips/garage/2026-10-01/garage_1790860967_alert.mp4",
+      "bytes": 4126,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 867,
+      "role": "meta",
+      "s3_key": "production_mizrahi_beersheva/meta/garage/2026-10-01/garage_1790860967_alert.meta.json",
+      "bytes": 964,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 1570,
+      "role": "thumbnail",
+      "s3_key": "admin_cache/thumbs/87.jpg",
+      "bytes": 4458,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "src_etag": "d7015fbe4f5c49aad0556f4b43c363da",
+        "needs_rendition": false
+      }
+    },
+    {
+      "id": 1571,
+      "role": "filmstrip",
+      "s3_key": "admin_cache/filmstrips/87.jpg",
+      "bytes": 3891,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "count": 4,
+        "tile_h": 90,
+        "tile_w": 160,
+        "src_etag": "d7015fbe4f5c49aad0556f4b43c363da"
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "alert",
+    "yolo": {
+      "class_counts": {
+        "truck": 1,
+        "person": 1
+      },
+      "class_max_conf": {
+        "truck": 0.836,
+        "person": 0.848
+      },
+      "trigger_classes": [
+        "person",
+        "truck"
+      ],
+      "trigger_detected": true
+    },
+    "alert": {
+      "label": "normal",
+      "muted": false,
+      "labels": [
+        "person",
+        "truck"
+      ],
+      "summary": "A man carries cardboard boxes from the garage to a parked van.",
+      "dispatch": {
+        "channel": "telegram",
+        "telegram": {
+          "command": "[send_message]",
+          "telegram": {
+            "sent": true,
+            "results": [
+              {
+                "ok": true,
+                "chat_id": "-100100",
+                "message_id": 468
+              }
+            ]
+          }
+        }
+      },
+      "alert_reason": "",
+      "alert_command": "[send_message]"
+    },
+    "codec": "h264",
+    "buffer": {
+      "store_fps": 5.0,
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "clip_path": "clips\\garage\\2026-10-01\\garage_1790860967_alert.mp4",
+    "camera_name": "garage",
+    "clip_end_ts": 1790860968.3340666,
+    "duration_sec": 4.0,
+    "clip_start_ts": 1790860964.3340666,
+    "fps_estimated": 5.0,
+    "clip_end_local": "2026-10-01 16:22:48",
+    "frames_written": 20,
+    "clip_start_local": "2026-10-01 16:22:44"
+  }
+}

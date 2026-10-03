@@ -1,0 +1,376 @@
+{
+  "items": [
+    {
+      "id": 1,
+      "ts": "2026-10-03T08:55:00Z",
+      "staff": "Ameer Faour",
+      "action": "export_create",
+      "customer_id": null,
+      "device_id": null,
+      "target": "export/1",
+      "reason": "",
+      "detail": {
+        "name": "night-visitors-v1",
+        "formats": [
+          "yolo",
+          "vlm_jsonl"
+        ],
+        "version": 1,
+        "collection_id": 1
+      }
+    },
+    {
+      "id": 30,
+      "ts": "2026-10-02T10:05:24Z",
+      "staff": "Eden Peretz",
+      "action": "collection_add",
+      "customer_id": null,
+      "device_id": null,
+      "target": "collection/2",
+      "reason": "",
+      "detail": {
+        "event_ids": [
+          8,
+          19,
+          27
+        ]
+      }
+    },
+    {
+      "id": 29,
+      "ts": "2026-10-02T05:44:27.428571Z",
+      "staff": "Ameer Faour",
+      "action": "collection_add",
+      "customer_id": null,
+      "device_id": null,
+      "target": "collection/1",
+      "reason": "",
+      "detail": {
+        "event_ids": [
+          12,
+          31,
+          44
+        ]
+      }
+    },
+    {
+      "id": 28,
+      "ts": "2026-10-02T01:32:22.857143Z",
+      "staff": "Eden Peretz",
+      "action": "collection_create",
+      "customer_id": null,
+      "device_id": null,
+      "target": "collection/2",
+      "reason": "",
+      "detail": {
+        "name": "Deliveries and couriers"
+      }
+    },
+    {
+      "id": 27,
+      "ts": "2026-10-01T21:16:34.285714Z",
+      "staff": "Ameer Faour",
+      "action": "collection_create",
+      "customer_id": null,
+      "device_id": null,
+      "target": "collection/1",
+      "reason": "",
+      "detail": {
+        "name": "Night-time visitors"
+      }
+    },
+    {
+      "id": 26,
+      "ts": "2026-10-01T16:56:40.714286Z",
+      "staff": "Ameer Faour",
+      "action": "review",
+      "customer_id": 1,
+      "device_id": "4c2fb54d-51c9-5af2-8288-3caad30115a2",
+      "target": "event/31",
+      "reason": "",
+      "detail": {
+        "flagged": true
+      }
+    },
+    {
+      "id": 25,
+      "ts": "2026-10-01T12:42:20.142857Z",
+      "staff": "Noa Shapira",
+      "action": "media_denied",
+      "customer_id": 3,
+      "device_id": "0a5823a6-8e52-568d-802e-b19165904dc2",
+      "target": "artifact/1190",
+      "reason": "No recording consent for live view.",
+      "detail": {
+        "reason": "No recording consent",
+        "purpose": "support"
+      }
+    },
+    {
+      "id": 24,
+      "ts": "2026-10-01T08:23:45.571429Z",
+      "staff": "Noa Shapira",
+      "action": "media_view",
+      "customer_id": 1,
+      "device_id": "4c2fb54d-51c9-5af2-8288-3caad30115a2",
+      "target": "artifact/412",
+      "reason": "Owner called about the 04:10 alert.",
+      "detail": {
+        "purpose": "support"
+      }
+    },
+    {
+      "id": 23,
+      "ts": "2026-10-01T04:08:04Z",
+      "staff": "Noa Shapira",
+      "action": "event_view",
+      "customer_id": 2,
+      "device_id": "7cdc4b44-de01-5ba8-8078-81b1a1072578",
+      "target": "event/55",
+      "reason": "",
+      "detail": null
+    },
+    {
+      "id": 22,
+      "ts": "2026-09-30T23:46:50.428571Z",
+      "staff": "Ameer Faour",
+      "action": "event_view",
+      "customer_id": 1,
+      "device_id": "4c2fb54d-51c9-5af2-8288-3caad30115a2",
+      "target": "event/48",
+      "reason": "",
+      "detail": null
+    },
+    {
+      "id": 21,
+      "ts": "2026-09-30T19:31:39.857143Z",
+      "staff": "Noa Shapira",
+      "action": "event_view",
+      "customer_id": 2,
+      "device_id": "7cdc4b44-de01-5ba8-8078-81b1a1072578",
+      "target": "event/41",
+      "reason": "",
+      "detail": null
+    },
+    {
+      "id": 20,
+      "ts": "2026-09-30T15:13:41.285714Z",
+      "staff": "Ameer Faour",
+      "action": "event_view",
+      "customer_id": 1,
+      "device_id": "4c2fb54d-51c9-5af2-8288-3caad30115a2",
+      "target": "event/34",
+      "reason": "",
+      "detail": null
+    },
+    {
+      "id": 19,
+      "ts": "2026-09-30T10:57:43.714286Z",
+      "staff": "Noa Shapira",
+      "action": "event_view",
+      "customer_id": 2,
+      "device_id": "7cdc4b44-de01-5ba8-8078-81b1a1072578",
+      "target": "event/27",
+      "reason": "",
+      "detail": null
+    },
+    {
+      "id": 18,
+      "ts": "2026-09-30T06:34:39.142857Z",
+      "staff": "Ameer Faour",
+      "action": "event_view",
+      "customer_id": 1,
+      "device_id": "4c2fb54d-51c9-5af2-8288-3caad30115a2",
+      "target": "event/20",
+      "reason": "",
+      "detail": null
+    },
+    {
+      "id": 17,
+      "ts": "2026-09-30T02:20:02.571429Z",
+      "staff": "Eden Peretz",
+      "action": "login",
+      "customer_id": null,
+      "device_id": null,
+      "target": "",
+      "reason": "",
+      "detail": null
+    },
+    {
+      "id": 16,
+      "ts": "2026-09-29T22:05:32Z",
+      "staff": "Eden Peretz",
+      "action": "login",
+      "customer_id": null,
+      "device_id": null,
+      "target": "",
+      "reason": "",
+      "detail": null
+    },
+    {
+      "id": 15,
+      "ts": "2026-09-29T17:50:38.428571Z",
+      "staff": "Ameer Faour",
+      "action": "login",
+      "customer_id": null,
+      "device_id": null,
+      "target": "",
+      "reason": "",
+      "detail": null
+    },
+    {
+      "id": 14,
+      "ts": "2026-09-29T13:28:49.857143Z",
+      "staff": "Ameer Faour",
+      "action": "login",
+      "customer_id": null,
+      "device_id": null,
+      "target": "",
+      "reason": "",
+      "detail": null
+    },
+    {
+      "id": 13,
+      "ts": "2026-09-29T09:15:00.285714Z",
+      "staff": "Noa Shapira",
+      "action": "login",
+      "customer_id": null,
+      "device_id": null,
+      "target": "",
+      "reason": "",
+      "detail": null
+    },
+    {
+      "id": 12,
+      "ts": "2026-09-29T04:56:28.714286Z",
+      "staff": "Noa Shapira",
+      "action": "login",
+      "customer_id": null,
+      "device_id": null,
+      "target": "",
+      "reason": "",
+      "detail": null
+    },
+    {
+      "id": 11,
+      "ts": "2026-09-29T00:40:28.142857Z",
+      "staff": "Noa Shapira",
+      "action": "login",
+      "customer_id": null,
+      "device_id": null,
+      "target": "",
+      "reason": "",
+      "detail": null
+    },
+    {
+      "id": 10,
+      "ts": "2026-09-28T20:19:46.571429Z",
+      "staff": "Ameer Faour",
+      "action": "customer_update",
+      "customer_id": 1,
+      "device_id": null,
+      "target": "customer/1",
+      "reason": "Owner agreed to training use.",
+      "detail": {
+        "consent_training": true
+      }
+    },
+    {
+      "id": 9,
+      "ts": "2026-09-28T16:00:09Z",
+      "staff": "Ameer Faour",
+      "action": "customer_update",
+      "customer_id": 3,
+      "device_id": null,
+      "target": "customer/3",
+      "reason": "Consent form received by email.",
+      "detail": {
+        "consent_recordings": true
+      }
+    },
+    {
+      "id": 8,
+      "ts": "2026-09-28T11:43:23.428571Z",
+      "staff": "Ameer Faour",
+      "action": "device_enroll",
+      "customer_id": 3,
+      "device_id": "76b32708-d2ce-5118-9e16-2c15bc450234",
+      "target": "mizrahi_eilat",
+      "reason": "",
+      "detail": null
+    },
+    {
+      "id": 7,
+      "ts": "2026-09-28T07:31:31.857143Z",
+      "staff": "Ameer Faour",
+      "action": "device_enroll",
+      "customer_id": 3,
+      "device_id": "0a5823a6-8e52-568d-802e-b19165904dc2",
+      "target": "mizrahi_beersheva",
+      "reason": "",
+      "detail": null
+    },
+    {
+      "id": 6,
+      "ts": "2026-09-28T03:18:19.285714Z",
+      "staff": "Ameer Faour",
+      "action": "device_enroll",
+      "customer_id": 2,
+      "device_id": "7cdc4b44-de01-5ba8-8078-81b1a1072578",
+      "target": "levi_haifa",
+      "reason": "",
+      "detail": null
+    },
+    {
+      "id": 5,
+      "ts": "2026-09-27T23:00:18.714286Z",
+      "staff": "Ameer Faour",
+      "action": "device_enroll",
+      "customer_id": 1,
+      "device_id": "4c2fb54d-51c9-5af2-8288-3caad30115a2",
+      "target": "cohen_ramatgan",
+      "reason": "",
+      "detail": null
+    },
+    {
+      "id": 4,
+      "ts": "2026-09-27T18:42:05.142857Z",
+      "staff": "Ameer Faour",
+      "action": "customer_create",
+      "customer_id": 3,
+      "device_id": null,
+      "target": "customer/3",
+      "reason": "",
+      "detail": {
+        "name": "Tamar Mizrahi"
+      }
+    },
+    {
+      "id": 3,
+      "ts": "2026-09-27T14:23:16.571429Z",
+      "staff": "Ameer Faour",
+      "action": "customer_create",
+      "customer_id": 2,
+      "device_id": null,
+      "target": "customer/2",
+      "reason": "",
+      "detail": {
+        "name": "Yossi Levi"
+      }
+    },
+    {
+      "id": 2,
+      "ts": "2026-09-27T10:07:41Z",
+      "staff": "Ameer Faour",
+      "action": "customer_create",
+      "customer_id": 1,
+      "device_id": null,
+      "target": "customer/1",
+      "reason": "",
+      "detail": {
+        "name": "Dana Cohen"
+      }
+    }
+  ],
+  "next_cursor": null
+}

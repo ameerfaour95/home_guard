@@ -1,0 +1,259 @@
+{
+  "id": 20,
+  "site": "customer-1fc0de",
+  "customer_id": 1,
+  "customer_name": "customer-1fc0de",
+  "camera": "cam-b42d16",
+  "kind": "alert",
+  "start_utc": "2026-10-01T18:36:54.618888Z",
+  "end_utc": "2026-10-01T18:36:58.618888Z",
+  "summary": "A person with a face covering crouches at the cam-b42d16 lock for several seconds.",
+  "label": "suspicious",
+  "alert_command": "[call_owner]",
+  "detected": [
+    "person"
+  ],
+  "owner_verdicts": [
+    "expected"
+  ],
+  "completeness": {
+    "video": true,
+    "boxes": "none",
+    "ai": "real",
+    "owner_feedback": true,
+    "expired": false,
+    "copies": [
+      "production",
+      "training"
+    ]
+  },
+  "reviewed": false,
+  "flagged": true,
+  "thumbnail_url": "/v1/events/20/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": null,
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "Person tampering with the door lock.",
+  "dispatch": null,
+  "ai_runs": [
+    {
+      "id": 20,
+      "purpose": "guard",
+      "status": "real",
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "prompt": null,
+      "parsed": {
+        "label": "suspicious",
+        "people": 1,
+        "summary": "A person with a face covering crouches at the cam-b42d16 lock for several seconds.",
+        "vehicle_moving": false
+      },
+      "raw_text_artifact_id": 146,
+      "input_frame_artifact_ids": [
+        187,
+        188,
+        189,
+        190,
+        191
+      ]
+    }
+  ],
+  "feedback": [
+    {
+      "id": 7,
+      "verdict": "expected",
+      "action": "none",
+      "note": "",
+      "raw_text": "",
+      "source": "text",
+      "received_utc": "2026-10-01T18:53:43Z"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": 8,
+      "role": "original_video",
+      "s3_key": "artifact-8",
+      "bytes": 3347,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 24,
+      "role": "feedback",
+      "s3_key": "artifact-24",
+      "bytes": 459,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 36,
+      "role": "meta",
+      "s3_key": "artifact-36",
+      "bytes": 986,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 63,
+      "role": "original_video",
+      "s3_key": "artifact-63",
+      "bytes": 3347,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 110,
+      "role": "meta",
+      "s3_key": "artifact-110",
+      "bytes": 1787,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 146,
+      "role": "raw_answer",
+      "s3_key": "artifact-146",
+      "bytes": 158,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 187,
+      "role": "teacher_frame",
+      "s3_key": "artifact-187",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 188,
+      "role": "teacher_frame",
+      "s3_key": "artifact-188",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 189,
+      "role": "teacher_frame",
+      "s3_key": "artifact-189",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 190,
+      "role": "teacher_frame",
+      "s3_key": "artifact-190",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 191,
+      "role": "teacher_frame",
+      "s3_key": "artifact-191",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1514,
+      "role": "thumbnail",
+      "s3_key": "artifact-1514",
+      "bytes": 2751,
+      "available": true,
+      "provenance": "cloud",
+      "detail": null
+    },
+    {
+      "id": 1515,
+      "role": "filmstrip",
+      "s3_key": "artifact-1515",
+      "bytes": 2725,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "tile_w": 160,
+        "tile_h": 90,
+        "count": 4
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "alert",
+    "duration_sec": 4.0,
+    "fps_estimated": 5.0,
+    "frames_written": 20,
+    "codec": "h264",
+    "buffer": {
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "yolo": {
+      "class_counts": {
+        "person": 1
+      },
+      "class_max_conf": {
+        "person": 0.713
+      },
+      "trigger_classes": [
+        "person"
+      ]
+    },
+    "model_response": {
+      "label": "suspicious",
+      "people": 1,
+      "summary": "A person with a face covering crouches at the cam-b42d16 lock for several seconds.",
+      "vehicle_moving": false
+    },
+    "teacher": {
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "temperature": 0
+    }
+  }
+}

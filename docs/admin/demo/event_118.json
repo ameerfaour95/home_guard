@@ -1,0 +1,476 @@
+{
+  "id": 118,
+  "site": "mizrahi_eilat",
+  "customer_id": 3,
+  "customer_name": "Tamar Mizrahi",
+  "camera": "front_door",
+  "kind": "alert",
+  "start_utc": "2026-10-01T18:01:46.583299Z",
+  "end_utc": "2026-10-01T18:01:50.583299Z",
+  "summary": "A courier in a yellow vest places a parcel on the doorstep, rings the bell and walks back toward the street.",
+  "label": "normal",
+  "alert_command": "[send_message]",
+  "detected": [
+    "person"
+  ],
+  "owner_verdicts": [],
+  "completeness": {
+    "video": true,
+    "boxes": "sampled",
+    "ai": "real",
+    "owner_feedback": false,
+    "expired": false,
+    "copies": [
+      "production",
+      "training"
+    ]
+  },
+  "reviewed": true,
+  "flagged": false,
+  "thumbnail_url": "/v1/events/118/thumbnail",
+  "timezone": "Asia/Jerusalem",
+  "clip_start_local": "2026-10-01 21:01:46",
+  "duration_sec": 4.0,
+  "fps": 5.0,
+  "frame_size": [
+    320,
+    180
+  ],
+  "alert_reason": "",
+  "dispatch": {
+    "channel": "telegram",
+    "sent": true,
+    "detail": {
+      "channel": "telegram",
+      "telegram": {
+        "command": "[send_message]",
+        "telegram": {
+          "sent": true,
+          "results": [
+            {
+              "ok": true,
+              "chat_id": "-100100",
+              "message_id": 110
+            }
+          ]
+        }
+      }
+    }
+  },
+  "ai_runs": [
+    {
+      "id": 118,
+      "purpose": "guard",
+      "status": "real",
+      "model": "gpt-4o",
+      "prompt_version": "2026-10-03.tagged-rules-label",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"front_door\", local time 21:01:49.\n\nWrite \"summary\": what happ",
+      "parsed": {
+        "label": "normal",
+        "people": 1,
+        "summary": "A courier in a yellow vest places a parcel on the doorstep, rings the bell and walks back toward the street.",
+        "vehicle_moving": false
+      },
+      "raw_text_artifact_id": 1199,
+      "input_frame_artifact_ids": [
+        1232,
+        1233,
+        1234,
+        1235,
+        1236
+      ]
+    }
+  ],
+  "feedback": [],
+  "artifacts": [
+    {
+      "id": 1162,
+      "role": "original_video",
+      "s3_key": "production_mizrahi_eilat/clips/front_door/2026-10-01/front_door_1790877709_alert.mp4",
+      "bytes": 3177,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 1172,
+      "role": "meta",
+      "s3_key": "production_mizrahi_eilat/meta/front_door/2026-10-01/front_door_1790877709_alert.meta.json",
+      "bytes": 976,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "production"
+      }
+    },
+    {
+      "id": 1182,
+      "role": "original_video",
+      "s3_key": "dataset_mizrahi_eilat/clips/front_door/2026-10-01/front_door_1790877709_alert.mp4",
+      "bytes": 3177,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1191,
+      "role": "meta",
+      "s3_key": "dataset_mizrahi_eilat/meta/front_door/2026-10-01/front_door_1790877709_alert.meta.json",
+      "bytes": 3720,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1199,
+      "role": "raw_answer",
+      "s3_key": "dataset_mizrahi_eilat/responses/front_door/2026-10-01/front_door_1790877709_alert.model_raw.txt",
+      "bytes": 180,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1232,
+      "role": "teacher_frame",
+      "s3_key": "dataset_mizrahi_eilat/vlm_crops/front_door/2026-10-01/front_door_1790877709_alert_f0.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1233,
+      "role": "teacher_frame",
+      "s3_key": "dataset_mizrahi_eilat/vlm_crops/front_door/2026-10-01/front_door_1790877709_alert_f1.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1234,
+      "role": "teacher_frame",
+      "s3_key": "dataset_mizrahi_eilat/vlm_crops/front_door/2026-10-01/front_door_1790877709_alert_f2.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1235,
+      "role": "teacher_frame",
+      "s3_key": "dataset_mizrahi_eilat/vlm_crops/front_door/2026-10-01/front_door_1790877709_alert_f3.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1236,
+      "role": "teacher_frame",
+      "s3_key": "dataset_mizrahi_eilat/vlm_crops/front_door/2026-10-01/front_door_1790877709_alert_f4.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1275,
+      "role": "yolo_image",
+      "s3_key": "dataset_mizrahi_eilat/yolo/images/front_door/2026-10-01/front_door_1790877709_alert_f0000.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1276,
+      "role": "yolo_image",
+      "s3_key": "dataset_mizrahi_eilat/yolo/images/front_door/2026-10-01/front_door_1790877709_alert_f0003.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1277,
+      "role": "yolo_image",
+      "s3_key": "dataset_mizrahi_eilat/yolo/images/front_door/2026-10-01/front_door_1790877709_alert_f0006.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1278,
+      "role": "yolo_image",
+      "s3_key": "dataset_mizrahi_eilat/yolo/images/front_door/2026-10-01/front_door_1790877709_alert_f0009.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1279,
+      "role": "yolo_image",
+      "s3_key": "dataset_mizrahi_eilat/yolo/images/front_door/2026-10-01/front_door_1790877709_alert_f0012.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1280,
+      "role": "yolo_image",
+      "s3_key": "dataset_mizrahi_eilat/yolo/images/front_door/2026-10-01/front_door_1790877709_alert_f0015.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1281,
+      "role": "yolo_image",
+      "s3_key": "dataset_mizrahi_eilat/yolo/images/front_door/2026-10-01/front_door_1790877709_alert_f0018.jpg",
+      "bytes": 677,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1321,
+      "role": "yolo_label",
+      "s3_key": "dataset_mizrahi_eilat/yolo/labels/front_door/2026-10-01/front_door_1790877709_alert_f0000.txt",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1322,
+      "role": "yolo_label",
+      "s3_key": "dataset_mizrahi_eilat/yolo/labels/front_door/2026-10-01/front_door_1790877709_alert_f0003.txt",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1323,
+      "role": "yolo_label",
+      "s3_key": "dataset_mizrahi_eilat/yolo/labels/front_door/2026-10-01/front_door_1790877709_alert_f0012.txt",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1324,
+      "role": "yolo_label",
+      "s3_key": "dataset_mizrahi_eilat/yolo/labels/front_door/2026-10-01/front_door_1790877709_alert_f0015.txt",
+      "bytes": 38,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1325,
+      "role": "yolo_label",
+      "s3_key": "dataset_mizrahi_eilat/yolo/labels/front_door/2026-10-01/front_door_1790877709_alert_f0018.txt",
+      "bytes": 0,
+      "available": true,
+      "provenance": "box",
+      "detail": {
+        "copy": "training"
+      }
+    },
+    {
+      "id": 1520,
+      "role": "thumbnail",
+      "s3_key": "admin_cache/thumbs/118.jpg",
+      "bytes": 2813,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "src_etag": "b2d3f8134def7dec91812c84310f63e1",
+        "needs_rendition": false
+      }
+    },
+    {
+      "id": 1521,
+      "role": "filmstrip",
+      "s3_key": "admin_cache/filmstrips/118.jpg",
+      "bytes": 2711,
+      "available": true,
+      "provenance": "cloud",
+      "detail": {
+        "fps": 1,
+        "count": 4,
+        "tile_h": 90,
+        "tile_w": 160,
+        "src_etag": "b2d3f8134def7dec91812c84310f63e1"
+      }
+    }
+  ],
+  "raw_meta": {
+    "kind": "alert",
+    "yolo": {
+      "class_counts": {
+        "person": 1
+      },
+      "class_max_conf": {
+        "person": 0.92
+      },
+      "trigger_classes": [
+        "person"
+      ],
+      "trigger_detected": true
+    },
+    "alert": {
+      "label": "normal",
+      "muted": false,
+      "labels": [
+        "person"
+      ],
+      "summary": "A courier in a yellow vest places a parcel on the doorstep, rings the bell and walks back toward the street.",
+      "alert_reason": "",
+      "alert_command": "[send_message]"
+    },
+    "codec": "h264",
+    "buffer": {
+      "store_fps": 5.0,
+      "store_size": [
+        320,
+        180
+      ]
+    },
+    "teacher": {
+      "model": "gpt-4o",
+      "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"front_door\", local time 21:01:49.\n\nWrite \"summary\": what happ",
+      "raw_path": "responses\\front_door\\2026-10-01\\front_door_1790877709_alert.model_raw.txt",
+      "temperature": 0,
+      "input_frames": [
+        "vlm_crops\\front_door\\2026-10-01\\front_door_1790877709_alert_f0.jpg",
+        "vlm_crops\\front_door\\2026-10-01\\front_door_1790877709_alert_f1.jpg",
+        "vlm_crops\\front_door\\2026-10-01\\front_door_1790877709_alert_f2.jpg",
+        "vlm_crops\\front_door\\2026-10-01\\front_door_1790877709_alert_f3.jpg",
+        "vlm_crops\\front_door\\2026-10-01\\front_door_1790877709_alert_f4.jpg"
+      ],
+      "prompt_version": "2026-10-03.tagged-rules-label"
+    },
+    "clip_path": "clips\\front_door\\2026-10-01\\front_door_1790877709_alert.mp4",
+    "camera_name": "front_door",
+    "clip_end_ts": 1790877710.3096468,
+    "yolo_export": {
+      "conf": 0.25,
+      "enabled": true,
+      "export_fps": 1.7,
+      "images_root": "yolo\\images",
+      "labels_root": "yolo\\labels",
+      "exported_frames": [
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\front_door\\2026-10-01\\front_door_1790877709_alert_f0000.jpg",
+          "label_path": "yolo\\labels\\front_door\\2026-10-01\\front_door_1790877709_alert_f0000.txt",
+          "frame_index": 0,
+          "approx_time_offset_sec": 0.0
+        },
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\front_door\\2026-10-01\\front_door_1790877709_alert_f0003.jpg",
+          "label_path": "yolo\\labels\\front_door\\2026-10-01\\front_door_1790877709_alert_f0003.txt",
+          "frame_index": 3,
+          "approx_time_offset_sec": 0.6
+        },
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\front_door\\2026-10-01\\front_door_1790877709_alert_f0006.jpg",
+          "label_path": "yolo\\labels\\front_door\\2026-10-01\\front_door_1790877709_alert_f0006.txt",
+          "frame_index": 6,
+          "approx_time_offset_sec": 1.2
+        },
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\front_door\\2026-10-01\\front_door_1790877709_alert_f0009.jpg",
+          "label_path": "yolo\\labels\\front_door\\2026-10-01\\front_door_1790877709_alert_f0009.txt",
+          "frame_index": 9,
+          "approx_time_offset_sec": 1.8
+        },
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\front_door\\2026-10-01\\front_door_1790877709_alert_f0012.jpg",
+          "label_path": "yolo\\labels\\front_door\\2026-10-01\\front_door_1790877709_alert_f0012.txt",
+          "frame_index": 12,
+          "approx_time_offset_sec": 2.4
+        },
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\front_door\\2026-10-01\\front_door_1790877709_alert_f0015.jpg",
+          "label_path": "yolo\\labels\\front_door\\2026-10-01\\front_door_1790877709_alert_f0015.txt",
+          "frame_index": 15,
+          "approx_time_offset_sec": 3.0
+        },
+        {
+          "num_boxes": 1,
+          "image_path": "yolo\\images\\front_door\\2026-10-01\\front_door_1790877709_alert_f0018.jpg",
+          "label_path": "yolo\\labels\\front_door\\2026-10-01\\front_door_1790877709_alert_f0018.txt",
+          "frame_index": 18,
+          "approx_time_offset_sec": 3.6
+        }
+      ]
+    },
+    "duration_sec": 4.0,
+    "clip_start_ts": 1790877706.3096468,
+    "fps_estimated": 5.0,
+    "clip_end_local": "2026-10-01 21:01:50",
+    "frames_written": 20,
+    "model_response": {
+      "label": "normal",
+      "people": 1,
+      "summary": "A courier in a yellow vest places a parcel on the doorstep, rings the bell and walks back toward the street.",
+      "vehicle_moving": false
+    },
+    "clip_start_local": "2026-10-01 21:01:46"
+  }
+}
