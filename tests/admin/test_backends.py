@@ -160,3 +160,12 @@ def test_tls_context_keeps_certificate_verification_without_debug_keylog():
     assert context.verify_mode == ssl.CERT_REQUIRED
     assert context.cert_store_stats()['x509_ca'] > 0
     assert context.keylog_filename is None
+
+
+def test_nullable_timestamps_and_customer_defaults():
+    wire = json.loads((DATA/'fleet.json').read_text())['devices'][0]
+    parsed = decode(DeviceSummary, dict(wire, last_seen_utc=None, newest_clip_utc=None))
+    assert parsed.last_seen_utc is None and parsed.newest_clip_utc is None
+    customer = decode(CustomerOut, {'id': 9, 'name': 'New household'})
+    assert customer.devices == [] and not customer.consent_live
+    assert customer.timezone == 'Asia/Jerusalem'

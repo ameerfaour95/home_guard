@@ -3,7 +3,7 @@
 The decoder validates the wire shape, including nested types and literals, and
 ignores additional fields so a newer server can extend a response safely.
 """
-from dataclasses import dataclass, fields, is_dataclass, MISSING
+from dataclasses import dataclass, field, fields, is_dataclass, MISSING
 from datetime import datetime
 from types import UnionType
 from typing import Literal, Union, get_args, get_origin, get_type_hints
@@ -77,13 +77,13 @@ class FleetResponse:
 @dataclass
 class CustomerOut:
     name: str
-    timezone: str
-    consent_live: bool
-    consent_recordings: bool
-    consent_training: bool
-    notes: str
     id: int
-    devices: list[DeviceSummary]
+    timezone: str = 'Asia/Jerusalem'
+    consent_live: bool = False
+    consent_recordings: bool = False
+    consent_training: bool = False
+    notes: str = ''
+    devices: list[DeviceSummary] = field(default_factory=list)
 
 
 @dataclass
@@ -208,6 +208,8 @@ def decode(cls, value):
                 raise ValueError(f'Missing field: {f.name}')
         return cls(**result)
     if cls is datetime:
+        if not isinstance(value, str):
+            raise ValueError('Expected ISO timestamp')
         result = datetime.fromisoformat(value.replace('Z', '+00:00'))
         if result.tzinfo is None:
             raise ValueError('Timestamp must include timezone')
