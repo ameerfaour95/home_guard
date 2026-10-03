@@ -34,7 +34,7 @@ RUN=(env -u SSLKEYLOGFILE -u PYTHONSTARTUP AWS_CA_BUNDLE=C:/Users/ameer/.homegua
      uv run --group cloud --system-certs)
 
 # Start the embedded Postgres and publish its URI to this shell (no secrets are printed).
-HG_CLOUD_DB_URL="$("${RUN[@]}" python -c 'import pgserver,sys; print(pgserver.get_server(sys.argv[1], cleanup_mode=None).get_uri())' "$PG_DIR")"
+HG_CLOUD_DB_URL="$("${RUN[@]}" python -c 'import pgserver,sys; print(pgserver.get_server(sys.argv[1], cleanup_mode=None).get_uri())' "$PG_DIR" | tail -n1)"
 export HG_CLOUD_DB_URL
 export HG_CLOUD_RUN_LOOPS=1
 

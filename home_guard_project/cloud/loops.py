@@ -10,6 +10,7 @@ import logging
 import random
 import threading
 import time
+from datetime import datetime, timezone
 from typing import Callable, Optional
 
 from sqlalchemy import text
@@ -19,11 +20,13 @@ log = logging.getLogger(__name__)
 
 LOCK_BASE = 0x48470000  # "HG" namespace for advisory-lock keys
 INDEXER_LOCK, MEDIA_LOCK, NOTICES_LOCK = LOCK_BASE + 1, LOCK_BASE + 2, LOCK_BASE + 3
-FULL_SCAN_EVERY = 30 * 60  # seconds, handled inside the indexer job
+EXPORTS_LOCK = LOCK_BASE + 4
 
 
 class Loop:
-    def __init__(self, name: str, interval: float, job: Callable, sm, s3, lock_key: int, jitter: float = 0.1):
+    def __init__(self, name: str, interval: float, job: Callable, sm, s3, lock_key: int, jitter: float = 0.1,
+                 engine=None):
+        self.engine = engine if engine is not None else sm.kw["bind"]
         self.name, self.interval, self.job, self.sm, self.s3 = name, interval, job, sm, s3
         self.lock_key, self.jitter = lock_key, jitter
         self.runs = 0
@@ -56,7 +59,7 @@ class Loop:
 
     def run_once(self) -> bool:
         """One locked attempt; False when another process holds the lock."""
-        conn = self.sm.kw["bind"].connect()
+        conn = self.engine.connect()
         try:
             got = conn.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": self.lock_key}).scalar()
             conn.commit()
@@ -101,18 +104,10 @@ class Loops:
             lp.stop(max(0.0, deadline - time.monotonic()))
 
 
-def _index_job_factory(clock=time.monotonic):
-    state = {"last_full": clock()}
+def _index_job(session, s3):
+    from . import indexer
 
-    def job(session, s3):
-        from . import indexer
-
-        full = clock() - state["last_full"] >= FULL_SCAN_EVERY
-        indexer.index_all(session, s3, full_scan=full)
-        if full:
-            state["last_full"] = clock()
-
-    return job
+    indexer.index_all(session, s3)  # the indexer schedules its own full scans
 
 
 def _media_job(session, s3):
@@ -127,9 +122,22 @@ def _notices_job(session, s3):
     audit.retry_pending_notices(session, s3)
 
 
-def build_loops(sm, s3) -> Loops:
-    return Loops([
-        Loop("indexer", 120, _index_job_factory(), sm, s3, INDEXER_LOCK),
-        Loop("media", 60, _media_job, sm, s3, MEDIA_LOCK),
-        Loop("notices", 300, _notices_job, sm, s3, NOTICES_LOCK),
-    ])
+def _exports_job(session, s3):
+    from . import studio
+
+    studio.sweep_stale_exports(session, datetime.now(timezone.utc))
+
+
+def build_loops(sm, s3, engine=None) -> Loops:
+    """The background loops; `engine` (the app's) defaults to the sessionmaker's bind."""
+    from . import studio
+
+    engine = engine if engine is not None else sm.kw["bind"]
+    built = [
+        Loop("indexer", 120, _index_job, sm, s3, INDEXER_LOCK, engine=engine),
+        Loop("media", 60, _media_job, sm, s3, MEDIA_LOCK, engine=engine),
+        Loop("notices", 300, _notices_job, sm, s3, NOTICES_LOCK, engine=engine),
+    ]
+    if hasattr(studio, "sweep_stale_exports"):
+        built.append(Loop("exports", 60, _exports_job, sm, s3, EXPORTS_LOCK, engine=engine))
+    return Loops(built)

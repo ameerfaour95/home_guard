@@ -172,3 +172,46 @@ def test_manage_media_once_and_index_once(db_engine, monkeypatch, capsys):
     assert "siteA: stats-A" in capsys.readouterr().out
     assert manage.main(["media-once"]) == 0
     assert "3" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------- fix round (Task 14 review)
+
+def test_lock_is_released_after_a_run(db_engine):
+    calls = []
+    sm = loops.sessionmaker(db_engine)
+    lp = loops.Loop("seq", 60, lambda session, s3: calls.append(1), sm, None, lock_key=9005)
+    assert lp.run_once() is True
+    assert lp.run_once() is True  # same key again: the first run released its session lock
+    assert calls == [1, 1] and lp.skipped == 0
+
+
+def test_loop_uses_the_engine_it_is_given(db_engine):
+    sm = loops.sessionmaker(db_engine)
+    lp = loops.Loop("eng", 60, lambda session, s3: None, sm, None, lock_key=9006, engine=db_engine)
+    assert lp.engine is db_engine and lp.run_once() is True
+
+
+def test_build_loops_wiring(db_engine, monkeypatch):
+    from home_guard_project.cloud import indexer, studio
+    sm = loops.sessionmaker(db_engine)
+    built = loops.build_loops(sm, object(), engine=db_engine)
+    names = [lp.name for lp in built.loops]
+    assert names[:3] == ["indexer", "media", "notices"]
+    assert all(lp.engine is db_engine for lp in built.loops)
+    assert (("exports" in names) == hasattr(studio, "sweep_stale_exports"))
+    old = loops.build_loops(sm, object())  # backward compatible: engine comes from the sessionmaker
+    assert all(lp.engine is db_engine for lp in old.loops)
+    seen = []
+    monkeypatch.setattr(indexer, "index_all", lambda s, s3, full_scan=False: seen.append(full_scan) or {})
+    built.loops[0].job(None, None)
+    built.loops[0].job(None, None)
+    assert seen == [False, False]  # the indexer schedules its own full scans
+
+
+def test_make_engine_pool_is_explicit(db_engine):
+    from home_guard_project.cloud.db import make_engine
+    eng = make_engine(db_engine.url.render_as_string(hide_password=False))
+    try:
+        assert eng.pool.size() == 10 and eng.pool._max_overflow == 10
+    finally:
+        eng.dispose()
