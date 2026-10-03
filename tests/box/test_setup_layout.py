@@ -35,7 +35,7 @@ class SetupLayoutTests(unittest.TestCase):
         recording=Path(__file__).with_name('fixtures').joinpath('setup_engine_success.txt').read_text()
         parser=OutputParser()
         for line in recording.splitlines(): window.engine_events.put(parser.parse(line))
-        window.present_engine_events();window.set_page(5);window.summary_details_action.setChecked(True);self.app.processEvents()
+        window.present_engine_events();window.set_page(6);window.summary_details_action.setChecked(True);self.app.processEvents()
         workspace=window.summary_workspace
         bounds=workspace.step_list.rect().translated(workspace.step_list.mapTo(workspace.viewport(),QPoint(0,0)))
         self.assertTrue(workspace.viewport().rect().contains(bounds),(bounds,workspace.viewport().rect()))

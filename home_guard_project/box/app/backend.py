@@ -13,6 +13,12 @@ class Answers:
     ssid: str = ""
     wifi_password: str = field(default="", repr=False)
     house: str = ""
+    owner_name: str = field(default="", repr=False)
+    owner_phone: str = field(default="", repr=False)
+    installer: str = ""
+    consent_live: bool = False
+    consent_recordings: bool = False
+    consent_training: bool = False
     show_cameras: bool = False
     alerts: bool = False
     start_hour: int = 0

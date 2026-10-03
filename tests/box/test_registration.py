@@ -65,6 +65,7 @@ class RegistrationTest(unittest.TestCase):
 
     def test_validation(self) -> None:
         for bad in ({"owner_name": ""}, {"owner_name": "x" * 121}, {"owner_name": "a\nb"}, {"owner_name": "a\x00"},
+                    {"owner_name": "Dana\n"}, {"site": "cohen_haifa\n"},
                     {"site": "Other"}, {"site": "other_site"}, {"consent_live": "yes"}, {"consent_training": 1}):
             with self.subTest(bad=bad), self.assertRaises(RegistrationError):
                 self._write(**bad)
@@ -142,6 +143,23 @@ class RegistrationTest(unittest.TestCase):
         with self.assertRaises(RegistrationError):
             update_site(self.path, "Bad Site")
 
+    def test_publish_repairs_site_after_interrupted_site_change(self):
+        self._write()
+        with mock.patch.object(box_main, 'REGISTRATION_PATH', self.path), \
+                mock.patch.object(box_main, 'publish_registration') as publish:
+            box_main.publish_registration_for_site('new_house')
+        self.assertEqual(load_registration(self.path)['site'], 'new_house')
+        self.assertEqual(publish.call_args.args[0]['site'], 'new_house')
+
+    def test_site_repair_failure_does_not_publish_old_site(self):
+        self._write()
+        with mock.patch.object(box_main, 'REGISTRATION_PATH', self.path), \
+                mock.patch.object(box_main, 'update_site', side_effect=OSError), \
+                mock.patch.object(box_main, 'publish_registration') as publish, \
+                self.assertLogs('box', level='WARNING'):
+            box_main.publish_registration_for_site('new_house')
+        publish.assert_not_called()
+
     def test_from_json_deletes_file_and_summary_hides_phone(self) -> None:
         src = os.path.join(self.dir, "answers.json")
         with open(src, "w", encoding="utf-8") as f:
@@ -153,7 +171,7 @@ class RegistrationTest(unittest.TestCase):
         self.assertEqual(reg["owner_name"], "Dana Cohen")
         line = registration_summary(reg)
         self.assertIn("cohen_haifa", line)
-        self.assertIn("Dana Cohen", line)
+        self.assertNotIn("Dana Cohen", line)
         self.assertNotIn("972", line)
 
     def test_from_json_old_answers_default_no_consent(self) -> None:
@@ -188,6 +206,55 @@ class RegistrationTest(unittest.TestCase):
         self.assertIs(args["consent_live"], True)
         self.assertIs(args["consent_recordings"], False)
         self.assertEqual(args["tailscale_host"], "h")
+
+    def test_replace_failure_keeps_registration_and_removes_private_temp(self):
+        first = self._write()
+        with mock.patch("home_guard_project.box.registration.os.replace", side_effect=OSError):
+            with self.assertRaises(OSError): self._write(owner_name="New owner")
+        self.assertEqual(load_registration(self.path), first)
+        self.assertFalse([n for n in os.listdir(self.dir) if n.endswith(".tmp")])
+
+    def test_corrupt_consent_is_not_loaded_or_granted(self):
+        for consent in ("yes", {"live": "false"}, {"live": 1}):
+            reg = self._write()
+            reg["consent"] = consent
+            with open(self.path, "w", encoding="utf-8") as f: json.dump(reg, f)
+            self.assertIsNone(load_registration(self.path))
+
+    def test_from_json_clears_phone_and_defaults_owner_on_rerun(self):
+        self._write()
+        src = os.path.join(self.dir, "answers.json")
+        with open(src, "w", encoding="utf-8-sig") as f:
+            json.dump({"owner_phone": "", "installer": ""}, f)
+        reg = register_from_json(src, self.path, box_yaml=self.box_yaml)
+        self.assertEqual(reg["owner_name"], "cohen_haifa")
+        self.assertEqual(reg["owner_phone"], "")
+        self.assertEqual(reg["installer"], "")
+        self.assertFalse(any(reg["consent"][k] for k in ("live", "recordings", "training")))
+
+    def test_bucket_change_publishes_but_key_order_does_not(self):
+        reg = self._write(); s3 = FakeS3()
+        put_registration(reg, "first", "dataset_cohen_haifa", s3, self.published)
+        reordered = dict(reversed(list(reg.items())))
+        self.assertIsNone(put_registration(reordered, "first", "dataset_cohen_haifa", s3, self.published))
+        self.assertIsNotNone(put_registration(reg, "second", "dataset_cohen_haifa", s3, self.published))
+
+    def test_cli_failure_does_not_log_exception_payload(self):
+        private = "Dana Cohen +972501234567"
+        with mock.patch.object(box_main, "register_from_json", side_effect=OSError(private)), \
+                self.assertLogs("box", level="ERROR") as logs:
+            self.assertEqual(box_main.run_register(["--from-json", "unused"]), 1)
+        self.assertNotIn(private, "".join(logs.output))
+
+    def test_publish_failure_does_not_log_exception_payload(self):
+        import io
+        private = "Dana Cohen +972501234567"
+        with mock.patch.object(box_main, "put_registration", side_effect=OSError(private)), \
+                mock.patch("home_guard_project.s3_upload.config.load_config"), \
+                mock.patch("sys.stdout", new_callable=io.StringIO) as output, \
+                self.assertLogs("box", level="WARNING") as logs:
+            box_main.publish_registration(self._write())
+        self.assertNotIn(private, "".join(logs.output) + output.getvalue())
 
 
 if __name__ == "__main__":

@@ -211,8 +211,8 @@ def run_register(argv: Sequence[str]) -> int:
     from_json = args.pop("from_json", None)
     try:
         reg = register_from_json(from_json) if from_json else write_registration(REGISTRATION_PATH, **args)
-    except (RegistrationError, BoxConfigError, OSError, ValueError) as exc:
-        log.error("%s", exc)
+    except (RegistrationError, BoxConfigError, OSError, ValueError):
+        log.error("Could not save registration. Check the owner details and file access, then retry.")
         return 1
     print(registration_summary(reg))
     publish_registration(reg)
@@ -229,9 +229,19 @@ def publish_registration(reg: Optional[dict]) -> None:
         key = put_registration(reg, load_s3_config().bucket, s3_prefix(reg["site"]))
         if key:
             log.info("Registration written to %s", key)
-    except Exception as exc:  # noqa: BLE001 - never block setup or the upload on this
-        log.warning("Could not publish the registration yet (%s); it will be retried.", exc)
-        print(f"warning: registration not published yet ({exc}); it is retried with the next upload")
+    except Exception:  # noqa: BLE001 - never block setup or the upload on this
+        log.warning("Could not publish the registration yet; it will be retried.")
+        print("warning: registration not published yet; it is retried with the next upload")
+
+
+def publish_registration_for_site(site: str) -> None:
+    """Repair an interrupted site rename before publishing; never send the old site."""
+    try:
+        reg = update_site(REGISTRATION_PATH, site)
+    except (RegistrationError, OSError):
+        log.warning("Registration site could not be saved; the next upload will retry.")
+        return
+    publish_registration(reg)
 
 
 def _status(cfg: BoxConfig) -> dict:
@@ -254,7 +264,7 @@ def _shown(value: Any) -> str:
 def main() -> None:
     if len(sys.argv) > 1 and sys.argv[1] == "register":
         logging.basicConfig(level=logging.INFO, format="%(levelname)-8s %(message)s")
-        run_register(sys.argv[2:])   # always exit 0: setup goes on without a registration
+        sys.exit(run_register(sys.argv[2:]))  # publish failure is best effort; invalid input fails
         return
     parser = argparse.ArgumentParser(description="Collector box: upload, heartbeat, status, mode, settings.")
     parser.add_argument("command", choices=["upload", "heartbeat", "status", "mode", "set-site", "set-option",
@@ -316,10 +326,7 @@ def main() -> None:
         if clips:
             log.info("Set aside %d clip(s) saved under the previous site name.", clips)
         print(f"site set to {args.value}; clips go to the S3 folder {s3_prefix(args.value)}/")
-        try:
-            publish_registration(update_site(REGISTRATION_PATH, args.value))
-        except RegistrationError as exc:
-            log.warning("Registration not moved to the new site: %s", exc)
+        publish_registration_for_site(args.value)
         return
 
     try:
@@ -357,7 +364,7 @@ def main() -> None:
 
     key = put_heartbeat(_status(cfg), s3_cfg.bucket, s3_prefix(cfg.site))
     log.info("Heartbeat written to s3://%s/%s", s3_cfg.bucket, key)
-    publish_registration(load_registration())
+    publish_registration_for_site(cfg.site)
 
 
 if __name__ == "__main__":

@@ -18,6 +18,26 @@ def recording():
     return Path(__file__).with_name('fixtures').joinpath('setup_engine_success.txt').read_text()
 
 class EngineTests(unittest.TestCase):
+    def test_customer_fields_reach_only_answers_file_and_output_is_redacted(self):
+        owner = 'Private Owner'; phone = '+972 50 123 4567'
+        runner = FakeRunner(recording().replace('@@step register ok Customer registered',
+                            'registered ' + owner + ' ' + phone + '\n@@step register ok Customer registered'))
+        events = []
+        with tempfile.TemporaryDirectory() as directory:
+            script = Path(directory)/'engine.ps1'; script.touch()
+            answers = Answers(owner_name=owner, owner_phone=phone, installer='Sam', consent_live=True)
+            self.assertTrue(EngineBackend(runner, script, 'powershell').run(answers, events.append))
+        self.assertEqual(runner.payload['owner_name'], owner)
+        self.assertEqual(runner.payload['owner_phone'], phone)
+        self.assertEqual(runner.payload['installer'], 'Sam')
+        self.assertIs(runner.payload['consent_live'], True)
+        self.assertIs(runner.payload['consent_recordings'], False)
+        self.assertIs(runner.payload['consent_training'], False)
+        for value in (owner, phone):
+            self.assertNotIn(value, str(runner.args))
+            self.assertNotIn(value, repr(events))
+        self.assertFalse(runner.path.exists())
+
     def test_success_streams_and_deletes_answers(self):
         runner=FakeRunner(recording());events=[]
         with tempfile.TemporaryDirectory() as directory:
@@ -26,7 +46,7 @@ class EngineTests(unittest.TestCase):
             answers=Answers(address='installer@box.example',house='cedar_house',cooldown_sec=90,wifi_password=secrets.token_hex(12),camera_password=secrets.token_hex(12))
             self.assertTrue(backend.run(answers,events.append))
         self.assertEqual(runner.payload['alert_cooldown_sec'],90)
-        self.assertEqual(set(runner.payload),{'target','network','wifi_ssid','wifi_password','site','show_cameras','find_cameras','camera_user','camera_password','alerts','alert_start_hour','alert_end_hour','alert_cooldown_sec'})
+        self.assertEqual(set(runner.payload),{'owner_name','owner_phone','installer','consent_live','consent_recordings','consent_training','target','network','wifi_ssid','wifi_password','site','show_cameras','find_cameras','camera_user','camera_password','alerts','alert_start_hour','alert_end_hour','alert_cooldown_sec'})
         self.assertEqual(runner.args[1:5],['-NoProfile','-ExecutionPolicy','Bypass','-File'])
         self.assertFalse(runner.path.exists())
         self.assertEqual(answers.wifi_password,'')

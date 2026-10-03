@@ -258,9 +258,10 @@ python -m home_guard_project.box register --from-json answers.json   # what setu
 python -m home_guard_project.box status                              # "registration": registered + consents (no name or phone)
 ```
 
-- Running it again changes only the fields you give; a changed consent or installer updates `consent.recorded_utc`.
+- CLI field updates preserve omitted fields; a changed consent or installer updates `consent.recorded_utc`. Setup/`--from-json` replaces owner details, including clearing a blank phone; missing permissions default off.
+- The graphical Owner & consent page follows Home. The owner name is required (1-120 characters); the installer name alone is remembered locally. Owner details never appear in setup logs, SSH arguments, or heartbeat data.
 - A failed publish only prints a warning (exit 0). The hourly upload retries; it sends the file only when its content changed (`logs/registration.published` holds the hash).
-- `set-site` moves the registration to the new site and publishes it under the new folder; the old folder keeps its copy.
+- `set-site` moves the registration to the new site and publishes it under the new folder; the old folder keeps its copy. The next heartbeat repairs an interrupted local site update before publishing.
 - Re-running setup on an already registered box is safe. An older answers file without these fields registers with all consents off and the house name as the owner.
 - Manual check of the setup step (no box needed): `powershell -File setup_customer.ps1 -AnswersFile a.json -DryRun -SkipUpdate` shows `@@step register ok`.
 

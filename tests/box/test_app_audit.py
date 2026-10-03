@@ -53,11 +53,11 @@ class GuidanceTests(unittest.TestCase):
         self.assertEqual(field_errors(1,{},wifi=False),{})
         self.assertEqual(field_errors(2,{'house':'Cedar House'}),{'house':'house_error'})
         self.assertEqual(field_errors(2,{'house':'cedar_house'}),{})
-        self.assertEqual(field_errors(3,{},find=False),{})
-        self.assertEqual(field_errors(3,{},find=True),{'camera_user':'camera_user_error','camera_password':'camera_password_error'})
+        self.assertEqual(field_errors(4,{},find=False),{})
+        self.assertEqual(field_errors(4,{},find=True),{'camera_user':'camera_user_error','camera_password':'camera_password_error'})
     def test_retry_routes_to_step_owner(self):
         from home_guard_project.box.app.guidance import retry_page
-        self.assertEqual([retry_page(step) for step in ('update','name_step','network_step','camera_step','readiness')],[0,2,1,3,0])
+        self.assertEqual([retry_page(step) for step in ('update','name_step','network_step','camera_step','readiness')],[0,2,1,4,0])
     def test_activity_clock_and_plain_words(self):
         from home_guard_project.box.app.model import parse_activity, Activity
         event=parse_activity('2026-10-02 14:31:02 INFO Done. Uploaded: 5 | Failed: 0')

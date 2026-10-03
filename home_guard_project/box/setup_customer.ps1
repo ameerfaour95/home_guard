@@ -165,8 +165,9 @@ if ($NonInteractive) {
     if ($a.alert_cooldown_sec)         { $AlertCooldown = [int]$a.alert_cooldown_sec }
     $OwnerName = [string]$a.owner_name; $OwnerPhone = [string]$a.owner_phone
     if ($a.installer) { $Installer = [string]$a.installer }
-    $ConsentLive = ($a.consent_live -eq $true); $ConsentRecordings = ($a.consent_recordings -eq $true)
-    $ConsentTraining = ($a.consent_training -eq $true)
+    $ConsentLive = ($a.consent_live -is [bool] -and $a.consent_live)
+    $ConsentRecordings = ($a.consent_recordings -is [bool] -and $a.consent_recordings)
+    $ConsentTraining = ($a.consent_training -is [bool] -and $a.consent_training)
     if ($Target -notmatch '^[^@\s]+@\S+$') { throw "answers: 'target' must be user@host (got '$Target')" }
     if (@('ethernet', 'wifi') -notcontains $Mode) { throw "answers: 'network' must be ethernet or wifi (got '$Mode')" }
     if ($Site -notmatch '^[a-z0-9_]+$') { throw "answers: 'site' must be lowercase letters, digits or underscores (got '$Site')" }
@@ -378,25 +379,27 @@ Step-Ok 'site' "dataset_$Site, show_cameras=$showVal"
 Step-Start 'register'
 Info "`n[2b] Registering the customer..."
 $regLocal = [IO.Path]::GetTempFileName()
-$regRemote = "$RemoteHome\registration_answers.json"
+$regRemote = "$RemoteHome\registration_$([Guid]::NewGuid().ToString('N')).json"
 $regName = $OwnerName; if (-not $regName) { $regName = $Site }
 $regHost = $Target.Substring($Target.IndexOf('@') + 1)
 $regJson = [ordered]@{ owner_name = $regName; owner_phone = $OwnerPhone; installer = $Installer
                        consent_live = $ConsentLive; consent_recordings = $ConsentRecordings
                        consent_training = $ConsentTraining; tailscale_host = $regHost } | ConvertTo-Json
-[IO.File]::WriteAllText($regLocal, $regJson, (New-Object Text.UTF8Encoding($false)))
 try {
+    [IO.File]::WriteAllText($regLocal, $regJson, (New-Object Text.UTF8Encoding($false)))
     Copy-ToBox $regLocal $regRemote
     $regOut = (Invoke-Box "cd /d $InstallDir && $Python -m home_guard_project.box register --from-json $regRemote" | Out-String)
-    $regOut.Trim() -split "`r?`n" | ForEach-Object { if ($_) { Note "    $_" } }
-    if ($DryRun -or ($LASTEXITCODE -eq 0 -and $regOut -match 'registered ')) { Ok 'Customer registered.'; Step-Ok 'register' 'registered' }
+    # Older boxes echo the owner's name. Never copy their raw response into setup logs.
+    if ($regOut -match 'registration not published yet') { Step-Warn 'register' 'saved on the box; will retry adding to Home Guard with the next upload' }
+    elseif ($DryRun -or ($LASTEXITCODE -eq 0 -and $regOut -match 'registered ')) { Ok 'Customer registered.'; Step-Ok 'register' 'registered' }
     else { Bad 'The customer could not be registered. Setup goes on; register again later.'; Step-Warn 'register' 'not registered; run setup again to retry' }
 } catch {
-    Bad "The customer could not be registered: $($_.Exception.Message)"
+    Bad 'The customer could not be registered. Check the owner details and try setup again.'
     Step-Warn 'register' 'not registered; run setup again to retry'
 } finally {
-    Invoke-Box "cmd /c del $regRemote" | Out-Null
-    Remove-Item $regLocal -ErrorAction SilentlyContinue
+    try { Invoke-Box "cmd /c if exist $regRemote del $regRemote" | Out-Null }
+    catch { Step-Warn 'register' 'could not remove the temporary answers from the box' }
+    finally { Remove-Item -LiteralPath $regLocal -Force -ErrorAction SilentlyContinue }
 }
 
 # ---- network configuration --------------------------------------------------

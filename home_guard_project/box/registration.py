@@ -15,6 +15,7 @@ import os
 import re
 import socket
 import subprocess
+import tempfile
 from typing import Any, Dict, Optional
 
 from .boxconfig import BOX_YAML, LOG_DIR, PROJECT_ROOT, load_box_config
@@ -43,10 +44,9 @@ def _now_utc() -> str:
 def _text(name: str, value: Any, max_len: int) -> str:
     if not isinstance(value, str):
         raise RegistrationError(f"{name} must be text")
-    value = value.strip()
-    if len(value) > max_len or _CONTROL_RE.search(value):
+    if len(value.strip()) > max_len or _CONTROL_RE.search(value):
         raise RegistrationError(f"{name} must be at most {max_len} characters, on one line")
-    return value
+    return value.strip()
 
 
 def _app_version() -> str:
@@ -66,21 +66,36 @@ def load_registration(path: str = REGISTRATION_PATH) -> Optional[Dict[str, Any]]
     try:
         with open(path, encoding="utf-8") as f:
             reg = json.load(f)
-    except (OSError, ValueError) as exc:
-        log.warning("Could not read %s: %s", path, exc)
+    except (OSError, ValueError):
+        log.warning("Could not read the registration; ignoring it.")
         return None
-    if not isinstance(reg, dict):
-        log.warning("%s does not hold a registration; ignoring it.", path)
+    if (not isinstance(reg, dict) or reg.get("schema_version") != SCHEMA_VERSION
+            or not isinstance(reg.get("site"), str) or not _SITE_RE.fullmatch(reg["site"])
+            or not isinstance(reg.get("owner_name"), str) or not 1 <= len(reg["owner_name"].strip()) <= 120
+            or _CONTROL_RE.search(reg["owner_name"])
+            or not isinstance(reg.get("consent"), dict)
+            or any(type(reg["consent"].get(k)) is not bool for k in _CONSENTS)):
+        log.warning("Invalid registration; ignoring it.")
         return None
     return reg
 
 
 def _save(path: str, reg: Dict[str, Any]) -> None:
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
-        json.dump(reg, f, indent=2, ensure_ascii=False)
-        f.write("\n")
-    os.replace(tmp, path)
+    _atomic_text(path, json.dumps(reg, indent=2, ensure_ascii=False) + "\n")
+
+
+def _atomic_text(path: str, text: str) -> None:
+    directory = os.path.dirname(os.path.abspath(path))
+    os.makedirs(directory, exist_ok=True)
+    descriptor, tmp = tempfile.mkstemp(prefix="registration-", suffix=".tmp", dir=directory)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp): os.remove(tmp)
 
 
 def write_registration(path: str = REGISTRATION_PATH, box_yaml: str = BOX_YAML, **fields: Any) -> Dict[str, Any]:
@@ -97,7 +112,7 @@ def write_registration(path: str = REGISTRATION_PATH, box_yaml: str = BOX_YAML, 
     old = load_registration(path) or {}
     box_site = load_box_config(box_yaml).site
     site = fields.get("site") or old.get("site") or box_site
-    if not isinstance(site, str) or not _SITE_RE.match(site):
+    if not isinstance(site, str) or not _SITE_RE.fullmatch(site):
         raise RegistrationError("site must be lowercase letters, digits or underscores")
     if site != box_site:
         raise RegistrationError(f"site {site!r} does not match this box's site {box_site!r}")
@@ -146,8 +161,10 @@ def update_site(path: str, site: str) -> Optional[Dict[str, Any]]:
     reg = load_registration(path)
     if reg is None:
         return None
-    if not _SITE_RE.match(site):
+    if not isinstance(site, str) or not _SITE_RE.fullmatch(site):
         raise RegistrationError("site must be lowercase letters, digits or underscores")
+    if reg["site"] == site:
+        return reg
     reg["site"] = site
     _save(path, reg)
     return reg
@@ -162,7 +179,7 @@ def register_from_json(src: str, path: str = REGISTRATION_PATH, box_yaml: str = 
         with open(src, encoding="utf-8-sig") as f:
             answers = json.load(f)
     except ValueError as exc:
-        raise RegistrationError(f"the answers file is not valid JSON: {exc}") from exc
+        raise RegistrationError("the answers file is not valid JSON") from exc
     finally:
         try:
             os.remove(src)
@@ -170,10 +187,9 @@ def register_from_json(src: str, path: str = REGISTRATION_PATH, box_yaml: str = 
             pass
     if not isinstance(answers, dict):
         raise RegistrationError("the answers file must hold a JSON object")
-    fields: Dict[str, Any] = {}
-    for key in ("owner_name", "owner_phone", "installer", "tailscale_host"):
-        if answers.get(key) not in (None, ""):
-            fields[key] = answers[key]
+    fields: Dict[str, Any] = {"owner_name": answers.get("owner_name") or load_box_config(box_yaml).site}
+    for key in ("owner_phone", "installer", "tailscale_host"):
+        fields[key] = answers.get(key) or ""
     for k in _CONSENTS:
         value = answers.get(f"consent_{k}", False)
         fields[f"consent_{k}"] = value if isinstance(value, bool) else False
@@ -181,10 +197,10 @@ def register_from_json(src: str, path: str = REGISTRATION_PATH, box_yaml: str = 
 
 
 def registration_summary(reg: Dict[str, Any]) -> str:
-    """One line for the console: site, owner and consents. Never the phone number."""
+    """One line for the console; never include owner details."""
     c = reg.get("consent", {})
     yes = lambda k: "yes" if c.get(k) else "no"  # noqa: E731
-    return (f"registered {reg.get('site')} for {reg.get('owner_name')}; consent: live {yes('live')}, "
+    return (f"registered {reg.get('site')}; consent: live {yes('live')}, "
             f"recordings {yes('recordings')}, training {yes('training')}")
 
 
@@ -192,12 +208,12 @@ def put_registration(reg: Dict[str, Any], bucket: str, prefix: str, s3_client: A
                      published_path: str = PUBLISHED_PATH) -> Optional[str]:
     """Write *reg* to ``<prefix>/_status/registration.json`` unless it is already there.
 
-    The hash of the last published content and prefix is kept in *published_path*,
+    The hash of the last published content, bucket and key is kept in *published_path*,
     so the hourly upload sends the file only after it changes. Returns the key, or None when skipped.
     """
-    body = json.dumps(reg, indent=2, ensure_ascii=False).encode("utf-8")
+    body = json.dumps(reg, indent=2, ensure_ascii=False, sort_keys=True).encode("utf-8")
     key = f"{prefix}/{STATUS_KEY}"
-    digest = hashlib.sha256(key.encode("utf-8") + b"\0" + body).hexdigest()
+    digest = hashlib.sha256(bucket.encode("utf-8") + b"\0" + key.encode("utf-8") + b"\0" + body).hexdigest()
     try:
         with open(published_path, encoding="utf-8") as f:
             if f.read().strip() == digest:
@@ -209,7 +225,5 @@ def put_registration(reg: Dict[str, Any], bucket: str, prefix: str, s3_client: A
 
         s3_client = boto3.client("s3")
     s3_client.put_object(Bucket=bucket, Key=key, Body=body, ContentType="application/json")
-    os.makedirs(os.path.dirname(published_path), exist_ok=True)
-    with open(published_path, "w", encoding="utf-8") as f:
-        f.write(digest)
+    _atomic_text(published_path, digest)
     return key
