@@ -44,8 +44,7 @@ def cmd_init_db(args) -> int:
 
 def cmd_create_staff(args) -> int:
     import pyotp
-    from argon2 import PasswordHasher
-
+    from . import auth
     from .db import session_scope
     from .models import Staff
 
@@ -57,7 +56,7 @@ def cmd_create_staff(args) -> int:
             print(f"staff {args.email} already exists", file=sys.stderr)
             return 1
         s.add(Staff(email=args.email, name=args.name, role=args.role,
-                    password_hash=PasswordHasher().hash(password), totp_secret=totp_secret))
+                    password_hash=auth.hash_password(password), totp_secret=totp_secret))
     uri = pyotp.TOTP(totp_secret).provisioning_uri(name=args.email, issuer_name="Home Guard Admin")
     print(f"Created {args.role} {args.email}. Shown once, store it now.")
     print(f"password: {password}")

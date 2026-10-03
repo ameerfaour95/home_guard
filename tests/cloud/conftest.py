@@ -58,3 +58,46 @@ def db_engine(pg_url, pg_template):
     engine.dispose()
     with pg_template.connect() as c:
         c.execute(text(f"DROP DATABASE IF EXISTS {name} WITH (FORCE)"))
+
+
+@pytest.fixture()
+def client(db_engine):
+    from fastapi.testclient import TestClient
+
+    from home_guard_project.cloud.app import create_app
+    from home_guard_project.cloud.settings import Settings
+
+    url = db_engine.url.render_as_string(hide_password=False)
+    app = create_app(Settings.for_tests(url), s3=None, init_db=False)
+    with TestClient(app) as c:
+        yield c
+    app.state.engine.dispose()
+
+
+@pytest.fixture()
+def staff_factory(client):
+    """staff_factory(role) -> (staff, password, totp_secret, auth_headers)."""
+    import itertools
+    import secrets
+
+    import pyotp
+
+    from home_guard_project.cloud import auth
+    from home_guard_project.cloud.db import session_scope
+    from home_guard_project.cloud.models import Staff
+
+    counter = itertools.count(1)
+
+    def make(role="admin"):
+        n = next(counter)
+        password = secrets.token_urlsafe(12)
+        secret = pyotp.random_base32()
+        with session_scope(client.app.state.engine) as s:
+            staff = Staff(email=f"{role}{n}@example.com", name=f"{role.title()} {n}", role=role,
+                          password_hash=auth.hash_password(password), totp_secret=secret)
+            s.add(staff)
+            s.flush()
+            token = auth.make_access_token(staff, client.app.state.settings)
+        return staff, password, secret, {"Authorization": f"Bearer {token}"}
+
+    return make
