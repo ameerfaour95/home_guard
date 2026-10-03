@@ -1,0 +1,75 @@
+{
+  "camera_name": "front_side",
+  "kind": "alert",
+  "clip_path": "clips\\front_side\\2026-10-03\\front_side_1791020177_alert.mp4",
+  "clip_start_ts": 1791020174.1329982,
+  "clip_end_ts": 1791020183.9285913,
+  "clip_start_local": "2026-10-03 12:36:14",
+  "clip_end_local": "2026-10-03 12:36:23",
+  "duration_sec": 9.795593023300171,
+  "frames_written": 44,
+  "fps_estimated": 4.4,
+  "codec": "h264",
+  "buffer": {
+    "store_fps": 4.4,
+    "store_size": [
+      704,
+      576
+    ]
+  },
+  "yolo": {
+    "class_counts": {
+      "person": 1
+    },
+    "trigger_classes": [
+      "person"
+    ],
+    "trigger_detected": true
+  },
+  "alert": {
+    "summary": "A person appears in the frame walking across the area, wearing light-colored clothing.",
+    "label": "normal",
+    "alert_command": "[send_message]",
+    "alert_reason": "",
+    "labels": [
+      "person"
+    ],
+    "muted": false,
+    "dispatch": {
+      "channel": "telegram",
+      "telegram": {
+        "command": "[send_message]",
+        "telegram": {
+          "sent": true,
+          "results": [
+            {
+              "chat_id": "-100100",
+              "ok": true,
+              "message_id": 1
+            }
+          ]
+        }
+      }
+    }
+  },
+  "model_response": {
+    "summary": "A person appears in the frame walking across the area, wearing light-colored clothing.",
+    "label": "normal",
+    "people": 1,
+    "vehicle_moving": false
+  },
+  "teacher": {
+    "model": "gpt-4o",
+    "prompt_version": "2026-10-03.tagged-rules-label",
+    "prompt": "You are the eyes of a home security system. These are sequential frames (one short clip of a few\nseconds) from the homeowner's own camera \"front_side\", local time 12:36:18.\n\nWrite \"summary\": what happ",
+    "input_frames": [
+      "vlm_crops\\front_side\\2026-10-03\\front_side_1791020177_alert_f0.jpg",
+      "vlm_crops\\front_side\\2026-10-03\\front_side_1791020177_alert_f1.jpg",
+      "vlm_crops\\front_side\\2026-10-03\\front_side_1791020177_alert_f2.jpg",
+      "vlm_crops\\front_side\\2026-10-03\\front_side_1791020177_alert_f3.jpg",
+      "vlm_crops\\front_side\\2026-10-03\\front_side_1791020177_alert_f4.jpg"
+    ],
+    "raw_path": "responses\\front_side\\2026-10-03\\front_side_1791020177_alert.model_raw.txt",
+    "temperature": 0
+  }
+}

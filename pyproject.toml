@@ -69,3 +69,21 @@ admin = [
     "pytest>=8,<10",
     "tzdata>=2025.2",
 ]
+cloud = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.8",
+    "sqlalchemy>=2.0.30",
+    "alembic>=1.13",
+    "psycopg[binary]>=3.2",
+    "argon2-cffi>=23.1",
+    "pyotp>=2.9",
+    "pyjwt>=2.9",
+    "httpx>=0.27",
+    "moto[s3]>=5.0",
+    "pgserver>=0.1.4",
+    "pytest>=8",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

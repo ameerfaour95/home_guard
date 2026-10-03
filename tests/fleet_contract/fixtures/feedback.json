@@ -1,0 +1,21 @@
+{
+  "time_utc": "2026-10-02T22:23:57Z",
+  "alert": {
+    "alert_id": "test_ch6_1790979739_alert",
+    "camera": "test_ch6",
+    "summary": "A person is stretching on the porch.",
+    "ts": 1790979739.9192235
+  },
+  "verdict": "none",
+  "action": "none",
+  "mute_until_utc": null,
+  "camera": null,
+  "note": "",
+  "source": "text",
+  "raw_text": "test message",
+  "from": {
+    "user_id": 1,
+    "name": "Owner"
+  },
+  "chat_id": "-100100"
+}

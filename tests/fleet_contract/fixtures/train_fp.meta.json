@@ -1,0 +1,59 @@
+{
+  "camera_name": "back_door",
+  "kind": "false_positive",
+  "clip_path": "clips\\back_door\\2026-10-03\\back_door_1791013299_fp.mp4",
+  "clip_start_ts": 1791013295.5857632,
+  "clip_end_ts": 1791013305.5090182,
+  "clip_start_local": "2026-10-03 10:41:35",
+  "clip_end_local": "2026-10-03 10:41:45",
+  "duration_sec": 9.92325496673584,
+  "frames_written": 45,
+  "fps_estimated": 4.4,
+  "codec": "h264",
+  "buffer": {
+    "store_fps": 4.4,
+    "store_size": [
+      704,
+      576
+    ]
+  },
+  "yolo": {
+    "class_counts": {
+      "person": 1
+    },
+    "trigger_classes": [
+      "person"
+    ],
+    "trigger_detected": true
+  },
+  "alert": {
+    "summary": "Nothing notable is happening.",
+    "label": "normal",
+    "alert_command": "[none]",
+    "alert_reason": "",
+    "labels": [
+      "person"
+    ],
+    "false_positive": true,
+    "vlm": {
+      "people": 0,
+      "vehicle_moving": false
+    }
+  },
+  "model_response": {
+    "summary": "Nothing notable is happening.",
+    "label": "normal",
+    "people": 0,
+    "vehicle_moving": false
+  },
+  "teacher": {
+    "model": "gpt-4o",
+    "prompt_version": "2026-10-03.summary-label",
+    "prompt": "You are helping a homeowner by describing what their own home security camera \"back_door\" sees.\nLook at these sequential frames (about 5 seconds, one short clip) and reply with ONE short, factual\nsent",
+    "input_frames": [
+      "vlm_crops\\back_door\\2026-10-03\\back_door_1791013299_fp_f0.jpg"
+    ],
+    "raw_path": "responses\\back_door\\2026-10-03\\back_door_1791013299_fp.model_raw.txt",
+    "temperature": 0
+  }
+}
