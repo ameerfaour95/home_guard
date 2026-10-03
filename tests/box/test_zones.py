@@ -261,3 +261,23 @@ class RenameZoneRefusesOverwriteTest(unittest.TestCase):
         with self.assertLogs(z.log, level="WARNING"):
             self.assertFalse(z.rename_zone("front", "back", self.path))
         self.assertEqual(z.load_zones(self.path), {"front": ZA, "back": ZB})
+
+
+class ZonesImportFailsLoudlyTest(unittest.TestCase):
+    def test_a_broken_zones_module_is_not_reported_as_a_missing_bare_module(self) -> None:
+        import sys
+
+        from home_guard_project.data_collection import config
+
+        key = "home_guard_project.data_collection.zones"
+        saved = sys.modules.get(key)
+        sys.modules[key] = None   # the package-mode import of zones.py now fails with ImportError
+        try:
+            with self.assertRaises(ImportError) as cm:
+                config._load_zones("zones.yaml")
+        finally:
+            if saved is None:
+                sys.modules.pop(key, None)
+            else:
+                sys.modules[key] = saved
+        self.assertNotIn("No module named 'zones'", str(cm.exception))

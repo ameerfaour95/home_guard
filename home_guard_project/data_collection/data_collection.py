@@ -32,9 +32,9 @@ import torch
 from ultralytics import YOLO
 
 from config import COCO_NAMES, Config, load_config
-try:
+if __package__:
     from .zones import ZoneMask, mask_for   # package mode (the preview test loads this file under the package)
-except ImportError:
+else:
     from zones import ZoneMask, mask_for    # script mode: run_collector.sh puts this dir on sys.path
 
 log = logging.getLogger(__name__)
