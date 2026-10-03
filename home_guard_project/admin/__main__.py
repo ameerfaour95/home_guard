@@ -21,12 +21,24 @@ def main():
     from home_guard_project.admin.http_backend import HttpBackend
     from home_guard_project.admin.demo_backend import DemoBackend
     from home_guard_project.admin.shell import AdminWindow
+    from home_guard_project.admin.backend import BackendError, UnavailableBackend
+    from home_guard_project.admin.logging_setup import setup_logging, install_exception_hook
+    from home_guard_project.admin.workers import shutdown_workers
     import home_guard_project.admin as admin_package
     app = QApplication(sys.argv[:1])
     app.setApplicationName('HomeGuardAdmin')
     apply_theme(app, args.theme)
-    backend = DemoBackend() if args.demo else HttpBackend(args.server)
+    setup_logging()
+    startup_error = None
+    try:
+        backend = DemoBackend() if args.demo else HttpBackend(args.server)
+    except BackendError as error:
+        startup_error = error
+        backend = UnavailableBackend(args.server, error)
     window = AdminWindow(backend, demo=args.demo, theme=args.theme)
+    if startup_error:
+        window.signin.error.setText(str(startup_error))
+    install_exception_hook(lambda message: window.statusBar().showMessage(message))
     # PyInstaller places the entry script at bundle root. Package __file__ keeps
     # the package-relative resource path in both source and frozen builds.
     icon = Path(admin_package.__file__).parent.parent / 'box' / 'assets' / 'logo.ico'
@@ -72,7 +84,7 @@ def main():
                 studio.wizard.name.setText('smoke_dataset'); studio.wizard.advance(); studio.wizard.advance(); stage[0] = 6
             elif stage[0] == 6 and shell.screens['Studio'].wizard.preview is not None:
                 wizard = shell.screens['Studio'].wizard
-                if len(wizard.preview['included']) != 8:
+                if not wizard.preview.included_ids:
                     app.exit(2); return
                 wizard.reject(); shell.navigate('Audit'); stage[0] = 7
             elif stage[0] == 7 and shell.screens['Audit'].loaded_once:
@@ -80,9 +92,13 @@ def main():
         smoke_timer = QTimer(window)
         smoke_timer.setInterval(100); smoke_timer.timeout.connect(verify); smoke_timer.start()
     result = app.exec()
-    QThreadPool.globalInstance().waitForDone()
-    if hasattr(backend, 'close'):
+    drained = shutdown_workers()
+    if drained and hasattr(backend, 'close'):
         backend.close()
+    if not drained:
+        # Qt destroys the global pool with an unbounded join. All jobs have
+        # cancellation set; enforce the process deadline if a socket is stuck.
+        os._exit(result)
     return result
 
 

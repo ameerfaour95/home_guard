@@ -3,7 +3,7 @@ from PySide6.QtGui import QColor, QFont, QPixmap
 from PySide6.QtWidgets import (QDialog, QWidget, QVBoxLayout, QHBoxLayout, QComboBox,
     QListView, QStyledItemDelegate, QAbstractItemView, QLineEdit, QStyle)
 from .workers import TaskRunner
-from .backend import BackendError
+from .backend import BackendError, AuthError
 from .widgets.common import label, button
 from .widgets.data_table import RowsModel
 from .theme import PALETTES
@@ -12,9 +12,11 @@ from .formatting import local_time
 
 class CollectionPicker(QDialog):
     added = Signal(object)
+    session_expired = Signal()
 
     def __init__(self, backend, event_id, last=None, parent=None):
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.backend, self.event_id, self.last = backend, event_id, last
         self.setWindowTitle('Add to collection'); self.setFixedWidth(440); self.setModal(True)
         box = QVBoxLayout(self); box.setContentsMargins(24, 24, 24, 24); box.setSpacing(16)
@@ -30,6 +32,7 @@ class CollectionPicker(QDialog):
 
     def loaded(self, collections, error):
         if error:
+            if isinstance(error, AuthError): self.session_expired.emit()
             self.message.setText(str(error)); return
         for collection in collections:
             self.choices.addItem(f'{collection.name}  ·  {collection.event_count} events', collection.id)
@@ -46,15 +49,18 @@ class CollectionPicker(QDialog):
     def saved(self, collection, error):
         self.submit.setEnabled(True); self.choices.setEnabled(True)
         if error:
+            if isinstance(error, AuthError): self.session_expired.emit()
             self.message.setText(str(error)); return
         self.added.emit(collection); self.accept()
 
 
 class CreateCollection(QDialog):
     created = Signal(object)
+    session_expired = Signal()
 
     def __init__(self, backend, parent=None):
         super().__init__(parent); self.backend = backend
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.setWindowTitle('New collection'); self.setFixedWidth(480); self.setModal(True)
         box = QVBoxLayout(self); box.setContentsMargins(24, 24, 24, 24); box.setSpacing(14)
         box.addWidget(label('New collection', 'section'))
@@ -75,6 +81,7 @@ class CreateCollection(QDialog):
     def completed(self, result, error):
         self.submit.setEnabled(True)
         if error:
+            if isinstance(error, AuthError): self.session_expired.emit()
             self.error.setText(str(error)); return
         self.created.emit(result); self.accept()
 
@@ -112,6 +119,7 @@ class GridDelegate(QStyledItemDelegate):
 class CollectionGrid(QWidget):
     changed = Signal()
     event_requested = Signal(int)
+    session_expired = Signal()
 
     def __init__(self, backend, theme='dark'):
         super().__init__(); self.backend, self.collection = backend, None
@@ -140,18 +148,14 @@ class CollectionGrid(QWidget):
         if self.runner.busy:
             return
         cid, self.pending = self.collection.id, self.generation
-        if not hasattr(self.backend, 'demo_collection_events'):
-            self.message.setText('Collection contents are unavailable with this server version. Reading collection members needs a Cloud API update.')
-            return
         def fetch():
-            events = self.backend.demo_collection_events(cid)
+            events, cursor = [], None
+            while True:
+                page = self.backend.collection_events(cid, cursor=cursor)
+                events.extend(page.items)
+                cursor = page.next_cursor
+                if not cursor: break
             images = {}
-            for e in events:
-                if e.thumbnail_url and e.thumbnail_url not in images:
-                    try:
-                        images[e.thumbnail_url] = self.backend.media_bytes(e.thumbnail_url)
-                    except BackendError:
-                        pass
             return events, images
         self.runner.start(fetch)
 
@@ -159,6 +163,7 @@ class CollectionGrid(QWidget):
         if self.pending != self.generation:
             self.request(); return
         if error:
+            if isinstance(error, AuthError): self.session_expired.emit()
             self.message.setText(str(error)); return
         events, images = result
         self.images.clear()
@@ -176,6 +181,7 @@ class CollectionGrid(QWidget):
 
     def removed(self, collection, error):
         if error:
+            if isinstance(error, AuthError): self.session_expired.emit()
             self.message.setText(str(error)); self.remove.setEnabled(True); return
         if collection.id == self.collection.id:
             self.open(collection)

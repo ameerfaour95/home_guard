@@ -1,5 +1,5 @@
 import json
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal, QTimer, QPoint
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QPlainTextEdit, QApplication
 from .event_logic import decision, ai_status, VERDICTS
@@ -21,6 +21,8 @@ class TextDisclosure(QWidget):
 
 
 class AiRecord(QScrollArea):
+    assets_requested = Signal()
+
     def __init__(self, role):
         super().__init__()
         self.role = role
@@ -30,6 +32,20 @@ class AiRecord(QScrollArea):
         self.layout = QVBoxLayout(self.body); self.layout.setContentsMargins(20, 18, 20, 20); self.layout.setSpacing(12)
         self.frames, self.raw_answers = {}, {}
         self.dispatch_label = None
+        self.verticalScrollBar().valueChanged.connect(lambda _: self.assets_requested.emit())
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        QTimer.singleShot(0, self.assets_requested.emit)
+
+    def visible_assets(self):
+        if not self.isVisible():
+            return [], []
+        viewport = self.viewport().rect()
+        images = [aid for aid, tile in self.frames.items()
+                  if tile.isVisible() and viewport.intersects(tile.rect().translated(tile.mapTo(self.viewport(), QPoint())))]
+        answers = [aid for aid, raw in self.raw_answers.items() if raw.content.isVisible()]
+        return images, answers
 
     def set_event(self, event, zone):
         while self.layout.count():
@@ -71,6 +87,7 @@ class AiRecord(QScrollArea):
                 add(label('No parsed model answer is available for this event.', 'muted', True))
             if run.raw_text_artifact_id:
                 raw = TextDisclosure('Raw answer', 'Loading saved answer…'); self.raw_answers[run.raw_text_artifact_id] = raw; add(raw)
+                raw.toggle.toggled.connect(lambda _: self.assets_requested.emit())
             add(TextDisclosure('Full prompt', run.prompt or 'No prompt was saved.'))
         if self.role in ('admin', 'support'):
             dispatch = event.dispatch
@@ -92,10 +109,12 @@ class AiRecord(QScrollArea):
 
     def set_assets(self, images, answers):
         for aid, tile in self.frames.items():
+            if aid not in images: continue
             pix = QPixmap(); pix.loadFromData(images.get(aid, b''))
             if pix.isNull():
                 tile.setText('Frame unavailable')
             else:
                 tile.setPixmap(pix.scaled(tile.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
         for aid, raw in self.raw_answers.items():
+            if aid not in answers: continue
             raw.text.setPlainText(answers.get(aid, 'Saved answer could not be loaded. Reopen the event to retry.'))

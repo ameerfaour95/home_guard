@@ -73,6 +73,7 @@ class DemoBackend(DemoStudio):
                 boundary = datetime.fromisoformat(str(filters[key]).replace('Z', '+00:00'))
                 items = [e for e in items if (e.start_utc >= boundary if lower else e.start_utc < boundary)]
         items.sort(key=lambda e: (e.start_utc, e.id), reverse=True)
+        total = len(items) if filters.get('with_total') else None
         if filters.get('cursor'):
             try:
                 stamp, eid = json.loads(base64.urlsafe_b64decode(filters['cursor']))
@@ -83,7 +84,7 @@ class DemoBackend(DemoStudio):
         limit = max(1, min(500, int(filters.get('limit', 100))))
         selected = items[:limit]
         cursor = base64.urlsafe_b64encode(json.dumps([selected[-1].start_utc.isoformat(), selected[-1].id]).encode()).decode() if len(items) > limit else None
-        return EventPage(selected, cursor)
+        return EventPage(selected, cursor, total, False)
 
     def _apply_review(self, event):
         with self._lock:

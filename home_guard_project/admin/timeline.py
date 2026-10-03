@@ -8,6 +8,7 @@ from .formatting import utcnow, local_time
 from .event_logic import KINDS
 from .timeline_model import TimelineModel, TimelineDelegate
 from .workers import TaskRunner
+from .review_controller import ReviewController
 from .widgets.activity import DensityStrip
 from .widgets.common import label, button, Skeleton, EmptyState
 
@@ -24,7 +25,8 @@ class TimelineScreen(QWidget):
         self.cell = None
         self.saved_filter = None
         self.generation = 0
-        self.runner, self.density_runner, self.review_runner = [TaskRunner(self) for _ in range(3)]
+        self.runner, self.density_runner = [TaskRunner(self) for _ in range(2)]
+        self.review_runner = ReviewController(backend, self)
         self.runner.finished.connect(self.completed)
         self.density_runner.finished.connect(self.density_loaded)
         self.review_runner.finished.connect(self.review_done)
@@ -247,7 +249,7 @@ class TimelineScreen(QWidget):
     def review_current(self, key):
         event = self.current()
         if event:
-            self.review_runner.start(lambda: self.backend.review(event.id, **{key: not getattr(event, key)}))
+            self.review_runner.submit(event, key)
 
     def review_done(self, event, error):
         if error:

@@ -198,7 +198,7 @@ def test_successful_signin_and_expired_session(widgets, wait, tmp_path):
     wait(lambda: window.shell is not None and window.shell.fleet.snapshot is not None)
     window.shell.fleet.show_error(AuthError())
     assert window.shell is None
-    assert window.signin.error.text() == 'Your session expired. Sign in again.'
+    assert window.signin.error.text() == 'Your session needs a new sign-in'
     assert window.signin.email.text() == 'maya@example.com'
 
 

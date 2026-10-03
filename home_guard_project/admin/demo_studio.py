@@ -1,4 +1,4 @@
-"""Session-local Studio demo state. Extra preview helpers are explicitly demo-only."""
+"""Session-local implementation of the same Studio protocol as Cloud."""
 import json
 from dataclasses import replace
 from datetime import timedelta
@@ -29,6 +29,43 @@ class DemoStudio:
     def demo_collection_events(self, id):
         self.collections()
         return [self.event(eid) for eid in self._members[str(id)]]
+
+    def collection_events(self, id, *, cursor=None, limit=100):
+        from .models import EventPage
+        events = sorted(self.demo_collection_events(id), key=lambda e: (e.start_utc, e.id), reverse=True)
+        start, limit = int(cursor or 0), min(500, max(1, limit))
+        return EventPage(events[start:start+limit], str(start+limit) if start+limit < len(events) else None)
+
+    def export_preview(self, **request):
+        import hashlib
+        from collections import Counter
+        from .models import ExportPreview, ExportExclusion
+        events = self.demo_collection_events(request['collection_id'])
+        consent = self.demo_training_consent(events)
+        included, excluded, groups = [], [], {}
+        splits = request.get('split', {'train': .8, 'val': .1, 'test': .1})
+        counts = Counter({k: 0 for k in splits})
+        for event in events:
+            reason = ('no_training_consent' if not consent.get(event.id) else
+                      'expired' if event.completeness.expired else
+                      'video_unavailable' if not event.completeness.video else
+                      'no_real_ai' if request.get('formats') == ['vlm_jsonl'] and not request.get('include_fallback_ai') and event.completeness.ai != 'real' else None)
+            if reason:
+                excluded.append(ExportExclusion(event.id, reason))
+                continue
+            included.append(event.id)
+            group = f'{event.site}|{event.start_utc.date()}'
+            if group not in groups:
+                fraction = int.from_bytes(hashlib.sha256((request.get('name', '')+group).encode()).digest()[:8], 'big') / 2**64
+                edge = 0
+                for key, value in splits.items():
+                    edge += value
+                    if fraction < edge:
+                        groups[group] = key
+                        break
+            counts[groups[group]] += 1
+        warnings = ['Fallback and failed AI are omitted only from vlm.jsonl; clips and YOLO labels remain.'] if not request.get('include_fallback_ai') else []
+        return ExportPreview(included, excluded, dict(counts), len(groups), warnings)
 
     def demo_training_consent(self, events):
         # This fixture-only helper never exposes customer identities to labelers.
@@ -73,11 +110,10 @@ class DemoStudio:
             raise ServerError()
         with self._lock:
             exports = self.exports()
-            events = self.demo_collection_events(request['collection_id'])
-            summary = consent_summary(events, self.demo_training_consent(events), request['include_fallback_ai'])
+            summary = self.export_preview(**request)
             version = max((e.version for e in exports if e.name == request['name']), default=0)+1
             result = ExportOut(max((e.id for e in exports), default=0)+1, request['name'], version,
-                               'queued', len(summary['included']), '', None, None, self.now, self.me().name)
+                               'queued', len(summary.included_ids), '', None, None, self.now, self.me().name)
             self._exports.insert(0, result)
             return replace(result)
 

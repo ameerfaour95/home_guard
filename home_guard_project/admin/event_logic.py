@@ -1,5 +1,6 @@
 """Pure presentation math. UTC buckets remain unambiguous across DST changes."""
 from bisect import bisect_left
+from statistics import median
 from datetime import timedelta
 
 KINDS = {'alert': 'Alert', 'false_positive': 'Dismissed by AI', 'paused': 'Paused',
@@ -15,7 +16,7 @@ def decision(command):
 def ai_status(status, model=None):
     return {'real': f'Real answer from {model or "an unrecorded model"}',
             'failed': 'AI call failed — no answer', 'fallback': 'Fallback: no model ran',
-            'none': 'No AI answer recorded'}[status]
+            'none': 'No AI answer recorded'}.get(status, 'Unknown AI state')
 
 
 def provenance(status, frames=()):
@@ -23,7 +24,7 @@ def provenance(status, frames=()):
         steps = {b.frame_index-a.frame_index for a, b in zip(frames, frames[1:])}
         return 'Boxes: sampled every 2nd frame' if steps == {2} else 'Boxes: sampled frames'
     return {'captured': 'Boxes: captured', 'recomputed': 'Boxes: recomputed in cloud',
-            'none': 'No boxes saved for this clip'}[status]
+            'none': 'No boxes saved for this clip'}.get(status, 'Unknown boxes state')
 
 
 def video_rect(width, height, frame_width, frame_height):
@@ -47,11 +48,10 @@ def nearest_frame(frames, position_ms, offset_ms=0, times=None):
     times = times if times is not None else [f.t_sec for f in frames]
     t = (position_ms+offset_ms)/1000
     i = bisect_left(times, t)
-    if i == 0:
-        return frames[0]
-    if i == len(frames):
-        return frames[-1]
-    return frames[i-1] if t-times[i-1] <= times[i]-t else frames[i]
+    nearest = frames[0] if i == 0 else frames[-1] if i == len(frames) else frames[i-1] if t-times[i-1] <= times[i]-t else frames[i]
+    gaps = [b-a for a, b in zip(times, times[1:]) if b > a]
+    tolerance = 1.5 * median(gaps) if gaps else 0
+    return nearest if abs(t-nearest.t_sec) <= tolerance else None
 
 
 def hour_buckets(start, end):

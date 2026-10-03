@@ -2,9 +2,13 @@
 from threading import RLock
 import os
 import ssl
+import sys
+from urllib.parse import urlsplit
 import certifi
 import httpx
-from .backend import AuthError, ForbiddenError, OfflineError, ServerError, RateLimitError
+from .backend import (AuthError, LoginError, ForbiddenError, OfflineError, ServerError,
+                      RateLimitError, TlsError, ConfigurationError, UnsupportedError, BackendError)
+from .models import ExportPreview
 from .models import SavedFilter, CollectionOut, ExportOut, AuditPage, DensityOut, ReviewCount
 from .models import TokenPair, StaffOut, FleetResponse, CustomerOut, EventPage, EventDetail, EventSummary, DetectionsOut, MediaAccess, decode
 
@@ -17,18 +21,35 @@ def tls_context():
     PROTOCOL_TLS_CLIENT retains certificate and hostname verification.
     """
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    context.load_verify_locations(cafile=os.environ.get('SSL_CERT_FILE') or certifi.where(),
-                                  capath=os.environ.get('SSL_CERT_DIR'))
+    try:
+        context.load_verify_locations(cafile=certifi.where())
+        if sys.platform == 'win32':
+            context.load_default_certs()
+        if os.environ.get('SSL_CERT_FILE') or os.environ.get('SSL_CERT_DIR'):
+            context.load_verify_locations(cafile=os.environ.get('SSL_CERT_FILE'),
+                                          capath=os.environ.get('SSL_CERT_DIR'))
+    except (OSError, ssl.SSLError):
+        raise TlsError() from None
     return context
 
 
 class HttpBackend:
     def __init__(self, base_url: str, *, transport=None):
+        origin = urlsplit(base_url)
+        if (origin.scheme != 'https' and not (origin.scheme == 'http' and
+                origin.hostname in ('localhost', '127.0.0.1'))) or not origin.hostname or origin.username or origin.password:
+            raise ConfigurationError()
         self.base_url = base_url.rstrip('/')
         self.client = httpx.Client(base_url=self.base_url + '/v1/', transport=transport,
-                                   timeout=15.0, follow_redirects=False, verify=tls_context())
+                                   timeout=httpx.Timeout(15, connect=5), follow_redirects=False, verify=tls_context())
         self.tokens = None
         self._auth_lock = RLock()
+        self._epoch = 0
+
+    def clear_session(self):
+        with self._auth_lock:
+            self._epoch += 1
+            self.tokens = None
 
     def close(self):
         self.client.close()
@@ -36,13 +57,18 @@ class HttpBackend:
     def _send(self, method, path, **kwargs):
         try:
             return self.client.request(method, path, **kwargs)
-        except httpx.TransportError:
+        except httpx.TransportError as exc:
+            cause = exc
+            while cause is not None:
+                if isinstance(cause, ssl.SSLCertVerificationError):
+                    raise TlsError() from None
+                cause = cause.__cause__ or cause.__context__
             raise OfflineError() from None
 
     @staticmethod
     def _parse(response, model):
         if response.status_code >= 300:
-            error = {401: AuthError, 403: ForbiddenError, 429: RateLimitError}.get(response.status_code, ServerError)
+            error = {401: AuthError, 403: ForbiddenError, 429: RateLimitError, 501: UnsupportedError}.get(response.status_code, ServerError)
             raise error()
         try:
             return decode(model, response.json())
@@ -51,28 +77,40 @@ class HttpBackend:
 
     def login(self, email, password, totp):
         with self._auth_lock:
+            self._epoch += 1
             self.tokens = None
-            self.tokens = self._parse(self._send('POST', 'auth/login', json=dict(
-                email=email, password=password, totp=totp)), TokenPair)
+            try:
+                self.tokens = self._parse(self._send('POST', 'auth/login', json=dict(
+                    email=email, password=password, totp=totp)), TokenPair)
+            except AuthError:
+                raise LoginError() from None
             return self.tokens
 
     def _response(self, method, path, **kwargs):
-        token = self.tokens.access_token if self.tokens else ''
+        with self._auth_lock:
+            epoch = self._epoch
+            token = self.tokens.access_token if self.tokens else ''
         response = self._send(method, path, **kwargs, headers={'Authorization': f'Bearer {token}'})
+        if epoch != self._epoch:
+            raise AuthError()
         if response.status_code == 401 and self.tokens:
             # Concurrent requests share one refresh; each original request retries once.
             with self._auth_lock:
+                if epoch != self._epoch:
+                    raise AuthError()
                 if self.tokens and self.tokens.access_token == token:
                     try:
                         self.tokens = self._parse(self._send('POST', 'auth/refresh', json={
                             'refresh_token': self.tokens.refresh_token}), TokenPair)
-                    except AuthError:
+                    except BackendError:
                         self.tokens = None
-                        raise
+                        raise AuthError() from None
                 if not self.tokens:
                     raise AuthError()
                 token = self.tokens.access_token
             response = self._send(method, path, **kwargs, headers={'Authorization': f'Bearer {token}'})
+        if epoch != self._epoch:
+            raise AuthError()
         if response.status_code == 401:
             self.tokens = None
         return response
@@ -146,6 +184,13 @@ class HttpBackend:
 
     def collections(self):
         return self._get('studio/collections', list[CollectionOut])
+
+    def collection_events(self, id, *, cursor=None, limit=100):
+        return self._get(f'studio/collections/{int(id)}/items', EventPage,
+                         **dict(limit=limit, **({'cursor': cursor} if cursor else {})))
+
+    def export_preview(self, **request):
+        return self._request('POST', 'studio/exports/preview', ExportPreview, json=request)
 
     def create_collection(self, name, description=''):
         return self._request('POST', 'studio/collections', CollectionOut, json=dict(name=name, description=description))

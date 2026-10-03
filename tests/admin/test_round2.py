@@ -53,7 +53,7 @@ def test_nearest_frame_offset_ties_empty_and_not_run():
     assert nearest_frame(frames, 1000) is frames[0]
     assert nearest_frame(frames, 1500, -500) is frames[0]
     assert nearest_frame(frames, 1500, 500) is frames[1]
-    assert nearest_frame(frames, 99999) is frames[-1]
+    assert nearest_frame(frames, 99999) is None
     assert nearest_frame(frames, -999) is frames[0]
     assert nearest_frame([], 0) is None
 

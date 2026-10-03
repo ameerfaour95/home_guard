@@ -3,6 +3,7 @@ import time
 import sys
 from pathlib import Path
 import pytest
+from shiboken6 import isValid
 
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -39,6 +40,7 @@ def widgets(app):
     QThreadPool.globalInstance().waitForDone()
     app.processEvents()
     for widget in created:
-        widget.close()
-        widget.deleteLater()
+        if isValid(widget):
+            widget.close()
+            widget.deleteLater()
     app.processEvents()

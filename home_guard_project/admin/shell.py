@@ -133,11 +133,16 @@ class Shell(QWidget):
             self.customer_page.event_view.review_changed.connect(lambda *_: self.update_badge())
 
     def update_badge(self):
+        if self.badge_runner.busy:
+            self.badge_dirty = True
+            return
+        self.badge_dirty = False
         self.badge_runner.start(self.backend.review_count)
 
     def badge_loaded(self, events, error):
         self.review_badge.setText('—' if error else str(events.unreviewed_24h))
         if isinstance(error,AuthError): self.session_expired.emit()
+        elif self.badge_dirty: self.update_badge()
 
     def navigate(self, title):
         if title not in self.screens:
@@ -228,8 +233,8 @@ class AdminWindow(QMainWindow):
         if self.signin:
             self.session.removeWidget(self.signin)
             self.signin.deleteLater()
-        if hasattr(self.backend, 'tokens'):
-            self.backend.tokens = None
+        if hasattr(self.backend, 'clear_session'):
+            self.backend.clear_session()
         self.signin = SignIn(self.backend, self.prefs, self.environment())
         self.signin.authenticated.connect(self.enter)
         self.signin.demo_requested.connect(self.use_demo)
@@ -249,4 +254,4 @@ class AdminWindow(QMainWindow):
 
     def expired(self):
         self.show_signin()
-        self.signin.error.setText('Your session expired. Sign in again.')
+        self.signin.error.setText('Your session needs a new sign-in')

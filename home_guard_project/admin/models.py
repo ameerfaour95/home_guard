@@ -10,8 +10,8 @@ from typing import Literal, Union, get_args, get_origin, get_type_hints
 
 Role = Literal['admin', 'support', 'labeler']
 Verdict = Literal['healthy', 'warning', 'critical', 'offline', 'unknown']
-AiStatus = Literal['real', 'fallback', 'failed', 'none']
-BoxesStatus = Literal['captured', 'sampled', 'recomputed', 'none']
+AiStatus = Literal['real', 'fallback', 'failed', 'none', 'unknown']
+BoxesStatus = Literal['captured', 'sampled', 'recomputed', 'none', 'unknown']
 EventKind = Literal['alert', 'false_positive', 'paused', 'owner_feedback', 'trigger', 'random', 'unknown']
 
 
@@ -25,8 +25,8 @@ class StaffOut:
 
 @dataclass
 class TokenPair:
-    access_token: str
-    refresh_token: str
+    access_token: str = field(repr=False)
+    refresh_token: str = field(repr=False)
     expires_in: int
     staff: StaffOut
 
@@ -122,6 +122,8 @@ class EventSummary:
 class EventPage:
     items: list[EventSummary]
     next_cursor: str | None
+    total: int | None = None
+    total_capped: bool = False
 
 
 @dataclass
@@ -244,6 +246,21 @@ class ExportOut:
 
 
 @dataclass
+class ExportExclusion:
+    event_id: int
+    reason: str
+
+
+@dataclass
+class ExportPreview:
+    included_ids: list[int]
+    excluded: list[ExportExclusion]
+    split_counts: dict
+    groups: int
+    warnings: list[str]
+
+
+@dataclass
 class AuditEntry:
     id: int
     ts: datetime
@@ -253,6 +270,7 @@ class AuditEntry:
     device_id: str | None
     target: str
     reason: str
+    detail: dict | None = None
 
 
 @dataclass
@@ -295,6 +313,8 @@ def decode(cls, value):
         raise ValueError('Invalid optional value')
     if origin is Literal:
         if value not in args:
+            if cls is not Role and isinstance(value, str):
+                return 'unknown'
             raise ValueError('Invalid enum value')
         return value
     if origin is list:

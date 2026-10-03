@@ -2,7 +2,7 @@ from PySide6.QtCore import Qt, Signal, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices, QColor, QFont
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QStackedWidget, QApplication, QStyledItemDelegate, QSizePolicy
 from .workers import TaskRunner
-from .backend import AuthError
+from .backend import AuthError, UnsupportedError
 from .formatting import local_time
 from .theme import PALETTES
 from .widgets.common import label, button, Skeleton, EmptyState
@@ -36,6 +36,7 @@ class StudioScreen(QWidget):
         self.filters,self.collections,self.exports,self.counts = [],[],[],{}
         self.loaded_once = False
         self.pending_export = False
+        self.refresh_dirty = False
         box = QVBoxLayout(self); box.setContentsMargins(32,24,32,20); box.setSpacing(16)
         top = QHBoxLayout(); titles = QVBoxLayout(); titles.addWidget(label('Training Studio','title'))
         titles.addWidget(label('From reviewed moments to trusted training data.','muted')); top.addLayout(titles,1)
@@ -49,6 +50,8 @@ class StudioScreen(QWidget):
         self.loading = Skeleton(theme); self.content_stack.addWidget(self.loading)
         self.failure = EmptyState('Studio could not be loaded','Check your connection and try again.',eyebrow='UNAVAILABLE')
         self.failure.action.show(); self.failure.action.clicked.connect(self.refresh); self.content_stack.addWidget(self.failure)
+        self.unsupported = EmptyState('Studio is not available yet', 'This server has not enabled Studio lists and exports yet.', eyebrow='TRAINING STUDIO')
+        self.content_stack.addWidget(self.unsupported)
         self.content_stack.setCurrentWidget(self.loading); box.addWidget(self.content_stack,1)
         filters_page = QWidget(); filters = QVBoxLayout(filters_page); filters.setContentsMargins(0,12,0,0); filters.setSpacing(14)
         filters.addWidget(label('A focused place to start','section'))
@@ -102,7 +105,10 @@ class StudioScreen(QWidget):
         self.poll.stop(); super().hideEvent(event)
 
     def refresh(self):
-        if self.runner.busy: return
+        if self.runner.busy:
+            self.refresh_dirty = True
+            return
+        self.refresh_dirty = False
         self.counts.clear()
         self.refresh_button.setEnabled(False)
         def fetch():
@@ -111,9 +117,13 @@ class StudioScreen(QWidget):
 
     def loaded(self,result,error):
         self.refresh_button.setEnabled(True)
+        if self.refresh_dirty and not isinstance(error, AuthError):
+            self.refresh()
+            return
         if error:
             self.message.setText(str(error)+' · Select Refresh to retry.'); self.message.show()
             if not self.loaded_once: self.content_stack.setCurrentWidget(self.failure)
+            if isinstance(error, UnsupportedError): self.content_stack.setCurrentWidget(self.unsupported)
             if isinstance(error,AuthError): self.session_expired.emit()
             return
         self.loaded_once = True; self.filters,self.collections,self.exports = result
@@ -140,11 +150,12 @@ class StudioScreen(QWidget):
         key = self.count_requested
         if key in self.counts: return
         self.count_pending = key
-        self.count_runner.start(lambda:self.backend.events(filter=key,limit=1))
+        self.count_runner.start(lambda:self.backend.events(filter=key,limit=1,with_total=True))
 
     def count_loaded(self,page,error):
         key = self.count_pending
-        self.counts[key] = 'Unavailable' if error else '0' if not page.items else '1+' if page.next_cursor else '1'
+        self.counts[key] = 'Unavailable' if error or page.total is None else '10,000+' if page.total_capped else f'{page.total:,}'
+        if isinstance(error, AuthError): self.session_expired.emit()
         self.filter_model.dataChanged.emit(self.filter_model.index(0,2),self.filter_model.index(max(0,len(self.filters)-1),2))
         if self.count_requested != key: self.request_count()
 
@@ -154,10 +165,12 @@ class StudioScreen(QWidget):
 
     def new_collection(self):
         self.create_dialog = CreateCollection(self.backend,self); self.create_dialog.created.connect(lambda _:self.refresh()); self.create_dialog.show()
+        self.create_dialog.session_expired.connect(self.session_expired)
 
     def open_collection(self,*_):
         index = self.collection_table.currentIndex()
         if index.isValid():
+            self.grid.session_expired.connect(self.session_expired, Qt.ConnectionType.UniqueConnection)
             self.grid.open(self.collection_model.items[index.row()]); self.collection_stack.setCurrentWidget(self.grid); self.back.show()
             self.open_collection_button.hide()
 
@@ -173,6 +186,7 @@ class StudioScreen(QWidget):
             self.message.setText('Create a collection before exporting.'); return
         selected = self.grid.collection.id if self.collection_stack.currentWidget() is self.grid and self.grid.collection else None
         self.wizard = ExportWizard(self.backend,self.collections,selected,self)
+        self.wizard.session_expired.connect(self.session_expired)
         self.wizard.exported.connect(self.export_created); self.wizard.show()
 
     def export_created(self,export):

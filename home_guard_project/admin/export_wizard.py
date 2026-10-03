@@ -2,18 +2,22 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QDialog, QWidget, QVBoxLayout, QHBoxLayout, QLineEdit,
     QComboBox, QCheckBox, QSlider, QStackedWidget)
 from .workers import TaskRunner
+from .backend import AuthError
+from collections import Counter
 from .widgets.common import label, button
 from .widgets.data_table import RowsModel, data_table
 
 
-from .export_logic import validate_export, consent_summary
+from .export_logic import validate_export
 
 
 class ExportWizard(QDialog):
     exported = Signal(object)
+    session_expired = Signal()
 
     def __init__(self, backend, collections, selected=None, parent=None):
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.backend, self.collections = backend, collections
         self.preview, self.preview_error, self.step = None, '', 0
         self.setWindowTitle('Export training dataset'); self.setModal(True); self.resize(760, 650)
@@ -47,13 +51,13 @@ class ExportWizard(QDialog):
             self.sliders[key] = slider; slider.valueChanged.connect(lambda value,k=key:self.balance(k,value)); split.addWidget(slider)
         self.total = label('Total 100%', 'muted'); split.addWidget(self.total)
         self.fallback = QCheckBox('Include fallback AI'); split.addWidget(self.fallback)
-        split.addWidget(label('Off by default. Fallback records do not contain a genuine model answer. Include them only when your training workflow handles that missing evidence.', 'muted', True))
+        split.addWidget(label('Off by default. Fallback and failed AI are excluded only from vlm.jsonl. These events still contribute video clips and YOLO labels when those formats are selected.', 'muted', True))
         split.addStretch(); self.pages.addWidget(second)
         third = QWidget(); consent = QVBoxLayout(third); consent.setContentsMargins(0,0,0,0); consent.setSpacing(12)
         consent.addWidget(label('Check consent before exporting', 'section'))
         self.summary = label('Checking collection and consent…', 'muted', True); consent.addWidget(self.summary)
-        self.exclusions = RowsModel([('Event',lambda r:f'#{r[0]}'),('Camera',lambda r:r[1]),('Excluded because',lambda r:r[2])])
-        self.table = data_table(self.exclusions,2); self.table.setColumnWidth(0,85); self.table.setColumnWidth(1,160); consent.addWidget(self.table,1)
+        self.exclusions = RowsModel([('Excluded because',lambda r:r[0]),('Events',lambda r:str(r[1]))])
+        self.table = data_table(self.exclusions,0); self.table.setColumnWidth(1,100); consent.addWidget(self.table,1)
         self.table.verticalHeader().setDefaultSectionSize(44)
         self.check = QCheckBox('Export the eligible events shown above'); consent.addWidget(self.check)
         self.check.toggled.connect(self.update_confirm)
@@ -90,12 +94,7 @@ class ExportWizard(QDialog):
             self.preview = None; self.check.setChecked(False); self.next.setEnabled(False); self.back.setEnabled(False)
             self.summary.setText('Checking collection and consent…'); self.exclusions.replace([])
             request = self.request()
-            def fetch():
-                if not hasattr(self.backend,'demo_collection_events'):
-                    return None
-                events = self.backend.demo_collection_events(request['collection_id'])
-                return consent_summary(events,self.backend.demo_training_consent(events),request['include_fallback_ai'])
-            self.runner.start(fetch)
+            self.runner.start(lambda: self.backend.export_preview(**request))
 
     def advance(self):
         request = self.request()
@@ -106,7 +105,7 @@ class ExportWizard(QDialog):
             self.error.setText(error); return
         if self.step < 2:
             self.set_step(self.step+1); return
-        if not self.preview or self.preview['unknown'] or not self.preview['included'] or not self.check.isChecked() or self.writer.busy:
+        if not self.preview or not self.preview.included_ids or not self.check.isChecked() or self.writer.busy:
             return
         self.next.setEnabled(False); self.back.setEnabled(False); self.check.setEnabled(False)
         self.writer.start(lambda:self.backend.create_export(**request))
@@ -117,20 +116,23 @@ class ExportWizard(QDialog):
     def preview_loaded(self, result, error):
         self.back.setEnabled(True); self.preview = result
         if error or result is None:
+            if isinstance(error, AuthError): self.session_expired.emit()
             self.summary.setText(str(error) if error else 'Consent preview is unavailable with this server version. Collection membership and per-event training eligibility are required before you can confirm an export.')
             self.check.setEnabled(False); return
         self.check.setEnabled(True)
-        eligible, excluded, unknown = len(result['included']),len(result['excluded']),len(result['unknown'])
-        self.summary.setText(f'{eligible} eligible events · {excluded} excluded · {unknown} awaiting consent verification\nEvents without customer training consent are excluded from this export.')
-        self.exclusions.replace(result['excluded'])
+        eligible, excluded = len(result.included_ids), len(result.excluded)
+        splits = ' · '.join(f'{key}: {value}' for key, value in result.split_counts.items())
+        self.summary.setText(f'{eligible} included events · {excluded} excluded · {result.groups} house/day groups\n{splits}' + ''.join('\n'+w for w in result.warnings))
+        self.exclusions.replace([(key.replace('_', ' ').capitalize(), count) for key, count in Counter(e.reason for e in result.excluded).items()])
         self.check.setText(f'Export the {eligible} eligible events')
         self.update_confirm()
 
     def update_confirm(self):
-        self.next.setEnabled(bool(self.preview and self.preview['included'] and not self.preview['unknown'] and self.check.isChecked() and not self.writer.busy))
+        self.next.setEnabled(bool(self.preview and self.preview.included_ids and self.check.isChecked() and not self.writer.busy))
 
     def created(self, export, error):
         self.back.setEnabled(True); self.check.setEnabled(True)
         if error:
+            if isinstance(error, AuthError): self.session_expired.emit()
             self.error.setText(str(error)); self.update_confirm(); return
         self.exported.emit(export); self.accept()

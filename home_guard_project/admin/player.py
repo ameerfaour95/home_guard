@@ -90,7 +90,7 @@ class FilmstripSlider(QSlider):
         super().__init__(Qt.Orientation.Horizontal)
         self.setMouseTracking(True)
         self.sprite, self.metadata = QPixmap(), {}
-        self.preview = QLabel(None, Qt.WindowType.ToolTip)
+        self.preview = QLabel(self, Qt.WindowType.ToolTip)
         self.preview.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
 
     def set_filmstrip(self, data=None, metadata=None):

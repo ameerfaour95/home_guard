@@ -9,6 +9,7 @@ from .event_view import EventView
 from .event_logic import KINDS
 from .formatting import local_time
 from .workers import TaskRunner
+from .review_controller import ReviewController
 from .backend import AuthError
 from .widgets.common import label, button
 from .widgets.icons import draw_icon
@@ -33,7 +34,7 @@ class ReviewDelegate(TimelineDelegate):
         p.setPen(QColor(t['border'])); p.drawLine(option.rect.bottomLeft(), option.rect.bottomRight())
         rect = option.rect.adjusted(8, 10, -10, -8)
         lines = [f'{local_time(e.start_utc, e.timezone)[13:18]}  ·  {e.camera}', e.summary or 'No summary saved',
-                 f'{KINDS[e.kind]} · '+{'real':'AI answer saved','failed':'AI failed','fallback':'Fallback AI','none':'No AI answer'}[e.completeness.ai],
+                 f'{KINDS.get(e.kind, "Unknown")} · '+{'real':'AI answer saved','failed':'AI failed','fallback':'Fallback AI','none':'No AI answer'}.get(e.completeness.ai, 'Unknown AI state'),
                  ('Reviewed' if e.reviewed else 'Unreviewed') + ('  ·  Flagged' if e.flagged else '') +
                  ('  ·  '+', '.join({'real':'Confirmed','false_alarm':'False alarm','real_but_wrong':'Wrong decision'}.get(v,v.replace('_',' ')) for v in e.owner_verdicts) if e.owner_verdicts else '')]
         for i, text in enumerate(lines):
@@ -55,13 +56,17 @@ class ReviewScreen(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self.saved_filters, self.total, self.done, self.pending_next = [], 0, 0, None
         self.last_collection = None
-        self.mutation = TaskRunner(self); self.mutation.finished.connect(self.mutation_done)
+        self.mutation = ReviewController(backend, self); self.mutation.finished.connect(self.mutation_done)
         self.metadata = TaskRunner(self); self.metadata.finished.connect(self.metadata_loaded)
         layout = QVBoxLayout(self); layout.setContentsMargins(24, 20, 24, 16); layout.setSpacing(12)
         top = QHBoxLayout(); top.addWidget(label('Review', 'title')); top.addStretch()
         self.progress = label('Loading review count…', 'muted'); top.addWidget(self.progress)
         layout.addLayout(top)
         self.toast = label('', 'badge', True); self.toast.hide(); layout.addWidget(self.toast)
+        self.toast_timer = QTimer(self)
+        self.toast_timer.setSingleShot(True)
+        self.toast_timer.setInterval(7000)
+        self.toast_timer.timeout.connect(self.toast.hide)
         body = QHBoxLayout(); body.setSpacing(16); layout.addLayout(body, 1)
         self.sidebar = QWidget(); self.sidebar.setFixedWidth(184)
         filters = QVBoxLayout(self.sidebar); filters.setContentsMargins(0, 0, 0, 0); filters.setSpacing(6)
@@ -70,6 +75,8 @@ class ReviewScreen(QWidget):
         self.saved.currentIndexChanged.connect(self.select_filter)
         filters.addSpacing(14); filters.addWidget(label('REFINE EVENTS', 'eyebrow'))
         self.timeline = TimelineScreen(backend, theme)
+        self.mutation.optimistic.connect(self.timeline.model.update_review)
+        self.mutation.optimistic.connect(self.sync_detail)
         for key, combo in self.timeline.filters.items():
             if key == 'camera':
                 combo.hide(); continue
@@ -182,9 +189,13 @@ class ReviewScreen(QWidget):
 
     def page_loaded(self, result, error):
         if not error and self.pending_next is not None:
-            target, self.pending_next = self.pending_next, None
-            if target < len(self.timeline.model.rows):
-                self.timeline.table.setCurrentIndex(self.timeline.model.index(target, 0))
+            anchor, generation = self.pending_next
+            self.pending_next = None
+            if generation == self.timeline.generation and result.items:
+                # The cursor follows anchor even when its optimistic removal
+                # has shifted every row. Resolve the returned event identity.
+                target = result.items[0].id
+                self.open_event(target)
         if not error and not self.timeline.model.rows:
             self.event_view.player.player.stop(); self.event_view.recording = None
             self.event_view.tabs.hide(); self.event_view.title.setText('No events in this view')
@@ -195,20 +206,16 @@ class ReviewScreen(QWidget):
         if 0 <= row < len(self.timeline.model.rows):
             self.timeline.table.setCurrentIndex(self.timeline.model.index(row, 0))
         elif delta > 0 and self.timeline.cursor:
-            self.pending_next = row; self.timeline.load_older()
+            self.pending_next = self.active_id, self.timeline.generation
+            self.timeline.load_older()
 
     def mutate(self, key):
         event = self.active_event()
-        if not event or self.mutation.busy:
+        if not event:
             return
-        # Capture an immutable before-image; UI selection can change during the request.
-        before = replace(event); value = True if key == 'reviewed' else not event.flagged
-        optimistic = replace(event, **{key: value})
-        self.pending_mutation = before, key, self.timeline.generation
-        self.timeline.model.update_review(optimistic); self.sync_detail(optimistic)
+        self.mutation.submit(event, key, True if key == 'reviewed' else None)
         if key == 'reviewed':
             self.move(1)
-        self.mutation.start(lambda: self.backend.review(before.id, **{key: value}))
 
     def sync_detail(self, event):
         view = self.event_view
@@ -217,9 +224,8 @@ class ReviewScreen(QWidget):
             view.review.setChecked(event.reviewed); view.flag.setChecked(event.flagged)
 
     def mutation_done(self, result, error):
-        before, key, generation = self.pending_mutation
-        event = before if error else result
-        self.timeline.model.update_review(event); self.sync_detail(event)
+        before = self.mutation.active_before
+        key = 'reviewed' if 'reviewed' in self.mutation.active_changes else 'flagged'
         if error:
             self.notify(f'Event #{before.id}: change not saved. {error}', True)
             if isinstance(error, AuthError):
@@ -230,7 +236,7 @@ class ReviewScreen(QWidget):
             self.notify('Marked reviewed' if key == 'reviewed' else 'Flag updated')
             self.review_changed.emit()
             selected_filter = self.timeline.filters[key].currentData()
-            if selected_filter is not None and selected_filter != getattr(result,key):
+            if result.id not in self.mutation.queue and selected_filter is not None and selected_filter != getattr(result,key):
                 self.timeline.model.remove_event(result.id)
                 if not self.timeline.model.rows:
                     if self.timeline.cursor: self.timeline.load_older()
@@ -242,13 +248,16 @@ class ReviewScreen(QWidget):
 
     def notify(self, text, error=False):
         self.toast.setObjectName('error' if error else 'badge'); self.toast.setText(text); self.toast.show()
-        QTimer.singleShot(7000, self.toast.hide)
+        self.toast.style().unpolish(self.toast)
+        self.toast.style().polish(self.toast)
+        self.toast_timer.start()
 
     def add_to_collection(self):
         event = self.active_event()
         if event:
             from .collections import CollectionPicker
             self.picker = CollectionPicker(self.backend, event.id, self.last_collection, self)
+            self.picker.session_expired.connect(self.session_expired)
             self.picker.added.connect(self.collection_added); self.picker.show()
 
     def collection_added(self, collection):

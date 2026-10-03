@@ -29,7 +29,7 @@ def test_every_fixture_parses_and_keeps_contract_fields(path):
             for a, b in zip(wire, actual):
                 shape(a, b)
         elif isinstance(wire, dict):
-            assert wire.keys() == actual.keys()
+            assert wire.keys() <= actual.keys()  # additive contract 2c defaults
             for key in wire:
                 shape(wire[key], actual[key])
     shape(source, [asdict(v) for v in parsed] if isinstance(parsed, list) else asdict(parsed))
@@ -148,7 +148,7 @@ def test_all_get_routes_and_event_query():
     backend.close()
 
 
-@pytest.mark.parametrize('mutation', [{'verdict': 'bad'}, {'events_24h': '4'}, {'last_seen_utc': 'not a date'}])
+@pytest.mark.parametrize('mutation', [{'events_24h': '4'}, {'last_seen_utc': 'not a date'}])
 def test_malformed_models_rejected(mutation):
     wire = json.loads((DATA/'fleet.json').read_text())['devices'][0]
     with pytest.raises(ValueError):

@@ -13,7 +13,7 @@ from home_guard_project.admin.http_backend import HttpBackend
 from home_guard_project.admin.models import ArtifactOut, EventSummary, decode
 from home_guard_project.admin.review import ReviewScreen
 from home_guard_project.admin.shell import Shell
-from home_guard_project.admin.export_wizard import ExportWizard, validate_export, consent_summary
+from home_guard_project.admin.export_wizard import ExportWizard, validate_export
 from home_guard_project.admin.collections import CollectionPicker, CollectionGrid
 from home_guard_project.admin.audit import AuditScreen, action_words
 from home_guard_project.admin.studio import StudioScreen
@@ -129,14 +129,15 @@ def test_export_invalid_split(split):
 
 def test_export_formats_and_consent_are_enforced():
     assert validate_export('valid',[],dict(train=.8,val=.1,test=.1))
-    b = DemoBackend(); events = b.demo_collection_events(1); consent = b.demo_training_consent(events)
-    summary = consent_summary(events,consent)
-    assert len(summary['included']) == 8 and len(summary['excluded']) == 4 and not summary['unknown']
-    assert {e[0] for e in summary['excluded'] if e[2] == 'No training consent'} == {106,112}
-    assert len(consent_summary(events,consent,True)['included']) == 10
-    assert consent_summary(events,{})['unknown'] == [e.id for e in events]
-    result = b.create_export(collection_id=1,name='entrance_october',formats=['clips'],split=dict(train=.8,val=.1,test=.1),include_fallback_ai=False)
-    assert result.state == 'queued' and result.item_count == 8 and result.version == 4
+    b = DemoBackend()
+    request = dict(collection_id=1, name='entrance_october', formats=['clips'], split=dict(train=.8,val=.1,test=.1), include_fallback_ai=False)
+    preview = b.export_preview(**request)
+    assert len(preview.included_ids) == 10
+    assert {e.event_id for e in preview.excluded if e.reason == 'no_training_consent'} == {106,112}
+    vlm = b.export_preview(**dict(request, formats=['vlm_jsonl']))
+    assert len(vlm.included_ids) < len(preview.included_ids)
+    result = b.create_export(**request)
+    assert result.state == 'queued' and result.item_count == 10 and result.version == 4
 
 
 def test_wizard_validation_balancing_and_submission(widgets,wait):
@@ -150,16 +151,19 @@ def test_wizard_validation_balancing_and_submission(widgets,wait):
     wizard.advance(); wait(lambda:wizard.preview is not None)
     assert not wizard.next.isEnabled(); wizard.check.setChecked(True); assert wizard.next.isEnabled()
     exports = []; wizard.exported.connect(exports.append); wizard.advance(); wait(lambda:bool(exports))
-    assert exports[0].item_count == 8 and b.exports()[0].name == 'review_set'
+    assert exports[0].item_count == 10 and b.exports()[0].name == 'review_set'
 
 
 def test_live_wizard_cannot_confirm_unknown_consent(widgets,wait):
     b = DemoBackend()
     class MissingPreview:
+        def export_preview(self, **request):
+            from home_guard_project.admin.backend import UnsupportedError
+            raise UnsupportedError()
         def create_export(self,**request): raise AssertionError('Must not export unverified events')
     wizard = ExportWizard(MissingPreview(),b.collections()); widgets.append(wizard)
     wizard.name.setText('sample'); wizard.set_step(2); wait(lambda:not wizard.runner.busy)
-    assert 'unavailable' in wizard.summary.text() and not wizard.next.isEnabled()
+    assert 'Not available yet' in wizard.summary.text() and not wizard.next.isEnabled()
     wizard.advance(); assert not wizard.writer.busy
 
 

@@ -5,7 +5,7 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QSpl
 from .widgets.common import label, button, Skeleton, EmptyState
 from .widgets.data_table import RowsModel, data_table
 from .workers import TaskRunner
-from .backend import AuthError
+from .backend import AuthError, UnsupportedError
 from .formatting import local_time
 
 
@@ -40,12 +40,14 @@ class AuditScreen(QWidget):
         self.details = label('','muted',True); drawer.addWidget(self.details)
         drawer.addWidget(label('ENTRY JSON','eyebrow'))
         self.json = QPlainTextEdit(); self.json.setReadOnly(True); self.json.setStyleSheet('font-family: Consolas; font-size: 9pt;'); drawer.addWidget(self.json,1)
-        drawer.addWidget(label('Additional detail JSON is not supplied by this server contract.','muted',True))
+        drawer.addWidget(label('Saved detail is included in the entry JSON.','muted',True))
         self.drawer.setMinimumWidth(320); split.addWidget(self.drawer); self.drawer.hide(); split.setSizes([1000,380])
         self.content = split; self.stack = QStackedWidget(); self.stack.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Ignored)
         self.stack.addWidget(split); self.loading = Skeleton(theme); self.stack.addWidget(self.loading)
         self.failure = EmptyState('Audit could not be loaded','Check your connection, then retry. Your filters are saved.',eyebrow='UNAVAILABLE')
         self.failure.action.show(); self.failure.action.clicked.connect(self.reload); self.stack.addWidget(self.failure)
+        self.unsupported = EmptyState('Audit is not available yet', 'This server has not enabled the audit list yet.', eyebrow='AUDIT')
+        self.stack.addWidget(self.unsupported)
         self.empty = EmptyState('No audit entries match','Try another staff member, customer or action.',eyebrow='AUDIT')
         self.empty.action.setText('Reset filters'); self.empty.action.show(); self.empty.action.clicked.connect(self.reset); self.stack.addWidget(self.empty)
         box.addWidget(self.stack,1)
@@ -84,6 +86,7 @@ class AuditScreen(QWidget):
         if error:
             self.message.setText(str(error)+' · Apply filters to retry.'); self.more.setEnabled(bool(self.cursor))
             self.stack.setCurrentWidget(self.content if append else self.failure)
+            if isinstance(error, UnsupportedError): self.stack.setCurrentWidget(self.unsupported)
             if isinstance(error,AuthError): self.session_expired.emit()
             return
         self.loaded_once = True; self.cursor = page.next_cursor

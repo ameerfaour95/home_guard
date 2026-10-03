@@ -3,7 +3,7 @@ import time
 from PySide6.QtCore import Qt, Signal, QTimer, QEvent
 from PySide6.QtGui import QShortcut, QKeySequence
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QTableView, QHeaderView, QStackedWidget, QAbstractItemView
-from .backend import OfflineError, AuthError
+from .backend import OfflineError, AuthError, ForbiddenError
 from .demo_backend import DemoBackend
 from .formatting import utcnow
 from .fleet_model import FleetModel, FleetDelegate
@@ -138,7 +138,7 @@ class FleetScreen(QWidget):
         self.timer = QTimer(self)
         self.timer.setInterval(30_000)
         self.timer.timeout.connect(self.refresh)
-        self.timer.start()
+        self.forbidden = False
         self.age_timer = QTimer(self)
         self.age_timer.setInterval(1000)
         self.age_timer.timeout.connect(self.update_age)
@@ -193,6 +193,9 @@ class FleetScreen(QWidget):
         self.activity.set_density(result)
 
     def show_error(self, error):
+        if isinstance(error, ForbiddenError):
+            self.forbidden = True
+            self.timer.stop()
         if isinstance(error, AuthError):
             self.timer.stop()
             self.session_expired.emit()
@@ -206,6 +209,15 @@ class FleetScreen(QWidget):
             self.summary.setText('Your customer boxes, in one place.')
             self.stack.setCurrentWidget(self.failure if isinstance(error, OfflineError) else self.server_failure)
             self.count.setText('No fleet data loaded')
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not self.forbidden:
+            self.timer.start()
+
+    def hideEvent(self, event):
+        self.timer.stop()
+        super().hideEvent(event)
 
     def update_age(self):
         if self.snapshot and self.received_at and not self.banner.isVisible():

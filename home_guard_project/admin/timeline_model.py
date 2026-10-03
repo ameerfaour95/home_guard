@@ -65,7 +65,7 @@ class TimelineModel(QAbstractTableModel):
             return f'{local_time(e.start_utc, e.timezone)}\n{e.summary}'
         if role == Qt.ItemDataRole.DisplayRole:
             return ['', local_time(e.start_utc, e.timezone)[13:18]+'  ·  '+age(e.start_utc, self.now())+'\n'+e.camera+'  ·  '+e.summary,
-                    KINDS[e.kind], decision(e.alert_command), ', '.join(VERDICTS.get(v, v.replace('_', ' ')) for v in e.owner_verdicts) or 'No feedback',
+                    KINDS.get(e.kind, "Unknown"), decision(e.alert_command), ', '.join(VERDICTS.get(v, v.replace('_', ' ')) for v in e.owner_verdicts) or 'No feedback',
                     '', ''][col]
 
 

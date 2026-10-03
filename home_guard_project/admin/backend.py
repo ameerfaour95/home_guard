@@ -10,8 +10,33 @@ class BackendError(Exception):
         super().__init__(self.message)
 
 
-class AuthError(BackendError):
+class LoginError(BackendError):
     message = 'Email, password or code is wrong'
+
+
+class AuthError(BackendError):
+    message = 'Your session needs a new sign-in'
+
+
+class TlsError(BackendError):
+    message = 'Certificate not trusted — check antivirus HTTPS scanning and certificate settings.'
+
+
+class ConfigurationError(BackendError):
+    message = 'Use an HTTPS server address. HTTP is allowed only for localhost or 127.0.0.1 development.'
+
+
+class UnsupportedError(BackendError):
+    message = 'Not available yet on this server.'
+
+
+class UnavailableBackend:
+    """Keep the sign-in window usable when client configuration is invalid."""
+    def __init__(self, base_url, error):
+        self.base_url, self.error = base_url, error
+
+    def login(self, email, password, totp):
+        raise self.error
 
 
 class ForbiddenError(BackendError):
@@ -27,7 +52,7 @@ class ServerError(BackendError):
 
 
 class RateLimitError(BackendError):
-    message = 'Too many tries — wait 15 minutes'
+    message = 'Too many requests. Please wait and try again.'
 
 
 class AdminBackend(Protocol):
@@ -47,6 +72,8 @@ class AdminBackend(Protocol):
     def review_count(self) -> ReviewCount: ...
     def saved_filters(self) -> list[SavedFilter]: ...
     def collections(self) -> list[CollectionOut]: ...
+    def collection_events(self, id, *, cursor=None, limit=100) -> EventPage: ...
+    def export_preview(self, **request): ...
     def create_collection(self, name, description='') -> CollectionOut: ...
     def add_collection_items(self, id, event_ids) -> CollectionOut: ...
     def remove_collection_items(self, id, event_ids) -> CollectionOut: ...

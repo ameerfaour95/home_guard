@@ -1,6 +1,17 @@
 """One owner per screen; Qt queued slots keep every widget update on the UI thread."""
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal, Slot
 from .backend import BackendError, ServerError
+from threading import Event
+from .logging_setup import setup_logging
+
+closing = Event()
+
+
+def shutdown_workers():
+    closing.set()
+    pool = QThreadPool.globalInstance()
+    pool.clear()
+    return pool.waitForDone(2000)
 
 
 class Signals(QObject):
@@ -14,13 +25,17 @@ class Job(QRunnable):
         self.signals = Signals()
 
     def run(self):
+        if closing.is_set():
+            return
         try:
             result, error = self.operation(), None
         except BackendError as exc:
             result, error = None, exc
         except Exception:
+            setup_logging().exception('Worker operation failed')
             result, error = None, ServerError()
-        self.signals.done.emit(result, error)
+        if not closing.is_set():
+            self.signals.done.emit(result, error)
 
 
 class TaskRunner(QObject):
@@ -35,7 +50,7 @@ class TaskRunner(QObject):
         return self.job is not None
 
     def start(self, operation):
-        if self.busy:
+        if self.busy or closing.is_set():
             return False
         self.job = Job(operation)
         self.job.signals.done.connect(self._done)
