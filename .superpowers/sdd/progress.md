@@ -20,3 +20,4 @@ Privacy round 3: complete (0190f35; fix-10c A-D)
 Task 13: complete (204978e + fixes 263aa82,57595e0; 361 passing; manifest schema v2)
 Task 15: complete (ad93f44; 366 passing)
 Final fix round: complete (267f8a4..4b1db2e + report; 401 passing; migration 0007; later-list in final-fix-report.md)
+FINAL: backend phase 1 complete at 6d0898a — 410 passing; Claude+Codex final reviews + 2 fix rounds; later-list in final-fix-report.md
