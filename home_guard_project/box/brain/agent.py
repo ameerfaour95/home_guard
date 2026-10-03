@@ -549,7 +549,9 @@ class OwnerAgentV2:
                 after = api.set_sensitivity(None, changed) if changed else api.get_alert_settings(None)
             elif back is None:
                 after = api.set_sensitivity(camera, "default")
-            elif set(d["own_after"]) <= set(back):
+            elif not isinstance(d["own_after"], (dict, type(None))):
+                raise ValueError("invalid sensitivity restore data")
+            elif set(d["own_after"] or ()) <= set(back):   # None: the turn reset it to the house values
                 after = api.set_sensitivity(camera, back)       # same keys: one merge call restores them
             else:
                 # The turn added keys: updates merge, so clear first, then restore the exact partial override.

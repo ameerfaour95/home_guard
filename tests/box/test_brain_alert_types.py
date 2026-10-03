@@ -367,6 +367,18 @@ class AlertTypesTest(unittest.TestCase):
                 self.assertEqual([tuple(c.args) for c in setter.call_args_list], expected)
                 self.assertEqual(self.fake.own_sens.get("main_entrance"), own_before)
 
+    def test_undo_of_a_reset_to_default_puts_the_own_values_back_in_one_call(self):
+        self.real_api("inference_conf: 0.4\n")
+        self.fake.set_sensitivity("main_entrance", {"person": 20})     # the camera has its own value
+        agent, reset = self.agent("set_sensitivity", "entrance", values="default")
+        self.assertEqual(reset.receipts[0].status, DONE)
+        self.assertIsNone(reset.receipts[0].detail["own_after"])
+        with patch.object(self.fake, "set_sensitivity", wraps=self.fake.set_sensitivity) as setter:
+            undone = agent.undo_turn("-5", reset.undo_token)
+        self.assertTrue(undone.text.startswith("✓"), undone.text)
+        self.assertEqual([tuple(c.args) for c in setter.call_args_list], [("main_entrance", {"person": 0.2})])
+        self.assertEqual(self.fake.get_alert_settings("main_entrance")["own_sensitivity"], {"person": 0.2})
+
     def test_camera_sensitivity_undo_that_adds_keys_clears_then_sets(self):
         agent, first, after = self.undo_calls({"vehicle": 0.8}, {"person": 30})
         with patch.object(self.fake, "set_sensitivity", wraps=self.fake.set_sensitivity) as setter:
