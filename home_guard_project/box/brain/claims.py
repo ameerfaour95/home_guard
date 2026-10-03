@@ -128,10 +128,28 @@ def _claimed(patterns: Sequence[str], text: str, flags: int = 0) -> bool:
     return any(not _negated(text, m.start(), m.end()) for p in patterns for m in re.finditer(p, text, flags))
 
 
-_SETTING_SUBJECT = re.compile(
-    r"^\s*(?:(?:the\s+)?(?:alert hours?|hours|cooldown|sensitivity|language|settings?|time between alerts)\b"
-    r"|(?:\u05d0\u05ea\s+)?\u05d4?(?:\u05e9\u05e2\u05d5\u05ea|\u05e8\u05d2\u05d9\u05e9\u05d5\u05ea|\u05e9\u05e4\u05d4|\u05d4\u05d2\u05d3\u05e8\u05d5\u05ea)\b"
-    r"|(?:\u0627\u0644)?(?:\u0633\u0627\u0639\u0627\u062a|\u062d\u0633\u0627\u0633\u064a\u0629|\u0644\u063a\u0629|\u0625\u0639\u062f\u0627\u062f(?:\u0627\u062a)?)\b)", re.IGNORECASE)
+_SETTING_BODY = (
+    r"(?:(?:the\s+)?(?:alert hours?|hours|time between alerts|cooldown|sensitivity|language|quiet log|settings?)\b"
+    r"|(?:\u05d0\u05ea\s+)?\u05d4?(?:\u05e9\u05e2\u05d5\u05ea|\u05e8\u05d2\u05d9\u05e9\u05d5\u05ea|\u05e9\u05e4\u05d4|\u05d4\u05d2\u05d3\u05e8\u05d5\u05ea"
+    r"|\u05d6\u05de\u05df \u05d1\u05d9\u05df|\u05ea\u05d9\u05e2\u05d5\u05d3 \u05e9\u05e7\u05d8)\b"
+    r"|(?:\u0627\u0644)?(?:\u0633\u0627\u0639\u0627\u062a|\u062d\u0633\u0627\u0633\u064a\u0629|\u0644\u063a\u0629|\u0625\u0639\u062f\u0627\u062f(?:\u0627\u062a)?)\b)"
+)
+_SETTING_SUBJECT = re.compile(r"^\s*" + _SETTING_BODY, re.IGNORECASE)
+_SETTING_ANYWHERE = re.compile(r"(?<![\w])" + _SETTING_BODY, re.IGNORECASE)
+
+
+def _setting_claimed(patterns: Sequence[str], text: str, flags: int = 0) -> bool:
+    """A settings claim needs a settings subject in the verb's own clause: after the verb ("I changed the alert
+    hours") or, for "is now set to", before it ("The hours are now set to")."""
+    for pattern in patterns:
+        for match in re.finditer(pattern, text, flags):
+            if _negated(text, match.start(), match.end()):
+                continue
+            tail = re.split(r"[,.!?;\n]|\band\s+I\b", text[match.end():], maxsplit=1, flags=re.IGNORECASE)[0]
+            head = re.split(r"[,.!?;\n]", text[:match.start()])[-1]
+            if _SETTING_SUBJECT.match(tail) or _SETTING_ANYWHERE.search(head):
+                return True
+    return False
 
 
 def _save_claimed(patterns: Sequence[str], text: str, flags: int = 0) -> bool:
@@ -173,7 +191,7 @@ def unbacked_claims(answer: str, receipts: Sequence[Receipt]) -> List[str]:
     for name, spec in CLAIMS.items():
         if set(spec["tools"]) & backed:  # type: ignore[arg-type]
             continue
-        claimed = _save_claimed if name == "save" else _claimed
+        claimed = {"save": _save_claimed, "setting": _setting_claimed}.get(name, _claimed)
         hit = claimed(spec["en"], text, re.IGNORECASE)  # type: ignore[arg-type]
         hit = hit or claimed(list(spec["he"]) + list(spec["ar"]), text)  # type: ignore[arg-type]
         if hit:

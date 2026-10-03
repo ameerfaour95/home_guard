@@ -171,8 +171,8 @@ class SettingsTest(unittest.TestCase):
 
     def test_setting_claims_preserve_save_and_negation(self) -> None:
         cases = {
-            "I changed the alias to driveway.": ["save", "setting"],
-            "I updated the verdict.": ["save", "setting"],
+            "I changed the alias to driveway.": ["save"],
+            "I updated the verdict.": ["save"],
             "I changed the alert hours and I saved the alias.": ["save", "setting"],
             "I changed the alias and I changed the alert hours.": ["save", "setting"],
             "The alert hours changed yesterday.": [],
@@ -197,6 +197,81 @@ class SettingsTest(unittest.TestCase):
         with self.assertLogs("box.brain.render", level="WARNING") as logs:
             self.assertEqual(receipt_line(malformed, "en"), "")
         self.assertEqual(len(logs.output), 1)
+
+    def test_setting_claim_needs_a_settings_subject(self) -> None:
+        from home_guard_project.box.brain.receipts import Receipt
+        def receipt(tool):
+            return Receipt(id="r1", turn="t1", tool=tool, status=DONE, target="x", detail={}, reason="", ts=NOW)
+        backed = {"I changed the alias to driveway.": "set_alias", "I updated the verdict.": "record_verdict",
+                  "I switched the entrance camera off.": "set_camera_active"}
+        for answer, tool in backed.items():
+            with self.subTest(answer=answer):
+                self.assertEqual(unbacked_claims(answer, [receipt(tool)]), [])
+                self.assertNotIn("setting", unbacked_claims(answer, []))
+        for answer in ("I changed the alert hours to 23-07.", "The hours are now set to 23-07.",
+                       "I switched the language to Hebrew.", "I set the quiet log to off.",
+                       "שיניתי את שעות ההתראה"):
+            with self.subTest(answer=answer):
+                self.assertIn("setting", unbacked_claims(answer, []))
+        for answer in ("The entrance camera is now set to record.", "The alias is now set to driveway."):
+            with self.subTest(answer=answer):
+                self.assertNotIn("setting", unbacked_claims(answer, []))
+
+    def hours_args(self, value="23-07"):
+        return {"setting": "alert_hours", "value": value, "owner_words": "set alert hours"}
+
+    def test_end_hour_write_fails_start_hour_is_put_back(self) -> None:
+        ctx = self.ctx("set alert hours please")
+        real = self.set_option
+        def flaky(key, value):
+            if key == "alert_end_hour":
+                raise ValueError("config write failed")
+            real(key, value)
+        ctx.services.set_option = flaky
+        result = change_setting(ctx, self.hours_args())
+        self.assertEqual(result["status"], FAILED)
+        self.assertEqual((self.store["alert_start_hour"], self.store["alert_end_hour"]), (22, 6))
+
+    def test_end_hour_and_rollback_fail_reason_says_start_changed(self) -> None:
+        ctx = self.ctx("set alert hours please")
+        real = self.set_option
+        calls = []
+        def flaky(key, value):
+            calls.append(key)
+            if key == "alert_end_hour" or calls.count("alert_start_hour") > 1:
+                raise ValueError("config write failed")
+            real(key, value)
+        ctx.services.set_option = flaky
+        result = change_setting(ctx, self.hours_args())
+        self.assertEqual(result["status"], FAILED)
+        self.assertIn("start hour changed to 23, end hour unchanged", ctx.receipts[0].reason)
+        self.assertEqual(self.store["alert_start_hour"], 23)
+
+    def test_hours_readback_failure_after_both_writes_is_done(self) -> None:
+        ctx = self.ctx("set alert hours please")
+        reads = [dict(self.store)]
+        def read():
+            if reads:
+                return reads.pop()
+            raise OSError("unreadable")
+        ctx.services.read_settings = read
+        with self.assertLogs("box.brain.tools", level="WARNING"):
+            result = change_setting(ctx, self.hours_args())
+        self.assertEqual(result["status"], DONE)
+        self.assertEqual(ctx.receipts[0].detail["new"], "23:00–07:00")
+        self.assertEqual((self.store["alert_start_hour"], self.store["alert_end_hour"]), (23, 7))
+
+    def test_same_start_and_end_needs_an_all_day_word(self) -> None:
+        for value in ("6-6", "06-06"):
+            with self.subTest(value=value):
+                ctx = self.ctx("set alert hours please")
+                self.assertFalse(change_setting(ctx, self.hours_args(value))["ok"])
+                self.assertEqual((self.store["alert_start_hour"], self.store["alert_end_hour"]), (22, 6))
+        for value in ("all day", "24h", "always", "כל היום", "طوال اليوم"):
+            with self.subTest(value=value):
+                ctx = self.ctx("set alert hours please")
+                self.assertEqual(change_setting(ctx, self.hours_args(value))["status"], DONE)
+                self.assertEqual((self.store["alert_start_hour"], self.store["alert_end_hour"]), (0, 0))
 
     def test_other_receipts_ignore_setting_detail_fields(self) -> None:
         ctx = self.ctx("set alert hours please")

@@ -757,9 +757,12 @@ def settings_line(settings: Dict[str, Any]) -> str:
             f"detector sensitivity {v['sensitivity']} · box language {v['language']} (alerts and announcements)")
 
 
+_ALL_DAY_WORDS = ("all day", "24h", "always", "כל היום", "طوال اليوم")
+
+
 def _hours(value: Any) -> Optional[Tuple[int, int]]:
     text = str(value or "").strip().lower()
-    if text in ("all day", "24h", "always"):
+    if text in _ALL_DAY_WORDS:
         return (0, 0)
     match = re.fullmatch(r"(\d{1,2})(?::00)?\s*(?:-|–|to)\s*(\d{1,2})(?::00)?", text)
     if not match:
@@ -767,6 +770,8 @@ def _hours(value: Any) -> Optional[Tuple[int, int]]:
     start, end = int(match.group(1)), int(match.group(2))
     if start > 24 or end > 24:
         return None                         # "99-88" is a mistake, not 03:00-16:00
+    if start % 24 == end % 24:
+        return None                         # "6-6" would silently mean all day; the owner must say so
     return (start % 24, end % 24)            # 24 means midnight
 
 
@@ -781,6 +786,7 @@ def change_setting(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     if ctx.services.set_option is None or ctx.services.read_settings is None:
         return _err("settings cannot be changed on this box")
     value = args.get("value")
+    seen: Dict[str, Any] = {}
     def read_view():
         settings = ctx.services.read_settings()
         if not isinstance(settings, dict):
@@ -797,6 +803,7 @@ def change_setting(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         code = settings.get("owner_language", "en")
         if code is not None and (not isinstance(code, str) or code not in ("", "en", "he", "ar")):
             raise ValueError("invalid setting language")
+        seen.setdefault("first", settings)
         return settings_view(settings)
     before = read_view()[name]
     try:
@@ -804,8 +811,26 @@ def change_setting(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
             hours = _hours(value)
             if hours is None:
                 return _err('alert_hours must look like "22-06" (whole hours) or "all day"')
+            raw = seen["first"].get("alert_start_hour", 0)
+            old_start = int(_finite(raw))
             ctx.services.set_option("alert_start_hour", str(hours[0]))
-            ctx.services.set_option("alert_end_hour", str(hours[1]))
+            try:
+                ctx.services.set_option("alert_end_hour", str(hours[1]))
+            except Exception as exc:  # noqa: BLE001 - put the start hour back so the change is all or nothing
+                log.warning("End hour write failed: %s", exc)
+                try:
+                    ctx.services.set_option("alert_start_hour", str(old_start))
+                except Exception as back:  # noqa: BLE001
+                    log.warning("Start hour rollback failed: %s", back)
+                    raise ValueError(f"{exc} (start hour changed to {hours[0]:02d}, end hour unchanged)") from back
+                raise
+            try:
+                after = read_view()[name]
+            except Exception as exc:  # noqa: BLE001 - both writes happened; only the confirmation read failed
+                log.warning("Hours read-back failed: %s", exc)
+                after = settings_view({"alert_start_hour": hours[0], "alert_end_hour": hours[1]})[name]
+            return _result(_issue(ctx, "change_setting", DONE, name,
+                                  {"setting": name, "old": before, "new": after}))
         elif name == "cooldown_minutes":
             if isinstance(value, bool) or not isinstance(value, (str, int, float)):
                 raise ValueError("cooldown_minutes must be a number")
