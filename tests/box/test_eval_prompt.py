@@ -74,6 +74,11 @@ class IndexTest(unittest.TestCase):
         self.assertEqual(index["w"], "tagging/b1/clips/w.mp4")                # sorted, deterministic
         self.assertNotIn("vlm_training", index)
 
+    def test_a_crop_never_beats_a_full_clip_across_prefix_tiers(self) -> None:
+        keys = ["dataset_ameer_house/vlm_crops/cam/q.mp4", "tagging/b1/dataset_multi/clips/cam/d/q.mp4"]
+        for ordered in (keys, list(reversed(keys))):
+            self.assertEqual(ev.build_index(ordered)["q"], "tagging/b1/dataset_multi/clips/cam/d/q.mp4")
+
     def test_order_of_keys_does_not_matter(self) -> None:
         keys = ["tagging/b2/clips/w.mp4", "tagging/b1/clips/w.mp4"]
         self.assertEqual(ev.build_index(keys), ev.build_index(list(reversed(keys))))
@@ -259,6 +264,26 @@ class PrepareTest(PreparedDirMixin, unittest.TestCase):
         self.assertEqual((again["new"], again["cached"]), (0, 3))
         self.assertEqual(read_jsonl(os.path.join(self.out, "manifest.jsonl")), manifest)
 
+    def test_temp_mp4_lives_in_the_system_temp_dir_and_is_removed(self) -> None:
+        made: List[tuple] = []
+        real = ev.tempfile.mkstemp
+
+        def spy(*args, **kwargs):
+            fd, path = real(*args, **kwargs)
+            if kwargs.get("suffix") == ".mp4":
+                made.append((kwargs.get("dir"), path))
+            return fd, path
+
+        ev.tempfile.mkstemp = spy
+        try:
+            ev.prepare(self.out, client=self.s3)
+        finally:
+            ev.tempfile.mkstemp = real
+        self.assertEqual(len(made), 3)
+        for directory, path in made:
+            self.assertEqual(directory, tempfile.gettempdir())
+            self.assertFalse(os.path.exists(path))
+
     def test_limit_and_batches(self) -> None:
         counts = ev.prepare(self.out, client=self.s3, limit=1)
         self.assertEqual(counts["new"], 1)
@@ -288,7 +313,7 @@ class RunTest(PreparedDirMixin, unittest.TestCase):
         backend = ev.FakeBackend()
         summary = ev.run_eval(self.out, backend)
         self.assertEqual(backend.calls, 3)
-        tag = ev.default_tag(None, fake=True)
+        tag = ev.default_tag(None, "fake", fake=True)
         results = os.path.join(self.out, "results")
         rows = read_jsonl(os.path.join(results, f"{tag}.jsonl"))
         self.assertEqual([r["clip_id"] for r in rows], [
@@ -341,8 +366,144 @@ class RunTest(PreparedDirMixin, unittest.TestCase):
         ev.run_eval(self.out, ev.FakeBackend(), tag="t2")
         other = ev.FakeBackend()
         other.model_name = "fake-2"
-        ev.run_eval(self.out, other, tag="t2")
+        with self.assertRaises(ev.ResultsConflict):
+            ev.run_eval(self.out, other, tag="t2")
+        self.assertEqual(other.calls, 0)
+        ev.run_eval(self.out, other, tag="t2", overwrite=True)
         self.assertEqual(other.calls, 3)
+
+    def test_default_tag_names_prompt_and_model(self) -> None:
+        self.assertEqual(ev.default_tag(None, "gpt-4o", fake=False), f"{inference.PROMPT_VERSION}__gpt-4o")
+        self.assertEqual(ev.default_tag(None, "ft:gpt/4o mini", fake=False),
+                         f"{inference.PROMPT_VERSION}__ft_gpt_4o_mini")
+        self.assertEqual(ev.default_tag(None, "fake", fake=True), f"fake-{inference.PROMPT_VERSION}__fake")
+
+    def _backend(self, model: str) -> "ev.FakeBackend":
+        b = ev.FakeBackend()
+        b.model_name = model
+        return b
+
+    def test_two_models_under_the_default_tag_keep_two_files(self) -> None:
+        ev.run_eval(self.out, self._backend("model-a"))
+        ev.run_eval(self.out, self._backend("model-b"))
+        results = os.path.join(self.out, "results")
+        files = sorted(n for n in os.listdir(results) if n.endswith(".jsonl"))
+        self.assertEqual(files, [f"fake-{inference.PROMPT_VERSION}__model-a.jsonl",
+                                 f"fake-{inference.PROMPT_VERSION}__model-b.jsonl"])
+        for name, model in zip(files, ("model-a", "model-b")):
+            rows = read_jsonl(os.path.join(results, name))
+            self.assertEqual(len(rows), 3)
+            self.assertEqual({r["model"] for r in rows}, {model})
+
+    def test_an_explicit_tag_with_another_model_is_refused_unless_overwrite(self) -> None:
+        ev.run_eval(self.out, self._backend("model-a"), tag="shared")
+        path = os.path.join(self.out, "results", "shared.jsonl")
+        with open(path, "rb") as f:
+            before = f.read()
+        refused = self._backend("model-b")
+        with self.assertRaises(ev.ResultsConflict) as ctx:
+            ev.run_eval(self.out, refused, tag="shared")
+        self.assertIn("model-a", str(ctx.exception))
+        self.assertIn("model-b", str(ctx.exception))
+        self.assertEqual(refused.calls, 0)
+        with open(path, "rb") as f:
+            self.assertEqual(f.read(), before)
+
+        replaced = self._backend("model-b")
+        ev.run_eval(self.out, replaced, tag="shared", overwrite=True)
+        self.assertEqual(replaced.calls, 3)
+        self.assertEqual({r["model"] for r in read_jsonl(path)}, {"model-b"})
+
+    def test_main_exits_2_and_leaves_the_file_when_the_prompt_differs(self) -> None:
+        ev.run_eval(self.out, ev.FakeBackend(), tag="shared")
+        path = os.path.join(self.out, "results", "shared.jsonl")
+        with open(path, "rb") as f:
+            before = f.read()
+        prompt_file = os.path.join(self.src, "other.txt")
+        with open(prompt_file, "w", encoding="utf-8") as f:
+            f.write("Other wording for {camera_name}")
+        args = ["run", "--dir", self.out, "--fake", "--tag", "shared", "--prompt-file", prompt_file]
+        self.assertEqual(ev.main(args), 2)
+        with open(path, "rb") as f:
+            self.assertEqual(f.read(), before)
+        self.assertEqual(ev.main(args + ["--overwrite"]), 0)
+        self.assertTrue(all(r["prompt_id"].startswith("file-") for r in read_jsonl(path)))
+
+    def test_changed_prompt_wording_with_the_same_version_asks_every_clip_again(self) -> None:
+        original = inference.build_prompt
+        try:
+            inference.build_prompt = lambda *a, **k: "wording one {x}"
+            ev.run_eval(self.out, ev.FakeBackend(), tag="w")
+            inference.build_prompt = lambda *a, **k: "wording two {x}"
+            with self.assertRaises(ev.ResultsConflict):
+                ev.run_eval(self.out, ev.FakeBackend(), tag="w")
+            second = ev.FakeBackend()
+            ev.run_eval(self.out, second, tag="w", overwrite=True)
+            self.assertEqual(second.calls, 3)
+            third = ev.FakeBackend()
+            ev.run_eval(self.out, third, tag="w")
+            self.assertEqual(third.calls, 0)
+        finally:
+            inference.build_prompt = original
+        rows = read_jsonl(os.path.join(self.out, "results", "w.jsonl"))
+        self.assertRegex(rows[0]["prompt_sha12"], r"^[0-9a-f]{12}$")
+
+    def test_a_truncated_last_line_is_skipped_with_a_warning(self) -> None:
+        path = os.path.join(self.out, "rows.jsonl")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write('{"clip_id": "a"}\n{"clip_id": "b"')
+        with self.assertLogs("box.eval_prompt", level="WARNING"):
+            self.assertEqual(ev.read_jsonl(path), [{"clip_id": "a"}])
+        with open(path, "w", encoding="utf-8") as f:
+            f.write('{"clip_id": "a"}\n{"clip_id": "b"\n{"clip_id": "c"}\n')
+        with self.assertRaises(json.JSONDecodeError):
+            ev.read_jsonl(path)
+
+    def test_a_run_over_a_truncated_results_file_still_works(self) -> None:
+        ev.run_eval(self.out, ev.FakeBackend(), tag="cut")
+        path = os.path.join(self.out, "results", "cut.jsonl")
+        with open(path, "a", encoding="utf-8") as f:
+            f.write('{"clip_id": "half')
+        again = ev.FakeBackend()
+        ev.run_eval(self.out, again, tag="cut")
+        self.assertEqual(again.calls, 0)
+        self.assertEqual(len(read_jsonl(path)), 3)
+
+    def test_the_run_says_what_it_will_ask(self) -> None:
+        lines: List[str] = []
+        ev.run_eval(self.out, ev.FakeBackend(), tag="m1", progress=lines.append)
+        self.assertEqual(lines[0], "asking 3 clips (0 already answered, 0 with errors to retry)")
+        ev.run_eval(self.out, ev.FakeBackend(fail_ids={"cam_a_1771696900_trigger"}), tag="m2")
+        lines = []
+        ev.run_eval(self.out, ev.FakeBackend(), tag="m2", progress=lines.append)
+        self.assertEqual(lines[0], "asking 1 clips (2 already answered, 1 with errors to retry)")
+
+    def test_a_big_real_run_names_the_model_and_waits_unless_yes(self) -> None:
+        slept: List[float] = []
+        saved = (ev.time.sleep, ev.CONFIRM_OVER, ev._make_gpt)
+
+        class Stub:
+            model_name = "gpt-test"
+
+            def ask(self, row, frames):
+                parsed = {"summary": "x", "label": "normal", "people": 0, "vehicle_moving": False}
+                return json.dumps(parsed), parsed
+
+        ev.time.sleep = slept.append
+        ev.CONFIRM_OVER = 2
+        ev._make_gpt = lambda model: Stub()
+        try:
+            self.assertEqual(ev.main(["run", "--dir", self.out, "--tag", "big1"]), 0)
+            self.assertEqual(slept, [5])
+            self.assertEqual(ev.main(["run", "--dir", self.out, "--tag", "big2", "--yes"]), 0)
+            self.assertEqual(slept, [5])
+            self.assertEqual(ev.main(["run", "--dir", self.out, "--fake", "--tag", "big3"]), 0)
+            self.assertEqual(slept, [5])
+            lines: List[str] = []
+            ev.run_eval(self.out, Stub(), tag="big4", progress=lines.append, wait=True)
+            self.assertIn("gpt-test", lines[1])
+        finally:
+            ev.time.sleep, ev.CONFIRM_OVER, ev._make_gpt = saved
 
     def test_limit(self) -> None:
         backend = ev.FakeBackend()
@@ -406,7 +567,7 @@ class PromptFileTest(PreparedDirMixin, unittest.TestCase):
         rows = read_jsonl(os.path.join(self.out, "results", "pf.jsonl"))
         self.assertEqual(rows[0]["prompt_id"], ev.prompt_id_of(text))
         self.assertRegex(ev.prompt_id_of(text), r"^file-[0-9a-f]{12}$")
-        self.assertEqual(ev.default_tag(text, fake=False), ev.prompt_id_of(text))
+        self.assertEqual(ev.default_tag(text, "gpt-4o", fake=False), ev.prompt_id_of(text) + "__gpt-4o")
 
     def test_restored_after_an_exception(self) -> None:
         class Boom(ev.FakeBackend):
@@ -432,11 +593,51 @@ class PromptFileTest(PreparedDirMixin, unittest.TestCase):
         self.assertIn("local time 03:04:05", text)
         self.assertEqual(text, self.original("porch", 0, "03:04:05", 0, 0))
 
+    def test_real_backend_sends_the_prompt_file_text_and_five_images(self) -> None:
+        calls: List[dict] = []
+        answer = {"summary": "A man walks.", "label": "normal", "people": 1, "vehicle_moving": False}
+
+        class Message:
+            content = json.dumps(answer)
+
+        class Choice:
+            message = Message()
+
+        class Response:
+            choices = [Choice()]
+
+        class Completions:
+            def create(self, **kw):
+                calls.append(kw)
+                return Response()
+
+        class Chat:
+            completions = Completions()
+
+        class Client:
+            chat = Chat()
+
+        backend = inference.GptBackend.__new__(inference.GptBackend)
+        backend._client = Client()
+        backend._model = "gpt-stub"
+        backend.model_name = "gpt-stub"
+        backend.last_prompt = ""
+        backend._response_format = inference.VLM_RESPONSE_FORMAT
+        text = "Look at camera {camera_name} and answer in JSON."
+        ev.run_eval(self.out, ev.GptAsker(backend), prompt_text=text, tag="real", limit=1)
+        self.assertEqual(len(calls), 1)
+        content = calls[0]["messages"][0]["content"]
+        self.assertEqual(content[0], {"type": "text", "text": "Look at camera cam_a and answer in JSON."})
+        self.assertEqual(sum(1 for part in content if part["type"] == "image_url"), 5)
+        self.assertEqual(len(content), 6)
+        rows = read_jsonl(os.path.join(self.out, "results", "real.jsonl"))
+        self.assertEqual((rows[0]["ai_label"], rows[0]["model"], rows[0]["error"]), ("normal", "gpt-stub", ""))
+
     def test_main_prompt_file(self) -> None:
         code = ev.main(["run", "--dir", self.out, "--fake", "--prompt-file", self.prompt_file])
         self.assertEqual(code, 0)
         with open(self.prompt_file, encoding="utf-8") as f:
-            tag = ev.default_tag(f.read(), fake=True)
+            tag = ev.default_tag(f.read(), "fake", fake=True)
         self.assertTrue(os.path.isfile(os.path.join(self.out, "results", f"{tag}.jsonl")))
 
 

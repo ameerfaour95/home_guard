@@ -10,9 +10,19 @@ Two steps, on two machines, because the box cannot read tagging/ on S3:
     python -m home_guard_project.box.eval_prompt summary --dir eval_set --tag <tag>
 
 ``prepare`` writes ``frames/<clip_id>_<i>.jpg`` and ``manifest.jsonl`` (one row per
-clip with our label and text). ``run`` asks the model about every clip with the
-same 5 frames the box would send, writes ``results/<tag>.jsonl`` / ``.csv`` /
-``.summary.json`` and prints the score. Both steps resume where they stopped.
+clip with our label and text). ``run`` asks the model about every clip with 5 frames,
+writes ``results/<tag>.jsonl`` / ``.csv`` / ``.summary.json`` and prints the score.
+Both steps resume where they stopped.
+
+Caveat: the box sends the model the last 5 buffered frames, 1 second apart, up to the
+trigger, with the camera's zone mask applied. The eval takes 5 frames evenly across the
+whole tagged clip, unmasked. The eval sees the whole clip, so alert recall reads somewhat
+optimistic compared with the box. Frames are JPEG-encoded twice (quality 90 on disk, 85
+when sent); the effect is negligible.
+
+Results are never deleted silently: the default results name is ``<prompt id>__<model>``,
+and a results file that holds answers from another prompt, wording or model is refused
+(exit 2) unless ``--overwrite`` is given.
 
 Our label comes from the tagger's text: ``[alert]`` (or the typo ``[alet]``) is
 ``alert``, "No special activity" is ``empty``, anything else ``normal``. Rows
@@ -49,6 +59,8 @@ HOME_BATCH_PREFIX = "ameer_house"
 CLIP_PREFIXES = ("dataset_multi/clips/", "dataset_ameer_house/", "tagging/")
 JSONL_RE = re.compile(r"^tagging/([^/]+)/analysis_output/vlm_training\.jsonl$")
 
+CONFIRM_OVER = 20          # a real run of more clips than this names the model and waits
+CONFIRM_SECONDS = 5
 FRAME_COUNT = 5            # what the box sends (inference.AlertSettings.clip_frames)
 MAX_SIDE = 1280
 JPEG_QUALITY = 90
@@ -57,7 +69,7 @@ MANIFEST = "manifest.jsonl"
 FRAMES_DIR = "frames"
 RESULTS_DIR = "results"
 RESULT_COLUMNS = ("clip_id", "camera", "ours_label", "ours_text", "ai_label", "ai_summary", "ai_people",
-                  "ai_vehicle_moving", "raw", "error", "prompt_id", "model")
+                  "ai_vehicle_moving", "raw", "error", "prompt_id", "prompt_sha12", "model")
 
 NO_ACTIVITY = "No special activity."
 PADDING_WORDS = ("without", "no one", "visible", "background", "parked")
@@ -97,12 +109,12 @@ def clip_stem(clip_id_or_key: str) -> str:
 def _key_rank(key: str) -> Tuple[int, int, str]:
     prefix = next((i for i, p in enumerate(CLIP_PREFIXES) if key.startswith(p)), len(CLIP_PREFIXES))
     crop = 1 if "/vlm_crops/" in f"/{key}" else 0      # a person crop shares the clip's name
-    return prefix, crop, key
+    return crop, prefix, key                            # any full clip beats any crop
 
 
 def build_index(keys: Iterable[str]) -> Dict[str, str]:
-    """``{stem: best mp4 key}``: dataset_multi/clips/, then dataset_ameer_house/, then tagging/;
-    a full clip before its vlm_crops copy; ties broken by sorting."""
+    """``{stem: best mp4 key}``: a full clip before any vlm_crops copy, then dataset_multi/clips/,
+    dataset_ameer_house/, tagging/ in that order; ties broken by sorting."""
     best: Dict[str, str] = {}
     for key in keys:
         if not key.lower().endswith(".mp4"):
@@ -166,10 +178,15 @@ def prompt_id_of(prompt_text: Optional[str]) -> str:
     return f"file-{hashlib.sha256(prompt_text.encode('utf-8')).hexdigest()[:12]}"
 
 
-def default_tag(prompt_text: Optional[str], fake: bool) -> str:
-    """Results file name: the prompt's id; a fake run gets its own file so it never mixes in."""
-    pid = prompt_id_of(prompt_text)
-    return f"fake-{pid}" if fake else pid
+def default_tag(prompt_text: Optional[str], model: str, fake: bool = False) -> str:
+    """Results file name ``<prompt id>__<model>``; a fake run gets its own ``fake-`` file."""
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", str(model or "unknown"))
+    tag = f"{prompt_id_of(prompt_text)}__{safe}"
+    return f"fake-{tag}" if fake else tag
+
+
+class ResultsConflict(Exception):
+    """The results file already holds answers from another prompt, wording or model."""
 
 
 def _words(text: str) -> int:
@@ -338,8 +355,19 @@ def _read_jsonl_from_s3(client: Any, bucket: str, key: str, tmp_dir: str) -> Lis
 
 
 def read_jsonl(path: str) -> List[Dict[str, Any]]:
+    """The rows of a jsonl file. A cut-off last line (a run killed mid-write) is skipped with a
+    warning; an unparseable line anywhere else still raises."""
     with open(path, encoding="utf-8") as f:
-        return [json.loads(line) for line in f if line.strip()]
+        lines = [line for line in f if line.strip()]
+    rows = []
+    for i, line in enumerate(lines):
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            if i != len(lines) - 1:
+                raise
+            log.warning("%s: the last line is cut off; skipping it", path)
+    return rows
 
 
 def _write_jsonl(path: str, rows: Iterable[Dict[str, Any]]) -> None:
@@ -420,7 +448,7 @@ def prepare(out_dir: str, client: Any, bucket: str = BUCKET, batches: Optional[S
 
 
 def _fetch_frames(client: Any, bucket: str, key: str, out_dir: str, clip_id: str) -> bool:
-    fd, tmp = tempfile.mkstemp(suffix=".mp4", dir=out_dir)
+    fd, tmp = tempfile.mkstemp(suffix=".mp4", dir=tempfile.gettempdir())
     os.close(fd)
     try:
         client.download_file(Bucket=bucket, Key=key, Filename=tmp)
@@ -493,7 +521,7 @@ class FakeBackend:
 
 
 class GptAsker:
-    """Asks inference.GptBackend exactly as the box does (same prompt function, 5 frames)."""
+    """Asks inference.GptBackend as the box does (same prompt function and request, 5 frames; which frames differ)."""
 
     def __init__(self, backend: Any) -> None:
         self.backend = backend
@@ -546,7 +574,7 @@ def _load_frames(out_dir: str, rels: Sequence[str]) -> List[Any]:
 
 
 def _result_row(row: Dict[str, Any], raw: str, parsed: Optional[Dict[str, Any]], error: str,
-                prompt_id: str, model: str) -> Dict[str, Any]:
+                prompt_id: str, model: str, prompt_sha12: str = "") -> Dict[str, Any]:
     p = parsed or {}
     return {
         "clip_id": row["clip_id"], "camera": row.get("camera", ""), "ours_label": row.get("ours_label", ""),
@@ -554,7 +582,7 @@ def _result_row(row: Dict[str, Any], raw: str, parsed: Optional[Dict[str, Any]],
         "ai_label": inference.label_of(parsed) if parsed else "",
         "ai_summary": str(p.get("summary", "")).strip(),
         "ai_people": p.get("people"), "ai_vehicle_moving": p.get("vehicle_moving"),
-        "raw": raw or "", "error": error, "prompt_id": prompt_id, "model": model,
+        "raw": raw or "", "error": error, "prompt_id": prompt_id, "prompt_sha12": prompt_sha12, "model": model,
     }
 
 
@@ -575,16 +603,22 @@ def _write_csv(path: str, rows: Sequence[Dict[str, Any]]) -> None:
 
 def run_eval(out_dir: str, backend: Any, prompt_text: Optional[str] = None, model: Optional[str] = None,
              tag: Optional[str] = None, limit: Optional[int] = None,
-             progress: Callable[[str], None] = log.info) -> Dict[str, Any]:
+             progress: Callable[[str], None] = log.info, overwrite: bool = False,
+             wait: bool = False) -> Dict[str, Any]:
     """Ask *backend* about each clip in the manifest; write results and the summary; return it.
 
-    Resumes: a clip already answered for the same prompt and model without an error
-    is not asked again. A model error on one clip is recorded and the run goes on.
+    Resumes: a clip already answered for the same prompt id, prompt wording (hash) and model
+    without an error is not asked again. A model error on one clip is recorded and the run
+    goes on. If the results file holds rows from another prompt, wording or model,
+    ``ResultsConflict`` is raised and nothing is touched, unless *overwrite* is true.
+    With *wait*, a run of more than CONFIRM_OVER clips names the model and pauses
+    CONFIRM_SECONDS first (Ctrl+C aborts).
     """
     manifest = read_jsonl(os.path.join(out_dir, MANIFEST))
     prompt_id = prompt_id_of(prompt_text)
     model = model or getattr(backend, "model_name", "unknown")
-    tag = tag or default_tag(prompt_text, fake=isinstance(backend, FakeBackend))
+    tag = tag or default_tag(prompt_text, model, fake=isinstance(backend, FakeBackend))
+    sha12 = prompt_sha12_of(prompt_text)
     jsonl_path, csv_path, summary_path = _results_paths(out_dir, tag)
     os.makedirs(os.path.dirname(jsonl_path), exist_ok=True)
 
@@ -592,14 +626,31 @@ def run_eval(out_dir: str, backend: Any, prompt_text: Optional[str] = None, mode
     if os.path.isfile(jsonl_path):
         for r in read_jsonl(jsonl_path):           # appended as it went: the last line per clip wins
             done[r["clip_id"]] = r
-        stale = [cid for cid, r in done.items() if (r.get("prompt_id"), r.get("model")) != (prompt_id, model)]
+        stale = [cid for cid, r in done.items()
+                 if (r.get("prompt_id"), r.get("prompt_sha12"), r.get("model")) != (prompt_id, sha12, model)]
+        if stale and not overwrite:
+            stale_set = set(stale)
+            theirs = sorted({f"prompt {r.get('prompt_id')} (wording {r.get('prompt_sha12') or 'unrecorded'}), "
+                             f"model {r.get('model')}" for cid, r in done.items() if cid in stale_set})
+            raise ResultsConflict(
+                f"{jsonl_path} already holds {len(stale)} answers from {'; '.join(theirs)}, but this run is "
+                f"prompt {prompt_id} (wording {sha12}), model {model}. Nothing was changed. "
+                "Use another --tag, or pass --overwrite to replace them.")
         if stale:
-            log.warning("%d rows in %s were made with another prompt or model; asking again", len(stale), tag)
+            log.warning("%d rows in %s were made with another prompt or model; replacing them", len(stale), tag)
             for cid in stale:
                 del done[cid]
-    _write_jsonl(jsonl_path, done.values())
 
     todo = manifest if limit is None else manifest[:limit]
+    answered = [r for r in todo if r["clip_id"] in done and not done[r["clip_id"]].get("error")]
+    retry = [r for r in todo if r["clip_id"] in done and done[r["clip_id"]].get("error")]
+    to_ask = len(todo) - len(answered)
+    progress(f"asking {to_ask} clips ({len(answered)} already answered, {len(retry)} with errors to retry)")
+    if wait and to_ask > CONFIRM_OVER:
+        progress(f"model {model}: this is a paid run; starting in {CONFIRM_SECONDS} seconds, Ctrl+C to abort "
+                 "(--yes skips the wait)")
+        time.sleep(CONFIRM_SECONDS)
+    _write_jsonl(jsonl_path, done.values())
     asked = 0
     with prompt_override(prompt_text) as state, open(jsonl_path, "a", encoding="utf-8") as out:
         for n, row in enumerate(todo, 1):
@@ -615,7 +666,7 @@ def run_eval(out_dir: str, backend: Any, prompt_text: Optional[str] = None, mode
                 error = f"{type(exc).__name__}: {exc}"
             if not error and parsed is None:
                 error = "the answer was not JSON"
-            result = _result_row(row, raw, parsed, error, prompt_id, model)
+            result = _result_row(row, raw, parsed, error, prompt_id, model, sha12)
             done[row["clip_id"]] = result
             out.write(json.dumps(result, ensure_ascii=False) + "\n")
             out.flush()
@@ -627,10 +678,14 @@ def run_eval(out_dir: str, backend: Any, prompt_text: Optional[str] = None, mode
     _write_jsonl(jsonl_path, rows)
     _write_csv(csv_path, rows)
     summary = {**summarize(rows), "tag": tag, "prompt_id": prompt_id, "model": model, "asked": asked,
-               "prompt_sha12": hashlib.sha256(_prompt_template(prompt_text).encode("utf-8")).hexdigest()[:12]}
+               "prompt_sha12": sha12}
     with open(summary_path, "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
     return summary
+
+
+def prompt_sha12_of(prompt_text: Optional[str]) -> str:
+    return hashlib.sha256(_prompt_template(prompt_text).encode("utf-8")).hexdigest()[:12]
 
 
 def _prompt_template(prompt_text: Optional[str]) -> str:
@@ -675,7 +730,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Score the AI's prompt against our human tags.")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    prep = sub.add_parser("prepare", help="Laptop: fetch 5 frames of every tagged home clip from S3.",
+    prep = sub.add_parser("prepare", help="Laptop: fetch 5 frames, evenly across each tagged home clip, from S3.",
                           description="Laptop only (reads tagging/ on S3). " + S3_HELP)
     prep.add_argument("--out", required=True, help="Folder to write frames/ and manifest.jsonl into.")
     prep.add_argument("--batches", nargs="+", default=None,
@@ -683,7 +738,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     prep.add_argument("--limit", type=int, default=None, help="Download at most N new clips this time.")
     prep.add_argument("--bucket", default=BUCKET)
 
-    runp = sub.add_parser("run", help="Box: ask the model about every prepared clip and print the score.")
+    runp = sub.add_parser("run", help="Box: ask the model about every prepared clip and print the score.",
+                          description="Caveat: the eval sees the whole clip (5 frames evenly across it, unmasked), "
+                                      "the box only the last 5 buffered frames before the trigger, zone-masked, "
+                                      "so alert recall reads somewhat optimistic compared with the box.")
     runp.add_argument("--dir", required=True, help="The folder prepare wrote.")
     runp.add_argument("--prompt-file", default=None,
                       help="Use this text as the prompt; {camera_name} and {local_time_str} are filled in.")
@@ -691,7 +749,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     runp.add_argument("--fake", action="store_true", help="No network: a stand-in model, for checking the setup.")
     runp.add_argument("--limit", type=int, default=None, help="Only the first N clips of the manifest.")
     runp.add_argument("--tag", default=None,
-                      help="Results name (default: the prompt version, or file-<sha12> for --prompt-file).")
+                      help="Results name (default: <prompt version, or file-<sha12>>__<model>). A file that holds "
+                           "answers from another prompt, wording or model is refused unless --overwrite.")
+    runp.add_argument("--overwrite", action="store_true",
+                      help="Replace answers in the results file that came from another prompt, wording or model.")
+    runp.add_argument("--yes", action="store_true",
+                      help="Skip the 5-second pause before a paid run of more than 20 clips.")
 
     summ = sub.add_parser("summary", help="Print the score of an earlier run again.")
     summ.add_argument("--dir", required=True)
@@ -725,8 +788,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 prompt_text = f.read()
         backend = FakeBackend() if args.fake else _make_gpt(args.model)
         model = None if args.fake else args.model
-        tag = args.tag or default_tag(prompt_text, fake=args.fake)
-        summary = run_eval(args.dir, backend, prompt_text=prompt_text, model=model, tag=tag, limit=args.limit)
+        tag = args.tag or default_tag(prompt_text, "fake" if args.fake else args.model, fake=args.fake)
+        try:
+            summary = run_eval(args.dir, backend, prompt_text=prompt_text, model=model, tag=tag,
+                               limit=args.limit, overwrite=args.overwrite, wait=not (args.fake or args.yes))
+        except ResultsConflict as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 2
+        except KeyboardInterrupt:
+            print("Aborted.", file=sys.stderr)
+            return 130
         print(format_summary(summary))
         return 0
 
