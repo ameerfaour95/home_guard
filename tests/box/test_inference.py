@@ -156,13 +156,13 @@ class _FakeAssistant:
     def is_muted(self, camera: str) -> bool:
         return self.muted
 
-    def send_alert(self, alert, text, image=None):
-        self.sent.append({"alert": alert, "text": text, "image": image})
+    def send_alert(self, alert, text, image=None, silent=False, lang="en"):
+        self.sent.append({"alert": alert, "text": text, "image": image, "silent": silent, "lang": lang})
         return {"sent": True, "results": [{"chat_id": "1", "ok": True, "message_id": 7}]}
 
 
 class _DescribingBackend:
-    def analyze(self, frames, camera_name, t_sec, start_hour, end_hour):
+    def analyze(self, frames, camera_name, t_sec, start_hour, end_hour, owner_language="en"):
         return '{"summary": "a person at the door"}', {"summary": "a person at the door"}
 
 
@@ -172,7 +172,8 @@ class WorkerWithAssistantTest(unittest.TestCase):
 
     def _run(self, assistant) -> inf.AlertJob:
         job = inf.AlertJob(camera="front_door", stem="front_door_100_alert", ts=100.0, labels=["person"])
-        with mock.patch.object(inf, "frame_to_jpeg_bytes", return_value=b"jpg"):
+        with mock.patch.object(inf, "frame_to_jpeg_bytes", return_value=b"jpg"), \
+                mock.patch.object(inf, "owner_language", return_value="en"):
             inf._worker(_DescribingBackend(), self.BOX, {}, self.SETTINGS, "front_door", [object()], assistant, job)
         return job
 
@@ -183,7 +184,9 @@ class WorkerWithAssistantTest(unittest.TestCase):
         (sent,) = assistant.sent
         self.assertEqual(sent["alert"], {"alert_id": "front_door_100_alert", "camera": "front_door", "label": "normal",
                                          "summary": "a person at the door", "ts": 100.0})
-        self.assertIn("front_door: a person at the door", sent["text"])
+        # The model gave no label: the owner reads "Activity", with a sound.
+        self.assertEqual(sent["text"], "\u26aa Activity \u00b7 front_door\na person at the door")
+        self.assertEqual((sent["silent"], sent["lang"]), (False, "en"))
         self.assertEqual(sent["image"], b"jpg")
         self.assertTrue(job.ready.is_set())
         self.assertEqual((job.alert["summary"], job.alert["alert_command"], job.alert["muted"]),
@@ -200,7 +203,7 @@ class WorkerWithAssistantTest(unittest.TestCase):
 
     def test_the_job_is_released_even_when_the_backend_fails(self) -> None:
         class Broken:
-            def analyze(self, *args):
+            def analyze(self, *args, **kwargs):
                 raise RuntimeError("boom")
 
         job = inf.AlertJob(camera="front_door", stem="s", ts=1.0)
@@ -262,7 +265,7 @@ class VlmFilterTest(unittest.TestCase):
 
 
 class _ParkedCarBackend:
-    def analyze(self, frames, camera_name, t_sec, start_hour, end_hour):
+    def analyze(self, frames, camera_name, t_sec, start_hour, end_hour, owner_language="en"):
         parsed = {"summary": "a car is parked in the driveway", "people": 0, "vehicle_moving": False}
         return "{}", parsed
 
@@ -272,7 +275,7 @@ class PausedCameraTest(unittest.TestCase):
         class CountingBackend:
             calls = 0
 
-            def analyze(self, *args):
+            def analyze(self, *args, **kwargs):
                 CountingBackend.calls += 1
                 return "{}", {"summary": "a person"}
 

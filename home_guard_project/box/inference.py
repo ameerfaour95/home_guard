@@ -107,7 +107,7 @@ def apply_policy_override(parsed: Dict[str, Any], in_window: bool, person: bool,
 
 
 # Bumped whenever the prompt or the answer's schema changes, so training records can be told apart.
-PROMPT_VERSION = "2026-10-03.tagged-rules-label-animals"
+PROMPT_VERSION = "2026-10-03.tagged-rules-label-animals-why-owner"
 
 # The three labels the model gives a scene, and what the box does with each. The owner
 # chose them (this is also what a student model will be trained to answer):
@@ -126,8 +126,10 @@ VLM_SCHEMA: Dict[str, Any] = {
         "people": {"type": "integer"},
         "vehicle_moving": {"type": "boolean"},
         "animals": {"type": "integer"},
+        "why": {"type": "string"},
+        "summary_owner": {"type": "string"},
     },
-    "required": ["summary", "label", "people", "vehicle_moving", "animals"],
+    "required": ["summary", "label", "people", "vehicle_moving", "animals", "why", "summary_owner"],
     "additionalProperties": False,
 }
 
@@ -145,6 +147,29 @@ def alert_summary(label: str, summary: str) -> str:
     if label == "escalation":
         return f"Escalation: {summary}"
     return summary
+
+
+def is_silent(label: str) -> bool:
+    """Only a normal scene is delivered without a sound. Suspicious and escalation are always loud."""
+    return label == "normal"
+
+
+def owner_language() -> str:
+    """The box language (alerts and announcements), read from box.yaml each time: it changes without a restart."""
+    try:
+        from .boxconfig import load_box_settings  # noqa: PLC0415
+
+        return "he" if str(load_box_settings().get("owner_language") or "en") == "he" else "en"
+    except Exception:  # noqa: BLE001
+        return "en"
+
+
+def _int_or_none(value: Any) -> Optional[int]:
+    """A count from the model's answer, or None when it gave something that is not a number."""
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError, OverflowError):
+        return None
 VLM_RESPONSE_FORMAT: Dict[str, Any] = {
     "type": "json_schema",
     "json_schema": {"name": "camera_report", "strict": True, "schema": VLM_SCHEMA},
@@ -168,7 +193,10 @@ LABEL_RULES = """
 """.strip()
 
 
-def build_prompt(camera_name: str, t_sec: int, local_time_str: str, start_hour: int, end_hour: int) -> str:
+def build_prompt(camera_name: str, t_sec: int, local_time_str: str, start_hour: int, end_hour: int,
+                 owner_language: str = "en") -> str:
+    language = "Hebrew" if owner_language == "he" else "English"
+    owner_rule = "the same summary, translated into Hebrew" if owner_language == "he" else "an empty string"
     # The summary follows the rules our taggers wrote by (tagging/*/analysis_output/
     # vlm_training.jsonl): what happens, in order, with what people wear and hold, and
     # "No special activity." for an empty scene. No example sentences, so the model does
@@ -193,13 +221,16 @@ Write "summary": what happens in the clip, in one to three short sentences (usua
 
 Then give the clip ONE "label":
 {LABEL_RULES}
+Dark clothing alone never makes a scene suspicious; judge what people do.
 
 Reply with EXACTLY ONE strict JSON object and nothing else:
 {{"summary": "<one to three short sentences>",
   "label": "normal" | "suspicious" | "escalation",
   "people": <how many people are visible in the frames, as a number; 0 if none>,
   "vehicle_moving": <true if a vehicle is driving, arriving or leaving; false if vehicles are only parked or there are none>,
-  "animals": <how many animals (cats, dogs and other animals, not birds) are visible, as a number; 0 if none>}}
+  "animals": <how many animals (cats, dogs and other animals, not birds) are visible, as a number; 0 if none>,
+  "why": "<one short clause in {language} naming the behaviour behind a suspicious or escalation label; empty for normal>",
+  "summary_owner": "<{owner_rule}>"}}
 """.strip()
 
 
@@ -314,7 +345,7 @@ class NullBackend:
     """
 
     def analyze(self, frames_bgr: List[Any], camera_name: str, t_sec: int,
-                start_hour: int, end_hour: int) -> Tuple[str, Optional[Dict[str, Any]]]:
+                start_hour: int, end_hour: int, owner_language: str = "en") -> Tuple[str, Optional[Dict[str, Any]]]:
         parsed = {"summary": ""}
         return json.dumps(parsed), parsed
 
@@ -343,8 +374,9 @@ class GptBackend:
         self._response_format: Dict[str, Any] = VLM_RESPONSE_FORMAT
 
     def analyze(self, frames_bgr: List[Any], camera_name: str, t_sec: int,
-                start_hour: int, end_hour: int) -> Tuple[str, Optional[Dict[str, Any]]]:
-        prompt = build_prompt(camera_name, t_sec, datetime.now().strftime("%H:%M:%S"), start_hour, end_hour)
+                start_hour: int, end_hour: int, owner_language: str = "en") -> Tuple[str, Optional[Dict[str, Any]]]:
+        prompt = build_prompt(camera_name, t_sec, datetime.now().strftime("%H:%M:%S"), start_hour, end_hour,
+                              owner_language=owner_language)
         self.last_prompt = prompt
         content: List[Dict[str, Any]] = [{"type": "text", "text": prompt}]
         for fr in frames_bgr:
@@ -399,12 +431,15 @@ def make_backend(settings: AlertSettings, env: Dict[str, str]):
 def dispatch_alert(box_settings: Dict[str, Any], env: Dict[str, str],
                    command: str, summary: str, reason: str,
                    image: Optional[bytes] = None,
-                   assistant: Any = None, alert: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                   assistant: Any = None, alert: Optional[Dict[str, Any]] = None,
+                   graded: Optional[str] = None, silent: bool = False, lang: str = "en") -> Dict[str, Any]:
     """Send the alert over the configured channel(s). Never raises.
 
     *image* (JPEG bytes) is the camera snapshot; Telegram sends it as a photo.
     With an *assistant* (telegram_agent.OwnerAssistant) the Telegram alert goes
-    out with the feedback question and buttons, filed under *alert*.
+    out with the feedback question and buttons, filed under *alert*: as the
+    *graded* text (telegram_notify.graded_alert_text) when given, without a
+    sound when *silent*, with the question and buttons in *lang*.
     """
     channel = str(box_settings.get("alert_channel", "telegram"))
     results: Dict[str, Any] = {"channel": channel}
@@ -412,9 +447,10 @@ def dispatch_alert(box_settings: Dict[str, Any], env: Dict[str, str],
         if channel in ("telegram", "both"):
             from . import telegram_notify  # noqa: PLC0415
 
-            text = telegram_notify.alert_text(command, summary, reason)
+            text = graded or telegram_notify.alert_text(command, summary, reason)
             if assistant is not None and alert is not None and text is not None:
-                results["telegram"] = {"command": command, "telegram": assistant.send_alert(alert, text, image)}
+                results["telegram"] = {"command": command,
+                                       "telegram": assistant.send_alert(alert, text, image, silent=silent, lang=lang)}
             else:
                 cfg = telegram_notify.load_telegram_config(box_settings, env)
                 results["telegram"] = telegram_notify.notify(cfg, command, summary, reason, image=image)
@@ -700,6 +736,7 @@ class _Stream:
         self._mask = mask                    # zones.ZoneMask, or None to watch the whole picture
         self._cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
         self._frame = None
+        self.last_ts = 0.0                   # when the camera last delivered a picture; 0.0 until the first
         self._lock = threading.Lock()
         self._running = True
         self._t = threading.Thread(target=self._loop, daemon=True)
@@ -734,6 +771,7 @@ class _Stream:
             from .alert_clips import encode_frame  # noqa: PLC0415
 
             self._ring.add(now, encode_frame(frame))
+        self.last_ts = now
 
     def read(self):
         with self._lock:
@@ -823,8 +861,9 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                 status.decision(camera_name, labels, "Alerts are paused; the AI was not asked.", "[none]",
                                 sent=False, muted=True)
             return
+        lang = owner_language()
         raw, parsed = backend.analyze(frames, camera_name, int(time.time()),
-                                      settings.alert_start_hour, settings.alert_end_hour)
+                                      settings.alert_start_hour, settings.alert_end_hour, owner_language=lang)
         if job is not None and raw:
             # Everything a student model needs to learn this answer: the exact pictures,
             # the question, and the answer word for word.
@@ -848,6 +887,11 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
         if not summary:
             summary = "a person or vehicle was detected"
         reason = str(parsed.get("alert_reason", "")) if parsed else ""
+        why = str(parsed.get("why") or "").strip() if parsed else ""
+        summary_owner = str(parsed.get("summary_owner") or "").strip() if parsed else ""
+        people = _int_or_none(parsed.get("people")) if parsed else None
+        raw_label = str((parsed or {}).get("label") or "").strip().lower()
+        shown_label = raw_label if raw_label in LABELS else ""    # no valid label: "activity", loud
         if vlm_confirms(parsed, alert_on) is False:
             # The detector fired, the VLM looked and saw nothing the owner alerts on (no
             # person, nothing moving, or only a car when the owner wants people): no
@@ -872,23 +916,34 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
         except Exception as exc:  # noqa: BLE001
             log.warning("[%s] could not encode snapshot: %s", camera_name, exc)
         muted = bool(assistant is not None and assistant.is_muted(camera_name))
+        silent = is_silent(shown_label)
         if muted:
             res: Dict[str, Any] = {"sent": False, "reason": "paused by the owner"}
             log.info("[%s] alert not sent: the owner paused alerts", camera_name)
         else:
+            from .telegram_notify import graded_alert_text  # noqa: PLC0415
+
             alert_ref = None
             if job is not None:
                 alert_ref = {"alert_id": job.stem, "camera": camera_name, "summary": summary, "label": label,
                              "ts": job.ts}
+            graded = graded_alert_text(shown_label, camera_name, summary_owner or summary, why, lang)
             res = dispatch_alert(box_settings, env, cmd, f"{camera_name}: {alert_summary(label, summary)}", reason,
-                                 image=image or None, assistant=assistant, alert=alert_ref)
+                                 image=image or None, assistant=assistant, alert=alert_ref, graded=graded,
+                                 silent=silent, lang=lang)
             log.info("[%s] alert dispatched: %s", camera_name, res)
+            if label == "escalation" and assistant is not None and alert_ref and delivery(res)[0]:
+                try:
+                    assistant.remind_if_silent(alert_ref, graded, lang)
+                except Exception as exc:  # noqa: BLE001 - a missed reminder must not lose the alert's record
+                    log.warning("[%s] escalation reminder not scheduled: %s", camera_name, exc)
         if status is not None:
             sent, why_not = delivery(res)
             status.decision(camera_name, labels, summary, cmd, sent=sent, muted=muted, error=why_not, label=label)
         if job is not None:
             job.alert = {"summary": summary, "label": label, "alert_command": cmd, "alert_reason": reason,
-                         "labels": job.labels, "muted": muted, "dispatch": res}
+                         "labels": job.labels, "muted": muted, "dispatch": res,
+                         "why": why, "summary_owner": summary_owner, "silent": silent, "people": people}
     except Exception as exc:  # noqa: BLE001
         log.warning("[%s] worker error: %s", camera_name, exc)
     finally:
@@ -917,7 +972,8 @@ def _save_clip(job: AlertJob, frames: List[Any], production_dir: str, training_d
             meta = write_alert_clip(training_dir, job.camera, f"{job.camera}_{int(job.ts)}_paused", frames,
                                     alert, kind="paused")
         else:
-            meta = write_alert_clip(production_dir, job.camera, job.stem, frames, alert)
+            meta = write_alert_clip(production_dir, job.camera, job.stem, frames, alert,
+                                    extra={"trigger_ts": job.ts, "mode": "guard"})
             # The owner's copy above expires in two weeks; the training set keeps every
             # alert with the teacher's answer, so a student model can be trained on it.
             write_alert_clip(training_dir, job.camera, job.stem, frames, alert, kind="alert", teacher=job.teacher)
@@ -925,7 +981,7 @@ def _save_clip(job: AlertJob, frames: List[Any], production_dir: str, training_d
             log.info("[%s] clip saved: %s (%d frames)", job.camera, os.path.basename(meta), len(frames))
         if (meta and assistant is not None and not job.false_positive and not job.paused
                 and delivery(alert.get("dispatch") or {})[0]):
-            res = assistant.send_clip(job.stem, clip_file(production_dir, meta))
+            res = assistant.send_clip(job.stem, clip_file(production_dir, meta), silent=bool(alert.get("silent")))
             log.info("[%s] video %s", job.camera, "sent" if res.get("sent") else f"not sent: {res}")
     except Exception as exc:  # noqa: BLE001
         log.warning("[%s] could not save the clip %s: %s", job.camera, job.stem, exc)
@@ -1069,6 +1125,9 @@ def run() -> int:
                 "camera_sensitivity": {c: dict(t) for c, t in sorted(camera_alerts.sensitivity.items())}}
 
     status.settings(reported_settings())
+    from .brain.mode import ModeWatch, status_line, switch_announcement  # noqa: PLC0415
+
+    mode_watch = ModeWatch()
     worker = {"t": None}  # single in-flight VLM call across cameras (N150 budget)
     pending: List[AlertJob] = []
     assistant = None
@@ -1085,6 +1144,24 @@ def run() -> int:
         settings_changed = bool(live.check(now_ts))
         if camera_alerts.check(now_ts) or settings_changed:
             status.settings(reported_settings())
+        if mode_watch.due(now_ts):
+            try:
+                start, end = settings.alert_start_hour, settings.alert_end_hour
+                switched = mode_watch.update(now_ts, start, end)
+                for cam_name, stream in streams.items():
+                    if stream.last_ts:
+                        status.frame_seen(cam_name, stream.last_ts)
+                offline = status.offline(now_ts, cameras=list(cameras))
+                mute = getattr(assistant, "mute", None)
+                paused = [(c, mute.muted_until(now_ts, c)) for c in cameras if mute and mute.muted_until(now_ts, c)]
+                logging_on = bool(getattr(settings, "quiet_log", False))      # the setting arrives in Task 19
+                status.mode(mode_watch.mode, status_line(mode_watch.mode, now_ts, start, end, paused, offline,
+                                                         logging_on), now=now_ts)
+                if switched and assistant is not None:
+                    assistant.announce(switch_announcement(switched, now_ts, start, end, len(cameras) - len(offline),
+                                                           len(cameras), owner_language(), logging_on))
+            except Exception as exc:  # noqa: BLE001 - the status line must never stop the alerts
+                log.warning("Mode status not updated: %s", exc)
         for job in [j for j in pending if now_ts >= j.ts + POST_SECONDS]:
             pending.remove(job)
             clip = rings[job.camera].between(job.ts - PRE_SECONDS, job.ts + POST_SECONDS)
@@ -1093,6 +1170,8 @@ def run() -> int:
         for name in cameras:
             frame = streams[name].read()
             if frame is None:
+                continue
+            if time.time() - streams[name].last_ts > 5:   # a frozen camera: its last picture is not seen again
                 continue
             # Maintain a rolling buffer, one frame every frame_interval_sec.
             if now_ts - last_buf_ts[name] >= settings.frame_interval_sec:

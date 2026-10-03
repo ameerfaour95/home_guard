@@ -34,7 +34,6 @@ from .brain.deliver import choice_keyboard
 from .boxconfig import LOG_DIR, PRODUCTION_ARCHIVE_DIR, PRODUCTION_LIVE_DIR, PRODUCTION_RETENTION_DAYS
 from .feedback import (
     FEEDBACK_BUTTONS,
-    FEEDBACK_QUESTION,
     AlertIndex,
     Feedback,
     MuteState,
@@ -54,12 +53,34 @@ Post = Callable[..., Dict[str, Any]]
 
 BUTTON_LABELS = {code: label for row in FEEDBACK_BUTTONS for label, code in row}
 
+REMIND_SEC = 300.0   # an escalation nobody answered is sent once more, loud, after this long
+# The i18n key of each button's label; a button not listed here keeps its English label.
+_BUTTON_KEYS = {"fb:true": "btn_true", "fb:false": "btn_false", "fb:expected": "btn_expected", "fb:mute60": "btn_mute60"}
 
-def feedback_keyboard() -> str:
-    """The buttons under an alert, as Telegram's ``reply_markup`` JSON."""
+
+def _button_label(label: str, code: str, lang: str) -> str:
+    key = _BUTTON_KEYS.get(code)
+    return tr(key, lang) if key else label
+
+
+def feedback_keyboard(lang: str = "en") -> str:
+    """The buttons under an alert, as Telegram's ``reply_markup`` JSON, in the box language."""
     return json.dumps({"inline_keyboard": [
-        [{"text": label, "callback_data": code} for label, code in row] for row in FEEDBACK_BUTTONS
+        [{"text": _button_label(label, code, lang), "callback_data": code} for label, code in row]
+        for row in FEEDBACK_BUTTONS
     ]})
+
+
+def owner_reacted(feedback_dir: str, alert_id: str) -> bool:
+    """True once any answer to *alert_id* was saved (a button, a reply, a message bound to it)."""
+    import glob  # noqa: PLC0415
+
+    if not feedback_dir or not alert_id:
+        return False
+    pattern = os.path.join(glob.escape(feedback_dir), "feedback", "*", "*", f"{glob.escape(alert_id)}_*.feedback.json")
+    prefix, suffix = f"{alert_id}_", ".feedback.json"
+    # The file is <alert_id>_<milliseconds>.feedback.json: an alert whose id merely starts the same does not count.
+    return any(os.path.basename(p)[len(prefix):-len(suffix)].isdigit() for p in glob.glob(pattern))
 
 
 def send_alert(
@@ -71,30 +92,36 @@ def send_alert(
     post: Post = telegram_notify._http_post,
     post_multipart: Post = telegram_notify._http_post_multipart,
     feed: Optional[ChatFeed] = None,
+    silent: bool = False,
+    lang: str = "en",
 ) -> Dict[str, Any]:
     """Send one alert to every chat, with the feedback question and buttons. Never raises.
 
     *alert* is what an answer will be filed under: ``{"alert_id", "camera",
     "summary", "ts"}``. Each chat's message id is stored in *index*. With a
     *feed*, the alert also appears in the box's window, delivered or not.
+    *silent* delivers it without a sound (a normal scene); the question and the
+    buttons are in *lang*, the box language.
     """
     if cfg.dry_run or not cfg.enabled:
         reason = "dry_run" if cfg.dry_run else "not_configured"
         log.info("Telegram alert not sent (%s): %s", reason, text)
         return {"sent": False, "reason": reason}
-    body = f"{text}\n\n{FEEDBACK_QUESTION}"
+    body = f"{text}\n\n{tr('feedback_question', lang)}"
+    keyboard = feedback_keyboard(lang)
+    quiet = {"disable_notification": "true"} if silent else {}
     results = []
     for chat_id in cfg.chat_ids:
         try:
             if image:
                 resp = post_multipart(
                     cfg.bot_token, "sendPhoto",
-                    {"chat_id": chat_id, "caption": body[:CAPTION_LIMIT], "reply_markup": feedback_keyboard()},
+                    {"chat_id": chat_id, "caption": body[:CAPTION_LIMIT], "reply_markup": keyboard, **quiet},
                     {"photo": ("alert.jpg", image, "image/jpeg")},
                 )
             else:
                 resp = post(cfg.bot_token, "sendMessage",
-                            {"chat_id": chat_id, "text": body, "reply_markup": feedback_keyboard()})
+                            {"chat_id": chat_id, "text": body, "reply_markup": keyboard, **quiet})
             ok = bool(resp.get("ok"))
             message_id = (resp.get("result") or {}).get("message_id")
             if ok and message_id is not None:
@@ -141,8 +168,12 @@ def send_clip(
     clip_path: str,
     post_multipart: Post = telegram_notify._http_post_multipart,
     feed: Optional[ChatFeed] = None,
+    silent: bool = False,
 ) -> Dict[str, Any]:
-    """Send an alert's video as a reply under the alert it belongs to, in every chat that got the alert. Never raises."""
+    """Send an alert's video as a reply under the alert it belongs to, in every chat that got the alert. Never raises.
+
+    *silent*: no sound, as for the alert itself (a normal scene).
+    """
     if cfg.dry_run or not cfg.enabled:
         return {"sent": False, "reason": "dry_run" if cfg.dry_run else "not_configured"}
     targets = index.messages(alert_id)
@@ -159,7 +190,8 @@ def send_clip(
             resp = post_multipart(
                 cfg.bot_token, "sendVideo",
                 {"chat_id": chat_id, "reply_to_message_id": str(message_id),
-                 "allow_sending_without_reply": "true", "supports_streaming": "true"},
+                 "allow_sending_without_reply": "true", "supports_streaming": "true",
+                 **({"disable_notification": "true"} if silent else {})},
                 {"video": (os.path.basename(clip_path), data, "video/mp4")},
                 timeout=120.0,
             )
@@ -214,12 +246,29 @@ class OwnerAssistant:
     def is_muted(self, camera: str) -> bool:
         return self.mute.is_muted(time.time(), camera)
 
-    def send_alert(self, alert: Dict[str, Any], text: str, image: Optional[bytes] = None) -> Dict[str, Any]:
-        return send_alert(self.cfg, self.index, alert, text, image, feed=self.feed)
+    def send_alert(self, alert: Dict[str, Any], text: str, image: Optional[bytes] = None, silent: bool = False,
+                   lang: str = "en") -> Dict[str, Any]:
+        return send_alert(self.cfg, self.index, alert, text, image, feed=self.feed, silent=silent, lang=lang)
 
-    def send_clip(self, alert_id: str, clip_path: str) -> Dict[str, Any]:
+    def remind_if_silent(self, alert: Dict[str, Any], text: str, lang: str = "en", delay: float = REMIND_SEC) -> None:
+        """For an escalation: if nobody answered within *delay*, send it once more, loud. Never raises."""
+        def remind() -> None:
+            try:
+                if not owner_reacted(self.feedback_dir, str(alert.get("alert_id") or "")):
+                    self.send_alert(alert, f"{tr('alert_reminder', lang)}\n{text}", lang=lang)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Escalation reminder not sent: %s", exc)
+
+        try:
+            timer = threading.Timer(delay, remind)
+            timer.daemon = True
+            timer.start()
+        except Exception as exc:  # noqa: BLE001 - the alert loop must never stop for a reminder
+            log.warning("Escalation reminder not scheduled: %s", exc)
+
+    def send_clip(self, alert_id: str, clip_path: str, silent: bool = False) -> Dict[str, Any]:
         """The alert's video, as a reply under the alert. Call it once the clip has been written."""
-        return send_clip(self.cfg, self.index, alert_id, clip_path, feed=self.feed)
+        return send_clip(self.cfg, self.index, alert_id, clip_path, feed=self.feed, silent=silent)
 
 
 def alert_roots(live_dir: str = PRODUCTION_LIVE_DIR, archive_dir: str = PRODUCTION_ARCHIVE_DIR) -> List[str]:

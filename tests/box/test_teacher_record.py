@@ -22,8 +22,9 @@ class _TeachingBackend:
     model_name = "gpt-4o"
     last_prompt = ""
 
-    def analyze(self, frames, camera_name, t_sec, start_hour, end_hour):
-        self.last_prompt = inf.build_prompt(camera_name, t_sec, "01:00:00", start_hour, end_hour)
+    def analyze(self, frames, camera_name, t_sec, start_hour, end_hour, owner_language="en"):
+        self.last_prompt = inf.build_prompt(camera_name, t_sec, "01:00:00", start_hour, end_hour,
+                                            owner_language=owner_language)
         return json.dumps(ANSWER), dict(ANSWER)
 
 
@@ -37,7 +38,8 @@ class TeacherRecordTest(unittest.TestCase):
     def test_the_answer_must_be_json_with_a_summary_and_one_of_three_labels(self) -> None:
         self.assertEqual(VLM_RESPONSE_FORMAT["type"], "json_schema")
         self.assertTrue(VLM_RESPONSE_FORMAT["json_schema"]["strict"])
-        self.assertEqual(set(VLM_SCHEMA["required"]), {"summary", "label", "people", "vehicle_moving", "animals"})
+        self.assertEqual(set(VLM_SCHEMA["required"]),
+                         {"summary", "label", "people", "vehicle_moving", "animals", "why", "summary_owner"})
         self.assertEqual(VLM_SCHEMA["properties"]["label"]["enum"], ["normal", "suspicious", "escalation"])
         self.assertFalse(VLM_SCHEMA["additionalProperties"])
         prompt = inf.build_prompt("door", 0, "01:00:00", 0, 0)

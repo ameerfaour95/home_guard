@@ -157,6 +157,18 @@ def alert_text(command: str, summary: str = "", reason: str = "") -> Optional[st
     return None
 
 
+def graded_alert_text(label: str, camera: str, summary: str, why: str = "", lang: str = "en") -> str:
+    """The alert the owner reads: the label and camera first, then what happened, then why (not for normal)."""
+    from .brain.i18n import t  # noqa: PLC0415
+
+    key = {"normal": "alert_normal", "suspicious": "alert_suspicious",
+           "escalation": "alert_escalation"}.get(label, "alert_unclassified")
+    lines = [t(key, lang, camera=camera), (summary or "").strip() or "activity detected"]
+    if label in ("suspicious", "escalation") and (why or "").strip():
+        lines.append(t("alert_why", lang, why=why.strip()))
+    return "\n".join(lines)
+
+
 def notify(cfg: TelegramConfig, command: str, summary: str = "", reason: str = "",
            image: Optional[bytes] = None) -> Dict[str, Any]:
     """Dispatch on an alert_command. Telegram cannot place calls, so

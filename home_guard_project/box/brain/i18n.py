@@ -162,6 +162,22 @@ TEMPLATES: Dict[str, Dict[str, str]] = {
                            "he": "💬 השמירה הסתיימה. שום דבר לא מתועד{next}.",
                            "ar": "💬 انتهت الحراسة. لا يتم تسجيل أي شيء{next}."},
     "guard_next": {"en": " until {time}", "he": " עד {time}", "ar": " حتى {time}"},
+    # -- alerts -----------------------------------------------------------------
+    "alert_normal": {"en": "🟢 Looks normal · {camera}", "he": "🟢 נראה תקין · {camera}", "ar": "🟢 يبدو طبيعيًا · {camera}"},
+    "alert_suspicious": {"en": "🟡 Suspicious · {camera}", "he": "🟡 חשוד · {camera}", "ar": "🟡 مريب · {camera}"},
+    "alert_escalation": {"en": "🔴 ESCALATION · {camera}", "he": "🔴 אירוע חמור · {camera}", "ar": "🔴 تصعيد · {camera}"},
+    "alert_unclassified": {"en": "⚪ Activity · {camera}", "he": "⚪ פעילות · {camera}", "ar": "⚪ نشاط · {camera}"},
+    "alert_why": {"en": "Why: {why}", "he": "למה: {why}", "ar": "السبب: {why}"},
+    "alert_reminder": {"en": "🔴 Reminder: nobody has answered this alert yet.",
+                       "he": "🔴 תזכורת: אף אחד עוד לא ענה להתראה הזו.",
+                       "ar": "🔴 تذكير: لم يرد أحد على هذا التنبيه بعد."},
+    "feedback_question": {"en": "Was this alert right? Tap a button, or just reply in your own words.",
+                          "he": "ההתראה הייתה נכונה? לחצו על כפתור, או פשוט ענו במילים שלכם.",
+                          "ar": "هل كان هذا التنبيه صحيحًا؟ اضغط زرًا أو رد بكلماتك."},
+    "btn_true": {"en": "Real alert", "he": "התראה אמיתית", "ar": "تنبيه حقيقي"},
+    "btn_false": {"en": "Nothing there", "he": "אין שם כלום", "ar": "لا يوجد شيء"},
+    "btn_expected": {"en": "It was expected", "he": "זה היה צפוי", "ar": "كان متوقعًا"},
+    "btn_mute60": {"en": "Pause 1 hour", "he": "השתק לשעה", "ar": "إيقاف لمدة ساعة"},
 }
 
 

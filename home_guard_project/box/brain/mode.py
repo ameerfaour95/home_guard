@@ -74,6 +74,25 @@ def status_line(mode: str, now_ts: float, start_hour: int, end_hour: int,
     return " · ".join(parts)
 
 
+class ModeWatch:
+    """Notices the switch between Guard and Assistant, checked every *every* seconds by the guard loop."""
+
+    def __init__(self, every: float = 30.0) -> None:
+        self.every = every
+        self.mode: Optional[str] = None
+        self._next = 0.0
+
+    def due(self, now: float) -> bool:
+        return now >= self._next
+
+    def update(self, now: float, start_hour: int, end_hour: int) -> Optional[str]:
+        """The new mode when it changed since the previous update, else None (the first update never counts)."""
+        self._next = now + self.every
+        current = resolve_mode(now, start_hour, end_hour)
+        previous, self.mode = self.mode, current
+        return current if previous is not None and previous != current else None
+
+
 def switch_announcement(mode: str, now_ts: float, start_hour: int, end_hour: int,
                         live: int, total: int, lang: str, quiet_log: bool = True) -> str:
     """The one Telegram message sent when the mode changes."""

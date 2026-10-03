@@ -135,8 +135,11 @@ def write_alert_clip(
     h264: bool = True,
     kind: str = "alert",
     teacher: Optional[Dict[str, Any]] = None,
+    extra: Optional[Dict[str, Any]] = None,
 ) -> Optional[str]:
     """Write the clip and then its meta under *root_dir*. Returns the meta path, or None with no frames.
+
+    *extra* fields are merged into the meta (``trigger_ts``, ``mode``).
 
     The meta is written last and through a temp file: a meta on disk means
     the clip is complete. With a *teacher* record (what the VLM was asked and
@@ -200,6 +203,7 @@ def write_alert_clip(
                  "trigger_classes": list(alert.get("labels", [])), "trigger_detected": True},
         "alert": alert,
     }
+    meta.update(extra or {})
     if teacher:
         meta.update(teacher_record(root_dir, camera, day, stem, teacher))
     tmp = f"{meta_path}.tmp"

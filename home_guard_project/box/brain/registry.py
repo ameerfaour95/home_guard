@@ -255,7 +255,9 @@ class HouseRegistry:
         start, end = self.hours()
         cams = []
         for name in active + disabled:
-            checked = _num(_dict(status_cams.get(name)).get("checked_ts"))
+            entry = _dict(status_cams.get(name))
+            # When the camera last delivered a new picture; the detector's last look for an older status file.
+            checked = _num(entry.get("frame_ts") or entry.get("checked_ts"))
             if name not in active:
                 live: Optional[bool] = False
             elif not status_cams:

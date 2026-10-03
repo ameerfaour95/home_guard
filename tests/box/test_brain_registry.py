@@ -165,6 +165,15 @@ class RegistryTest(unittest.TestCase):
         self.assertFalse(s.state_known)
         self.assertEqual(s.cameras, ())
 
+    def test_a_new_picture_decides_live_not_the_detectors_last_look(self) -> None:
+        # The detector looked a moment ago, but at a frozen picture: the camera sent nothing new for minutes.
+        self._write(self.status, json.dumps({"cameras": {
+            "main_entrance": {"checked_ts": NOW - 1, "frame_ts": NOW - 300},
+            "front_side": {"checked_ts": NOW - 300, "frame_ts": NOW - 2}}}))
+        s = self._registry().snapshot()
+        self.assertEqual((s.camera("main_entrance").live, s.camera("front_side").live), (False, True))
+        self.assertEqual(s.camera("front_side").last_seen, NOW - 2)
+
     def test_non_numeric_checked_ts_means_no_timestamp(self) -> None:
         self._write(self.status, json.dumps({"cameras": {"main_entrance": {"checked_ts": "soon"},
                                                          "front_side": "junk"}}))

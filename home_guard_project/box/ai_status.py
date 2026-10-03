@@ -12,7 +12,12 @@ they share ``logs/ai_status.json``:
      "decisions": [{"ts": <epoch>, "camera": "...", "labels": ["person"],
                     "summary": "A person is walking in the driveway.", "label": "normal",   # or suspicious / escalation
                     "command": "[send_message]", "sent": true, "false_positive": false,
-                    "muted": false, "error": ""}]}                            # newest last
+                    "muted": false, "error": ""}],                            # newest last
+     "mode": "guard" | "assistant" | null,
+     "status_line": "🛡️ Guarding until 06:00" or null}
+
+A camera's entry may also carry ``frame_ts``: when the camera last delivered a
+new picture (not a repeat of an old frame). Live/offline follows it.
 
 The file holds no picture, address or login. It is rewritten at most about
 once a second, through a temp file, so a reader never sees half of it.
@@ -24,7 +29,7 @@ import json
 import os
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 KEEP_DECISIONS = 50
 
@@ -59,6 +64,7 @@ class AiStatus:
         self._decisions: List[Dict[str, Any]] = []
         self._thinking: Optional[Dict[str, Any]] = None
         self._settings: Dict[str, Any] = {}
+        self._mode: Dict[str, str] = {}
         self._lock = threading.Lock()
         self._written = 0.0
 
@@ -104,12 +110,33 @@ class AiStatus:
             self._decisions = self._decisions[-KEEP_DECISIONS:]
             self._write(now, force=True)
 
+    def mode(self, mode: str, line: str, now: Optional[float] = None) -> None:
+        """Guard or Assistant, and the status line the app and Telegram show."""
+        now = time.time() if now is None else now
+        with self._lock:
+            self._mode = {"mode": mode, "line": line}
+            self._write(now, force=True)
+
+    def frame_seen(self, camera: str, ts: float) -> None:
+        """The camera delivered a new picture at *ts* (not a repeat of an old frame)."""
+        with self._lock:
+            entry = self._cameras.setdefault(camera, {"checked_ts": None, "ts": None, "objects": []})
+            entry["frame_ts"] = ts
+
+    def offline(self, now: float, after: float = 60.0, cameras: Sequence[str] = ()) -> List[str]:
+        """Cameras with no new picture for *after* seconds; a listed camera that never sent one is offline too."""
+        with self._lock:
+            names = set(self._cameras) | set(cameras)
+            return sorted(n for n in names
+                          if now - float((self._cameras.get(n) or {}).get("frame_ts") or 0) > after)
+
     def _write(self, now: float, force: bool) -> None:
         if not force and now - self._written < self.min_interval:
             return
         self._written = now
         data = {"updated": now, "cameras": self._cameras, "thinking": self._thinking,
-                "settings": self._settings, "decisions": self._decisions}
+                "settings": self._settings, "decisions": self._decisions,
+                "mode": self._mode.get("mode"), "status_line": self._mode.get("line")}
         try:
             os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
             tmp = f"{self.path}.{os.getpid()}.tmp"

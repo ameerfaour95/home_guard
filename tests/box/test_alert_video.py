@@ -107,8 +107,9 @@ class _Assistant:
     def __init__(self) -> None:
         self.clips: list = []
 
-    def send_clip(self, alert_id, clip_path):
+    def send_clip(self, alert_id, clip_path, silent=False):
         self.clips.append((alert_id, clip_path, os.path.isfile(clip_path)))
+        self.silent = silent
         return {"sent": True}
 
 
@@ -126,6 +127,7 @@ class ClipFollowsAlertTest(unittest.TestCase):
         assistant = _Assistant()
         with mock.patch("home_guard_project.box.alert_clips._to_h264", return_value=False):
             inf._save_clip(job, frames, production, training, assistant)
+        self.assistant = assistant
         return assistant.clips, production
 
     def test_a_delivered_alert_is_followed_by_its_video(self) -> None:
@@ -137,6 +139,19 @@ class ClipFollowsAlertTest(unittest.TestCase):
         self.assertEqual(alert_id, "door_100_alert")
         self.assertTrue(existed)
         self.assertTrue(path.startswith(production) and path.endswith("door_100_alert.mp4"))
+        self.assertFalse(self.assistant.silent)
+        (meta_path,) = [os.path.join(d, n) for d, _, names in os.walk(production) for n in names
+                        if n.endswith(".meta.json")]
+        with open(meta_path, encoding="utf-8") as f:
+            meta = json.load(f)
+        self.assertEqual((meta["trigger_ts"], meta["mode"]), (100.0, "guard"))
+
+    def test_the_video_of_a_silent_alert_is_silent_too(self) -> None:
+        delivered = {"channel": "telegram", "telegram": {"telegram": {"sent": True, "results": [{"ok": True}]}}}
+        clips, _ = self._save({"summary": "a person", "alert_command": "[send_message]", "labels": ["person"],
+                               "dispatch": delivered, "silent": True})
+        self.assertEqual(len(clips), 1)
+        self.assertTrue(self.assistant.silent)
 
     def test_no_video_when_the_alert_was_refused_paused_or_a_false_positive(self) -> None:
         refused = {"channel": "telegram", "telegram": {"telegram": {"sent": False, "results": [
@@ -163,7 +178,7 @@ class _Backend:
     def __init__(self, parsed: dict) -> None:
         self.parsed = parsed
 
-    def analyze(self, frames, camera_name, t_sec, start_hour, end_hour):
+    def analyze(self, frames, camera_name, t_sec, start_hour, end_hour, owner_language="en"):
         return json.dumps(self.parsed), self.parsed
 
 
@@ -199,6 +214,9 @@ class WorkerReportsTest(unittest.TestCase):
                                 {"alert_channel": "telegram"}, {}, AlertSettings(), "door", [object()], None, job, status)
                 self.assertEqual(d.call_args[0][2], command, label)
                 self.assertTrue(d.call_args[0][3].startswith(prefix), (label, d.call_args[0][3]))
+                # Telegram gets the graded text; only a normal scene arrives without a sound.
+                self.assertEqual(d.call_args.kwargs["silent"], label == "normal", label)
+                self.assertIn("door\nSomeone is trying the gate.", d.call_args.kwargs["graded"])
                 self.assertEqual((status.decisions[0]["label"], job.alert["label"]), (label, label))
 
     def test_a_refused_alert_carries_the_reason(self) -> None:
