@@ -174,6 +174,19 @@ class EventsTest(unittest.TestCase):
         with self.assertLogs("box.archive", level="WARNING"):
             self.assertEqual(len(load_records([self.root])), 4)
 
+    def test_archive_skips_deeply_nested_meta_and_feedback(self):
+        feedback = os.path.join(self.root, "feedback")
+        os.makedirs(feedback)
+        nested = '{"nested":' + '[' * 100000 + '0' + ']' * 100000 + '}'
+        for path in [os.path.join(self.root, "meta", "nested.meta.json"),
+                     os.path.join(feedback, "nested.feedback.json")]:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(nested)
+        with self.assertLogs("box.archive", level="WARNING") as logs:
+            records = load_records([self.root])
+        self.assertEqual(len(records), 4)
+        self.assertEqual(len(logs.output), 2)
+
     def test_latest_desc_bad_timestamps(self):
         with self.assertLogs("box.brain.events", level="WARNING"):
             result = latest_desc({"bad": {"text": "bad", "ts": "no"},

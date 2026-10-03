@@ -55,7 +55,7 @@ def _load_json(path: str) -> Optional[Dict[str, Any]]:
         if not isinstance(data, dict):
             raise ValueError("saved record must be an object")
         return data
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, RecursionError) as exc:
         log.warning("Could not read saved record %s: %s", path, exc)
         return None
 
