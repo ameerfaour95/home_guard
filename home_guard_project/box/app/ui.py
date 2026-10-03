@@ -148,12 +148,23 @@ class CameraTile(QFrame):
         self.skeleton_timer.stop()
         super().hideEvent(event)
 
+    def thumbnail_labels(self, badge_width):
+        """Shared paint/test geometry, including the 80 px thumbnail rail floor."""
+        area = QRectF(self.rect().adjusted(1, 1, -1, -1))
+        width = max(0, area.width() - 16)
+        return {
+            "name": QRectF(area.left()+8, area.bottom()-62, width, 24),
+            "caption": QRectF(area.left()+8, area.bottom()-34, width, 24),
+            "badge": QRectF(area.left()+8, area.top()+8, min(width, badge_width), 28),
+        }
+
     def paintEvent(self, event):
         super().paintEvent(event)
         p = QPainter(self)
         area = self.rect().adjusted(1,1,-1,-1)
         from .liveness import frame_health
         live_text, reconnecting = frame_health(self.frame_stamp, time.time(), self.live_started)
+        self.painted_label_rects = {}
         if self.picture:
             from .detector_view import box_rect,picture_rect
             from .camera_presentation import image_rect
@@ -180,12 +191,13 @@ class CameraTile(QFrame):
                     for cx,cy,sx,sy in ((rect.left(),rect.top(),1,1),(rect.right(),rect.top(),-1,1),(rect.left(),rect.bottom(),1,-1),(rect.right(),rect.bottom(),-1,-1)):
                         from PySide6.QtCore import QLineF
                         p.drawLine(QLineF(cx,cy,cx+sx*length,cy));p.drawLine(QLineF(cx,cy,cx,cy+sy*length))
-                    if self.detection_labels=="none": continue
+                    if not self.hero or self.detection_labels=="none": continue
                     from .detector_view import object_name
                     text=detection.caption() if self.detection_labels=="confidence" else object_name(detection.label).capitalize();metrics=p.fontMetrics()
                     tx=max(x,min(rect.left(),x+w-metrics.horizontalAdvance(text)-16))
                     ty=max(y,rect.top()-metrics.height()-12)
                     tag=QRectF(tx,ty,metrics.horizontalAdvance(text)+16,metrics.height()+8)
+                    self.painted_label_rects[f"chip_{len(self.painted_label_rects)}"] = tag
                     p.fillRect(tag,QColor("#101a21"));p.drawText(tag.adjusted(8,0,-8,0),Qt.AlignmentFlag.AlignVCenter,text)
                 p.setOpacity(1)
             if self.off:
@@ -200,13 +212,18 @@ class CameraTile(QFrame):
                 footer=QRectF(area.left()+12,area.bottom()-66,area.width()-24,56)
                 gradient=QLinearGradient(0,area.bottom()-area.height()*.45,0,area.bottom());gradient.setColorAt(0,QColor(0,0,0,0));gradient.setColorAt(1,QColor(0,0,0,225))
                 p.fillRect(QRectF(area.left(),area.bottom()-area.height()*.45,area.width(),area.height()*.45),gradient)
-            p.setPen(QColor('#edf4f6'));p.drawText(footer.adjusted(12,0,-12,-28),Qt.AlignmentFlag.AlignVCenter,self.caption.text())
+            labels = self.thumbnail_labels(0) if not self.hero else {
+                "name": footer.adjusted(12,0,-12,-28), "caption": footer.adjusted(12,28,-12,0)}
+            self.painted_label_rects.update({key: labels[key] for key in ("name", "caption")})
+            name = p.fontMetrics().elidedText(self.caption.text(), Qt.TextElideMode.ElideRight, int(labels["name"].width()))
+            p.setPen(QColor('#edf4f6'));p.drawText(labels["name"],Qt.AlignmentFlag.AlignVCenter,name)
             p.setFont(QFont('Segoe UI',10));p.setPen(QColor('#bfccd3'))
-            note=p.fontMetrics().elidedText(self.detector_note.text(),Qt.TextElideMode.ElideRight,max(1,int(footer.width()-24)))
+            note=self.detector_note.text()
             if reconnecting:
                 from .liveness import relative_time
                 note="Last frame "+relative_time(self.frame_stamp,time.time())
-            p.drawText(footer.adjusted(12,28,-12,0),Qt.AlignmentFlag.AlignVCenter,note)
+            note=p.fontMetrics().elidedText(note,Qt.TextElideMode.ElideRight,int(labels["caption"].width()))
+            p.drawText(labels["caption"],Qt.AlignmentFlag.AlignVCenter,note)
         else:
             if not self.off and not self.stopped:
                 gradient=QLinearGradient(0,0,area.width(),0);phase=(math.sin(time.monotonic()*2)+1)/2
@@ -219,6 +236,9 @@ class CameraTile(QFrame):
             p.setFont(QFont("Segoe UI", 10))
             width = p.fontMetrics().horizontalAdvance(live_text)+38
             badge = QRectF(area.left()+12, area.top()+12, width, 28)
+            if not self.hero: badge = self.thumbnail_labels(width)["badge"]
+            self.painted_label_rects["badge"] = badge
+            live_text = p.fontMetrics().elidedText(live_text, Qt.TextElideMode.ElideRight, max(0, int(badge.width()-30)))
             p.setPen(Qt.PenStyle.NoPen);p.setBrush(QColor(12,22,28,225));p.drawRoundedRect(badge,7,7)
             color = QColor(WARNING if reconnecting else OK)
             color.setAlphaF(1 if reconnecting else .65+.35*(math.sin(time.monotonic()*3)+1)/2)
