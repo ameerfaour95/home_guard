@@ -18,7 +18,8 @@ class ThumbnailLabelsTests(unittest.TestCase):
 
     def check_labels(self, tile):
         tile.show_detections = True
-        tile.detections = (Detection("person", .91, (.1, .65, .8, .95)),)
+        tile.detections = (Detection("person", .91, (.1, .2, .8, .95)),
+                           Detection("car", .92, (.4, .8, .6, .98)))
         tile.caption.setText("A very long driveway camera name")
         tile.detector_note.setText("Sees: 1 person, 2 vehicles")
         for age in (0, 12000):
@@ -30,6 +31,22 @@ class ThumbnailLabelsTests(unittest.TestCase):
                 self.assertTrue(tile.rect().contains(rect.toAlignedRect()), name)
             for (a, ra), (b, rb) in itertools.combinations(rects.items(), 2):
                 self.assertFalse(ra.intersects(rb), (tile.size(), a, b))
+            scrim=tile.thumbnail_scrim()
+            if age==0: self.assertTrue(tile.painted_detection_rects)
+            for rect in tile.painted_detection_rects:
+                self.assertFalse(rect.intersects(scrim), (tile.size(), rect, scrim))
+            # Exercise the actual pixels too: enabling outlines must not alter
+            # even a single scrim pixel (including antialiased stroke edges).
+            with_boxes=tile.grab().toImage()
+            tile.show_detections=False
+            without_boxes=tile.grab().toImage()
+            scale=with_boxes.devicePixelRatio()
+            pixels=scrim.adjusted(0,1,0,-1)
+            from PySide6.QtCore import QRect
+            region=QRect(round(pixels.x()*scale),round(pixels.y()*scale),
+                         round(pixels.width()*scale),round(pixels.height()*scale))
+            self.assertEqual(with_boxes.copy(region),without_boxes.copy(region))
+            tile.show_detections=True
 
     def test_narrowest_thumbnail(self):
         tile = CameraTile("garden")

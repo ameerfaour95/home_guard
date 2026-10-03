@@ -1,3 +1,63 @@
+# Round L3 — final live details (2026-10-03)
+
+Merged `origin/beelink-collector-box` in **1a825de**, retaining the upstream
+`entry_opacity` call and L/L2 live behavior. `uv sync` with `VIRTUAL_ENV` unset
+installed OpenVINO. The merge passed **740 tests** with the standard command.
+Per-type sensitivity settings were not added to the app Settings table.
+
+**e6379b8** aligns demo and replay detections with the painted person and car.
+Optical flow is bounded to one observed sample interval and half the last real
+box's width; before cadence is known the interval is one second. New observations
+ease to their real coordinates over `motion.HOVER_MS` (120 ms). After one interval
+the estimate freezes, including beyond 1.5 intervals. Visibility and fading stay
+owned by `detector_view.camera_view` and `entry_opacity`, including slow-box
+`still_seen` behavior. The hero caption moves to the clear bottom corner over
+`motion.PANE_MS` (240 ms); it is concealed while its animated rectangle would
+cover a box or detection label, or when both corners are occupied.
+
+**58ceac4** clips thumbnail detection outlines above the entire bottom scrim.
+The extended L2 regression checks rectangle intersections and verifies identical
+scrim pixels with detections on and off, at the 80×144 floor and both window sizes.
+
+Final suite: **746 tests passed in 50.339 seconds, exit code 0**, using:
+
+```text
+python -m unittest discover -s tests/box
+```
+
+The obsolete test runner and `live_tests.log` were removed. Test output from this
+round is outside the repository. The replacement [live demo](live_demo_l3.gif)
+is **877,050 bytes** (854×480, 5 fps, 48 colors), below the 2 MB limit. The original
+17,342,585-byte GIF was removed. The clip demonstrates status/chat changes and the
+garage reconnecting; the synthetic figures remain stationary and boxes match them.
+
+All six screenshots were recaptured and opened individually for visual inspection:
+every visible box is on its subject, the hero caption covers no box, and thumbnail
+outlines stop before the scrim. Files have the exact pixel dimensions below.
+
+| State | 1366×768 | 1920×1080 |
+| --- | --- | --- |
+| Overview | [live_overview.png](screenshots/live_overview.png) | [live_overview_1920.png](screenshots/live_overview_1920.png) |
+| AI looking | [live_looking.png](screenshots/live_looking.png) | [live_looking_1920.png](screenshots/live_looking_1920.png) |
+| Reconnecting | [live_reconnecting.png](screenshots/live_reconnecting.png) | [live_reconnecting_1920.png](screenshots/live_reconnecting_1920.png) |
+
+Capture metadata: [1366](live_l3_capture.json), [1920](live_l3_capture_1920.json).
+These are visual proof runs with capture overhead, not new CPU-budget benchmarks.
+On this workstation's 150% display, set `QT_SCALE_FACTOR=0.6666666666666667` for
+one physical pixel per logical pixel. With the checkout's virtual environment
+active, reproduce using:
+
+```text
+python docs/ui/measure_live.py --seconds 11 --capture --output docs/ui/live_l3_capture.json
+python docs/ui/measure_live.py --seconds 11 --screenshots-only --size 1920x1080 --screenshot-suffix _1920 --output docs/ui/live_l3_capture_1920.json
+```
+
+All work stayed on local branch `box-app-ui`. No push or box, camera, Telegram,
+or other external service access was performed. Post-merge changes are confined
+to the app, app/live tests under `tests/box`, and `docs/ui`.
+
+---
+
 # Round L2 — thumbnail layout and bounded publisher cost
 
 This section supersedes Round L's fixed 18/6 rates and its workstation-only
@@ -86,13 +146,8 @@ smaller logical work area. Capture JSON records the actual window and tile
 dimensions: [1366 capture](live_l2_capture.json), [1920 capture](live_l2_capture_1920.json).
 The garage intentionally stops after four seconds to demonstrate reconnecting.
 
-Full suite: **676 tests passed in 40.545 seconds, exit code 0**, including all
-`test_serve.py` cases, with no skips. [Raw test output](live_l2_tests.log).
-The exact requested `-m unittest discover -s tests/box -t .` command was also
-attempted; it still fails before discovery with `Start directory is not
-importable`. The existing `run_box_tests.py` runner resolves the checkout's
-namespace collision in memory and discovers every box test, as documented
-in Round L below. New regressions cover painted thumbnail rectangles, CPU
+Historical L2 suite: **676 tests passed**. Run the standard command
+`python -m unittest discover -s tests/box`. New regressions cover painted thumbnail rectangles, CPU
 backoff/recovery/floors and measured overhead, overlay settings, hidden-window
 suppression, detector/publication counters, and the installer's delta/rate math
 and stale/restarted-data handling.
@@ -106,7 +161,7 @@ uv sync --offline
 .venv/Scripts/python.exe docs/ui/measure_live.py --seconds 15 --output docs/ui/live_l2_after.json
 .venv/Scripts/python.exe docs/ui/measure_live.py --seconds 11 --screenshots-only --output docs/ui/live_l2_capture.json
 .venv/Scripts/python.exe docs/ui/measure_live.py --seconds 11 --screenshots-only --size 1920x1080 --screenshot-suffix _1920 --output docs/ui/live_l2_capture_1920.json
-.venv/Scripts/python.exe docs/ui/run_box_tests.py
+python -m unittest discover -s tests/box
 ```
 
 The three requested 1366×768 screenshots are regenerated, with additional
@@ -119,8 +174,8 @@ The three requested 1366×768 screenshots are regenerated, with additional
 - [live_reconnecting_1920.png](screenshots/live_reconnecting_1920.png)
 - [live_looking_1920.png](screenshots/live_looking_1920.png)
 
-The old Round L GIF is retained as historical evidence. L2 captures only the
-three requested states, without recording overhead.
+The Round L recording has been replaced by the compact L3 clip linked above.
+L2 captured only the three requested states, without recording overhead.
 
 ---
 
@@ -317,7 +372,7 @@ docs/ui/measure_live.py --seconds 15 --output docs/ui/live_after.json
 docs/ui/measure_live.py --seconds 15 --remote-simulated --output docs/ui/live_remote.json
 docs/ui/measure_publisher.py
 docs/ui/measure_live.py --seconds 12 --capture --output docs/ui/live_capture.json
-docs/ui/run_box_tests.py
+python -m unittest discover -s tests/box
 ```
 
 The recording is a separate run: the garage source intentionally stops at four
@@ -333,16 +388,10 @@ from the six-active-camera performance result.
 - [Hero and thumbnails with LIVE badges](screenshots/live_overview.png)
 - [AI looking state](screenshots/live_looking.png)
 - [Reconnecting and dimmed last frame](screenshots/live_reconnecting.png)
-- [Short moving demo, decisions and chat](live_demo.gif)
-- [Full test output](live_tests.log)
+- [Short moving demo, decisions and chat](live_demo_l3.gif)
 
-The exact requested command,
-`.venv/Scripts/python.exe -m unittest discover -s tests/box -t .`, fails before
-discovery: `Start directory is not importable`. This checkout has no test package
-markers and an unrelated installed package named `tests` shadows its namespace.
-`docs/ui/run_box_tests.py` installs those two namespaces **in memory** and discovers
-every box test without changing files outside the allowlist. No tests are skipped;
-`test_serve.py` completes. New tests cover reconnect boundaries, relative times,
+Run `python -m unittest discover -s tests/box` from the checkout with its
+virtual environment active. New tests cover reconnect boundaries, relative times,
 retained widgets and scroll, visible/hidden/expired demand, hero switching, masked
 asynchronous capture, off-GUI decoding, lease revocation, optical-flow translation
 and expiry, and remote frozen-frame handling.
@@ -350,9 +399,7 @@ and expiry, and remote frozen-frame handling.
 Final result: **666 tests passed in 38.778 seconds, exit code 0**, including all
 `test_serve.py` cases. The existing detection-layer screenshot comparison now
 holds the intentional LIVE pulse clock still; otherwise two screenshots could
-differ solely because the pulse advanced. The GIF contains **109 frames / 10.9
-seconds**. Its separate capture run painted the hero at 15.39 fps, with maximum
-posted input-to-paint 45.14 ms while recording and demonstrating the outage.
+differ solely because the pulse advanced. The original recording has been replaced by the compact L3 clip above.
 
 The branch received external merge `1d112f3` between Parts 1 and 2. It was retained;
 the final full suite tests that merged tree plus this work. This round's commits
