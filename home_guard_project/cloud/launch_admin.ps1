@@ -1,7 +1,7 @@
 # One-click launcher for the Home Guard Admin Center on the founder's Windows laptop.
 # Shortcut: powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File launch_admin.ps1
 param(
-    [string]$App = "C:\Users\ameer\HomeGuardAdmin\HomeGuardAdmin.exe",
+    [string]$App = "",
     [int]$Port = 8610,
     [int]$WaitSeconds = 90
 )
@@ -9,6 +9,8 @@ $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Windows.Forms
 
 $repo = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+# The app is built into this folder's dist\ by home_guard_project\admin\build_admin_exe.ps1.
+if (-not $App) { $App = Join-Path $repo "dist\HomeGuardAdmin\HomeGuardAdmin.exe" }
 $logDir = Join-Path $env:LOCALAPPDATA "HomeGuardAdmin\logs"
 $log = Join-Path $logDir "cloud.log"
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
