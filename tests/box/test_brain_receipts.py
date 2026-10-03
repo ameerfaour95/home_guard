@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import os
@@ -53,6 +53,22 @@ class ReceiptBookTest(unittest.TestCase):
             f.write("x")
         book = ReceiptBook(os.path.join(blocked, "receipts"), now=lambda: NOW)
         self.assertEqual(book.issue("t1", "send_media", DONE).status, DONE)
+
+
+    def test_a_damaged_line_is_skipped_not_fatal(self) -> None:
+        import datetime as dt
+        day = dt.datetime.fromtimestamp(NOW).date().isoformat()
+        def line(rid: str) -> bytes:
+            return (json.dumps({"id": rid, "turn": "t1", "tool": "set_camera_active",
+                                "status": "requested", "target": rid}) + "\n").encode("utf-8")
+        with open(os.path.join(self.dir, f"{day}.jsonl"), "wb") as f:
+            f.write(line("R1") + b"\xff\xfe{bad\n" + line("R2"))
+        got = self.book.open_receipts("set_camera_active")
+        self.assertEqual(sorted(r.id for r in got), ["R1", "R2"])
+
+    def test_an_odd_detail_never_raises(self) -> None:
+        r = self.book.issue("t1", "x", "done", detail={("tuple", "key"): 1})
+        self.assertEqual(r.status, "done")
 
 
 if __name__ == "__main__":

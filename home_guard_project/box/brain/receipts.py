@@ -1,4 +1,4 @@
-﻿"""Proof of every action the assistant takes.
+"""Proof of every action the assistant takes.
 
 A tool that sends, pauses, turns off or saves something writes a receipt before
 it returns, and the reply's confirmations are rendered from receipts only - so
@@ -97,7 +97,7 @@ class ReceiptBook:
         for back in range(days - 1, -1, -1):
             path = self._path(today - dt.timedelta(days=back))
             try:
-                with open(path, encoding="utf-8") as f:
+                with open(path, encoding="utf-8", errors="replace") as f:
                     for line in f:
                         try:
                             r = Receipt(**json.loads(line))
@@ -117,5 +117,5 @@ class ReceiptBook:
             path = self._path(dt.datetime.fromtimestamp(receipt.ts).date())
             with open(path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(receipt.to_dict(), ensure_ascii=False, default=str) + "\n")
-        except OSError as exc:
+        except Exception as exc:  # never raise: OSError, TypeError, ValueError, OverflowError
             log.warning("Receipt %s not written to disk: %s", receipt.summary(), exc)
