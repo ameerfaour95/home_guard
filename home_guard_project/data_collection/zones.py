@@ -191,9 +191,10 @@ def remap_zones(renames: Dict[str, str], path: str = ZONES_PATH,
     """Apply camera renames ``{old: new}`` to the zone file in one pass (swaps and chains included).
 
     ``between`` (e.g. writing the renamed cameras.yaml) runs while the file holds
-    the zones under BOTH the old and the new names, so a failure part-way never
+    the zones under BOTH the old and the new names, so a crash part-way never
     leaves a camera unmasked; the final file, without the old names, is written
-    only after it returns.
+    only after it returns. If it raises, the original zones are put back, so
+    every zone stays on the camera it belonged to.
     """
     entries = _read_raw(path)
     final = remapped_zones(entries, renames)
@@ -201,7 +202,12 @@ def remap_zones(renames: Dict[str, str], path: str = ZONES_PATH,
     if between is not None:
         if changed:
             save_zones({**entries, **final}, path)
-        between()
+        try:
+            between()
+        except BaseException:
+            if changed:
+                save_zones(entries, path)   # the renamed file was not written: put the old zones back
+            raise
     if changed:
         save_zones(final, path)
 

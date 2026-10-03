@@ -118,12 +118,24 @@ class RenameKeepsZonesOnTheirCameraTest(unittest.TestCase):
         self._rename([("a", "b"), ("b", "c"), ("c", "a")])
         self.assertEqual(self._zone_by_url(), {URL_A: None, URL_B: ZB, URL_C: None})
 
-    def test_a_failed_cameras_write_leaves_every_camera_masked(self) -> None:
+    def test_a_failed_cameras_write_leaves_the_original_zones(self) -> None:
         fc._write_cameras({"front": URL_A}, {}, self.cameras)
         z.save_zones({"front": ZA}, self.zones)
         with mock.patch.object(fc, "_write_cameras", side_effect=OSError("disk full")),                 self.assertRaises(OSError):
             self._rename([("front", "porch")])
-        self.assertEqual(z.load_zones(self.zones), {"front": ZA, "porch": ZA})   # old and new names both covered
+        self.assertEqual(z.load_zones(self.zones), {"front": ZA})   # cameras.yaml unchanged, so the zones are too
+
+    def test_a_failed_swap_leaves_each_zone_on_its_own_camera(self) -> None:
+        fc._write_cameras({"front": URL_A, "back": URL_B}, {}, self.cameras)
+        z.save_zones({"front": ZA, "back": ZB}, self.zones)
+        with open(self.cameras) as f:
+            before = f.read()
+        with mock.patch.object(fc, "_write_cameras", side_effect=OSError("disk full")),                 self.assertRaises(OSError):
+            self._rename([("front", "back"), ("back", "front")])
+        with open(self.cameras) as f:
+            self.assertEqual(f.read(), before)
+        self.assertEqual(z.load_zones(self.zones), {"front": ZA, "back": ZB})
+        self.assertEqual(self._zone_by_url(), {URL_A: ZA, URL_B: ZB})
 
 
 class ZoneCliFailureTest(unittest.TestCase):

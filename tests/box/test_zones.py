@@ -237,7 +237,7 @@ class RemapZonesTest(unittest.TestCase):
         self.assertEqual(seen, {"a": ZA, "b": ZA, "c": ZB, "s": ZC})   # old a and stale s still masked mid-way
         self.assertEqual(z.load_zones(self.path), {"b": ZA, "c": ZB})
 
-    def test_if_between_fails_the_file_still_covers_the_old_names(self) -> None:
+    def test_if_between_fails_the_original_zone_file_is_put_back(self) -> None:
         self._save({"a": ZA})
 
         def boom() -> None:
@@ -245,7 +245,7 @@ class RemapZonesTest(unittest.TestCase):
 
         with self.assertRaises(OSError):
             z.remap_zones({"a": "b"}, self.path, between=boom)
-        self.assertEqual(z.load_zones(self.path), {"a": ZA, "b": ZA})
+        self.assertEqual(z.load_zones(self.path), {"a": ZA})
 
 
 class RenameZoneRefusesOverwriteTest(unittest.TestCase):
