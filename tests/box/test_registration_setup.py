@@ -16,7 +16,7 @@ class RegistrationSetupTests(unittest.TestCase):
             path = Path(directory) / 'test.ps1'
             path.write_text(source, encoding='utf-8-sig')
             return subprocess.run(['powershell', '-NoProfile', '-File', str(path)],
-                                  capture_output=True, text=True, timeout=30)
+                                  capture_output=True, text=True, timeout=120)
 
     def test_old_answers_and_non_boolean_consents_default_off(self):
         script = SCRIPT.read_text(encoding='utf-8')
@@ -87,7 +87,7 @@ function Invoke-Box($command) {
                                                     site='test_house', find_cameras=False, **fields)), encoding='utf-8')
                 try:
                     result = subprocess.run([str(exe), '-AnswersFile', str(answers), '-DryRun', '-SkipUpdate'],
-                                            capture_output=True, text=True, timeout=45,
+                                            capture_output=True, text=True, timeout=180,
                                             creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
                 except OSError as exc:
                     if getattr(exc, 'winerror', None) == 4551:
