@@ -306,7 +306,7 @@ On the box itself, without network: `uv run python -m home_guard_project.box sta
 
 `eval_prompt.py` gives one repeatable score for the prompt the box sends to the AI, over every tagged home clip (about 220). It runs in two steps, because only the laptop can read `tagging/` on S3 and only the box needs the OpenAI key.
 
-**1. On the laptop: fetch the clips' frames.** This lists the `ameer_house*` tagging batches, finds each clip's video, and saves the same 5 evenly spaced frames the box would send. Re-running it fetches only what is missing; `--limit N` fetches at most N new clips, and `--batches` picks other batches.
+**1. On the laptop: fetch the clips' frames.** This lists the `ameer_house*` tagging batches, finds each clip's video, and saves 5 frames spaced evenly across it. Re-running it fetches only what is missing; `--limit N` fetches at most N new clips, and `--batches` picks other batches.
 
 ```bash
 env -u SSLKEYLOGFILE -u PYTHONSTARTUP AWS_CA_BUNDLE=<bundle.pem> \
@@ -329,7 +329,13 @@ scp -i ~/.ssh/homeguard_box -r eval_set <user>@<box-ip>:C:/home_guard/eval_set
 .venv\Scripts\python.exe -m home_guard_project.box.eval_prompt summary --dir eval_set --tag <tag>
 ```
 
-`--prompt-file` tries a new wording without touching `inference.py`; `{camera_name}` and `{local_time_str}` in the file are filled in. Results go to `eval_set/results/<tag>.jsonl`, `.csv` and `.summary.json`, where the tag is the prompt version, or `file-<hash>` for a prompt file. A stopped run continues where it left off, and a clip that failed is asked again. `--fake` checks the setup without calling the AI.
+`--prompt-file` tries a new wording without touching `inference.py`; `{camera_name}` and `{local_time_str}` in the file are filled in. Results go to `eval_set/results/<tag>.jsonl`, `.csv` and `.summary.json`, named by the tag. A stopped run continues where it left off, and a clip that failed is asked again. `--fake` checks the setup without calling the AI.
+
+Paid answers are never deleted silently. The default tag is `<prompt version or file-hash>__<model>`, so a second model gets its own file. Every row also stores a hash of the prompt wording, so editing the prompt in `inference.py` without bumping its version is noticed. If a results file (usually one picked with `--tag`) holds answers from another prompt, wording or model, `run` prints which and exits with code 2 without touching it; pass `--overwrite` to replace them. A cut-off last line left by a killed run is skipped with a warning.
+
+Before the first call, `run` prints `asking N clips (M already answered, K with errors to retry)`. For a real run of more than 20 clips it also names the model and waits 5 seconds (Ctrl+C aborts); `--yes` skips the wait.
+
+**Caveat: the eval sees the whole clip.** The box sends the AI the last 5 buffered frames, 1 second apart, up to the trigger, with the camera's zone mask applied. The eval takes 5 frames evenly across the whole tagged clip, unmasked. So alert recall reads somewhat optimistic compared with the box. Frames are also JPEG-encoded twice (quality 90 on disk, 85 when sent); the effect is negligible.
 
 What the score means:
 
