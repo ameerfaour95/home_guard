@@ -4,7 +4,7 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 import unittest
 from unittest.mock import Mock
 from PySide6.QtCore import QPointF, Qt
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QColor, QPixmap
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
@@ -150,6 +150,39 @@ class ZoneTileTests(unittest.TestCase):
             self.page.zone_dialog.reject(); QTest.qWait(motion.TOGGLE_MS+30)
         self.page.close(); self.page.widget.close(); self.page.widget.deleteLater()
         self.app.processEvents()
+
+    def test_cover_crop_dims_only_outside_saved_zone(self):
+        from home_guard_project.box.app.zone_picture import ZonePicture
+        from home_guard_project.box.app.theme import PALETTES
+        photo = ZonePicture(None)
+        photo.pix = QPixmap(800, 600); photo.pix.fill(QColor(180, 160, 140))
+        photo.height_limit = 200
+        photo.resize(900, 200); photo.show(); self.app.processEvents()
+        try:
+            whole = photo.grab().toImage()
+            photo.set_zone([[0, 0], [.5, 0], [.5, 1], [0, 1]])
+            QTest.qWait(motion.PANE_MS + 30)
+            zoned = photo.grab().toImage()
+            self.assertEqual(zoned.pixelColor(225, 100), whole.pixelColor(225, 100))
+            before, after = whole.pixelColor(675, 100), zoned.pixelColor(675, 100)
+            bg = QColor(PALETTES['dark']['bg'])
+            for channel in ('red', 'green', 'blue'):
+                self.assertLess(getattr(after, channel)(), getattr(before, channel)())
+                expected = .4 * getattr(before, channel)() + .6 * getattr(bg, channel)()
+                self.assertAlmostEqual(getattr(after, channel)(), expected, delta=1)
+            # A horizontal edge at y=.4 is cropped/scaled with the image:
+            # 600 * 1.125 high, centred in a 200px tile -> y=32.5.
+            photo.set_zone([[0, .4], [1, .4], [1, 1], [0, 1]])
+            QTest.qWait(motion.PANE_MS + 30)
+            cropped = photo.grab().toImage()
+            self.assertLess(cropped.pixelColor(225, 20).red(), whole.pixelColor(225, 20).red())
+            self.assertEqual(cropped.pixelColor(225, 50), whole.pixelColor(225, 50))
+            edge = cropped.pixelColor(225, 32)
+            self.assertGreater(edge.green(), edge.red())
+            photo.set_zone([]); QTest.qWait(motion.PANE_MS + 30)
+            self.assertEqual(photo.grab().toImage(), whole)
+        finally:
+            photo.close()
 
     def test_load_once_after_snapshots_and_success_updates_tile(self):
         calls = []

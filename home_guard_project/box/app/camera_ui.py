@@ -222,12 +222,13 @@ class CameraPage:
             slot=QWidget();slot.setObjectName('cameraActionSlot');slot.setFixedHeight(36)
             actions=QHBoxLayout(slot);actions.setContentsMargins(0,0,0,0);actions.setSpacing(8);layout.addWidget(slot)
             if self.zones_loaded or self.zone_load_failed:
-                from .zone_editor import ZonePill, FadingLabel, colors
+                from .zone_editor import ZonePill, colors
+                from .zone_picture import WatchingStatus
                 zone_button=ZonePill(tr('camera_zone_button'),compact=True)
                 zone_button.setEnabled(isinstance(photo,ZonePicture) and not photo.pix.isNull() and not self.zone_load_failed)
                 zone_button.clicked.connect(lambda checked=False,n=camera.name,p=photo:self.open_zone(n,p))
-                status=FadingLabel(tr('camera_error') if self.zone_load_failed else tr('camera_zone_drawn' if self.zone_values.get(camera.name) else 'camera_zone_whole'))
-                status.setStyleSheet(f'color: {colors(self.widget)["muted"]}; font-size: 8.25pt;')
+                status=WatchingStatus(tr('camera_error') if self.zone_load_failed else tr('camera_zone_drawn' if self.zone_values.get(camera.name) else 'camera_zone_whole'), bool(self.zone_values.get(camera.name)))
+                status.setStyleSheet(f'color: {colors(self.widget)["secondary"]}; font-size: 13px;')
                 status.setAccessibleName(status.text())
                 actions.addWidget(zone_button);actions.addWidget(status,1)
                 self.zone_widgets[camera.name]=(zone_button,status,photo)
@@ -268,6 +269,7 @@ class CameraPage:
         self.zone_values[name]=points
         if name in self.zone_widgets:
             _,status,photo=self.zone_widgets[name]
+            status.drawn = bool(points)
             status.change(tr('camera_zone_drawn' if points else 'camera_zone_whole'))
             status.setAccessibleName(status.text())
             photo.set_zone(points)

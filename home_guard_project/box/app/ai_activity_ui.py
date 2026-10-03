@@ -17,14 +17,18 @@ class AlertPicture(QWidget):
         height=min(getattr(self,"height_limit",16777215),max(120,round(self.width()*9/16)))
         if self.height()!=height: self.setFixedHeight(height)
         super().resizeEvent(event)
+    def picture_rect(self):
+        rect=QRectF(self.rect())
+        if self.pix.isNull(): return QRectF()
+        scale=max(rect.width()/self.pix.width(),rect.height()/self.pix.height())
+        w,h=self.pix.width()*scale,self.pix.height()*scale
+        return QRectF(rect.center().x()-w/2,rect.center().y()-h/2,w,h)
     def paintEvent(self,event):
         if self.pix.isNull():
             painter=QPainter(self);painter.drawText(self.rect(),Qt.AlignmentFlag.AlignCenter,tr("chat_image_unavailable"));return
         painter=QPainter(self);painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         rect=QRectF(self.rect());clip=QPainterPath();clip.addRoundedRect(rect,10,10);painter.setClipPath(clip)
-        scale=max(rect.width()/self.pix.width(),rect.height()/self.pix.height())
-        w,h=self.pix.width()*scale,self.pix.height()*scale
-        painter.drawPixmap(QRectF((rect.width()-w)/2,(rect.height()-h)/2,w,h),self.pix,QRectF(self.pix.rect()))
+        painter.drawPixmap(self.picture_rect(),self.pix,QRectF(self.pix.rect()))
 
 class AiActivity(QWidget):
     def __init__(self):
