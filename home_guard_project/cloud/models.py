@@ -102,6 +102,7 @@ class Event(Base):
     class_max_conf: Mapped[Optional[Any]] = mapped_column(JSONType, nullable=True)
     owner_verdicts: Mapped[Optional[Any]] = mapped_column(JSONType, nullable=True)
     dispatch: Mapped[Optional[Any]] = mapped_column(JSONType, nullable=True)
+    muted: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)  # production copy only; None = unknown
     completeness: Mapped[Any] = mapped_column(JSONType, default=dict, server_default=text("'{}'::jsonb"))
     clip_start_local: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     duration_sec: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
@@ -116,6 +117,10 @@ class Event(Base):
 
 class Artifact(Base):
     __tablename__ = "artifacts"
+    __table_args__ = (
+        Index("ix_artifacts_s3_key_prefix", "s3_key", postgresql_ops={"s3_key": "text_pattern_ops"}),
+        Index("ix_artifacts_camera_stem", "camera", "stem"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     event_id: Mapped[Optional[int]] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"), nullable=True, index=True)
     # role: original_video|thumbnail|rendition|filmstrip|meta|raw_answer|teacher_frame|yolo_image|yolo_label|feedback
@@ -130,6 +135,9 @@ class Artifact(Base):
     camera: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     stem: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     last_modified: Mapped[Optional[datetime]] = mapped_column(TS, nullable=True)
+    # etag = what S3 lists now; applied_etag = the JSON revision whose content is in effect
+    applied_etag: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    etag_mismatches: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
 
 
 class RawRevision(Base):
@@ -154,6 +162,8 @@ class AiRun(Base):
     parsed: Mapped[Optional[Any]] = mapped_column(JSONType, nullable=True)
     raw_artifact_id: Mapped[Optional[int]] = mapped_column(ForeignKey("artifacts.id", ondelete="SET NULL"), nullable=True)
     input_artifact_ids: Mapped[Any] = mapped_column(JSONType, default=list, server_default=text("'[]'::jsonb"))
+    ai_source_key: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+    ai_source_etag: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
 
 
 class Feedback(Base):
@@ -231,9 +241,13 @@ class AuditLog(Base):
 
 class IndexProblem(Base):
     __tablename__ = "index_problems"
+    __table_args__ = (
+        Index("ix_index_problems_s3_key_prefix", "s3_key", postgresql_ops={"s3_key": "text_pattern_ops"}),
+    )
     s3_key: Mapped[str] = mapped_column(String(1024), primary_key=True)
     reason: Mapped[str] = mapped_column(Text)
     seen_at: Mapped[datetime] = mapped_column(TS)
+    etag: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)  # the revision it is about
 
 
 class S3Cursor(Base):
