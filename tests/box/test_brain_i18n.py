@@ -28,6 +28,13 @@ class I18nTest(unittest.TestCase):
         self.assertIsNone(detect_language("8"))
         self.assertIsNone(detect_language("👍"))
 
+    def test_detect_language_ignores_digits_and_punctuation_in_script(self) -> None:
+        self.assertIsNone(detect_language("٨"))
+        self.assertIsNone(detect_language("،"))
+        self.assertIsNone(detect_language("٨ ؟"))
+        self.assertIsNone(detect_language("״"))
+        self.assertEqual(detect_language("שָׁלוֹם"), "he")
+
     def test_english_and_hebrew_are_spoken_today(self) -> None:
         self.assertEqual(SUPPORTED_LANGS, ("en", "he"))
 

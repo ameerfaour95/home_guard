@@ -114,8 +114,8 @@ def t(key: str, lang: str, **values: object) -> str:
     return (entry.get(lang) or entry[DEFAULT_LANG]).format(**values)
 
 
-_HEBREW = re.compile(r"[\u0590-\u05FF]")
-_ARABIC = re.compile(r"[\u0600-\u06FF]")
+_HEBREW = re.compile(r"[א-תװ-ײ]")
+_ARABIC = re.compile(r"[ء-غف-يٱ-ۓۺ-ۼ]")
 _LATIN = re.compile(r"[A-Za-z]")
 
 
