@@ -3,6 +3,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 import time
 from decimal import Decimal, ROUND_HALF_UP
+from typing import Optional
 from .. import control, boxconfig
 
 
@@ -16,6 +17,9 @@ class Settings:
     inference_conf: float = 0.4
 
     alert_on: str = "person"
+    conf_person: Optional[float] = None
+    conf_vehicle: Optional[float] = None
+    conf_animal: Optional[float] = None
 
     def __post_init__(self):
         from .alert_types import ordered_types
@@ -29,9 +33,17 @@ class Settings:
         for key,(low,high) in boxconfig.DECIMAL_OPTIONS.items():
             value=getattr(self,key)
             if type(value) not in (int,float) or not low<=value<=high: raise ValueError('Invalid settings')
+        for key, (low, high) in boxconfig.TYPE_CONF_OPTIONS.items():
+            value = getattr(self, key)
+            if value is not None and (type(value) not in (int, float) or not low <= value <= high):
+                raise ValueError('Invalid sensitivity')
+
+    def effective_sensitivity(self):
+        return {key.removeprefix('conf_'): self.inference_conf if getattr(self, key) is None else getattr(self, key)
+                for key in boxconfig.TYPE_CONF_OPTIONS}
 
     def options(self):
-        return {key: getattr(self, key) for key in ("mode", "alert_start_hour", "alert_end_hour", "alert_cooldown_sec", "show_cameras", "inference_conf", "alert_on")}
+        return {key: getattr(self, key) for key in ("mode", "alert_start_hour", "alert_end_hour", "alert_cooldown_sec", "show_cameras", "inference_conf", "alert_on", *boxconfig.TYPE_CONF_OPTIONS)}
 
     @classmethod
     def from_options(cls, options):
@@ -54,6 +66,7 @@ class BoxControls:
         self._settings = settings or Settings(show_cameras=True)
         self.pending_at = None
         self.camera_alert_on = {}
+        self.camera_sensitivity = {}
 
     def is_stopped(self):
         return self._stopped if self.demo else control.is_stopped()
@@ -78,7 +91,7 @@ class BoxControls:
     def reported_status(self):
         if self.demo:
             s=self._settings
-            return {'updated':self.clock(),'settings':dict(conf=s.inference_conf,alert_start_hour=s.alert_start_hour,alert_end_hour=s.alert_end_hour,cooldown_sec=s.alert_cooldown_sec,alert_on=s.alert_on.split(","),camera_alert_on={k:list(v) for k,v in self.camera_alert_on.items()})}
+            return {'updated':self.clock(),'settings':dict(conf=s.inference_conf,alert_start_hour=s.alert_start_hour,alert_end_hour=s.alert_end_hour,cooldown_sec=s.alert_cooldown_sec,alert_on=s.alert_on.split(","),camera_alert_on={k:list(v) for k,v in self.camera_alert_on.items()},sensitivity=s.effective_sensitivity(),camera_sensitivity={k:dict(v) for k,v in self.camera_sensitivity.items()})}
         from ..ai_status import read_status
         return read_status(Path(boxconfig.LOG_DIR)/'ai_status.json')
 

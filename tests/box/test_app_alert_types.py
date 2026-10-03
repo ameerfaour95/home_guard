@@ -52,7 +52,7 @@ class AlertDataTests(unittest.TestCase):
                 runner = Mock()
                 backend = RemoteCameras('user@box', runner=runner) if remote else CameraControls(BoxControls(), runner=runner)
                 run = runner.run if remote else runner
-                rows = {'house': ['person'], 'cameras': [{'name': 'yard', 'alert_on': None}]}
+                rows = {'house': ['person'], 'house_sensitivity': None, 'cameras': [{'name': 'yard', 'alert_on': None, 'sensitivity': None}]}
                 run.return_value = SimpleNamespace(returncode=0, stdout=json.dumps(rows))
                 self.assertEqual(backend.camera_alerts(), rows)
                 for value, suffix in [('vehicle,person', '--on person,vehicle'), (None, '--default')]:

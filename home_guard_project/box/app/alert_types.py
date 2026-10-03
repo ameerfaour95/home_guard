@@ -2,6 +2,7 @@
 import json
 import re
 from ..boxconfig import SET_OPTIONS
+from .sensitivity import CameraSensitivityBackend, parse_thresholds
 
 TYPES = SET_OPTIONS['alert_on']
 
@@ -40,7 +41,7 @@ def alert_result(output):
     raise ValueError('The camera alert choices could not be read. Try again.')
 
 
-class CameraAlertsBackend:
+class CameraAlertsBackend(CameraSensitivityBackend):
     def set_house_alerts(self, value):
         from dataclasses import replace
         from .box_controls import RemoteSettingsBackend, Settings
@@ -74,10 +75,14 @@ class CameraAlertsBackend:
         if self.box.demo:
             own = getattr(self.box, 'camera_alert_on', {})
             return {'house': list(ordered_types(self.box.load_settings().alert_on)),
-                    'cameras': [{'name': c.name, 'alert_on': list(own[c.name]) if c.name in own else None} for c in self.records]}
+                    'house_sensitivity': self.box.load_settings().effective_sensitivity(),
+                    'cameras': [{'name': c.name, 'alert_on': list(own[c.name]) if c.name in own else None,
+                                 'sensitivity': dict(self.box.camera_sensitivity[c.name]) if c.name in self.box.camera_sensitivity else None} for c in self.records]}
         data = self._alert_command(['camera-alerts'])
         return {'house': list(ordered_types(data['house'])),
-                'cameras': [{'name': row['name'], 'alert_on': None if row['alert_on'] is None else list(ordered_types(row['alert_on']))} for row in data['cameras']]}
+                'house_sensitivity': parse_thresholds(data['house_sensitivity']) if data.get('house_sensitivity') else None,
+                'cameras': [{'name': row['name'], 'alert_on': None if row['alert_on'] is None else list(ordered_types(row['alert_on'])),
+                             'sensitivity': parse_thresholds(row['sensitivity']) if row.get('sensitivity') else None} for row in data['cameras']]}
 
     def set_camera_alerts(self, name, value):
         args = camera_alert_operation(name, value)
