@@ -219,6 +219,15 @@ class VlmFilterTest(unittest.TestCase):
         self.assertFalse(inf.vlm_confirms({"summary": "a parked car", "people": 0, "vehicle_moving": False}))
         self.assertFalse(inf.vlm_confirms({"summary": "nothing", "people": 0}))
 
+    def test_only_what_the_owner_alerts_on_counts(self) -> None:
+        car = {"summary": "a car arrives", "people": 0, "vehicle_moving": True}
+        person = {"summary": "a person walks", "people": 1, "vehicle_moving": False}
+        self.assertFalse(inf.vlm_confirms(car, alert_on=("person",)))      # a moving car is not an alert
+        self.assertTrue(inf.vlm_confirms(person, alert_on=("person",)))
+        self.assertFalse(inf.vlm_confirms(person, alert_on=("vehicle",)))
+        self.assertTrue(inf.vlm_confirms(car, alert_on=("vehicle",)))
+        self.assertTrue(inf.vlm_confirms(car, alert_on=("person", "vehicle")))
+
     def test_no_verdict_when_the_vlm_did_not_say(self) -> None:
         self.assertIsNone(inf.vlm_confirms(None))
         self.assertIsNone(inf.vlm_confirms({}))
@@ -447,6 +456,32 @@ class EscalationTest(unittest.TestCase):
 
     def test_nothing_in_view_does_not_escalate(self) -> None:
         self.assertFalse(inf.should_escalate(person=False, vehicle=False, vehicles_moved=True))
+
+    def test_only_what_the_owner_alerts_on_wakes_the_ai(self) -> None:
+        people_only = ("person",)
+        self.assertFalse(inf.should_escalate(person=False, vehicle=True, vehicles_moved=True, alert_on=people_only))
+        self.assertTrue(inf.should_escalate(person=True, vehicle=True, vehicles_moved=True, alert_on=people_only))
+        vehicles_only = ("vehicle",)
+        self.assertFalse(inf.should_escalate(person=True, vehicle=False, vehicles_moved=False, alert_on=vehicles_only))
+        self.assertTrue(inf.should_escalate(person=False, vehicle=True, vehicles_moved=True, alert_on=vehicles_only))
+        self.assertFalse(inf.should_escalate(person=False, vehicle=True, vehicles_moved=False, alert_on=vehicles_only))
+
+
+class AlertOnTest(unittest.TestCase):
+    def test_people_only_unless_the_owner_chose_otherwise(self) -> None:
+        self.assertEqual(inf.AlertSettings().alert_on, ("person",))
+        self.assertEqual(inf.AlertSettings.from_box_settings({}).alert_on, ("person",))
+        self.assertEqual(inf.AlertSettings.from_box_settings({"alert_on": "vehicle,person"}).alert_on,
+                         ("person", "vehicle"))
+        self.assertEqual(inf.AlertSettings.from_box_settings({"alert_on": ["vehicle"]}).alert_on, ("vehicle",))
+
+    def test_a_broken_value_falls_back_to_people(self) -> None:
+        for bad in ("", "cats", None, 5):
+            self.assertEqual(inf.AlertSettings.from_box_settings({"alert_on": bad}).alert_on, ("person",), bad)
+
+    def test_the_window_sees_the_choice(self) -> None:
+        self.assertEqual(inf.AlertSettings(alert_on=("person", "vehicle")).live_values()["alert_on"],
+                         ["person", "vehicle"])
 
 
 class _FakeRing:

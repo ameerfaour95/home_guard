@@ -172,6 +172,19 @@ class BoxConfigTest(unittest.TestCase):
             with self.assertRaises(BoxConfigError, msg=bad):
                 set_option("inference_conf", bad, self.path)
 
+    def test_what_to_alert_on_is_a_live_list_of_people_and_vehicles(self) -> None:
+        from home_guard_project.box.boxconfig import LIVE_OPTIONS, get_option
+
+        self.assertIn("alert_on", LIVE_OPTIONS)
+        self.assertEqual(set_option("alert_on", "person", self.path), "person")
+        self.assertEqual(set_option("alert_on", "Vehicle, person", self.path), "person,vehicle")
+        self.assertEqual(get_option("alert_on", self.path), "person,vehicle")
+        self.assertEqual(load_box_settings(self.path)["alert_on"], "person,vehicle")
+        for bad in ("", "cats", "person,cats", ","):
+            with self.assertRaises(BoxConfigError, msg=bad):
+                set_option("alert_on", bad, self.path)
+        self.assertEqual(get_option("alert_on", self.path), "person,vehicle")
+
     def test_unset_options_have_defaults(self) -> None:
         self._write('site: "house2"\n')
         self.assertFalse(get_option("notify_dry_run", self.path))

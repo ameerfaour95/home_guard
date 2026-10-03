@@ -108,6 +108,7 @@ def set_site(site: str, path: str = BOX_YAML) -> None:
 #   mode:              what the box runs.
 #   alert_channel:     how inference mode delivers its alerts.
 #   telegram_chat_ids: who receives the Telegram alerts, e.g. -1001234567,987654.
+#   alert_on:          what the owner is alerted about: person, vehicle, or both (person,vehicle).
 BOOLEAN_OPTIONS = ("show_cameras", "notify_dry_run")
 # Whole numbers, each with the smallest and largest value it may take.
 NUMBER_OPTIONS = {"alert_start_hour": (0, 23), "alert_end_hour": (0, 23), "alert_cooldown_sec": (10, 86400)}
@@ -117,11 +118,13 @@ NUMBER_OPTIONS = {"alert_start_hour": (0, 23), "alert_end_hour": (0, 23), "alert
 DECIMAL_OPTIONS = {"inference_conf": (0.05, 0.95)}
 CHOICE_OPTIONS = {"mode": MODES, "alert_channel": ("telegram", "twilio", "both")}
 CHAT_IDS_OPTION = "telegram_chat_ids"
+# Options holding a set of choices, written comma-separated in a fixed order (e.g. person,vehicle).
+SET_OPTIONS = {"alert_on": ("person", "vehicle")}
 OPTIONS = (BOOLEAN_OPTIONS + tuple(NUMBER_OPTIONS) + tuple(DECIMAL_OPTIONS) + tuple(CHOICE_OPTIONS)
-           + (CHAT_IDS_OPTION,))
+           + tuple(SET_OPTIONS) + (CHAT_IDS_OPTION,))
 # Options the running program re-reads while it runs (inference.LiveSettings): a change applies
 # within seconds, without a restart.
-LIVE_OPTIONS = ("alert_start_hour", "alert_end_hour", "alert_cooldown_sec", "inference_conf")
+LIVE_OPTIONS = ("alert_start_hour", "alert_end_hour", "alert_cooldown_sec", "inference_conf", "alert_on")
 # Options the running program reads only when it starts. show_cameras is read by the screen, not by it.
 RESTART_OPTIONS = tuple(key for key in OPTIONS if key != "show_cameras" and key not in LIVE_OPTIONS)
 
@@ -172,6 +175,16 @@ def set_option(key: str, value: str, path: str = BOX_YAML) -> OptionValue:
             raise BoxConfigError(f"{key} must be one of {', '.join(CHOICE_OPTIONS[key])} (got {value!r})")
         _set_line(key, text, path)
         return text
+
+    if key in SET_OPTIONS:
+        allowed = SET_OPTIONS[key]
+        picked = {part.strip().lower() for part in text.split(",") if part.strip()}
+        if not picked or not picked <= set(allowed):
+            raise BoxConfigError(f"{key} must be one or more of {', '.join(allowed)}, separated by commas "
+                                 f"(got {value!r})")
+        joined = ",".join(choice for choice in allowed if choice in picked)
+        _set_line(key, f'"{joined}"', path)
+        return joined
 
     if not _CHAT_IDS_RE.match(text):
         raise BoxConfigError(f"{key} must be numbers separated by commas, without spaces (got {value!r})")

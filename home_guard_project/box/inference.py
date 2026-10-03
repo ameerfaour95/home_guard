@@ -39,6 +39,23 @@ log = logging.getLogger("box.inference")
 PERSON_CLASSES = {"person"}
 VEHICLE_CLASSES = {"car", "truck", "bus", "motorcycle"}
 TRIGGER_CLASSES = PERSON_CLASSES | VEHICLE_CLASSES
+# What the owner can be alerted about (box.yaml alert_on), and the default: people only.
+ALERT_ON_CHOICES = ("person", "vehicle")
+DEFAULT_ALERT_ON = ("person",)
+
+
+def parse_alert_on(value: Any) -> Tuple[str, ...]:
+    """box.yaml's alert_on ("person,vehicle" or a list) as a tuple in fixed order; anything unusable -> people only."""
+    if isinstance(value, str):
+        parts = value.split(",")
+    elif isinstance(value, (list, tuple)):
+        parts = [str(v) for v in value]
+    else:
+        return DEFAULT_ALERT_ON
+    picked = {p.strip().lower() for p in parts if p.strip()}
+    if not picked or not picked <= set(ALERT_ON_CHOICES):
+        return DEFAULT_ALERT_ON
+    return tuple(c for c in ALERT_ON_CHOICES if c in picked)
 
 
 # ----------------------------------------------------------------------------
@@ -174,11 +191,14 @@ Reply with EXACTLY ONE strict JSON object and nothing else:
 """.strip()
 
 
-def vlm_confirms(parsed: Optional[Dict[str, Any]]) -> Optional[bool]:
+def vlm_confirms(parsed: Optional[Dict[str, Any]],
+                 alert_on: Sequence[str] = ALERT_ON_CHOICES) -> Optional[bool]:
     """What the VLM saw, for the decision to alert.
 
-    True: a person, or a vehicle on the move. False: it looked and saw neither,
-    so the detector's trigger was a false positive. None: it did not say (no
+    True: a person, or a vehicle on the move - each only if the owner alerts on
+    it (*alert_on*). False: it looked and saw nothing the owner alerts on, so the
+    detector's trigger was a false positive (a passing car when the owner wants
+    people only, too). None: it did not say (no
     answer, or an answer without these fields); the caller then trusts the
     detector, because a missed alert is worse than a needless one.
     """
@@ -188,7 +208,8 @@ def vlm_confirms(parsed: Optional[Dict[str, Any]]) -> Optional[bool]:
         people = int(parsed.get("people") or 0)
     except (TypeError, ValueError):
         return None
-    return people > 0 or parsed.get("vehicle_moving") is True
+    return (("person" in alert_on and people > 0)
+            or ("vehicle" in alert_on and parsed.get("vehicle_moving") is True))
 
 
 @dataclass(frozen=True)
@@ -204,11 +225,13 @@ class AlertSettings:
     vlm_model: str = "gpt-4o"
     alert_channel: str = "telegram"  # telegram | twilio | both
     dry_run: bool = False
+    alert_on: Tuple[str, ...] = DEFAULT_ALERT_ON   # what reaches the owner: people, vehicles or both
 
     def live_values(self) -> Dict[str, Any]:
         """The values the window shows and the owner can change while the program runs."""
         return {"conf": self.conf, "alert_start_hour": self.alert_start_hour,
-                "alert_end_hour": self.alert_end_hour, "cooldown_sec": self.cooldown_sec}
+                "alert_end_hour": self.alert_end_hour, "cooldown_sec": self.cooldown_sec,
+                "alert_on": list(self.alert_on)}
 
     @classmethod
     def from_box_settings(cls, s: Dict[str, Any]) -> "AlertSettings":
@@ -225,6 +248,7 @@ class AlertSettings:
             vlm_model=str(g("vlm_model", "gpt-4o")),
             alert_channel=str(g("alert_channel", "telegram")),
             dry_run=bool(g("notify_dry_run", False)),
+            alert_on=parse_alert_on(g("alert_on", ",".join(DEFAULT_ALERT_ON))),
         )
 
 
@@ -465,9 +489,15 @@ class VehicleMemory:
         return moved
 
 
-def should_escalate(person: bool, vehicle: bool, vehicles_moved: bool) -> bool:
-    """A person always goes to the VLM; a vehicle only when it moved since the camera's previous look."""
-    return person or (vehicle and vehicles_moved)
+def should_escalate(person: bool, vehicle: bool, vehicles_moved: bool,
+                    alert_on: Sequence[str] = ALERT_ON_CHOICES) -> bool:
+    """A person always goes to the VLM; a vehicle only when it moved since the camera's previous look.
+
+    Only what the owner alerts on (*alert_on*) counts: with people only, a car
+    never wakes the AI.
+    """
+    return (("person" in alert_on and person)
+            or ("vehicle" in alert_on and vehicle and vehicles_moved))
 
 
 # ----------------------------------------------------------------------------
@@ -481,7 +511,7 @@ def apply_live_settings(settings: AlertSettings, box_settings: Dict[str, Any]) -
     """Take over the values the program re-reads while running. Returns the names that changed."""
     fresh = AlertSettings.from_box_settings(box_settings)
     changed = []
-    for name in ("alert_start_hour", "alert_end_hour", "cooldown_sec", "conf"):
+    for name in ("alert_start_hour", "alert_end_hour", "cooldown_sec", "conf", "alert_on"):
         if getattr(settings, name) != getattr(fresh, name):
             # The settings object is frozen and shared with the worker threads: the same
             # instance must carry the new value, so the one write goes around the freeze.
@@ -700,10 +730,12 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
         if not summary:
             summary = "a person or vehicle was detected"
         reason = str(parsed.get("alert_reason", "")) if parsed else ""
-        if vlm_confirms(parsed) is False:
-            # The detector fired, the VLM looked and saw no person and nothing moving: no
+        if vlm_confirms(parsed, settings.alert_on) is False:
+            # The detector fired, the VLM looked and saw nothing the owner alerts on (no
+            # person, nothing moving, or only a car when the owner wants people): no
             # message to the owner. The clip is kept as a false positive, for training.
-            log.info("[%s] no alert: the VLM saw nobody and nothing moving (%s)", camera_name, summary)
+            log.info("[%s] no alert: the VLM saw nothing to alert on (alert_on=%s): %s",
+                     camera_name, ",".join(settings.alert_on), summary)
             if job is not None:
                 job.false_positive = True
                 job.alert = {"summary": summary, "label": label, "alert_command": "[none]", "alert_reason": "",
@@ -899,9 +931,12 @@ def run() -> int:
             if not (person or vehicle):
                 parked[name] = False
                 continue
-            if not should_escalate(person, vehicle, moved):
-                if not parked[name]:  # one line per parked spell, not one per look
-                    log.info("[%s] vehicles have not moved; no alert", name)
+            if not should_escalate(person, vehicle, moved, settings.alert_on):
+                if not parked[name]:  # one line per quiet spell, not one per look
+                    if vehicle and moved and "vehicle" not in settings.alert_on:
+                        log.info("[%s] a vehicle moved; vehicles are not on the alert list", name)
+                    else:
+                        log.info("[%s] vehicles have not moved; no alert", name)
                     parked[name] = True
                 continue
             parked[name] = False

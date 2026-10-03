@@ -48,6 +48,11 @@ class LiveSettingsTest(unittest.TestCase):
         self.assertEqual((settings.alert_start_hour, settings.alert_end_hour, settings.alert_channel),
                          (22, 6, "telegram"))
 
+    def test_what_to_alert_on_is_live(self) -> None:
+        settings = AlertSettings()
+        self.assertEqual(apply_live_settings(settings, {"alert_on": "person,vehicle"}), ["alert_on"])
+        self.assertEqual(settings.alert_on, ("person", "vehicle"))
+
     def test_a_half_written_file_keeps_the_current_values(self) -> None:
         self._write('inference_conf: [oops\n', NOW)
         self.assertEqual(self.live.check(NOW + 3), [])
