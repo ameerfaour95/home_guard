@@ -1,0 +1,65 @@
+{
+  "event_id": 68,
+  "version": 0,
+  "status": "new",
+  "tracks": [
+    {
+      "track_id": "s1",
+      "label": "person",
+      "keyframes": [
+        {
+          "frame": 0,
+          "t_sec": 0.0,
+          "xyxy": [
+            0.6906319999999999,
+            0.41000000000000003,
+            0.800632,
+            0.83
+          ],
+          "enabled": true
+        },
+        {
+          "frame": 15,
+          "t_sec": 3.0,
+          "xyxy": [
+            0.350518,
+            0.41000000000000003,
+            0.460518,
+            0.83
+          ],
+          "enabled": true
+        },
+        {
+          "frame": 18,
+          "t_sec": 3.6,
+          "xyxy": [
+            0.350518,
+            0.41000000000000003,
+            0.460518,
+            0.83
+          ],
+          "enabled": false
+        }
+      ],
+      "source": "suggestion"
+    }
+  ],
+  "description": "Tree branches sway in the wind and cast moving shadows; nothing else is visible.",
+  "ai_description": "Tree branches sway in the wind and cast moving shadows; nothing else is visible.",
+  "ai_status": "real",
+  "ai_model": "gpt-4o",
+  "ai_prompt_version": "2026-10-03.tagged-rules-label",
+  "drop_clip": false,
+  "needs_review": false,
+  "author": null,
+  "updated_utc": null,
+  "review_note": "",
+  "review_frame": null,
+  "fps": 5.0,
+  "frame_count": 20,
+  "frame_size": [
+    320,
+    180
+  ],
+  "suggestions_used": true
+}

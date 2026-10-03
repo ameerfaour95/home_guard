@@ -1586,6 +1586,60 @@
       "path": "/v1/studio/collections/2/items?limit=500"
     },
     {
+      "file": "annotation_19.json",
+      "role": "admin",
+      "method": "GET",
+      "path": "/v1/events/19/annotation"
+    },
+    {
+      "file": "annotation_history_19.json",
+      "role": "admin",
+      "method": "GET",
+      "path": "/v1/events/19/annotation/history"
+    },
+    {
+      "file": "annotation_57.json",
+      "role": "admin",
+      "method": "GET",
+      "path": "/v1/events/57/annotation"
+    },
+    {
+      "file": "annotation_history_57.json",
+      "role": "admin",
+      "method": "GET",
+      "path": "/v1/events/57/annotation/history"
+    },
+    {
+      "file": "annotation_58.json",
+      "role": "admin",
+      "method": "GET",
+      "path": "/v1/events/58/annotation"
+    },
+    {
+      "file": "annotation_history_58.json",
+      "role": "admin",
+      "method": "GET",
+      "path": "/v1/events/58/annotation/history"
+    },
+    {
+      "file": "annotation_68.json",
+      "role": "admin",
+      "method": "GET",
+      "path": "/v1/events/68/annotation"
+    },
+    {
+      "file": "annotation_history_68.json",
+      "role": "admin",
+      "method": "GET",
+      "path": "/v1/events/68/annotation/history"
+    },
+    {
+      "file": "publishes.json",
+      "role": "admin",
+      "method": "GET",
+      "path": "/v1/studio/publishes"
+    },
+    {
       "file": "exports.json",
       "role": "admin",
       "method": "GET",
@@ -2688,6 +2742,30 @@
       "role": "labeler",
       "method": "GET",
       "path": "/v1/studio/exports"
+    },
+    {
+      "file": "annotation_19.labeler.json",
+      "role": "labeler",
+      "method": "GET",
+      "path": "/v1/events/19/annotation"
+    },
+    {
+      "file": "annotation_57.labeler.json",
+      "role": "labeler",
+      "method": "GET",
+      "path": "/v1/events/57/annotation"
+    },
+    {
+      "file": "annotation_58.labeler.json",
+      "role": "labeler",
+      "method": "GET",
+      "path": "/v1/events/58/annotation"
+    },
+    {
+      "file": "annotation_68.labeler.json",
+      "role": "labeler",
+      "method": "GET",
+      "path": "/v1/events/68/annotation"
     },
     {
       "file": "export_preview.labeler.json",

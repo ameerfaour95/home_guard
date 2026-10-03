@@ -29,6 +29,9 @@ SCHEMAS = [
     (r"exports", list[S.ExportOut]),
     (r"export_\d+", S.ExportOut),
     (r"export_preview", S.ExportPreview),
+    (r"annotation_\d+", S.AnnotationOut),
+    (r"annotation_history_\d+", list[S.AnnotationVersion]),
+    (r"publishes", list[S.PublishOut]),
     (r"audit", S.AuditPage),
     (r"index_problems", list[S.IndexProblem]),
 ]
@@ -96,7 +99,9 @@ def test_dataset_shape(demo):
     assert {"true_alert", "false_alarm"} <= {v for e in events["items"] for v in e["owner_verdicts"]}
     assert len(load(demo, "collections.json")) == 2
     assert [e["state"] for e in load(demo, "exports.json")] == ["ready"]
-    assert len(load(demo, "audit.json")["items"]) == 30
+    assert len(load(demo, "audit.json")["items"]) == 36  # 29 seeded + the export + 3 label saves, 2 reviews, 1 publish
+    assert [p["state"] for p in load(demo, "publishes.json")] == ["ready"]
+    assert {"reviewed", "rejected", "submitted"} <= {e["annotation_status"] for e in events["items"]}
     assert load(demo, "index_problems.json")
     stamps = sorted(e["start_utc"] for e in events["items"])
     assert stamps[0] >= "2026-10-01T12:00:00" and stamps[-1] <= "2026-10-03T12:00:00"

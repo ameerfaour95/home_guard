@@ -1,0 +1,54 @@
+{
+  "event_id": 19,
+  "version": 1,
+  "status": "reviewed",
+  "tracks": [
+    {
+      "track_id": "s1",
+      "label": "person",
+      "keyframes": [
+        {
+          "frame": 0,
+          "t_sec": 0.0,
+          "xyxy": [
+            0.24525800000000003,
+            0.41000000000000003,
+            0.355258,
+            0.83
+          ],
+          "enabled": true
+        },
+        {
+          "frame": 18,
+          "t_sec": 3.6,
+          "xyxy": [
+            0.5856469999999999,
+            0.41000000000000003,
+            0.695647,
+            0.83
+          ],
+          "enabled": true
+        }
+      ],
+      "source": "suggestion"
+    }
+  ],
+  "description": "A teenager in a school uniform steps out of the cam-b42d16, locks it and walks toward the gate, checked by hand.",
+  "ai_description": "A teenager in a school uniform steps out of the cam-b42d16, locks it and walks toward the gate.",
+  "ai_status": "real",
+  "ai_model": "gpt-4o",
+  "ai_prompt_version": "2026-10-03.tagged-rules-label",
+  "drop_clip": false,
+  "needs_review": false,
+  "author": "Eden Peretz",
+  "updated_utc": "2026-10-03T10:00:00Z",
+  "review_note": "",
+  "review_frame": null,
+  "fps": 5.0,
+  "frame_count": 20,
+  "frame_size": [
+    320,
+    180
+  ],
+  "suggestions_used": true
+}

@@ -1,0 +1,58 @@
+[
+  {
+    "batch_name": "demo_night_visitors",
+    "s3_prefix": "tagging/demo_night_visitors/",
+    "state": "ready",
+    "tasks": 2,
+    "yolo_frames": 40,
+    "vlm_lines": 2,
+    "missing": [
+      {
+        "event_id": 1,
+        "reason": "not labeled"
+      },
+      {
+        "event_id": 2,
+        "reason": "not labeled"
+      },
+      {
+        "event_id": 11,
+        "reason": "not labeled"
+      },
+      {
+        "event_id": 20,
+        "reason": "not labeled"
+      },
+      {
+        "event_id": 55,
+        "reason": "not labeled"
+      },
+      {
+        "event_id": 57,
+        "reason": "not labeled"
+      },
+      {
+        "event_id": 68,
+        "reason": "not labeled"
+      },
+      {
+        "event_id": 76,
+        "reason": "not labeled"
+      },
+      {
+        "event_id": 83,
+        "reason": "not labeled"
+      },
+      {
+        "event_id": 87,
+        "reason": "no training consent"
+      },
+      {
+        "event_id": 88,
+        "reason": "no training consent"
+      }
+    ],
+    "created_utc": "2026-10-03T10:30:00Z",
+    "created_by": "Ameer Faour"
+  }
+]

@@ -1,0 +1,54 @@
+{
+  "event_id": 58,
+  "version": 1,
+  "status": "submitted",
+  "tracks": [
+    {
+      "track_id": "s1",
+      "label": "car",
+      "keyframes": [
+        {
+          "frame": 0,
+          "t_sec": 0.0,
+          "xyxy": [
+            0.602275,
+            0.55,
+            0.9422750000000001,
+            0.77
+          ],
+          "enabled": true
+        },
+        {
+          "frame": 18,
+          "t_sec": 3.6,
+          "xyxy": [
+            0.12215899999999999,
+            0.55,
+            0.462159,
+            0.77
+          ],
+          "enabled": true
+        }
+      ],
+      "source": "suggestion"
+    }
+  ],
+  "description": "Headlights sweep across the wall as a vehicle turns on the road; no people are visible, checked by hand.",
+  "ai_description": "Headlights sweep across the wall as a vehicle turns on the road; no people are visible.",
+  "ai_status": "real",
+  "ai_model": "gpt-4o",
+  "ai_prompt_version": "2026-10-03.tagged-rules-label",
+  "drop_clip": false,
+  "needs_review": true,
+  "author": "Eden Peretz",
+  "updated_utc": "2026-10-03T09:30:00Z",
+  "review_note": "",
+  "review_frame": null,
+  "fps": 5.0,
+  "frame_count": 20,
+  "frame_size": [
+    320,
+    180
+  ],
+  "suggestions_used": true
+}

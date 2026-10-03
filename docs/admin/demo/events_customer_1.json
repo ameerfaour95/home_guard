@@ -1536,7 +1536,7 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/19/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": "reviewed"
     },
     {
       "id": 39,

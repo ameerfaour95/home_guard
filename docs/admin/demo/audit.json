@@ -1,6 +1,102 @@
 {
   "items": [
     {
+      "id": 7,
+      "ts": "2026-10-03T10:30:00Z",
+      "staff": "Ameer Faour",
+      "action": "tagging_publish",
+      "customer_id": null,
+      "device_id": null,
+      "target": "tagging/demo_night_visitors",
+      "reason": "",
+      "detail": {
+        "events": 2,
+        "publish_id": 1,
+        "collection_id": 1
+      }
+    },
+    {
+      "id": 6,
+      "ts": "2026-10-03T10:00:00Z",
+      "staff": "Ameer Faour",
+      "action": "annotation_review",
+      "customer_id": 2,
+      "device_id": "7cdc4b44-de01-5ba8-8078-81b1a1072578",
+      "target": "event/57",
+      "reason": "",
+      "detail": {
+        "frame": 5,
+        "version": 1,
+        "decision": "reject"
+      }
+    },
+    {
+      "id": 5,
+      "ts": "2026-10-03T10:00:00Z",
+      "staff": "Ameer Faour",
+      "action": "annotation_review",
+      "customer_id": 1,
+      "device_id": "4c2fb54d-51c9-5af2-8288-3caad30115a2",
+      "target": "event/19",
+      "reason": "",
+      "detail": {
+        "frame": null,
+        "version": 1,
+        "decision": "accept"
+      }
+    },
+    {
+      "id": 4,
+      "ts": "2026-10-03T09:30:00Z",
+      "staff": "Eden Peretz",
+      "action": "annotation_save",
+      "customer_id": 2,
+      "device_id": "7cdc4b44-de01-5ba8-8078-81b1a1072578",
+      "target": "event/58",
+      "reason": "",
+      "detail": {
+        "status": "submitted",
+        "tracks": 1,
+        "version": 1,
+        "drop_clip": false,
+        "needs_review": true
+      }
+    },
+    {
+      "id": 3,
+      "ts": "2026-10-03T09:20:00Z",
+      "staff": "Eden Peretz",
+      "action": "annotation_save",
+      "customer_id": 2,
+      "device_id": "7cdc4b44-de01-5ba8-8078-81b1a1072578",
+      "target": "event/57",
+      "reason": "",
+      "detail": {
+        "status": "submitted",
+        "tracks": 1,
+        "version": 1,
+        "drop_clip": false,
+        "needs_review": false
+      }
+    },
+    {
+      "id": 2,
+      "ts": "2026-10-03T09:10:00Z",
+      "staff": "Eden Peretz",
+      "action": "annotation_save",
+      "customer_id": 1,
+      "device_id": "4c2fb54d-51c9-5af2-8288-3caad30115a2",
+      "target": "event/19",
+      "reason": "",
+      "detail": {
+        "status": "submitted",
+        "tracks": 1,
+        "version": 1,
+        "drop_clip": false,
+        "needs_review": false
+      }
+    },
+    {
       "id": 1,
       "ts": "2026-10-03T08:55:00Z",
       "staff": "Ameer Faour",
@@ -20,7 +116,7 @@
       }
     },
     {
-      "id": 30,
+      "id": 36,
       "ts": "2026-10-02T10:05:24Z",
       "staff": "Eden Peretz",
       "action": "collection_add",
@@ -37,7 +133,7 @@
       }
     },
     {
-      "id": 29,
+      "id": 35,
       "ts": "2026-10-02T05:44:27.428571Z",
       "staff": "Ameer Faour",
       "action": "collection_add",
@@ -54,7 +150,7 @@
       }
     },
     {
-      "id": 28,
+      "id": 34,
       "ts": "2026-10-02T01:32:22.857143Z",
       "staff": "Eden Peretz",
       "action": "collection_create",
@@ -67,7 +163,7 @@
       }
     },
     {
-      "id": 27,
+      "id": 33,
       "ts": "2026-10-01T21:16:34.285714Z",
       "staff": "Ameer Faour",
       "action": "collection_create",
@@ -80,7 +176,7 @@
       }
     },
     {
-      "id": 26,
+      "id": 32,
       "ts": "2026-10-01T16:56:40.714286Z",
       "staff": "Ameer Faour",
       "action": "review",
@@ -93,7 +189,7 @@
       }
     },
     {
-      "id": 25,
+      "id": 31,
       "ts": "2026-10-01T12:42:20.142857Z",
       "staff": "Noa Shapira",
       "action": "media_denied",
@@ -107,7 +203,7 @@
       }
     },
     {
-      "id": 24,
+      "id": 30,
       "ts": "2026-10-01T08:23:45.571429Z",
       "staff": "Noa Shapira",
       "action": "media_view",
@@ -120,7 +216,7 @@
       }
     },
     {
-      "id": 23,
+      "id": 29,
       "ts": "2026-10-01T04:08:04Z",
       "staff": "Noa Shapira",
       "action": "event_view",
@@ -131,7 +227,7 @@
       "detail": null
     },
     {
-      "id": 22,
+      "id": 28,
       "ts": "2026-09-30T23:46:50.428571Z",
       "staff": "Ameer Faour",
       "action": "event_view",
@@ -142,7 +238,7 @@
       "detail": null
     },
     {
-      "id": 21,
+      "id": 27,
       "ts": "2026-09-30T19:31:39.857143Z",
       "staff": "Noa Shapira",
       "action": "event_view",
@@ -153,7 +249,7 @@
       "detail": null
     },
     {
-      "id": 20,
+      "id": 26,
       "ts": "2026-09-30T15:13:41.285714Z",
       "staff": "Ameer Faour",
       "action": "event_view",
@@ -164,7 +260,7 @@
       "detail": null
     },
     {
-      "id": 19,
+      "id": 25,
       "ts": "2026-09-30T10:57:43.714286Z",
       "staff": "Noa Shapira",
       "action": "event_view",
@@ -175,7 +271,7 @@
       "detail": null
     },
     {
-      "id": 18,
+      "id": 24,
       "ts": "2026-09-30T06:34:39.142857Z",
       "staff": "Ameer Faour",
       "action": "event_view",
@@ -186,7 +282,7 @@
       "detail": null
     },
     {
-      "id": 17,
+      "id": 23,
       "ts": "2026-09-30T02:20:02.571429Z",
       "staff": "Eden Peretz",
       "action": "login",
@@ -197,7 +293,7 @@
       "detail": null
     },
     {
-      "id": 16,
+      "id": 22,
       "ts": "2026-09-29T22:05:32Z",
       "staff": "Eden Peretz",
       "action": "login",
@@ -208,7 +304,7 @@
       "detail": null
     },
     {
-      "id": 15,
+      "id": 21,
       "ts": "2026-09-29T17:50:38.428571Z",
       "staff": "Ameer Faour",
       "action": "login",
@@ -219,7 +315,7 @@
       "detail": null
     },
     {
-      "id": 14,
+      "id": 20,
       "ts": "2026-09-29T13:28:49.857143Z",
       "staff": "Ameer Faour",
       "action": "login",
@@ -230,7 +326,7 @@
       "detail": null
     },
     {
-      "id": 13,
+      "id": 19,
       "ts": "2026-09-29T09:15:00.285714Z",
       "staff": "Noa Shapira",
       "action": "login",
@@ -241,7 +337,7 @@
       "detail": null
     },
     {
-      "id": 12,
+      "id": 18,
       "ts": "2026-09-29T04:56:28.714286Z",
       "staff": "Noa Shapira",
       "action": "login",
@@ -252,7 +348,7 @@
       "detail": null
     },
     {
-      "id": 11,
+      "id": 17,
       "ts": "2026-09-29T00:40:28.142857Z",
       "staff": "Noa Shapira",
       "action": "login",
@@ -263,7 +359,7 @@
       "detail": null
     },
     {
-      "id": 10,
+      "id": 16,
       "ts": "2026-09-28T20:19:46.571429Z",
       "staff": "Ameer Faour",
       "action": "customer_update",
@@ -276,7 +372,7 @@
       }
     },
     {
-      "id": 9,
+      "id": 15,
       "ts": "2026-09-28T16:00:09Z",
       "staff": "Ameer Faour",
       "action": "customer_update",
@@ -289,7 +385,7 @@
       }
     },
     {
-      "id": 8,
+      "id": 14,
       "ts": "2026-09-28T11:43:23.428571Z",
       "staff": "Ameer Faour",
       "action": "device_enroll",
@@ -300,7 +396,7 @@
       "detail": null
     },
     {
-      "id": 7,
+      "id": 13,
       "ts": "2026-09-28T07:31:31.857143Z",
       "staff": "Ameer Faour",
       "action": "device_enroll",
@@ -311,7 +407,7 @@
       "detail": null
     },
     {
-      "id": 6,
+      "id": 12,
       "ts": "2026-09-28T03:18:19.285714Z",
       "staff": "Ameer Faour",
       "action": "device_enroll",
@@ -322,7 +418,7 @@
       "detail": null
     },
     {
-      "id": 5,
+      "id": 11,
       "ts": "2026-09-27T23:00:18.714286Z",
       "staff": "Ameer Faour",
       "action": "device_enroll",
@@ -333,7 +429,7 @@
       "detail": null
     },
     {
-      "id": 4,
+      "id": 10,
       "ts": "2026-09-27T18:42:05.142857Z",
       "staff": "Ameer Faour",
       "action": "customer_create",
@@ -346,7 +442,7 @@
       }
     },
     {
-      "id": 3,
+      "id": 9,
       "ts": "2026-09-27T14:23:16.571429Z",
       "staff": "Ameer Faour",
       "action": "customer_create",
@@ -359,7 +455,7 @@
       }
     },
     {
-      "id": 2,
+      "id": 8,
       "ts": "2026-09-27T10:07:41Z",
       "staff": "Ameer Faour",
       "action": "customer_create",

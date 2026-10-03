@@ -600,6 +600,36 @@ def seed_review_and_collections(engine, ids: dict, rng: random.Random) -> dict:
     return out
 
 
+def seed_labels(client, tokens: dict, collections: dict, clock: list) -> dict:
+    """Label a few clips through the real routes, as a labeler would (suggestions kept, the AI summary corrected),
+    review two of them, and publish the night collection as a tagging batch. Returns the event ids shown."""
+    admin = {"Authorization": f"Bearer {tokens['admin']}"}
+    labeler = {"Authorization": f"Bearer {tokens['labeler']}"}
+    night = collections["Night-time visitors"]
+    items = client.get(f"/v1/studio/collections/{night}/items", headers=labeler, params={"limit": 500}).json()["items"]
+    starts = {i["id"]: client.get(f"/v1/events/{i['id']}/annotation", headers=labeler).json() for i in items}
+    ordered = sorted(starts, key=lambda eid: (not starts[eid]["tracks"], eid))  # clips with suggestions first
+    ids = ordered[:4]
+    for n, eid in enumerate(ids[:3]):
+        clock[0] = NOW - timedelta(hours=2, minutes=50 - 10 * n)
+        start = starts[eid]
+        body = {"base_version": 0, "tracks": start["tracks"], "status": "submitted", "needs_review": n == 2,
+                "description": (start["description"] or "A person is visible.").rstrip(".") + ", checked by hand."}
+        resp = client.put(f"/v1/events/{eid}/annotation", headers=labeler, json=body)
+        if resp.status_code != 200:
+            raise RuntimeError(f"demo annotation failed: {resp.status_code} {resp.text[:300]}")
+    clock[0] = NOW - timedelta(hours=2)
+    client.post(f"/v1/events/{ids[0]}/annotation/review", headers=admin, json={"decision": "accept"})
+    client.post(f"/v1/events/{ids[1]}/annotation/review", headers=admin,
+                json={"decision": "reject", "note": "The second person is missing from frame 5 on.", "frame": 5})
+    clock[0] = NOW - timedelta(hours=1, minutes=30)
+    resp = client.post(f"/v1/studio/collections/{night}/publish", headers=admin,
+                       json={"batch_name": "demo_night_visitors"})
+    if resp.status_code != 200 or resp.json()["state"] not in ("ready", "partial"):
+        raise RuntimeError(f"demo publish did not finish: {resp.status_code} {resp.text[:400]}")
+    return {"annotated": ids}
+
+
 def seed_audit(engine, ids: dict, rng: random.Random, count: int) -> None:
     """Earlier staff activity, so the audit page has history. Written through the real audit.record."""
     from . import audit
@@ -712,6 +742,10 @@ def record_routes(client, out: Path, tokens: dict, ids: dict, collections: dict,
     for cid in collections.values():
         rec.call(f"collection_{cid}_items", "admin", admin, "GET", f"/studio/collections/{cid}/items",
                  params={"limit": 500})
+    for eid in event_ids.get("annotated", []):
+        rec.call(f"annotation_{eid}", "admin", admin, "GET", f"/events/{eid}/annotation")
+        rec.call(f"annotation_history_{eid}", "admin", admin, "GET", f"/events/{eid}/annotation/history")
+    rec.call("publishes", "admin", admin, "GET", "/studio/publishes")
     exports = rec.call("exports", "admin", admin, "GET", "/studio/exports")
     for exp in exports:
         rec.call(f"export_{exp['id']}", "admin", admin, "GET", f"/studio/exports/{exp['id']}")
@@ -734,6 +768,8 @@ def record_routes(client, out: Path, tokens: dict, ids: dict, collections: dict,
         rec.call(f"collection_{cid}_items", "labeler", labeler, "GET", f"/studio/collections/{cid}/items",
                  params={"limit": 500})
     rec.call("exports", "labeler", labeler, "GET", "/studio/exports")
+    for eid in event_ids.get("annotated", []):
+        rec.call(f"annotation_{eid}", "labeler", labeler, "GET", f"/events/{eid}/annotation")
     rec.call("export_preview", "labeler", labeler, "POST", "/studio/exports/preview",
              body={**preview, "collection_id": collections["Deliveries and couriers"], "name": "deliveries-v1"})
     return rec.entries
@@ -841,9 +877,10 @@ def _generate(out: Path) -> None:
                     "include_fallback_ai": False})
                 if resp.status_code != 200 or resp.json()["state"] != "ready":
                     raise RuntimeError(f"demo export did not become ready: {resp.status_code} {resp.text[:400]}")
+                labeled = seed_labels(client, tokens, collections, clock)
                 clock[0] = NOW
                 seed_audit(engine, ids, rng, count=29)
-                entries = record_routes(client, out, tokens, ids, collections, {})
+                entries = record_routes(client, out, tokens, ids, collections, labeled)
             n_media = save_media(engine, s3, out)
             app.state.engine.dispose()
         index = {"now_utc": f"{NOW:%Y-%m-%dT%H:%M:%SZ}",
