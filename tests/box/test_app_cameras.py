@@ -124,3 +124,31 @@ class CameraControlsTests(unittest.TestCase):
             api.out=Path(directory)
             with self.assertRaises(ValueError):
                 api.snapshots()
+
+
+class BoxPythonTests(unittest.TestCase):
+    """The app runs on the base pythonw (start.pyw); its commands must run on the box's .venv,
+    where yaml/cv2 are. With sys.executable every camera command failed on the box (2026-10-03)."""
+
+    def test_the_venv_interpreter_is_used_when_it_exists(self):
+        from home_guard_project.box.app.camera_controls import box_python
+        with tempfile.TemporaryDirectory() as root:
+            venv = Path(root) / ".venv" / "Scripts" / "python.exe"
+            venv.parent.mkdir(parents=True)
+            venv.write_text("")
+            self.assertEqual(box_python(Path(root)), str(venv))
+
+    def test_without_a_venv_the_running_interpreter_is_used(self):
+        import sys
+        from home_guard_project.box.app.camera_controls import box_python
+        with tempfile.TemporaryDirectory() as root:
+            self.assertEqual(box_python(Path(root)), sys.executable)
+
+    def test_camera_commands_run_on_the_box_interpreter(self):
+        from home_guard_project.box.app import camera_controls as cc
+        seen = []
+        runner = lambda args, **kw: (seen.append(args), Mock(returncode=0, stdout='{"cameras": []}'))[1]
+        controls = CameraControls(BoxControls(demo=False), [], runner=runner)
+        with patch.object(cc, "box_python", return_value="C:/box/.venv/Scripts/python.exe"):
+            controls.zones()
+        self.assertEqual(seen[0][0], "C:/box/.venv/Scripts/python.exe")

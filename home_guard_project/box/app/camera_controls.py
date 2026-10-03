@@ -46,6 +46,18 @@ def zone_operation(name, points=None):
         raise ValueError("A zone needs at least three corners")
     return ["set-zone", "--camera", name, "--points", ";".join(f"{x:.4f},{y:.4f}" for x, y in values)]
 
+def box_python(root=None):
+    """The interpreter for the box's own commands: the repository's .venv, where yaml and cv2 are.
+
+    The app itself may run on the base pythonw (start.pyw adds the .venv's packages to its
+    own path only), so sys.executable cannot import them: every camera command failed on
+    the box that way. Falls back to sys.executable where there is no .venv (tests, dev).
+    """
+    root = Path(root) if root is not None else Path(__file__).resolve().parents[3]
+    venv = root / ".venv" / "Scripts" / "python.exe"
+    return str(venv) if venv.is_file() else sys.executable
+
+
 class CameraControls(CameraAlertsBackend):
     def __init__(self, box, names=(), runner=None):
         self.box = box
@@ -85,7 +97,7 @@ class CameraControls(CameraAlertsBackend):
     def command(self, *args):
         env = os.environ.copy()
         env.pop("VIRTUAL_ENV", None)
-        result = self.runner([sys.executable, "-m", "home_guard_project.box.find_cameras", "--json", *map(str, args)], env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding="utf-8", timeout=480, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        result = self.runner([box_python(), "-m", "home_guard_project.box.find_cameras", "--json", *map(str, args)], env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding="utf-8", timeout=480, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         data = json.loads(result.stdout)
         if "error" in data:
             raise ValueError(str(data["error"]) if args and args[0] in ("camera-alerts", "set-camera-alerts", "set-camera-sensitivity") else "Camera command failed")
@@ -110,7 +122,7 @@ class CameraControls(CameraAlertsBackend):
         env=os.environ.copy();env.pop('VIRTUAL_ENV',None)
         env['HG_CAMERA_PASSWORD']=password
         site=boxconfig.load_box_settings().get('site','home')
-        result=self.runner([sys.executable,'-m','home_guard_project.box.find_cameras','--json','auto','--user',user,'--prefix',site,'--write'],env=env,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True,encoding='utf-8',timeout=480,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+        result=self.runner([box_python(),'-m','home_guard_project.box.find_cameras','--json','auto','--user',user,'--prefix',site,'--write'],env=env,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True,encoding='utf-8',timeout=480,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
         data=json.loads(result.stdout)
         if result.returncode not in (0,1) or not isinstance(data.get('cameras'),list):
             raise ValueError('Camera search failed')
