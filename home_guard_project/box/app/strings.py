@@ -442,5 +442,37 @@ TEXT.update(
     camera_zone_saved="Area saved",
 )
 
+TEXT.update(
+    alert_types_title="Alert me about",
+    alert_house_title="House alert choices",
+    alert_house_caption="For every camera, unless a camera has its own choice.",
+    alert_type_person="People",
+    alert_type_vehicle="Vehicles",
+    alert_type_animal="Animals",
+    alert_hint_person="Anyone on your property.",
+    alert_hint_vehicle="Cars arriving or leaving. Parked cars never alert.",
+    alert_hint_animal="Cats, dogs and other animals. Not birds.",
+    alert_keep_one="Keep at least one on. To stop all alerts, turn off Security alerts.",
+    alert_camera_default="Alerts: House default · {types}",
+    alert_camera_custom="Alerts: {types}",
+    alert_camera_title="{camera} · Alert me about",
+    alert_use_default="Use the house default",
+    alert_choose_camera="Choose for this camera",
+    alert_house_value="House default · {types}",
+    alert_custom_one="1 camera custom",
+    alert_custom_many="{count} cameras custom",
+    alert_done="Done",
+    alert_loading="Loading alert choices…",
+    alert_read_error="Alert choices could not be read. Open to try again.",
+)
+
 def tr(key, **values):
     return TEXT[key].format(**values)
+
+TEXT.update(catches_more="Catches more", reset_sensitivity="Reset to recommended",
+            sensitivity_house="Use the house values", sensitivity_camera="Set for this camera",
+            sensitivity_choose_hint="Move a slider to set it for this camera. Other types keep the house values.",
+            sensitivity_unavailable="Sensitivity values are unavailable. Update the box program to use these controls.",
+            sensitivity_custom="Own sensitivity", alert_types_custom="Own alert types")
+
+TEXT.update(camera_detection_title="{camera} · Alerts & detection")

@@ -1,0 +1,22 @@
+Round A validation - 2026-10-03
+
+uv sync completed with VIRTUAL_ENV unset. All Python runs use .venv/Scripts/python.exe with VIRTUAL_ENV unset.
+Final result: Ran 674 tests in 39.211s - OK.
+New alert-choice tests: 23 (8 data-path tests, 15 Qt UI tests).
+Excluded: tests/box/test_serve.py (5 tests), per the reported pre-existing process termination on this machine.
+
+The requested discover -s tests/box -t . cannot import this checkout's test directories because they lack package markers. The complete remaining suite was loaded as follows:
+
+import unittest
+from pathlib import Path
+loader = unittest.TestLoader()
+suite = unittest.TestSuite(loader.discover('tests/box', pattern=p.name) for p in sorted(Path('tests/box').glob('test_*.py')) if p.name != 'test_serve.py')
+result = unittest.TextTestRunner(verbosity=1).run(suite)
+raise SystemExit(not result.wasSuccessful())
+
+Screenshots can be regenerated offline with:
+.venv/Scripts/python.exe -m home_guard_project.box.app.alert_types_proof
+
+All six PNGs are 1366x768 and were visually inspected. The narrow image uses a real 560-pixel Settings viewport centered on the proof canvas. The offscreen dialog is its actual Qt surface composited at its window position over the demo application.
+
+Local and SSH command paths use recorded runners in tests. No box, camera, Telegram or OpenAI was contacted. Engine files and dependencies were not changed. No engine-contract blockers.

@@ -10,6 +10,7 @@ import threading
 import time
 from .camera_controls import Camera,changes_payload,zone_operation,zone_points
 from .engine_backend import ProcessRunner
+from .alert_types import CameraAlertsBackend
 
 def target_user(target):
     match=re.fullmatch(r'([A-Za-z0-9_][A-Za-z0-9_.-]*)@([A-Za-z0-9][A-Za-z0-9_.:-]*|\[[A-Fa-f0-9:]+\])',target)
@@ -36,7 +37,7 @@ class CommandRunner:
             self.processes.stop(process)
             if process.stdout: process.stdout.close()
 
-class RemoteCameras:
+class RemoteCameras(CameraAlertsBackend):
     remote=True
     def __init__(self,target,names=(),runner=None,key=None):
         self.target=target;self.user=target_user(target)
