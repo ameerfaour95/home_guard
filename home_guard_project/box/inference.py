@@ -87,7 +87,7 @@ def apply_policy_override(parsed: Dict[str, Any], in_window: bool, person: bool,
 
 
 # Bumped whenever the prompt or the answer's schema changes, so training records can be told apart.
-PROMPT_VERSION = "2026-10-03.tagged-style-label"
+PROMPT_VERSION = "2026-10-03.tagged-style-label-3"
 
 # The three labels the model gives a scene, and what the box does with each. The owner
 # chose them (this is also what a student model will be trained to answer):
@@ -147,6 +147,8 @@ Write "summary": what happens in the clip, in one to three short sentences (usua
 - Mention what matters for safety: clothing that hides the face (hood, mask, covered face), dark or
   covering clothes, and objects in the hands (phone, bag, tool, hammer, knife, gun, baby, mop).
 - Where something is uncertain, say "appears to" or "seems to".
+- Describe only what is there and what happens. Do not mention what is absent ("no faces are
+  obscured", "no movement") or the background (parked cars, walls, plants) unless someone acts on it.
 - Say "a man", "a woman", "a person", "two men", "a group of people"; never guess names, age,
   ethnicity or who the person is.
 - If nobody is there and nothing moves (parked cars, plants, light changes), write exactly:
@@ -167,8 +169,10 @@ Examples of good summaries:
   holding a knife in his hand."
 
 Then give the clip ONE "label":
-- "normal": everyday life - family and visitors, people talking, walking, smoking, cleaning, carrying
-  babies or bags into the house, deliveries, cars parking or leaving, pets, or no special activity.
+- "normal": everyday life - family and visitors, people talking, walking, standing or waiting, looking
+  at a phone, smoking, cleaning, carrying babies or bags into the house, deliveries, cars parking or
+  leaving, pets, or no special activity. A person standing still is normal unless they hide their face
+  or do something from the "suspicious" list.
 - "suspicious": something the homeowner should look at - faces hidden by hoods, masks or clothing,
   lingering or loitering, looking around cautiously, looking into windows or cars, trying doors,
   gates or car doors, walking around the property at night, hiding, or a vehicle waiting with no
