@@ -443,6 +443,21 @@ class MuteState:
         self._cameras = {k: v for k, v in cameras.items() if v > now}
         self._save()
 
+    def set_entry(self, camera: Optional[str], until: float, now: float) -> None:
+        """Set one pause entry - *camera*'s, or the whole house's when None - to *until*; a past *until* removes it.
+        Every other entry is left alone (Undo of one turn). Raises ValueError on bad input."""
+        now, until = _finite_number(now), _finite_number(until)
+        if camera is not None and (not isinstance(camera, str) or not camera):
+            raise ValueError("camera must be a name or None")
+        if camera is None:
+            self._all = until if until > now else 0.0
+        elif until > now:
+            self._cameras[camera] = until
+        else:
+            self._cameras.pop(camera, None)
+        self._cameras = {k: v for k, v in self._cameras.items() if v > now}
+        self._save()
+
     def _save(self) -> None:
         try:
             _write_json(self.path, self.snapshot())

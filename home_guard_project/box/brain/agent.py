@@ -31,9 +31,10 @@ from .i18n import LANGUAGE_NAMES, t
 from .memory import ChatMemory, ChatState
 from .profiles import needs_big, system_prompt, tool_names, tools_for
 from .receipts import ACTING_TOOLS, DONE, FAILED, REQUESTED, UNDONE, Receipt, ReceiptBook
+from .mode import hhmm
 from .registry import render_block, resolve_camera
-from .render import receipt_line, render_reply
-from .tools import TOOLS, KEYS, Services, ToolContext, _issue, settings_line
+from .render import receipt_line, render_reply, undo_what
+from .tools import DEFAULTS, TOOLS, KEYS, Services, ToolContext, _issue, settings_line
 
 log = logging.getLogger("box.brain.agent")
 
@@ -111,6 +112,45 @@ class AgentReply:
 
 class _HandOff(Exception):
     """The fast model asked for the big one, failed, or ran out of steps."""
+
+
+class _ChangedSince(Exception):
+    """Undo: what the turn changed no longer holds (another turn, button or person changed it since)."""
+
+
+def _same_value(current: Any, wrote: Any) -> bool:
+    """A setting still holds the raw value a turn wrote (the store may keep "23" as 23)."""
+    if not isinstance(current, bool) and not isinstance(wrote, bool):
+        try:
+            return float(current) == float(wrote)
+        except (TypeError, ValueError):
+            pass
+    return str(current).strip().lower() == str(wrote).strip().lower()
+
+
+def _pause_entries(value: Any) -> List[Tuple[Optional[str], float]]:
+    """The pause entries in a receipt's ``before``/``after``: (camera, until), camera None for the whole house."""
+    if not isinstance(value, dict) or not isinstance(value.get("cameras", {}), dict):
+        raise ValueError("invalid pause entries")
+    out: List[Tuple[Optional[str], float]] = []
+    if "all" in value:
+        out.append((None, _finite(value["all"])))
+    for name, until in value.get("cameras", {}).items():
+        if not isinstance(name, str) or not name:
+            raise ValueError("invalid pause camera")
+        out.append((name, _finite(until)))
+    return out
+
+
+def _touches_pause(entry: Optional[str], later: Receipt) -> bool:
+    """Did a later pause/resume receipt set or clear this pause entry (a camera's, or the house's when None)?"""
+    camera = later.detail.get("camera") or None
+    if later.tool == "pause_alerts":
+        return camera == entry
+    if later.tool == "resume_alerts":
+        # Resuming everything clears every entry; resuming one camera clears its entry and rewrites the house's.
+        return camera is None or entry is None or camera == entry
+    return False
 
 
 def context_block(snapshot: Any, settings_text: str, now: float, lang: str, alert_handle: Optional[str],
@@ -365,62 +405,118 @@ class OwnerAgentV2:
                 ctx = ToolContext(turn_id=f"{chat_id}:{token}:undo", chat_id=chat_id, speaker=who, text="", lang=lang,
                                   mode=snapshot.mode, snapshot=snapshot, state=state, services=self.services,
                                   book=self.book)
-                undone = 0
+                processed = 0
+                lines: List[str] = []
                 for r in reversed(self.book.turn_receipts(f"{chat_id}:{token}")):     # newest first
                     if r.tool not in UNDOABLE or r.status not in (DONE, REQUESTED) or r.detail.get("already"):
                         continue
-                    d = r.detail
+                    processed += 1
+                    first = len(ctx.receipts)
                     try:
-                        if r.tool == "pause_alerts":
-                            camera = d.get("camera") or None
-                            before = d.get("before")
-                            if (not isinstance(before, dict) or "all" not in before
-                                    or not isinstance(before.get("cameras"), dict)):
-                                raise ValueError("invalid pause restore data")
-                            _finite(before["all"])
-                            for name, until in before["cameras"].items():
-                                if not isinstance(name, str):
-                                    raise ValueError("invalid pause camera")
-                                _finite(until)
-                            self.services.mute.restore(before, now)   # an earlier pause survives
-                            _issue(ctx, "resume_alerts", DONE, camera or "all", {"camera": camera or ""})
-                        elif r.tool == "set_camera_active":
-                            if type(d.get("active")) is not bool or not isinstance(d.get("camera"), str):
-                                raise ValueError("invalid camera restore data")
-                            back = not d["active"]
-                            result = self.services.set_camera(d["camera"], back)
-                            if not isinstance(result, dict) or result.get("ok") is not True:
-                                raise ValueError("camera change was refused")
-                            _issue(ctx, "set_camera_active", REQUESTED, d["camera"],
-                                   {"camera": d["camera"], "active": back, "chat_id": chat_id, "lang": lang})
-                            if self.services.request_restart:
-                                ctx.after_reply.append(self.services.request_restart)
-                        else:
-                            restore = d.get("restore")
-                            keys = KEYS.get(d.get("setting"), ())
-                            if not isinstance(restore, dict) or not keys or set(restore) != set(keys):
-                                raise ValueError("missing or invalid setting restore data")
-                            json.dumps(restore, allow_nan=False)
-                            if any(not isinstance(v, (str, int, float, bool)) for v in restore.values()):
-                                raise ValueError("invalid setting restore values")
-                            for key, value in restore.items():
-                                self.services.set_option(key, str(value).lower() if isinstance(value, bool) else str(value))
-                            _issue(ctx, "change_setting", DONE, str(d.get("setting") or ""),
-                                   {"setting": d.get("setting"), "old": d.get("new", ""), "new": d.get("old", "")})
+                        self._undo_one(ctx, r, snapshot, now)
+                    except _ChangedSince:
+                        # Left as it is, not marked undone; the line says why nothing happened.
+                        lines.append(t("undo_changed_since", lang, what=undo_what(r.tool, r.detail, r.target, lang)))
+                        continue
                     except Exception as exc:  # noqa: BLE001
                         log.warning("Undo of %s failed: %s", r.summary(), exc)
-                        _issue(ctx, r.tool, FAILED, r.target, dict(d), "error")
-                        undone += 1
+                        _issue(ctx, r.tool, FAILED, r.target,
+                               {"undo_of": r.tool, "camera": str(r.detail.get("camera") or ""),
+                                "setting": str(r.detail.get("setting") or "")}, "error")
+                        lines += [receipt_line(x, lang, self.retention_days) for x in ctx.receipts[first:]]
                         continue                                   # not undone: it stays undoable
                     self.book.update(r, UNDONE)
-                    undone += 1
-                text_out = render_reply("", ctx.receipts, lang, self.retention_days) if undone else t("nothing_to_undo", lang)
+                    lines += [receipt_line(x, lang, self.retention_days) for x in ctx.receipts[first:]]
+                if processed:
+                    text_out = "\n".join(line for line in lines if line) or t("unavailable", lang)
+                else:
+                    text_out = t("nothing_to_undo", lang)
                 state.add_turn(speaker, "↩", text_out, [], [r.summary() for r in ctx.receipts], now)
                 self.memory.save(chat_id, state)
                 return AgentReply(text=text_out, after=tuple(ctx.after_reply), lang=lang, receipts=tuple(ctx.receipts))
             except Exception as exc:
                 log.warning("Undo failed at the poll boundary: %s", exc)
                 return _fallback_reply(ctx, lang)
+
+    def _undo_one(self, ctx: ToolContext, r: Receipt, snapshot: Any, now: float) -> None:
+        """Reverse one receipt - only while what it changed still holds. Raises _ChangedSince when it no longer
+        does (nothing is touched), any other exception when the reversal itself fails."""
+        d = r.detail
+        later = [x for x in self.book.later(r.turn, r.id)
+                 if x.status in (DONE, REQUESTED) and not x.detail.get("undo_of") and not x.detail.get("already")]
+        if r.tool == "pause_alerts":
+            before = d.get("before")
+            if (not isinstance(before, dict) or "all" not in before
+                    or not isinstance(before.get("cameras"), dict)):
+                raise ValueError("invalid pause restore data")
+            earlier = dict(_pause_entries(before))
+            entries = _pause_entries(d.get("after"))
+            if not entries:
+                raise ValueError("missing pause undo data")
+            current = self.services.mute.snapshot()
+            held = []
+            for entry, until in entries:
+                now_until = current["all"] if entry is None else current["cameras"].get(entry, 0.0)
+                if float(now_until) == until and not any(_touches_pause(entry, x) for x in later):
+                    held.append(entry)
+            if not held:
+                raise _ChangedSince()
+            for entry in held:                        # only this turn's entries; every other pause is untouched
+                self.services.mute.set_entry(entry, earlier.get(entry, 0.0), now)
+            for entry in held:
+                detail: Dict[str, Any] = {"camera": entry or "", "undo_of": "pause_alerts"}
+                if entry:
+                    still = self.services.mute.muted_until(now, entry)
+                    detail["still_until"] = hhmm(still) if still else ""
+                else:
+                    left = self.services.mute.snapshot()
+                    if float(left["all"]) > now:
+                        detail["still_until"] = hhmm(float(left["all"]))
+                    else:
+                        detail["still_pauses"] = [[name, hhmm(until)] for name, until in sorted(left["cameras"].items())
+                                                  if until > now]
+                _issue(ctx, "resume_alerts", DONE, entry or "all", detail)
+        elif r.tool == "set_camera_active":
+            camera, active = d.get("camera"), d.get("active")
+            if type(active) is not bool or not isinstance(camera, str):
+                raise ValueError("invalid camera restore data")
+            if not getattr(snapshot, "state_known", True):
+                raise ValueError("the camera list could not be read")
+            cam = snapshot.camera(camera)
+            if (cam is None or cam.enabled is not active
+                    or any(x.tool == "set_camera_active" and (x.detail.get("camera") or x.target) == camera
+                           for x in later)):
+                raise _ChangedSince()
+            back = not active
+            result = self.services.set_camera(camera, back)
+            if not isinstance(result, dict) or result.get("ok") is not True:
+                raise ValueError("camera change was refused")
+            _issue(ctx, "set_camera_active", REQUESTED, camera,
+                   {"camera": camera, "active": back, "chat_id": ctx.chat_id, "lang": ctx.lang,
+                    "undo_of": "set_camera_active"})
+            if self.services.request_restart and self.services.request_restart not in ctx.after_reply:
+                ctx.after_reply.append(self.services.request_restart)
+        else:
+            setting = d.get("setting")
+            restore, wrote = d.get("restore"), d.get("wrote")
+            keys = KEYS.get(setting, ()) if isinstance(setting, str) else ()
+            if (not isinstance(restore, dict) or not keys or set(restore) != set(keys)
+                    or not isinstance(wrote, dict) or set(wrote) != set(keys)):
+                raise ValueError("missing or invalid setting undo data")
+            json.dumps([restore, wrote], allow_nan=False)
+            if any(not isinstance(v, (str, int, float, bool)) for v in list(restore.values()) + list(wrote.values())):
+                raise ValueError("invalid setting undo values")
+            current = self.services.read_settings() if self.services.read_settings else None
+            if not isinstance(current, dict):
+                raise ValueError("settings could not be read")
+            if (not all(_same_value(current.get(k, DEFAULTS[k]), wrote[k]) for k in keys)
+                    or any(x.tool == "change_setting" and x.detail.get("setting") == setting for x in later)):
+                raise _ChangedSince()
+            for key in keys:
+                value = restore[key]
+                self.services.set_option(key, str(value).lower() if isinstance(value, bool) else str(value))
+            _issue(ctx, "change_setting", DONE, setting,
+                   {"setting": setting, "old": d.get("new", ""), "new": d.get("old", ""), "undo_of": "change_setting"})
 
     def _handle(self, text: str, chat_id: str, who: Dict[str, Any], alert: Optional[Dict[str, Any]],
                 threaded: bool, choice: Optional[Tuple[str, int]] = None) -> Optional[AgentReply]:

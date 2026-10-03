@@ -46,7 +46,9 @@ _BIG_WORDS_HE = ("תכבה", "תדליק", "תשתיק", "תפסיק", "עצור
                  "תגדיר", "הגדר", "תחזירי", "תמשיכי")
 
 
-_CANCEL_HE = re.compile(r"(?<!\w)[ושהת]?בטל(?!\w)")
+# "בטל" as a word, with up to two prefix letters (לבטל, ולבטל, תבטל) and one suffix (בטלו, תבטלי) - never inside
+# another word such as בטלפון / לטלפון / בטלוויזיה.
+_CANCEL_HE = re.compile(r"(?<!\w)[ולשהתמכ]{0,2}בטל[ויה]?(?!\w)")
 
 def needs_big(text: str, threaded: bool = False) -> bool:
     """True when this message should skip the fast model."""

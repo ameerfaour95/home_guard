@@ -156,6 +156,47 @@ class WiringTest(InboxV2Test):
         self.assertEqual(json.loads(fields["reply_markup"])["inline_keyboard"][0][0]["callback_data"], "cl:abc:0")
         self.assertEqual(self.agent.order[-1], "after")
 
+    def test_a_question_with_an_undo_shows_both(self):
+        self.inbox._send_v2("-5", AgentReply(text="Which?", buttons=("front", "back"), question_token="abc",
+                                             undo_token="123"), 10)
+        rows = json.loads(self.posts[-1][1]["reply_markup"])["inline_keyboard"]
+        self.assertEqual([[b["callback_data"] for b in row] for row in rows], [["cl:abc:0"], ["cl:abc:1"], ["u:123"]])
+        self.assertEqual(rows[-1][0]["text"], "↩ Undo")
+
+    def test_a_failed_spinner_stop_does_not_lose_the_tap(self):
+        from unittest.mock import Mock
+        sent = []
+
+        def post(token, method, fields, timeout=15.0):
+            if method == "answerCallbackQuery":
+                raise OSError("connection reset")
+            sent.append(method)
+            return {"ok": True, "result": {"message_id": 99}}
+        self.inbox._post = post
+        with self.assertLogs("box.telegram_agent", level="WARNING"):
+            self.inbox.handle_update(self.tap("u:123", 40))
+            self.inbox.handle_update(self.tap("cl:ab12:1", 41))
+        self.assertEqual(self.agent.calls, [("undo", "123"), ("choice", "ab12", 1)])
+        self.assertEqual(sent, ["sendMessage", "sendMessage"])
+
+    def test_v2_taps_are_noted_in_the_chat_window(self):
+        notes = []
+
+        class Feed:
+            def add(self, who, kind, text, name="", camera="", alert_id="", now=0.0):
+                notes.append((who, kind, text, name))
+        self.inbox.feed = Feed()
+        tap = self.tap("cl:ab12:1", 50)
+        tap["callback_query"]["from"]["first_name"] = "Dana"
+        tap["callback_query"]["message"]["reply_markup"] = {"inline_keyboard": [
+            [{"text": "front", "callback_data": "cl:ab12:0"}], [{"text": "back", "callback_data": "cl:ab12:1"}]]}
+        self.inbox.handle_update(tap)
+        undo = self.tap("u:123", 51)
+        undo["callback_query"]["from"]["first_name"] = "Dana"
+        self.inbox.handle_update(undo)
+        owner = [n for n in notes if n[0] == "owner"]
+        self.assertEqual(owner, [("owner", "button", "back", "Dana"), ("owner", "button", "↩ Undo", "Dana")])
+
     def test_after_actions_run_even_when_send_fails(self):
         from unittest.mock import patch
         with patch.object(self.inbox, "_say", side_effect=ValueError("send failed")):

@@ -289,6 +289,18 @@ def _who(sender: Dict[str, Any]) -> Dict[str, Any]:
     return {"user_id": sender.get("id"), "name": name or sender.get("username") or ""}
 
 
+def _button_text(message: Dict[str, Any], code: str, default: str) -> str:
+    """The label of the tapped button, read from the message's keyboard (for the box's chat window)."""
+    try:
+        for row in (message.get("reply_markup") or {}).get("inline_keyboard") or []:
+            for button in row:
+                if isinstance(button, dict) and button.get("callback_data") == code and button.get("text"):
+                    return str(button["text"])
+    except (AttributeError, TypeError):
+        pass
+    return default
+
+
 class TelegramInbox:
     """Receives what the owner taps and writes, and answers."""
 
@@ -337,11 +349,15 @@ class TelegramInbox:
         if reply_to is not None:
             fields["reply_to_message_id"] = str(reply_to)
             fields["allow_sending_without_reply"] = "true"
+        undo_row = [{"text": tr("undo_button", lang), "callback_data": f"u:{undo_token}"}] if undo_token else None
         if buttons:
-            fields["reply_markup"] = choice_keyboard(buttons, question_token)
-        elif undo_token:
-            fields["reply_markup"] = json.dumps({"inline_keyboard": [[
-                {"text": tr("undo_button", lang), "callback_data": f"u:{undo_token}"}]]})
+            # A question asked after something was already changed: the choices, then the Undo row.
+            markup = json.loads(choice_keyboard(buttons, question_token))
+            if undo_row:
+                markup.setdefault("inline_keyboard", []).append(undo_row)
+            fields["reply_markup"] = json.dumps(markup)
+        elif undo_row:
+            fields["reply_markup"] = json.dumps({"inline_keyboard": [undo_row]})
         # A dropped connection (WinError 10054) once swallowed the confirmation of a pause:
         # the owner never learned the house was unwatched. Try again before giving up.
         for attempt in range(3):
@@ -407,7 +423,10 @@ class TelegramInbox:
             return
         code = str(query.get("data") or "")
         if getattr(self.agent, "version", 1) == 2 and (code.startswith("cl:") or code.startswith("u:")):
-            self._post(self.cfg.bot_token, "answerCallbackQuery", {"callback_query_id": str(query.get("id"))})
+            try:   # only stops the button's spinner: a dropped connection here must not lose the tap
+                self._post(self.cfg.bot_token, "answerCallbackQuery", {"callback_query_id": str(query.get("id"))})
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Could not stop the button's spinner: %s", exc)
             who = _who(query.get("from") or {})
             if code.startswith("cl:"):
                 try:
@@ -416,8 +435,10 @@ class TelegramInbox:
                 except ValueError:
                     log.warning("Ignoring malformed clarification callback")
                     return
+                self._note("owner", "button", _button_text(message, code, code), who["name"])
                 reply = self.agent.handle_choice(chat_id, token, index, who)
             else:
+                self._note("owner", "button", _button_text(message, code, tr("undo_button", "en")), who["name"])
                 reply = self.agent.undo_turn(chat_id, code[2:], who)
             if reply is not None:
                 self._send_v2(chat_id, reply, message.get("message_id"))

@@ -144,6 +144,41 @@ class ReceiptBook:
             log.warning("Could not read turn receipts: %s", exc)
             return []
 
+    def later(self, turn: str, receipt_id: str, days: int = 2) -> List[Receipt]:
+        """Latest states of the receipts first written after receipt *receipt_id* of *turn* (file order, so
+        equal timestamps still sort right). Empty when that receipt is not on disk. Never raises."""
+        try:
+            if not isinstance(turn, str) or not isinstance(receipt_id, str) or type(days) is not int or days < 0:
+                raise ValueError("invalid turn, receipt or day count")
+            order: List[Tuple[str, str]] = []
+            latest: Dict[Tuple[str, str], Receipt] = {}
+            today = dt.datetime.fromtimestamp(self._now()).date()
+            for back in range(days - 1, -1, -1):
+                try:
+                    with open(self._path(today - dt.timedelta(days=back)), encoding="utf-8",
+                              errors="replace") as f:
+                        for line in f:
+                            try:
+                                r = Receipt(**json.loads(line))
+                                if (not all(isinstance(v, str) for v in (r.id, r.turn, r.tool, r.status, r.target))
+                                        or not isinstance(r.detail, dict)):
+                                    raise ValueError("invalid receipt")
+                            except (ValueError, TypeError):
+                                continue
+                            key = (r.turn, r.id)
+                            if key not in latest:
+                                order.append(key)
+                            latest[key] = r
+                except OSError:
+                    continue
+            mine = (turn, receipt_id)
+            if mine not in latest:
+                return []
+            return [latest[k] for k in order[order.index(mine) + 1:]]
+        except Exception as exc:
+            log.warning("Could not read later receipts: %s", exc)
+            return []
+
     def _path(self, day: dt.date) -> str:
         return os.path.join(self._dir, f"{day.isoformat()}.jsonl")
 

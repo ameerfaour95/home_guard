@@ -581,7 +581,9 @@ def pause_alerts(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     for camera in sorted(cameras) if cameras else [None]:
         feedback = Feedback(action="mute", mute_until=fb.mute_until, camera=camera)
         before = ctx.services.mute.snapshot()            # what Undo puts back (an earlier pause survives)
-        detail = {"camera": camera or "", "until": hhmm(fb.mute_until), "before": before}
+        # before: what Undo puts back; after: the one entry this call sets, so Undo can tell whether it still holds
+        after = {"cameras": {camera: fb.mute_until}} if camera else {"all": fb.mute_until}
+        detail = {"camera": camera or "", "until": hhmm(fb.mute_until), "before": before, "after": after}
         try:
             ctx.services.mute.apply(feedback, now)
         except Exception as exc:  # noqa: BLE001 - memory may have changed even though saving failed
@@ -816,6 +818,7 @@ def change_setting(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     before = read_view()[name]
     before_raw = seen["first"]
     restore = {k: before_raw.get(k, DEFAULTS[k]) for k in KEYS[name]}
+    wrote: Dict[str, str] = {}              # the raw values this call writes: Undo acts only while they still hold
     try:
         if name == "alert_hours":
             hours = _hours(value)
@@ -823,6 +826,7 @@ def change_setting(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
                 return _err('alert_hours must look like "22-06" (whole hours) or "all day"')
             raw = seen["first"].get("alert_start_hour", 0)
             old_start = int(_finite(raw))
+            wrote = {"alert_start_hour": str(hours[0]), "alert_end_hour": str(hours[1])}
             ctx.services.set_option("alert_start_hour", str(hours[0]))
             try:
                 ctx.services.set_option("alert_end_hour", str(hours[1]))
@@ -840,28 +844,33 @@ def change_setting(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
                 log.warning("Hours read-back failed: %s", exc)
                 after = settings_view({"alert_start_hour": hours[0], "alert_end_hour": hours[1]})[name]
             return _result(_issue(ctx, "change_setting", DONE, name,
-                                  {"setting": name, "old": before, "new": after, "restore": restore}))
+                                  {"setting": name, "old": before, "new": after, "restore": restore,
+                                   "wrote": wrote}))
         elif name == "cooldown_minutes":
             if isinstance(value, bool) or not isinstance(value, (str, int, float)):
                 raise ValueError("cooldown_minutes must be a number")
             seconds = int(round(_finite(value) * 60))
             if not 10 <= seconds <= 86400:
                 return _err("cooldown_minutes must be between 0.2 and 1440")
+            wrote = {"alert_cooldown_sec": str(seconds)}
             ctx.services.set_option("alert_cooldown_sec", str(seconds))
         elif name == "sensitivity":
             text = str(value).strip().lower()
             conf = SENSITIVITY_LEVELS.get(text)
-            ctx.services.set_option("inference_conf", str(conf if conf is not None else _finite(text)))
+            wrote = {"inference_conf": str(conf if conf is not None else _finite(text))}
+            ctx.services.set_option("inference_conf", wrote["inference_conf"])
         else:
             code = LANGUAGE_WORDS.get(str(value).strip().lower())
             if code is None:
                 return _err('language must be "en" (English) or "he" (Hebrew)')
+            wrote = {"owner_language": code}
             ctx.services.set_option("owner_language", code)
         after = read_view()[name]
     except Exception as exc:  # noqa: BLE001 - BoxConfigError / ValueError: the owner's value was refused
         log.warning("Setting change failed: %s", exc)
         return _result(_issue(ctx, "change_setting", FAILED, name, {"setting": name}, str(exc)))
-    return _result(_issue(ctx, "change_setting", DONE, name, {"setting": name, "old": before, "new": after, "restore": restore}))
+    return _result(_issue(ctx, "change_setting", DONE, name, {"setting": name, "old": before, "new": after,
+                                                             "restore": restore, "wrote": wrote}))
 
 TOOLS: Dict[str, Callable[[ToolContext, Dict[str, Any]], Dict[str, Any]]] = {
     "find_events": find_events,

@@ -180,5 +180,16 @@ class ProfilesTest(unittest.TestCase):
             self.assertIn(directory, str(ctx.exception))
 
 
+
+class HebrewCancelTest(unittest.TestCase):
+    def test_cancel_with_prefixes_and_suffixes(self):
+        for text in ("לבטל את ההשתקה", "בטלו את זה", "תבטלי בבקשה", "בטל", "ובטל!", "(בטל)", "תבטל", "שבטל",
+                     "הבטל", "מבטל", "כבטל", "ולבטל", "בטלה", "בטלי"):
+            self.assertTrue(needs_big(text), text)
+
+    def test_phone_words_do_not_match(self):
+        for text in ("תשלח לי לטלפון", "בטלפון שלי", "ובטלפון", "לבטלפון", "בטלוויזיה"):
+            self.assertFalse(needs_big(text), text)
+
 if __name__ == "__main__":
     unittest.main()

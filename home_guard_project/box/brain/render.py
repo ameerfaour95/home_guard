@@ -22,6 +22,21 @@ def receipt_line(receipt: Receipt, lang: str, retention_days: float = 14.0) -> s
         return ""
 
 
+def undo_what(tool: str, detail: dict, target: str, lang: str) -> str:
+    """What an Undo was about, for its "changed since" and "could not undo" lines."""
+    detail = detail if isinstance(detail, dict) else {}
+    camera = detail.get("camera") if isinstance(detail.get("camera"), str) else ""
+    if tool == "pause_alerts":
+        return t("undo_what_pause_camera", lang, camera=camera) if camera else t("undo_what_pause_all", lang)
+    if tool == "set_camera_active":
+        return t("undo_what_camera", lang, camera=camera or target)
+    if tool == "change_setting":
+        key = f"setting_{detail.get('setting')}"
+        return t(key, lang) if key in TEMPLATES else str(detail.get("setting") or target)
+    key = f"what_{tool}"
+    return t(key, lang) if key in TEMPLATES else str(tool)
+
+
 def _nonnegative_number(value: object) -> float:
     if isinstance(value, bool) or not isinstance(value, (str, int, float)):
         raise ValueError("Invalid number")
@@ -49,6 +64,11 @@ def _receipt_line(receipt: Receipt, lang: str, retention_days: float) -> str:
             reason = t(reason_key, lang, days=int(_nonnegative_number(retention_days)))
         else:
             reason = receipt.reason or t("reason_error", lang)
+        undo_of = d.get("undo_of")
+        if undo_of:
+            if not isinstance(undo_of, str):
+                raise ValueError("Invalid undo receipt")
+            return t("undo_failed", lang, what=undo_what(undo_of, d, receipt.target, lang), reason=reason)
         what_key = f"what_{receipt.tool}"
         what = t(what_key, lang) if what_key in TEMPLATES else receipt.tool
         return t("failed", lang, what=what, reason=reason)
@@ -71,6 +91,22 @@ def _receipt_line(receipt: Receipt, lang: str, retention_days: float) -> str:
         if d.get("camera"):
             return t("paused_camera", lang, camera=d["camera"], until=d.get("until", ""))
         return t("paused_all", lang, until=d.get("until", ""))
+    if receipt.tool == "resume_alerts" and d.get("undo_of"):
+        # An undone pause: say what still holds alerts back, so "back on" is only written when it is true.
+        still = d.get("still_until") or ""
+        if not isinstance(still, str):
+            raise ValueError("Invalid undo receipt")
+        if still:
+            if d.get("camera"):
+                return t("undo_camera_still_paused", lang, camera=d["camera"], until=still)
+            return t("undo_all_still_paused", lang, until=still)
+        pauses = d.get("still_pauses") or []
+        if not isinstance(pauses, list) or not all(
+                isinstance(p, list) and len(p) == 2 and all(isinstance(x, str) for x in p) for p in pauses):
+            raise ValueError("Invalid undo receipt")
+        if pauses and not d.get("camera"):
+            return t("undo_back_on_except", lang,
+                     pauses=", ".join(t("pause_until_item", lang, camera=c, until=u) for c, u in pauses))
     if receipt.tool == "resume_alerts":
         return t("resumed_camera", lang, camera=d["camera"]) if d.get("camera") else t("resumed_all", lang)
     if receipt.tool == "set_camera_active":
