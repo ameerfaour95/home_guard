@@ -234,7 +234,19 @@ if the AI sees only something not chosen, the clip is kept for training and noth
 .venv\Scripts\python.exe -m home_guard_project.box.find_cameras --json set-camera-alerts --camera driveway --default
 ```
 
-Renaming a camera carries its choice along. Design: `docs/superpowers/specs/2026-10-03-alert-types-design.md`.
+Each type also has its own detector certainty, like Frigate's per-object thresholds: `conf_person`,
+`conf_vehicle`, `conf_animal` in box.yaml (0.05-0.95; unset = `inference_conf`), and a camera can
+override some or all of them. A lower value for people than for cars means a half-hidden person is
+still caught while a car needs to be clear. The detector runs at the lowest value in use; each find
+is then held to its own type's value.
+
+```
+.venv\Scripts\python.exe -m home_guard_project.box set-option conf_person=0.5
+.venv\Scripts\python.exe -m home_guard_project.box.find_cameras --json set-camera-sensitivity --camera driveway --values person=0.5,vehicle=0.8
+.venv\Scripts\python.exe -m home_guard_project.box.find_cameras --json set-camera-sensitivity --camera driveway --default
+```
+
+Renaming a camera carries its choices along. Design: `docs/superpowers/specs/2026-10-03-alert-types-design.md`.
 
 ## Telegram alerts for a new customer
 
