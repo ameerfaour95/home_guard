@@ -230,6 +230,13 @@ class VlmFilterTest(unittest.TestCase):
         self.assertIn('"people"', prompt)
         self.assertIn('"vehicle_moving"', prompt)
 
+    def test_the_prompt_asks_for_summaries_in_the_style_we_tagged(self) -> None:
+        prompt = inf.build_prompt("front_door", 0, "12:00:00", 22, 6)
+        self.assertIn('"No special activity."', prompt)          # the taggers' sentence for an empty scene
+        for word in ("hood", "knife", "appears to", "one to three short sentences"):
+            self.assertIn(word, prompt)
+        self.assertNotIn("[alert]", prompt)                       # the label carries that now
+
 
 class _ParkedCarBackend:
     def analyze(self, frames, camera_name, t_sec, start_hour, end_hour):
