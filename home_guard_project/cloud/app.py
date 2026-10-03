@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from sqlalchemy.orm import sessionmaker
 
 from .db import make_engine
-from .routes import audit, auth, customers, events, fleet, media, studio
+from .routes import annotations, audit, auth, customers, events, fleet, media, studio
 from .settings import Settings
 
 log = logging.getLogger(__name__)
@@ -87,7 +87,7 @@ def create_app(settings: Settings, s3=None, init_db: bool = True) -> FastAPI:
         from .manage import run_migrations
 
         run_migrations(settings.db_url)
-    for module in (auth, fleet, customers, events, media, studio, audit):
+    for module in (auth, fleet, customers, events, media, studio, annotations, audit):
         app.include_router(module.router, prefix="/v1")
     return app
 

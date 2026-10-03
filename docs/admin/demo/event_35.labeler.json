@@ -28,6 +28,7 @@
   "flagged": false,
   "thumbnail_url": "/v1/events/35/thumbnail",
   "timezone": "Asia/Jerusalem",
+  "annotation_status": null,
   "clip_start_local": null,
   "duration_sec": 4.0,
   "fps": 5.0,

@@ -100,6 +100,275 @@
         "title": "AiRunOut",
         "type": "object"
       },
+      "AnnotationIn": {
+        "properties": {
+          "base_version": {
+            "title": "Base Version",
+            "type": "integer"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "drop_clip": {
+            "default": false,
+            "title": "Drop Clip",
+            "type": "boolean"
+          },
+          "needs_review": {
+            "default": false,
+            "title": "Needs Review",
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "edited",
+              "submitted"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "tracks": {
+            "items": {
+              "$ref": "#/components/schemas/Track"
+            },
+            "title": "Tracks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "base_version",
+          "tracks",
+          "description",
+          "status"
+        ],
+        "title": "AnnotationIn",
+        "type": "object"
+      },
+      "AnnotationOut": {
+        "properties": {
+          "ai_description": {
+            "title": "Ai Description",
+            "type": "string"
+          },
+          "ai_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai Model"
+          },
+          "ai_prompt_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai Prompt Version"
+          },
+          "ai_status": {
+            "enum": [
+              "real",
+              "fallback",
+              "failed",
+              "none"
+            ],
+            "title": "Ai Status",
+            "type": "string"
+          },
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "drop_clip": {
+            "title": "Drop Clip",
+            "type": "boolean"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "integer"
+          },
+          "fps": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fps"
+          },
+          "frame_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frame Count"
+          },
+          "frame_size": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frame Size"
+          },
+          "needs_review": {
+            "title": "Needs Review",
+            "type": "boolean"
+          },
+          "review_frame": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Frame"
+          },
+          "review_note": {
+            "default": "",
+            "title": "Review Note",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "new",
+              "edited",
+              "submitted",
+              "reviewed",
+              "rejected"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "suggestions_used": {
+            "title": "Suggestions Used",
+            "type": "boolean"
+          },
+          "tracks": {
+            "items": {
+              "$ref": "#/components/schemas/Track"
+            },
+            "title": "Tracks",
+            "type": "array"
+          },
+          "updated_utc": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated Utc"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "event_id",
+          "version",
+          "status",
+          "tracks",
+          "description",
+          "ai_description",
+          "ai_status",
+          "ai_model",
+          "ai_prompt_version",
+          "drop_clip",
+          "needs_review",
+          "author",
+          "updated_utc",
+          "fps",
+          "frame_count",
+          "frame_size",
+          "suggestions_used"
+        ],
+        "title": "AnnotationOut",
+        "type": "object"
+      },
+      "AnnotationVersion": {
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "created_utc": {
+            "format": "date-time",
+            "title": "Created Utc",
+            "type": "string"
+          },
+          "description_changed": {
+            "title": "Description Changed",
+            "type": "boolean"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "tracks_count": {
+            "title": "Tracks Count",
+            "type": "integer"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "status",
+          "author",
+          "created_utc",
+          "tracks_count",
+          "description_changed"
+        ],
+        "title": "AnnotationVersion",
+        "type": "object"
+      },
       "ArtifactOut": {
         "properties": {
           "available": {
@@ -952,6 +1221,17 @@
             "title": "Alert Reason",
             "type": "string"
           },
+          "annotation_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Annotation Status"
+          },
           "artifacts": {
             "items": {
               "$ref": "#/components/schemas/ArtifactOut"
@@ -1223,6 +1503,17 @@
               }
             ],
             "title": "Alert Command"
+          },
+          "annotation_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Annotation Status"
           },
           "camera": {
             "title": "Camera",
@@ -1720,6 +2011,37 @@
         "title": "IndexProblem",
         "type": "object"
       },
+      "Keyframe": {
+        "properties": {
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "frame": {
+            "title": "Frame",
+            "type": "integer"
+          },
+          "t_sec": {
+            "title": "T Sec",
+            "type": "number"
+          },
+          "xyxy": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Xyxy",
+            "type": "array"
+          }
+        },
+        "required": [
+          "frame",
+          "t_sec",
+          "xyxy"
+        ],
+        "title": "Keyframe",
+        "type": "object"
+      },
       "LoginRequest": {
         "properties": {
           "email": {
@@ -1785,6 +2107,102 @@
         "title": "MediaAccessRequest",
         "type": "object"
       },
+      "PublishMissing": {
+        "properties": {
+          "event_id": {
+            "title": "Event Id",
+            "type": "integer"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "reason"
+        ],
+        "title": "PublishMissing",
+        "type": "object"
+      },
+      "PublishOut": {
+        "properties": {
+          "batch_name": {
+            "title": "Batch Name",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "created_utc": {
+            "format": "date-time",
+            "title": "Created Utc",
+            "type": "string"
+          },
+          "missing": {
+            "items": {
+              "$ref": "#/components/schemas/PublishMissing"
+            },
+            "title": "Missing",
+            "type": "array"
+          },
+          "s3_prefix": {
+            "title": "S3 Prefix",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "queued",
+              "running",
+              "ready",
+              "failed",
+              "partial"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "tasks": {
+            "title": "Tasks",
+            "type": "integer"
+          },
+          "vlm_lines": {
+            "title": "Vlm Lines",
+            "type": "integer"
+          },
+          "yolo_frames": {
+            "title": "Yolo Frames",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "batch_name",
+          "s3_prefix",
+          "state",
+          "tasks",
+          "yolo_frames",
+          "vlm_lines",
+          "missing",
+          "created_utc",
+          "created_by"
+        ],
+        "title": "PublishOut",
+        "type": "object"
+      },
+      "PublishRequest": {
+        "properties": {
+          "batch_name": {
+            "pattern": "^[a-z0-9_]+$",
+            "title": "Batch Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "batch_name"
+        ],
+        "title": "PublishRequest",
+        "type": "object"
+      },
       "RefreshRequest": {
         "properties": {
           "refresh_token": {
@@ -1814,6 +2232,39 @@
           "flagged_open"
         ],
         "title": "ReviewCount",
+        "type": "object"
+      },
+      "ReviewDecision": {
+        "properties": {
+          "decision": {
+            "enum": [
+              "accept",
+              "reject"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "frame": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frame"
+          },
+          "note": {
+            "default": "",
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "title": "ReviewDecision",
         "type": "object"
       },
       "ReviewUpdate": {
@@ -1936,6 +2387,41 @@
           "staff"
         ],
         "title": "TokenPair",
+        "type": "object"
+      },
+      "Track": {
+        "properties": {
+          "keyframes": {
+            "items": {
+              "$ref": "#/components/schemas/Keyframe"
+            },
+            "title": "Keyframes",
+            "type": "array"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "source": {
+            "default": "human",
+            "enum": [
+              "human",
+              "suggestion"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "track_id": {
+            "title": "Track Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "track_id",
+          "label",
+          "keyframes"
+        ],
+        "title": "Track",
         "type": "object"
       },
       "ValidationError": {
@@ -2973,6 +3459,216 @@
         ]
       }
     },
+    "/v1/events/{event_id}/annotation": {
+      "get": {
+        "operationId": "get_annotation_v1_events__event_id__annotation_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "title": "Event Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnnotationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Annotation",
+        "tags": [
+          "annotations"
+        ]
+      },
+      "put": {
+        "operationId": "save_annotation_v1_events__event_id__annotation_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "title": "Event Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnnotationIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnnotationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Save Annotation",
+        "tags": [
+          "annotations"
+        ]
+      }
+    },
+    "/v1/events/{event_id}/annotation/history": {
+      "get": {
+        "operationId": "annotation_history_v1_events__event_id__annotation_history_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "title": "Event Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AnnotationVersion"
+                  },
+                  "title": "Response Annotation History V1 Events  Event Id  Annotation History Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Annotation History",
+        "tags": [
+          "annotations"
+        ]
+      }
+    },
+    "/v1/events/{event_id}/annotation/review": {
+      "post": {
+        "operationId": "review_annotation_v1_events__event_id__annotation_review_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "title": "Event Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewDecision"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnnotationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Review Annotation",
+        "tags": [
+          "annotations"
+        ]
+      }
+    },
     "/v1/events/{event_id}/detections": {
       "get": {
         "operationId": "get_detections_v1_events__event_id__detections_get",
@@ -3514,6 +4210,63 @@
         ]
       }
     },
+    "/v1/studio/collections/{collection_id}/publish": {
+      "post": {
+        "operationId": "publish_collection_v1_studio_collections__collection_id__publish_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "collection_id",
+            "required": true,
+            "schema": {
+              "title": "Collection Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublishOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Publish Collection",
+        "tags": [
+          "annotations"
+        ]
+      }
+    },
     "/v1/studio/exports": {
       "get": {
         "operationId": "list_exports_v1_studio_exports_get",
@@ -3709,6 +4462,36 @@
         "summary": "List Filters",
         "tags": [
           "studio"
+        ]
+      }
+    },
+    "/v1/studio/publishes": {
+      "get": {
+        "operationId": "list_publishes_v1_studio_publishes_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PublishOut"
+                  },
+                  "title": "Response List Publishes V1 Studio Publishes Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Publishes",
+        "tags": [
+          "annotations"
         ]
       }
     }

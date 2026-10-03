@@ -137,6 +137,7 @@ class EventSummary(BaseModel):
     flagged: bool
     thumbnail_url: Optional[str]
     timezone: str = "UTC"
+    annotation_status: Optional[str] = None  # new|edited|submitted|reviewed|rejected (None = never opened)
 
 
 class EventPage(BaseModel):
@@ -330,3 +331,86 @@ class DensityOut(BaseModel):
 class ReviewCount(BaseModel):
     unreviewed_24h: int
     flagged_open: int
+
+
+# ---------------------------------------------------------------- contract 2f: in-app labeling
+
+class Keyframe(BaseModel):
+    frame: int
+    t_sec: float
+    xyxy: list[float]
+    enabled: bool = True
+
+
+class Track(BaseModel):
+    track_id: str
+    label: str
+    keyframes: list[Keyframe]
+    source: Literal["human", "suggestion"] = "human"
+
+
+class AnnotationIn(BaseModel):
+    base_version: int
+    tracks: list[Track]
+    description: str
+    drop_clip: bool = False
+    needs_review: bool = False
+    status: Literal["edited", "submitted"]
+
+
+class AnnotationOut(BaseModel):
+    event_id: int
+    version: int
+    status: Literal["new", "edited", "submitted", "reviewed", "rejected"]
+    tracks: list[Track]
+    description: str
+    ai_description: str
+    ai_status: AiStatus
+    ai_model: Optional[str]
+    ai_prompt_version: Optional[str]
+    drop_clip: bool
+    needs_review: bool
+    author: Optional[str]
+    updated_utc: Optional[datetime]
+    review_note: str = ""
+    review_frame: Optional[int] = None
+    fps: Optional[float]
+    frame_count: Optional[int]
+    frame_size: Optional[list[int]]
+    suggestions_used: bool
+
+
+class ReviewDecision(BaseModel):
+    decision: Literal["accept", "reject"]
+    note: str = ""
+    frame: Optional[int] = None
+
+
+class AnnotationVersion(BaseModel):
+    version: int
+    status: str
+    author: Optional[str]
+    created_utc: datetime
+    tracks_count: int
+    description_changed: bool
+
+
+class PublishRequest(BaseModel):
+    batch_name: str = Field(pattern=r"^[a-z0-9_]+$")
+
+
+class PublishMissing(BaseModel):
+    event_id: int
+    reason: str
+
+
+class PublishOut(BaseModel):
+    batch_name: str
+    s3_prefix: str
+    state: Literal["queued", "running", "ready", "failed", "partial"]
+    tasks: int
+    yolo_frames: int
+    vlm_lines: int
+    missing: list[PublishMissing]
+    created_utc: datetime
+    created_by: str

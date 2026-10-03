@@ -28,6 +28,7 @@
   "flagged": false,
   "thumbnail_url": null,
   "timezone": "Asia/Jerusalem",
+  "annotation_status": null,
   "clip_start_local": "2026-10-03 13:04:44",
   "duration_sec": 4.0,
   "fps": 5.0,

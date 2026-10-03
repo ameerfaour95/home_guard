@@ -31,6 +31,7 @@
   "flagged": true,
   "thumbnail_url": "/v1/events/57/thumbnail",
   "timezone": "Asia/Jerusalem",
+  "annotation_status": null,
   "clip_start_local": "2026-10-02 05:41:29",
   "duration_sec": 4.0,
   "fps": 5.0,

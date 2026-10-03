@@ -29,7 +29,8 @@
       "reviewed": true,
       "flagged": false,
       "thumbnail_url": "/v1/events/27/thumbnail",
-      "timezone": "Asia/Jerusalem"
+      "timezone": "Asia/Jerusalem",
+      "annotation_status": null
     },
     {
       "id": 43,
@@ -63,7 +64,8 @@
       "reviewed": false,
       "flagged": false,
       "thumbnail_url": "/v1/events/43/thumbnail",
-      "timezone": "Asia/Jerusalem"
+      "timezone": "Asia/Jerusalem",
+      "annotation_status": null
     },
     {
       "id": 79,
@@ -94,7 +96,8 @@
       "reviewed": true,
       "flagged": false,
       "thumbnail_url": "/v1/events/79/thumbnail",
-      "timezone": "Asia/Jerusalem"
+      "timezone": "Asia/Jerusalem",
+      "annotation_status": null
     },
     {
       "id": 26,
@@ -126,7 +129,8 @@
       "reviewed": false,
       "flagged": false,
       "thumbnail_url": "/v1/events/26/thumbnail",
-      "timezone": "Asia/Jerusalem"
+      "timezone": "Asia/Jerusalem",
+      "annotation_status": null
     },
     {
       "id": 6,
@@ -158,7 +162,8 @@
       "reviewed": true,
       "flagged": false,
       "thumbnail_url": "/v1/events/6/thumbnail",
-      "timezone": "Asia/Jerusalem"
+      "timezone": "Asia/Jerusalem",
+      "annotation_status": null
     },
     {
       "id": 21,
@@ -190,7 +195,8 @@
       "reviewed": true,
       "flagged": false,
       "thumbnail_url": "/v1/events/21/thumbnail",
-      "timezone": "Asia/Jerusalem"
+      "timezone": "Asia/Jerusalem",
+      "annotation_status": null
     }
   ],
   "next_cursor": null,

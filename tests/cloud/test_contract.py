@@ -66,3 +66,39 @@ def test_contract_amendment_2e_consent_proposal():
     assert any(o.get("$ref", "").endswith("/ConsentProposal") for o in prop["anyOf"])
     assert "consent_proposed" not in schemas["CustomerOut"].get("required", [])
     assert "consent_proposed" not in schemas["CustomerIn"]["properties"]
+
+
+def test_contract_amendment_2f_annotation_contract():
+    app = create_app(Settings.for_tests(db_url="sqlite://"), s3=None, init_db=False)
+    doc = app.openapi()
+    paths, schemas = doc["paths"], doc["components"]["schemas"]
+    base = "/v1/events/{event_id}/annotation"
+    assert set(paths[base]) == {"get", "put"}
+    assert "post" in paths[base + "/review"] and "get" in paths[base + "/history"]
+    assert set(schemas["Keyframe"]["properties"]) == {"frame", "t_sec", "xyxy", "enabled"}
+    assert schemas["Keyframe"]["properties"]["enabled"]["default"] is True
+    assert schemas["Track"]["properties"]["source"]["enum"] == ["human", "suggestion"]
+    assert schemas["AnnotationIn"]["properties"]["status"]["enum"] == ["edited", "submitted"]
+    assert set(schemas["AnnotationIn"]["required"]) == {"base_version", "tracks", "description", "status"}
+    assert schemas["AnnotationOut"]["properties"]["status"]["enum"] == [
+        "new", "edited", "submitted", "reviewed", "rejected"]
+    assert {"suggestions_used", "fps", "frame_count", "frame_size", "review_note", "review_frame", "ai_status",
+            "ai_model", "ai_prompt_version"} <= set(schemas["AnnotationOut"]["properties"])
+    assert schemas["ReviewDecision"]["properties"]["decision"]["enum"] == ["accept", "reject"]
+    assert set(schemas["AnnotationVersion"]["properties"]) == {
+        "version", "status", "author", "created_utc", "tracks_count", "description_changed"}
+    assert "annotation_status" in schemas["EventSummary"]["properties"]
+    assert "annotation_status" not in schemas["EventSummary"]["required"]
+
+
+def test_contract_2f_publish_batch():
+    app = create_app(Settings.for_tests(db_url="sqlite://"), s3=None, init_db=False)
+    doc = app.openapi()
+    schemas = doc["components"]["schemas"]
+    assert "post" in doc["paths"]["/v1/studio/collections/{collection_id}/publish"]
+    assert "get" in doc["paths"]["/v1/studio/publishes"]
+    assert schemas["PublishRequest"]["properties"]["batch_name"]["pattern"] == "^[a-z0-9_]+$"
+    assert set(schemas["PublishMissing"]["properties"]) == {"event_id", "reason"}
+    assert schemas["PublishOut"]["properties"]["state"]["enum"] == ["queued", "running", "ready", "failed", "partial"]
+    assert set(schemas["PublishOut"]["properties"]) == {
+        "batch_name", "s3_prefix", "state", "tasks", "yolo_frames", "vlm_lines", "missing", "created_utc", "created_by"}
