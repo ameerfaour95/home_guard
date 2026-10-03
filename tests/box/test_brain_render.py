@@ -33,6 +33,43 @@ class ClaimsTest(unittest.TestCase):
         self.assertEqual(unbacked_claims("Alerts are now paused until 06:00.", []), ["pause"])
         self.assertEqual(unbacked_claims("Here are the two latest videos", []), ["send"])
 
+    def test_fix2_english_claims_after_an_action_are_caught(self) -> None:
+        cases = {
+            "Alerts are paused until 06:00.": ["pause"],
+            "Done, alerts paused until 6.": ["pause"],
+            "Muted for an hour.": ["pause"],
+            "Done - paused until six.": ["pause"],
+            "The back camera is turned off now.": ["off"],
+            "Done - back camera turned off.": ["off"],
+            "Turned off the back camera.": ["off"],
+            "The camera is off until 6.": ["off"],
+            "Sent.": ["send"],
+            "Marked as a false alarm.": ["save"],
+            "Two events. Done - sent.": ["send"],
+        }
+        for text, kinds in cases.items():
+            self.assertEqual(unbacked_claims(text, []), kinds, text)
+
+    def test_fix2_negation_stops_at_clause_boundaries(self) -> None:
+        self.assertEqual(unbacked_claims("No problem, I sent it", []), ["send"])
+        self.assertEqual(unbacked_claims("I'm not sure why, but I sent it", []), ["send"])
+        self.assertEqual(unbacked_claims("No problem I sent it", []), ["send"])
+        self.assertEqual(unbacked_claims("Not sure, I paused the alerts", []), ["pause"])
+
+    def test_fix2_plain_facts_still_pass(self) -> None:
+        for text in ["An alert was sent at 02:10", "The camera was turned off at 3pm", "The back camera is off.",
+                     "No video was saved for that time.", "I noted two events at the entrance",
+                     "I recorded no events", "I recorded nothing at the gate", "I sent nothing",
+                     "I set nothing aside"]:
+            self.assertEqual(unbacked_claims(text, []), [], text)
+
+    def test_fix2_probe_is_fast(self) -> None:
+        import time
+        start = time.perf_counter()
+        unbacked_claims("done - turned " * 5000, [])
+        unbacked_claims("done - " * 5000 + "x", [])
+        self.assertLess(time.perf_counter() - start, 1.0)
+
     def test_receipts_back_the_claim(self) -> None:
         self.assertEqual(unbacked_claims("Here is the video.", [r("send_media", DONE)]), [])
         self.assertEqual(unbacked_claims("I turned it off", [r("set_camera_active", REQUESTED)]), ["off"])

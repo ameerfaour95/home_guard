@@ -23,6 +23,7 @@ def _fp(verbs: str) -> str:
 
 
 _HERE_MEDIA = r"\bhere(?:['\u2019]s| is| are)\b[^.?!\n]{0,40}\b(?:videos?|photos?|pictures?|clips?|recordings?)\b"
+_OPEN = r"(?:^|[.!?\n]\s{0,3})(?:done\s{0,3}[,.!:\-\u2013\u2014]\s{0,3})?"
 _BEEN = r"\bhas been (?:%s) (?:to you|for you|now)\b"
 _NOW_AR = r"تم (?:%s)(?:\s+\S+){0,3}\s+الآن"
 
@@ -32,7 +33,7 @@ _NOW_AR = r"تم (?:%s)(?:\s+\S+){0,3}\s+الآن"
 CLAIMS: Dict[str, Dict[str, object]] = {
     "send": {
         "tools": {"send_media", "check_camera", "record_clip"},
-        "en": [_fp("sent"), _HERE_MEDIA, _BEEN % "sent"],
+        "en": [_fp("sent"), _HERE_MEDIA, _BEEN % "sent", _OPEN + r"sent\b"],
         "he": ["שלחתי", "הנה הסרטון", "הנה התמונה", "הנה שני הסרטונים", "הנה הסרטונים", "מצורף"],
         "ar": ["أرسلت", "إليك الفيديو", "إليك الصورة", "مرفق", _NOW_AR % "إرسال"],
     },
@@ -41,14 +42,21 @@ CLAIMS: Dict[str, Dict[str, object]] = {
         "en": [r"\bI(?:['\u2019]ve| have| just)?\s+(?:just\s+)?(?:turned|switched)\b[^.?!\n]{0,30}\b(?:off|on)\b",
                _fp("disabled|enabled"),
                r"\b(?:is|are)\s+now\s+(?:off|on|disabled|enabled)\b",
-               _BEEN % "turned (?:off|on)|disabled|enabled"],
+               _BEEN % "turned (?:off|on)|disabled|enabled",
+               r"\b(?:off|disabled)\s+(?:until|till)\b",
+               r"\b(?:turned|switched)\s+(?:it\s+|the\s+\w+(?:\s+\w+)?\s+)?(?:off|on)\s+now\b",
+               _OPEN + r"(?:(?:the\s+)?\w+\s+(?:camera\s+)?)?(?:turned|switched)\s+(?:off|on)\b",
+               _OPEN + r"(?:turned|switched)\s+(?:off|on)\b"],
         "he": ["כיביתי", "הדלקתי", "כובתה עד", "כובה עד", "כבויה עכשיו", "כבויה עד"],
         "ar": ["أطفأت", "أوقفت الكاميرا", "شغلت الكاميرا"],
     },
     "pause": {
         "tools": {"pause_alerts"},
         "en": [_fp("paused|muted|silenced"), r"\b(?:is|are)\s+now\s+(?:paused|muted)\b",
-               r"\bnow\s+(?:paused|muted)\b", _BEEN % "paused|muted"],
+               r"\bnow\s+(?:paused|muted)\b", _BEEN % "paused|muted",
+               r"\b(?:paused|muted|silenced)\s+(?:until|till|for)\b",
+               r"\b(?:is|are)\s+(?:paused|muted)\s+(?:until|till|for)\b",
+               _OPEN + r"(?:paused|muted)\b"],
         "he": ["השתקתי", "מושתקות עד", "הושתקו עד", "מושתקת עד"],
         "ar": ["كتמت", "أوقفت التنبيهات", _NOW_AR % "إيقاف التنبيهات"],
     },
@@ -60,7 +68,8 @@ CLAIMS: Dict[str, Dict[str, object]] = {
     },
     "save": {
         "tools": {"record_verdict", "set_alias"},
-        "en": [_fp("marked|saved|noted|changed|updated|set"), _BEEN % "saved|marked|changed|updated"],
+        "en": [_fp("marked|saved|changed|updated"), _BEEN % "saved|marked|changed|updated",
+               _OPEN + r"(?:saved|marked)\b"],
         "he": ["סימנתי", "שמרתי", "רשמתי", "שיניתי", "עדכנתי", "הגדרתי"],
         "ar": ["سجلت(?! (?:لك )?(?:فيديو|مقطع))", "حفظت", "غيرت", "حدثت", _NOW_AR % "التسجيل|تغيير"],
     },
@@ -80,14 +89,37 @@ _NEGATIONS = {
 _ALL_NEGATIONS = set().union(*_NEGATIONS.values())
 
 
-def _negated(text: str, start: int) -> bool:
-    """True if a negation word is among the 3 words right before *start*."""
-    words = re.findall(r"[\w'\u2019]+", text[:start].lower().replace("\u2019", "'"))[-3:]
-    return any(w in _ALL_NEGATIONS for w in words)
+_CLAUSE_END = re.compile(r"[,;:.!?\u2014\u2013-]")
+_NOT_NEGATIONS = re.compile(r"\b(?:no problem|not sure)\b")
+_AFTER_NEGATIONS = {"no", "nothing", "none"}
+
+
+def _words(segment: str) -> List[str]:
+    return re.findall(r"[\w'\u2019]+", segment.lower().replace("\u2019", "'"))
+
+
+def _negated(text: str, start: int, end: int = -1) -> bool:
+    """True if a negation word is among the 3 words right before *start* (in the same clause), or "no"/
+    "nothing"/"none" is among the 2 words right after the match (*end*, same clause)."""
+    before = text[max(0, start - 200):start]
+    cut = list(_CLAUSE_END.finditer(before))
+    if cut:
+        before = before[cut[-1].end():]
+    before = _NOT_NEGATIONS.sub(" ", before.lower())
+    if any(w in _ALL_NEGATIONS for w in _words(before)[-3:]):
+        return True
+    if end >= 0:
+        after = text[end:end + 60]
+        m = _CLAUSE_END.search(after)
+        if m:
+            after = after[:m.start()]
+        if any(w in _AFTER_NEGATIONS for w in _words(after)[:2]):
+            return True
+    return False
 
 
 def _claimed(patterns: Sequence[str], text: str, flags: int = 0) -> bool:
-    return any(not _negated(text, m.start()) for p in patterns for m in re.finditer(p, text, flags))
+    return any(not _negated(text, m.start(), m.end()) for p in patterns for m in re.finditer(p, text, flags))
 
 
 def unbacked_claims(answer: str, receipts: Sequence[Receipt]) -> List[str]:
