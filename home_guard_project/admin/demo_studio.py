@@ -9,7 +9,11 @@ from .backend import ForbiddenError, ServerError
 
 class DemoStudio:
     def saved_filters(self):
-        return self._load('studio_filters.json', list[SavedFilter])
+        existing = self._load('studio_filters.json', list[SavedFilter])
+        additions = [('needs_labeling', 'Needs labeling', 'Drafts and clips ready for boxes and text.'),
+                     ('to_review', 'To review', 'Submitted clips and annotations needing review.'),
+                     ('rejected', 'Rejected', 'Clips returned with reviewer feedback.')]
+        return [SavedFilter(k, t, d, True, {}) for k, t, d in additions if k not in {f.key for f in existing}] + existing
 
     def collections(self):
         with self._lock:
@@ -71,7 +75,7 @@ class DemoStudio:
         # This fixture-only helper never exposes customer identities to labelers.
         customers = self._load('customers.json', list[CustomerOut])
         consent = {c.id: c.consent_training for c in customers}
-        return {e.id: consent.get(e.customer_id, False) for e in events}
+        return {e.id: consent.get(self._original_customer(e.id) if self.role == 'labeler' else e.customer_id, False) for e in events}
 
     def add_collection_items(self, id, event_ids):
         with self._lock:

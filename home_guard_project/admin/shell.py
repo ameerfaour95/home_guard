@@ -8,6 +8,7 @@ from .fleet import FleetScreen
 from .customer import CustomerScreen
 from .review import ReviewScreen
 from .studio import StudioScreen
+from .label_view import LabelView
 from .audit import AuditScreen
 from .widgets.common import label, button, EmptyState
 from .widgets.palette import CommandPalette
@@ -53,7 +54,7 @@ class Shell(QWidget):
         self.navigation = {}
         self.pages = QStackedWidget()
         self.screens = {}
-        allowed = ['Review', 'Studio'] if staff.role == 'labeler' else ['Fleet', 'Review', 'Studio'] + (['Audit'] if staff.role == 'admin' else [])
+        allowed = ['Label', 'Review', 'Studio'] if staff.role == 'labeler' else ['Fleet', 'Review', 'Studio'] + (['Label', 'Audit'] if staff.role == 'admin' else [])
         for title in allowed:
             nav = button(title, lambda checked=False, name=title: self.navigate(name), 'nav')
             nav.setIcon(icon(title, theme))
@@ -73,6 +74,11 @@ class Shell(QWidget):
                 page.customer_requested.connect(self.open_customer)
                 page.loaded.connect(self.fleet_loaded)
                 page.session_expired.connect(self.session_expired)
+            elif title == 'Label':
+                page = LabelView(backend, staff.role, theme)
+                self.label_page = page
+                page.session_expired.connect(self.session_expired)
+                page.annotation_saved.connect(self.annotation_saved)
             elif title == 'Review':
                 page = ReviewScreen(backend, theme, staff.role)
                 self.review_page = page
@@ -130,7 +136,10 @@ class Shell(QWidget):
             self.pages.addWidget(self.customer_page)
         shortcut = QShortcut(QKeySequence('Ctrl+K'), self)
         shortcut.activated.connect(self.open_palette)
-        self.navigate('Studio' if staff.role == 'labeler' else 'Fleet')
+        if staff.role in ('admin', 'labeler'):
+            self.review_page.event_view.label_requested.connect(self.open_label)
+            if self.customer_page: self.customer_page.event_view.label_requested.connect(self.open_label)
+        self.navigate('Label' if staff.role == 'labeler' else 'Fleet')
         self.badge_runner = TaskRunner(self)
         self.badge_runner.finished.connect(self.badge_loaded)
         self.update_badge()
@@ -156,6 +165,8 @@ class Shell(QWidget):
         if title not in self.screens:
             return
         self.pages.setCurrentWidget(self.screens[title])
+        if title == 'Label' and not self.label_page.doc and not self.label_page.loader.busy:
+            self.label_page.open_queue()
         for name, nav in self.navigation.items():
             nav.setChecked(name == title)
 
@@ -185,7 +196,29 @@ class Shell(QWidget):
         self.palette_dialog.search.setFocus()
 
     def open_filter(self, key):
+        if key in ('needs_labeling', 'to_review', 'rejected') and hasattr(self, 'label_page'):
+            self.pages.setCurrentWidget(self.label_page)
+            for name, nav in self.navigation.items(): nav.setChecked(name == 'Label')
+            self.label_page.open_queue(key); return
         self.navigate('Review'); self.review_page.open_filter(key)
+
+    def open_label(self, eid):
+        self.pages.setCurrentWidget(self.label_page)
+        for name, nav in self.navigation.items(): nav.setChecked(name == 'Label')
+        self.label_page.open_event(eid)
+
+    def annotation_saved(self, annotation):
+        timelines = [self.review_page.timeline]
+        if self.customer_page: timelines.append(self.customer_page.timeline)
+        for timeline in timelines:
+            for row, event in enumerate(timeline.model.rows):
+                if event.id == annotation.event_id:
+                    event.annotation_status = annotation.status
+                    timeline.model.dataChanged.emit(timeline.model.index(row, 0), timeline.model.index(row, 6))
+        studio = self.screens['Studio']
+        for event in studio.grid.model.items:
+            if event.id == annotation.event_id: event.annotation_status = annotation.status
+        studio.grid.grid.viewport().update()
 
     def open_event(self, eid):
         self.navigate('Review'); self.review_page.open_event(eid)

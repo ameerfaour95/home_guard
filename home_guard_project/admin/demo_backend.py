@@ -11,13 +11,15 @@ from .models import decode, TokenPair, StaffOut, FleetResponse, CustomerOut, Eve
 
 
 from .demo_studio import DemoStudio
+from .demo_annotations import DemoAnnotations
 
 
-class DemoBackend(DemoStudio):
+class DemoBackend(DemoAnnotations, DemoStudio):
     def __init__(self, data_dir=None, role='admin'):
         self.data_dir = Path(data_dir) if data_dir else Path(__file__).parent / 'demo_data'
         self.role = role
         self._reviews, self._lock = {}, RLock()
+        self._annotations, self._annotation_versions, self._publishes = {}, {}, {}
         self._collections, self._members, self._exports = None, {}, None
         self.now = datetime(2026, 10, 3, 12, tzinfo=timezone.utc)
 
@@ -59,6 +61,15 @@ class DemoBackend(DemoStudio):
         for event in items:
             self._apply_review(event)
             self._redact(event)
+        if self.role == 'labeler':
+            items = [e for e in items if self._load(f'customer_{self._original_customer(e.id)}.json', CustomerOut).consent_training]
+        annotation_filter = filters.get('filter')
+        if annotation_filter == 'needs_labeling':
+            items = [e for e in items if e.annotation_status not in ('submitted', 'reviewed')]
+        elif annotation_filter == 'to_review':
+            items = [e for e in items if e.annotation_status == 'submitted' or (e.id in self._annotations and self._annotations[e.id].needs_review)]
+        elif annotation_filter == 'rejected':
+            items = [e for e in items if e.annotation_status == 'rejected']
         for key in ('site', 'customer_id', 'camera', 'kind', 'reviewed', 'flagged'):
             if filters.get(key) is not None:
                 items = [e for e in items if getattr(e, key) == filters[key]]
@@ -88,6 +99,8 @@ class DemoBackend(DemoStudio):
 
     def _apply_review(self, event):
         with self._lock:
+            if event.id in self._annotations:
+                event.annotation_status = self._annotations[event.id].status
             for key, value in self._reviews.get(event.id, {}).items():
                 setattr(event, key, value)
 
@@ -97,9 +110,14 @@ class DemoBackend(DemoStudio):
             event.customer_name = f'customer-{event.customer_id:06}'
             event.site = event.customer_name
             event.camera = 'cam-'+hashlib.sha256(event.camera.encode()).hexdigest()[:6]
+            event.customer_id = 0
             if isinstance(event, EventDetail):
                 event.raw_meta = {}
                 event.dispatch = None
+                for run in event.ai_runs:
+                    run.prompt = None
+                    run.prompt_version = None
+                    run.raw_text_artifact_id = None
                 for feedback in event.feedback:
                     feedback.raw_text = ''
                     feedback.note = ''

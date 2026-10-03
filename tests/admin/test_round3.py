@@ -213,9 +213,9 @@ def test_density_math_zero_camera_and_timezone(widgets):
     assert len({bar_metrics(v[0],v[1],48)[0] for v in strip.rows['Fleet activity']}) > 10
 
 
-def test_labeler_lands_in_studio_and_uses_customer_timezone(widgets,wait):
+def test_labeler_lands_in_label_and_uses_customer_timezone(widgets,wait):
     b = DemoBackend(role='labeler'); shell = Shell(b,b.me()); widgets.append(shell); shell.show()
-    assert shell.pages.currentWidget() is shell.screens['Studio'] and 'Audit' not in shell.navigation
+    assert shell.pages.currentWidget() is shell.screens['Label'] and 'Audit' not in shell.navigation
     shell.navigate('Review'); wait(lambda:shell.review_page.event_view.recording is not None)
     e = shell.review_page.event_view.recording
     assert e.timezone == 'Asia/Jerusalem' and e.customer_name.startswith('customer-')

@@ -2,6 +2,7 @@
 from typing import Protocol
 from .models import SavedFilter, CollectionOut, ExportOut, ExportPreview, AuditPage, DensityOut, ReviewCount
 from .models import TokenPair, StaffOut, FleetResponse, CustomerOut, EventPage, EventDetail, EventSummary, DetectionsOut, MediaAccess
+from .models import AnnotationIn, AnnotationOut, AnnotationVersion, ReviewDecision, PublishOut
 
 
 class BackendError(Exception):
@@ -56,6 +57,10 @@ class ServerError(BackendError):
     message = 'Home Guard Cloud could not complete this request. Please try again.'
 
 
+class ConflictError(BackendError):
+    message = 'Someone else saved a newer version'
+
+
 class InternalError(BackendError):
     message = 'This view could not be loaded. Please try again. Details were saved to the local admin log.'
 
@@ -65,6 +70,12 @@ class RateLimitError(BackendError):
 
 
 class AdminBackend(Protocol):
+    def annotation(self, event_id: int) -> AnnotationOut: ...
+    def save_annotation(self, event_id: int, annotation: AnnotationIn) -> AnnotationOut: ...
+    def review_annotation(self, event_id: int, decision: ReviewDecision) -> AnnotationOut: ...
+    def annotation_history(self, event_id: int) -> list[AnnotationVersion]: ...
+    def publish_collection(self, collection_id: int, batch_name: str) -> PublishOut: ...
+    def publishes(self) -> list[PublishOut]: ...
     def login(self, email: str, password: str, totp: str) -> TokenPair: ...
     def me(self) -> StaffOut: ...
     def fleet(self) -> FleetResponse: ...
