@@ -48,4 +48,11 @@ if (-not (Test-Port $Port)) {
     }
 }
 
-Start-Process -FilePath $App -ArgumentList @("--server", "http://127.0.0.1:$Port", "--local")
+$appArgs = @("--server", "http://127.0.0.1:$Port", "--local")
+try {
+    Start-Process -FilePath $App -ArgumentList $appArgs
+} catch {
+    # Windows Smart App Control can block a freshly built, unsigned exe. The same app runs from this folder's Python.
+    $pythonw = Join-Path $repo ".venv\Scripts\pythonw.exe"
+    Start-Process -FilePath $pythonw -ArgumentList (@("-m", "home_guard_project.admin") + $appArgs) -WorkingDirectory $repo
+}
