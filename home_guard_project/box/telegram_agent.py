@@ -24,6 +24,7 @@ import os
 import threading
 import time
 import urllib.error
+import uuid
 from collections import deque
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
@@ -47,6 +48,7 @@ from .feedback import (
     _write_json,
     button_feedback,
     save_feedback,
+    saved_tag_requests,
     undo_training_tag,
     verdict_for,
 )
@@ -106,8 +108,8 @@ class PendingTags:
 
     A person may wait on several alerts at once (one entry per chat, user and alert). A text is
     taken only when it is meant for a wait: a reply to that wait's question or to its alert's
-    message goes to that alert; a text that replies to nothing goes to the newest wait, once - the
-    other waits then take only a reply, so a later question to the assistant is never swallowed.
+    message goes to that alert; only the newest wait can take text that replies to nothing.
+    Opening a newer prompt permanently makes older waits reply-only, even if sending it fails.
     Kept as JSON (``<feedback_dir>/.pending_tags.json``) so a restart does not lose a wait. A wait
     ends after *ttl* seconds; its question is remembered for a day with who was asked, so that
     person's late reply can be told that it expired. Never raises: a damaged file is an empty store.
@@ -123,10 +125,19 @@ class PendingTags:
         pending = data.get("pending") if isinstance(data.get("pending"), dict) else {}
         expired = data.get("expired_prompts") if isinstance(data.get("expired_prompts"), dict) else {}
         self._pending: Dict[str, Dict[str, Any]] = {}
+        self._completed = saved_tag_requests(os.path.dirname(path)) if pending else set()
         for entry in pending.values():
             if isinstance(entry, dict) and self._valid(entry):
                 entry["prompt_ids"] = self._prompt_ids(entry)
+                # Old files have no id. Derive a stable one so a failed migration write cannot
+                # change the request's identity on restart.
+                if not entry.get("request_id"):
+                    entry["request_id"] = uuid.uuid5(uuid.NAMESPACE_URL, json.dumps(entry, sort_keys=True)).hex
                 self._pending[self._key(entry["chat_id"], entry["user_id"], entry["alert_id"])] = entry
+        for chat_id, user_id in {(e["chat_id"], e["user_id"]) for e in self._pending.values()}:
+            for _, entry in self._mine(chat_id, user_id)[1:]:
+                entry["reply_only"] = True
+        self._pending = {k: e for k, e in self._pending.items() if e["request_id"] not in self._completed}
         self._expired: Dict[str, Dict[str, Any]] = {}
         for key, value in expired.items():
             # {"ts", "user_id"}; an older file kept only a time: whose question it was is unknown, so drop it.
@@ -186,18 +197,30 @@ class PendingTags:
 
     def add(self, chat_id: Any, user_id: Any, alert_id: str, now: float, prompt_id: Optional[int] = None) -> None:
         self._purge(now)
+        self.demote(chat_id, user_id)
         key = self._key(chat_id, user_id, alert_id)
         # "Other…" on the same alert again: a reply to either of its questions still counts.
         prompts = self._prompt_ids(self._pending.pop(key, None) or {})     # popped: it is the newest now
         if prompt_id is not None:
             prompts.append(str(prompt_id))
         self._pending[key] = {"chat_id": str(chat_id), "user_id": str(user_id), "alert_id": str(alert_id),
-                              "ts": float(now), "prompt_ids": prompts[-self.MAX_PROMPTS:], "reply_only": False}
+                              "ts": float(now), "prompt_ids": prompts[-self.MAX_PROMPTS:], "reply_only": False,
+                              "request_id": uuid.uuid4().hex}
         self._save()
 
-    def take(self, chat_id: Any, user_id: Any, now: float, reply_to: Any = None,
-             reply_alert: Optional[str] = None) -> Optional[str]:
-        """The alert a text from *user_id* in *chat_id* tags, removed from the store; None: not a tag.
+    def demote(self, chat_id: Any, user_id: Any, request_id: Optional[str] = None) -> None:
+        """Disable implicit answers for superseded waits or a tag whose save is being attempted."""
+        changed = False
+        for _, entry in self._mine(chat_id, user_id):
+            if not entry.get("reply_only") and (request_id is None or entry["request_id"] == request_id):
+                entry["reply_only"] = True
+                changed = True
+        if changed:
+            self._save()
+
+    def match(self, chat_id: Any, user_id: Any, now: float, reply_to: Any = None,
+              reply_alert: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Find a wait without consuming it; completion follows the durable feedback write.
 
         *reply_to* is the id of the message the text replies to (None: it replies to nothing) and
         *reply_alert* the alert that message carried, if any.
@@ -209,18 +232,34 @@ class PendingTags:
             open_waits = [kv for kv in mine if not kv[1].get("reply_only")]
             if open_waits:
                 chosen = open_waits[0]
-                for key, entry in mine:            # the others now take only a reply to their own question
-                    if key != chosen[0] and not entry.get("reply_only"):
-                        entry["reply_only"] = True
         else:
             chosen = next((kv for kv in mine if str(reply_to) in kv[1]["prompt_ids"]), None)
             if chosen is None and reply_alert:
                 chosen = next((kv for kv in mine if kv[1]["alert_id"] == str(reply_alert)), None)
-        if chosen is not None:
-            del self._pending[chosen[0]]
-        if changed or chosen is not None:
+        if changed:
             self._save()
-        return str(chosen[1]["alert_id"]) if chosen else None
+        return dict(chosen[1]) if chosen else None
+
+    def complete(self, request_id: str) -> None:
+        """Remember completion in memory even if saving the pending file fails."""
+        self._completed.add(request_id)
+        self._pending = {k: e for k, e in self._pending.items() if e["request_id"] != request_id}
+        self._save()
+
+    def take(self, chat_id: Any, user_id: Any, now: float, reply_to: Any = None,
+             reply_alert: Optional[str] = None) -> Optional[str]:
+        """Compatibility API: remove a matching wait and return its alert id."""
+        entry = self.match(chat_id, user_id, now, reply_to, reply_alert)
+        if entry:
+            self.complete(entry["request_id"])
+        return str(entry["alert_id"]) if entry else None
+
+    def needs_text(self, chat_id: Any, user_id: Any, now: float, reply_to: Any = None) -> bool:
+        """Media from the asker needs a text hint, without consuming any wait."""
+        if self._purge(now):
+            self._save()
+        return any(reply_to is None or str(reply_to) in e["prompt_ids"]
+                   for _, e in self._mine(chat_id, user_id))
 
     def cancel(self, chat_id: Any, user_id: Any) -> None:
         """End every wait of *user_id* in *chat_id*."""
@@ -775,21 +814,20 @@ class TelegramInbox:
     def _undo_tag(self, alert: Dict[str, Any], who: Dict[str, Any], chat_id: str, now: float) -> bool:
         """Take a tag back: an undo record (the newest answer wins), then the training copy the tag made.
 
-        Each step is tried even when the other fails; False only when nothing at all was undone.
+        Each step is tried even when the other fails; success requires both stores to agree.
         """
-        undone = False
+        record_saved = training_done = False
         try:
             save_feedback(self.feedback_dir, alert, Feedback(verdict="none", note=TAG_UNDONE_NOTE, source="button"),
                           "", who, chat_id, now, training_dir=self.training_dir, archive_dir=self.archive_dir)
-            undone = True
+            record_saved = True
         except Exception as exc:  # noqa: BLE001
             log.warning("Undo record of %s not saved: %s", alert.get("alert_id"), exc)
         try:
-            if undo_training_tag(alert, "", who, now, self.training_dir) in ("removed", "noted"):
-                undone = True
+            training_done = undo_training_tag(alert, "", who, now, self.training_dir) in ("removed", "noted", "none")
         except Exception as exc:  # noqa: BLE001
             log.warning("Training copy of %s not taken back: %s", alert.get("alert_id"), exc)
-        return undone
+        return record_saved and training_done
 
     def _on_tag_button(self, query: Dict[str, Any], message: Dict[str, Any], chat_id: str, code: str) -> None:
         """``tag:<label>`` and ``tu:<alert_id>``. A tag never pauses or changes a setting, and never raises."""
@@ -805,11 +843,12 @@ class TelegramInbox:
                 alert_id = code[3:]
                 alert = self.index.alert(alert_id) or {"alert_id": alert_id}
                 self._note("owner", "button", _button_text(message, code, tr("undo_button", lang)), who["name"], alert)
-                if not self._undo_tag(alert, who, chat_id, now):
-                    raise RuntimeError("nothing was undone")
+                undone = self._undo_tag(alert, who, chat_id, now)
                 self._answer_callback(query)
                 answered = True
-                self._say(chat_id, tr("tag_undone", lang), reply_to=message.get("message_id"))
+                self._say(chat_id, tr("tag_undone" if undone else "tag_undo_partial", lang),
+                          reply_to=message.get("message_id"),
+                          undo_data="" if undone else self._undo_code(alert_id), lang=lang)
                 return
             label = code[4:]
             known = label in OWNER_LABELS
@@ -825,6 +864,7 @@ class TelegramInbox:
             alert_id = str(alert["alert_id"])
             self._mark_answered(alert)
             if label == "other":
+                self.pending.demote(chat_id, user_id)
                 try:
                     resp = self._ask_for_tag(chat_id, sender, message.get("message_id"), lang)
                 except Exception as exc:  # noqa: BLE001 - the owner must learn the question never came
@@ -876,23 +916,27 @@ class TelegramInbox:
             if replied is not None:
                 replied_alert = self.index.lookup(chat_id, replied)
                 reply_alert = str((replied_alert or {}).get("alert_id") or "") or None
-            alert_id = self.pending.take(chat_id, user_id, now, reply_to=replied, reply_alert=reply_alert)
+            request = self.pending.match(chat_id, user_id, now, reply_to=replied, reply_alert=reply_alert)
             who = _who(sender)
-            if not alert_id:
+            if not request:
                 if replied is not None and self.pending.expired_prompt(chat_id, replied, user_id, now):
                     self._note("owner", "message", text, who["name"])
                     self._say(chat_id, tr("tag_expired", lang), reply_to=message.get("message_id"))
                     return True
                 return False
             taken = True
+            self.pending.demote(chat_id, user_id, request["request_id"])
+            alert_id = request["alert_id"]
             alert = self.index.alert(alert_id) or {"alert_id": alert_id}
             self._note("owner", "message", text, who["name"], alert)
             self._mark_answered(alert)
             words = text[:MAX_TAG_TEXT_CHARS]
             feedback = Feedback(verdict=verdict_for("other", str(alert.get("label") or "")), owner_label="other",
-                                owner_text=words, tagged_by=who["name"] or str(user_id or ""), source="text")
+                                owner_text=words, tagged_by=who["name"] or str(user_id or ""), source="text",
+                                request_id=request["request_id"])
             save_feedback(self.feedback_dir, alert, feedback, text, who, chat_id, now,
                           training_dir=self.training_dir, archive_dir=self.archive_dir)
+            self.pending.complete(request["request_id"])
             self._say(chat_id, tr("tag_saved_text", lang, text=words), reply_to=message.get("message_id"),
                       undo_data=self._undo_code(alert_id), lang=lang)
             return True
@@ -910,7 +954,12 @@ class TelegramInbox:
         chat_id = str((message.get("chat") or {}).get("id"))
         sender = message.get("from") or {}
         text = str(message.get("text") or "").strip()
-        if not self._allowed(chat_id) or sender.get("is_bot") or not text:
+        if not self._allowed(chat_id) or sender.get("is_bot"):
+            return
+        if not text:
+            replied = (message.get("reply_to_message") or {}).get("message_id")
+            if self.pending.needs_text(chat_id, sender.get("id"), self._now(), replied):
+                self._say(chat_id, tr("tag_need_text", self._language()), reply_to=message.get("message_id"))
             return
         if self._take_tag_text(chat_id, sender, text, message):
             return

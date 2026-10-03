@@ -15,6 +15,7 @@ message belongs to which alert) so both survive a restart.
 from __future__ import annotations
 
 import datetime as dt
+import glob
 import json
 import logging
 import math
@@ -91,6 +92,7 @@ class Feedback:
     owner_label: str = ""               # a tag from Telegram: one of OWNER_LABELS
     owner_text: str = ""                # the owner's own words for an "other" tag
     tagged_by: str = ""                 # who tagged it (name, or Telegram user id)
+    request_id: str = ""                # durable completion of an Other prompt
 
 
 def verdict_for(owner_label: str, ai_label: str) -> str:
@@ -614,6 +616,22 @@ class AlertIndex:
         return out
 
 
+def _feedback_paths(root_dir: str, alert_id: Optional[str] = None) -> List[str]:
+    pattern = f"{glob.escape(alert_id)}_*.feedback.json" if alert_id else "*.feedback.json"
+    return glob.glob(os.path.join(glob.escape(root_dir), "feedback", "*", "*", pattern))
+
+
+def saved_tag_requests(root_dir: str) -> set[str]:
+    """Feedback is the durable receipt when removing a pending request could not be saved."""
+    completed = set()
+    for path in _feedback_paths(root_dir):
+        record = _read_json(path)
+        request_id = record.get("request_id")
+        if isinstance(request_id, str) and request_id and record.get("owner_label") in OWNER_LABELS:
+            completed.add(request_id)
+    return completed
+
+
 def save_feedback(
     root_dir: str,
     alert: Optional[Dict[str, Any]],
@@ -634,6 +652,18 @@ def save_feedback(
     """
     camera = (alert or {}).get("camera") or "_general"
     alert_id = (alert or {}).get("alert_id") or "general"
+    if feedback.verdict == "none" and feedback.note == TAG_UNDONE_NOTE:
+        # Retrying an Undo, including after restart, must not append the same effect again.
+        previous = []
+        for candidate in _feedback_paths(root_dir, alert_id):
+            stamp_text = os.path.basename(candidate)[len(alert_id) + 1:-len(".feedback.json")]
+            if stamp_text.isdigit():
+                previous.append((int(stamp_text), candidate))
+        if previous:
+            latest_path = max(previous)[1]
+            latest = _read_json(latest_path)
+            if latest.get("verdict") == "none" and latest.get("note") == TAG_UNDONE_NOTE:
+                return latest_path
     day = dt.datetime.fromtimestamp(now).strftime("%Y-%m-%d")
     folder = os.path.join(root_dir, "feedback", camera, day)
     stamp = int(now * 1000)
@@ -658,6 +688,7 @@ def save_feedback(
         "owner_label": feedback.owner_label,
         "owner_text": feedback.owner_text,
         "tagged_by": feedback.tagged_by,
+        "request_id": feedback.request_id,
     })
     if feedback.verdict in LABELLING_VERDICTS and (alert or {}).get("alert_id"):
         try:
@@ -760,6 +791,29 @@ def _is_tag_answer(answer: Any) -> bool:
     return isinstance(answer, dict) and bool(answer.get("owner_label") or answer.get("note") == TAG_UNDONE_NOTE)
 
 
+def _remove_tag_copy(meta_path: str, clip_path: str, journal_path: str) -> str:
+    """The journal survives either removal failing, so a later Undo can finish both."""
+    removed = True
+    for path in (meta_path, clip_path):
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            removed = False
+            log.warning("Could not remove %s after its tag was undone: %s", path, exc)
+    if not removed:
+        return "failed"
+    try:
+        os.remove(journal_path)
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        log.warning("Could not finish training tag undo: %s", exc)
+        return "failed"
+    return "removed"
+
+
 def undo_training_tag(
     alert: Dict[str, Any],
     raw_text: str,
@@ -774,9 +828,8 @@ def undo_training_tag(
     and its meta are removed. A copy that was there anyway - inference keeps every real alert, and an
     earlier button or written answer may have made it - stays, and gets an undo answer at the end of
     ``owner_feedback`` (the newest answer wins, as for the feedback records). Each removal is tried
-    even when the other fails: either one takes the example out of the dataset (a clip without its
-    meta, or a meta whose clip is gone, is skipped). A meta that cannot be read is left alone - who
-    made that copy is unknown - and the undo is ``"failed"``.
+    even when the other fails. A journal keeps both paths until removal finishes, including across
+    restarts. A meta that cannot be read is left alone and the undo is ``"failed"``.
     """
     from .boxconfig import LIVE_DIR  # noqa: PLC0415
 
@@ -785,6 +838,16 @@ def undo_training_tag(
         alert_id = str((alert or {}).get("alert_id") or "")
         if not alert_id:
             return "none"
+        journals = glob.glob(os.path.join(glob.escape(training_dir), "meta", "*", "*",
+                                         f"{glob.escape(alert_id)}.meta.json.undo.json"))
+        if journals:
+            outcomes = []
+            for journal_path in journals:
+                with open(journal_path, encoding="utf-8") as f:
+                    journal = json.load(f)
+                clip_path = os.path.join(training_dir, *journal["clip_path"].replace("\\", "/").split("/"))
+                outcomes.append(_remove_tag_copy(journal_path[:-len(".undo.json")], clip_path, journal_path))
+            return "removed" if all(outcome == "removed" for outcome in outcomes) else "failed"
         kept = _alert_files(alert_id, [training_dir])
         if not kept:
             return "none"
@@ -796,17 +859,15 @@ def undo_training_tag(
         return "failed"
     answers = meta.get("owner_feedback") if isinstance(meta.get("owner_feedback"), list) else []
     if meta.get("kind") == "owner_feedback" and answers and all(_is_tag_answer(a) for a in answers):
-        removed = False
-        for path in (meta_path, clip_path):                   # the meta first: a clip without a meta is ignored
-            try:
-                os.remove(path)
-                removed = True
-            except OSError as exc:
-                log.warning("Could not remove %s after its tag was undone: %s", path, exc)
-        if not removed:
+        journal_path = meta_path + ".undo.json"
+        try:
+            _write_json(journal_path, {"clip_path": os.path.relpath(clip_path, training_dir)})
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Could not prepare training tag undo: %s", exc)
             return "failed"
-        log.info("Removed the training copy of %s: its tag was undone.", alert_id)
-        return "removed"
+        return _remove_tag_copy(meta_path, clip_path, journal_path)
+    if answers and answers[-1].get("verdict") == "none" and answers[-1].get("note") == TAG_UNDONE_NOTE:
+        return "noted"
     answers.append({
         "time_utc": dt.datetime.fromtimestamp(now, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "verdict": "none",
