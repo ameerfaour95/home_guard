@@ -112,7 +112,7 @@ class AiRecord(QScrollArea):
             if aid not in images: continue
             pix = QPixmap(); pix.loadFromData(images.get(aid, b''))
             if pix.isNull():
-                tile.setText('Frame unavailable')
+                tile.setText('Frame\nunavailable')
             else:
                 tile.setPixmap(pix.scaled(tile.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
         for aid, raw in self.raw_answers.items():

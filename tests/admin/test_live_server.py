@@ -66,13 +66,19 @@ def test_live_fleet_customer_timeline_density_review_and_2c(live, app):
     shell.open_customer(1)
     customer = shell.customer_page
     wait(lambda: bool(customer.timeline.model.rows) and bool(customer.timeline.density.hours))
+    wait(lambda: any(customer.timeline.thumbnail_cache.values()))
     assert 'Daniel' in customer.name.text()
     app.processEvents(); assert window.grab().save(str(SHOTS/'r4-live-timeline.png'))
     customer.open_event(101)
     view = customer.event_view
     wait(lambda: view.recording is not None and not view.evidence_runner.busy and not view.asset_runner.busy)
     assert view.recording.ai_runs
-    assert view.player.canvas.overlay.frames
+    assert any(frame.boxes for frame in view.player.canvas.overlay.frames)
+    if 'Not available yet' not in view.banner.text():
+        view.player.player.play()
+        view.player.player.setPosition(3000)
+        wait(lambda: not view.player.canvas.image.isNull() and view.player.canvas.overlay.position_ms >= 3000)
+        view.player.player.pause()
     app.processEvents(); assert window.grab().save(str(SHOTS/'r4-live-event.png'))
     before = view.recording.reviewed
     view.toggle_review('reviewed')
@@ -121,7 +127,7 @@ def test_live_media_access_and_first_decoded_frame(live):
     view.player.open_url(access.url)
     view.player.player.play()
     wait(lambda: not view.player.canvas.image.isNull())
-    assert view.player.canvas.overlay.frames
+    assert any(frame.boxes for frame in view.player.canvas.overlay.frames)
 
 
 def test_live_labeler_signin_pseudonyms(app, credentials, widgets, wait, tmp_path):
@@ -153,7 +159,7 @@ def test_moto_synthetic_clip_decodes_independently(live, widgets):
     player.canvas.overlay.set_detections(backend.detections(101))
     player.open_url(url); player.player.play()
     wait(lambda: not player.canvas.image.isNull())
-    assert player.canvas.overlay.frames
+    assert any(frame.boxes for frame in player.canvas.overlay.frames)
     player.player.pause()
 
 
@@ -188,5 +194,6 @@ def test_built_exe_against_real_server(credentials):
         assert process.wait(timeout=40) == 0, result_path.read_text() if result_path.exists() else 'No packaged probe result'
         result = json.loads(result_path.read_text())
         assert result['fleet'] == 4 and result['timeline'] > 0 and result['detections'] > 0
+        assert result['frame_decoded'] and result['review_saved']
     finally:
         path.unlink(missing_ok=True)

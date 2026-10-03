@@ -18,7 +18,7 @@ BUCKET = 'homeguard-admin-local'
 
 
 def seed(engine, s3, credentials):
-    from sqlalchemy import select, text
+    from sqlalchemy import select, text, delete
     from sqlalchemy.orm import Session
     from home_guard_project.cloud import auth
     from home_guard_project.cloud.models import (Staff, Customer, Device, Camera, Event, Artifact,
@@ -83,6 +83,11 @@ def seed(engine, s3, credentials):
             heartbeat['cameras'] = dict(heartbeat['cameras'], **{camera: dict(newest_clip_utc=latest, clips_waiting=0)})
             device.last_heartbeat = heartbeat
             session.flush()
+            # Event times shift on each local run. Drop only this synthetic
+            # event's derived fixture pointers, so a fresh in-memory S3 server
+            # cannot be asked for labels from a previous run's object keys.
+            session.execute(delete(Artifact).where(Artifact.event_id == event.id,
+                Artifact.role.in_(['meta', 'yolo_label'])))
             for art in detail['artifacts']:
                 local = DATA/'media'/Path(art['s3_key']).name
                 key = f'admin_cache/dev/{event.id}/{local.name}'
@@ -96,6 +101,14 @@ def seed(engine, s3, credentials):
                 artifact.bytes, artifact.detail = art['bytes'], art['detail']
                 artifact.mime = mimetypes.guess_type(local)[0]
                 session.add(artifact)
+            if detail.get('thumbnail_url'):
+                local = DATA/detail['thumbnail_url']
+                key = f'admin_cache/dev/{event.id}/thumbnail.jpg'
+                s3.client.put_object(Bucket=BUCKET, Key=key, Body=local.read_bytes(), ContentType='image/jpeg')
+                thumbnail = session.scalar(select(Artifact).where(Artifact.s3_key == key)) or Artifact(s3_key=key)
+                thumbnail.event_id, thumbnail.role = event.id, 'thumbnail'
+                thumbnail.available, thumbnail.mime = True, 'image/jpeg'
+                session.add(thumbnail)
             # Cloud currently decodes sampled YOLO labels from applied meta revisions.
             # Use the real parser's format, backed by actual synthetic label objects.
             prefix = f'dataset_{device.site}/'
@@ -146,6 +159,9 @@ def seed(engine, s3, credentials):
                 session.merge(CollectionItem(collection_id=int(cid), event_id=eid, added_by=admin.id, added_at=now))
         session.add(AuditLog(ts=now, staff_id=admin.id, staff_name=admin.name, action='dev_seed',
                             target='synthetic-fixtures', reason='Local integration run', detail={'synthetic': True}))
+        from home_guard_project.cloud.redact import backfill
+        for device in devices.values():
+            backfill(session, device, everything=True)
         session.commit()
 
 

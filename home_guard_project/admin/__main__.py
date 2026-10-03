@@ -88,6 +88,10 @@ def main():
                     view = customer.event_view
                     live_result['detections'] = len(view.player.canvas.overlay.frames)
                     live_result['media_unavailable'] = 'Not available yet' in view.banner.text()
+                    if not live_result['media_unavailable'] and view.player.canvas.image.isNull():
+                        view.player.player.play()
+                        return
+                    live_result['frame_decoded'] = not view.player.canvas.image.isNull()
                     view.review_runner.finished.connect(lambda result, error: live_result.update(review_saved=error is None))
                     view.toggle_review('flagged'); stage[0] = 3
                 elif stage[0] == 3 and not customer.event_view.review_runner.busy:
