@@ -105,7 +105,7 @@ def test_session_cap_family_started_at(client, staff_factory):
 
 
 def test_every_v1_route_requires_token(client):
-    open_paths = {"/v1/auth/login", "/v1/auth/refresh"}
+    open_paths = {"/v1/auth/login", "/v1/auth/local", "/v1/auth/refresh"}
     checked = 0
     for path, ops in client.app.openapi()["paths"].items():  # every registered route
         if not path.startswith("/v1") or path in open_paths:

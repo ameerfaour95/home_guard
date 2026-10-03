@@ -15,6 +15,8 @@ class Settings:
     access_ttl: int = 900
     refresh_ttl: int = 43200
     run_loops: bool = False
+    local_trust: bool = False
+    local_admin_email: str = ""
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -29,6 +31,8 @@ class Settings:
             access_ttl=int(os.environ.get("HG_CLOUD_ACCESS_TTL", "900")),
             refresh_ttl=int(os.environ.get("HG_CLOUD_REFRESH_TTL", "43200")),
             run_loops=os.environ.get("HG_CLOUD_RUN_LOOPS", "").lower() in ("1", "true", "yes"),
+            local_trust=os.environ.get("HG_CLOUD_LOCAL_TRUST", "").lower() in ("1", "true", "yes"),
+            local_admin_email=os.environ.get("HG_CLOUD_LOCAL_ADMIN", "").strip(),
         )
 
     @classmethod

@@ -55,6 +55,23 @@ def login(body: LoginRequest, request: Request, session: Session = SessionDep):
     return pair
 
 
+@router.post("/auth/local", response_model=TokenPair)
+def local_signin(request: Request, session: Session = SessionDep):
+    """One-click sign-in for the founder's laptop: only with HG_CLOUD_LOCAL_TRUST=1 and a loopback client."""
+    settings = request.app.state.settings
+    host = request.client.host if request.client else None
+    staff = None
+    if settings.local_trust and host in ("127.0.0.1", "::1") and settings.local_admin_email:
+        staff = session.scalars(select(Staff).where(
+            func.lower(Staff.email) == settings.local_admin_email.strip().lower())).first()
+    if staff is None or staff.disabled:
+        raise HTTPException(status_code=404, detail="Not Found")
+    pair = auth.issue_tokens(staff, settings, session)
+    audit.record(session, staff.id, "local_signin", detail={"email": staff.email})
+    session.commit()
+    return pair
+
+
 @router.post("/auth/refresh", response_model=TokenPair)
 def refresh(body: RefreshRequest, request: Request, session: Session = SessionDep):
     pair = auth.rotate(session, body.refresh_token, request.app.state.settings)

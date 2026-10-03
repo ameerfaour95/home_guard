@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Run the Admin Center API on this laptop: embedded Postgres (pgserver), loops on, 127.0.0.1:8600.
+# Run the Admin Center API on this laptop: embedded Postgres (pgserver), loops on, 127.0.0.1:8610.
 # Reads S3 with the laptop's AWS profile; writes only under fleet/, admin_cache/, training_exports/.
 #
-# Port: set HG_CLOUD_PORT to listen elsewhere (default 8600), e.g. `HG_CLOUD_PORT=8700 ./run_local.sh`.
+# Port: set HG_CLOUD_PORT to listen elsewhere (default 8610), e.g. `HG_CLOUD_PORT=8700 ./run_local.sh`.
 # Logs: timestamped INFO lines on stderr ("<time> <LEVEL> <logger> <message>"); a failing background loop shows as
 #   "... ERROR home_guard_project.cloud.loops loop <name> iteration failed" with its traceback.
 # Manual passes (`manage index-once`, `manage media-once`) wait for the server's loops: while the server is indexing
@@ -31,6 +31,9 @@ set -a
 # shellcheck disable=SC1090
 . "$ENV_FILE"
 set +a
+# Founder's laptop: the Admin Center signs in with no password (loopback only). Override in cloud.env.
+export HG_CLOUD_LOCAL_TRUST="${HG_CLOUD_LOCAL_TRUST:-1}"
+export HG_CLOUD_LOCAL_ADMIN="${HG_CLOUD_LOCAL_ADMIN:-ameerfaour95@gmail.com}"
 
 unset VIRTUAL_ENV
 export UV_SYSTEM_CERTS=1
@@ -46,6 +49,6 @@ export HG_CLOUD_DB_URL
 export HG_CLOUD_RUN_LOOPS=1
 
 "${RUN[@]}" python -m home_guard_project.cloud.manage init-db
-echo "Admin Center API on http://127.0.0.1:${HG_CLOUD_PORT:-8600} (loops on)"
+echo "Admin Center API on http://127.0.0.1:${HG_CLOUD_PORT:-8610} (loops on)"
 exec "${RUN[@]}" python -m uvicorn home_guard_project.cloud.app:create_app_from_env --factory \
-  --host 127.0.0.1 --port "${HG_CLOUD_PORT:-8600}"
+  --host 127.0.0.1 --port "${HG_CLOUD_PORT:-8610}"

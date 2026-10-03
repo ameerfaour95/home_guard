@@ -2151,6 +2151,28 @@
         ]
       }
     },
+    "/v1/auth/local": {
+      "post": {
+        "description": "One-click sign-in for the founder's laptop: only with HG_CLOUD_LOCAL_TRUST=1 and a loopback client.",
+        "operationId": "local_signin_v1_auth_local_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenPair"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Local Signin",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/v1/auth/login": {
       "post": {
         "operationId": "login_v1_auth_login_post",
