@@ -14,14 +14,16 @@ from __future__ import annotations
 import json
 import logging
 import math
+import os
 import time
 from collections import Counter
 from dataclasses import dataclass, field
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
+from ..alert_clips import PRE_SECONDS
 from ..archive import AlertRecord
-from ..feedback import MAX_MUTE_HOURS, feedback_from_fields
+from ..feedback import MAX_MUTE_HOURS, VERDICTS, Feedback, feedback_from_fields, save_feedback
 from . import media
 from .events import (
     coverage,
@@ -35,8 +37,9 @@ from .events import (
     write_desc,
 )
 from .memory import ChatState
-from .mode import GUARD
-from .receipts import Receipt, ReceiptBook
+from .media import bounds_text
+from .mode import GUARD, hhmm
+from .receipts import DONE, FAILED, REQUESTED, Receipt, ReceiptBook
 from .registry import HouseSnapshot, Resolution, resolve_camera
 from .vision import QUALITIES, VISION_VERSION
 
@@ -322,10 +325,303 @@ def ask_clarification(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     return {"ok": True, "message": "The question will be sent with buttons; end the turn now."}
 
 
+# -- acting ----------------------------------------------------------------------
+def quoted_from(quote: str, text: str) -> bool:
+    """True if *quote* is a real piece of *text* of at least two words (ignoring case and spacing)."""
+    squeeze = lambda s: " ".join(str(s).casefold().split())  # noqa: E731
+    q = squeeze(quote)
+    return len(q) >= 3 and len(q.split()) >= 2 and q in squeeze(text)
+
+
+def _issue(ctx: ToolContext, tool: str, status: str, target: str = "", detail: Optional[Dict[str, Any]] = None,
+           reason: str = "") -> Receipt:
+    key, ctx.call_key = ctx.call_key, ""       # the agent's idempotency key goes on the call's first receipt
+    detail = dict(detail or {})
+    if ctx.speaker.get("name"):
+        detail["by"] = str(ctx.speaker["name"])  # which family member asked for it
+    receipt = ctx.book.issue(ctx.turn_id, tool, status, target=target, detail=detail, reason=reason, key=key)
+    ctx.receipts.append(receipt)
+    return receipt
+
+
+def _result(receipt: Receipt, **extra: Any) -> Dict[str, Any]:
+    out: Dict[str, Any] = {"ok": receipt.status != FAILED, "receipt": receipt.id, "status": receipt.status}
+    if receipt.reason:
+        out["reason"] = receipt.reason
+    out.update(extra)
+    return out
+
+
+def _service_result(value: Any) -> Dict[str, Any]:
+    if not isinstance(value, dict) or type(value.get("ok")) is not bool:
+        raise ValueError("service result must contain a boolean ok field")
+    json.dumps(value, allow_nan=False)
+    return value
+
+
+def _media_sent(ctx: ToolContext) -> int:
+    return sum(1 for r in ctx.receipts if r.tool in ("send_media", "record_clip") and r.status == DONE)
+
+
+def _one_camera(ctx: ToolContext, words: Any) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+    res = resolve_camera(ctx.snapshot, str(words or ""))
+    if res.camera is None:
+        return None, _camera_error(ctx, words, res)
+    return res.camera, None
+
+
+@_safe_tool
+def check_camera(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+    camera, bad = _one_camera(ctx, args.get("camera"))
+    if bad:
+        return bad
+    if not ctx.snapshot.camera(camera).enabled:
+        return _result(_issue(ctx, "check_camera", FAILED, camera, {"camera": camera}, "camera_off"))
+    shot = ctx.services.grab_photo(camera) if ctx.services.grab_photo else {"error": "no live view"}
+    if not isinstance(shot, dict):
+        raise ValueError("photo result must be an object")
+    if shot.get("error"):
+        return _result(_issue(ctx, "check_camera", FAILED, camera, {"camera": camera}, "camera_offline"))
+    if not isinstance(shot["image"], str):
+        raise ValueError("photo path must be a string")
+    sent = _service_result(ctx.services.deliver.photo(ctx.chat_id, shot["image"]))
+    receipt = _issue(ctx, "check_camera", DONE if sent.get("ok") else FAILED, camera,
+                     {"camera": camera, "message_id": sent.get("message_id")}, "" if sent.get("ok") else "telegram")
+    handle = ctx.state.add_handle("photo", shot["image"], camera, ctx.services.now())
+    ctx.shown.append(handle)
+    out = _result(receipt, camera=camera, handle=handle)
+    look: Dict[str, Any] = {}
+    if ctx.services.vision is not None:
+        try:
+            with open(shot["image"], "rb") as f:
+                look = ctx.services.vision.look(camera, [f.read()], guard=ctx.mode == GUARD)
+        except Exception as exc:
+            log.warning("Live-photo vision failed: %s", exc)
+            look = {"ok": False}
+    if ctx.services.vision is not None and (not isinstance(look, dict)
+                                           or type(look.get("ok")) is not bool):
+        log.warning("Live-photo vision returned a malformed result")
+        return dict(out, description_error="the picture could not be described")
+    if isinstance(look, dict) and look.get("ok"):
+        value = dict(text=look.get("description"), quality=look.get("quality"), people=look.get("people"),
+                     label=look.get("label"), why=look.get("why"), ts=ctx.services.now())
+        if not _valid_description(value, ctx.mode == GUARD):
+            log.warning("Live-photo vision returned a malformed description")
+            return dict(out, description_error="the picture could not be described")
+        out.update(description=look["description"], quality=look["quality"], people=look["people"])
+        if ctx.mode == GUARD:
+            out.update(label=look.get("label", ""), why=look.get("why", ""))
+    else:
+        out["description_error"] = "the picture was taken but could not be described" + (
+            " (the model declined)" if isinstance(look, dict) and look.get("refused") else "")
+    return out
+
+
+@_safe_tool
+def record_clip(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+    camera, bad = _one_camera(ctx, args.get("camera"))
+    if bad:
+        return bad
+    seconds = int(min(30, max(1, _finite(args.get("seconds") if args.get("seconds") is not None else 10))))
+    if not ctx.snapshot.camera(camera).enabled:
+        return _result(_issue(ctx, "record_clip", FAILED, camera, {"camera": camera}, "camera_off"))
+    if _media_sent(ctx) >= MAX_MEDIA_PER_TURN:
+        return _result(_issue(ctx, "record_clip", FAILED, camera, {"camera": camera}, "too_many"))
+    rec = ctx.services.record_live(camera, seconds) if ctx.services.record_live else {"ok": False, "error": "error"}
+    _service_result(rec)
+    if not rec.get("ok"):
+        reason = rec.get("error") if rec.get("error") in ("camera_offline", "busy", "camera_unknown") else "error"
+        return _result(_issue(ctx, "record_clip", FAILED, camera, {"camera": camera}, reason))
+    bounds = bounds_text(_finite(rec["start"]), _finite(rec["end"]))
+    if not isinstance(rec["path"], str):
+        raise ValueError("recording path must be a string")
+    sent = _service_result(ctx.services.deliver.video(ctx.chat_id, rec["path"], caption=f"{camera} · {bounds}"))
+    receipt = _issue(ctx, "record_clip", DONE if sent.get("ok") else FAILED, camera,
+                     {"camera": camera, "seconds": seconds, "bounds": bounds, "message_id": sent.get("message_id")},
+                     "" if sent.get("ok") else "telegram")
+    handle = ctx.state.add_handle("clip", rec["path"], camera, rec["start"])
+    ctx.shown.append(handle)
+    return _result(receipt, handle=handle, bounds=bounds)
+
+
+@_safe_tool
+def send_media(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+    handle = str(args.get("handle") or "").strip().upper()
+    entry = ctx.state.resolve(handle)
+    if not entry:
+        return _err(f"unknown handle {handle!r}; use a handle from an earlier tool result")
+    if _media_sent(ctx) >= MAX_MEDIA_PER_TURN:
+        return _result(_issue(ctx, "send_media", FAILED, handle, {"kind": "video"}, "too_many"))
+    if entry.get("kind") in ("photo", "clip"):
+        path, camera = str(entry["ref"]), str(entry.get("camera") or "")
+        if not os.path.isfile(path):
+            return _result(_issue(ctx, "send_media", FAILED, handle, {"kind": entry["kind"]}, "not_on_box"))
+        if entry["kind"] == "photo":
+            sent = _service_result(ctx.services.deliver.photo(ctx.chat_id, path))
+            return _result(_issue(ctx, "send_media", DONE if sent.get("ok") else FAILED, handle,
+                                  {"kind": "photo", "camera": camera, "message_id": sent.get("message_id")},
+                                  "" if sent.get("ok") else "telegram"))
+        bounds = ""
+    else:
+        record, bad = _record_for(ctx, handle)
+        if bad:
+            return bad
+        camera = record.camera
+        if not record.clip_path:
+            return _result(_issue(ctx, "send_media", FAILED, handle, {"kind": "video", "camera": camera},
+                                  "not_on_box"))
+        path = record.clip_path
+        clip_start = record.clip_start_ts if record.clip_start_ts else record.ts - 10.0
+        bounds = bounds_text(clip_start, record.ts)
+        if args.get("from_sec") is not None or args.get("seconds") is not None:
+            trigger = record.trigger_ts if record.trigger_ts else clip_start + PRE_SECONDS
+            try:
+                start = trigger + _finite(args.get("from_sec") if args.get("from_sec") is not None else -PRE_SECONDS)
+                seconds = min(60.0, max(1.0, _finite(args.get("seconds") if args.get("seconds") is not None else 10)))
+            except (TypeError, ValueError) as exc:
+                log.warning("Invalid saved-video segment arguments: %s", exc)
+                return _err("from_sec and seconds must be numbers")
+            os.makedirs(ctx.services.work_dir, exist_ok=True)
+            out_path = os.path.join(ctx.services.work_dir, f"{record.alert_id}_{int(start)}_{int(seconds)}.mp4")
+            span = ctx.services.cut_segment(path, clip_start, record.ts, start, seconds, out_path) \
+                if ctx.services.cut_segment else None
+            if not span:
+                return _result(_issue(ctx, "send_media", FAILED, handle, {"kind": "video", "camera": camera},
+                                      "error"))
+            path, bounds = out_path, bounds_text(*[_finite(v) for v in span])
+    sent = _service_result(ctx.services.deliver.video(ctx.chat_id, path, caption=f"{camera} · {bounds}".strip(" ·")))
+    return _result(_issue(ctx, "send_media", DONE if sent.get("ok") else FAILED, handle,
+                          {"kind": "video", "camera": camera, "bounds": bounds, "message_id": sent.get("message_id")},
+                          "" if sent.get("ok") else "telegram"))
+
+
+def _alert_of(entry: Dict[str, Any]) -> Dict[str, Any]:
+    return {"alert_id": entry.get("ref"), "camera": entry.get("camera"), "summary": entry.get("summary", ""),
+            "ts": entry.get("ts")}
+
+
+@_safe_tool
+def pause_alerts(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+    if not quoted_from(str(args.get("owner_words") or ""), ctx.text):
+        return _err("Not paused: pause only when this message asks for it, and owner_words must be copied "
+                    "from it (two words or more).")
+    cameras, bad = _cameras_arg(ctx, args.get("cameras") or args.get("camera"))
+    if bad:
+        return bad
+    now = _finite(ctx.services.now())
+    if args.get("minutes") is not None:
+        _finite(args["minutes"])
+    fb = feedback_from_fields({"action": "mute", "mute_until": args.get("until"),
+                               "mute_minutes": args.get("minutes")}, now, [], _finite(ctx.services.max_mute_hours))
+    out = []
+    for camera in sorted(cameras) if cameras else [None]:
+        feedback = Feedback(action="mute", mute_until=fb.mute_until, camera=camera)
+        before = ctx.services.mute.snapshot()            # what Undo puts back (an earlier pause survives)
+        ctx.services.mute.apply(feedback, now)
+        out.append(_issue(ctx, "pause_alerts", DONE, camera or "all",
+                          {"camera": camera or "", "until": hhmm(fb.mute_until), "before": before}))
+        alert = _alert_of(ctx.state.resolve(ctx.alert_handle) or {}) if ctx.alert_handle else None
+        try:
+            save_feedback(ctx.services.feedback_dir, alert, feedback, ctx.text, ctx.speaker, ctx.chat_id, now)
+            ctx.saved += 1
+        except Exception as exc:  # noqa: BLE001 - the pause happened and has its receipt
+            log.warning("Pause applied but its feedback file was not saved: %s", exc)
+    return {"ok": True, "status": DONE, "receipts": [r.id for r in out], "until": hhmm(fb.mute_until)}
+
+
+@_safe_tool
+def resume_alerts(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+    cameras, bad = _cameras_arg(ctx, args.get("cameras") or args.get("camera"))
+    if bad:
+        return bad
+    now = _finite(ctx.services.now())
+    out = []
+    for camera in sorted(cameras) if cameras else [None]:
+        ctx.services.mute.resume(camera, now, cameras=ctx.snapshot.names)
+        out.append(_issue(ctx, "resume_alerts", DONE, camera or "all", {"camera": camera or ""}))
+    try:
+        save_feedback(ctx.services.feedback_dir, None, Feedback(action="resume"), ctx.text, ctx.speaker,
+                      ctx.chat_id, now)
+        ctx.saved += 1
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Alerts resumed but the feedback file was not saved: %s", exc)
+    return {"ok": True, "status": DONE, "receipts": [r.id for r in out]}
+
+
+@_safe_tool
+def record_verdict(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+    handle = str(args.get("handle") or ctx.alert_handle or "").strip().upper()
+    if not handle:
+        return _err("no alert is bound to this message; ask the owner which alert they mean")
+    entry = ctx.state.resolve(handle)
+    if not entry or entry.get("kind") != "event":
+        return _err(f"unknown handle {handle!r}")
+    verdict = str(args.get("verdict") or "")
+    if verdict not in VERDICTS or verdict == "none":
+        return _err("verdict must be one of true_alert, false_alarm, real_but_wrong, expected, missed_event")
+    if not quoted_from(str(args.get("owner_words") or ""), ctx.text):
+        return _err("Not saved: owner_words must quote the owner's judgement from this message (two words or "
+                    "more). If the message only points at an event, ask what they want to say about it.")
+    feedback = Feedback(verdict=verdict, note=str(args.get("note") or "")[:300])
+    save_feedback(ctx.services.feedback_dir, _alert_of(entry), feedback, ctx.text, ctx.speaker, ctx.chat_id,
+                  ctx.services.now())
+    ctx.saved += 1
+    return _result(_issue(ctx, "record_verdict", DONE, handle, {"verdict": verdict}))
+
+
+@_safe_tool
+def set_camera_active(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+    camera, bad = _one_camera(ctx, args.get("camera"))
+    if bad:
+        return bad
+    active = args.get("active")
+    if type(active) is not bool:
+        return _err("active must be a boolean")
+    detail = {"camera": camera, "active": active, "chat_id": ctx.chat_id, "lang": ctx.lang}
+    current = {c.name: ctx.camera_states.get(c.name, c.enabled) for c in ctx.snapshot.cameras}
+    if current[camera] == active:
+        return _result(_issue(ctx, "set_camera_active", DONE, camera, dict(detail, already=True)))
+    if not active and sum(1 for on in current.values() if on) <= 1:
+        # The last camera stays on: with none, the box would stop listening to this chat.
+        return _result(_issue(ctx, "set_camera_active", FAILED, camera, detail, "last_camera"))
+    try:
+        changed = ctx.services.set_camera(camera, active) if ctx.services.set_camera else {"error": "unavailable"}
+        _service_result(changed)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Camera change failed: %s", exc)
+        return _result(_issue(ctx, "set_camera_active", FAILED, camera, detail, "error"))
+    if not changed.get("ok") or changed.get("error"):
+        return _result(_issue(ctx, "set_camera_active", FAILED, camera, detail, "error"))
+    ctx.camera_states[camera] = active
+    if ctx.services.request_restart and ctx.services.request_restart not in ctx.after_reply:
+        ctx.after_reply.append(ctx.services.request_restart)
+    return _result(_issue(ctx, "set_camera_active", REQUESTED, camera, detail))
+
+
+@_safe_tool
+def set_alias(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+    camera, bad = _one_camera(ctx, args.get("camera"))
+    if bad:
+        return bad
+    alias = str(args.get("alias") or "").strip()
+    try:
+        ctx.services.add_alias(camera, alias, ctx.snapshot.names)
+    except (ValueError, TypeError) as exc:
+        return _result(_issue(ctx, "set_alias", FAILED, camera, {"camera": camera, "alias": alias}, str(exc)))
+    return _result(_issue(ctx, "set_alias", DONE, camera, {"camera": camera, "alias": alias}))
+
 TOOLS: Dict[str, Callable[[ToolContext, Dict[str, Any]], Dict[str, Any]]] = {
     "find_events": find_events,
     "summarize_period": summarize_period,
     "describe_event": describe_event,
     "assess_event": assess_event,
     "ask_clarification": ask_clarification,
+    "check_camera": check_camera,
+    "record_clip": record_clip,
+    "send_media": send_media,
+    "pause_alerts": pause_alerts,
+    "resume_alerts": resume_alerts,
+    "record_verdict": record_verdict,
+    "set_camera_active": set_camera_active,
+    "set_alias": set_alias,
 }
