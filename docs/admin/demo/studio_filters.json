@@ -52,5 +52,32 @@
     "query": {
       "filter": "paused"
     }
+  },
+  {
+    "key": "needs_labeling",
+    "title": "Needs labeling",
+    "description": "Clips without a submitted or reviewed annotation.",
+    "builtin": true,
+    "query": {
+      "filter": "needs_labeling"
+    }
+  },
+  {
+    "key": "to_review",
+    "title": "Labels to review",
+    "description": "Submitted annotations, and annotations a labeler asked to have reviewed.",
+    "builtin": true,
+    "query": {
+      "filter": "to_review"
+    }
+  },
+  {
+    "key": "rejected",
+    "title": "Labels rejected",
+    "description": "Annotations a reviewer sent back.",
+    "builtin": true,
+    "query": {
+      "filter": "rejected"
+    }
   }
 ]

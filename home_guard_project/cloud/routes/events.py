@@ -37,8 +37,8 @@ from .. import audit, pseudonym, redact
 from .. import studio as studio_logic
 from ..access import may_see_thumbnail
 from ..deps import TEXT_MAX, SessionDep, check_length, current_staff, id_in_range, require_id
-from ..models import (AiRun, Artifact, AuditLog, Camera, Collection, CollectionItem, Customer, Device, Event, Feedback,
-                      IndexProblem, RawRevision, ReviewState, Staff)
+from ..models import (AiRun, AnnotationHead, Artifact, AuditLog, Camera, Collection, CollectionItem, Customer,
+                      Device, Event, Feedback, IndexProblem, RawRevision, ReviewState, Staff)
 from ..s3 import ETagMismatch
 from ..schemas import (AiRunOut, ArtifactOut, Box, DensityOut, DensityRow, DetectionsOut, DispatchOut, EventDetail,
                        AiStatus, EventKind, EventPage, EventSummary, FeedbackOut, FrameBoxes, ReviewCount, ReviewUpdate)
@@ -200,7 +200,7 @@ def _event_select():
 
 def _summary_fields(session: Session, viewer: _Viewer, ev: Event, customer_id: int, customer_name: str,
                     tz: Optional[str], reviewed: Optional[bool], flagged: Optional[bool],
-                    has_thumbnail: bool) -> dict[str, Any]:
+                    has_thumbnail: bool, annotation_status: Optional[str] = None) -> dict[str, Any]:
     completeness = {**_COMPLETENESS_DEFAULT, **(ev.completeness if isinstance(ev.completeness, dict) else {})}
     shown = lambda value: viewer.text(session, ev.device_pk, value)  # noqa: E731
     return dict(
@@ -215,8 +215,16 @@ def _summary_fields(session: Session, viewer: _Viewer, ev: Event, customer_id: i
                         for v in (ev.owner_verdicts or []) if isinstance(v, str)],
         completeness=completeness, reviewed=bool(reviewed), flagged=bool(flagged),
         thumbnail_url=f"/v1/events/{ev.id}/thumbnail" if has_thumbnail else None,
-        timezone=tz or "UTC",
+        timezone=tz or "UTC", annotation_status=annotation_status,
     )
+
+
+def annotation_statuses(session: Session, ids: list[int]) -> dict[int, str]:
+    """Current labeling status (annotation_heads) of the events among `ids` that have a saved annotation."""
+    if not ids:
+        return {}
+    return dict(session.execute(select(AnnotationHead.event_id, AnnotationHead.status)
+                                .where(AnnotationHead.event_id.in_(ids))).all())
 
 
 def _thumbnail_ids(session: Session, viewer: _Viewer, ids: list[int]) -> set[int]:
@@ -241,7 +249,8 @@ def _load_one(session: Session, viewer: _Viewer, event_id: int):
 def _summary_of(session: Session, viewer: _Viewer, row) -> dict[str, Any]:
     ev, cid, name, tz, reviewed, flagged = row
     return _summary_fields(session, viewer, ev, cid, name, tz, reviewed, flagged,
-                           ev.id in _thumbnail_ids(session, viewer, [ev.id]))
+                           ev.id in _thumbnail_ids(session, viewer, [ev.id]),
+                           annotation_statuses(session, [ev.id]).get(ev.id))
 
 
 def _device_id(session: Session, ev: Event) -> Optional[str]:
@@ -363,7 +372,9 @@ def event_page(session: Session, viewer: _Viewer, conds: list, cursor: Optional[
     more = len(rows) > limit
     rows = rows[:limit]
     thumbs = _thumbnail_ids(session, viewer, [r[0].id for r in rows])
-    items = [EventSummary(**_summary_fields(session, viewer, ev, cid, name, tz, rv, fl, ev.id in thumbs))
+    labeled = annotation_statuses(session, [r[0].id for r in rows])
+    items = [EventSummary(**_summary_fields(session, viewer, ev, cid, name, tz, rv, fl, ev.id in thumbs,
+                                            labeled.get(ev.id)))
              for ev, cid, name, tz, rv, fl in rows]
     next_cursor = _encode_cursor(rows[-1][0].start_ts, rows[-1][0].id) if more and rows else None
     return EventPage(items=items, next_cursor=next_cursor, total=total, total_capped=capped)
@@ -755,6 +766,14 @@ def get_detections(event_id: int, request: Request, staff: Staff = Depends(curre
     s3 = request.app.state.s3
     if s3 is None:
         raise HTTPException(status_code=503, detail="Storage is not configured")
+    return DetectionsOut(provenance="sampled", model=SAMPLED_MODEL,
+                         frames=weak_label_frames(session, s3, ev, _now(request), ev.fps))
+
+
+def weak_label_frames(session: Session, s3, ev: Event, now: datetime, fps: Optional[float]) -> list[FrameBoxes]:
+    """The event's sampled YOLO weak labels (COCO ids), one entry per sampled frame in frame order. A frame's time
+    is frame_index / `fps` (else the box's approximate offset, else 0). A label file that cannot be read, was
+    replaced since indexing, or is malformed is a `not_run` frame, never an empty scene."""
     spec, prefix = _sampled_frames(session, session.scalars(select(Artifact).where(Artifact.event_id == ev.id)))
     keys = sorted({prefix + f["label_path"] for f in spec if isinstance(f.get("label_path"), str)})
     labels = {a.s3_key: a for a in session.scalars(select(Artifact).where(
@@ -765,8 +784,8 @@ def get_detections(event_id: int, request: Request, staff: Staff = Depends(curre
         if type(index) is not int or index < 0 or index in frames:
             continue
         offset = f.get("approx_time_offset_sec")
-        if ev.fps and ev.fps > 0:
-            t_sec = index / ev.fps
+        if fps and fps > 0:
+            t_sec = index / fps
         elif isinstance(offset, (int, float)) and not isinstance(offset, bool) and math.isfinite(offset):
             t_sec = float(offset)
         else:
@@ -776,13 +795,13 @@ def get_detections(event_id: int, request: Request, staff: Staff = Depends(curre
         text = _read_label(s3, key, art.etag) if art is not None and art.available else None
         boxes = _boxes(text) if text is not None else None
         if text is not None:
-            _label_problem(session, key, art.etag, _now(request), bad=boxes is None)
+            _label_problem(session, key, art.etag, now, bad=boxes is None)
         if boxes is None:  # unreadable, replaced since indexing, or malformed: never shown as an empty scene
             frames[index] = FrameBoxes(frame_index=index, t_sec=t_sec, status="not_run", boxes=[])
             continue
         frames[index] = FrameBoxes(frame_index=index, t_sec=t_sec, status="ran" if boxes else "ran_empty",
                                    boxes=boxes)
-    return DetectionsOut(provenance="sampled", model=SAMPLED_MODEL, frames=[frames[i] for i in sorted(frames)])
+    return [frames[i] for i in sorted(frames)]
 
 
 # ---------------------------------------------------------------- review

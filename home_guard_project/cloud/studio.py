@@ -33,7 +33,7 @@ from home_guard_project.fleet_contract.classes import COCO_NAMES, CONTIGUOUS
 from home_guard_project.fleet_contract.yolo_labels import parse_label
 
 from . import pseudonym, redact
-from .models import (AiRun, Artifact, CollectionItem, Customer, Device, Event, Export, Feedback,
+from .models import (AiRun, AnnotationHead, Artifact, CollectionItem, Customer, Device, Event, Export, Feedback,
                      RawRevision, Staff)
 from .s3 import ETagMismatch
 from .schemas import EventKind, ExportExclusion, ExportRequest, SavedFilter
@@ -57,6 +57,13 @@ def max_class_conf():
 
 
 LOW_CONF = 0.45
+LABEL_DONE = ("submitted", "reviewed")  # a clip counts as labeled once its current annotation is one of these
+
+
+def _head_where(*conds):
+    """Condition over Event: its current annotation (annotation_heads) matches `conds`."""
+    return Event.id.in_(select(AnnotationHead.event_id).where(*conds))
+
 
 # key -> (title, description, SQL condition over Event)
 _BUILTINS: dict[str, tuple[str, str, Callable[[], Any]]] = {
@@ -75,6 +82,14 @@ _BUILTINS: dict[str, tuple[str, str, Callable[[], Any]]] = {
                  lambda: max_class_conf() < LOW_CONF),
     "paused": ("Paused-camera footage", "Clips recorded while the camera's alerts were paused.",
                lambda: Event.kind == "paused"),
+    "needs_labeling": ("Needs labeling", "Clips without a submitted or reviewed annotation.",
+                       lambda: ~_head_where(AnnotationHead.status.in_(LABEL_DONE))),
+    "to_review": ("Labels to review", "Submitted annotations, and annotations a labeler asked to have reviewed.",
+                  lambda: _head_where(or_(AnnotationHead.status == "submitted",
+                                          and_(AnnotationHead.needs_review.is_(True),
+                                               AnnotationHead.status.notin_(("reviewed", "rejected")))))),
+    "rejected": ("Labels rejected", "Annotations a reviewer sent back.",
+                 lambda: _head_where(AnnotationHead.status == "rejected")),
 }
 
 BUILTIN_FILTERS: list[SavedFilter] = [

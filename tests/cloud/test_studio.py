@@ -96,10 +96,11 @@ def test_builtin_filters_listed_for_every_role(client, staff_factory):
         assert r.status_code == 200, r.text
         body = r.json()
         assert [f["key"] for f in body] == ["false_alarm", "ai_dismissed_person", "ai_failed", "real_but_wrong",
-                                            "low_conf", "paused"]
+                                            "low_conf", "paused", "needs_labeling", "to_review", "rejected"]
         assert [f["title"] for f in body] == [
             "Owner said false alarm", "AI dismissed, YOLO saw a person", "AI call failed or fell back",
-            "Owner said real but wrong", "Low detector confidence", "Paused-camera footage"]
+            "Owner said real but wrong", "Low detector confidence", "Paused-camera footage", "Needs labeling",
+            "Labels to review", "Labels rejected"]
         assert all(f["builtin"] and f["query"] == {"filter": f["key"]} and f["description"] for f in body)
     assert client.get("/v1/studio/filters").status_code == 401
 
