@@ -1,0 +1,42 @@
+{
+  "id": 2,
+  "name": "Noa Haddad",
+  "timezone": "Asia/Jerusalem",
+  "consent_live": false,
+  "consent_recordings": true,
+  "consent_training": true,
+  "notes": "Contact the owner before arranging live access.",
+  "devices": [
+    {
+      "device_id": "hg-olive-01",
+      "site": "olive_house",
+      "customer_id": 2,
+      "customer_name": "Noa Haddad",
+      "verdict": "warning",
+      "reasons": [
+        {
+          "code": "camera_quiet",
+          "message": "Front side camera quiet for 26 h",
+          "severity": "warning"
+        },
+        {
+          "code": "upload_backlog",
+          "message": "12 clips waiting to upload",
+          "severity": "warning"
+        }
+      ],
+      "last_seen_utc": "2026-10-03T11:56:00Z",
+      "mode": "inference",
+      "host": "hg-olive-01",
+      "cameras_total": 6,
+      "cameras_stale": 1,
+      "disk_free_gb": 78.2,
+      "collector_running": true,
+      "stopped": false,
+      "newest_clip_utc": "2026-10-03T11:49:00Z",
+      "events_24h": 216,
+      "alerts_24h": 8,
+      "false_alarms_7d": 4
+    }
+  ]
+}

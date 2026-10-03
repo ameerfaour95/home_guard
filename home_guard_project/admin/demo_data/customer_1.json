@@ -1,0 +1,68 @@
+{
+  "id": 1,
+  "name": "Daniel Levi",
+  "timezone": "Asia/Jerusalem",
+  "consent_live": true,
+  "consent_recordings": true,
+  "consent_training": true,
+  "notes": "Main residence and detached guest house.",
+  "devices": [
+    {
+      "device_id": "hg-cedar-01",
+      "site": "cedar_house",
+      "customer_id": 1,
+      "customer_name": "Daniel Levi",
+      "verdict": "healthy",
+      "reasons": [
+        {
+          "code": "reporting",
+          "message": "All cameras reporting normally",
+          "severity": "healthy"
+        }
+      ],
+      "last_seen_utc": "2026-10-03T11:59:00Z",
+      "mode": "inference",
+      "host": "hg-cedar-01",
+      "cameras_total": 4,
+      "cameras_stale": 0,
+      "disk_free_gb": 182.6,
+      "collector_running": true,
+      "stopped": false,
+      "newest_clip_utc": "2026-10-03T11:56:00Z",
+      "events_24h": 148,
+      "alerts_24h": 3,
+      "false_alarms_7d": 1
+    },
+    {
+      "device_id": "hg-cedar-02",
+      "site": "cedar_guest_house",
+      "customer_id": 1,
+      "customer_name": "Daniel Levi",
+      "verdict": "offline",
+      "reasons": [
+        {
+          "code": "heartbeat_missing",
+          "message": "Last heard 3 h ago",
+          "severity": "offline"
+        },
+        {
+          "code": "status_unconfirmed",
+          "message": "Camera and collector status cannot be confirmed",
+          "severity": "unknown"
+        }
+      ],
+      "last_seen_utc": "2026-10-03T09:00:00Z",
+      "mode": "data_collection",
+      "host": "hg-cedar-02",
+      "cameras_total": 2,
+      "cameras_stale": 2,
+      "disk_free_gb": null,
+      "collector_running": null,
+      "stopped": null,
+      "newest_clip_utc": "2026-10-03T08:52:00Z",
+      "events_24h": 42,
+      "alerts_24h": 0,
+      "false_alarms_7d": 0
+    }
+  ]
+}

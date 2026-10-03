@@ -1,0 +1,42 @@
+{
+  "id": 3,
+  "name": "Eli Rosen",
+  "timezone": "Asia/Jerusalem",
+  "consent_live": true,
+  "consent_recordings": true,
+  "consent_training": false,
+  "notes": "Training consent has not been granted.",
+  "devices": [
+    {
+      "device_id": "hg-pine-01",
+      "site": "pine_residence",
+      "customer_id": 3,
+      "customer_name": "Eli Rosen",
+      "verdict": "critical",
+      "reasons": [
+        {
+          "code": "disk_low",
+          "message": "Disk 14 GB free",
+          "severity": "critical"
+        },
+        {
+          "code": "camera_quiet",
+          "message": "Driveway camera quiet for 8 h",
+          "severity": "warning"
+        }
+      ],
+      "last_seen_utc": "2026-10-03T11:58:00Z",
+      "mode": "inference",
+      "host": "hg-pine-01",
+      "cameras_total": 5,
+      "cameras_stale": 1,
+      "disk_free_gb": 14.0,
+      "collector_running": true,
+      "stopped": false,
+      "newest_clip_utc": "2026-10-03T11:42:00Z",
+      "events_24h": 184,
+      "alerts_24h": 6,
+      "false_alarms_7d": 2
+    }
+  ]
+}

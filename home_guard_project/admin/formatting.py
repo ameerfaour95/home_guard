@@ -1,0 +1,67 @@
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+
+def utcnow():
+    return datetime.now(timezone.utc)
+
+
+def age(value, now=None):
+    if value is None:
+        return 'Not reported'
+    seconds = max(0, int(((now or utcnow()) - value).total_seconds()))
+    if seconds < 60:
+        return 'Just now'
+    if seconds < 3600:
+        return f'{seconds // 60} min ago'
+    if seconds < 86400:
+        return f'{seconds // 3600} h ago'
+    return f'{seconds // 86400} d ago'
+
+
+def local_time(value, zone):
+    if value is None:
+        return 'Not reported'
+    try:
+        tz = ZoneInfo(zone)
+    except ZoneInfoNotFoundError:
+        tz = timezone.utc
+    return value.astimezone(tz).strftime('%d %b %Y, %H:%M %Z')
+
+
+def site_name(site):
+    return site.replace('_', ' ').title()
+
+
+def mode_name(mode):
+    return {'inference': 'Security', 'data_collection': 'Data collection'}.get(mode, mode or 'Not reported')
+
+
+def humanise(value):
+    text = str(value or '').replace('_', ' ')
+    return text[:1].upper()+text[1:]
+
+
+def export_warning(value):
+    import re
+    words = {'vlm':'VLM', 'yolo':'YOLO', 'train':'training', 'val':'validation', 'site+day':'household/day'}
+    return re.sub(r'\b(?:vlm|yolo|train|val|site\+day)\b', lambda match:words[match[0]], value)
+
+
+def camera_name(value, display_name=None):
+    raw = value if isinstance(value, str) else value.camera
+    if raw.startswith('cam-'):
+        return raw
+    if '/' in raw and not display_name:
+        site, camera = raw.split('/', 1)
+        return f'{humanise(site)} / {humanise(camera)}'
+    return display_name or getattr(value, 'display_name', None) or humanise(raw)
+
+
+def delivery_text(dispatch):
+    if not dispatch or dispatch.sent is None:
+        return 'Delivery not recorded'
+    if dispatch.sent:
+        return 'Sent to the owner on Telegram'
+    reason = dispatch.detail.get('reason') or dispatch.detail.get('error') or 'Reason not recorded'
+    return f'Not delivered ({humanise(reason)})'

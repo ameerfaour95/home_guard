@@ -1,0 +1,5 @@
+{
+  "summary": "A visitor walked past the front door without stopping.",
+  "alert_command": "[none]",
+  "confidence": 0.93
+}

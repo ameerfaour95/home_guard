@@ -60,6 +60,15 @@ torchvision = [
 ]
 
 [dependency-groups]
+admin = [
+    "pyside6-addons>=6.11.2",
+    "opencv-python==4.11.0.86",
+    "httpx>=0.28,<1",
+    "pyinstaller>=6.16,<7",
+    "pyside6-essentials>=6.11.2",
+    "pytest>=8,<10",
+    "tzdata>=2025.2",
+]
 cloud = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
@@ -71,10 +80,11 @@ cloud = [
     "pyotp>=2.9",
     "pyjwt>=2.9",
     "httpx>=0.27",
-    "moto[s3]>=5.0",
+    "moto[s3,server]>=5.0",
     "pgserver>=0.1.4",
     "pytest>=8",
 ]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+markers = ["integration: opt-in tests against local Cloud and moto services"]
