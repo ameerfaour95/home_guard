@@ -35,9 +35,11 @@ from config import COCO_NAMES, Config, load_config
 if __package__:
     from .detector import load_detector
     from .zones import ZoneMask, mask_for   # package mode (the preview test loads this file under the package)
+    from . import vlm_crop                  # the crop, shared with inference
 else:
     from detector import load_detector
     from zones import ZoneMask, mask_for    # script mode: run_collector.sh puts this dir on sys.path
+    import vlm_crop
 
 log = logging.getLogger(__name__)
 
@@ -152,91 +154,10 @@ def _norm_polygon_to_px(
 # Trigger-class crop helpers (for VLM main-stream clips)
 # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-def _scale_boxes(
-    boxes: Any,
-    trigger_class_ids: List[int],
-    src_h: int, src_w: int,
-    dst_h: int, dst_w: int,
-) -> List[Tuple[float, float, float, float]]:
-    """Extract trigger-class xyxy boxes and scale from src to dst resolution."""
-    if boxes is None or len(boxes) == 0:
-        return []
-    id_set = set(trigger_class_ids)
-    sx = dst_w / max(1, src_w)
-    sy = dst_h / max(1, src_h)
-    scaled: List[Tuple[float, float, float, float]] = []
-    for b in boxes:
-        cid = int(b.cls.item()) if hasattr(b.cls, "item") else int(b.cls)
-        if cid not in id_set:
-            continue
-        x1, y1, x2, y2 = b.xyxy[0].tolist()
-        scaled.append((x1 * sx, y1 * sy, x2 * sx, y2 * sy))
-    return scaled
-
-
-def _compute_trigger_crop(
-    boxes_xyxy: List[Tuple[float, float, float, float]],
-    frame_h: int,
-    frame_w: int,
-    padding: float = 0.3,
-    min_size: int = 384,
-) -> Optional[Tuple[int, int, int, int]]:
-    """
-    Compute a square crop region around the union of trigger-class bboxes.
-
-    Returns (x1, y1, x2, y2) in pixel coordinates, or None if no boxes.
-    """
-    if not boxes_xyxy:
-        return None
-
-    ux1 = min(b[0] for b in boxes_xyxy)
-    uy1 = min(b[1] for b in boxes_xyxy)
-    ux2 = max(b[2] for b in boxes_xyxy)
-    uy2 = max(b[3] for b in boxes_xyxy)
-
-    bw = ux2 - ux1
-    bh = uy2 - uy1
-    pad_x = bw * padding
-    pad_y = bh * padding
-
-    cx1 = ux1 - pad_x
-    cy1 = uy1 - pad_y
-    cx2 = ux2 + pad_x
-    cy2 = uy2 + pad_y
-
-    cw = cx2 - cx1
-    ch = cy2 - cy1
-    side = max(cw, ch, float(min_size))
-
-    center_x = (cx1 + cx2) / 2.0
-    center_y = (cy1 + cy2) / 2.0
-
-    cx1 = center_x - side / 2.0
-    cy1 = center_y - side / 2.0
-    cx2 = center_x + side / 2.0
-    cy2 = center_y + side / 2.0
-
-    if cx1 < 0:
-        cx2 -= cx1
-        cx1 = 0
-    if cy1 < 0:
-        cy2 -= cy1
-        cy1 = 0
-    if cx2 > frame_w:
-        cx1 -= (cx2 - frame_w)
-        cx2 = frame_w
-    if cy2 > frame_h:
-        cy1 -= (cy2 - frame_h)
-        cy2 = frame_h
-
-    cx1 = max(0, int(cx1))
-    cy1 = max(0, int(cy1))
-    cx2 = min(frame_w, int(cx2))
-    cy2 = min(frame_h, int(cy2))
-
-    if cx2 - cx1 < 2 or cy2 - cy1 < 2:
-        return None
-    return (cx1, cy1, cx2, cy2)
+# The crop helpers live in vlm_crop.py, shared with inference (the AI sees this exact crop).
+_scale_boxes = vlm_crop.scale_boxes
+_compute_trigger_crop = vlm_crop.compute_trigger_crop
+_smooth_crops = vlm_crop.smooth_crops
 
 
 def _smooth_crops(
@@ -922,126 +843,13 @@ def _save_vlm_crop_clip(
         return None
 
     main_frames, m_start, m_end, m_fps = main_clip_data
-    if len(main_frames) < 2:
-        log.warning("[%s] main-stream had too few frames for VLM crop", st.name)
+    settings = vlm_crop.settings_from_config(cfg)
+    result = vlm_crop.crop_clip(detector, settings, sub_frames, sub_start_ts, sub_end_ts,
+                                main_frames, m_start, name=st.name)
+    if result is None:
         return None
-
-    mh, mw = main_frames[0].shape[:2]
-
-    # --- Align sub-stream frames to the main-stream time window ------------
-    # The main-stream may cover a shorter (or equal) window than the sub-
-    # stream.  Only use the sub-stream frames whose interpolated timestamps
-    # fall within [m_start, m_end] so the crop matches what is actually
-    # visible in the main-stream footage.
-    sub_dur = sub_end_ts - sub_start_ts
-    if sub_dur > 0 and m_start > sub_start_ts:
-        overlap_ratio = (m_start - sub_start_ts) / sub_dur
-        skip = int(overlap_ratio * len(sub_frames))
-        aligned_sub = sub_frames[skip:]
-    else:
-        aligned_sub = sub_frames
-    if not aligned_sub:
-        aligned_sub = sub_frames
-
-    # --- Sampled detection â†’ interpolate â†’ EMA smooth -----------------------
-    # Run YOLO on ~2 fps worth of sub-stream frames (not every frame) to
-    # keep processing fast for the live pipeline.  Crops for intermediate
-    # frames are linearly interpolated, then the whole sequence is
-    # EMA-smoothed for temporal stability.
-    n_sub = len(aligned_sub)
-    n_main = len(main_frames)
-
-    sample_step = max(1, int(round(cfg.STORE_FPS / 2.0)))
-    sampled_crops: Dict[int, Tuple[int, int, int, int]] = {}
-
-    for i in range(0, n_sub, sample_step):
-        sf = aligned_sub[i]
-        if sf is None:
-            continue
-        sh, sw = sf.shape[:2]
-        results = detector(
-            sf, verbose=False,
-            conf=cfg.YOLO_TRIGGER_CONF,
-            imgsz=cfg.YOLO_IMGSZ,
-        )
-        scaled = _scale_boxes(
-            results[0].boxes, cfg.TRIGGER_CLASS_IDS,
-            src_h=sh, src_w=sw, dst_h=mh, dst_w=mw,
-        )
-        crop = _compute_trigger_crop(
-            scaled, mh, mw,
-            padding=cfg.CROP_PADDING,
-            min_size=cfg.CROP_MIN_SIZE,
-        )
-        if crop is not None:
-            sampled_crops[i] = crop
-
-    if not sampled_crops:
-        log.warning("[%s] no trigger-class detections for VLM crop", st.name)
-        return None
-
-    # Linear interpolation to fill every sub-stream frame
-    sorted_keys = sorted(sampled_crops.keys())
-    raw_crops: List[Optional[Tuple[int, int, int, int]]] = []
-    for i in range(n_sub):
-        if i in sampled_crops:
-            raw_crops.append(sampled_crops[i])
-            continue
-        prev_k = max((k for k in sorted_keys if k <= i), default=None)
-        next_k = min((k for k in sorted_keys if k >= i), default=None)
-        if prev_k is not None and next_k is not None and prev_k != next_k:
-            t = (i - prev_k) / (next_k - prev_k)
-            a, b = sampled_crops[prev_k], sampled_crops[next_k]
-            raw_crops.append((
-                int(a[0] + t * (b[0] - a[0])),
-                int(a[1] + t * (b[1] - a[1])),
-                int(a[2] + t * (b[2] - a[2])),
-                int(a[3] + t * (b[3] - a[3])),
-            ))
-        elif prev_k is not None:
-            raw_crops.append(sampled_crops[prev_k])
-        elif next_k is not None:
-            raw_crops.append(sampled_crops[next_k])
-        else:
-            raw_crops.append(None)
-
-    smoothed_sub = _smooth_crops(raw_crops, alpha=cfg.CROP_EMA_ALPHA)
-
-    # Map sub-stream crops to main-stream frame count
-    smoothed_main: List[Optional[Tuple[int, int, int, int]]] = []
-    for mi in range(n_main):
-        si = min(int(mi * n_sub / max(1, n_main)), n_sub - 1)
-        smoothed_main.append(smoothed_sub[si])
-
-    # Uniform output size from the median of smoothed crop dimensions
-    valid_sizes = [
-        (c[2] - c[0], c[3] - c[1])
-        for c in smoothed_main if c is not None
-    ]
-    if not valid_sizes:
-        log.warning("[%s] no usable smoothed crops for VLM clip", st.name)
-        return None
-    valid_sizes.sort()
-    median_w, median_h = valid_sizes[len(valid_sizes) // 2]
-    if median_w < 2 or median_h < 2:
-        return None
-
-    # --- Crop each main-stream frame with its own smoothed region -----------
-    cropped_frames: List[np.ndarray] = []
-    for frame, crop in zip(main_frames, smoothed_main):
-        if crop is None:
-            continue
-        x1, y1, x2, y2 = crop
-        cropped = frame[y1:y2, x1:x2]
-        if cropped.size == 0:
-            continue
-        if cropped.shape[1] != median_w or cropped.shape[0] != median_h:
-            cropped = cv2.resize(cropped, (median_w, median_h))
-        cropped_frames.append(cropped)
-
-    if len(cropped_frames) < 2:
-        log.warning("[%s] no usable cropped frames for VLM clip", st.name)
-        return None
+    cropped_frames = result.frames
+    median_w, median_h = result.width, result.height
 
     vlm_dir = os.path.join(cfg.OUT_DIR, "vlm_crops", st.name, day)
     os.makedirs(vlm_dir, exist_ok=True)
@@ -1049,24 +857,10 @@ def _save_vlm_crop_clip(
     vlm_mp4 = os.path.join(vlm_dir, f"{clip_id}.mp4")
     shutil.move(tmp, vlm_mp4)
 
-    first_crop = next(c for c in smoothed_main if c is not None)
-    x1, y1, x2, y2 = first_crop
-
     log.info("[%s] VLM crop saved: %s (%dx%d, %d frames, per-frame tracking)",
              st.name, vlm_mp4, median_w, median_h, len(cropped_frames))
 
-    return {
-        "enabled": True,
-        "vlm_crop_path": os.path.relpath(vlm_mp4, start=cfg.OUT_DIR),
-        "crop_padding": cfg.CROP_PADDING,
-        "crop_min_size": cfg.CROP_MIN_SIZE,
-        "source_resolution": [mw, mh],
-        "crop_region": [x1, y1, x2, y2],
-        "crop_resolution": [median_w, median_h],
-        "frames_written": len(cropped_frames),
-        "fps": float(m_fps),
-        "per_frame_tracking": True,
-    }
+    return vlm_crop.crop_meta(result, settings, os.path.relpath(vlm_mp4, start=cfg.OUT_DIR), m_fps)
 
 
 def _save_clip(
