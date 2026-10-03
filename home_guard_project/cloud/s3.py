@@ -68,6 +68,14 @@ class S3:
         return self.client.generate_presigned_url(
             "get_object", Params={"Bucket": self.bucket, "Key": key}, ExpiresIn=ttl)
 
+    def download_file(self, key: str, path) -> None:
+        self.client.download_file(self.bucket, key, str(path))
+
+    def upload_file(self, path, key: str, content_type: str) -> None:
+        if not key.startswith(WRITABLE_PREFIXES):
+            raise ValueError(f"refusing to write outside {WRITABLE_PREFIXES}: {key}")
+        self.client.upload_file(str(path), self.bucket, key, ExtraArgs={"ContentType": content_type})
+
     def exists(self, key: str) -> bool:
         from botocore.exceptions import ClientError
 
