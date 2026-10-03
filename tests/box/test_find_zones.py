@@ -70,6 +70,62 @@ class ZoneCommandsTest(unittest.TestCase):
         self.assertEqual(set(z.load_zones(self.zones)), {"yard"})
 
 
+
+URL_A = "rtsp://admin:s3cret@192.168.1.51:554/unicast/c1/s0/live"
+URL_B = "rtsp://admin:s3cret@192.168.1.52:554/unicast/c1/s0/live"
+URL_C = "rtsp://admin:s3cret@192.168.1.53:554/unicast/c1/s0/live"
+ZA = [(0.0, 0.0), (0.4, 0.0), (0.4, 1.0)]
+ZB = [(0.6, 0.0), (1.0, 0.0), (1.0, 1.0)]
+
+
+class RenameKeepsZonesOnTheirCameraTest(unittest.TestCase):
+    """Each zone belongs to a physical camera (its URL); renames must not move it to another."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.cameras = os.path.join(self.tmp.name, "cameras.yaml")
+        self.zones = os.path.join(self.tmp.name, "zones.yaml")
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _zone_by_url(self) -> dict:
+        cams = fc._read_cameras_raw(self.cameras)
+        names = {**(cams.get("disabled") or {}), **(cams.get("cameras") or {})}
+        zones = z.load_zones(self.zones)
+        return {url: zones.get(name) for name, url in names.items()}
+
+    def _rename(self, pairs) -> None:
+        fc.apply_changes({"cameras": [{"name": o, "new_name": n, "enabled": True} for o, n in pairs]},
+                         self.cameras, zones_path=self.zones, restart=False)
+
+    def test_swapping_two_camera_names_keeps_each_zone_on_its_camera(self) -> None:
+        fc._write_cameras({"front": URL_A, "back": URL_B}, {}, self.cameras)
+        z.save_zones({"front": ZA, "back": ZB}, self.zones)
+        self._rename([("front", "back"), ("back", "front")])
+        self.assertEqual(self._zone_by_url(), {URL_A: ZA, URL_B: ZB})
+        self.assertEqual(z.load_zones(self.zones), {"back": ZA, "front": ZB})
+
+    def test_a_chain_of_renames_keeps_each_zone_on_its_camera(self) -> None:
+        fc._write_cameras({"a": URL_A, "b": URL_B}, {}, self.cameras)
+        z.save_zones({"a": ZA, "b": ZB}, self.zones)
+        self._rename([("a", "b"), ("b", "c")])
+        self.assertEqual(self._zone_by_url(), {URL_A: ZA, URL_B: ZB})
+
+    def test_a_camera_without_a_zone_does_not_inherit_one_by_taking_a_name(self) -> None:
+        fc._write_cameras({"a": URL_A, "b": URL_B, "c": URL_C}, {}, self.cameras)
+        z.save_zones({"b": ZB}, self.zones)
+        self._rename([("a", "b"), ("b", "c"), ("c", "a")])
+        self.assertEqual(self._zone_by_url(), {URL_A: None, URL_B: ZB, URL_C: None})
+
+    def test_a_failed_cameras_write_leaves_every_camera_masked(self) -> None:
+        fc._write_cameras({"front": URL_A}, {}, self.cameras)
+        z.save_zones({"front": ZA}, self.zones)
+        with mock.patch.object(fc, "_write_cameras", side_effect=OSError("disk full")),                 self.assertRaises(OSError):
+            self._rename([("front", "porch")])
+        self.assertEqual(z.load_zones(self.zones), {"front": ZA, "porch": ZA})   # old and new names both covered
+
+
 class ZoneCliFailureTest(unittest.TestCase):
     def test_an_unexpected_failure_still_prints_a_json_error(self) -> None:
         argv = ["find_cameras", "--json", "set-zone", "--camera", "yard", "--points", "0,0;1,0;1,1"]
