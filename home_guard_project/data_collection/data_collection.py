@@ -33,9 +33,9 @@ from ultralytics import YOLO
 
 from config import COCO_NAMES, Config, load_config
 try:
-    from zones import ZoneMask, mask_for
-except ModuleNotFoundError:   # loaded by file path with only `config` aliased (the preview test)
-    from home_guard_project.data_collection.zones import ZoneMask, mask_for
+    from .zones import ZoneMask, mask_for   # package mode (the preview test loads this file under the package)
+except ImportError:
+    from zones import ZoneMask, mask_for    # script mode: run_collector.sh puts this dir on sys.path
 
 log = logging.getLogger(__name__)
 

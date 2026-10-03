@@ -173,7 +173,10 @@ def _parse_size(raw: Any) -> Optional[Tuple[int, int]]:
 
 def _load_zones(path: str) -> Dict[str, List[Tuple[float, float]]]:
     """Load the watch zones (normalised polygons) from zones.yaml; see zones.py."""
-    from .zones import load_zones  # noqa: PLC0415
+    try:
+        from .zones import load_zones  # noqa: PLC0415 - package mode (inference, tests)
+    except ImportError:
+        from zones import load_zones  # noqa: PLC0415 - script mode: run_collector.sh puts this dir on sys.path
 
     return load_zones(path)
 
