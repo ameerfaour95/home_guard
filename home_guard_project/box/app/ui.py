@@ -170,7 +170,7 @@ class CameraTile(QFrame):
                 p.fillRect(area,QColor(0,0,0,165))
             p.drawPixmap(QRectF(x,y,w,h),self.picture,QRectF(self.picture.rect()))
             if reconnecting: p.fillRect(area, QColor(0,0,0,110))
-            if not self.off and not self.stopped and self.show_detections:
+            if not self.off and not self.stopped and not reconnecting and self.show_detections:
                 p.setOpacity(self.box_opacity)
                 p.setFont(QFont("Segoe UI",11))
                 for detection in self.detections:
@@ -200,9 +200,12 @@ class CameraTile(QFrame):
                 footer=QRectF(area.left()+12,area.bottom()-66,area.width()-24,56)
                 gradient=QLinearGradient(0,area.bottom()-area.height()*.45,0,area.bottom());gradient.setColorAt(0,QColor(0,0,0,0));gradient.setColorAt(1,QColor(0,0,0,225))
                 p.fillRect(QRectF(area.left(),area.bottom()-area.height()*.45,area.width(),area.height()*.45),gradient)
-            p.setPen(QColor('#edf4f6'));p.drawText(footer.adjusted(12,0,-72,-28),Qt.AlignmentFlag.AlignVCenter,self.caption.text())
+            p.setPen(QColor('#edf4f6'));p.drawText(footer.adjusted(12,0,-12,-28),Qt.AlignmentFlag.AlignVCenter,self.caption.text())
             p.setFont(QFont('Segoe UI',10));p.setPen(QColor('#bfccd3'))
             note=p.fontMetrics().elidedText(self.detector_note.text(),Qt.TextElideMode.ElideRight,max(1,int(footer.width()-24)))
+            if reconnecting:
+                from .liveness import relative_time
+                note="Last frame "+relative_time(self.frame_stamp,time.time())
             p.drawText(footer.adjusted(12,28,-12,0),Qt.AlignmentFlag.AlignVCenter,note)
         else:
             if not self.off and not self.stopped:
@@ -589,17 +592,22 @@ class Window(QMainWindow):
                    and not self.box_controls.is_stopped())
         hero = getattr(self, "expanded_tile", None)
         self.live_transport.demand([t.name for t in self.tiles if not t.off],
-                                   hero.name if hero else None, visible)
+                                   hero.name if hero else None, visible, self.viewer_settings.detections)
 
     def receive_frames(self, frames):
         for tile in self.tiles:
             if tile.name in frames and not tile.off:
-                image, stamp = frames[tile.name]
+                image, stamp, *overlay = frames[tile.name]
+                if overlay and overlay[0] is not None:
+                    tile.detections=overlay[0]
+                    tile.tracked_stamp=self.ai_data.get("cameras",{}).get(tile.name,{}).get("ts")
                 tile.update_picture(QPixmap.fromImage(image), stamp)
 
     def receive_status(self, packet):
         if "images" in packet: self.ai_panel.receive_images(packet["images"])
-        if "overview" in packet:
+        overview={key:packet.get("overview",{}).get(key) for key in ("box","settings","cameras")}
+        if "overview" in packet and overview!=getattr(self,"remote_overview",None):
+            self.remote_overview=overview
             data=packet["overview"];box=data.get("box",{});settings=data.get("settings",{})
             cameras=data.get("cameras",{});active=cameras.get("active",[]);disabled=cameras.get("disabled",[])
             from .box_controls import Settings
@@ -609,7 +617,10 @@ class Window(QMainWindow):
                 mode=settings.get("mode") or "inference",collecting=not self.box_controls._stopped,
                 cameras=list(dict.fromkeys(active+disabled)),disabled=disabled),
                 settings.get("show_cameras") is not False,[])
-        if "status" in packet: self.ai_data = packet["status"]
+        if "status" in packet:
+            self.ai_data = packet["status"]
+            self.box_controls.live_status = self.ai_data
+            if hasattr(self,"settings_page"): self.settings_page.check_applied()
         if "chat" in packet: self.chat_data = packet["chat"]
         self.update_detector()
 
@@ -677,7 +688,10 @@ class Window(QMainWindow):
             tile.detection_labels=self.viewer_settings.detection_labels
             tile.detector_enabled=inference
             tile.detector_note.hide()
-            tile.detections,text=camera_view(self.ai_data,tile.name,now,stopped or tile.off)
+            observations,text=camera_view(self.ai_data,tile.name,now,stopped or tile.off)
+            detection_stamp=self.ai_data.get("cameras",{}).get(tile.name,{}).get("ts")
+            if not observations or getattr(tile,"tracked_stamp",None)!=detection_stamp:
+                tile.detections=observations
             if tile.off: text="Off"
             tile.detector_note.setToolTip(text)
             if not tile.hero: text=tile.detector_note.fontMetrics().elidedText(text,Qt.TextElideMode.ElideRight,max(120,tile.width()-48))
@@ -782,6 +796,7 @@ class Window(QMainWindow):
             }[message]
             self.message_hint.setText(tr(hint,address=self.last_box_address or tr("no_known_address")) if hint else "")
             self.message_action.setVisible(message in ("no_cameras","box_unreachable"))
+            self.message_action.setEnabled(not self.remote_target)
             self.message_icon.setVisible(message in ("no_cameras","box_unreachable"))
             self.message_action.setText(tr("retry_setup_action" if message=="box_unreachable" else "find_cameras_action"))
             return
@@ -801,6 +816,7 @@ class Window(QMainWindow):
         for tile in self.tiles:
             tile.off=tile.name in state.disabled
             tile.turn_on.setVisible(tile.off)
+            tile.turn_on.setEnabled(not self.remote_target)
             tile.stopped = stopped
             tile.update_picture(tile.picture)
             if stopped: tile.update_picture(None)
@@ -827,6 +843,7 @@ class Window(QMainWindow):
         self.update_detector()
         for tile in self.tiles:
             tile.show_detections=self.viewer_settings.detections;tile.detection_labels=self.viewer_settings.detection_labels;tile.update()
+        self.update_demand()
 
     def stage_action(self):
         if self.box_unreachable:

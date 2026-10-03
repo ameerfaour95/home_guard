@@ -6,11 +6,13 @@ from pathlib import Path
 import subprocess
 import re
 import time
-import urllib.request
-from urllib.parse import quote
+import http.client
+from urllib.parse import quote, urlsplit
 from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot, Qt
 from PySide6.QtGui import QImage
 from .remote_cameras import target_user
+
+BASE_URL="http://127.0.0.1:8765/"
 
 
 def tunnel_command(target):
@@ -29,6 +31,9 @@ class _RemoteReader(QObject):
         self.jobs={};self.due={};self.versions={};self.pending={};self.inflight=False
         self.process=None
         self.image_names=[]
+        self.overlays=False;self.ai_data={}
+        from .live_tracking import OverlayTracker
+        self.tracker=OverlayTracker()
 
     @Slot()
     def start(self):
@@ -46,23 +51,32 @@ class _RemoteReader(QObject):
 
     @Slot(object)
     def demand(self,request):
-        self.names,self.hero,self.visible=request
+        self.names,self.hero,self.visible,self.overlays=request
         self.due["viewer"]=0
 
     def fetch(self,key,request=None):
         path = ("preview/"+quote(key[6:],safe="")+".jpg") if key.startswith("frame:") else ("chat_images/"+quote(key[6:],safe="")) if key.startswith("image:") else "chat?limit=200" if key=="chat" else key
-        url="http://127.0.0.1:8765/"+path
-        req=urllib.request.Request(url,data=json.dumps(request).encode() if request is not None else None,
-                                   headers={"Content-Type":"application/json"})
-        # Bypass corporate proxies for the SSH loopback only.
-        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req,timeout=2) as response:
+        url=BASE_URL+path
+        endpoint=urlsplit(url)
+        connection=http.client.HTTPConnection(endpoint.hostname,endpoint.port,timeout=2)
+        requested=time.time()
+        try:
+            connection.request("POST" if request is not None else "GET",endpoint.path+("?"+endpoint.query if endpoint.query else ""),
+                body=json.dumps(request).encode() if request is not None else None,headers={"Content-Type":"application/json"})
+            response=connection.getresponse()
+            if response.status!=200: raise OSError("Remote resource unavailable")
             data=response.read(8*1024*1024+1)
             if len(data)>8*1024*1024: raise ValueError("Oversized reply")
             version=(response.headers.get("X-Modified"),hashlib.sha256(data).digest())
+            age=max(0,float(response.headers.get("X-Server-Time",requested))-float(response.headers.get("X-Modified",requested)))
+        finally: connection.close()
         if key.startswith(("frame:","image:")):
             image=QImage.fromData(data)
             if image.isNull(): raise ValueError("Invalid frame")
-            return version,(image,time.time()) if key.startswith("frame:") else image
+            if key.startswith("frame:"):
+                objects=self.tracker.update(key[6:],image,self.ai_data,time.time()) if self.overlays else None
+                return version,(image,requested-age,objects)
+            return version,image
         return version,json.loads(data)
 
     @Slot()
@@ -79,14 +93,18 @@ class _RemoteReader(QObject):
                 if self.versions.get(key)!=version:
                     self.versions[key]=version
                     if key!="viewer": self.pending[key]=data
+                    if key=="status": self.ai_data=data.get("ai",{})
                     if key=="chat":
                         self.image_names=list(dict.fromkeys(row.get("image","") for row in data
                             if isinstance(row,dict) and re.fullmatch(r"[A-Za-z0-9_-]+\.jpe?g",str(row.get("image","")),re.I)))[-32:]
-            except (OSError,ValueError):
+                        for old in list(self.versions):
+                            if old.startswith("image:") and old[6:] not in self.image_names:
+                                del self.versions[old]
+            except (OSError,ValueError,http.client.HTTPException):
                 self.due[key]=now+.5
         rates={"status":.35,"chat":.5,"viewer":1}
         if self.visible:
-            rates.update({"frame:"+n:(.09 if n==self.hero else .18) for n in self.names})
+            rates.update({"frame:"+n:(.06 if n==self.hero else .18) for n in self.names})
         for key,interval in rates.items():
             if key in self.jobs or now<self.due.get(key,0): continue
             request={"hero":self.hero,"cameras":self.names,"visible":self.visible} if key=="viewer" else None
@@ -119,7 +137,9 @@ class _RemoteReader(QObject):
         if self.process is not None:
             if self.process.stdin: self.process.stdin.close()
             if self.process.poll() is None: self.process.terminate()
-            self.process.wait(timeout=5)
+            try: self.process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                self.process.kill();self.process.wait(timeout=2)
 
 
 class RemoteLiveTransport(QObject):
@@ -140,8 +160,9 @@ class RemoteLiveTransport(QObject):
         self.thread.finished.connect(self.worker.deleteLater);self.thread.start()
     @Slot(object)
     def deliver(self,packet):
-        self.status.emit(packet);self.frames.emit(packet["frames"]);self.ack.emit()
-    def demand(self,names,hero,visible): self.request.emit((tuple(names),hero,bool(visible)))
+        if any(key in packet for key in ("status","chat","overview","images")): self.status.emit(packet)
+        self.frames.emit(packet["frames"]);self.ack.emit()
+    def demand(self,names,hero,visible,overlays=False): self.request.emit((tuple(names),hero,bool(visible),bool(overlays)))
     def close(self):
         if self.thread.isRunning():
             self.stopping.emit();self.thread.quit();self.thread.wait()

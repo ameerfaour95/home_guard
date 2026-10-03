@@ -22,6 +22,10 @@ class _Reader(QObject):
         self.stamps = {}
         self.inflight = False
         self.last_touch = 0
+        self.ai_data = {}
+        from .live_tracking import OverlayTracker
+        self.tracker = OverlayTracker()
+        self.overlays = False
 
     @Slot()
     def start(self):
@@ -35,7 +39,7 @@ class _Reader(QObject):
 
     @Slot(object)
     def demand(self, request):
-        self.names, self.hero, self.visible = request
+        self.names, self.hero, self.visible, self.overlays = request
         self.last_touch = 0
         self.scan()
 
@@ -70,6 +74,7 @@ class _Reader(QObject):
                     from ..chat_feed import read_feed
                     data = read_feed(str(path), limit=200)
                 status[key] = data
+                if key == "status": self.ai_data = data
                 self.stamps[filename] = stamp
             except (OSError, ValueError, UnicodeError):
                 continue
@@ -84,7 +89,8 @@ class _Reader(QObject):
                 # Don't associate an old decode with a file replaced during the read.
                 if path.stat().st_mtime_ns != stamp: continue
                 self.stamps[name] = stamp
-                frames[name] = (image, stamp/1e9)
+                objects=self.tracker.update(name,image,self.ai_data,time.time()) if self.overlays else None
+                frames[name] = (image, stamp/1e9, objects)
             except OSError:
                 continue
         if frames or status:
@@ -124,8 +130,8 @@ class LiveTransport(QObject):
         self.frames.emit(packet["frames"])
         self.ack.emit()
 
-    def demand(self, names, hero, visible):
-        self.request.emit((tuple(names), hero, bool(visible)))
+    def demand(self, names, hero, visible, overlays=False):
+        self.request.emit((tuple(names), hero, bool(visible), bool(overlays)))
 
     def close(self):
         if self.thread.isRunning():

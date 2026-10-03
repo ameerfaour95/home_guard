@@ -4,6 +4,7 @@ Extends the existing read-only server without changing serve.py. The only write 
 the viewer lease. Camera capture, configuration and detector ownership stay put.
 """
 import json
+import time
 from http import HTTPStatus
 from http.server import ThreadingHTTPServer
 from ..serve import Handler, box_data, stop_when_stdin_closes
@@ -11,6 +12,10 @@ from ..preview import PreviewReader
 
 
 class LiveHandler(Handler):
+    def end_headers(self):
+        self.send_header("X-Server-Time",repr(time.time()))
+        super().end_headers()
+
     def do_POST(self):
         if self.path != "/viewer": return super().do_POST()
         try:
@@ -30,8 +35,12 @@ class LiveHandler(Handler):
             self._json({"error": "Invalid viewer demand"}, HTTPStatus.BAD_REQUEST)
 
 
+class LiveServer(ThreadingHTTPServer):
+    request_queue_size=32
+
+
 def main():
-    server = ThreadingHTTPServer(("127.0.0.1", 8765), type("LiveHandler",(LiveHandler,),{"data":box_data()}))
+    server = LiveServer(("127.0.0.1", 8765), type("LiveHandler",(LiveHandler,),{"data":box_data()}))
     stop_when_stdin_closes(server)
     try: server.serve_forever()
     finally: server.server_close()
