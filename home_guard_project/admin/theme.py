@@ -64,6 +64,9 @@ QToolTip { background: @raised; color: @text; border: 1px solid @border; padding
 QComboBox { background: @surface; border: 1px solid @border; border-radius: 5px; padding: 7px 8px; min-height: 20px; }
 QComboBox::drop-down { border: none; width: 16px; }
 QComboBox QAbstractItemView { background: @surface; selection-background-color: @raised; }
+QCheckBox { spacing: 9px; }
+QCheckBox::indicator { width: 16px; height: 16px; border: 1px solid @muted; border-radius: 3px; background: @surface; }
+QCheckBox::indicator:checked { background: @action; border: 1px solid @action; }
 QTabWidget::pane { border: none; }
 QTabBar::tab { background: transparent; color: @muted; padding: 10px 16px; margin-bottom: 8px; border-bottom: 2px solid @border; }
 QTabBar::tab:selected { color: @action; border-bottom: 2px solid @action; }

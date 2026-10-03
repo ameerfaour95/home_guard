@@ -37,7 +37,7 @@ def main():
         started = time.monotonic()
         stage = [0]
         def verify():
-            if time.monotonic()-started > 15:
+            if time.monotonic()-started > 30:
                 app.exit(2)
                 return
             ok = window.signin is not None and not window.windowIcon().isNull()
@@ -62,7 +62,21 @@ def main():
                 player = customer.event_view.player
                 if not player.canvas.image.isNull() and player.canvas.overlay.position_ms >= 3000:
                     player.player.pause()
-                    app.exit(0 if player.canvas.overlay.frames else 2)
+                    if not player.canvas.overlay.frames:
+                        app.exit(2); return
+                    shell.navigate('Review'); stage[0] = 4
+            elif stage[0] == 4 and shell.review_page.event_view.recording:
+                shell.navigate('Studio'); stage[0] = 5
+            elif stage[0] == 5 and shell.screens['Studio'].loaded_once:
+                studio = shell.screens['Studio']; studio.open_export()
+                studio.wizard.name.setText('smoke_dataset'); studio.wizard.advance(); studio.wizard.advance(); stage[0] = 6
+            elif stage[0] == 6 and shell.screens['Studio'].wizard.preview is not None:
+                wizard = shell.screens['Studio'].wizard
+                if len(wizard.preview['included']) != 8:
+                    app.exit(2); return
+                wizard.reject(); shell.navigate('Audit'); stage[0] = 7
+            elif stage[0] == 7 and shell.screens['Audit'].loaded_once:
+                app.exit(0 if shell.screens['Audit'].model.items else 2)
         smoke_timer = QTimer(window)
         smoke_timer.setInterval(100); smoke_timer.timeout.connect(verify); smoke_timer.start()
     result = app.exec()

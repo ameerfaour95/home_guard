@@ -114,7 +114,8 @@ def test_role_navigation(role, expected, widgets, wait):
         assert backend.calls == 0
         shell.open_customer(1)
         shell.open_palette()
-        assert shell.customer_page is None and shell.palette_dialog is None
+        assert shell.customer_page is None and shell.palette_dialog is not None
+        assert shell.pages.currentWidget() is shell.screens['Studio']
     else:
         wait(lambda: shell.fleet.snapshot is not None)
 

@@ -6,13 +6,14 @@ from .demo_backend import DemoBackend
 from .signin import SignIn
 from .fleet import FleetScreen
 from .customer import CustomerScreen
+from .review import ReviewScreen
+from .studio import StudioScreen
+from .audit import AuditScreen
 from .widgets.common import label, button, EmptyState
 from .widgets.palette import CommandPalette
 from .widgets.icons import icon
 from .workers import TaskRunner
-from .backend import all_events
-from .formatting import utcnow
-from datetime import timedelta
+from .backend import AuthError
 
 
 class SearchField(QLineEdit):
@@ -73,14 +74,17 @@ class Shell(QWidget):
                 page.loaded.connect(self.fleet_loaded)
                 page.session_expired.connect(self.session_expired)
             elif title == 'Review':
-                page = CustomerScreen(backend, theme, staff.role, review=True)
+                page = ReviewScreen(backend, theme, staff.role)
                 self.review_page = page
                 page.session_expired.connect(self.session_expired)
+            elif title == 'Studio':
+                page = StudioScreen(backend, staff.role, theme)
+                page.filter_requested.connect(self.open_filter)
+                page.event_requested.connect(self.open_event)
+                page.session_expired.connect(self.session_expired)
             else:
-                descriptions = {'Review': 'Review AI decisions alongside the camera footage and owner feedback.',
-                                'Studio': 'Turn reviewed events into consented, versioned training datasets.',
-                                'Audit': 'See who accessed a customer recording or changed a setting.'}
-                page = EmptyState(f'{title} is coming in this release', descriptions[title], eyebrow=title.upper())
+                page = AuditScreen(backend)
+                page.session_expired.connect(self.session_expired)
             self.screens[title] = page
             self.pages.addWidget(page)
         nav_layout.addStretch()
@@ -101,9 +105,7 @@ class Shell(QWidget):
         self.search.setAccessibleName('Open command palette')
         self.search.setMaximumWidth(480)
         self.search.requested.connect(self.open_palette)
-        self.search.setEnabled(staff.role != 'labeler')
-        if staff.role == 'labeler':
-            self.search.setPlaceholderText('Review and training workspace')
+        self.search.setPlaceholderText('Search or run a command…                          Ctrl+K')
         bar.addWidget(self.search, 1)
         bar.addStretch()
         bar.addWidget(label(environment, 'badge'))
@@ -124,18 +126,18 @@ class Shell(QWidget):
         self.badge_runner = TaskRunner(self)
         self.badge_runner.finished.connect(self.badge_loaded)
         self.update_badge()
-        self.review_page.timeline.review_runner.finished.connect(lambda *_: self.update_badge())
+        self.review_page.review_changed.connect(self.update_badge)
         self.review_page.event_view.review_changed.connect(lambda *_: self.update_badge())
         if self.customer_page:
             self.customer_page.timeline.review_runner.finished.connect(lambda *_: self.update_badge())
             self.customer_page.event_view.review_changed.connect(lambda *_: self.update_badge())
 
     def update_badge(self):
-        end = getattr(self.backend, 'now', None) or utcnow()
-        self.badge_runner.start(lambda: all_events(self.backend, reviewed=False, from_utc=(end-timedelta(hours=24)).isoformat(), to_utc=end.isoformat()))
+        self.badge_runner.start(self.backend.review_count)
 
     def badge_loaded(self, events, error):
-        self.review_badge.setText('—' if error else str(len(events)))
+        self.review_badge.setText('—' if error else str(events.unreviewed_24h))
+        if isinstance(error,AuthError): self.session_expired.emit()
 
     def navigate(self, title):
         if title not in self.screens:
@@ -154,15 +156,42 @@ class Shell(QWidget):
         self.customer_page.open(customer_id, device_id)
 
     def open_palette(self):
-        if self.staff.role == 'labeler':
-            return
         if self.palette_dialog and self.palette_dialog.isVisible():
             return
-        self.palette_dialog = CommandPalette(self, self.devices, self.customers, self.staff.role)
+        cameras = {(e.camera, e.customer_id) for e in self.review_page.timeline.model.rows}
+        if self.customer_page:
+            cameras.update((e.camera, e.customer_id) for e in self.customer_page.timeline.model.rows)
+            if self.customer_page.customer_id:
+                cameras.update((name,self.customer_page.customer_id) for name in self.customer_page.timeline.density.rows)
+        self.palette_dialog = CommandPalette(self, self.devices, self.customers, self.staff.role,
+                                             self.review_page.saved_filters, sorted(cameras))
+        self.palette_dialog.execute.connect(self.execute_command)
         self.palette_dialog.jump.connect(self.open_customer)
         self.palette_dialog.move(self.mapToGlobal(self.rect().center()) - self.palette_dialog.rect().center())
         self.palette_dialog.show()
         self.palette_dialog.search.setFocus()
+
+    def open_filter(self, key):
+        self.navigate('Review'); self.review_page.open_filter(key)
+
+    def open_event(self, eid):
+        self.navigate('Review'); self.review_page.open_event(eid)
+
+    def execute_command(self, kind, value):
+        if kind == 'event': self.open_event(value)
+        elif kind == 'filter': self.open_filter(value)
+        elif kind == 'camera':
+            self.navigate('Review')
+            timeline = self.review_page.timeline
+            timeline.customer_id,value = value
+            timeline.filters['camera'].blockSignals(True)
+            if timeline.filters['camera'].findData(value) < 0: timeline.filters['camera'].addItem(value,value)
+            timeline.filters['camera'].setCurrentIndex(timeline.filters['camera'].findData(value))
+            timeline.filters['camera'].blockSignals(False); timeline.reload()
+        elif value == 'Sign out': self.signed_out.emit()
+        elif value == 'Export collection…':
+            self.navigate('Studio'); self.screens['Studio'].open_export()
+        elif value.startswith('Go to '): self.navigate(value[6:])
 
 
 class AdminWindow(QMainWindow):

@@ -7,8 +7,9 @@ from ..formatting import site_name
 
 class CommandPalette(QDialog):
     jump = Signal(int, str)
+    execute = Signal(str, object)
 
-    def __init__(self, parent, devices, customers, role):
+    def __init__(self, parent, devices, customers, role, filters=(), cameras=()):
         super().__init__(parent)
         self.setWindowTitle('Jump to…')
         self.setObjectName('commandPalette')
@@ -18,15 +19,23 @@ class CommandPalette(QDialog):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 16)
         layout.setSpacing(16)
-        layout.addWidget(label('JUMP TO CUSTOMER OR DEVICE', 'eyebrow'))
+        layout.addWidget(label('SEARCH & COMMANDS', 'eyebrow'))
         self.search = QLineEdit()
-        self.search.setPlaceholderText('Search by name, site or device…')
+        self.search.setPlaceholderText('Search names, cameras, filters, commands or #event ID…')
         self.search.setAccessibleName('Command palette search')
         layout.addWidget(self.search)
         self.entries = []
         if role != 'labeler':
             self.entries += [(f'{c.name}   ·   Customer', c.id, '') for c in customers]
             self.entries += [(f'{site_name(d.site)}   ·   {d.device_id}   ·   {d.customer_name}', d.customer_id, d.device_id) for d in devices]
+        self.entries += [(f'{name}   ·   Camera', cid, 'camera:'+name) for name,cid in cameras]
+        self.entries += [('Filter: '+f.title, 0, 'filter:'+f.key) for f in filters]
+        commands = ['Go to Studio', 'Go to Review']
+        if role != 'labeler': commands += ['Go to Fleet']
+        if role == 'admin': commands += ['Go to Audit']
+        if role != 'support': commands += ['Export collection…']
+        commands += ['Sign out']
+        self.entries += [(name, 0, 'command:'+name) for name in commands]
         self.results = QListView()
         self.results.setSpacing(4)
         self.model = QStringListModel(self)
@@ -42,15 +51,21 @@ class CommandPalette(QDialog):
 
     def filter(self, query):
         query = query.casefold().strip()
+        commands_only = query.startswith('>')
+        if commands_only: query = query[1:].strip()
         def score(entry):
             text = entry[0].casefold()
+            if query and text == query: return 4
+            if query and text.startswith(query): return 3
             if not query or query in text:
                 return 2
             it = iter(text)
             if all(char in it for char in query):
                 return 1
             return max(SequenceMatcher(None, query, word).ratio() for word in text.split())
-        self.matches = sorted([(score(e), e) for e in self.entries], key=lambda item: -item[0])
+        entries = [(f'Open event #{query[1:]}', int(query[1:]), 'event')] if query.startswith('#') and query[1:].isdigit() else self.entries
+        if commands_only: entries = [e for e in entries if e[2].startswith('command:')]
+        self.matches = sorted([(score(e), e) for e in entries], key=lambda item: -item[0])
         self.matches = [entry for score_value, entry in self.matches if score_value >= .6]
         self.model.setStringList([e[0] for e in self.matches])
         if self.matches:
@@ -60,8 +75,11 @@ class CommandPalette(QDialog):
     def activate(self, index):
         if index.isValid() and index.row() < len(self.matches):
             _, customer_id, device_id = self.matches[index.row()]
-            self.jump.emit(customer_id, device_id)
             self.accept()
+            if device_id == 'event': self.execute.emit('event',customer_id)
+            elif device_id.startswith(('camera:','filter:','command:')):
+                kind,value = device_id.split(':',1); self.execute.emit(kind,(customer_id,value) if kind == 'camera' else value)
+            else: self.jump.emit(customer_id,device_id)
 
     def eventFilter(self, watched, event):
         if event.type() == QEvent.Type.KeyPress:
