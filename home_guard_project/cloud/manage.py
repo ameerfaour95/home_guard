@@ -155,6 +155,32 @@ def cmd_redact_backfill(args) -> int:
     return 0
 
 
+def cmd_export_download(args) -> int:
+    """Download a finished training export (without its _private/ folder) with the server's S3 credentials and
+    make its YOLO data.yaml point at the absolute local folder, ready for `yolo detect train`."""
+    from . import studio
+    from .db import session_scope
+    from .models import Export
+
+    with session_scope(_engine()) as s:
+        export = s.get(Export, args.export_id) if 1 <= args.export_id <= 2 ** 31 - 1 else None
+        if export is None:
+            print(f"export {args.export_id} not found", file=sys.stderr)
+            return 1
+        if export.state not in ("ready", "partial"):
+            print(f"export {args.export_id} is {export.state}, not finished", file=sys.stderr)
+            return 1
+        if studio.consent_withdrawn(s, export):
+            print(f"export {args.export_id}: a household has withdrawn training consent since it was made; "
+                  "not downloaded", file=sys.stderr)
+            return 1
+        prefix = export.s3_prefix
+    dest = Path(args.dest)
+    n = studio.download_export(_s3(), prefix, dest)
+    print(f"downloaded {n} file(s) into {dest.resolve()} (see README.txt there)")
+    return 0
+
+
 def cmd_serve(args) -> int:
     import uvicorn
 
@@ -188,6 +214,10 @@ def build_parser() -> argparse.ArgumentParser:
     r = sub.add_parser("redact-backfill")
     r.add_argument("--all", action="store_true", help="recompute every event, not only missing ones")
     r.set_defaults(fn=cmd_redact_backfill)
+    d = sub.add_parser("export-download", help="download a training export, ready to train on")
+    d.add_argument("export_id", type=int)
+    d.add_argument("--dest", required=True, help="local folder to download into")
+    d.set_defaults(fn=cmd_export_download)
     s = sub.add_parser("serve")
     s.add_argument("--port", type=int, default=8600)
     s.set_defaults(fn=cmd_serve)

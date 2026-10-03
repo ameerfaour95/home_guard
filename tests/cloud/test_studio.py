@@ -18,9 +18,30 @@ LABEL_0 = "0 0.5 0.5 0.2 0.4\n16 0.3 0.3 0.1 0.1\n4 0.1 0.1 0.1 0.1\n"
 IDENTITY = ("front_side", "back_door", "left_side", "Acme", "dataset_", "production_", b.STEM, b.COLLECT_STEM)
 
 
-def _seed(client, s3client, consent_training=True):
+COLLECT_FRAMES = [f["frame_index"] for f in b.fixture_json("collect.meta.json")["yolo_export"]["exported_frames"]]
+
+
+def _frame_keys(frame):
+    base = f"dataset_test/yolo/%s/back_door/2026-10-02/{b.COLLECT_STEM}_f{frame:04d}"
+    return base % "images" + ".jpg", base % "labels" + ".txt"
+
+
+def _seed(client, s3client, consent_training=True, all_frames=True, overrides=None):
+    """The fixture bucket, indexed. With `all_frames`, every sampled frame the collection meta lists has its image
+    and label (the fixtures carry only frames 0 and 2). `overrides`: key -> body, or None to delete the key."""
     b.seed_bucket(s3client)
     b.put(s3client, b.YOLO_LABELS[0], LABEL_0)
+    if all_frames:
+        for frame in COLLECT_FRAMES:
+            image, label = _frame_keys(frame)
+            if frame not in (0, 2):
+                b.put(s3client, image, b.FAKE_JPG)
+                b.put(s3client, label, b.LABEL_TEXT)
+    for key, body in (overrides or {}).items():
+        if body is None:
+            s3client.delete_object(Bucket=b.BUCKET, Key=key)
+        else:
+            b.put(s3client, key, body)
     client.app.state.export_runner = lambda job: job()  # synchronous for tests
     return _index(client, s3client, consent_training=consent_training, seed=False)
 
@@ -150,7 +171,7 @@ def test_export_all_formats(client, s3client, staff_factory, seeded):
     prefix = out["s3_prefix"]
 
     manifest = json.loads(_get(s3client, prefix + "manifest.json"))
-    assert manifest["schema_version"] == 1 and manifest["name"] == "people" and manifest["version"] == 1
+    assert manifest["schema_version"] == 2 and manifest["name"] == "people" and manifest["version"] == 1
     assert manifest["collection_id"] == cid and manifest["formats"] == ["yolo", "vlm_jsonl", "clips"]
     assert manifest["class_map"] == {"0": "person", "1": "bicycle", "2": "car", "3": "motorcycle", "4": "bus",
                                      "5": "truck", "6": "bird", "7": "cat", "8": "dog"}
@@ -176,8 +197,9 @@ def test_export_all_formats(client, s3client, staff_factory, seeded):
     assert _get(s3client, f"{prefix}yolo/images/{split}/{collect}_f0000.jpg") == b.FAKE_JPG
     assert _get(s3client, f"{prefix}yolo/labels/{split}/{collect}_f0002.txt").decode() == b.LABEL_TEXT
     yaml = _get(s3client, prefix + "yolo/data.yaml").decode()
-    assert "path: .\n" in yaml and "train: images/train\n" in yaml and "val: images/val\n" in yaml
-    assert "test: images/test\n" in yaml
+    assert "path: .\n" in yaml and "train: images/train\n" in yaml
+    for sp in ("val", "test"):  # a YOLO split without images points at train (and the manifest warns)
+        assert f"{sp}: images/{sp if sp == split else 'train'}\n" in yaml
     names = [line.split(":", 1)[1].strip() for line in yaml.split("names:", 1)[1].splitlines() if line.strip()]
     assert names == ["person", "bicycle", "car", "motorcycle", "bus", "truck", "bird", "cat", "dog"]
 
@@ -185,8 +207,9 @@ def test_export_all_formats(client, s3client, staff_factory, seeded):
     for ev, item in items.items():
         assert _get(s3client, f"{prefix}clips/{item['split']}/{ev}.mp4") == b.FAKE_MP4
 
-    # vlm.jsonl: only the real AI answer, identity redacted from the prompt
-    lines = [json.loads(x) for x in _get(s3client, prefix + "vlm.jsonl").decode().splitlines()]
+    # vlm/<split>.jsonl: only the real AI answer, identity redacted from the prompt
+    whole = "".join(_get(s3client, f"{prefix}vlm/{sp}.jsonl").decode() for sp in ("train", "val", "test"))
+    lines = [json.loads(x) for x in whole.splitlines()]
     assert [x["event_id"] for x in lines] == [alert]
     line = lines[0]
     assert line["ai_status"] == "real" and line["videos"] == [f"clips/{items[alert]['split']}/{alert}.mp4"]
@@ -195,7 +218,6 @@ def test_export_all_formats(client, s3client, staff_factory, seeded):
     assert "front_side" not in user["content"] and "You are the eyes" in user["content"]
     assert line["prompt_redacted"] is True
     assert assistant["role"] == "assistant" and json.loads(assistant["content"])["summary"].startswith("A person")
-    whole = _get(s3client, prefix + "vlm.jsonl").decode()
     assert not [t for t in IDENTITY if t in whole]
 
     # the private mapping keeps provenance for admins
@@ -257,10 +279,11 @@ def test_fallback_ai_only_leaves_vlm(client, s3client, staff_factory, seeded):
     cid = _make_collection(client, h, [alert, collect])
     out = _export(client, h, cid)
     assert out["item_count"] == 2
-    assert _get(s3client, out["s3_prefix"] + "vlm.jsonl") == b""
+    assert all(_get(s3client, f"{out['s3_prefix']}vlm/{sp}.jsonl") == b"" for sp in ("train", "val", "test"))
     assert _keys(s3client, out["s3_prefix"] + "clips/")  # its clip is still exported
     out = _export(client, h, cid, include_fallback_ai=True)
-    lines = [json.loads(x) for x in _get(s3client, out["s3_prefix"] + "vlm.jsonl").decode().splitlines()]
+    whole = "".join(_get(s3client, f"{out['s3_prefix']}vlm/{sp}.jsonl").decode() for sp in ("train", "val", "test"))
+    lines = [json.loads(x) for x in whole.splitlines()]
     assert [(x["event_id"], x["ai_status"]) for x in lines] == [(alert, "fallback")]
 
 
@@ -273,7 +296,8 @@ def test_labeler_export_leaves_out_unseen_events(client, s3client, staff_factory
     assert manifest["items"] == [] and manifest["excluded"] == [] and out["item_count"] == 0
     out = _export(client, adm, cid, formats=["clips"])
     manifest = json.loads(_get(s3client, out["s3_prefix"] + "manifest.json"))
-    assert {e["reason"] for e in manifest["excluded"]} == {"no_training_consent"}
+    # households without consent are only counted in the manifest; the event ids stay in _private/
+    assert manifest["excluded"] == [] and manifest["excluded_counts"] == {"no_training_consent": 3}
 
 
 def test_export_matches_preview(client, s3client, staff_factory, seeded):
@@ -333,11 +357,9 @@ def test_sweep_marks_stale_exports_failed(client, staff_factory, seeded):
 def test_default_runner_builds_on_a_thread(client, s3client, staff_factory, seeded):
     import time
 
-    from home_guard_project.cloud.routes.studio import default_export_runner
-
     _, _, _, h = staff_factory("admin")
     cid = _make_collection(client, h, _ids(client))
-    client.app.state.export_runner = default_export_runner
+    client.app.state.export_runner = None  # the app's bounded executor
     out = _export(client, h, cid, formats=["clips"])
     assert out["state"] in ("queued", "running", "ready")
     deadline = time.monotonic() + 30
@@ -355,7 +377,12 @@ def test_clip_rendition_used_only_when_original_is_not_h264(client, s3client, st
         for ev in (alert, collect):
             key = f"admin_cache/renditions/{ev}.mp4"
             b.put(s3client, key, rendered)
-            s.add(m.Artifact(event_id=ev, role="rendition", s3_key=key, available=True, provenance="cloud"))
+            original = s.scalar(select(m.Artifact.etag).where(  # made from the very original that is exported
+                m.Artifact.event_id == ev, m.Artifact.role == "original_video",
+                m.Artifact.s3_key.startswith("dataset_")))
+            s.add(m.Artifact(event_id=ev, role="rendition", s3_key=key, available=True, provenance="cloud",
+                             etag=s3client.head_object(Bucket=b.BUCKET, Key=key)["ETag"].strip('"'),
+                             detail={"src_etag": original}))
     cid = _make_collection(client, h, [alert, collect])
     out = _export(client, h, cid, formats=["clips"])
     manifest = json.loads(_get(s3client, out["s3_prefix"] + "manifest.json"))
@@ -376,9 +403,7 @@ def test_app_startup_sweeps_stale_exports(client, staff_factory):
     with session_scope(client.app.state.engine) as s:
         s.add(m.Export(name="stuck", version=1, state="running", created_by=staff.id,
                        created_at=datetime.now(timezone.utc) - timedelta(hours=3), s3_prefix="training_exports/stuck/v1/"))
-    from home_guard_project.cloud.routes.studio import default_export_runner
-
-    assert client.app.state.export_runner is default_export_runner
+    assert client.app.state.export_runner is None  # the bounded executor runs real jobs
     with TestClient(client.app):  # a restart
         pass
     with session_scope(client.app.state.engine) as s:
@@ -387,7 +412,7 @@ def test_app_startup_sweeps_stale_exports(client, staff_factory):
 
 def test_vlm_prompt_falls_back_when_redaction_leaves_identity():
     leaky = SimpleNamespace(text=lambda v: v, mentions=lambda v: True)
-    assert studio.vlm_prompt(leaky, "Camera front_side at night") == (studio.PLACEHOLDER_PROMPT, False)
+    assert studio.vlm_prompt(leaky, "Camera front_side at night") == (studio.PLACEHOLDER_PROMPT, True)
     clean = SimpleNamespace(text=lambda v: v.replace("front_side", "cam-1"), mentions=lambda v: "front_side" in v)
     assert studio.vlm_prompt(clean, "Camera front_side") == ("<video>Camera cam-1", True)
     assert studio.vlm_prompt(clean, "Camera") == ("<video>Camera", False)
@@ -396,5 +421,6 @@ def test_vlm_prompt_falls_back_when_redaction_leaves_identity():
 
 
 def test_remap_label():
-    text, dropped = studio.remap_label("0 0.5 0.5 0.2 0.4\n16 0.1 0.1 0.1 0.1\n4 0.1 0.1 0.1 0.1\nbad\n\n2.0 1 1 1 1\n")
-    assert text == "0 0.5 0.5 0.2 0.4\n8 0.1 0.1 0.1 0.1\n2 1 1 1 1\n" and dropped == 2
+    text, dropped, problem = studio.remap_label("0 0.5 0.5 0.2 0.4\n16 0.1 0.1 0.1 0.1\n4 0.1 0.1 0.1 0.1\n\n"
+                                                "2.0 1 1 1 1\n")
+    assert text == "0 0.5 0.5 0.2 0.4\n8 0.1 0.1 0.1 0.1\n2 1 1 1 1\n" and dropped == 1 and problem is None

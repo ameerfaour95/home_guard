@@ -1,6 +1,4 @@
 import functools
-import math
-import threading
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -111,6 +109,7 @@ def create_collection(body: CollectionIn, request: Request, staff: Staff = Depen
     name = body.name.strip()
     if not name or len(name) > 255:
         raise HTTPException(status_code=400, detail="A collection needs a name of at most 255 characters")
+    _checked(studio_logic.validate_collection_text, session, name, body.description)
     col = Collection(name=name, description=body.description or "", created_by=staff.id,
                      created_at=request.app.state.clock())
     session.add(col)
@@ -154,49 +153,61 @@ def remove_collection_items(collection_id: int, body: CollectionItems, staff: St
 MANIFEST_URL_TTL = 3600
 
 
-def _export_out(session: Session, request: Request, export: Export) -> ExportOut:
+_EXPORT_NOT_FOUND = "Export not found"
+
+
+def _checked(fn, *args):
+    """Run a studio validator; its refusal becomes a 400 with the validator's message."""
+    try:
+        return fn(*args)
+    except studio_logic.RequestError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+def _export_out(session: Session, request: Request, staff: Staff, export: Export) -> ExportOut:
     s3 = request.app.state.s3
     url = None
     if export.state in ("ready", "partial") and s3 is not None:
         url = s3.presign(export.s3_prefix + "manifest.json", ttl=MANIFEST_URL_TTL)  # only ever the manifest
+    error = export.error
+    if error is None and staff.role == "admin" and studio_logic.consent_withdrawn(session, export):
+        error = studio_logic.CONSENT_WARNING  # computed when read; never stored
     return ExportOut(id=export.id, name=export.name, version=export.version, state=export.state,
-                     item_count=export.item_count, s3_prefix=export.s3_prefix, manifest_url=url, error=export.error,
+                     item_count=export.item_count, s3_prefix=export.s3_prefix, manifest_url=url, error=error,
                      created_utc=export.created_at, created_by=_staff_name(session, export.created_by))
 
 
-def _check_request(body: ExportRequest) -> None:
-    if not body.formats:
-        raise HTTPException(status_code=400, detail="Choose at least one format")
-    if len(body.name) > 100:
-        raise HTTPException(status_code=400, detail="The export name is too long (at most 100 characters)")
-    values = list(body.split.values())
-    if not values or any(not math.isfinite(v) or v < 0 for v in values) or sum(values) <= 0:
-        raise HTTPException(status_code=400, detail="Split fractions must be non-negative and not all zero")
-
-
-def default_export_runner(job) -> None:
-    """Runs an export job on a background thread (tests inject a synchronous runner on app.state)."""
-    threading.Thread(target=job, name="training-export", daemon=True).start()
+def _run_job(request: Request, job) -> None:
+    """Hand an export job to the injected runner (tests run it synchronously), else to the bounded executor."""
+    runner = getattr(request.app.state, "export_runner", None)
+    if runner is None:
+        runner = request.app.state.export_executor.submit
+    runner(job)
 
 
 @router.get("/exports", response_model=list[ExportOut], dependencies=[Depends(_studio_staff)])
-def list_exports(request: Request, session: Session = SessionDep):
-    exports = session.scalars(select(Export).order_by(Export.id.desc()).limit(500)).all()
-    return [_export_out(session, request, e) for e in exports]
+def list_exports(request: Request, staff: Staff = Depends(current_staff), session: Session = SessionDep):
+    stmt = select(Export).order_by(Export.id.desc()).limit(500)
+    if staff.role != "admin":
+        stmt = stmt.where(Export.created_by == staff.id)
+    exports = [e for e in session.scalars(stmt).all() if studio_logic.export_visible_to(session, staff, e)]
+    return [_export_out(session, request, staff, e) for e in exports]
 
 
 @router.post("/exports", response_model=ExportOut, dependencies=[Depends(_studio_staff)])
 def create_export(body: ExportRequest, request: Request, staff: Staff = Depends(current_staff),
                   session: Session = SessionDep):
-    _check_request(body)
+    _checked(studio_logic.validate_export_request, session, body)
     _load_collection(session, body.collection_id)
     s3 = request.app.state.s3
     if s3 is None:
         raise HTTPException(status_code=503, detail="Storage is not configured")
+    secret = request.app.state.settings.jwt_secret
+    snapshot = studio_logic.take_snapshot(session, body, labeler=staff.role == "labeler", secret=secret)
     version = studio_logic.next_version(session, s3, body.name)
     export = Export(name=body.name, version=version, state="queued",
                     s3_prefix=studio_logic.export_prefix(body.name, version),
-                    request={**body.model_dump(), "as_labeler": staff.role == "labeler"},
+                    request={**body.model_dump(), "as_labeler": staff.role == "labeler", "snapshot": snapshot},
                     created_by=staff.id, created_at=request.app.state.clock())
     session.add(export)
     session.flush()
@@ -204,11 +215,10 @@ def create_export(body: ExportRequest, request: Request, staff: Staff = Depends(
                  detail={"name": body.name, "version": version, "collection_id": body.collection_id,
                          "formats": list(body.formats)})
     session.commit()  # the job reads the row from its own session
-    runner = getattr(request.app.state, "export_runner", None) or default_export_runner
-    runner(functools.partial(studio_logic.run_export_job, request.app.state.sessionmaker, s3, export.id,
-                             request.app.state.settings.jwt_secret))
+    _run_job(request, functools.partial(studio_logic.run_export_job, request.app.state.sessionmaker, s3,
+                                        export.id, secret))
     session.refresh(export)
-    return _export_out(session, request, export)
+    return _export_out(session, request, staff, export)
 
 
 @router.get("/collections/{collection_id}/items", response_model=EventPage,
@@ -242,6 +252,7 @@ def preview_export(body: ExportRequest, request: Request, staff: Staff = Depends
     """
     # For a labeler, who may not know those events exist, they are silently left out instead (no exclusion
     # entry, no count). (A comment, not part of the docstring: the docstring is in the frozen OpenAPI.)
+    warnings = list(_checked(studio_logic.validate_export_request, session, body))
     if session.get(Collection, body.collection_id) is None:
         raise HTTPException(status_code=404, detail="Collection not found")
     included, excluded = studio_logic.select_export_items(session, body.collection_id, body,
@@ -251,15 +262,13 @@ def preview_export(body: ExportRequest, request: Request, staff: Staff = Depends
     counts = {n: 0 for n in body.split}
     for s in splits.values():
         counts[s] = counts.get(s, 0) + 1
-    warnings = []
-    if abs(sum(body.split.values()) - 1.0) > 1e-6:
-        warnings.append("Split fractions do not add up to 1; they were normalised.")
     if not included:
         warnings.append("No events would be exported.")
     else:
         empty = [n for n, c in counts.items() if c == 0 and body.split[n] > 0]
         if empty:
             warnings.append("Empty split: " + ", ".join(sorted(empty)))
+        warnings += studio_logic.small_set_warnings(studio_logic.group_count(included))
     if excluded:
         warnings.append(f"{len(excluded)} event(s) excluded.")
     return ExportPreview(included_ids=[e.id for e in included], excluded=excluded, split_counts=counts,
@@ -267,8 +276,9 @@ def preview_export(body: ExportRequest, request: Request, staff: Staff = Depends
 
 
 @router.get("/exports/{export_id}", response_model=ExportOut, dependencies=[Depends(_studio_staff)])
-def get_export(export_id: int, request: Request, session: Session = SessionDep):
+def get_export(export_id: int, request: Request, staff: Staff = Depends(current_staff),
+               session: Session = SessionDep):
     export = session.get(Export, export_id) if 1 <= export_id <= MAX_DB_ID else None
-    if export is None:
-        raise HTTPException(status_code=404, detail="Export not found")
-    return _export_out(session, request, export)
+    if export is None or not studio_logic.export_visible_to(session, staff, export):
+        raise HTTPException(status_code=404, detail=_EXPORT_NOT_FOUND)  # the same for hidden and absent
+    return _export_out(session, request, staff, export)

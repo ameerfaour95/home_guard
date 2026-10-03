@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
@@ -15,7 +16,8 @@ log = logging.getLogger(__name__)
 
 
 def sweep_exports(app: FastAPI) -> int:
-    """Startup: exports a previous process left queued or running for over an hour are marked failed."""
+    """Startup: exports whose worker is gone (no heartbeat for 5 minutes, or queued for 30) are marked failed;
+    the periodic exports loop keeps doing this while the API runs."""
     from .studio import sweep_stale_exports
 
     try:
@@ -31,20 +33,31 @@ def sweep_exports(app: FastAPI) -> int:
         return 0
 
 
+EXPORT_WORKERS = 2  # export builds running at once; more requests wait in the executor's queue
+
+
+def _export_executor() -> ThreadPoolExecutor:
+    return ThreadPoolExecutor(max_workers=EXPORT_WORKERS, thread_name_prefix="training-export")
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
+    if getattr(app.state.export_executor, "_shutdown", False):  # a restart of the same app (tests)
+        app.state.export_executor = _export_executor()
     sweep_exports(app)
     running = None
     if app.state.settings.run_loops and app.state.s3 is not None:
         from .loops import build_loops
 
-        running = build_loops(app.state.sessionmaker, app.state.s3)
+        running = build_loops(app.state.sessionmaker, app.state.s3, engine=app.state.engine)
         running.start()
     try:
         yield
     finally:
         if running is not None:
             running.stop(5.0)
+        # queued jobs are dropped (their exports stay queued and the sweep fails them); running ones finish
+        app.state.export_executor.shutdown(wait=False, cancel_futures=True)
 
 
 def create_app(settings: Settings, s3=None, init_db: bool = True) -> FastAPI:
@@ -54,7 +67,8 @@ def create_app(settings: Settings, s3=None, init_db: bool = True) -> FastAPI:
     app.state.clock = lambda: datetime.now(timezone.utc)  # tests inject a fixed clock
     app.state.engine = make_engine(settings.db_url)  # lazy: connects on first use
     app.state.sessionmaker = sessionmaker(app.state.engine, expire_on_commit=False)
-    app.state.export_runner = studio.default_export_runner  # starts a thread; tests inject a synchronous runner
+    app.state.export_executor = _export_executor()
+    app.state.export_runner = None  # None: the bounded executor; tests inject a synchronous runner
     if init_db:
         from .manage import run_migrations
 
