@@ -1,0 +1,90 @@
+{
+  "id": 101,
+  "site": "cedar_house",
+  "customer_id": 1,
+  "customer_name": "Daniel Levi",
+  "camera": "front_door",
+  "kind": "alert",
+  "start_utc": "2026-10-03T11:55:00Z",
+  "end_utc": "2026-10-03T11:55:12Z",
+  "summary": "A delivery driver left a parcel by the front door.",
+  "label": "person",
+  "alert_command": "alert",
+  "detected": [
+    "person"
+  ],
+  "owner_verdicts": [
+    "real"
+  ],
+  "completeness": {
+    "video": true,
+    "boxes": "captured",
+    "ai": "real",
+    "owner_feedback": true,
+    "expired": false,
+    "copies": [
+      "production",
+      "training"
+    ]
+  },
+  "reviewed": false,
+  "flagged": false,
+  "thumbnail_url": null,
+  "clip_start_local": "2026-10-03T14:55:00+03:00",
+  "duration_sec": 12.0,
+  "fps": 15.0,
+  "frame_size": [
+    1920,
+    1080
+  ],
+  "alert_reason": "A person approached the front door during security hours.",
+  "dispatch": {
+    "channel": "telegram",
+    "sent": true,
+    "detail": {
+      "delivered": true
+    }
+  },
+  "ai_runs": [
+    {
+      "id": 301,
+      "purpose": "guard",
+      "status": "real",
+      "model": "qwen2.5-vl",
+      "prompt_version": "guard-v3",
+      "prompt": "Describe the activity and decide whether to alert the owner.",
+      "parsed": {
+        "summary": "A delivery driver left a parcel by the front door.",
+        "alert": true
+      },
+      "raw_text_artifact_id": 402,
+      "input_frame_artifact_ids": [
+        403
+      ]
+    }
+  ],
+  "feedback": [
+    {
+      "id": 501,
+      "verdict": "real",
+      "action": "keep",
+      "note": "Expected delivery.",
+      "raw_text": "That was our delivery.",
+      "source": "telegram",
+      "received_utc": "2026-10-03T11:57:00Z"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": 401,
+      "role": "clip",
+      "s3_key": "production_cedar_house/clips/front_door/2026-10-03/delivery.mp4",
+      "bytes": 2840000,
+      "available": true,
+      "provenance": "captured"
+    }
+  ],
+  "raw_meta": {
+    "schema_version": 1
+  }
+}

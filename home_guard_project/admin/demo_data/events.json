@@ -1,0 +1,38 @@
+{
+  "items": [
+    {
+      "id": 101,
+      "site": "cedar_house",
+      "customer_id": 1,
+      "customer_name": "Daniel Levi",
+      "camera": "front_door",
+      "kind": "alert",
+      "start_utc": "2026-10-03T11:55:00Z",
+      "end_utc": "2026-10-03T11:55:12Z",
+      "summary": "A delivery driver left a parcel by the front door.",
+      "label": "person",
+      "alert_command": "alert",
+      "detected": [
+        "person"
+      ],
+      "owner_verdicts": [
+        "real"
+      ],
+      "completeness": {
+        "video": true,
+        "boxes": "captured",
+        "ai": "real",
+        "owner_feedback": true,
+        "expired": false,
+        "copies": [
+          "production",
+          "training"
+        ]
+      },
+      "reviewed": false,
+      "flagged": false,
+      "thumbnail_url": null
+    }
+  ],
+  "next_cursor": null
+}

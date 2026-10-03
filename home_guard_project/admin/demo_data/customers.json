@@ -1,0 +1,154 @@
+[
+  {
+    "id": 1,
+    "name": "Daniel Levi",
+    "timezone": "Asia/Jerusalem",
+    "consent_live": true,
+    "consent_recordings": true,
+    "consent_training": true,
+    "notes": "Main residence and detached guest house.",
+    "devices": [
+      {
+        "device_id": "hg-cedar-01",
+        "site": "cedar_house",
+        "customer_id": 1,
+        "customer_name": "Daniel Levi",
+        "verdict": "healthy",
+        "reasons": [
+          {
+            "code": "reporting",
+            "message": "All cameras reporting normally",
+            "severity": "healthy"
+          }
+        ],
+        "last_seen_utc": "2026-10-03T11:59:00Z",
+        "mode": "inference",
+        "host": "hg-cedar-01",
+        "cameras_total": 4,
+        "cameras_stale": 0,
+        "disk_free_gb": 182.6,
+        "collector_running": true,
+        "stopped": false,
+        "newest_clip_utc": "2026-10-03T11:56:00Z",
+        "events_24h": 148,
+        "alerts_24h": 3,
+        "false_alarms_7d": 1
+      },
+      {
+        "device_id": "hg-cedar-02",
+        "site": "cedar_guest_house",
+        "customer_id": 1,
+        "customer_name": "Daniel Levi",
+        "verdict": "offline",
+        "reasons": [
+          {
+            "code": "heartbeat_missing",
+            "message": "Last heard 3 h ago",
+            "severity": "offline"
+          },
+          {
+            "code": "status_unconfirmed",
+            "message": "Camera and collector status cannot be confirmed",
+            "severity": "unknown"
+          }
+        ],
+        "last_seen_utc": "2026-10-03T09:00:00Z",
+        "mode": "data_collection",
+        "host": "hg-cedar-02",
+        "cameras_total": 2,
+        "cameras_stale": 2,
+        "disk_free_gb": null,
+        "collector_running": null,
+        "stopped": null,
+        "newest_clip_utc": "2026-10-03T08:52:00Z",
+        "events_24h": 42,
+        "alerts_24h": 0,
+        "false_alarms_7d": 0
+      }
+    ]
+  },
+  {
+    "id": 2,
+    "name": "Noa Haddad",
+    "timezone": "Asia/Jerusalem",
+    "consent_live": false,
+    "consent_recordings": true,
+    "consent_training": true,
+    "notes": "Contact the owner before arranging live access.",
+    "devices": [
+      {
+        "device_id": "hg-olive-01",
+        "site": "olive_house",
+        "customer_id": 2,
+        "customer_name": "Noa Haddad",
+        "verdict": "warning",
+        "reasons": [
+          {
+            "code": "camera_quiet",
+            "message": "Front side camera quiet for 26 h",
+            "severity": "warning"
+          },
+          {
+            "code": "upload_backlog",
+            "message": "12 clips waiting to upload",
+            "severity": "warning"
+          }
+        ],
+        "last_seen_utc": "2026-10-03T11:56:00Z",
+        "mode": "inference",
+        "host": "hg-olive-01",
+        "cameras_total": 6,
+        "cameras_stale": 1,
+        "disk_free_gb": 78.2,
+        "collector_running": true,
+        "stopped": false,
+        "newest_clip_utc": "2026-10-03T11:49:00Z",
+        "events_24h": 216,
+        "alerts_24h": 8,
+        "false_alarms_7d": 4
+      }
+    ]
+  },
+  {
+    "id": 3,
+    "name": "Eli Rosen",
+    "timezone": "Asia/Jerusalem",
+    "consent_live": true,
+    "consent_recordings": true,
+    "consent_training": false,
+    "notes": "Training consent has not been granted.",
+    "devices": [
+      {
+        "device_id": "hg-pine-01",
+        "site": "pine_residence",
+        "customer_id": 3,
+        "customer_name": "Eli Rosen",
+        "verdict": "critical",
+        "reasons": [
+          {
+            "code": "disk_low",
+            "message": "Disk 14 GB free",
+            "severity": "critical"
+          },
+          {
+            "code": "camera_quiet",
+            "message": "Driveway camera quiet for 8 h",
+            "severity": "warning"
+          }
+        ],
+        "last_seen_utc": "2026-10-03T11:58:00Z",
+        "mode": "inference",
+        "host": "hg-pine-01",
+        "cameras_total": 5,
+        "cameras_stale": 1,
+        "disk_free_gb": 14.0,
+        "collector_running": true,
+        "stopped": false,
+        "newest_clip_utc": "2026-10-03T11:42:00Z",
+        "events_24h": 184,
+        "alerts_24h": 6,
+        "false_alarms_7d": 2
+      }
+    ]
+  }
+]
