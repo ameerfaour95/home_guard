@@ -4,30 +4,18 @@ Keeps inference.py untouched. Uses its existing reader and never adds detection.
 Inference has no annotated display image, so these previews are camera pictures.
 """
 
-import os
 from pathlib import Path
-import yaml
-from .preview import PreviewWriter
+from .preview import PreviewWriter, preview_settings
 from .boxconfig import LOG_DIR
 
 
 def preview_enabled():
-    base = Path(__file__).parents[1] / "data_collection" / "config.yaml"
-    enabled = False
-    for path in (base, os.environ.get("HOME_GUARD_CONFIG_OVERLAY")):
-        if not path:
-            continue
-        try:
-            with open(path, encoding="utf-8") as stream:
-                display = (yaml.safe_load(stream) or {}).get("display", {})
-            enabled = bool(display.get("preview_enabled", enabled))
-        except OSError:
-            pass
-    return enabled
+    return bool(preview_settings().get("preview_enabled", False))
 
 
 def adapt_stream(stream_class, writer):
     names = []
+    writer.detector_instrumented = True
 
     class PreviewStream(stream_class):
         def __init__(self, name, url, **kwargs):
@@ -37,6 +25,10 @@ def adapt_stream(stream_class, writer):
             writer.set_cameras(names)
 
         def read(self):
+            # Inference visits each stream exactly once per outer detector loop.
+            # Count at its first stream without changing inference or its status.
+            if names and self.name == names[0]:
+                writer.detector_loops += 1
             frame = super().read()
             # Real capture uses _ingest below, independently of YOLO's loop.
             # Keep the original adapter contract for older stream interfaces.

@@ -41,16 +41,16 @@ class DemandTests(unittest.TestCase):
             writer=PreviewWriter(directory,enabled=True,clock=lambda:now)
             reader.touch("front",visible=True,cameras=("front","yard"))
             writer.last={"front":now,"yard":now}
-            now+=.06
+            now+=.07
             self.assertTrue(writer.wanted("front"))
             self.assertFalse(writer.wanted("yard"))
             self.assertFalse(writer.wanted("unseen"))
-            now+=.12
+            now+=.14
             self.assertTrue(writer.wanted("yard"))
             reader.touch("yard",visible=True,cameras=("front","yard"))
             now+=.3
             writer.wanted("yard")
-            writer.last={"front":now,"yard":now};now+=.06
+            writer.last={"front":now,"yard":now};now+=.07
             self.assertTrue(writer.wanted("yard"))
             self.assertFalse(writer.wanted("front"))
             reader.touch("yard",visible=False,cameras=())
