@@ -770,6 +770,8 @@ def _hours(value: Any) -> Optional[Tuple[int, int]]:
     start, end = int(match.group(1)), int(match.group(2))
     if start > 24 or end > 24:
         return None                         # "99-88" is a mistake, not 03:00-16:00
+    if start == 0 and end == 24:
+        return (0, 0)                       # "0-24" is all day
     if start % 24 == end % 24:
         return None                         # "6-6" would silently mean all day; the owner must say so
     return (start % 24, end % 24)            # 24 means midnight

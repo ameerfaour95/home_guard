@@ -12,7 +12,7 @@ from home_guard_project.box.brain.claims import unbacked_claims
 from home_guard_project.box.brain.memory import ChatState
 from home_guard_project.box.brain.receipts import DONE, FAILED, ReceiptBook
 from home_guard_project.box.brain.render import receipt_line
-from home_guard_project.box.brain.tools import TOOLS, Services, ToolContext, change_setting, settings_line, settings_view
+from home_guard_project.box.brain.tools import _hours, TOOLS, Services, ToolContext, change_setting, settings_line, settings_view
 
 NOW = 1_790_000_000.0
 
@@ -153,6 +153,11 @@ class SettingsTest(unittest.TestCase):
         self.assertIn("alert_on", boxconfig.LIVE_OPTIONS)
         with self.assertRaises(boxconfig.BoxConfigError):
             boxconfig.set_option("owner_language", "ar", path)
+
+    def test_zero_to_24_is_all_day_but_equal_hours_are_refused(self) -> None:
+        for value in ("0-24", "00-24", "0:00-24:00"):
+            self.assertEqual(_hours(value), (0, 0), value)
+        self.assertIsNone(_hours("6-6"))
 
     def test_boundary_values_and_pointer_rejection(self) -> None:
         ctx = self.ctx("set alert hours all day and cooldown please")

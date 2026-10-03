@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import ssl
+import time
 from dataclasses import dataclass
 from functools import lru_cache, wraps
 from typing import Any, Dict, List, Optional, Tuple
@@ -40,11 +41,27 @@ class ModelMessage:
     raw: Any = None                      # the provider's own assistant content, replayed unchanged
     usage: Tuple[int, int] = (0, 0)      # (input tokens, output tokens)
     refused: bool = False
+    error: str = ""                     # set when the call itself failed (not when the model said nothing)
 
 
 @lru_cache(maxsize=32)
 def _warn_once(message: str) -> None:
     log.warning(message)
+
+
+_WARN_EVERY = 300.0
+_last_warned: Dict[Tuple[str, str], float] = {}
+
+
+def _log_failure(where: str, exc: BaseException) -> None:
+    """Log with the traceback, at most once per (function, exception type) per 300 s."""
+    key = (where, type(exc).__name__)
+    now = time.monotonic()
+    last = _last_warned.get(key)
+    if last is not None and now - last < _WARN_EVERY:
+        return
+    _last_warned[key] = now
+    log.warning("%s failed (%s: %s); ignoring this model result", where, type(exc).__name__, exc, exc_info=True)
 
 
 def _safe(fallback):
@@ -54,8 +71,10 @@ def _safe(fallback):
         def wrapped(*args, **kwargs):
             try:
                 return func(*args, **kwargs)
-            except Exception:  # noqa: BLE001 - never escape into the Telegram loop
-                _warn_once(func.__qualname__ + " failed; ignoring this model result")
+            except Exception as exc:  # noqa: BLE001 - never escape into the Telegram loop
+                _log_failure(func.__qualname__, exc)
+                if fallback is ModelMessage:
+                    return ModelMessage(error=f"{type(exc).__name__}: {exc}"[:300])
                 return fallback()
         return wrapped
     return decorate
@@ -161,9 +180,11 @@ def to_anthropic_messages(messages: List[Dict[str, Any]]) -> Tuple[str, List[Dic
     for m in messages:
         role = m.get("role")
         if role == "user":
-            out.append({"role": "user", "content": m.get("content") or ""})
+            content = m.get("content")
+            if content:
+                out.append({"role": "user", "content": content})
         elif role == "assistant":
-            if m.get("_raw") is not None:
+            if m.get("_raw") is not None and m.get("_raw") != []:
                 out.append({"role": "assistant", "content": m["_raw"]})
                 continue
             blocks: List[Dict[str, Any]] = []
@@ -257,12 +278,17 @@ def make_model(spec: str, env: Dict[str, str]) -> Optional[Any]:
         _warn_once("Missing model name; disabling the model")
         return None
     provider = provider.lower()
+    name = name.strip()
     temperature = None if name.startswith(_REASONING_PREFIXES) else 0.0
     if provider in ("openai", "gemini"):
         key = env.get("OPENAI_API_KEY" if provider == "openai" else "GEMINI_API_KEY", "")
         if not isinstance(key, str) or not key.strip():
             return None
-        from openai import OpenAI  # noqa: PLC0415
+        try:
+            from openai import OpenAI  # noqa: PLC0415
+        except ImportError:
+            log.warning("pip/uv: openai is not installed; the %s model is disabled", provider)
+            return None
 
         extra = {"base_url": GEMINI_BASE_URL} if provider == "gemini" else {}
         http_client = _http_client()
@@ -276,7 +302,11 @@ def make_model(spec: str, env: Dict[str, str]) -> Optional[Any]:
         key = env.get("ANTHROPIC_API_KEY", "")
         if not isinstance(key, str) or not key.strip():
             return None
-        import anthropic  # noqa: PLC0415
+        try:
+            import anthropic  # noqa: PLC0415
+        except ImportError:
+            log.warning("pip/uv: anthropic is not installed; the anthropic model is disabled")
+            return None
 
         # The box injects the OS trust store at start-up (truststore), which the SDK's client uses.
         effort = None if name.startswith("claude-haiku") else env.get("ANTHROPIC_EFFORT", "low")

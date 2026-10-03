@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import types
 import unittest
 from unittest import mock
@@ -228,6 +229,68 @@ class RobustnessTest(unittest.TestCase):
             AnthropicChat(ant, "m").chat([], TOOLS, choice)
             self.assertEqual(oa.kwargs["tool_choice"], "auto")
             self.assertEqual(ant.kwargs["tool_choice"], {"type": "auto"})
+
+
+class FailureVisibilityTest(unittest.TestCase):
+    def setUp(self) -> None:
+        from home_guard_project.box.brain import models
+        models._last_warned.clear()
+
+    def test_failure_is_reported_and_normal_reply_has_no_error(self) -> None:
+        client = FakeOpenAI(None)
+        client.chat.completions.create = mock.Mock(side_effect=ConnectionError("offline"))
+        with self.assertLogs("box.brain.models", "WARNING"):
+            msg = OpenAIChat(client, "m").chat([], TOOLS)
+        self.assertEqual(msg.error, "ConnectionError: offline")
+        self.assertEqual(msg.tool_calls, ())
+        ant = FakeAnthropic([])
+        ant.messages.create = mock.Mock(side_effect=RuntimeError("x" * 500))
+        with self.assertLogs("box.brain.models", "WARNING"):
+            msg = AnthropicChat(ant, "m").chat([], TOOLS)
+        self.assertTrue(msg.error.startswith("RuntimeError: "))
+        self.assertLessEqual(len(msg.error), 300)
+        ok = OpenAIChat(FakeOpenAI(NS(content="hi", tool_calls=None)), "m").chat([], TOOLS)
+        self.assertEqual(ok.error, "")
+
+    def test_failures_log_once_per_window(self) -> None:
+        client = FakeOpenAI(None)
+        client.chat.completions.create = mock.Mock(side_effect=ConnectionError("offline"))
+        chat = OpenAIChat(client, "m")
+        with mock.patch("home_guard_project.box.brain.models.time.monotonic", return_value=1000.0):
+            with self.assertLogs("box.brain.models", "WARNING") as cm:
+                chat.chat([], TOOLS)
+                chat.chat([], TOOLS)
+            self.assertEqual(len(cm.records), 1)
+            self.assertIsNotNone(cm.records[0].exc_info)
+        with mock.patch("home_guard_project.box.brain.models.time.monotonic", return_value=1301.0):
+            with self.assertLogs("box.brain.models", "WARNING") as cm:
+                chat.chat([], TOOLS)
+            self.assertEqual(len(cm.records), 1)
+
+    def test_empty_raw_is_rebuilt_or_dropped(self) -> None:
+        _, msgs = to_anthropic_messages([
+            {"role": "user", "content": "q"},
+            {"role": "assistant", "content": "a", "_raw": []},
+            {"role": "assistant", "content": None, "_raw": []},
+        ])
+        self.assertEqual(msgs, [{"role": "user", "content": "q"},
+                                {"role": "assistant", "content": [{"type": "text", "text": "a"}]}])
+
+    def test_empty_user_text_is_skipped(self) -> None:
+        _, msgs = to_anthropic_messages([{"role": "user", "content": ""}, {"role": "user", "content": None},
+                                         {"role": "user", "content": "q"}])
+        self.assertEqual(msgs, [{"role": "user", "content": "q"}])
+
+    def test_model_name_is_stripped(self) -> None:
+        model = make_model("openai: gpt-6-sol", {"OPENAI_API_KEY": "k"})
+        self.assertEqual(model.model_name, "gpt-6-sol")
+        self.assertIsNone(model._temperature)
+
+    def test_missing_sdk_is_named_in_the_log(self) -> None:
+        with mock.patch.dict("sys.modules", {"anthropic": None}):
+            with self.assertLogs("box.brain.models", "WARNING") as cm:
+                self.assertIsNone(make_model("anthropic:claude-sonnet-5-5", {"ANTHROPIC_API_KEY": "k"}))
+        self.assertIn("anthropic is not installed", " ".join(r.getMessage() for r in cm.records))
 
 
 if __name__ == "__main__":
