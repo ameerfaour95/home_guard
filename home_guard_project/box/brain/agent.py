@@ -638,7 +638,7 @@ class OwnerAgentV2:
         try:
             if snapshot is None:
                 raise RuntimeError("no house snapshot")
-            settings_text = settings_line(settings) if settings else ""
+            settings_text = settings_line(settings, lang) if settings else ""
             block = context_block(snapshot, settings_text, now, lang, ctx.alert_handle, alert,
                                   (pending, text) if pending else None, text, box_lang)
             history = state.history_messages(now)

@@ -38,7 +38,7 @@ from .events import (
     read_desc,
     write_desc,
 )
-from .i18n import LANGUAGE_NAMES
+from .i18n import LANGUAGE_NAMES, t
 from .memory import ChatState
 from .media import bounds_text
 from .mode import GUARD, hhmm
@@ -717,7 +717,7 @@ SENSITIVITY_LEVELS = {"low": 0.6, "medium": 0.4, "high": 0.25}   # detector conf
 LANGUAGE_WORDS = {"en": "en", "english": "en", "אנגלית": "en", "he": "he", "hebrew": "he", "עברית": "he"}
 
 
-def settings_view(settings: Dict[str, Any]) -> Dict[str, str]:
+def settings_view(settings: Dict[str, Any], lang: str = "en") -> Dict[str, str]:
     malformed = not isinstance(settings, dict)
     source = settings if isinstance(settings, dict) else {}
     def number(key, default, low, high):
@@ -751,15 +751,15 @@ def settings_view(settings: Dict[str, Any]) -> Dict[str, str]:
         "cooldown_minutes": f"{cooldown / 60:g} min",
         "sensitivity": f"{level} ({conf:.2f})",
         "language": LANGUAGE_NAMES[code],
-        "quiet_log": "on" if source.get("quiet_log", False) else "off",
+        "quiet_log": t("setting_on" if source.get("quiet_log", False) else "setting_off", lang),
     }
 
 
-def settings_line(settings: Dict[str, Any]) -> str:
-    v = settings_view(settings)
+def settings_line(settings: Dict[str, Any], lang: str = "en") -> str:
+    v = settings_view(settings, lang)
     return (f"SETTINGS: alert hours {v['alert_hours']} · time between alerts per camera {v['cooldown_minutes']} · "
             f"detector sensitivity {v['sensitivity']} · box language {v['language']} (alerts and announcements)"
-            f" · quiet log outside the hours {v['quiet_log']}")
+            f" · {t('settings_quiet_log', lang, state=v['quiet_log'])}")
 
 
 _ALL_DAY_WORDS = ("all day", "24h", "always", "כל היום", "طوال اليوم")

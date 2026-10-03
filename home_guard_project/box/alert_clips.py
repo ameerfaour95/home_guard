@@ -103,7 +103,12 @@ def trim_quiet(roots: Sequence[str], max_bytes: int) -> int:
                 os.remove(meta)   # no meta means it is no longer a complete clip for the uploader
             except FileNotFoundError:
                 pass
-            os.remove(path)
+            try:
+                os.remove(path)
+            except FileNotFoundError:
+                # It disappeared after the scan; its bytes are already freed.
+                total -= size
+                continue
         except OSError as exc:
             log.warning("Quiet clip not deleted: %s: %s", path, exc)
             continue

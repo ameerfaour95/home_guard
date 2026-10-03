@@ -70,6 +70,11 @@ TEMPLATES: Dict[str, Dict[str, str]] = {
     "setting_sensitivity": {"en": "Detector sensitivity", "he": "רגישות הזיהוי", "ar": "حساسية الكشف"},
     "setting_language": {"en": "Box language", "he": "שפת המערכת", "ar": "لغة النظام"},
     "setting_quiet_log": {"en": "Quiet log outside the alert hours", "he": "תיעוד שקט מחוץ לשעות ההתראה", "ar": "سجل هادئ خارج ساعات التنبيه"},
+    "settings_quiet_log": {"en": "quiet log outside the hours {state}",
+                           "he": "תיעוד שקט מחוץ לשעות ההתראה {state}",
+                           "ar": "سجل هادئ خارج ساعات التنبيه {state}"},
+    "setting_on": {"en": "on", "he": "פעיל", "ar": "مفعّل"},
+    "setting_off": {"en": "off", "he": "כבוי", "ar": "متوقف"},
     "what_change_setting": {"en": "Changing the setting", "he": "שינוי ההגדרה", "ar": "تغيير الإعداد"},
     # -- receipts that succeeded ------------------------------------------------
     "sent_video": {"en": "✓ Video sent ({bounds})",

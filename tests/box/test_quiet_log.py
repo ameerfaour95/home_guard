@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import tempfile
 import threading
 import unittest
@@ -54,6 +55,45 @@ class QuietTrackerTest(unittest.TestCase):
 
 
 class QuietSaverTest(unittest.TestCase):
+    def test_marker_changes_are_coalesced_without_displacing_pending_clips(self):
+        gate, started, saved = threading.Event(), threading.Event(), []
+        def save(event, frames):
+            started.set()
+            gate.wait(5)
+            saved.append(event)
+        with tempfile.TemporaryDirectory() as root:
+            path = os.path.join(root, ".registry", "quiet_since.json")
+            saver = QuietSaver(save)
+            try:
+                saver.submit("active", [])
+                self.assertTrue(started.wait(2))
+                saver.submit("pending", [])
+                for stamp in range(100):
+                    saver.marker(path, stamp)
+            finally:
+                gate.set()
+                saver.stop()
+            self.assertEqual(saved, ["active", "pending"])
+            self.assertEqual(json.loads(Path(path).read_text()), {"since": 99})
+
+    def test_blocked_marker_write_does_not_block_submission_and_failure_is_contained(self):
+        gate, started, saved = threading.Event(), threading.Event(), []
+        def blocked(*args, **kwargs):
+            started.set()
+            gate.wait(5)
+            raise OSError("slow disk failed")
+        with mock.patch.object(inf.os, "makedirs", side_effect=blocked):
+            saver = QuietSaver(lambda event, frames: saved.append(event))
+            try:
+                saver.marker("unused/quiet_since.json", 100)
+                self.assertTrue(started.wait(2))
+                self.assertTrue(saver.submit("event", []))
+                self.assertFalse(gate.is_set())
+            finally:
+                gate.set()
+                saver.stop()
+        self.assertEqual(saved, ["event"])
+
     def test_bounded_queue_drops_oldest_pending(self):
         gate, started, saved = threading.Event(), threading.Event(), []
         def save(event, frames):
@@ -160,13 +200,14 @@ class HelpersTest(unittest.TestCase):
 
 class RunTest(unittest.TestCase):
     def run_loop(self, enabled=True, change=None, broken=False, positions=None, visible=None, duration=14,
-                 snapshot_error=False):
+                 snapshot_error=False, start_at=None, script=None, alert_on=None, cooldown=120):
         from home_guard_project.box import ai_status, camera_alerts, telegram_agent
         from home_guard_project.data_collection import config
         import numpy as np
         cfg = config.Config()
         cfg.CAMERAS = {"gate": "synthetic", "yard": "synthetic"}
-        start = datetime(2026, 10, 3, 12).timestamp()
+        start = (start_at or datetime(2026, 10, 3, 12)).timestamp()
+        self.start = start
         clock, looks, saved = [start], [], []
         status = mock.Mock()
         status.offline.return_value = []
@@ -178,10 +219,14 @@ class RunTest(unittest.TestCase):
         detector, backend = mock.Mock(), mock.Mock()
         def predict(*a, **kw):
             looks.append(clock[0])
+            if script:
+                labels, delay = script(len(looks) - 1, clock[0] - start)
+                clock[0] += delay
+                return [result(*labels)]
             if broken and clock[0] < start + 1:
                 raise ValueError("bad detector frame")
             if positions:
-                return [result("car")]
+                return [result("car") if positions(clock[0] - start) else result()]
             return [result("person", "person", "car") if clock[0] < start + 2 else result()]
         detector.predict.side_effect = predict
         class StopLoop(BaseException):
@@ -192,11 +237,22 @@ class RunTest(unittest.TestCase):
             if clock[0] >= start + duration:
                 raise StopLoop
         settings = inf.AlertSettings(alert_start_hour=22, alert_end_hour=6, quiet_log=enabled)
+        object.__setattr__(settings, "cooldown_sec", cooldown)
         if positions:
             object.__setattr__(settings, "alert_on", ("vehicle",))
-        self.memories = [inf.VehicleMemory() for _ in streams]
-        for memory in self.memories:
+        if alert_on:
+            object.__setattr__(settings, "alert_on", alert_on)
+        self.memories = []
+        vehicle_memory = inf.VehicleMemory
+        def make_memory():
+            memory = vehicle_memory()
             memory.prime = mock.Mock(wraps=memory.prime)
+            self.memories.append(memory)
+            return memory
+        self.admissions = []
+        def drain(pending, *args):
+            self.admissions.extend((j.camera, round(j.ts - start, 3), j.labels) for j in pending)
+            pending.clear()
         with tempfile.TemporaryDirectory() as root, ExitStack() as stack:
             patches = [
                 mock.patch("dotenv.load_dotenv"),
@@ -210,7 +266,7 @@ class RunTest(unittest.TestCase):
                 mock.patch.object(inf, "LiveSettings", return_value=SimpleNamespace(check=lambda now: [])),
                 mock.patch.object(inf, "filter_by_thresholds", side_effect=lambda r, *a: r),
                 mock.patch.object(inf, "vehicle_boxes", side_effect=lambda r: positions(clock[0] - start) if positions else []),
-                mock.patch.object(inf, "VehicleMemory", side_effect=self.memories),
+                mock.patch.object(inf, "VehicleMemory", side_effect=make_memory),
                 mock.patch.object(ai_status, "objects_from_result", return_value=[]),
                 mock.patch.object(ai_status, "AiStatus", return_value=status),
                 mock.patch.object(camera_alerts, "LiveCameraAlerts", return_value=SimpleNamespace(
@@ -218,6 +274,7 @@ class RunTest(unittest.TestCase):
                     thresholds_for=lambda name, defaults: defaults, for_camera=lambda name, defaults: defaults)),
                 mock.patch.object(telegram_agent, "start", return_value=None),
                 mock.patch.object(inf, "dispatch_alert"),
+                mock.patch.object(inf, "_start_due_alerts", side_effect=drain),
                 mock.patch.object(inf, "_save_quiet", side_effect=lambda ev, frames, root: saved.append((ev, frames))),
                 mock.patch.object(inf.time, "time", side_effect=lambda: clock[0]),
                 mock.patch.object(inf.time, "sleep", side_effect=sleep),
@@ -227,7 +284,7 @@ class RunTest(unittest.TestCase):
                 stack.enter_context(patch)
             if snapshot_error:
                 stack.enter_context(mock.patch.object(inf, "_quiet_frames", side_effect=OSError("buffer unavailable")))
-            inf.datetime.now.return_value.hour = 12
+            inf.datetime.now.side_effect = lambda: datetime.fromtimestamp(clock[0])
             # Live mutation here is deliberate: run() shares this frozen settings instance.
             if change:
                 def reload(now):
@@ -237,7 +294,15 @@ class RunTest(unittest.TestCase):
                     return ["quiet_log"] if value != old else []
                 inf.LiveSettings.return_value.check = reload
             with self.assertRaises(StopLoop):
-                inf.run()
+                try:
+                    inf.run()
+                except StopLoop:
+                    frame = sys.exc_info()[2]
+                    while frame and frame.tb_frame.f_code is not inf.run.__code__:
+                        frame = frame.tb_next
+                    self.loop_state = dict(frame.tb_frame.f_locals)
+                    drain(self.loop_state["pending"])
+                    raise
             backend.analyze.assert_not_called()
             inf.dispatch_alert.assert_not_called()
             marker = Path(root, ".registry", "quiet_since.json").exists()
@@ -275,13 +340,17 @@ class RunTest(unittest.TestCase):
         a, b = [(0.1, 0.1, 0.2, 0.2)], [(0.5, 0.5, 0.6, 0.6)]
         _, saved, _, _, _ = self.run_loop(positions=lambda t: a if t < 2 else b,
                                           visible=lambda t: t < 2 or t >= 65, duration=70)
-        self.assertEqual(saved, [])
-        for memory in self.memories:
-            self.assertEqual(memory.prime.call_args_list, [mock.call(a), mock.call(b)])
+        # Startup is an arrival; reconnect after a real gap must add no event.
+        self.assertEqual([ev.start for ev, _ in saved], [self.start, self.start])
+        self.assertEqual(len(self.memories), 4)
+        for memory in self.memories[:2]:
+            memory.prime.assert_not_called()
+        for memory in self.memories[2:]:
+            self.assertEqual(memory.prime.call_args_list, [mock.call(b)])
 
     def test_moving_vehicle_is_saved_after_confirmation(self):
-        a, b = [(0.1, 0.1, 0.2, 0.2)], [(0.5, 0.5, 0.6, 0.6)]
-        _, saved, _, _, _ = self.run_loop(positions=lambda t: a if t < 2 else b, duration=16)
+        b = [(0.5, 0.5, 0.6, 0.6)]
+        _, saved, _, _, _ = self.run_loop(positions=lambda t: [] if t < 2 else b, duration=16)
         self.assertEqual(len(saved), 2)
         self.assertEqual(saved[0][0].labels, {"car"})
         self.assertEqual(saved[0][0].people, 0)
@@ -295,6 +364,128 @@ class RunTest(unittest.TestCase):
         looks, saved, _, _, _ = self.run_loop(snapshot_error=True)
         self.assertEqual(len(looks), 28)
         self.assertEqual(saved, [])
+
+
+class GuardRegressionTest(unittest.TestCase):
+    run_loop = RunTest.run_loop
+
+    def test_startup_vehicle_alerts_without_priming(self):
+        self.run_loop(enabled=False, start_at=datetime(2026, 10, 3, 23), duration=2,
+                      positions=lambda t: [(0.1, 0.1, 0.2, 0.2)])
+        self.assertEqual(self.admissions, [("gate", 0, ["car"])])
+        for memory in self.memories:
+            memory.prime.assert_not_called()
+
+    def test_hours_are_checked_for_each_camera_after_slow_inference(self):
+        self.run_loop(enabled=False, start_at=datetime(2026, 10, 3, 5, 59, 59), duration=2,
+                      script=lambda i, t: ([], 1.3) if i == 0 else (["person"], 0))
+        self.assertEqual(self.admissions, [], "yard's first look is after 06:00")
+
+    def test_quiet_to_guard_transition_is_handled_before_next_camera(self):
+        _, saved, _, marker, _ = self.run_loop(
+            start_at=datetime(2026, 10, 3, 21, 59, 59), duration=2,
+            script=lambda i, t: (["person"], 1.3 if i == 0 else 0))
+        self.assertEqual(self.admissions, [("yard", 1.3, ["person"]), ("gate", 1.55, ["person"])])
+        self.assertEqual([ev.camera for ev, _ in saved], ["gate"])
+        self.assertFalse(marker)
+
+    def test_guard_to_quiet_transition_is_handled_before_next_camera(self):
+        _, saved, _, marker, _ = self.run_loop(
+            start_at=datetime(2026, 10, 3, 5, 59, 59), duration=2,
+            script=lambda i, t: ([], 1.3) if i == 0 else (["person"], 0))
+        self.assertEqual(self.admissions, [])
+        self.assertEqual({ev.camera for ev, _ in saved}, {"gate", "yard"})
+        self.assertTrue(all(ev.start >= self.start + 1.3 for ev, _ in saved))
+        self.assertTrue(marker)
+
+    def test_guard_never_primes_even_with_quiet_enabled_or_a_long_camera_gap(self):
+        for enabled in (False, True):
+            with self.subTest(enabled=enabled):
+                self.run_loop(enabled=enabled, start_at=datetime(2026, 10, 3, 23), duration=70,
+                              positions=lambda t: [(t / 100, 0.1, t / 100 + .1, .2)],
+                              visible=lambda t: t < 2 or t >= 65)
+                for memory in self.memories:
+                    memory.prime.assert_not_called()
+                self.assertIsNone(self.loop_state["last_vehicle_look"])
+
+    def test_quiet_vehicle_looks_do_not_consume_first_guard_arrival(self):
+        for enabled in (False, True):
+            with self.subTest(enabled=enabled):
+                self.run_loop(enabled=enabled, start_at=datetime(2026, 10, 3, 21, 59, 59, 500000), duration=3,
+                              positions=lambda t: [(0.1, 0.1, 0.2, 0.2)])
+                # 520aec5 first sees this car when the guard hours begin.
+                self.assertEqual(self.admissions, [("gate", .5, ["car"])])
+
+    def test_exactly_sixty_seconds_between_quiet_looks_does_not_prime(self):
+        self.run_loop(duration=62, visible=lambda t: t == 0 or t >= 60,
+                      positions=lambda t: [(0.1, 0.1, 0.2, 0.2)])
+        for memory in self.memories:
+            memory.prime.assert_not_called()
+
+    def test_disabling_flushes_only_once_and_releases_quiet_state(self):
+        flush = inf.QuietTracker.flush
+        with mock.patch.object(inf.QuietTracker, "flush", autospec=True, side_effect=flush) as calls:
+            self.run_loop(change=lambda t: t < 2, duration=5)
+        self.assertEqual(calls.call_count, 2)
+        for key in ("quiet", "quiet_vehicles", "quiet_look_ts", "last_vehicle_look", "default_retention"):
+            self.assertIsNone(self.loop_state[key])
+
+    def test_guard_admissions_match_520aec5_hand_written_script(self):
+        # Baseline: gate's startup car reserves the only pending slot. Yard's
+        # startup car is still remembered while waiting; it never alerts parked.
+        # Yard's person then alerts. Gate's animal alerts when its cooldown ends.
+        # Continued people alert only once each camera's 2-second cooldown ends.
+        script = [(["car"], 0), (["car"], 0), (["person"], 0),
+                  (["car"], 0), (["person"], 0), (["dog"], 0),
+                  (["person"], 0), (["person"], 0)]
+        self.run_loop(enabled=False, start_at=datetime(2026, 10, 3, 23), duration=3,
+                      positions=lambda t: [(0.1, 0.1, 0.2, 0.2)],
+                      script=lambda i, t: script[i] if i < len(script) else ([], 0),
+                      alert_on=("person", "vehicle", "animal"), cooldown=2)
+        self.assertEqual(self.admissions, [("gate", 0, ["car"]),
+                                          ("yard", .25, ["person"]),
+                                          ("gate", 2, ["dog"]),
+                                          ("yard", 2.25, ["person"])])
+
+    def test_disabled_quiet_state_is_not_allocated_or_flushed(self):
+        with mock.patch.object(inf, "QuietTracker", wraps=inf.QuietTracker) as tracker, \
+                mock.patch.object(inf.QuietTracker, "flush") as flush:
+            self.run_loop(enabled=False, start_at=datetime(2026, 10, 3, 23), duration=2)
+        tracker.assert_not_called()
+        flush.assert_not_called()
+        for key in ("quiet", "quiet_vehicles", "quiet_look_ts", "last_vehicle_look", "default_retention"):
+            self.assertIsNone(self.loop_state.get(key), key)
+
+    def marker_io(self, enabled, change=None):
+        import builtins
+        calls = []
+        def spy(real):
+            def record(path, *args, **kwargs):
+                if ".registry" in str(path):
+                    calls.append((real.__name__, threading.current_thread().name))
+                return real(path, *args, **kwargs)
+            return record
+        with ExitStack() as stack:
+            for obj, attr in ((os.path, "exists"), (os, "makedirs"), (os, "remove"), (builtins, "open")):
+                stack.enter_context(mock.patch.object(obj, attr, side_effect=spy(getattr(obj, attr))))
+            self.run_loop(enabled=enabled, change=change, duration=3)
+        return calls
+
+    def test_default_startup_does_not_even_check_the_marker(self):
+        self.assertEqual(self.marker_io(False), [])
+
+    def test_marker_io_runs_on_background_saver(self):
+        calls = self.marker_io(True, change=lambda t: t < 2)
+        self.assertTrue(calls)
+        self.assertTrue(all(thread == "quiet-saver" for _, thread in calls), calls)
+
+    def test_animals_are_guard_alerts_but_never_quiet_events(self):
+        _, saved, _, _, _ = self.run_loop(script=lambda i, t: (["dog"], 0),
+                                          alert_on=("animal",), duration=3)
+        self.assertEqual(saved, [])
+        self.run_loop(enabled=False, start_at=datetime(2026, 10, 3, 23),
+                      script=lambda i, t: (["dog"], 0), alert_on=("animal",), duration=2)
+        self.assertEqual(self.admissions, [("gate", 0, ["dog"]), ("yard", .25, ["dog"])])
 
 
 class TrimQuietTest(unittest.TestCase):
@@ -330,6 +521,20 @@ class TrimQuietTest(unittest.TestCase):
                 self.assertEqual(trim_quiet([root], 1000), 1)
             self.assertTrue(paths[0][0].exists())
             self.assertFalse(paths[1][0].exists())
+            self.assertTrue(paths[2][0].exists())
+
+    def test_disappearing_old_clip_is_already_freed(self):
+        with tempfile.TemporaryDirectory() as root:
+            paths = self.clips(root)
+            remove = os.remove
+            def disappear(path):
+                if str(path) == str(paths[0][0]):
+                    remove(path)  # another writer removed it after the scan
+                    raise FileNotFoundError(path)
+                remove(path)
+            with mock.patch.object(alert_clips.os, "remove", side_effect=disappear):
+                trim_quiet([root], 1000)
+            self.assertTrue(paths[1][0].exists(), "the newer clip must survive")
             self.assertTrue(paths[2][0].exists())
 
     def test_cap_is_shared_across_live_and_archive(self):

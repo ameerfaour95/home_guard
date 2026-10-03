@@ -738,6 +738,7 @@ class QuietSaver:
         self._save = save
         self._max_pending = max(1, max_pending)
         self._pending: Any = deque()
+        self._marker: Optional[Tuple[str, Optional[float]]] = None
         self._condition = threading.Condition()
         self._stopping = False
         self._thread = threading.Thread(target=self._run, name="quiet-saver", daemon=True)
@@ -755,17 +756,37 @@ class QuietSaver:
             self._condition.notify()
             return kept_all
 
+    def marker(self, path: str, since: Optional[float]) -> None:
+        """Coalesce state changes into one pending write, independent of the clip queue."""
+        with self._condition:
+            if not self._stopping:
+                self._marker = (path, since)
+                self._condition.notify()
+
     def _run(self) -> None:
         while True:
             with self._condition:
-                self._condition.wait_for(lambda: self._pending or self._stopping)
-                if not self._pending:
+                self._condition.wait_for(lambda: self._marker is not None or self._pending or self._stopping)
+                marker, self._marker = self._marker, None
+                if marker is None and not self._pending:
                     return
-                item = self._pending.popleft()
+                item = self._pending.popleft() if marker is None else None
             try:
-                self._save(*item)
+                if marker is not None:
+                    path, since = marker
+                    if since is not None:
+                        os.makedirs(os.path.dirname(path), exist_ok=True)
+                        with open(path, "w", encoding="utf-8") as f:
+                            json.dump({"since": since}, f)
+                    else:
+                        try:
+                            os.remove(path)
+                        except FileNotFoundError:
+                            pass
+                else:
+                    self._save(*item)
             except Exception as exc:  # noqa: BLE001
-                log.warning("Quiet clip not saved: %s", exc)
+                log.warning("Quiet %s not saved: %s", "marker" if marker is not None else "clip", exc)
 
     def stop(self, timeout: float = 10.0) -> None:
         with self._condition:
@@ -1401,13 +1422,15 @@ def run() -> int:
     last_look_ts: Dict[str, float] = {name: 0.0 for name in cameras}
     vehicles: Dict[str, VehicleMemory] = {name: VehicleMemory() for name in cameras}
     parked: Dict[str, bool] = {name: False for name in cameras}  # "have not moved" already logged
-    last_vehicle_look: Dict[str, float] = {}
-    quiet = {name: QuietTracker(name) for name in cameras}
+    # The default guard path allocates and maintains no quiet state.
+    last_vehicle_look: Optional[Dict[str, float]] = None
+    quiet_look_ts: Optional[Dict[str, float]] = None
+    quiet_vehicles: Optional[Dict[str, VehicleMemory]] = None
+    quiet: Optional[Dict[str, QuietTracker]] = None
     saver: Optional[QuietSaver] = None
     quiet_since_path = os.path.join(PRODUCTION_LIVE_DIR, ".registry", "quiet_since.json")
     quiet_retention = PRE_SECONDS + QUIET_MAX_SEC + max(QUIET_GAP_SEC, POST_SECONDS) + 5
-    default_retention = {name: getattr(stream.sub_cap, "keep_seconds", 0) for name, stream in streams.items()}
-    quiet_was_on: Optional[bool] = None
+    default_retention: Optional[Dict[str, float]] = None
     last_memory_log = 0.0
 
     def close_quiet(event: Optional[QuietEvent], now_value: float) -> None:
@@ -1423,7 +1446,24 @@ def run() -> int:
             log.warning("[%s] quiet event not queued: %s", event.camera, exc)
 
     def update_quiet(on: bool, now_value: float) -> None:
-        nonlocal quiet_was_on
+        nonlocal quiet, quiet_vehicles, quiet_look_ts, last_vehicle_look, default_retention, saver
+        if quiet is None:
+            if not on:
+                return
+            quiet = {name: QuietTracker(name) for name in cameras}
+            quiet_vehicles = {name: VehicleMemory() for name in cameras}
+            last_vehicle_look = {}
+            quiet_look_ts = {}
+            default_retention = {name: getattr(stream.sub_cap, "keep_seconds", 0)
+                                 for name, stream in streams.items()}
+            for cam_name, stream in streams.items():
+                stream.sub_cap.keep_seconds = max(default_retention[cam_name], quiet_retention)
+            try:
+                if saver is None:
+                    saver = QuietSaver(lambda ev, frames: _save_quiet(ev, frames, PRODUCTION_LIVE_DIR))
+                saver.marker(quiet_since_path, now_value)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Quiet-log state not queued: %s", exc)
         for cam_name, tracker in quiet.items():
             try:
                 # Tick even when a camera is offline. Freeze closing visits before shortening buffers.
@@ -1431,20 +1471,13 @@ def run() -> int:
                 close_quiet(event, now_value)
             except Exception as exc:  # noqa: BLE001
                 log.warning("[%s] quiet event not closed: %s", cam_name, exc)
-        try:
-            if on != quiet_was_on:
-                if on:
-                    os.makedirs(os.path.dirname(quiet_since_path), exist_ok=True)
-                    with open(quiet_since_path, "w", encoding="utf-8") as f:
-                        json.dump({"since": now_value}, f)
-                elif os.path.exists(quiet_since_path):
-                    os.remove(quiet_since_path)
-                for cam_name, stream in streams.items():
-                    stream.sub_cap.keep_seconds = (max(default_retention[cam_name], quiet_retention)
-                                                   if on else default_retention[cam_name])
-                quiet_was_on = on
-        except Exception as exc:  # noqa: BLE001
-            log.warning("Quiet-log state not updated: %s", exc)
+        if not on:
+            for cam_name, stream in streams.items():
+                stream.sub_cap.keep_seconds = default_retention[cam_name]
+            quiet, quiet_vehicles, last_vehicle_look, default_retention = None, None, None, None
+            quiet_look_ts = None
+            if saver is not None:
+                saver.marker(quiet_since_path, None)
 
     status = AiStatus(os.path.join(LOG_DIR, "ai_status.json"))  # what the box's window shows
     live = LiveSettings(settings, now=time.time())
@@ -1477,10 +1510,11 @@ def run() -> int:
         while True:
             now_ts = time.time()
             settings_changed = bool(live.check(now_ts))
-            now = datetime.now()
-            in_window = in_alert_window(now.hour, settings.alert_start_hour, settings.alert_end_hour)
-            quiet_on = settings.quiet_log and not in_window
-            update_quiet(quiet_on, now_ts)
+            if settings.quiet_log or quiet is not None:
+                quiet_on = settings.quiet_log and not in_alert_window(
+                    datetime.now().hour, settings.alert_start_hour, settings.alert_end_hour)
+                if quiet_on or quiet is not None:
+                    update_quiet(quiet_on, now_ts)
             if camera_alerts.check(now_ts) or settings_changed:
                 status.settings(reported_settings())
             if mode_watch.due(now_ts):
@@ -1501,7 +1535,7 @@ def run() -> int:
                                                                len(cameras), owner_language(), logging_on))
                 except Exception as exc:  # noqa: BLE001 - the status line must never stop the alerts
                     log.warning("Mode status not updated: %s", exc)
-                if quiet_on and now_ts - last_memory_log >= 60:
+                if quiet is not None and now_ts - last_memory_log >= 60:
                     try:
                         memory_bytes = 0
                         for cap in [s.sub_cap for s in streams.values()] + list(main_caps.values()):
@@ -1523,6 +1557,13 @@ def run() -> int:
                     continue
                 if time.time() - streams[name].last_ts > 5:   # a frozen camera: its last picture is not seen again
                     continue
+                # As in the original guard loop, check at this camera's look,
+                # after reading its frame. Earlier inference may cross an hour.
+                now = datetime.now()
+                in_window = in_alert_window(now.hour, settings.alert_start_hour, settings.alert_end_hour)
+                quiet_on = settings.quiet_log and not in_window
+                if quiet_on != (quiet is not None):
+                    update_quiet(quiet_on, time.time())
                 if not in_window and not quiet_on:
                     continue
                 # No new alert for this camera during its cooldown, or while a VLM call is
@@ -1530,9 +1571,14 @@ def run() -> int:
                 # window can show what it sees.
                 waiting = (now_ts - last_alert_ts[name] < settings.cooldown_sec
                            or bool(pending) or (worker["t"] is not None and worker["t"].is_alive()))
-                if (quiet_on or waiting) and now_ts - last_look_ts[name] < STATUS_LOOK_SEC:
-                    continue
-                last_look_ts[name] = now_ts
+                if quiet_on:
+                    if now_ts - quiet_look_ts.get(name, 0) < STATUS_LOOK_SEC:
+                        continue
+                    quiet_look_ts[name] = now_ts
+                else:
+                    if waiting and now_ts - last_look_ts[name] < STATUS_LOOK_SEC:
+                        continue
+                    last_look_ts[name] = now_ts
 
                 # Each type is held to its own certainty (house value, or the camera's own);
                 # the detector runs at the lowest of them and the rest are filtered here.
@@ -1554,9 +1600,16 @@ def run() -> int:
                 # with its own parked position afterwards, and stays quiet.
                 try:
                     boxes = vehicle_boxes(results[0]) if results else []
-                    stale = name not in last_vehicle_look or seen_ts - last_vehicle_look[name] > 60
-                    moved = vehicles[name].prime(boxes) if stale else vehicles[name].look(boxes, now=seen_ts)
-                    last_vehicle_look[name] = seen_ts
+                    if quiet_on:
+                        previous = last_vehicle_look.get(name)
+                        stale = previous is not None and seen_ts - previous > 60
+                        # Quiet looks must never consume an arrival or change the
+                        # parked reference used by the original guard path.
+                        memory = quiet_vehicles[name]
+                        moved = memory.prime(boxes) if stale else memory.look(boxes, now=seen_ts)
+                        last_vehicle_look[name] = seen_ts
+                    else:
+                        moved = vehicles[name].look(boxes, now=seen_ts)
                 except Exception as exc:  # noqa: BLE001
                     log.warning("[%s] vehicle reference not updated: %s", name, exc)
                     continue
@@ -1565,7 +1618,7 @@ def run() -> int:
                         result = results[0] if results else None
                         person, vehicle, labels = detect_trigger(result) if result is not None else (False, False, [])
                         alert_on = camera_alerts.for_camera(name, settings.alert_on)
-                        trigger = should_escalate(person, vehicle, moved, alert_on, animal=has_animal(labels))
+                        trigger = should_escalate(person, vehicle, moved, alert_on)
                         close_quiet(quiet[name].look(seen_ts, trigger, _detector_labels(result), count_people(result)), seen_ts)
                     except Exception as exc:  # noqa: BLE001
                         log.warning("[%s] quiet look failed: %s", name, exc)
@@ -1593,7 +1646,7 @@ def run() -> int:
                 pending.append(job)   # reserves the single VLM slot throughout post-roll
             time.sleep(0.05)
     finally:
-        for tracker in quiet.values():
+        for tracker in quiet.values() if quiet is not None else ():
             try:
                 close_quiet(tracker.flush(), time.time())
             except Exception as exc:  # noqa: BLE001
