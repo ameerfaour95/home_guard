@@ -542,12 +542,26 @@ class OwnerAgentV2:
             if r.tool == "set_alert_types":
                 after = api.set_alert_types(camera, ["default"] if back is None else back)
             elif camera is None:
-                after = api.set_sensitivity(None, back)
-            else:
-                # Camera sensitivity updates merge: clear before restoring the exact partial override.
+                # Restore only the types this turn changed; the others keep following box.yaml's own default.
+                if not isinstance(d["new"], dict):
+                    raise ValueError("invalid sensitivity restore data")
+                changed = {k: back[k] for k in d["new"] if k in back and d["new"][k] != back[k]}
+                after = api.set_sensitivity(None, changed) if changed else api.get_alert_settings(None)
+            elif back is None:
                 after = api.set_sensitivity(camera, "default")
-                if back is not None:
+            elif set(d["own_after"]) <= set(back):
+                after = api.set_sensitivity(camera, back)       # same keys: one merge call restores them
+            else:
+                # The turn added keys: updates merge, so clear first, then restore the exact partial override.
+                api.set_sensitivity(camera, "default")
+                try:
                     after = api.set_sensitivity(camera, back)
+                except Exception:
+                    try:
+                        api.set_sensitivity(camera, d["own_after"])     # put the camera back as the turn left it
+                    except Exception:   # noqa: BLE001 - the original failure is the one reported
+                        log.warning("Could not put the camera sensitivity back after a failed undo")
+                    raise
             after = _alert_state(after, camera)
             row = after["house"] if camera is None else after
             if (row[key] if camera is None else row.get(own_key)) != back:

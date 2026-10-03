@@ -939,14 +939,43 @@ def _alert_state(state: Any, camera: Optional[str]) -> Dict[str, Any]:
 
 
 def _alert_target(ctx: ToolContext, words: Any) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
-    """``(camera name or None for the house, None)`` or ``(None, error)``."""
+    """``(camera name or None for the house, None)`` or ``(None, error)``. "default" is not the house."""
     if words is not None and not isinstance(words, str):
         return None, _err("camera must be a camera name or house")
     text = str(words or "").strip()
-    if not text or text.casefold() in ("house", "the house", "default", "בית", "הבית", "כל הבית"):
+    if not text or text.casefold() in ("house", "the house", "בית", "הבית", "כל הבית", "المنزل"):
         return None, None
     camera, bad = _one_camera(ctx, text)
     return camera, bad
+
+
+_PATH_LIKE = re.compile(
+    r"""'[^'\n]*[\\/][^'\n]*'|"[^"\n]*[\\/][^"\n]*"|[A-Za-z]:[\\/]\S*|(?<!\w)/(?:[\w.\-~]+/)*[\w.\-~]+""")
+
+
+def _no_paths(message: str) -> str:
+    """The owner sees what went wrong, never where on the box's disk."""
+    return " ".join(_PATH_LIKE.sub("the file", message).split())
+
+
+def _intended(tool: str, camera: Optional[str], value: Any, old: Any, own_before: Any) -> Optional[Tuple[Any, Any]]:
+    """What a saved change should read back as ``(new, own_after)``; None when it cannot be known without reading."""
+    if tool == "set_alert_types":
+        if value == ["default"]:
+            return None
+        if all(w.startswith(("+", "-")) for w in value):
+            new = list(old)
+            for w in value:
+                if w[0] == "+" and w[1:] not in new:
+                    new.append(w[1:])
+                elif w[0] == "-" and w[1:] in new:
+                    new.remove(w[1:])
+        else:
+            new = list(value)
+        return new, (new if camera is not None else None)
+    if value == "default":
+        return None
+    return {**old, **value}, ({**(own_before or {}), **value} if camera is not None else None)
 
 
 @_safe_tool
@@ -968,7 +997,10 @@ def _change_alerts(ctx: ToolContext, args: Dict[str, Any], tool: str, key: str, 
                     "copied from it (two words or more).")
     if ctx.services.alert_settings is None:
         return _err("alert settings are not available on this box")
-    camera, bad = _alert_target(ctx, args.get("camera"))
+    raw = args.get("camera")
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return _result(_issue(ctx, tool, FAILED, "", {"camera": ""}, "which_camera"))
+    camera, bad = _alert_target(ctx, raw)
     if bad:
         return bad
     api = ctx.services.alert_settings
@@ -981,14 +1013,25 @@ def _change_alerts(ctx: ToolContext, args: Dict[str, Any], tool: str, key: str, 
         detail.update(old=old, own_before=None if camera is None else before.get(own_key))
         if camera is None:
             detail["house_before"] = old
-        after = api.set_alert_types(camera, value) if tool == "set_alert_types" else api.set_sensitivity(camera, value)
-        after = _alert_state(after, camera)
+        saved = api.set_alert_types(camera, value) if tool == "set_alert_types" else api.set_sensitivity(camera, value)
+    except Exception as exc:
+        log.warning("Alert setting change failed: %s", exc)
+        return _result(_issue(ctx, tool, FAILED, camera or "house", detail, _no_paths(str(exc))))
+    try:
+        after = _alert_state(saved, camera)
         detail["new"] = after["house"][key] if camera is None else after[key]
         if camera is not None:
             detail["own_after"] = after.get(own_key)
     except Exception as exc:
-        log.warning("Alert setting change failed: %s", exc)
-        return _result(_issue(ctx, tool, FAILED, camera or "house", detail, str(exc)))
+        # The change is saved; only the confirmation read failed, so report what was asked for (like change_setting).
+        log.warning("Alert setting saved but could not be read back: %s", exc)
+        intended = _intended(tool, camera, value, old, detail.get("own_before"))
+        if intended is None:
+            return _result(_issue(ctx, tool, FAILED, camera or "house", detail, _no_paths(str(exc))))
+        detail["new"] = intended[0]
+        if camera is not None:
+            detail["own_after"] = intended[1]
+        return _result(_issue(ctx, tool, DONE, camera or "house", detail))
     return _result(_issue(ctx, tool, DONE, camera or "house", detail), state=after)
 
 

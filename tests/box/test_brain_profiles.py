@@ -126,6 +126,16 @@ class ProfilesTest(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertFalse(needs_big(text))
 
+    def test_alert_type_and_sensitivity_requests_route_to_big(self) -> None:
+        for text in ("alert me about cars", "alerts for the back door", "cars too", "also vehicles", "animals",
+                     "sensitivity", "make it more sensitive", "less alerts", "fewer alerts", "more alerts",
+                     "התראות על רכבים", "גם על רכבים", "רגישות", "פחות התראות", "יותר התראות"):
+            with self.subTest(text=text):
+                self.assertTrue(needs_big(text))
+        for text in ("what happened today", "send me a picture"):
+            with self.subTest(text=text):
+                self.assertFalse(needs_big(text))
+
     def test_schema_loader_skips_bad_entries_and_logs_once(self) -> None:
         good = load_schemas()["reply"]
         bad = [None, [], "bad", 5, {}, {"function": []}, {"function": {"name": []}},

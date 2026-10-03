@@ -38,13 +38,16 @@ _BIG_WORDS_EN = re.compile(
     r"switch (?:on|off)|shut (?:off|down)|disarm|arm|snooze|disable|enable|change|"
     r"set|call (?:it|camera)|rename|wrong|false|mistake|not (?:me|us|true|right)|it" + _APOS + r"?s (?:me|us)|"
     r"that" + _APOS + r"?s me|(?:that |it )?was (?:me|us)|nobody|why|"
-    r"angry|annoying|useless|stupid|broken|doesn" + _APOS + r"?t work|language|hebrew|english|suspicious)\b",
+    r"angry|annoying|useless|stupid|broken|doesn" + _APOS + r"?t work|language|hebrew|english|suspicious|"
+    r"alert me about|alerts for|cars too|also vehicles|animals|sensitivity|sensitive|"
+    r"(?:less|fewer|more) alerts)\b",
     re.IGNORECASE)
 _BIG_WORDS_HE = ("תכבה", "תדליק", "תשתיק", "תפסיק", "עצור", "תמשיך", "תחזיר", "תשנה", "שנה", "תקרא", "טעות",
                  "שגוי", "לא נכון", "זה אני", "זה אנחנו", "אין אף אחד", "למה", "מעצבן", "לא עובד", "שפה",
                  "עברית", "אנגלית", "חשוד",
                  "תפעיל", "הפעל", "תכבי", "כבה", "תדליקי", "הדלק", "השתק", "תשתיקי", "הפסק", "תפסיקי",
-                 "תגדיר", "הגדר", "תחזירי", "תמשיכי")
+                 "תגדיר", "הגדר", "תחזירי", "תמשיכי",
+                 "התראות על", "גם על רכבים", "רגישות", "פחות התראות", "יותר התראות")
 
 
 # "בטל" as a word, with up to two prefix letters (לבטל, ולבטל, תבטל) and one suffix (בטלו, תבטלי) - never inside

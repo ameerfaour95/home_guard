@@ -289,7 +289,7 @@ class AlertTypesTest(unittest.TestCase):
         for tool, args in ((set_alert_types, {"types": ["+animal"]}),
                            (set_sensitivity, {"values": {"person": 30}})):
             ctx = self.ctx("change alerts please")
-            tool(ctx, dict(owner_words=ctx.text, **args))
+            tool(ctx, dict(camera="house", owner_words=ctx.text, **args))
             receipt = ctx.receipts[-1]
             for lang in ("en", "he", "ar"):
                 self.assertTrue(receipt_line(receipt, lang).startswith("✓"))
@@ -318,6 +318,188 @@ class AlertTypesTest(unittest.TestCase):
         self.assertFalse(get_alert_settings(ctx, {"camera": "entrance"})["ok"])
         self.assertEqual(set_alert_types(ctx, {"camera": "entrance", "types": ["person"],
                                               "owner_words": ctx.text})["status"], FAILED)
+
+    # ---- Fix 1 ----------------------------------------------------------------------------------------------
+
+    def real_api(self, box_text):
+        import yaml
+        from home_guard_project.box import alert_settings
+        paths = {name: os.path.join(self.dir, name + ".yaml") for name in
+                 ("cameras_path", "alerts_path", "box_path")}
+        with open(paths["cameras_path"], "w", encoding="utf-8") as f:
+            f.write("cameras:\n  main_entrance: rtsp://unused\n  back_door: rtsp://unused\n")
+        with open(paths["box_path"], "w", encoding="utf-8") as f:
+            f.write(box_text)
+        self.fake = SimpleNamespace(**{name: partial(getattr(alert_settings, name), **paths) for name in
+                                      ("get_alert_settings", "set_alert_types", "set_sensitivity")})
+        return lambda: yaml.safe_load(open(paths["box_path"], encoding="utf-8")) or {}
+
+    def test_house_sensitivity_undo_restores_only_the_changed_type(self):
+        box = self.real_api("inference_conf: 0.4\n")
+        agent, first = self.agent("set_sensitivity", "house", values={"person": 30})
+        self.assertEqual(first.receipts[0].status, DONE)
+        self.assertEqual(box()["conf_person"], 0.3)
+        undone = agent.undo_turn("-5", first.undo_token)
+        self.assertTrue(undone.text.startswith("✓"), undone.text)
+        self.assertNotIn("conf_vehicle", box())
+        self.assertNotIn("conf_animal", box())
+        self.assertEqual(box()["conf_person"], 0.4)
+
+    def undo_calls(self, own_before, values):
+        self.fake.own_sens.pop("main_entrance", None)
+        if own_before:
+            self.fake.own_sens["main_entrance"] = dict(own_before)
+        agent, first = self.agent("set_sensitivity", "entrance", values=values)
+        after = dict(self.fake.own_sens["main_entrance"])
+        return agent, first, after
+
+    def test_camera_sensitivity_undo_is_one_call_when_it_can_be(self):
+        for own_before, values, expected in (
+            (None, {"person": 30}, [("main_entrance", "default")]),
+            ({"person": 0.2}, {"person": 30}, [("main_entrance", {"person": 0.2})]),
+        ):
+            with self.subTest(own_before=own_before):
+                self.fake = FakeAlertSettings()
+                agent, first, _ = self.undo_calls(own_before, values)
+                with patch.object(self.fake, "set_sensitivity", wraps=self.fake.set_sensitivity) as setter:
+                    undone = agent.undo_turn("-5", first.undo_token)
+                self.assertTrue(undone.text.startswith("✓"), undone.text)
+                self.assertEqual([tuple(c.args) for c in setter.call_args_list], expected)
+                self.assertEqual(self.fake.own_sens.get("main_entrance"), own_before)
+
+    def test_camera_sensitivity_undo_that_adds_keys_clears_then_sets(self):
+        agent, first, after = self.undo_calls({"vehicle": 0.8}, {"person": 30})
+        with patch.object(self.fake, "set_sensitivity", wraps=self.fake.set_sensitivity) as setter:
+            agent.undo_turn("-5", first.undo_token)
+        self.assertEqual([tuple(c.args) for c in setter.call_args_list],
+                         [("main_entrance", "default"), ("main_entrance", {"vehicle": 0.8})])
+        self.assertEqual(self.fake.own_sens["main_entrance"], {"vehicle": 0.8})
+
+    def test_failed_second_undo_call_puts_the_camera_back_and_retry_works(self):
+        agent, first, after = self.undo_calls({"vehicle": 0.8}, {"person": 30})
+        real = self.fake.set_sensitivity
+        calls = []
+
+        def flaky(camera, values, **kw):
+            calls.append(values)
+            if len(calls) == 2:
+                raise OSError("disk full")
+            return real(camera, values, **kw)
+
+        with patch.object(self.fake, "set_sensitivity", side_effect=flaky):
+            undone = agent.undo_turn("-5", first.undo_token)
+        self.assertIn("Could not undo", undone.text)
+        self.assertEqual(calls, ["default", {"vehicle": 0.8}, after])
+        self.assertEqual(self.fake.own_sens["main_entrance"], after)       # not stuck on the house values
+        again = agent.undo_turn("-5", first.undo_token)
+        self.assertNotIn("Changed since", again.text)
+        self.assertEqual(self.fake.own_sens["main_entrance"], {"vehicle": 0.8})
+
+    def test_setters_need_a_camera_or_house(self):
+        for tool, args in (("set_alert_types", {"types": ["+vehicle"]}), ("set_sensitivity", {"values": {"person": 30}})):
+            fn = {"set_alert_types": set_alert_types, "set_sensitivity": set_sensitivity}[tool]
+            for camera in (None, "", "   "):
+                with self.subTest(tool=tool, camera=camera):
+                    ctx = self.ctx("change alerts please")
+                    before = self.fake.get_alert_settings()
+                    given = dict(args, owner_words=ctx.text)
+                    if camera is not None:
+                        given["camera"] = camera
+                    out = fn(ctx, given)
+                    self.assertEqual((out["ok"], out["status"]), (False, FAILED))
+                    self.assertIn("say which camera, or 'house'", receipt_line(ctx.receipts[-1], "en"))
+                    self.assertEqual(self.fake.get_alert_settings(), before)
+            with self.subTest(tool=tool, camera="default"):
+                ctx = self.ctx("change alerts please")
+                before = self.fake.get_alert_settings()
+                out = fn(ctx, dict(args, camera="default", owner_words=ctx.text))
+                self.assertFalse(out["ok"])
+                self.assertEqual(self.fake.get_alert_settings(), before)
+            for camera in ("house", "הבית", "المنزل"):
+                with self.subTest(tool=tool, camera=camera):
+                    ctx = self.ctx("change alerts please")
+                    self.assertEqual(fn(ctx, dict(args, camera=camera, owner_words=ctx.text))["status"], DONE)
+                    self.assertEqual(ctx.receipts[-1].detail["camera"], "")
+
+    def test_failed_read_back_after_a_saved_change_is_done_with_the_intended_values(self):
+        for tool, camera, args, check in (
+            ("set_sensitivity", "house", {"values": {"person": 30}},
+             lambda d: self.assertEqual(d["new"], {"person": 0.3, "vehicle": 0.5, "animal": 0.5})),
+            ("set_sensitivity", "entrance", {"values": {"person": 30}},
+             lambda d: (self.assertEqual(d["new"]["person"], 0.3), self.assertEqual(d["own_after"], {"person": 0.3}))),
+            ("set_alert_types", "house", {"types": ["+animal"]},
+             lambda d: self.assertEqual(d["new"], ["person", "animal"])),
+            ("set_alert_types", "entrance", {"types": ["+vehicle"]},
+             lambda d: (self.assertEqual(d["new"], ["person", "vehicle"]),
+                        self.assertEqual(d["own_after"], ["person", "vehicle"]))),
+        ):
+            with self.subTest(tool=tool, camera=camera):
+                self.fake = FakeAlertSettings()
+                real = getattr(self.fake, tool)
+                ctx = self.ctx("change alerts please")
+                with patch.object(self.fake, tool, side_effect=lambda c, v, **k: (real(c, v), {"bad": 1})[1]):
+                    out = {"set_alert_types": set_alert_types, "set_sensitivity": set_sensitivity}[tool](
+                        ctx, dict(args, camera=camera, owner_words=ctx.text))
+                self.assertEqual(out["status"], DONE)
+                check(ctx.receipts[-1].detail)
+
+    def test_failed_reason_has_no_file_paths(self):
+        for message in ("cannot write C:\\Users\\x\\box.yaml now", "cannot write /data/box/box.yaml now",
+                        "cannot write 'C:/home guard/box.yaml' now"):
+            with self.subTest(message=message):
+                ctx = self.ctx("change alerts please")
+                with patch.object(self.fake, "set_sensitivity", side_effect=ValueError(message)):
+                    out = set_sensitivity(ctx, {"camera": "house", "values": {"person": 30}, "owner_words": ctx.text})
+                self.assertEqual(out["status"], FAILED)
+                for shown in (out.get("reason", ""), receipt_line(ctx.receipts[-1], "en")):
+                    self.assertNotIn("box.yaml", shown)
+                    self.assertNotIn("Users", shown)
+                    self.assertIn("cannot write", shown)
+        ctx = self.ctx("change alerts please")
+        with patch.object(self.fake, "set_alert_types", side_effect=OSError(28, "No space left", "C:\\x\\box.yaml")):
+            set_alert_types(ctx, {"camera": "house", "types": ["+animal"], "owner_words": ctx.text})
+        self.assertNotIn("box.yaml", receipt_line(ctx.receipts[-1], "en"))
+
+    def line(self, tool, lang, **detail):
+        from home_guard_project.box.brain.receipts import Receipt
+        return receipt_line(Receipt(id="R1", turn="t", tool=tool, status=DONE, target="x", detail=detail, reason=""), lang)
+
+    def test_sensitivity_line_shows_only_what_changed_in_order(self):
+        old = {"animal": 0.5, "vehicle": 0.5, "person": 0.4}
+        new = {"animal": 0.7, "vehicle": 0.5, "person": 0.3}
+        self.assertEqual(self.line("set_sensitivity", "en", camera="", old=old, new=new),
+                         "✓ The house: how sure before alerting - people 40% → 30%, animals 50% → 70%")
+        self.assertEqual(self.line("set_sensitivity", "en", camera="back_door", old=old, new=new),
+                         "✓ back_door: how sure before alerting - people 40% → 30%, animals 50% → 70%")
+        he = self.line("set_sensitivity", "he", camera="", old=old, new=new)
+        self.assertIn("אנשים 40% ← 30%", he)
+        self.assertNotIn("רכבים", he)
+        self.assertLess(he.index("אנשים"), he.index("בעלי חיים"))
+
+    def test_alert_type_lists_are_in_people_vehicles_animals_order(self):
+        self.assertEqual(self.line("set_alert_types", "en", camera="back_door",
+                                   old=["animal", "person"], new=["animal", "vehicle", "person"]),
+                         "✓ back_door alerts on: people, animals → people, vehicles, animals")
+
+    def test_hebrew_house_uses_the_masculine_verb(self):
+        he = self.line("set_alert_types", "he", camera="", old=["person"], new=["person", "animal"])
+        self.assertIn("הבית מתריע על", he)
+        self.assertNotIn("מתריעה", he)
+        self.assertEqual(self.line("set_alert_types", "en", camera="", old=["person"], new=["person", "animal"]),
+                         "✓ The house alerts on: people → people, animals")
+
+    def test_changed_since_names_the_camera_or_house(self):
+        from home_guard_project.box.brain.i18n import t
+        from home_guard_project.box.brain.render import undo_what
+        for tool, camera, en in (("set_alert_types", "back_door", "the alert types of back_door"),
+                                 ("set_sensitivity", "", "the sensitivity of the house")):
+            what = undo_what(tool, {"camera": camera}, camera or "house", "en")
+            self.assertEqual(what, en)
+            self.assertEqual(t("undo_changed_since", "en", what=what),
+                             f"Changed since - nothing to undo for {en}.")
+            for lang in ("he", "ar"):
+                self.assertNotEqual(undo_what(tool, {"camera": camera}, "x", lang), tool)
+        self.assertIn("הבית", undo_what("set_sensitivity", {"camera": ""}, "house", "he"))
 
 
 if __name__ == "__main__":
