@@ -93,7 +93,8 @@ class FleetDelegate(QStyledItemDelegate):
         if index.column() == 1:
             painter.setBrush(QColor(color))
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawEllipse(rect.x(), rect.y()+21, 6, 6)
+            dot_y = int(rect.center().y()-3) if rect.width()-14 >= 420 else rect.y()+21
+            painter.drawEllipse(rect.x(), dot_y, 6, 6)
             rect.adjust(14, 0, 0, 0)
             painter.setPen(QColor(color))
             if rect.width() >= 420:
