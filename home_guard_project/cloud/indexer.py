@@ -18,7 +18,8 @@ A pass over one device:
    command) comes from the best revision ever seen of either copy -- a later, poorer copy (A7: training meta
    recreated from production without the teacher) never replaces it -- and owner feedback is the union over
    every retained revision of both copies. Delivery (`dispatch`, `muted`) comes only from the production copy;
-5. refreshes `expired` for events whose 14-day production retention passed with no video left.
+5. refreshes `expired` for events whose 14-day production retention passed with no video left;
+6. fills the labelers' redacted search text (`Event.summary_redacted`) for every event that lacks it.
 """
 from __future__ import annotations
 
@@ -38,6 +39,7 @@ from home_guard_project.fleet_contract._time import parse_utc
 from home_guard_project.fleet_contract.keys import KeyInfo, parse_key, stem_kind
 from home_guard_project.fleet_contract.legacy import ClipRecord, parse_feedback, parse_heartbeat, parse_meta
 
+from . import redact
 from .models import AiRun, Artifact, Device, Event, Feedback, IndexProblem, RawRevision, S3Cursor
 from .s3 import S3, ETagMismatch
 
@@ -599,6 +601,7 @@ class _Run:
         # what the event says comes from the revision that supplied the AI answer
         source = winner.rec if winner is not None and winner.rec.ai.status != "none" else recs[0]
         ev.summary = source.summary or ""
+        ev.summary_redacted = None  # refilled from the new summary at the end of the pass (redact.backfill)
         ev.label = _cut(source.label, 64)
         ev.alert_command = _cut(source.alert_command, 32)
         ev.alert_reason = source.alert_reason or ""
@@ -655,6 +658,7 @@ class _Run:
         self.apply_feedback(feedback)
         self.rebuild_all()
         refresh_expiry(self.session, self.device, self.now)
+        redact.backfill(self.session, self.device)  # labelers' search text for new, changed and old events
         self.session.commit()
         return self.stats
 

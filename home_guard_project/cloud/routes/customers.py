@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import audit
-from ..deps import get_session, require_role
+from ..deps import SessionDep, require_role
 from ..models import Customer, Staff
 from ..schemas import CustomerIn, CustomerOut
 from .fleet import build_summaries, now_of
@@ -28,13 +28,13 @@ def _get(session: Session, customer_id: int) -> Customer:
 
 
 @router.get("/customers", response_model=list[CustomerOut], dependencies=[Depends(require_role("admin", "support"))])
-def list_customers(request: Request, session: Session = Depends(get_session)):
+def list_customers(request: Request, session: Session = SessionDep):
     return [_out(session, request, c) for c in session.scalars(select(Customer).order_by(Customer.name, Customer.id))]
 
 
 @router.post("/customers", response_model=CustomerOut)
 def create_customer(body: CustomerIn, request: Request, staff: Staff = Depends(require_role("admin")),
-                    session: Session = Depends(get_session)):
+                    session: Session = SessionDep):
     c = Customer(**body.model_dump())
     session.add(c)
     session.flush()
@@ -44,13 +44,13 @@ def create_customer(body: CustomerIn, request: Request, staff: Staff = Depends(r
 
 @router.get("/customers/{customer_id}", response_model=CustomerOut,
             dependencies=[Depends(require_role("admin", "support"))])
-def get_customer(customer_id: int, request: Request, session: Session = Depends(get_session)):
+def get_customer(customer_id: int, request: Request, session: Session = SessionDep):
     return _out(session, request, _get(session, customer_id))
 
 
 @router.patch("/customers/{customer_id}", response_model=CustomerOut)
 def update_customer(customer_id: int, body: CustomerIn, request: Request,
-                    staff: Staff = Depends(require_role("admin")), session: Session = Depends(get_session)):
+                    staff: Staff = Depends(require_role("admin")), session: Session = SessionDep):
     c = _get(session, customer_id)
     changed = {}
     for f, new in body.model_dump().items():

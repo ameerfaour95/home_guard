@@ -115,6 +115,20 @@ def cmd_index_once(args) -> int:
     return indexer.run_once(_engine())
 
 
+def cmd_redact_backfill(args) -> int:
+    """Fill the labelers' redacted search text; `--all` recomputes it (after a camera or customer rename)."""
+    from . import redact
+    from .db import session_scope
+    from .models import Device
+
+    engine = _engine()
+    with session_scope(engine) as s:
+        for device in s.scalars(select(Device).order_by(Device.id)).all():
+            n = redact.backfill(s, device, everything=args.all)
+            print(f"{device.site}: {n} event(s) redacted")
+    return 0
+
+
 def cmd_serve(args) -> int:
     import uvicorn
 
@@ -140,6 +154,9 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--tailscale-host", default="")
     e.set_defaults(fn=cmd_enroll)
     sub.add_parser("index-once").set_defaults(fn=cmd_index_once)
+    r = sub.add_parser("redact-backfill")
+    r.add_argument("--all", action="store_true", help="recompute every event, not only missing ones")
+    r.set_defaults(fn=cmd_redact_backfill)
     s = sub.add_parser("serve")
     s.add_argument("--port", type=int, default=8600)
     s.set_defaults(fn=cmd_serve)

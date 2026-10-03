@@ -83,6 +83,7 @@ class Event(Base):
         Index("ix_events_camera_start", "camera", text("start_ts DESC"), text("id DESC")),
         Index("ix_events_completeness", "completeness", postgresql_using="gin"),
         Index("ix_events_search", "search", postgresql_using="gin"),
+        Index("ix_events_search_redacted", "search_redacted", postgresql_using="gin"),
     )
     id: Mapped[int] = mapped_column(primary_key=True)
     device_pk: Mapped[int] = mapped_column(ForeignKey("devices.id", ondelete="CASCADE"))
@@ -113,6 +114,11 @@ class Event(Base):
     updated_at: Mapped[Optional[datetime]] = mapped_column(TS, nullable=True)
     search: Mapped[Optional[Any]] = mapped_column(
         postgresql.TSVECTOR, Computed("to_tsvector('simple', coalesce(summary,''))", persisted=True), nullable=True)
+    # the summary with the household's names replaced (redact.py); labelers search this, never `search`
+    summary_redacted: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    search_redacted: Mapped[Optional[Any]] = mapped_column(
+        postgresql.TSVECTOR, Computed("to_tsvector('simple', coalesce(summary_redacted,''))", persisted=True),
+        nullable=True)
 
 
 class Artifact(Base):
@@ -266,3 +272,5 @@ class OwnerNotice(Base):
     first_ts: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     last_ts: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     s3_key: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+    # True while the S3 notice object could not be written; cleared when a retry uploads it
+    pending_upload: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)

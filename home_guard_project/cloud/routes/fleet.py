@@ -13,7 +13,7 @@ from home_guard_project.fleet_contract import health
 from home_guard_project.fleet_contract.legacy import parse_heartbeat
 
 from .. import audit
-from ..deps import get_session, require_role
+from ..deps import SessionDep, require_role
 from ..models import Camera, Customer, Device, Event, Feedback, Staff
 from ..schemas import DensityOut, DeviceSummary, EnrollRequest, FleetResponse, HealthReason
 from .events import fleet_activity_density
@@ -72,20 +72,20 @@ def build_summaries(session: Session, now: datetime, customer_id: Optional[int] 
 
 
 @router.get("/fleet", response_model=FleetResponse, dependencies=[Depends(require_role("admin", "support"))])
-def fleet(request: Request, session: Session = Depends(get_session)):
+def fleet(request: Request, session: Session = SessionDep):
     now = now_of(request)
     return FleetResponse(devices=build_summaries(session, now), generated_utc=now)
 
 
 @router.get("/fleet/activity", response_model=DensityOut, dependencies=[Depends(require_role("admin", "support"))])
-def fleet_activity(request: Request, hours: int = Query(24, ge=1, le=168), session: Session = Depends(get_session)):
+def fleet_activity(request: Request, hours: int = Query(24, ge=1, le=168), session: Session = SessionDep):
     # Hourly event, alert and false-alarm counts over the whole fleet; the last bucket is the current hour.
     return fleet_activity_density(session, now_of(request), hours)
 
 
 @router.post("/devices/enroll", response_model=DeviceSummary)
 def enroll(body: EnrollRequest, request: Request, staff: Staff = Depends(require_role("admin")),
-           session: Session = Depends(get_session)):
+           session: Session = SessionDep):
     customer = session.get(Customer, body.customer_id)
     if customer is None:
         raise HTTPException(status_code=404, detail="Customer not found")
