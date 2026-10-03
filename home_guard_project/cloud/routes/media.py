@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 
-from ..deps import bearer
+from ..deps import current_staff
 from ..schemas import MediaAccess, MediaAccessRequest
 
-router = APIRouter(tags=["media"], dependencies=[Depends(bearer)])
+router = APIRouter(tags=["media"], dependencies=[Depends(current_staff)])
 
 
 @router.post("/artifacts/{artifact_id}/access", response_model=MediaAccess)

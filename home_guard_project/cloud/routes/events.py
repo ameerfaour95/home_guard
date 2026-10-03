@@ -3,10 +3,10 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from ..deps import bearer
+from ..deps import current_staff
 from ..schemas import DetectionsOut, EventDetail, EventPage, EventSummary, ReviewUpdate
 
-router = APIRouter(tags=["events"], dependencies=[Depends(bearer)])
+router = APIRouter(tags=["events"], dependencies=[Depends(current_staff)])
 
 
 @router.get("/events", response_model=EventPage)

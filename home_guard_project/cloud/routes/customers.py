@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 
-from ..deps import bearer
+from ..deps import current_staff
 from ..schemas import CustomerIn, CustomerOut
 
-router = APIRouter(tags=["customers"], dependencies=[Depends(bearer)])
+router = APIRouter(tags=["customers"], dependencies=[Depends(current_staff)])
 
 
 @router.get("/customers", response_model=list[CustomerOut])

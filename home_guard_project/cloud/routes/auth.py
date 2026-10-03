@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from .. import audit, auth
@@ -20,36 +20,48 @@ def _recent_failures(session: Session, email: str) -> int:
 
 
 @router.post("/auth/login", response_model=TokenPair)
-def login(body: LoginRequest, request: Request, session: Session = Depends(get_session)):
+def login(body: LoginRequest, request: Request, session: Session = Depends(get_session, scope="function")):
+    # scope="function": the session commits before the response is sent
     settings = request.app.state.settings
     email = body.email.strip().lower()
+    # serialise attempts per email so concurrent guesses cannot all pass the failure count
+    session.execute(text("SELECT pg_advisory_xact_lock(hashtext(:email))"), {"email": email})
+    staff = session.scalars(select(Staff).where(func.lower(Staff.email) == email).with_for_update()).first()
+    staff_id = staff.id if staff else None
     if _recent_failures(session, email) >= auth.MAX_FAILURES:
-        audit.record(session, None, "login_locked", detail={"email": email})
+        audit.record(session, staff_id, "login_locked", detail={"email": email})
         session.commit()
         raise HTTPException(status_code=429, detail="Too many attempts. Try again in 15 minutes.")
-    staff = session.scalars(select(Staff).where(func.lower(Staff.email) == email)).first()
-    if staff is None:
+    counter = None
+    if len(body.password) > auth.MAX_PASSWORD_LEN or len(body.totp) > auth.MAX_TOTP_LEN:
+        ok = False  # absurd input: same answer, no hashing
+    elif staff is None:
         auth.verify_dummy(body.password)
         ok = False
     else:
         # evaluate both factors so timing does not reveal which one was wrong
         pw_ok = auth.verify_password(staff.password_hash, body.password)
-        code_ok = auth.verify_totp(staff.totp_secret, body.totp)
-        ok = pw_ok and code_ok and not staff.disabled
+        counter = auth.totp_counter(staff.totp_secret, body.totp)
+        fresh = counter is not None and (staff.totp_last_counter is None or counter > staff.totp_last_counter)
+        ok = pw_ok and fresh and not staff.disabled
     if not ok:
-        audit.record(session, staff.id if staff else None, "login_failed", detail={"email": email})
+        audit.record(session, staff_id, "login_failed", detail={"email": email})
         session.commit()
         raise HTTPException(status_code=401, detail=auth.BAD_LOGIN)
+    staff.totp_last_counter = counter  # a code works once
     pair = auth.issue_tokens(staff, settings, session)
     audit.record(session, staff.id, "login", detail={"email": email})
+    session.commit()
     return pair
 
 
 @router.post("/auth/refresh", response_model=TokenPair)
-def refresh(body: RefreshRequest, request: Request, session: Session = Depends(get_session)):
+def refresh(body: RefreshRequest, request: Request, session: Session = Depends(get_session, scope="function")):
     pair = auth.rotate(session, body.refresh_token, request.app.state.settings)
     if pair is None:
+        session.commit()
         raise HTTPException(status_code=401, detail="Sign in again")
+    session.commit()
     return pair
 
 

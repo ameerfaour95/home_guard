@@ -2,10 +2,10 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from ..deps import bearer
+from ..deps import current_staff
 from ..schemas import AuditPage, IndexProblem
 
-router = APIRouter(tags=["audit"], dependencies=[Depends(bearer)])
+router = APIRouter(tags=["audit"], dependencies=[Depends(current_staff)])
 
 
 @router.get("/audit", response_model=AuditPage)

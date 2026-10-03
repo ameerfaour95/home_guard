@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 
-from ..deps import bearer
+from ..deps import current_staff
 from ..schemas import (
     CollectionIn,
     CollectionItems,
@@ -10,7 +10,7 @@ from ..schemas import (
     SavedFilter,
 )
 
-router = APIRouter(prefix="/studio", tags=["studio"], dependencies=[Depends(bearer)])
+router = APIRouter(prefix="/studio", tags=["studio"], dependencies=[Depends(current_staff)])
 
 
 @router.get("/filters", response_model=list[SavedFilter])

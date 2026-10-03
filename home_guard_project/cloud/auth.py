@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -14,6 +15,7 @@ from argon2.exceptions import InvalidHashError, VerificationError
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from . import audit
 from .models import RefreshToken, Staff
 from .schemas import StaffOut, TokenPair
 from .settings import Settings
@@ -41,8 +43,27 @@ def verify_dummy(pw: str) -> None:
     verify_password(_DUMMY_HASH, pw)
 
 
+TOTP_STEP = 30
+MAX_PASSWORD_LEN = 1024
+MAX_TOTP_LEN = 16
+
+
+def totp_counter(secret: str, code: str, now: Optional[float] = None) -> Optional[int]:
+    """The time-step counter (within +-1 step) whose code matches, else None."""
+    code = (code or "").strip()
+    if not code:
+        return None
+    totp = pyotp.TOTP(secret, interval=TOTP_STEP)
+    current = int((now if now is not None else datetime.now(timezone.utc).timestamp()) // TOTP_STEP)
+    found = None
+    for counter in (current - 1, current, current + 1):  # no early exit: constant work
+        if hmac.compare_digest(totp.at(counter * TOTP_STEP), code):
+            found = counter
+    return found
+
+
 def verify_totp(secret: str, code: str) -> bool:
-    return bool(code) and pyotp.TOTP(secret).verify(code.strip(), valid_window=1)
+    return totp_counter(secret, code) is not None
 
 
 def make_access_token(staff: Staff, settings: Settings) -> str:
@@ -64,17 +85,22 @@ def _hash_refresh(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def _new_refresh(session: Session, staff: Staff, settings: Settings, family: str) -> str:
+def _new_refresh(session: Session, staff: Staff, settings: Settings, family: str,
+                 family_started_at: Optional[datetime] = None) -> str:
     raw = secrets.token_urlsafe(32)
     now = datetime.now(timezone.utc)
+    started = family_started_at or now
+    ttl = timedelta(seconds=settings.refresh_ttl)
     session.add(RefreshToken(staff_id=staff.id, token_hash=_hash_refresh(raw), family=family,
-                             expires_at=now + timedelta(seconds=settings.refresh_ttl), created_at=now))
+                             expires_at=min(now + ttl, started + ttl), created_at=now,
+                             family_started_at=started))
     session.flush()
     return raw
 
 
-def issue_tokens(staff: Staff, settings: Settings, session: Session, family: Optional[str] = None) -> TokenPair:
-    refresh = _new_refresh(session, staff, settings, family or uuid.uuid4().hex)
+def issue_tokens(staff: Staff, settings: Settings, session: Session, family: Optional[str] = None,
+                 family_started_at: Optional[datetime] = None) -> TokenPair:
+    refresh = _new_refresh(session, staff, settings, family or uuid.uuid4().hex, family_started_at)
     return TokenPair(access_token=make_access_token(staff, settings), refresh_token=refresh,
                      expires_in=settings.access_ttl,
                      staff=StaffOut(id=staff.id, email=staff.email, name=staff.name, role=staff.role))
@@ -93,14 +119,17 @@ def rotate(session: Session, raw: str, settings: Settings) -> Optional[TokenPair
                           .with_for_update()).first()
     if row is None:
         return None
+    now = datetime.now(timezone.utc)
     if row.revoked_at is not None:
+        audit.record(session, row.staff_id, "refresh_reuse", detail={"family": row.family})
         revoke_all(session, row.staff_id)
         session.commit()
         return None
-    if row.expires_at <= datetime.now(timezone.utc):
-        return None
+    started = row.family_started_at or row.created_at or now
+    if row.expires_at <= now or started + timedelta(seconds=settings.refresh_ttl) <= now:
+        return None  # absolute session cap: rotation never extends past family start + ttl
     staff = session.get(Staff, row.staff_id)
     if staff is None or staff.disabled:
         return None
-    row.revoked_at = datetime.now(timezone.utc)
-    return issue_tokens(staff, settings, session, family=row.family or None)
+    row.revoked_at = now
+    return issue_tokens(staff, settings, session, family=row.family or None, family_started_at=started)
