@@ -24,20 +24,41 @@ def run_migrations(db_url: str) -> None:
     command.upgrade(cfg, "head")
 
 
-def _engine():
-    from .db import make_engine
-    from .settings import Settings
+class ConfigError(Exception):
+    pass
 
+
+def _db_url() -> str:
+    """One resolver for every command: HG_CLOUD_DB_URL, else the full settings."""
     import os
 
-    return make_engine(os.environ["HG_CLOUD_DB_URL"]) if "HG_CLOUD_DB_URL" in os.environ else make_engine(
-        Settings.from_env().db_url)
+    url = os.environ.get("HG_CLOUD_DB_URL")
+    if not url:
+        raise ConfigError("HG_CLOUD_DB_URL is not set (the database to use)")
+    return url
+
+
+def _engine():
+    from .db import make_engine
+
+    return make_engine(_db_url())
+
+
+def _optional(module: str):
+    """Import a module that a later task adds; None only if that very module is missing."""
+    import importlib
+
+    name = f"{__package__}.{module}"
+    try:
+        return importlib.import_module(name)
+    except ModuleNotFoundError as e:
+        if e.name != name:
+            raise
+        return None
 
 
 def cmd_init_db(args) -> int:
-    import os
-
-    run_migrations(os.environ["HG_CLOUD_DB_URL"])
+    run_migrations(_db_url())
     print("database is at head")
     return 0
 
@@ -70,14 +91,14 @@ def cmd_enroll(args) -> int:
 
     engine = _engine()
     with session_scope(engine) as s:
+        if s.scalars(select(Device).where(Device.site == args.site)).first():
+            print(f"site {args.site} is already enrolled", file=sys.stderr)
+            return 1
         cust = s.scalars(select(Customer).where(Customer.name == args.customer)).first()
         if cust is None:
             cust = Customer(name=args.customer)
             s.add(cust)
             s.flush()
-        if s.scalars(select(Device).where(Device.site == args.site)).first():
-            print(f"site {args.site} is already enrolled", file=sys.stderr)
-            return 1
         dev = Device(device_id=str(uuid.uuid4()), site=args.site, tailscale_host=args.tailscale_host or "",
                      customer_id=cust.id, enrolled_at=datetime.now(timezone.utc))
         s.add(dev)
@@ -87,20 +108,17 @@ def cmd_enroll(args) -> int:
 
 
 def cmd_index_once(args) -> int:
-    try:
-        from . import indexer  # noqa: F401  (Task 8)
-    except ImportError:
+    indexer = _optional("indexer")  # Task 8
+    if indexer is None:
         print("index-once: not available yet")
         return 0
-    return indexer.run_once(_engine())  # type: ignore[attr-defined]
+    return indexer.run_once(_engine())
 
 
 def cmd_serve(args) -> int:
     import uvicorn
 
-    try:
-        from .app import create_app  # noqa: F401
-    except ImportError:
+    if _optional("app") is None:
         print("serve: not available yet")
         return 0
     uvicorn.run("home_guard_project.cloud.app:create_app", factory=True, host="0.0.0.0", port=args.port)
@@ -130,7 +148,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
-    return args.fn(args)
+    try:
+        return args.fn(args)
+    except ConfigError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":
