@@ -76,6 +76,9 @@ def cmd_create_staff(args) -> int:
     from .db import session_scope
     from .models import Staff
 
+    if args.name.strip().lower().startswith("system:"):
+        print("staff names cannot start with 'system:' (reserved for automatic actors)", file=sys.stderr)
+        return 1
     password = secrets.token_urlsafe(16)
     totp_secret = pyotp.random_base32()
     engine = _engine()

@@ -13,7 +13,7 @@ import json
 import logging
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Optional
 
 from sqlalchemy import select
@@ -21,7 +21,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from . import audit, redact
 from .deps import NAME_MAX
-from .models import Customer, Device, RawRevision
+from .models import Customer, Device, IndexProblem, RawRevision
 from .s3 import ETagMismatch, S3
 
 log = logging.getLogger(__name__)
@@ -57,44 +57,103 @@ def _text(value: Any, limit: int) -> str:
     return value.strip()[:limit] if isinstance(value, str) else ""
 
 
+FUTURE_SLACK = timedelta(minutes=5)
+ACTOR_SETUP, ACTOR_DISCOVERY = "system:setup", "system:discovery"
+FUTURE_REASON = "registration time in the future"
+
+
+def _problem(session, key: str, etag: str, reason: str, now: datetime) -> None:
+    session.execute(pg_insert(IndexProblem).values(s3_key=key, reason=reason, seen_at=now, etag=etag)
+                    .on_conflict_do_update(index_elements=[IndexProblem.s3_key],
+                                           set_={"reason": reason, "seen_at": now, "etag": etag}))
+
+
+def _redacted(body: dict) -> dict:
+    """The stored copy of a registration: everything but the owner's phone (that lives on the customer only)."""
+    return {k: v for k, v in body.items() if k != "owner_phone"}
+
+
 def _fetch_registration(session, s3: S3, key: str, now: datetime) -> tuple[Optional[dict], bool]:
-    """(registration body or None, is_new_revision). None when absent, unreadable or not a v1 registration."""
+    """(registration body or None, is_new_revision). None when absent, unreadable, not a v1 registration or
+    recorded in the future. A revision already in raw_revisions is read from there, never fetched again (the stored
+    copy has no owner_phone)."""
     info = s3.head(key)
     if info is None:
         return None, False
-    seen = session.scalar(select(RawRevision.id).where(RawRevision.s3_key == key, RawRevision.etag == info.etag))
-    try:
-        body = json.loads(s3.get_text(key, if_match=info.etag))
-    except ETagMismatch:
-        return None, False  # replaced while we looked; the next pass reads the new one
-    except ValueError:
-        log.warning("registration %s is not JSON; skipped", key)
-        return None, False
+    stored = session.scalar(select(RawRevision).where(RawRevision.s3_key == key, RawRevision.etag == info.etag))
+    if stored is not None:
+        body, fresh = stored.body, False
+    else:
+        try:
+            body = json.loads(s3.get_text(key, if_match=info.etag))
+        except ETagMismatch:
+            return None, False  # replaced while we looked; the next pass reads the new one
+        except ValueError:
+            log.warning("registration %s is not JSON; skipped", key)
+            return None, False
+        fresh = True
     if not isinstance(body, dict) or body.get("schema_version") != 1:
         log.warning("registration %s has an unknown shape; skipped", key)
         return None, False
-    if seen is None:
-        session.execute(pg_insert(RawRevision).values(s3_key=key, etag=info.etag, fetched_at=now, body=body)
+    if fresh:
+        session.execute(pg_insert(RawRevision).values(s3_key=key, etag=info.etag, fetched_at=now, body=_redacted(body))
                         .on_conflict_do_nothing(index_elements=[RawRevision.s3_key, RawRevision.etag]))
-    return body, seen is None
+    consent = body.get("consent")
+    recorded = _utc(consent.get("recorded_utc")) if isinstance(consent, dict) else None
+    if recorded is not None and recorded > now + FUTURE_SLACK:
+        _problem(session, key, info.etag, FUTURE_REASON, now)
+        return None, False
+    return body, fresh
 
 
-def _apply_consents(cust: Customer, reg: dict) -> list[str]:
-    """Copy the registration consents when its answer is newer than the stored one; returns changed fields."""
+def _consents_of(reg: dict) -> Optional[tuple[dict, datetime]]:
     consent = reg.get("consent")
     if not isinstance(consent, dict):
-        return []
+        return None
     recorded = _utc(consent.get("recorded_utc"))
-    if recorded is None or (cust.consent_recorded_utc is not None and recorded <= cust.consent_recorded_utc):
-        return []
-    changed = []
+    if recorded is None:
+        return None
+    return {key: bool(consent.get(key)) for key, _ in CONSENTS}, recorded
+
+
+def _proposal(values: dict, recorded: datetime, reg: dict) -> dict:
+    return {**values, "recorded_utc": recorded.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "installer": _text(reg.get("installer"), 255)}
+
+
+def _apply_consents(session, cust: Customer, dev: Device, reg: dict, now: datetime, first: bool = False) -> None:
+    """Box consent is a proposal, never a grant. Owner revocations (true -> false) apply on their own except on an
+    admin-enrolled device; grants, and every consent on first enrolment, wait for an admin to confirm."""
+    parsed = _consents_of(reg)
+    if parsed is None:
+        return
+    values, recorded = parsed
+    prior = cust.consent_proposed.get("recorded_utc") if isinstance(cust.consent_proposed, dict) else None
+    baseline = max([t for t in (cust.consent_recorded_utc, _utc(prior)) if t is not None], default=None)
+    if baseline is not None and recorded <= baseline:
+        return
+    revoked, granted = [], []
     for key, field in CONSENTS:
-        new = bool(consent.get(key))
-        if getattr(cust, field) != new:
-            setattr(cust, field, new)
-            changed.append(field)
-    cust.consent_recorded_utc = recorded
-    return changed
+        have = bool(getattr(cust, field))
+        if have and not values[key]:
+            revoked.append(field)
+        elif values[key] and not have:
+            granted.append(field)
+    admin_owned = dev.enrolled_by == "admin"
+    if not admin_owned and not first:
+        for field in revoked:
+            setattr(cust, field, False)
+        if revoked:
+            audit.record(session, None, "consent_revoked_by_owner", target=dev.site, customer_id=cust.id,
+                         device_id=dev.device_id, detail={"fields": sorted(revoked)}, ts=now,
+                         staff_name=ACTOR_DISCOVERY)
+    if first or granted or (admin_owned and revoked):
+        cust.consent_proposed = _proposal(values, recorded, reg)
+        fields = sorted(f for _, f in CONSENTS) if first else sorted(granted + (revoked if admin_owned else []))
+        audit.record(session, None, "consent_proposed", target=dev.site, customer_id=cust.id, device_id=dev.device_id,
+                     detail={"fields": fields}, ts=now, staff_name=ACTOR_SETUP)
+    elif cust.consent_proposed is not None:
+        cust.consent_proposed = None  # the owner's newer answer asks for nothing beyond what is confirmed
 
 
 def _enroll(session, site: str, reg: Optional[dict], now: datetime) -> str:
@@ -107,8 +166,6 @@ def _enroll(session, site: str, reg: Optional[dict], now: datetime) -> str:
         enrolled_by = "discovered"
     session.add(cust)
     session.flush()
-    if reg:
-        _apply_consents(cust, reg)
     dev = Device(device_id=str(uuid.uuid4()), site=site, customer_id=cust.id, enrolled_at=now, enrolled_by=enrolled_by,
                  tailscale_host=_text(reg.get("tailscale_host"), 255) if reg else "",
                  app_version=(_text(reg.get("app_version"), 64) or None) if reg else None)
@@ -118,7 +175,9 @@ def _enroll(session, site: str, reg: Optional[dict], now: datetime) -> str:
     redact.remember(session, dev, extra=extra, now=now)  # the owner name is an identity term for labelers
     action = "auto_enroll" if enrolled_by == "setup" else "auto_discover"
     audit.record(session, None, action, target=site, customer_id=cust.id, device_id=dev.device_id, ts=now,
-                 staff_name="setup" if enrolled_by == "setup" else "discovery")
+                 staff_name=ACTOR_SETUP if enrolled_by == "setup" else ACTOR_DISCOVERY)
+    if reg:
+        _apply_consents(session, cust, dev, reg, now, first=True)
     return action
 
 
@@ -142,14 +201,14 @@ def _update(session, dev: Device, reg: dict, now: datetime) -> list[str]:
         if cust.name_source != "admin":
             cust.name, cust.name_source = owner, "setup"
         done.append("registered")
-    changed = _apply_consents(cust, reg)
+    state = lambda: (tuple(getattr(cust, f) for _, f in CONSENTS), cust.consent_proposed)  # noqa: E731
+    before = state()
+    _apply_consents(session, cust, dev, reg, now, first="registered" in done)
     session.flush()
     if owner or host:
         extra = [("customer", owner)] if owner else []
         redact.remember(session, dev, extra=extra, now=now)
-    if changed:
-        audit.record(session, None, "consent_update", target=dev.site, customer_id=cust.id, device_id=dev.device_id,
-                     detail={"changed": sorted(changed)}, ts=now, staff_name="setup")
+    if state() != before:
         done.append("consents")
     return done
 

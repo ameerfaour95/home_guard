@@ -48,6 +48,7 @@ class CustomerSpec:
     recordings: bool
     training: bool
     notes: str
+    proposed: Optional[dict] = None  # the box's unconfirmed consent answer (shows the exe a pending proposal)
 
 
 @dataclass(frozen=True)
@@ -67,7 +68,9 @@ CUSTOMERS = [
     CustomerSpec("Dana Cohen", True, True, True, "Detached house in Ramat Gan. Installed in July, three cameras."),
     CustomerSpec("Yossi Levi", True, True, True, "Ground-floor flat in Haifa with a shared building entrance."),
     CustomerSpec("Tamar Mizrahi", False, True, False,
-                 "Two properties: the family house in Beer Sheva and a holiday flat in Eilat. No training consent."),
+                 "Two properties: the family house in Beer Sheva and a holiday flat in Eilat. No training consent.",
+                 {"live": True, "recordings": True, "training": True, "recorded_utc": "2026-10-03T08:30:00Z",
+                  "installer": "Ameer"}),
 ]
 DEVICES = [
     DeviceSpec(0, "cohen_ramatgan", "hg-box-ramatgan",
@@ -523,7 +526,8 @@ def seed_state(engine, plans: list, rng: random.Random) -> dict:
     with session_scope(engine) as s:
         for spec in CUSTOMERS:
             c = Customer(name=spec.name, timezone="Asia/Jerusalem", consent_live=spec.live,
-                         consent_recordings=spec.recordings, consent_training=spec.training, notes=spec.notes)
+                         consent_recordings=spec.recordings, consent_training=spec.training, notes=spec.notes,
+                         consent_proposed=spec.proposed)
             s.add(c)
             s.flush()
             ids["customers"].append(c.id)

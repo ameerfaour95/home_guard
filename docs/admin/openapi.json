@@ -428,6 +428,40 @@
         "title": "Completeness",
         "type": "object"
       },
+      "ConsentProposal": {
+        "properties": {
+          "installer": {
+            "title": "Installer",
+            "type": "string"
+          },
+          "live": {
+            "title": "Live",
+            "type": "boolean"
+          },
+          "recorded_utc": {
+            "format": "date-time",
+            "title": "Recorded Utc",
+            "type": "string"
+          },
+          "recordings": {
+            "title": "Recordings",
+            "type": "boolean"
+          },
+          "training": {
+            "title": "Training",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "live",
+          "recordings",
+          "training",
+          "recorded_utc",
+          "installer"
+        ],
+        "title": "ConsentProposal",
+        "type": "object"
+      },
       "CustomerIn": {
         "properties": {
           "consent_live": {
@@ -472,6 +506,16 @@
             "default": false,
             "title": "Consent Live",
             "type": "boolean"
+          },
+          "consent_proposed": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConsentProposal"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "consent_recordings": {
             "default": false,

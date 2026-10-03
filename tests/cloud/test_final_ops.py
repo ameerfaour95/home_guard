@@ -407,7 +407,7 @@ def test_customer_patch_updates_only_the_fields_sent(client, staff_factory):
     cid = client.post("/v1/customers", headers=adm, json=full).json()["id"]
     r = client.patch(f"/v1/customers/{cid}", headers=adm, json={"name": "Acme Ltd"})
     assert r.status_code == 200, r.text
-    assert r.json() | {"devices": []} == {**full, "name": "Acme Ltd", "id": cid, "devices": []}
+    assert r.json() | {"devices": []} == {**full, "name": "Acme Ltd", "id": cid, "devices": [], "consent_proposed": None}
     r = client.patch(f"/v1/customers/{cid}", headers=adm, json={"name": "Acme Ltd", "consent_training": False})
     assert r.json()["consent_training"] is False and r.json()["consent_live"] is True
     with session_scope(client.app.state.engine) as s:

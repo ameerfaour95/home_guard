@@ -55,3 +55,14 @@ def test_contract_amendment_2d_device_summary_fields():
     assert props["enrolled_by"]["enum"] == ["admin", "setup", "discovered"] and props["enrolled_by"]["default"] == "admin"
     assert "app_version" not in schemas["DeviceSummary"]["required"] and "needs_details" not in schemas["DeviceSummary"]["required"]
     assert "owner_phone" not in schemas["CustomerOut"]["properties"]
+
+
+def test_contract_amendment_2e_consent_proposal():
+    app = create_app(Settings.for_tests(db_url="sqlite://"), s3=None, init_db=False)
+    schemas = app.openapi()["components"]["schemas"]
+    assert set(schemas["ConsentProposal"]["properties"]) == {"live", "recordings", "training", "recorded_utc", "installer"}
+    assert set(schemas["ConsentProposal"]["required"]) == {"live", "recordings", "training", "recorded_utc", "installer"}
+    prop = schemas["CustomerOut"]["properties"]["consent_proposed"]
+    assert any(o.get("$ref", "").endswith("/ConsentProposal") for o in prop["anyOf"])
+    assert "consent_proposed" not in schemas["CustomerOut"].get("required", [])
+    assert "consent_proposed" not in schemas["CustomerIn"]["properties"]

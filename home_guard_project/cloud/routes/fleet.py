@@ -31,7 +31,7 @@ def now_of(request: Request) -> datetime:
 def build_summaries(session: Session, now: datetime, customer_id: Optional[int] = None,
                     device_pks: Optional[Iterable[int]] = None) -> list[DeviceSummary]:
     """One DeviceSummary per device, sorted by severity, customer name, site. Grouped queries, no per-device loops."""
-    q = select(Device, Customer.name, Customer.name_source).join(Customer, Customer.id == Device.customer_id)
+    q = select(Device, Customer.name, Customer.name_source, Customer.consent_proposed).join(Customer, Customer.id == Device.customer_id)
     if customer_id is not None:
         q = q.where(Device.customer_id == customer_id)
     if device_pks is not None:
@@ -39,7 +39,7 @@ def build_summaries(session: Session, now: datetime, customer_id: Optional[int] 
     rows = session.execute(q).all()
     if not rows:
         return []
-    pks = [d.id for d, _, _ in rows]
+    pks = [r[0].id for r in rows]
     since24 = (now - timedelta(hours=24)).timestamp()
     events = dict(session.execute(select(Event.device_pk, func.count()).where(
         Event.device_pk.in_(pks), Event.start_ts >= since24).group_by(Event.device_pk)).all())
@@ -53,7 +53,7 @@ def build_summaries(session: Session, now: datetime, customer_id: Optional[int] 
         cams.setdefault(pk, set()).add(name)
 
     out: list[DeviceSummary] = []
-    for dev, cust_name, name_source in rows:
+    for dev, cust_name, name_source, proposed in rows:
         hb = parse_heartbeat(dev.last_heartbeat) if isinstance(dev.last_heartbeat, dict) else None
         v, reasons = health.verdict(hb, now)
         names = set(cams.get(dev.id, ())) | (set(hb.cameras) if hb else set())
@@ -68,7 +68,7 @@ def build_summaries(session: Session, now: datetime, customer_id: Optional[int] 
             newest_clip_utc=hb.newest_clip_utc if hb else None,
             events_24h=events.get(dev.id, 0), alerts_24h=alerts.get(dev.id, 0),
             false_alarms_7d=false_alarms.get(dev.id, 0),
-            needs_details=(dev.enrolled_by == "discovered" and name_source != "admin"),
+            needs_details=((dev.enrolled_by == "discovered" and name_source != "admin") or proposed is not None),
             enrolled_by=dev.enrolled_by, app_version=dev.app_version))
     out.sort(key=lambda d: (_SEVERITY_RANK[d.verdict], d.customer_name, d.site))
     return out

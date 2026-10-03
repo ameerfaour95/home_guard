@@ -14,11 +14,12 @@ router = APIRouter(tags=["customers"])
 
 _FIELDS = tuple(CustomerIn.model_fields)
 _NOT_FOUND = "Customer not found"
+_CONSENTS = ("consent_live", "consent_recordings", "consent_training")
 TIMEZONE_MAX = 64  # the column's width
 
 
 def _out(session: Session, request: Request, c: Customer) -> CustomerOut:
-    return CustomerOut(id=c.id, **{f: getattr(c, f) for f in _FIELDS},
+    return CustomerOut(id=c.id, consent_proposed=c.consent_proposed, **{f: getattr(c, f) for f in _FIELDS},
                        devices=build_summaries(session, now_of(request), customer_id=c.id))
 
 
@@ -73,6 +74,11 @@ def update_customer(customer_id: int, body: CustomerIn, request: Request,
             setattr(c, f, new)
     if "name" in changed:
         c.name_source = "admin"  # a person named it: discovery never renames it again
+    set_consents = sorted(set(body.model_fields_set) & set(_CONSENTS))
+    confirmed = bool(set_consents) and c.consent_proposed is not None
+    if set_consents:  # an admin decision on consents: the box's proposal is settled, later answers must be newer
+        c.consent_proposed = None
+        c.consent_recorded_utc = now_of(request)
     session.flush()
     if "name" in changed:
         # the old name stays an identity term of every device of this customer (labeler redaction), and the
@@ -81,6 +87,9 @@ def update_customer(customer_id: int, body: CustomerIn, request: Request,
             redact.remember(session, device, extra=[("customer", old_name), ("customer", c.name)],
                             now=now_of(request))
             redact.backfill(session, device, everything=True)
+    if confirmed:
+        audit.record(session, staff.id, "consent_confirmed", target=c.name, customer_id=c.id,
+                     detail={"fields": set_consents}, ts=now_of(request))
     if changed:
         audit.record(session, staff.id, "customer_update", target=c.name, customer_id=c.id,
                      detail={"changed": changed}, ts=now_of(request))

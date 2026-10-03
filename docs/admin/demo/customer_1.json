@@ -6,6 +6,7 @@
   "consent_training": true,
   "notes": "Detached house in Ramat Gan. Installed in July, three cameras.",
   "id": 1,
+  "consent_proposed": null,
   "devices": [
     {
       "device_id": "4c2fb54d-51c9-5af2-8288-3caad30115a2",

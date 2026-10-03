@@ -55,6 +55,8 @@ class Customer(Base):
     name_source: Mapped[str] = mapped_column(String(16), default="admin", server_default="admin")
     owner_phone: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)  # admin/support only, never exposed
     consent_recorded_utc: Mapped[Optional[datetime]] = mapped_column(TS, nullable=True)  # newest owner answer applied
+    # the box's consent answer waiting for an admin: {live, recordings, training, recorded_utc, installer}
+    consent_proposed: Mapped[Optional[Any]] = mapped_column(JSONType, nullable=True)
 
 
 class Device(Base):

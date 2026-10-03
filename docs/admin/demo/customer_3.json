@@ -6,6 +6,13 @@
   "consent_training": false,
   "notes": "Two properties: the family house in Beer Sheva and a holiday flat in Eilat. No training consent.",
   "id": 3,
+  "consent_proposed": {
+    "live": true,
+    "recordings": true,
+    "training": true,
+    "recorded_utc": "2026-10-03T08:30:00Z",
+    "installer": "Ameer"
+  },
   "devices": [
     {
       "device_id": "76b32708-d2ce-5118-9e16-2c15bc450234",
@@ -37,7 +44,7 @@
       "events_24h": 0,
       "alerts_24h": 0,
       "false_alarms_7d": 0,
-      "needs_details": false,
+      "needs_details": true,
       "enrolled_by": "admin",
       "app_version": null
     },
@@ -66,7 +73,7 @@
       "events_24h": 10,
       "alerts_24h": 4,
       "false_alarms_7d": 2,
-      "needs_details": false,
+      "needs_details": true,
       "enrolled_by": "admin",
       "app_version": null
     }

@@ -88,8 +88,17 @@ class CustomerIn(BaseModel):
     notes: str = ""
 
 
+class ConsentProposal(BaseModel):
+    live: bool
+    recordings: bool
+    training: bool
+    recorded_utc: datetime
+    installer: str
+
+
 class CustomerOut(CustomerIn):
     id: int
+    consent_proposed: Optional[ConsentProposal] = None  # admin/support only: what the box recorded, unconfirmed
     devices: list[DeviceSummary] = []
 
 
