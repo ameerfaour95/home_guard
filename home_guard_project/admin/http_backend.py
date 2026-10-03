@@ -98,6 +98,17 @@ class HttpBackend:
                 raise LoginError() from None
             return self.tokens
 
+    def local_login(self):
+        """Token-less sign-in for a local service; 404 means it is not allowed."""
+        with self._auth_lock:
+            self._epoch += 1
+            self.tokens = None
+            try:
+                self.tokens = self._parse(self._send('POST', 'auth/local'), TokenPair)
+            except AuthError:
+                raise LoginError() from None
+            return self.tokens
+
     def _response(self, method, path, **kwargs):
         with self._auth_lock:
             epoch = self._epoch

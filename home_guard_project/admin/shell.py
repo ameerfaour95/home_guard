@@ -1,7 +1,7 @@
 from urllib.parse import urlsplit
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QShortcut, QKeySequence
-from PySide6.QtWidgets import QWidget, QFrame, QVBoxLayout, QHBoxLayout, QStackedWidget, QLineEdit, QMainWindow
+from PySide6.QtWidgets import QWidget, QFrame, QVBoxLayout, QHBoxLayout, QStackedWidget, QLineEdit, QMainWindow, QLabel
 from .demo_backend import DemoBackend
 from .signin import SignIn
 from .fleet import FleetScreen
@@ -209,7 +209,7 @@ class Shell(QWidget):
 
 
 class AdminWindow(QMainWindow):
-    def __init__(self, backend, *, demo=False, theme='dark', prefs=None):
+    def __init__(self, backend, *, demo=False, theme='dark', prefs=None, local=False):
         super().__init__()
         from .prefs import Preferences
         prefs = prefs or Preferences()
@@ -223,10 +223,43 @@ class AdminWindow(QMainWindow):
         self.setCentralWidget(self.session)
         self.signin = None
         self.shell = None
+        self.connecting = None
+        self.local_relogin = False
+        self.local = local
+        self.local_runner = TaskRunner(self)
+        self.local_runner.finished.connect(self.local_done)
         self.menuBar().addAction('Settings', self.open_settings)
         self.show_signin()
         if demo:
             self.use_demo()
+        elif local:
+            self.start_local()
+
+    def start_local(self, relogin=False):
+        backend = self.configured_backend
+        if not hasattr(backend, 'local_login') or not self.local_runner.start(backend.local_login):
+            return False
+        self.local_relogin = relogin
+        if not relogin and self.signin:
+            self.connecting = QLabel('Connecting to the local service…', alignment=Qt.AlignmentFlag.AlignCenter)
+            self.session.addWidget(self.connecting); self.session.setCurrentWidget(self.connecting)
+        return True
+
+    def local_done(self, result, error):
+        connecting, self.connecting = self.connecting, None
+        if connecting:
+            self.session.removeWidget(connecting); connecting.deleteLater()
+        if error:
+            if self.local_relogin:
+                self.show_signin()
+                self.signin.error.setText('Your session needs a new sign-in')
+            elif self.signin:
+                self.session.setCurrentWidget(self.signin)
+            return
+        if self.shell:
+            self.session.removeWidget(self.shell); self.shell.hide(); self.shell.deleteLater(); self.shell = None
+        self.backend = self.configured_backend
+        self.enter(result.staff)
 
     def environment(self):
         if isinstance(self.backend, DemoBackend):
@@ -266,12 +299,14 @@ class AdminWindow(QMainWindow):
         self.session.setCurrentWidget(self.shell)
 
     def expired(self):
+        if self.local and not self.local_runner.busy and self.start_local(relogin=True):
+            return
         self.show_signin()
         self.signin.error.setText('Your session needs a new sign-in')
 
     def open_settings(self):
         from .settings import SettingsDialog
-        server = getattr(self.configured_backend, 'base_url', self.prefs.get('server') or 'http://127.0.0.1:8000')
+        server = getattr(self.configured_backend, 'base_url', self.prefs.get('server') or 'http://127.0.0.1:8610')
         self.settings_dialog = SettingsDialog(server, self.theme, self)
         self.settings_dialog.saved.connect(self.save_settings); self.settings_dialog.show()
 
@@ -280,7 +315,7 @@ class AdminWindow(QMainWindow):
         from .theme import apply_theme
         from .backend import BackendError
         from PySide6.QtWidgets import QApplication
-        changed = server != getattr(self.configured_backend, 'base_url', self.prefs.get('server') or 'http://127.0.0.1:8000')
+        changed = server != getattr(self.configured_backend, 'base_url', self.prefs.get('server') or 'http://127.0.0.1:8610')
         if changed:
             try: backend = HttpBackend(server)
             except BackendError as error:

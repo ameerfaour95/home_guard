@@ -9,13 +9,16 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--demo', action='store_true')
     parser.add_argument('--server')
+    parser.add_argument('--local', action='store_true', help='sign in without credentials to a local service')
     parser.add_argument('--theme', choices=['dark', 'light'])
     parser.add_argument('--smoke-test', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
     from home_guard_project.admin.prefs import Preferences
     prefs = Preferences()
-    args.server = args.server or prefs.get('server') or 'http://127.0.0.1:8000'
+    args.server = args.server or prefs.get('server') or 'http://127.0.0.1:8610'
     args.theme = args.theme or prefs.get('theme') or 'dark'
+    from urllib.parse import urlsplit
+    local = not args.demo and (args.local or urlsplit(args.server).hostname in ('127.0.0.1', 'localhost'))
     if args.theme not in ('dark', 'light'): args.theme = 'dark'
     if args.smoke_test:
         os.environ['QT_QPA_PLATFORM'] = 'offscreen'
@@ -40,7 +43,7 @@ def main():
     except BackendError as error:
         startup_error = error
         backend = UnavailableBackend(args.server, error)
-    window = AdminWindow(backend, demo=args.demo, theme=args.theme, prefs=prefs)
+    window = AdminWindow(backend, demo=args.demo, theme=args.theme, prefs=prefs, local=local)
     if startup_error:
         window.signin.error.setText(str(startup_error))
     install_exception_hook(lambda message: window.statusBar().showMessage(message))

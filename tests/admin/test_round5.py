@@ -35,7 +35,7 @@ def test_settings_persist_email_and_apply_theme(app, widgets, tmp_path, wait):
     window.open_settings(); dialog = window.settings_dialog
     dialog.server.setText('http://invalid.example.com'); dialog.save()
     assert dialog.error.text() and dialog.isVisible()
-    dialog.server.setText('http://127.0.0.1:8000'); dialog.theme.setCurrentIndex(1); dialog.save()
+    dialog.server.setText('http://127.0.0.1:8610'); dialog.theme.setCurrentIndex(1); dialog.save()
     assert window.theme == 'light' and window.shell is not None
     assert prefs.email() == 'staff@example.com' and prefs.get('theme') == 'light'
     window.save_settings('https://cloud.example.com','dark')
