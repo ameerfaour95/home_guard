@@ -602,8 +602,8 @@ class _Run:
         source = winner.rec if winner is not None and winner.rec.ai.status != "none" else recs[0]
         ev.summary = source.summary or ""
         ev.summary_redacted = None  # refilled from the new summary at the end of the pass (redact.backfill)
-        ev.label = _cut(source.label, 64)
-        ev.alert_command = _cut(source.alert_command, 32)
+        ev.label = redact.label(source.label)  # enum fields: anything else is stored as null
+        ev.alert_command = redact.alert_command(source.alert_command)
         ev.alert_reason = source.alert_reason or ""
         # delivery is what the production copy recorded; without a production copy it is unknown
         prod = current.get("production")
@@ -614,9 +614,9 @@ class _Run:
         ev.duration_sec = first("duration_sec")
         ev.fps = first("fps")
         ev.frame_size = first("frame_size")
-        ev.clip_start_local = next((_cut(c.body.get("clip_start_local"), 64) for c in ordered
+        ev.clip_start_local = next((redact.clip_start_local(c.body.get("clip_start_local")) for c in ordered
                                     if isinstance(c.body, dict) and isinstance(c.body.get("clip_start_local"), str)),
-                                   None)
+                                   None)  # a timestamp or nothing: free text here would bypass every projection
         ev.expires_at = (datetime.fromtimestamp(ev.start_ts, timezone.utc) + PRODUCTION_RETENTION
                          if prod is not None else None)
 

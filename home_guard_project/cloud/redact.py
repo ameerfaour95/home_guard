@@ -11,8 +11,11 @@ cameras), the owner's camera display names, the customer name and the Tailscale 
 (`_`, space, `-` or nothing between the parts, so "bian_house" also catches "BianHouse") and each distinctive
 part of at least 4 characters that is not a common word ("bian" of "bian_ch2", "Levi" of "Daniel Levi").
 Matching is case-insensitive and whole-word-ish: a term must not continue an alphanumeric run, except at a
-camelCase boundary ("MyBianHome" still loses "Bian"); `_` and punctuation count as boundaries, so
-"dataset_bian" loses "bian" too.
+case or digit boundary ("MyBianHome", "MyBIANHome", "BIANhome" and "BIAN2" all lose "BIAN"); `_` and punctuation
+count as boundaries, so "dataset_bian" loses "bian" too.
+
+Redaction is defence in depth: labelers get no search and no prompt text, and the enum/format fields they see are
+validated here (`alert_command`, `label`) rather than redacted.
 """
 from __future__ import annotations
 
@@ -38,14 +41,41 @@ STOPWORDS = frozenset({
 })
 MIN_PART = 4
 
+# The only values these fields may take; anything else is shown (and stored) as null.
+ALERT_COMMANDS = frozenset({"[none]", "[send_message]", "[call_owner]"})
+LABELS = frozenset({"normal", "suspicious", "escalation"})
+# The box writes "YYYY-MM-DD HH:MM:SS" (optionally ISO with T, fraction, offset); imports write "<seconds>s".
+_CLIP_START_LOCAL = re.compile(
+    r"\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?(?:Z|[+-]\d{2}:?\d{2})?|\d{1,7}(?:\.\d{1,3})?s")
+
+
+def alert_command(value: Optional[str]) -> Optional[str]:
+    """`value` when it is one of the bracketed alert commands, else None."""
+    return value if value in ALERT_COMMANDS else None
+
+
+def label(value: Optional[str]) -> Optional[str]:
+    """`value` when it is one of the AI's scene labels, else None."""
+    return value if value in LABELS else None
+
+
+def clip_start_local(value: Optional[str]) -> Optional[str]:
+    """`value` when it is a local timestamp (or an import's offset in seconds), else None."""
+    return value if isinstance(value, str) and _CLIP_START_LOCAL.fullmatch(value) else None
+
 # What a labeler sees instead of a term when no server secret is at hand (the stored search copy).
 NEUTRAL_CUSTOMER = "customer-redacted"
 NEUTRAL_CAMERA = "cam-redacted"
 
 _SEPARATORS = re.compile(r"[\s_.\-]+")
 _CAMEL = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
-_START = r"(?:(?<![A-Za-z0-9])|(?<=[a-z0-9])(?=[A-Z]))"
-_END = r"(?:(?![A-Za-z0-9])|(?<=[a-z0-9])(?=[A-Z]))"
+# Word boundaries inside an alphanumeric run: lower -> Upper ("myBian"), an acronym ending where a capitalised word
+# starts ("BIAN|Home"), an upper-case run of two or more ending in lower case ("BIAN|home") and letter <-> digit
+# ("BIAN|2"). A boundary only lets a term match there; it never removes a character.
+_INNER = (r"(?<=[a-z0-9])(?=[A-Z])", r"(?<=[A-Z])(?=[A-Z][a-z])", r"(?<=[A-Z]{2})(?=[a-z])",
+          r"(?<=[A-Za-z])(?=[0-9])", r"(?<=[0-9])(?=[A-Za-z])")
+_START = "(?:" + "|".join((r"(?<![A-Za-z0-9])",) + _INNER) + ")"
+_END = "(?:" + "|".join((r"(?![A-Za-z0-9])",) + _INNER) + ")"
 
 
 def variants(term: str) -> list[str]:

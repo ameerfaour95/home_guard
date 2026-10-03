@@ -7,6 +7,11 @@ Labelers therefore never get the real key: on first access the file is copied se
 `admin_cache/opaque/<hmac(artifact id, etag)>.<ext>` (recorded as an `opaque_copy` artifact with provenance
 "cloud", never shown to labelers) and that copy is presigned, without any filename hint. Owner documents and raw
 AI text (meta, feedback, raw answers) are not media and are refused to labelers outright.
+
+For a labeler, an artifact they may not see (no training consent, an owner document, an opaque copy, no known
+household) is indistinguishable from a missing one: visibility is decided before existence, availability or any
+consent-specific message, and the answer is always the same 404. The real reason is audited (`media_denied`);
+the audit is not visible to labelers.
 """
 from __future__ import annotations
 
@@ -95,40 +100,62 @@ def _device_of(session: Session, art: Artifact, ev: Optional[Event]) -> Optional
     return found[0] if len(found) == 1 else None  # none or ambiguous: the caller answers 404
 
 
-def _deny(session: Session, staff: Staff, art: Artifact, customer: Customer, device: Device, purpose: str,
-          reason: str, status: int = 403):
-    """Audit a refused access (committed now: the raise below would roll the request back), then refuse."""
-    audit.record(session, staff.id, "media_denied", target=art.s3_key, reason=reason, customer_id=customer.id,
-                 device_id=device.device_id, detail={"reason": reason, "purpose": purpose})
+_NOT_FOUND = "Artifact not found"
+
+
+def _deny(session: Session, staff: Staff, target: str, customer: Optional[Customer], device: Optional[Device],
+          purpose: str, reason: str, status: int = 403, shown: Optional[str] = None):
+    """Audit a refused access (committed now: the raise below would roll the request back), then refuse with
+    `shown` (default: the reason itself)."""
+    audit.record(session, staff.id, "media_denied", target=target, reason=reason,
+                 customer_id=customer.id if customer is not None else None,
+                 device_id=device.device_id if device is not None else None,
+                 detail={"reason": reason, "purpose": purpose})
     session.commit()
-    raise HTTPException(status_code=status, detail=reason)
+    raise HTTPException(status_code=status, detail=shown or reason)
+
+
+def _labeler_hidden_reason(art: Optional[Artifact], customer: Optional[Customer]) -> Optional[str]:
+    """Why a labeler may not see this artifact at all, or None when it is visible to them."""
+    if art is None:
+        return "Artifact not found"
+    if customer is None:
+        return "Artifact belongs to no known household"
+    if not customer.consent_training:
+        return "This customer has not agreed to training use"
+    if art.role in LABELER_HIDDEN_ROLES:
+        return "Your role cannot open this file"
+    return None
 
 
 @router.post("/artifacts/{artifact_id}/access", response_model=MediaAccess)
 def artifact_access(artifact_id: int, body: MediaAccessRequest, request: Request,
                     staff: Staff = Depends(current_staff), session: Session = SessionDep):
     art = session.get(Artifact, artifact_id)
-    if art is None:
-        raise HTTPException(status_code=404, detail="Artifact not found")
+    ev = session.get(Event, art.event_id) if art is not None and art.event_id is not None else None
+    device = _device_of(session, art, ev) if art is not None else None
+    customer = session.get(Customer, device.customer_id) if device is not None else None
+    if staff.role == "labeler":  # visibility first: hidden and missing artifacts get the same 404
+        hidden = _labeler_hidden_reason(art, customer)
+        if hidden is not None:
+            target = art.s3_key if art is not None else f"artifact/{artifact_id}"
+            _deny(session, staff, target, customer, device, body.purpose, hidden, status=404, shown=_NOT_FOUND)
+    if art is None or customer is None:
+        raise HTTPException(status_code=404, detail=_NOT_FOUND)
     if not art.available:
         raise HTTPException(status_code=410, detail="This file is no longer available")
-    ev = session.get(Event, art.event_id) if art.event_id is not None else None
-    device = _device_of(session, art, ev)
-    customer = session.get(Customer, device.customer_id) if device is not None else None
-    if customer is None:
-        raise HTTPException(status_code=404, detail="Artifact not found")
     if body.purpose == "training":
         if staff.role not in ("labeler", "admin"):
-            _deny(session, staff, art, customer, device, body.purpose, "Your role cannot open training data")
+            _deny(session, staff, art.s3_key, customer, device, body.purpose, "Your role cannot open training data")
         if not customer.consent_training:
-            _deny(session, staff, art, customer, device, body.purpose, "This customer has not agreed to training use")
-        if staff.role == "labeler" and art.role in LABELER_HIDDEN_ROLES:
-            _deny(session, staff, art, customer, device, body.purpose, "Your role cannot open this file")
+            _deny(session, staff, art.s3_key, customer, device, body.purpose,
+                  "This customer has not agreed to training use")
     else:
         if staff.role == "labeler":
-            _deny(session, staff, art, customer, device, body.purpose, "Your role cannot do this")
+            _deny(session, staff, art.s3_key, customer, device, body.purpose, "Your role cannot do this")
         if not customer.consent_recordings:
-            _deny(session, staff, art, customer, device, body.purpose, "This customer has not agreed to recordings access")
+            _deny(session, staff, art.s3_key, customer, device, body.purpose,
+                  "This customer has not agreed to recordings access")
     s3 = _s3(request)
     now: datetime = request.app.state.clock()
     camera = art.camera or (ev.camera if ev is not None else None)

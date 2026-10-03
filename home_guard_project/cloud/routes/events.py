@@ -4,9 +4,10 @@ Labelers see only events of customers who gave training consent, with the custom
 pseudonyms (`customer-<6 hex>` for the customer and site, `cam-<6 hex>` for each camera), and without delivery
 details or the owner's words. Their responses are built from allowlisted projections, never by deleting fields
 from real data: free text (summaries, reasons, prompts, AI output) passes through `redact`, storage keys become
-opaque `artifact-<id>` references, and `raw_meta` keeps only a fixed set of non-identifying fields. Their search
-runs over the redacted summaries, and a query naming the household returns nothing. Admin and support see
-everything.
+opaque `artifact-<id>` references, `raw_meta` keeps only a fixed set of non-identifying fields, enum fields
+(`alert_command`, `label`) outside their value sets are null, and `clip_start_local` is never shown. Labelers get
+no prompt text and cannot search (any `q` is one uniform 400): capabilities they do not need are removed, and
+redaction is only defence in depth. Admin and support see everything.
 """
 from __future__ import annotations
 
@@ -50,7 +51,7 @@ _LABELER_ARTIFACT_DETAIL = ("fps", "tile_w", "tile_h", "count", "copy")
 _LABELER_META = {
     "kind": None, "duration_sec": None, "fps_estimated": None, "frames_written": None, "codec": None,
     "buffer": ("store_size",), "yolo": ("class_counts", "class_max_conf", "trigger_classes"),
-    "model_response": None, "teacher": ("model", "prompt_version", "temperature", "prompt"),
+    "model_response": None, "teacher": ("model", "prompt_version", "temperature"),
 }
 
 
@@ -198,8 +199,8 @@ def _summary_fields(session: Session, viewer: _Viewer, ev: Event, customer_id: i
         customer_name=viewer.customer_name(customer_id, customer_name), camera=viewer.camera(ev.site, ev.camera),
         kind=ev.kind if ev.kind in _KINDS else "unknown",
         start_utc=_ts_utc(ev.start_ts), end_utc=_ts_utc(ev.end_ts), summary=shown(ev.summary),
-        label=shown(ev.label) if ev.label is not None else None,
-        alert_command=ev.alert_command,
+        label=redact.label(ev.label) if viewer.labeler else ev.label,
+        alert_command=redact.alert_command(ev.alert_command) if viewer.labeler else ev.alert_command,
         detected=[shown(d) for d in (ev.detected or []) if isinstance(d, str)],
         owner_verdicts=[shown(v) for v in (ev.owner_verdicts or []) if isinstance(v, str)],
         completeness=completeness, reviewed=bool(reviewed), flagged=bool(flagged),
@@ -260,6 +261,14 @@ def list_events(
     """Event history, newest first. `with_total=true` also fills `total` (counted up to 10000; beyond that
     `total` is 10000 and `total_capped` is true). `collection_id` keeps only events in that collection."""
     viewer = _Viewer(staff, request)
+    # Everything a request can be refused for is decided here, before any query: the answer never depends on
+    # what is stored. Labelers cannot search at all (any query text, whatever it says, is the same 400).
+    if q and viewer.labeler:
+        raise HTTPException(status_code=400, detail="Search is not available for this role")
+    if filter is not None and filter not in BUILTIN_FILTERS:
+        raise HTTPException(status_code=400, detail=f"Unknown filter: {filter}")
+    if cursor is not None:
+        _decode_cursor(cursor)
     conds = [viewer.visible()]
     if site is not None:
         conds.append(_site_condition(session, viewer, site))
@@ -273,13 +282,8 @@ def list_events(
         conds.append(Event.completeness["ai"].as_string() == ai)
     if verdict is not None:
         conds.append(_has_verdict(verdict))
-    if q:
-        if viewer.labeler:
-            if _names_household(session, viewer, q):  # no identity oracle: such a query matches nothing
-                return EventPage(items=[], next_cursor=None, total=0 if with_total else None, total_capped=False)
-            conds.append(Event.search_redacted.op("@@")(func.websearch_to_tsquery("simple", q)))
-        else:
-            conds.append(Event.search.op("@@")(func.websearch_to_tsquery("simple", q)))
+    if q:  # admin and support only (labelers were refused above)
+        conds.append(Event.search.op("@@")(func.websearch_to_tsquery("simple", q)))
     if from_utc is not None:
         conds.append(Event.start_ts >= _utc(from_utc).timestamp())
     if to_utc is not None:
@@ -289,23 +293,13 @@ def list_events(
     if flagged is not None:
         conds.append(_flagged.is_(flagged))
     if filter is not None:
-        builder = BUILTIN_FILTERS.get(filter)
-        if builder is None:
-            raise HTTPException(status_code=400, detail=f"Unknown filter: {filter}")
-        conds.append(builder())
+        conds.append(BUILTIN_FILTERS[filter]())
     if collection_id is not None:
         conds.append(_in_collection(collection_id))
     return event_page(session, viewer, conds, cursor, limit, with_total)
 
 
 TOTAL_CAP = 10_000
-
-
-def _names_household(session: Session, viewer: _Viewer, q: str) -> bool:
-    """Whether a labeler's query contains an identity term of any device the labeler may see."""
-    pks = session.scalars(select(Device.id).join(Customer, Customer.id == Device.customer_id)
-                          .where(viewer.visible()).order_by(Device.id)).all()
-    return any(viewer.identity(session, pk).mentions(q) for pk in pks)
 
 
 def _in_collection(collection_id: int):
@@ -316,14 +310,15 @@ def event_page(session: Session, viewer: _Viewer, conds: list, cursor: Optional[
                with_total: bool = False) -> EventPage:
     """One keyset page of events matching `conds` (which already include viewer.visible()), newest first.
     Shared by /events and the studio collection items route so both show identical rows and pseudonyms."""
+    after = _decode_cursor(cursor) if cursor is not None else None  # absent: the first page; bad: 400, no query
     total, capped = None, False
     if with_total:
         counted = session.scalar(select(func.count()).select_from(
             _event_select().where(*conds).order_by(None).limit(TOTAL_CAP + 1).subquery()))
         capped = counted > TOTAL_CAP
         total = TOTAL_CAP if capped else counted
-    if cursor is not None:  # absent: the first page; present but empty or malformed: 400
-        ts, last_id = _decode_cursor(cursor)
+    if after is not None:
+        ts, last_id = after
         last = literal(last_id, BigInteger)  # compared as bigint: any id of the cursor domain is a valid bound
         conds = [*conds, or_(Event.start_ts < ts, and_(Event.start_ts == ts, Event.id < last))]
     rows = session.execute(_event_select().where(*conds)
@@ -569,7 +564,7 @@ def get_event(event_id: int, request: Request, staff: Staff = Depends(current_st
         ident = viewer.identity(session, ev.device_pk)
         optional = lambda value: ident.text(value) if value is not None else None  # noqa: E731
         ai_runs = [AiRunOut(id=r.id, purpose="guard", status=r.status, model=optional(r.model),
-                            prompt_version=optional(r.prompt_version), prompt=optional(r.prompt),
+                            prompt_version=optional(r.prompt_version), prompt=None,  # never prompt text
                             parsed=ident.json(parsed(r)), raw_text_artifact_id=r.raw_artifact_id,
                             input_frame_artifact_ids=frame_ids(r)) for r in runs]
         feedback_out = [FeedbackOut(id=f.id, verdict=ident.text(f.verdict), action=ident.text(f.action), note="",
@@ -594,7 +589,7 @@ def get_event(event_id: int, request: Request, staff: Staff = Depends(current_st
         alert_reason = ev.alert_reason or ""
     detail = EventDetail(
         **fields,
-        clip_start_local=ev.clip_start_local, duration_sec=ev.duration_sec, fps=ev.fps,
+        clip_start_local=None if viewer.labeler else ev.clip_start_local, duration_sec=ev.duration_sec, fps=ev.fps,
         frame_size=ev.frame_size if isinstance(ev.frame_size, list) else None,
         alert_reason=alert_reason,
         dispatch=None if viewer.labeler else _dispatch_out(ev.dispatch),

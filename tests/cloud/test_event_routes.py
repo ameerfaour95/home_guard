@@ -261,7 +261,7 @@ def test_labeler_sees_pseudonyms_and_no_dispatch(client, staff_factory, indexed_
     text = r.text
     assert d["camera"] == cam_p and d["dispatch"] is None
     assert "dispatch" not in json.dumps(d["raw_meta"])
-    assert d["raw_meta"]["teacher"]["prompt"].startswith("You are the eyes")
+    assert "prompt" not in d["raw_meta"]["teacher"] and all(r["prompt"] is None for r in d["ai_runs"])
     assert all(f["raw_text"] == "" and f["note"] == "" for f in d["feedback"]) and d["feedback"]
     assert "Acme" not in text and "-100100" not in text and "test message" not in text
     assert all(not a["s3_key"].startswith(("dataset_test/", "production_test/")) for a in d["artifacts"])

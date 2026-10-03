@@ -16,7 +16,7 @@ from ..schemas import (
     ExportRequest,
     SavedFilter,
 )
-from .events import _Viewer, _in_collection, event_page
+from .events import _decode_cursor, _Viewer, _in_collection, event_page
 
 router = APIRouter(prefix="/studio", tags=["studio"], dependencies=[Depends(current_staff)])
 
@@ -70,6 +70,8 @@ def list_collection_items(
 ):
     """Events in a collection, newest first, same rows and pseudonyms as /events. Labelers only see events
     of customers who gave training consent."""
+    if cursor is not None:
+        _decode_cursor(cursor)  # a bad cursor is a 400 before any query
     if session.get(Collection, collection_id) is None:
         raise HTTPException(status_code=404, detail="Collection not found")
     viewer = _Viewer(staff, request)
@@ -77,17 +79,22 @@ def list_collection_items(
 
 
 @router.post("/exports/preview", response_model=ExportPreview, dependencies=[Depends(_studio_staff)])
-def preview_export(body: ExportRequest, session: Session = SessionDep):
+def preview_export(body: ExportRequest, request: Request, staff: Staff = Depends(current_staff),
+                   session: Session = SessionDep):
     """What an export of this request would contain, using the same selection and split code as the builder.
 
     `include_fallback_ai=false` excludes only fallback/failed AI from vlm.jsonl; such events still contribute
     clips and YOLO labels, so `no_real_ai` is reported only for VLM-only exports (formats == ["vlm_jsonl"]).
     Events of customers without training consent are always excluded (`no_training_consent`).
     """
+    # For a labeler, who may not know those events exist, they are silently left out instead (no exclusion
+    # entry, no count). (A comment, not part of the docstring: the docstring is in the frozen OpenAPI.)
     if session.get(Collection, body.collection_id) is None:
         raise HTTPException(status_code=404, detail="Collection not found")
-    included, excluded = studio_logic.select_export_items(session, body.collection_id, body)
-    splits = studio_logic.assign_splits(included, body.name, body.split)
+    included, excluded = studio_logic.select_export_items(session, body.collection_id, body,
+                                                          labeler=staff.role == "labeler")
+    splits = studio_logic.assign_splits(included, body.name, body.split,
+                                        secret=request.app.state.settings.jwt_secret)
     counts = {n: 0 for n in body.split}
     for s in splits.values():
         counts[s] = counts.get(s, 0) + 1
