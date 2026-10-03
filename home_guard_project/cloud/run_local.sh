@@ -39,6 +39,6 @@ export HG_CLOUD_DB_URL
 export HG_CLOUD_RUN_LOOPS=1
 
 "${RUN[@]}" python -m home_guard_project.cloud.manage init-db
-echo "Admin Center API on http://127.0.0.1:8600 (loops on)"
+echo "Admin Center API on http://127.0.0.1:${HG_CLOUD_PORT:-8600} (loops on)"
 exec "${RUN[@]}" python -m uvicorn home_guard_project.cloud.app:create_app_from_env --factory \
-  --host 127.0.0.1 --port 8600
+  --host 127.0.0.1 --port "${HG_CLOUD_PORT:-8600}"
