@@ -59,3 +59,42 @@
 5. **Beyond the brief:** I also pseudonymise `raw_meta.camera_name` and artifact `s3_key`s for labelers, because the site appears in every key. `raw_meta` paths (`clip_path` and similar) and the teacher prompt still contain the real **camera** name, which the brief keeps. They never contain the site or customer.
 6. **`event_view` batching** reads the audit ts (wall clock) against `app.state.clock`. In production both are the same clock.
 7. Another agent had uncommitted changes in `indexer.py`, `keys.py`, `test_indexer.py` and `test_keys.py` during this task. I did not stage them. My commit is green on its own: 219 passed in a clean worktree.
+
+## Fix round (Codex review)
+
+Spec `.superpowers/sdd/fix-10.md`. Commits `43ca89e` (redaction module, migration 0005, indexer +
+`manage redact-backfill`) and `f2591fe` (labeler projections, search guard, opaque media, findings 4-6).
+`schemas.py` and `docs/admin/openapi.json` unchanged (contract test green).
+
+RED first: the response-wide test was written before any code change and failed on `da4ec98`:
+`test_no_labeler_response_names_the_household` -> `list leaks 'bian': ..."summary":"person at bianhouse near the
+bian_ch2 gate, walking to daniel levi's c...`; `test_labeler_search_has_no_identity_oracle` -> labeler
+`q=BianHouse` returned `[5, 4]`; `test_labeler_media_urls_do_not_name_the_household` -> `access url leaks 'bian':
+...s3.amazonaws.com/dataset_bian/clips/bian_ch2/2026-10-03/bian_ch2_1791020177_alert.mp4`. The finding 4-6 tests
+also failed first (empty cursor 200; density 10:50Z->10:10Z 200; concurrent views wrote 6 event_view rows).
+
+| Finding | Change | Test | RED -> GREEN |
+|---|---|---|---|
+| 1-3 Critical: raw meta, free text, search and artifacts disclose the household | New `cloud/redact.py`: identity terms per device (site, every camera name from Camera rows / events / heartbeat, display names, customer name, Tailscale host) + variants (`_` / space / `-` / joined, camelCase) + distinctive parts (>= 4 chars, not digits, not on the stoplist; spec stoplist plus a few more generic words). Single-pass, case-insensitive, whole-word-ish (camelCase and `_` are boundaries) replacement; no re-redaction of inserted pseudonyms. Labeler responses are allowlisted projections: `summary`, `label`, `detected`, `owner_verdicts`, `alert_reason`, `ai_runs[].prompt/parsed/model/prompt_version` redacted (site/customer -> `customer-xxxxxx`, camera/display name -> `cam-xxxxxx`); `raw_meta` = the spec allowlist only, every string redacted; artifacts `s3_key = artifact-<id>`, `detail` only scalar fps/tile_w/tile_h/count/copy, `opaque_copy` rows never listed; feedback verdict/action/source/received_utc only. Search: migration 0005 (after 0004) adds `events.summary_redacted` + generated `search_redacted` tsvector + GIN index; the indexer nulls `summary_redacted` whenever it sets a summary and `redact.backfill` refills every NULL at the end of each pass; `manage redact-backfill [--all]`. Labeler `q` searches `search_redacted`; a `q` containing an identity term of any device in the labeler's scope returns an empty page. | `tests/cloud/test_labeler_privacy.py` (household `bian` / `bian_ch2` / `BianHouse` / `Daniel Levi` / `bian-box`; serialises list (plain, paged, searched), detail + detections of every event, density hour/day, review-count, review PATCH, collection items (plain, paged), export preview; asserts no identity term, no `dataset_`/`production_`/`clips/` path, no chat id, no owner text); `test_labeler_search_has_no_identity_oracle` (10 identity queries empty, `walking` still found); `tests/cloud/test_redact.py` (variants, single pass, camelCase, term sources, indexer fill, `redact-backfill` with and without `--all`) | RED as above -> GREEN |
+| 7 (controller): presigned URLs name the household | Labeler `POST /artifacts/{id}/access` and the thumbnail redirect: server-side `S3.copy` (writable prefixes only, `MetadataDirective=REPLACE` so no stored Content-Disposition/metadata travels) to `admin_cache/opaque/<hmac(artifact id, etag)[:40]>.<ext>` (HMAC sub-key derived from the JWT secret) on first access, recorded as Artifact role `opaque_copy`, provenance `cloud`, detail `{"source_artifact_id": id}`, `event_id` NULL (never in event views); upsert so concurrent first accesses are safe; the copy is presigned with no filename/ResponseContentDisposition hints. Admin/support keep the real key. Extra: labelers get 403 for `meta`, `feedback`, `raw_answer` and `opaque_copy` artifacts (the meta/feedback JSON carry dispatch, chat ids and the owner's words, which bypassed every redaction above). | `test_labeler_media_urls_do_not_name_the_household`: URL and thumbnail Location carry no identity term and no `dataset_`/`production_`; copy bytes equal the clip; second access reuses the key; exactly one `opaque_copy` row; admin URL still real; labeler 403 on the meta artifact | RED (real key in URL) -> GREEN |
+| 4 Important: event_view batching race | `_audit_view` takes `pg_advisory_xact_lock(hashtextextended('event_view:<staff>:<event>'))` before the check, rechecks under the lock, and stamps the row with the same app clock that decides the window | `test_event_view_audit_is_race_free`: 6 threads behind a barrier, `audit.record` slowed by 0.3 s -> exactly 1 row, `ts` == app clock | 6 rows -> 1 |
+| 5 Important: invalid cursors reach PostgreSQL | Absent cursor = first page; empty or invalid -> 400 before any query: > 128 chars, bad base64, not exactly `<number>:<id>` (no extra parts, whitespace or sign on the id), non-finite ts, id outside 1..2^63-1. `events.id` is int4, so the keyset bound is compared as a bigint literal (2^63-1 returns 200 instead of the DataError the first attempt showed). Collection items share the path. | `test_invalid_cursors_are_400_before_any_query` (16 bad cursors incl. `""`, the 30-digit id and 2^63; 2^63-1 -> 200; collection items `""` and 2^63 -> 400) | `""` 200 -> 400 |
+| 6 Minor: density validates rounded bounds | UTC-normalise the original endpoints (naive = UTC) and compare before aligning; `to <= from` -> 400 | `test_density_validates_the_requested_interval_not_the_rounded_one` (hour and day: reversed and equal endpoints inside one bucket -> 400; valid sub-bucket interval -> 200 with one bucket; naive start vs +03:00 end compared in UTC) | 200 -> 400 |
+
+Decision (stored search copy): the indexer has no server secret, so `summary_redacted` uses neutral placeholders
+(`customer-redacted` / `cam-redacted`) and serves search only. Responses redact the original text per request with
+the current terms and the labeler's real pseudonyms, so what a labeler sees is never stale. A stale stored copy
+(e.g. after a camera is added) can still hold a newly added name, but the `q` guard makes it unsearchable, and
+`redact-backfill --all` refreshes it.
+
+Full suite (exact command from constraints.md): **269 passed in 119.15s**. The tree includes Task 12's commits
+`6b80967` and `6c98307`, which landed on the branch during this round.
+
+Notes:
+- `audit.retry_pending_notices` is still not scheduled; Task 14's background loops will call it.
+- Opaque copies are not garbage-collected: when a source etag changes, the old copy stays under
+  `admin_cache/opaque/`. A cache-cleanup task should drop `opaque_copy` rows whose source has a newer etag.
+- File contents (video frames, the raw AI text file) are not redacted; raw answers are refused to labelers,
+  video and images are the labeling material.
+- `ExportPreview.excluded` still lists event ids of non-consenting customers with the reason (ids only, no
+  identity; unchanged behaviour).
