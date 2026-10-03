@@ -79,7 +79,10 @@ def test_save_appends_versions_and_refuses_a_stale_base(client, staff_factory, s
     r = _save(client, h, eid, base=0)
     assert r.status_code == 200, r.text
     one = r.json()
-    assert one["version"] == 1 and one["status"] == "edited" and one["author"] == staff.name
+    from home_guard_project.cloud import pseudonym
+
+    assert one["version"] == 1 and one["status"] == "edited"
+    assert one["author"] == pseudonym.staff(client.app.state.settings.jwt_secret, staff.id)  # D5: never a name
     assert one["tracks"][0]["keyframes"][1]["xyxy"] == [0.4, 0.1, 0.6, 0.5] and one["updated_utc"]
     stale = _save(client, h, eid, base=0, description="other")
     assert stale.status_code == 409, stale.text
@@ -106,7 +109,6 @@ def test_save_validates_tracks(client, staff_factory, seeded):
         [_track(kfs=((0, 0.0, [0.1, 0.1, 1.3, 0.5], True),))],  # outside 0..1
         [_track(kfs=((0, 0.0, [0.1, 0.1, 0.3, 0.5], True), (1, 0.0, [0.1, 0.1, 0.3, 0.5], True)))],  # same time
         [_track(kfs=((70, 60.0, [0.1, 0.1, 0.3, 0.5], True),))],  # after the clip
-        [_track(), _track()],  # one id twice
     ]
     for tracks in bad:
         r = _save(client, h, eid, tracks=tracks)
@@ -127,18 +129,20 @@ def test_admin_review_accept_and_reject(client, staff_factory, seeded):
     _, _, _, lab = staff_factory("labeler")
     admin, _, _, adm = staff_factory("admin")
     eid = _event_id(client, b.COLLECT_STEM)
-    assert client.post(_url(eid, "/review"), headers=adm, json={"decision": "accept"}).status_code == 400
+    assert client.post(_url(eid, "/review"), headers=adm, json={"decision": "accept",
+                                                                "version": 0}).status_code == 400
     _save(client, lab, eid, status="submitted")
-    assert client.post(_url(eid, "/review"), headers=lab, json={"decision": "accept"}).status_code == 403
+    assert client.post(_url(eid, "/review"), headers=lab, json={"decision": "accept",
+                                                                "version": 1}).status_code == 403
     r = client.post(_url(eid, "/review"), headers=adm, json={"decision": "reject", "note": "box too loose",
-                                                              "frame": 12})
+                                                              "frame": 12, "version": 1})
     assert r.status_code == 200, r.text
     assert (r.json()["status"], r.json()["review_note"], r.json()["review_frame"], r.json()["version"]) == (
         "rejected", "box too loose", 12, 1)
     assert client.get(_url(eid), headers=lab).json()["status"] == "rejected"
     r = _save(client, lab, eid, base=1, status="submitted")
     assert r.json()["status"] == "submitted" and r.json()["review_note"] == ""
-    r = client.post(_url(eid, "/review"), headers=adm, json={"decision": "accept"})
+    r = client.post(_url(eid, "/review"), headers=adm, json={"decision": "accept", "version": 2})
     assert r.json()["status"] == "reviewed" and r.json()["version"] == 2
     hist = client.get(_url(eid, "/history"), headers=adm).json()
     assert [(v["version"], v["status"]) for v in hist] == [(2, "reviewed"), (1, "rejected")]
@@ -156,7 +160,7 @@ def test_roles(client, staff_factory, seeded):
     assert client.get(_url(eid), headers=sup).status_code == 200
     assert client.get(_url(eid, "/history"), headers=sup).status_code == 200
     assert _save(client, sup, eid).status_code == 403
-    assert client.post(_url(eid, "/review"), headers=sup, json={"decision": "accept"}).status_code == 403
+    assert client.post(_url(eid, "/review"), headers=sup, json={"decision": "accept", "version": 0}).status_code == 403
     assert client.get(_url(eid)).status_code == 401
     _, _, _, adm = staff_factory("admin")
     assert client.get(_url(999999), headers=adm).status_code == 404
@@ -191,7 +195,7 @@ def test_summary_status_and_labeling_filters(client, staff_factory, seeded):
     _save(client, adm, collect, status="submitted")
     _save(client, adm, paused, status="edited", needs_review=True)
     _save(client, adm, alert, status="submitted")
-    client.post(_url(alert, "/review"), headers=adm, json={"decision": "reject"})
+    client.post(_url(alert, "/review"), headers=adm, json={"decision": "reject", "version": 1})
 
     def ids(flt):
         r = client.get("/v1/events", headers=adm, params={"filter": flt, "limit": 500})
@@ -208,3 +212,65 @@ def test_summary_status_and_labeling_filters(client, staff_factory, seeded):
     assert client.get(f"/v1/events/{collect}", headers=adm).json()["annotation_status"] == "submitted"
     keys = [f["key"] for f in client.get("/v1/studio/filters", headers=adm).json()]
     assert keys[-3:] == ["needs_labeling", "to_review", "rejected"]
+
+
+# ---------------------------------------------------------------- fix round D5: no staff identity reaches a labeler
+
+def test_labeler_never_reads_a_staff_identity(client, staff_factory, seeded):
+    import json
+    import re
+
+    from home_guard_project.cloud import pseudonym
+
+    admin, _, _, adm = staff_factory("admin")
+    labeler, _, _, lab = staff_factory("labeler")
+    eid = _event_id(client, b.COLLECT_STEM)
+    # a name-bearing track id from the client never comes back: ids are server-assigned
+    r = _save(client, adm, eid, tracks=[_track(track_id=f"box by {admin.name}")], description="A person.")
+    assert r.status_code == 200 and r.json()["author"] == admin.name  # admins see real names
+    secret = client.app.state.settings.jwt_secret
+    responses = [client.get(_url(eid), headers=lab), client.get(_url(eid, "/history"), headers=lab)]
+    put = client.put(_url(eid), headers=lab, json={"base_version": 1, "tracks": responses[0].json()["tracks"],
+                                                   "description": "A person.", "status": "submitted"})
+    responses += [put, client.get(_url(eid, "/history"), headers=lab)]
+    for resp in responses:
+        assert resp.status_code == 200, resp.text
+        text = json.dumps(resp.json())
+        for secret_word in (admin.name, admin.email, labeler.name, labeler.email):
+            assert secret_word not in text, (secret_word, text)
+    assert responses[0].json()["author"] == pseudonym.staff(secret, admin.id)
+    assert put.json()["author"] == pseudonym.staff(secret, labeler.id)
+    assert [v["author"] for v in responses[3].json()] == [pseudonym.staff(secret, labeler.id),
+                                                          pseudonym.staff(secret, admin.id)]
+    assert all(re.fullmatch(r"t-\d+", t["track_id"]) for resp in responses[:1] + [put]
+               for t in resp.json()["tracks"])
+
+
+def test_track_ids_are_server_assigned_and_stable(client, staff_factory, seeded):
+    _, _, _, h = staff_factory("labeler")
+    eid = _event_id(client, b.COLLECT_STEM)
+    one = _save(client, h, eid, tracks=[_track("alice"), _track("p1", label="dog")]).json()
+    assert [t["track_id"] for t in one["tracks"]] == ["t-1", "t-2"]
+    two = _save(client, h, eid, base=1, tracks=[_track("t-2", label="dog"), _track("t-99"), _track("bob")]).json()
+    assert [t["track_id"] for t in two["tracks"]] == ["t-2", "t-3", "t-4"]  # only ids the server gave are kept
+    same = _save(client, h, eid, base=2, tracks=[_track("x"), _track("x")])  # duplicates become two tracks
+    assert same.status_code == 200 and [t["track_id"] for t in same.json()["tracks"]] == ["t-5", "t-6"]
+
+
+# ---------------------------------------------------------------- fix round D6: a review names the version it saw
+
+def test_review_requires_the_version_it_decides_on(client, staff_factory, seeded):
+    _, _, _, lab = staff_factory("labeler")
+    _, _, _, adm = staff_factory("admin")
+    eid = _event_id(client, b.COLLECT_STEM)
+    _save(client, lab, eid, status="submitted")
+    seen = client.get(_url(eid), headers=adm).json()["version"]  # the admin opens v1
+    missing = client.post(_url(eid, "/review"), headers=adm, json={"decision": "accept"})
+    assert missing.status_code == 422 and missing.json()["detail"] == "version required"
+    assert _save(client, lab, eid, base=1, status="submitted", description="changed").status_code == 200  # v2
+    for decision in ("accept", "reject"):
+        stale = client.post(_url(eid, "/review"), headers=adm, json={"decision": decision, "version": seen})
+        assert stale.status_code == 409, stale.text
+    assert client.get(_url(eid), headers=adm).json()["status"] == "submitted"  # nothing was approved unseen
+    ok = client.post(_url(eid, "/review"), headers=adm, json={"decision": "accept", "version": 2})
+    assert ok.status_code == 200 and (ok.json()["status"], ok.json()["version"]) == ("reviewed", 2)

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from fractions import Fraction
 from datetime import datetime
 from pathlib import Path
@@ -139,6 +140,29 @@ def track_dicts(tracks: list[ft.Track]) -> list[dict]:
                            for k in t.keyframes]} for t in tracks]
 
 
+_TRACK_ID = re.compile(r"t-([0-9]{1,9})")
+
+
+def assign_track_ids(tracks: list[ft.Track], earlier: list[Annotation], current: int) -> None:
+    """Give every track a server-assigned opaque id `t-<n>` (in place): a client may keep an id of the current
+    version's tracks (the same object across saves); any other id -- free text that could carry a name, a
+    suggestion's id, a duplicate -- becomes the next unused number of the clip."""
+    used, keep = 0, set()
+    for row in earlier:
+        for tr in row.tracks or []:
+            m = _TRACK_ID.fullmatch(str(tr.get("track_id", "")))
+            if m:
+                used = max(used, int(m.group(1)))
+                if row.version == current:
+                    keep.add(m.group(0))
+    seen: set[str] = set()
+    for tr in tracks:
+        if tr.track_id not in keep or tr.track_id in seen:
+            used += 1
+            tr.track_id = f"t-{used}"
+        seen.add(tr.track_id)
+
+
 def problems(tracks: list[ft.Track], duration: Optional[float], frame_count: Optional[int]) -> list[str]:
     """Why a set of tracks cannot be saved (empty list = it can)."""
     out: list[str] = []
@@ -179,7 +203,10 @@ def suggestions(session: Session, s3, ev: Event, fps: Optional[float], now: date
         if f.status == "not_run":
             continue
         frames.append((f.frame_index, f.t_sec, [(b.label, b.xyxy) for b in f.boxes if b.label in _KNOWN]))
-    return ft.tracks_from_weak_labels(frames)
+    tracks = ft.tracks_from_weak_labels(frames)
+    for n, tr in enumerate(tracks, start=1):
+        tr.track_id = f"t-{n}"
+    return tracks
 
 
 def yolo_rows(tracks: list[ft.Track], t_sec: float) -> list[str]:

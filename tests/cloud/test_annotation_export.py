@@ -49,7 +49,7 @@ def labeled(client, s3client, staff_factory, tmp_path):
     _annotate(client, lab, collect, tracks=[PERSON], description="One person crosses the yard.")
     _annotate(client, lab, alert, description="A courier leaves a parcel.")
     assert client.post(f"/v1/events/{alert}/annotation/review", headers=adm,
-                       json={"decision": "accept"}).status_code == 200
+                       json={"decision": "accept", "version": 1}).status_code == 200
     _annotate(client, lab, paused, description="nothing here", drop_clip=True)
     cid = _make_collection(client, adm, [collect, alert, paused])
     return {"adm": adm, "cid": cid, "collect": collect, "alert": alert, "paused": paused, "labeler": labeler}

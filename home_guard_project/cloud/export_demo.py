@@ -619,9 +619,12 @@ def seed_labels(client, tokens: dict, collections: dict, clock: list) -> dict:
         if resp.status_code != 200:
             raise RuntimeError(f"demo annotation failed: {resp.status_code} {resp.text[:300]}")
     clock[0] = NOW - timedelta(hours=2)
-    client.post(f"/v1/events/{ids[0]}/annotation/review", headers=admin, json={"decision": "accept"})
-    client.post(f"/v1/events/{ids[1]}/annotation/review", headers=admin,
-                json={"decision": "reject", "note": "The second person is missing from frame 5 on.", "frame": 5})
+    for eid, decision in ((ids[0], {"decision": "accept"}),
+                          (ids[1], {"decision": "reject", "note": "The second person is missing from frame 5 on.",
+                                    "frame": 5})):
+        resp = client.post(f"/v1/events/{eid}/annotation/review", headers=admin, json={**decision, "version": 1})
+        if resp.status_code != 200:
+            raise RuntimeError(f"demo review failed: {resp.status_code} {resp.text[:300]}")
     clock[0] = NOW - timedelta(hours=1, minutes=30)
     resp = client.post(f"/v1/studio/collections/{night}/publish", headers=admin,
                        json={"batch_name": "demo_night_visitors"})

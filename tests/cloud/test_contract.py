@@ -109,3 +109,13 @@ def test_contract_2f_export_exclusion_dropped_by_labeler():
     schemas = app.openapi()["components"]["schemas"]
     assert schemas["ExportExclusion"]["properties"]["reason"]["enum"] == [
         "no_training_consent", "video_unavailable", "no_real_ai", "expired", "dropped_by_labeler"]
+
+
+def test_contract_2f_fix_review_names_its_version():
+    # additive: ReviewDecision.version is optional in the schema (older clients still parse); the route requires it
+    app = create_app(Settings.for_tests(db_url="sqlite://"), s3=None, init_db=False)
+    schemas = app.openapi()["components"]["schemas"]
+    prop = schemas["ReviewDecision"]["properties"]["version"]
+    assert {"type": "integer"} in prop["anyOf"] and prop.get("default") is None
+    assert "version" not in schemas["ReviewDecision"].get("required", [])
+    assert set(schemas["ReviewDecision"]["required"]) == {"decision"}

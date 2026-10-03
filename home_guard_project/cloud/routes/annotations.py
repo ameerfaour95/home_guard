@@ -14,7 +14,7 @@ from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from .. import audit, labeling, tagging
+from .. import audit, labeling, pseudonym, tagging
 from ..deps import NOTES_MAX, SessionDep, check_length, current_staff, require_id, require_role
 from ..models import Annotation, AnnotationHead, AnnotationReview, Event, Staff, TaggingPublish
 from ..schemas import (AiStatus, AnnotationIn, AnnotationOut, AnnotationVersion, PublishMissing, PublishOut,
@@ -29,6 +29,8 @@ _AI_STATUSES = set(get_args(AiStatus))
 NOT_FOUND = "Event not found"
 CONFLICT = "Someone saved this clip since you opened it (now version {v}). Reload it, then save again."
 NOTHING_TO_REVIEW = "This clip has no saved annotation to review"
+VERSION_REQUIRED = "version required"
+REVIEW_CONFLICT = "This clip changed since you opened it (now version {v}). Reload it, then review again."
 
 
 def _lock(session: Session, event_id: int) -> None:
@@ -44,6 +46,13 @@ def _ai(session: Session, viewer: _Viewer, ev: Event) -> tuple:
     status = status if status in _AI_STATUSES else "none"
     shown = lambda v: viewer.text(session, ev.device_pk, v) if v is not None else None  # noqa: E731
     return status, shown(run.model if run else None), shown(run.prompt_version if run else None)
+
+
+def _author(viewer: _Viewer, author_id, author_name):
+    """Who saved a version, as this viewer may read it: a labeler only ever reads staff pseudonyms."""
+    if not viewer.labeler:
+        return author_name
+    return pseudonym.staff(viewer.secret, author_id) if author_id is not None else None
 
 
 def _out(session: Session, request: Request, viewer: _Viewer, ev: Event) -> AnnotationOut:
@@ -65,7 +74,7 @@ def _out(session: Session, request: Request, viewer: _Viewer, ev: Event) -> Anno
     return AnnotationOut(**common, version=row.version, status=labeling.effective_status(row, review),
                          tracks=row.tracks or [], description=shown(row.description),
                          ai_description=shown(row.ai_description), drop_clip=row.drop_clip,
-                         needs_review=row.needs_review, author=row.author_name,
+                         needs_review=row.needs_review, author=_author(viewer, row.author_id, row.author_name),
                          updated_utc=review.created_at if review is not None else row.created_at,
                          review_note=shown(review.note) if review is not None else "",
                          review_frame=review.frame if review is not None else None,
@@ -104,14 +113,15 @@ def save_annotation(event_id: int, body: AnnotationIn, request: Request, staff: 
     viewer, ev, customer_id = _event(session, request, staff, event_id)
     _, frame_count, duration = labeling.clip_timing(ev, labeling.meta_body(session, ev.id))
     tracks = labeling.to_tracks([t.model_dump() for t in body.tracks])
-    problems = labeling.problems(tracks, duration, frame_count)
-    if problems:
-        raise HTTPException(status_code=422, detail=problems)
     _lock(session, ev.id)
     head = labeling.head(session, ev.id)
     current = head.version if head is not None else 0
     if body.base_version != current:
         raise HTTPException(status_code=409, detail=CONFLICT.format(v=current))
+    labeling.assign_track_ids(tracks, labeling.versions(session, ev.id), current)  # opaque, server-given ids
+    problems = labeling.problems(tracks, duration, frame_count)
+    if problems:
+        raise HTTPException(status_code=422, detail=problems)
     previous = labeling.version_row(session, ev.id, current) if current else None
     run = labeling.guard_run(session, ev.id)
     now = _now(request)
@@ -137,6 +147,8 @@ def review_annotation(event_id: int, body: ReviewDecision, request: Request,
                       staff: Staff = Depends(require_role("admin")), session: Session = SessionDep):
     check_length("note", body.note, NOTES_MAX)
     viewer, ev, customer_id = _event(session, request, staff, event_id)
+    if body.version is None:  # optional in the contract (additive), required here: never approve an unseen version
+        raise HTTPException(status_code=422, detail=VERSION_REQUIRED)
     _, frame_count, _ = labeling.clip_timing(ev, labeling.meta_body(session, ev.id))
     if body.frame is not None and (body.frame < 0 or (frame_count and body.frame >= frame_count)):
         raise HTTPException(status_code=422, detail="frame is outside the clip")
@@ -144,6 +156,8 @@ def review_annotation(event_id: int, body: ReviewDecision, request: Request,
     head = labeling.head(session, ev.id)
     if head is None:
         raise HTTPException(status_code=400, detail=NOTHING_TO_REVIEW)
+    if head.version != body.version:
+        raise HTTPException(status_code=409, detail=REVIEW_CONFLICT.format(v=head.version))
     row = labeling.version_row(session, ev.id, head.version)
     now = _now(request)
     session.add(AnnotationReview(event_id=ev.id, version=row.version, decision=body.decision, note=body.note,
@@ -162,7 +176,7 @@ def review_annotation(event_id: int, body: ReviewDecision, request: Request,
 def annotation_history(event_id: int, request: Request, staff: Staff = Depends(current_staff),
                        session: Session = SessionDep):
     # newest version first; a version's status has its review applied
-    _, ev, _ = _event(session, request, staff, event_id)
+    viewer, ev, _ = _event(session, request, staff, event_id)
     rows = labeling.versions(session, ev.id)
     reviews = labeling.reviews_by_version(session, ev.id)
     out = []
@@ -170,7 +184,8 @@ def annotation_history(event_id: int, request: Request, staff: Staff = Depends(c
         before = rows[i - 1].description if i else row.ai_description
         out.append(AnnotationVersion(
             version=row.version, status=labeling.effective_status(row, reviews.get(row.version)),
-            author=row.author_name, created_utc=row.created_at, tracks_count=len(row.tracks or []),
+            author=_author(viewer, row.author_id, row.author_name), created_utc=row.created_at,
+            tracks_count=len(row.tracks or []),
             description_changed=(row.description or "") != (before or "")))
     return list(reversed(out))
 

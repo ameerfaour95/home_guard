@@ -384,6 +384,9 @@ class ReviewDecision(BaseModel):
     decision: Literal["accept", "reject"]
     note: str = ""
     frame: Optional[int] = None
+    # the annotation version the reviewer looked at; the server requires it (422 without, 409 when it is not the
+    # current version any more)
+    version: Optional[int] = None
 
 
 class AnnotationVersion(BaseModel):
