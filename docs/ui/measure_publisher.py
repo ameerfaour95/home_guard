@@ -3,6 +3,7 @@
 No detector/model/camera is started. This does not measure YOLO throughput.
 """
 import json
+import argparse
 import os
 from pathlib import Path
 import subprocess
@@ -50,12 +51,20 @@ def run(modern,visible,duration):
                 finally: worker_cpu.append(time.thread_time()-started)
             writer._drain=measured_drain
         start=time.monotonic();next_touch=0;next_capture=start;caller_cpu=0
+        transitions=[]
+        midpoint=None
         while time.monotonic()-start<duration:
             now=time.monotonic()
             if now>=next_touch:
                 if modern: reader.touch(names[0],visible=visible,cameras=names)
                 elif visible: reader.touch(names[0])
                 next_touch=now+1
+                if modern:
+                    rates=writer.rate_controller.rates
+                    if not transitions or transitions[-1]['rates']!=list(rates):
+                        transitions.append({'seconds':round(now-start,2),'rates':list(rates)})
+            if modern and midpoint is None and now-start >= duration/2:
+                midpoint=(now,dict(counts),writer.worker_cpu_seconds+writer.offer_cpu_seconds)
             for name in names:
                 frame=base.copy()  # capture simulation, excluded from publisher CPU
                 before=time.thread_time()
@@ -66,14 +75,33 @@ def run(modern,visible,duration):
             time.sleep(max(0,next_capture-time.monotonic()))
         elapsed=time.monotonic()-start
         if modern: writer.close()
-        return {'duration_s':round(elapsed,2),'one_core_percent':round((caller_cpu+sum(worker_cpu))/elapsed*100,2),
+        result={'duration_s':round(elapsed,2),'one_core_percent':round((caller_cpu+sum(worker_cpu))/elapsed*100,2),
                 'published_frames':counts,'fps':{name:round(count/elapsed,2) for name,count in counts.items()}}
+        if modern:
+            controller=writer.rate_controller
+            result.update(rate_transitions=transitions,cap_percent=controller.cap*100,
+                          telemetry_one_core_percent=round((writer.worker_cpu_seconds+writer.offer_cpu_seconds)/elapsed*100,2),
+                          overhead_one_core_percent=round(controller.overhead*100,2),
+                          encode_publish_ema_ms={name:round(value*1000,3) for name,value in controller.costs.items()},
+                          final_estimated_one_core_percent=round(controller.estimate(names,names[0])*100,2) if visible else 0,
+                          floor_over_budget=visible and controller.level==3 and controller.estimate(names,names[0])>controller.cap)
+            if midpoint:
+                began,previous,cpu=midpoint
+                seconds=start+elapsed-began
+                result['second_half']={'seconds':round(seconds,2),
+                    'one_core_percent':round((writer.worker_cpu_seconds+writer.offer_cpu_seconds-cpu)/seconds*100,2),
+                    'fps':{name:round((count-previous[name])/seconds,2) for name,count in counts.items()}}
+        return result
 
 
+parser=argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--seconds',type=float,default=60)
+parser.add_argument('--output',type=Path,default=Path(__file__).with_name('live_l2_publisher_cpu.json'))
+args=parser.parse_args()
 result={'hardware':'AMD Ryzen 9 9955HX3D; not the N150 box',
-        'before_open':run(False,True,8),'after_open':run(True,True,8),
-        'before_hidden':run(False,False,2),'after_hidden':run(True,False,2)}
+        'before_open':run(False,True,args.seconds),'after_open':run(True,True,args.seconds),
+        'before_hidden':run(False,False,10),'after_hidden':run(True,False,10)}
 result['extra_one_core_percentage_points']=round(result['after_open']['one_core_percent']-result['before_open']['one_core_percent'],2)
 text=json.dumps(result,indent=2)
 print(text)
-Path(__file__).with_name('live_publisher_cpu.json').write_text(text+'\n',encoding='utf-8')
+args.output.write_text(text+'\n',encoding='utf-8')

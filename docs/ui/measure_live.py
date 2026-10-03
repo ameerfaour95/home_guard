@@ -53,6 +53,9 @@ def main():
     parser.add_argument("--seconds", type=float, default=12)
     parser.add_argument("--output")
     parser.add_argument("--capture", action="store_true")
+    parser.add_argument("--screenshots-only", action="store_true", help="Capture the three proof states without recording a GIF")
+    parser.add_argument("--size", default="1366x768")
+    parser.add_argument("--screenshot-suffix", default="")
     parser.add_argument("--remote-simulated", action="store_true", help="Use a synthetic HTTP server on loopback; no box/SSH")
     args = parser.parse_args()
     app = QApplication([])
@@ -128,10 +131,13 @@ def main():
              patch.object(ui.CameraTile, "paintEvent", paint), patch.object(ui.CameraTile,"event",event), \
              patch.object(AiActivity, "paintEvent", ai_paint), patch.object(AiActivity,"render",timed(AiActivity.render)), \
              patch.object(ui.Window,"tick",timed(ui.Window.tick)), patch.object(ui.Window,"update_detector",timed(ui.Window.update_detector)):
-            options = SimpleNamespace(demo=True, setup=False, state="inference", size="1366x768",
+            options = SimpleNamespace(demo=True, setup=False, state="inference", size=args.size,
                                       cameras=6, details=False, detections=True, theme="dark", aspect="16:9")
             window = ui.Window(options)
             window.show()
+            # Windows constrains the initial show to this monitor's work area.
+            # Resize after show so proof captures exercise the requested layout.
+            window.resize(*map(int, args.size.split("x")))
             window.args.demo = False  # controls remain simulated; transport uses temporary files
             window.box_unreachable = False
             window.fetch = lambda: (window.current_state, True, [])
@@ -184,7 +190,7 @@ def main():
                         QCoreApplication.postEvent(window.tiles[0],event)
                         next_input=now+.2
                     for i, name in enumerate(names):
-                        if args.capture and i == 5 and now-start > 4: continue
+                        if (args.capture or args.screenshots_only) and i == 5 and now-start > 4: continue
                         if not writer.wanted(name): continue
                         frame = bases[i].copy()
                         x = 80+int((now-start)*75) % 1000
@@ -235,7 +241,7 @@ def main():
             captures = []
             capture_times = []
             capture_timer = QTimer()
-            if args.capture:
+            if args.capture or args.screenshots_only:
                 from PIL import Image
                 def capture():
                     from PySide6.QtGui import QImage
@@ -244,7 +250,10 @@ def main():
                     image=window.grab().toImage().convertToFormat(QImage.Format.Format_RGBA8888)
                     captures.append(Image.frombytes("RGBA", (image.width(),image.height()), bytes(image.bits())).convert("RGB"))
                     capture_times.append(time.time()-start)
-                capture_timer.timeout.connect(capture);capture_timer.start(100)
+                if args.screenshots_only:
+                    for milliseconds in (2600, 4200, 9500): QTimer.singleShot(milliseconds, capture)
+                else:
+                    capture_timer.timeout.connect(capture);capture_timer.start(100)
                 shots = Path(__file__).parent/"screenshots";shots.mkdir(exist_ok=True)
             QTimer.singleShot(round(args.seconds*1000), app.quit)
             app.exec()
@@ -256,6 +265,8 @@ def main():
             if server: server.terminate();server.join(2)
             for item in reversed(remote_patches): item.stop()
             result = {"duration_s": round(elapsed,2), "source": "six synthetic 1280x720 camera frames; local Windows workstation",
+                      "window_logical_size": [window.width(), window.height()],
+                      "tile_logical_sizes": {tile.name: [tile.width(), tile.height()] for tile in window.tiles},
                       "transport":"simulated remote over loopback HTTP (separate server process; no SSH)" if args.remote_simulated else "local files",
                       "fps": {name: round(len(frames[name])/max(1,elapsed-1),2) for name in names},
                       "file_to_paint": summary(latencies), "ai_write_to_paint": summary(status_latencies),
@@ -270,8 +281,9 @@ def main():
             if captures:
                 for second,name in ((2.6,"live_overview"),(4.2,"live_looking"),(9.5,"live_reconnecting")):
                     index=min(range(len(capture_times)),key=lambda i:abs(capture_times[i]-second))
-                    captures[index].save(shots/(name+".png"))
-                captures[0].save(Path(__file__).parent/"live_demo.gif", save_all=True, append_images=captures[1:], duration=100, loop=0)
+                    captures[index].save(shots/(name+args.screenshot_suffix+".png"))
+                if not args.screenshots_only:
+                    captures[0].save(Path(__file__).parent/"live_demo.gif", save_all=True, append_images=captures[1:], duration=100, loop=0)
 
 
 if __name__ == "__main__": main()

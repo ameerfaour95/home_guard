@@ -1,4 +1,130 @@
-# Round L — live console
+# Round L2 — thumbnail layout and bounded publisher cost
+
+This section supersedes Round L's fixed 18/6 rates and its workstation-only
+extra-CPU budget result. The earlier measurements below remain historical.
+All L2 work is local/offline on `box-app-ui`; `uv sync --offline` used the
+existing environment. No box, camera or external service was contacted.
+
+## Part 1: thumbnail text geometry
+
+Thumbnail detections now draw box corners only. The existing `Sees: 1 person`
+caption carries the count; per-box name/confidence chips remain on the hero.
+Camera names, captions and heartbeat badges use separate bounded rectangles.
+Long names, captions and reconnecting text elide within the tile. Tests exercise
+the actual paint path, assert every text rectangle is inside the tile and every
+pair is disjoint, and reject any thumbnail chip. Coverage includes the rail's
+80×144 minimum and actual six-camera layouts at 1366×768 and 1920×1080.
+
+## Part 2: adaptive publisher and local box measurement
+
+`display.preview_cpu_cap_percent` defaults to **10% of one core in total**.
+It is read with the existing preview display settings and local overlay
+precedence. Per-camera encode/resize/write elapsed time uses a moving average
+(20% new sample). Projected cost sums every visible camera at its selected rate
+and adds measured worker/handoff CPU overhead, with a one-point minimum reserve.
+Lease reads are shared across cameras every 250 ms. Whole-worker CPU counters
+include wait/lock bookkeeping, not just encode calls.
+
+The controller lowers one step every two seconds when projected cost exceeds
+the cap: **16/5 → 12/3 → 8/2 → 6/2 fps** (hero/each thumbnail). Recovery requires
+five seconds and projected cost at the next faster step below 80% of the cap.
+Only the large selected camera receives the hero rate. Hidden/minimized,
+undemanded and expired viewers publish zero frames; old viewers retain 6/2.
+The 6/2 floors take priority when the cap is physically impossible; telemetry
+explicitly flags `floor_over_budget`. Startup/transition overshoot is possible.
+This adaptive budget replaces the unconditional ≥15/5 target from Round L.
+
+The installer runs [measure_on_box.py](measure_on_box.py) following
+[measure_on_box.md](measure_on_box.md). It reads local telemetry only and prints
+publisher CPU, actual per-camera and hero/thumbnail publication fps, and detector
+outer-loop Hz for 60 seconds closed and 60 seconds open. It rejects stale data,
+engine restarts and changed visibility. Detector loops are counted at the first
+stream read in the existing preview adapter, independently of throttled status
+files; inference/YOLO logic is untouched. The probe has **not** been run on a box.
+Actual N150 CPU and detector rates remain unmeasured. Native codec helper-thread
+CPU, if present in a different OpenCV build, is outside thread CPU counters.
+
+## Part 3: workstation proof
+
+Hardware: Windows, AMD Ryzen 9 9955HX3D, six synthetic 1280×720 captures.
+[live_l2_publisher_cpu.json](live_l2_publisher_cpu.json) compares the original
+6/2 publisher to the adaptive worker for **60 seconds each**, then hidden for
+10 seconds each. CPU is independently timed across the entire worker lifetime
+plus the offer caller; the new telemetry independently agrees at **8.36%**.
+
+| Publisher metric | Original 6/2 | L2 adaptive |
+| --- | ---: | ---: |
+| Total CPU, percent of one core | 3.59% | **8.36%** |
+| Hero actually published | 5.38 fps | 8.18 fps |
+| Each thumbnail actually published | 1.92 fps | 2.28 fps |
+| Hidden frames published | 0 | **0** |
+| Hidden CPU, percent of one core | 0.16% | 1.88% |
+
+L2 is **4.77 percentage points** above the old publisher and below the stricter
+10% total cap in this run. The second half measured **8.33%**, with 7.50 hero
+fps and 2.13 fps per thumbnail. The controller exercised all four levels and
+both directions; it ended at 8/2, with a 7.14% projected share including 2.96%
+measured overhead. Final per-camera encode/publish moving averages were
+2.00–2.66 ms. Rate transitions are retained in the raw JSON, sampled once per
+second. These are measurements, not a guarantee for different hardware or for
+every short time window. The configured floors may prevent satisfying a cap
+on a sufficiently slow/busy box; the installer probe exposes that condition.
+
+[live_l2_after.json](live_l2_after.json) is a separate 15-second UI replay with
+all six cameras active. Hero paint rate was 7.99 fps; thumbnails 2.21–2.28 fps.
+File-to-paint p95 was 29.17 ms; AI status maximum 55.22 ms; chat maximum 54.03 ms;
+posted input-to-paint maximum 19.13 ms. The measured UI callback maximum was
+27.59 ms. As in Round L, this replay times individual publish calls only; use
+the whole-worker CPU run above for budget acceptance.
+
+Screenshots were visually reviewed at **1366×768** and **1920×1080** logical
+window sizes. The corresponding thumbnail widths are 164 and 237–238 pixels;
+the regression separately exercises the narrower 80×144 floor. Captures at this
+display's 150% scale retain the composed high-DPI image. The 1920 run resizes
+after initial show so Windows cannot silently constrain it to the monitor's
+smaller logical work area. Capture JSON records the actual window and tile
+dimensions: [1366 capture](live_l2_capture.json), [1920 capture](live_l2_capture_1920.json).
+The garage intentionally stops after four seconds to demonstrate reconnecting.
+
+Full suite: **676 tests passed in 40.545 seconds, exit code 0**, including all
+`test_serve.py` cases, with no skips. [Raw test output](live_l2_tests.log).
+The exact requested `-m unittest discover -s tests/box -t .` command was also
+attempted; it still fails before discovery with `Start directory is not
+importable`. The existing `run_box_tests.py` runner resolves the checkout's
+namespace collision in memory and discovers every box test, as documented
+in Round L below. New regressions cover painted thumbnail rectangles, CPU
+backoff/recovery/floors and measured overhead, overlay settings, hidden-window
+suppression, detector/publication counters, and the installer's delta/rate math
+and stale/restarted-data handling.
+
+Reproduce using the existing environment, with `VIRTUAL_ENV` and `SSLKEYLOGFILE`
+unset:
+
+```text
+uv sync --offline
+.venv/Scripts/python.exe docs/ui/measure_publisher.py --seconds 60
+.venv/Scripts/python.exe docs/ui/measure_live.py --seconds 15 --output docs/ui/live_l2_after.json
+.venv/Scripts/python.exe docs/ui/measure_live.py --seconds 11 --screenshots-only --output docs/ui/live_l2_capture.json
+.venv/Scripts/python.exe docs/ui/measure_live.py --seconds 11 --screenshots-only --size 1920x1080 --screenshot-suffix _1920 --output docs/ui/live_l2_capture_1920.json
+.venv/Scripts/python.exe docs/ui/run_box_tests.py
+```
+
+The three requested 1366×768 screenshots are regenerated, with additional
+1920×1080 versions for comparison:
+
+- [live_overview.png](screenshots/live_overview.png)
+- [live_reconnecting.png](screenshots/live_reconnecting.png)
+- [live_looking.png](screenshots/live_looking.png)
+- [live_overview_1920.png](screenshots/live_overview_1920.png)
+- [live_reconnecting_1920.png](screenshots/live_reconnecting_1920.png)
+- [live_looking_1920.png](screenshots/live_looking_1920.png)
+
+The old Round L GIF is retained as historical evidence. L2 captures only the
+three requested states, without recording overhead.
+
+---
+
+# Round L — live console (historical)
 
 ## Part 1: baseline (2026-10-03)
 

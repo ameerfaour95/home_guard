@@ -45,7 +45,9 @@ class ThumbnailLabelsTests(unittest.TestCase):
             window = Window(args)
             try:
                 window.show()
+                window.resize(*map(int, size.split("x")))
                 self.app.processEvents()
+                self.assertEqual((window.width(), window.height()), tuple(map(int, size.split("x"))))
                 for tile in window.tiles:
                     if not tile.hero:
                         self.check_labels(tile)
