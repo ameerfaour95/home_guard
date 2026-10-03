@@ -18,12 +18,25 @@ class ClaimsTest(unittest.TestCase):
         self.assertEqual(unbacked_claims("Here are the two videos", []), ["send"])
         self.assertEqual(unbacked_claims("המצלמה הקדמית כובתה עד 01:35", []), ["off"])
         self.assertEqual(unbacked_claims("סימנתי את ההתרעה הזו כהתרעה שגויה", []), ["save"])
-        self.assertEqual(unbacked_claims("تم إيقاف التنبيهات حتى السادسة", []), ["pause"])
+        self.assertEqual(unbacked_claims("أوقفت التنبيهات حتى السادسة", []), ["pause"])
+
+    def test_plain_facts_and_negations_are_not_claims(self) -> None:
+        for text in ["An alert was sent at 02:10", "Nothing was sent", "No events were noted",
+                     "The alert was marked as expected earlier", "The camera is enabled in settings",
+                     "היו שני אירועים, נשלח אליך אתמול", "لم يتم إرسال شيء", "I did not send anything",
+                     "לא שלחתי כלום"]:
+            self.assertEqual(unbacked_claims(text, []), [], text)
+
+    def test_first_person_and_now_claims_are_caught(self) -> None:
+        self.assertEqual(unbacked_claims("I sent you the video.", []), ["send"])
+        self.assertEqual(unbacked_claims("I've paused the alerts.", []), ["pause"])
+        self.assertEqual(unbacked_claims("Alerts are now paused until 06:00.", []), ["pause"])
+        self.assertEqual(unbacked_claims("Here are the two latest videos", []), ["send"])
 
     def test_receipts_back_the_claim(self) -> None:
         self.assertEqual(unbacked_claims("Here is the video.", [r("send_media", DONE)]), [])
-        self.assertEqual(unbacked_claims("turned off", [r("set_camera_active", REQUESTED)]), ["off"])
-        self.assertEqual(unbacked_claims("turned off", [r("set_camera_active", DONE)]), [])
+        self.assertEqual(unbacked_claims("I turned it off", [r("set_camera_active", REQUESTED)]), ["off"])
+        self.assertEqual(unbacked_claims("I turned it off", [r("set_camera_active", DONE)]), [])
         self.assertEqual(unbacked_claims("I sent it", [r("send_media", FAILED)]), ["send"])
 
     def test_plain_facts_pass(self) -> None:
