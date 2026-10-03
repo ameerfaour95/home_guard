@@ -326,12 +326,13 @@ def frame_times(src: Path, ffprobe: str = "ffprobe") -> list[float]:
 
 
 def extract_frames(src: Path, work: Path, fps: Optional[float], ffmpeg: str = "ffmpeg",
-                   ffprobe: str = "ffprobe") -> list[tuple[int, float, Path]]:
+                   ffprobe: str = "ffprobe", times: Optional[list[float]] = None) -> list[tuple[int, float, Path]]:
     """Every decoded frame of the clip as a JPEG: [(native 0-based frame index, t_sec, image path)].
 
     One ffmpeg pass with `-fps_mode passthrough` writes decoded frame n (0-based) as f_<n+1>.jpg: exactly the frame
     `select=eq(n\\,i)` picks for i = n, without decoding the clip once per frame. Times are the frames' own
-    presentation timestamps (ffprobe); a frame without one gets index / fps."""
+    presentation timestamps (ffprobe, or `times` when the caller already probed them); a frame without one gets
+    index / fps."""
     out_dir = work / "frames"
     out_dir.mkdir(parents=True, exist_ok=True)
     local = work / "src.mp4"
@@ -342,7 +343,7 @@ def extract_frames(src: Path, work: Path, fps: Optional[float], ffmpeg: str = "f
     files = sorted(out_dir.glob("f_*.jpg"))
     if not files:
         raise media.MediaError("no frames decoded")
-    times = frame_times(local, ffprobe)
+    times = frame_times(local, ffprobe) if times is None else times
     rate = fps if fps and fps > 0 else None
     result = []
     for n, path in enumerate(files):

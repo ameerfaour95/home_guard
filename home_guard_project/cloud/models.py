@@ -372,7 +372,7 @@ class AnnotationSuggestion(Base):
 class TaggingPublish(Base):
     """A collection published as a Label Studio-shaped batch under s3 `tagging/<batch_name>/`."""
     __tablename__ = "tagging_publishes"
-    __table_args__ = (Index("ix_tagging_publishes_batch_name", "batch_name"),)
+    __table_args__ = (Index("ix_tagging_publishes_batch_name", "batch_name", unique=True),)  # a name is used once
     id: Mapped[int] = mapped_column(primary_key=True)
     batch_name: Mapped[str] = mapped_column(String(128))
     collection_id: Mapped[Optional[int]] = mapped_column(ForeignKey("collections.id", ondelete="SET NULL"),
