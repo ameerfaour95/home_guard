@@ -42,6 +42,7 @@ INCLUDE_FILES = (
     "home_guard_project/data_collection/roi_editor.py",
     "home_guard_project/data_collection/zones.py",
     "home_guard_project/data_collection/vlm_crop.py",
+    "home_guard_project/data_collection/streams.py",
     "home_guard_project/data_collection/detector.py",
     "home_guard_project/data_collection/start.sh",
 )
