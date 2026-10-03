@@ -3,14 +3,29 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
 import unittest
 from unittest.mock import Mock
-from PySide6.QtCore import QPointF, QSize, Qt
+import time
+
+from PySide6.QtCore import QAbstractAnimation, QPointF, QSize, Qt
 from PySide6.QtGui import QColor, QPixmap
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
-from home_guard_project.box.app import motion
 from home_guard_project.box.app.strings import tr
 from home_guard_project.box.app.zone_editor import ZoneEditorDialog, ZoneStage
+
+
+def wait_until(condition, timeout_ms=3000):
+    """Run the event loop until condition() holds. Animations end on an event-loop
+    tick, so on a busy machine they finish late; a fixed qWait races them."""
+    deadline = time.monotonic() + timeout_ms / 1000
+    while not condition() and time.monotonic() < deadline:
+        QTest.qWait(10)
+    return condition()
+
+
+def settled(owner, name='animation'):
+    animation = getattr(owner, name, None)
+    return animation is None or animation.state() == QAbstractAnimation.State.Stopped
 
 
 class ZoneEditorTests(unittest.TestCase):
@@ -25,11 +40,11 @@ class ZoneEditorTests(unittest.TestCase):
         self.controls.clear_zone.return_value = []
         self.dialog = ZoneEditorDialog(self.controls, 'yard', self.pix)
         self.dialog.show()
-        QTest.qWait(motion.PANE_MS + 30)
+        self.assertTrue(wait_until(lambda: settled(self.dialog, 'transition_group')))
 
     def tearDown(self):
         self.dialog.reject()
-        QTest.qWait(motion.TOGGLE_MS + 30)
+        wait_until(lambda: not self.dialog.isVisible())
         self.dialog.deleteLater()
         self.app.processEvents()
 
@@ -68,8 +83,7 @@ class ZoneEditorTests(unittest.TestCase):
         self.assertTrue(self.dialog.save_button.rect().contains(self.dialog.progress.geometry()))
         self.dialog.future.result(timeout=3); self.dialog.poll()
         self.controls.set_zone.assert_called_once_with('yard', [[.1235, .2346], [.9, .2], [.5, .9]])
-        QTest.qWait(motion.TOGGLE_MS + 30)
-        self.assertFalse(self.dialog.isVisible())
+        self.assertTrue(wait_until(lambda: not self.dialog.isVisible()))
 
     def test_empty_save_clears_and_incomplete_save_is_disabled(self):
         self.assertTrue(self.dialog.save_button.isEnabled())
@@ -101,7 +115,7 @@ class ZoneEditorTests(unittest.TestCase):
             self.dialog.resize(self.dialog.opening_size(screen))
             for points in ([], [[.1, .1]], [[0, 0], [1, 0], [1, .46], [0, .46]]):
                 self.dialog.stage.set_points(points)
-                QTest.qWait(motion.PANE_MS + 30)
+                self.assertTrue(wait_until(lambda: settled(self.dialog.coverage)))
                 stage = self.dialog.stage.geometry()
                 top = self.dialog.eyebrow.mapTo(self.dialog, self.dialog.eyebrow.rect().topLeft())
                 bottom = self.dialog.save_button.mapTo(self.dialog, self.dialog.save_button.rect().bottomLeft())
@@ -171,8 +185,7 @@ class ZoneEditorTests(unittest.TestCase):
         self.app.processEvents()
         self.assertGreater(self.dialog.stage.x(), self.dialog.eyebrow.parentWidget().x())
         QTest.keyClick(self.dialog, Qt.Key.Key_Escape)
-        QTest.qWait(motion.TOGGLE_MS + 30)
-        self.assertFalse(self.dialog.isVisible())
+        self.assertTrue(wait_until(lambda: not self.dialog.isVisible()))
         self.controls.set_zone.assert_not_called(); self.controls.clear_zone.assert_not_called()
 
 
@@ -193,7 +206,7 @@ class ZoneTileTests(unittest.TestCase):
 
     def tearDown(self):
         if self.page.zone_dialog:
-            self.page.zone_dialog.reject(); QTest.qWait(motion.TOGGLE_MS+30)
+            self.page.zone_dialog.reject(); wait_until(lambda: self.page.zone_dialog is None)
         self.page.close(); self.page.widget.close(); self.page.widget.deleteLater()
         self.app.processEvents()
 
@@ -207,7 +220,7 @@ class ZoneTileTests(unittest.TestCase):
         try:
             whole = photo.grab().toImage()
             photo.set_zone([[0, 0], [.5, 0], [.5, 1], [0, 1]])
-            QTest.qWait(motion.PANE_MS + 30)
+            self.assertTrue(wait_until(lambda: settled(photo)))
             zoned = photo.grab().toImage()
             self.assertEqual(zoned.pixelColor(225, 100), whole.pixelColor(225, 100))
             before, after = whole.pixelColor(675, 100), zoned.pixelColor(675, 100)
@@ -219,13 +232,13 @@ class ZoneTileTests(unittest.TestCase):
             # A horizontal edge at y=.4 is cropped/scaled with the image:
             # 600 * 1.125 high, centred in a 200px tile -> y=32.5.
             photo.set_zone([[0, .4], [1, .4], [1, 1], [0, 1]])
-            QTest.qWait(motion.PANE_MS + 30)
+            self.assertTrue(wait_until(lambda: settled(photo)))
             cropped = photo.grab().toImage()
             self.assertLess(cropped.pixelColor(225, 20).red(), whole.pixelColor(225, 20).red())
             self.assertEqual(cropped.pixelColor(225, 50), whole.pixelColor(225, 50))
             edge = cropped.pixelColor(225, 32)
             self.assertGreater(edge.green(), edge.red())
-            photo.set_zone([]); QTest.qWait(motion.PANE_MS + 30)
+            photo.set_zone([]); self.assertTrue(wait_until(lambda: settled(photo)))
             self.assertEqual(photo.grab().toImage(), whole)
         finally:
             photo.close()
@@ -253,8 +266,8 @@ class ZoneTileTests(unittest.TestCase):
         self.assertEqual(photo.points, points)
         self.assertEqual(photo.pix.cacheKey(), raw_key)
         self.assertEqual(calls, ['snapshots', 'zones'])
-        QTest.qWait(motion.PANE_MS+30)
-        self.assertIsNone(self.page.zone_dialog)
+        # The close animation ends on an event-loop tick; wait for it, not a fixed time.
+        self.assertTrue(wait_until(lambda: self.page.zone_dialog is None))
         # Reopening restores the saved polygon, clearing restores the whole image.
         button.click(); dialog = self.page.zone_dialog
         self.assertEqual(dialog.stage.points, points)
