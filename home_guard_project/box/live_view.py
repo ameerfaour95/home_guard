@@ -81,6 +81,13 @@ def _mask_in_place(image_path: str, polygon: Any) -> bool:
         return False
 
 
+def _remove_quietly(path: str) -> None:
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
 def look_now(camera: str, cameras_path: str, env: Dict[str, str], out_dir: str,
              now: Callable[[], float] = time.time,
              grab: Optional[Callable[[str, str], bool]] = None,
@@ -106,21 +113,23 @@ def look_now(camera: str, cameras_path: str, env: Dict[str, str], out_dir: str,
     except OSError as exc:
         return {"error": f"could not prepare a place for the picture ({exc})"}
     image_path = os.path.join(out_dir, f"{camera}_{int(now())}.jpg")
-    if not grab(url, image_path):
+    temp_path = image_path + ".tmp.jpg"   # the unmasked grab lives only under this name
+    if not grab(url, temp_path):
+        _remove_quietly(temp_path)
         return {"error": f"could not get a picture from {camera} right now (is it online?)"}
-    from ..data_collection.zones import ZONES_PATH, load_zones  # noqa: PLC0415
-
     try:
+        from ..data_collection.zones import ZONES_PATH, load_zones  # noqa: PLC0415
+
         polygon = load_zones(ZONES_PATH if zones_path is None else zones_path).get(camera)
-    except Exception:  # noqa: BLE001 - an unreadable zone must not let an unmasked picture through
-        polygon, ok = None, False
-    else:
-        ok = True if not polygon else _mask_in_place(image_path, polygon)
+        ok = True if not polygon else _mask_in_place(temp_path, polygon)
+        if ok:
+            os.replace(temp_path, image_path)
+    except Exception as exc:  # noqa: BLE001 - an unreadable zone must not let an unmasked picture through
+        log.warning("Live-view zone handling failed: %s", exc)
+        ok = False
     if not ok:
-        try:
-            os.remove(image_path)
-        except OSError:
-            pass
+        _remove_quietly(temp_path)
+        _remove_quietly(image_path)
         return {"error": f"could not prepare the picture from {camera} right now"}
     text = describe(image_path, api_key)
     if not text:
