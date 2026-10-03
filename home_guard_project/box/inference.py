@@ -164,12 +164,29 @@ def owner_language() -> str:
         return "en"
 
 
+_PLACEHOLDERS = ("an empty string", "empty string")
+
+
+def owner_summary(summary: str, summary_owner: str, lang: str) -> str:
+    """The summary the owner reads: the model's *summary_owner* in the box language when it is not English and the
+    model really wrote one; otherwise *summary*. An English prompt asks for summary_owner as "<an empty string>",
+    and a model sometimes copies that placeholder word for word, so it never reaches the owner."""
+    text = (summary_owner or "").strip()
+    if lang == "en" or not text:
+        return summary
+    if (text.startswith("<") and text.endswith(">")) or text.strip("<>.\"' ").lower() in _PLACEHOLDERS:
+        return summary
+    return text
+
+
 def _int_or_none(value: Any) -> Optional[int]:
     """A count from the model's answer, or None when it gave something that is not a number."""
     try:
         return int(value or 0)
     except (TypeError, ValueError, OverflowError):
         return None
+
+
 VLM_RESPONSE_FORMAT: Dict[str, Any] = {
     "type": "json_schema",
     "json_schema": {"name": "camera_report", "strict": True, "schema": VLM_SCHEMA},
@@ -767,11 +784,11 @@ class _Stream:
             frame = self._mask.apply(frame)
         with self._lock:
             self._frame = frame
+        self.last_ts = now          # before the ring: a failing encode must not freeze the camera's clock
         if self._ring is not None and self._ring.wants(now):
             from .alert_clips import encode_frame  # noqa: PLC0415
 
             self._ring.add(now, encode_frame(frame))
-        self.last_ts = now
 
     def read(self):
         with self._lock:
@@ -927,7 +944,8 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
             if job is not None:
                 alert_ref = {"alert_id": job.stem, "camera": camera_name, "summary": summary, "label": label,
                              "ts": job.ts}
-            graded = graded_alert_text(shown_label, camera_name, summary_owner or summary, why, lang)
+            graded = graded_alert_text(shown_label, camera_name, owner_summary(summary, summary_owner, lang),
+                                       why, lang)
             res = dispatch_alert(box_settings, env, cmd, f"{camera_name}: {alert_summary(label, summary)}", reason,
                                  image=image or None, assistant=assistant, alert=alert_ref, graded=graded,
                                  silent=silent, lang=lang)
@@ -1139,6 +1157,7 @@ def run() -> int:
         log.warning("Owner assistant not started (%s); alerts go out without feedback buttons.", exc)
 
     log.info("Watching %d camera(s): %s", len(cameras), ", ".join(cameras))
+    started = time.time()   # no camera counts as offline before it had a minute to deliver its first picture
     while True:
         now_ts = time.time()
         settings_changed = bool(live.check(now_ts))
@@ -1151,7 +1170,7 @@ def run() -> int:
                 for cam_name, stream in streams.items():
                     if stream.last_ts:
                         status.frame_seen(cam_name, stream.last_ts)
-                offline = status.offline(now_ts, cameras=list(cameras))
+                offline = status.offline(now_ts, cameras=list(cameras), since=started)
                 mute = getattr(assistant, "mute", None)
                 paused = [(c, mute.muted_until(now_ts, c)) for c in cameras if mute and mute.muted_until(now_ts, c)]
                 logging_on = bool(getattr(settings, "quiet_log", False))      # the setting arrives in Task 19

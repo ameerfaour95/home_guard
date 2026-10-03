@@ -123,12 +123,16 @@ class AiStatus:
             entry = self._cameras.setdefault(camera, {"checked_ts": None, "ts": None, "objects": []})
             entry["frame_ts"] = ts
 
-    def offline(self, now: float, after: float = 60.0, cameras: Sequence[str] = ()) -> List[str]:
-        """Cameras with no new picture for *after* seconds; a listed camera that never sent one is offline too."""
+    def offline(self, now: float, after: float = 60.0, cameras: Sequence[str] = (), since: float = 0.0) -> List[str]:
+        """Cameras with no new picture for *after* seconds; a listed camera that never sent one is offline too.
+
+        *since* is when watching began: a camera is not counted offline before it had *after* seconds to deliver.
+        """
         with self._lock:
             names = set(self._cameras) | set(cameras)
             return sorted(n for n in names
-                          if now - float((self._cameras.get(n) or {}).get("frame_ts") or 0) > after)
+                          if now - max(float((self._cameras.get(n) or {}).get("frame_ts") or 0), float(since))
+                          > after)
 
     def _write(self, now: float, force: bool) -> None:
         if not force and now - self._written < self.min_interval:

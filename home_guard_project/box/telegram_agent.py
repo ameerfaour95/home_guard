@@ -224,6 +224,14 @@ class OwnerAssistant:
 
     deliverer: Any = None
     feedback_dir: str = ""
+    archive_dir: str = PRODUCTION_ARCHIVE_DIR   # the upload moves answers here, one folder per site
+
+    def answered(self, alert_id: str) -> bool:
+        """True once the owner answered *alert_id*: seen by the inbox in this run, or saved in the live folder or
+        in any site folder of the archive (the upload moves answers there every 15 minutes)."""
+        if alert_id in (getattr(self.inbox, "answered", None) or ()):
+            return True
+        return any(owner_reacted(root, alert_id) for root in alert_roots(self.feedback_dir, self.archive_dir))
 
     def announce(self, text: str) -> None:
         """One message to every configured chat (mode switches), sent on its own thread so a slow network never
@@ -254,8 +262,13 @@ class OwnerAssistant:
         """For an escalation: if nobody answered within *delay*, send it once more, loud. Never raises."""
         def remind() -> None:
             try:
-                if not owner_reacted(self.feedback_dir, str(alert.get("alert_id") or "")):
-                    self.send_alert(alert, f"{tr('alert_reminder', lang)}\n{text}", lang=lang)
+                if self.answered(str(alert.get("alert_id") or "")):
+                    return
+                camera = str(alert.get("camera") or "")
+                if self.mute is not None and self.mute.is_muted(time.time(), camera):
+                    log.info("[%s] escalation reminder not sent: the owner paused alerts", camera)
+                    return
+                self.send_alert(alert, f"{tr('alert_reminder', lang)}\n{text}", lang=lang)
             except Exception as exc:  # noqa: BLE001
                 log.warning("Escalation reminder not sent: %s", exc)
 
@@ -326,7 +339,7 @@ def start(
     inbox = TelegramInbox(cfg, agent, index, mute, live_dir, os.path.join(log_dir, "telegram_offset.json"),
                           feed=feed, deliverer=deliverer)
     assistant = OwnerAssistant(cfg=cfg, index=index, mute=mute, inbox=inbox, feed=feed, deliverer=deliverer,
-                               feedback_dir=live_dir)
+                               feedback_dir=live_dir, archive_dir=archive_dir)
     if cfg.enabled and not cfg.dry_run:
         assistant.thread = threading.Thread(target=inbox.run, name="telegram-inbox", daemon=True)
         assistant.thread.start()
@@ -370,6 +383,7 @@ class TelegramInbox:
         self.feed = feed
         self.deliverer = deliverer
         self._seen = deque(maxlen=200)
+        self.answered: set = set()       # alert ids the owner answered in this run (the reminder checks it first)
         self.cfg, self.agent, self.index, self.mute = cfg, agent, index, mute
         self.feedback_dir, self.offset_path = feedback_dir, offset_path
         self._post, self._post_multipart, self._now = post, post_multipart, now
@@ -465,6 +479,11 @@ class TelegramInbox:
     def _allowed(self, chat_id: str) -> bool:
         return chat_id in self.cfg.chat_ids
 
+    def _mark_answered(self, alert: Optional[Dict[str, Any]]) -> None:
+        alert_id = str((alert or {}).get("alert_id") or "")
+        if alert_id:
+            self.answered.add(alert_id)
+
     def _on_button(self, query: Dict[str, Any]) -> None:
         message = query.get("message") or {}
         chat_id = str((message.get("chat") or {}).get("id"))
@@ -498,6 +517,7 @@ class TelegramInbox:
         self._note("owner", "button", BUTTON_LABELS.get(code, code), _who(query.get("from") or {})["name"], tapped_alert)
         if feedback:
             alert = tapped_alert
+            self._mark_answered(alert)
             self.mute.apply(feedback, self._now())
             save_feedback(self.feedback_dir, alert, feedback, "", _who(query.get("from") or {}), chat_id, self._now())
         # Stops the button's spinner, then leaves a visible line in the chat.
@@ -521,6 +541,7 @@ class TelegramInbox:
             else:
                 alert = self.index.latest(chat_id, self._now())
         self._note("owner", "message", text, _who(sender)["name"], alert)
+        self._mark_answered(alert)
         if self.agent is None:
             save_feedback(self.feedback_dir, alert, Feedback(), text, _who(sender), chat_id, self._now())
             self._say(chat_id, UNAVAILABLE_REPLY, reply_to=message.get("message_id"))

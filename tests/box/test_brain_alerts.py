@@ -249,5 +249,162 @@ class GradedAlertWiringTest(unittest.TestCase):
         self.assertEqual(t("feedback_question", "en"), FEEDBACK_QUESTION)
 
 
+class ReviewFixTest(unittest.TestCase):
+    """Task 18 review: no false reminder, no false offline at start, no placeholder text, a live frozen-frame clock."""
+
+    def _assistant(self, live: str, archive: str, inbox=None, mute=None):
+        from home_guard_project.box import telegram_agent as ta
+
+        assistant = ta.OwnerAssistant(cfg=TelegramConfig(), index=None, mute=mute, inbox=inbox, feedback_dir=live,
+                                      archive_dir=archive)
+        sent: list = []
+        assistant.send_alert = lambda alert, text, image=None, silent=False, lang="en": sent.append(text)  # type: ignore
+        return assistant, sent
+
+    def _fire_reminder(self, assistant, alert) -> None:
+        from unittest import mock
+
+        from home_guard_project.box import telegram_agent as ta
+
+        _Timer.made = []
+        with mock.patch.object(ta.threading, "Timer", _Timer):
+            assistant.remind_if_silent(alert, "🔴 ESCALATION · gate\nx", "en")
+        (timer,) = _Timer.made
+        timer.fn()
+
+    def test_an_answer_already_moved_to_the_archive_counts(self) -> None:
+        live, archive = tempfile.mkdtemp(), tempfile.mkdtemp()
+        alert = {"alert_id": "gate_1_alert", "camera": "gate", "ts": NOW}
+        # The 15-minute upload moved the owner's answer to the archive's folder for this site.
+        save_feedback(os.path.join(archive, "house_a"), alert, Feedback(), "ok", {}, "-5", NOW)
+        assistant, sent = self._assistant(live, archive)
+        self._fire_reminder(assistant, alert)
+        self.assertEqual(sent, [])
+
+    def test_no_answer_anywhere_still_reminds(self) -> None:
+        live, archive = tempfile.mkdtemp(), tempfile.mkdtemp()
+        os.makedirs(os.path.join(archive, "house_a"))
+        assistant, sent = self._assistant(live, archive)
+        self._fire_reminder(assistant, {"alert_id": "gate_1_alert", "camera": "gate", "ts": NOW})
+        self.assertEqual(len(sent), 1)
+
+    def test_an_answer_the_inbox_remembers_counts(self) -> None:
+        class Inbox:
+            answered = {"gate_1_alert"}
+
+        assistant, sent = self._assistant(tempfile.mkdtemp(), tempfile.mkdtemp(), inbox=Inbox())
+        self._fire_reminder(assistant, {"alert_id": "gate_1_alert", "camera": "gate", "ts": NOW})
+        self.assertEqual(sent, [])
+
+    def test_the_inbox_remembers_a_tap_and_a_message(self) -> None:
+        from home_guard_project.box.feedback import AlertIndex, MuteState
+        from home_guard_project.box.telegram_agent import TelegramInbox
+
+        d = tempfile.mkdtemp()
+        cfg = TelegramConfig(bot_token="t", chat_ids=["-5"])
+        index = AlertIndex(os.path.join(d, "index.json"))
+        index.remember("-5", 7, {"alert_id": "gate_1_alert", "camera": "gate", "ts": NOW})
+        index.remember("-5", 8, {"alert_id": "gate_2_alert", "camera": "gate", "ts": NOW})
+        post = lambda *a, **k: {"ok": True, "result": {"message_id": 99}}  # noqa: E731
+        inbox = TelegramInbox(cfg, None, index, MuteState(os.path.join(d, "mute.json")), d,
+                              os.path.join(d, "offset.json"), post=post, now=lambda: NOW)
+        inbox._on_button({"id": "q", "data": "fb:true", "from": {"id": 1},
+                          "message": {"chat": {"id": -5}, "message_id": 7}})
+        inbox._on_message({"chat": {"id": -5}, "from": {"id": 1}, "text": "who is it?", "message_id": 20,
+                           "reply_to_message": {"message_id": 8}})
+        self.assertEqual(inbox.answered, {"gate_1_alert", "gate_2_alert"})
+
+    def test_no_reminder_while_the_camera_or_the_house_is_paused(self) -> None:
+        import time
+
+        from home_guard_project.box.feedback import MuteState
+
+        d = tempfile.mkdtemp()
+        for scope in ("gate", None):
+            mute = MuteState(os.path.join(tempfile.mkdtemp(), "mute.json"))
+            mute.apply(Feedback(action="mute", mute_until=time.time() + 3600, camera=scope), time.time())
+            assistant, sent = self._assistant(d, d, mute=mute)
+            self._fire_reminder(assistant, {"alert_id": "gate_1_alert", "camera": "gate", "ts": NOW})
+            self.assertEqual(sent, [], scope)
+
+    def test_another_camera_paused_still_reminds(self) -> None:
+        import time
+
+        from home_guard_project.box.feedback import MuteState
+
+        d = tempfile.mkdtemp()
+        mute = MuteState(os.path.join(d, "mute.json"))
+        mute.apply(Feedback(action="mute", mute_until=time.time() + 3600, camera="door"), time.time())
+        assistant, sent = self._assistant(d, d, mute=mute)
+        self._fire_reminder(assistant, {"alert_id": "gate_1_alert", "camera": "gate", "ts": NOW})
+        self.assertEqual(len(sent), 1)
+
+    def test_nothing_is_offline_right_after_start(self) -> None:
+        status = AiStatus(os.path.join(tempfile.mkdtemp(), "ai_status.json"), min_interval=0)
+        started = NOW
+        self.assertEqual(status.offline(started + 10, cameras=["gate", "door"], since=started), [])
+        status.frame_seen("door", started + 50)
+        self.assertEqual(status.offline(started + 61, cameras=["gate", "door"], since=started), ["gate"])
+        self.assertEqual(status.offline(started + 200, cameras=["gate", "door"], since=started), ["door", "gate"])
+
+    def test_an_english_placeholder_never_reaches_the_owner(self) -> None:
+        expected = graded_alert_text("suspicious", "gate", "A man at the gate.", "lingers", "en")
+        for lang in ("en", "he"):
+            for placeholder in ("an empty string", "<an empty string>", "Empty String", "<empty>"):
+                assistant = _Assistant()
+                GradedAlertWiringTest._work(self, {"summary": "A man at the gate.", "label": "suspicious",
+                                                   "people": 1, "why": "lingers", "summary_owner": placeholder},
+                                            assistant, lang)
+                self.assertIn("A man at the gate.", assistant.sent[0]["text"], (lang, placeholder))
+                if lang == "en":
+                    self.assertEqual(assistant.sent[0]["text"], expected, placeholder)
+
+    def test_english_uses_the_summary_even_when_summary_owner_is_filled(self) -> None:
+        assistant = _Assistant()
+        GradedAlertWiringTest._work(self, {"summary": "A man at the gate.", "label": "suspicious", "people": 1,
+                                           "summary_owner": "Un homme au portail."}, assistant, "en")
+        self.assertIn("A man at the gate.", assistant.sent[0]["text"])
+
+    def test_a_failing_clip_encode_still_moves_the_frame_clock(self) -> None:
+        import threading
+        from unittest import mock
+
+        from home_guard_project.box import alert_clips
+        from home_guard_project.box import inference as inf
+
+        class Ring:
+            def wants(self, now):
+                return True
+
+            def add(self, now, data):
+                pass
+
+        stream = inf._Stream.__new__(inf._Stream)     # no capture, no thread
+        stream.name, stream._mask, stream._ring, stream._frame = "gate", None, Ring(), None
+        stream._lock, stream.last_ts = threading.Lock(), 0.0
+        with mock.patch.object(alert_clips, "encode_frame", side_effect=RuntimeError("encoder gone")):
+            with self.assertRaises(RuntimeError):
+                stream._ingest("frame", 123.0)
+        self.assertEqual((stream.last_ts, stream._frame), (123.0, "frame"))
+
+    def test_the_worker_is_loud_without_a_valid_label(self) -> None:
+        from unittest import mock
+
+        from home_guard_project.box import inference as inf
+
+        for backend in (inf.NullBackend(), _Backend({"summary": "Someone at the gate.", "people": 1}),
+                        _Backend({"summary": "Someone at the gate.", "people": 1, "label": "maybe"})):
+            assistant = _Assistant()
+            job = inf.AlertJob(camera="gate", stem="gate_100_alert", ts=100.0, labels=["person"])
+            with mock.patch.object(inf, "frame_to_jpeg_bytes", return_value=b"jpg"), \
+                    mock.patch.object(inf, "owner_language", return_value="en"):
+                inf._worker(backend, {"alert_channel": "telegram"}, {}, inf.AlertSettings(), "gate", [object()],
+                            assistant, job)
+            (sent,) = assistant.sent
+            self.assertFalse(sent["silent"], backend)
+            self.assertTrue(sent["text"].startswith(t("alert_unclassified", "en", camera="gate")), sent["text"])
+            self.assertFalse(job.alert["silent"])
+
+
 if __name__ == "__main__":
     unittest.main()
