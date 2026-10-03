@@ -437,26 +437,47 @@ class VehicleMemoryTest(unittest.TestCase):
         # Each step on its own wobbles too little to count (IoU ~0.82 between neighbours),
         # so comparing only with the previous look would never see this car move.
         mem = inf.VehicleMemory()
-        mem.look([CAR])
+        mem.look([CAR], now=0)
         steps = [(0.50 + 0.02 * i, 0.50, 0.70 + 0.02 * i, 0.60) for i in range(1, 8)]
-        moved = [mem.look([s]) for s in steps]
+        moved = [mem.look([s], now=0.5 * i) for i, s in enumerate(steps, 1)]
         self.assertFalse(moved[0])
         self.assertTrue(any(moved))
 
     def test_a_car_that_arrives_and_parks_during_the_cooldown_is_quiet_afterwards(self) -> None:
         mem = inf.VehicleMemory()
-        mem.look([])                                  # the empty driveway
-        self.assertTrue(mem.look([SHIFTED]))          # a car arrives (the trigger, then the cooldown)
-        self.assertTrue(mem.look([CAR]))              # still rolling, one second later
-        self.assertFalse(mem.look([CAR]))             # parked
-        self.assertFalse(mem.look([JITTER]))          # ... two minutes later: no new alert
+        mem.look([], now=0)                           # the empty driveway
+        self.assertFalse(mem.look([SHIFTED], now=1))  # a car arrives: one look is not yet movement
+        self.assertFalse(mem.look([CAR], now=1.4))    # still there, but not for a second yet
+        self.assertTrue(mem.look([CAR], now=2.1))     # a second of change over three looks: it moved
+        self.assertFalse(mem.look([CAR], now=2.5))    # parked
+        self.assertFalse(mem.look([JITTER], now=120))  # ... two minutes later: no new alert
 
     def test_a_car_leaving_is_movement_and_the_empty_driveway_is_then_quiet(self) -> None:
         mem = inf.VehicleMemory()
-        mem.look([CAR])
-        self.assertFalse(mem.look([CAR]))
-        self.assertTrue(mem.look([]))
-        self.assertFalse(mem.look([]))
+        mem.look([CAR], now=0)
+        self.assertFalse(mem.look([CAR], now=1))
+        self.assertFalse(mem.look([], now=2))
+        self.assertTrue(mem.look([], now=3.1))
+        self.assertFalse(mem.look([], now=4))
+
+    def test_the_detector_blinking_on_a_parked_car_is_not_movement(self) -> None:
+        # Three looks a second on the graphics chip: a parked car missed for a look or two
+        # (under a second) must not wake the AI.
+        mem = inf.VehicleMemory()
+        mem.look([CAR, OTHER], now=0)
+        looks = [([CAR, OTHER], 0.3), ([CAR], 0.6), ([CAR, OTHER], 0.9), ([OTHER], 1.2), ([], 1.5),
+                 ([CAR, OTHER], 1.8), ([CAR], 2.1), ([CAR], 2.4), ([CAR, OTHER], 2.7)]
+        self.assertEqual([mem.look(b, now=t) for b, t in looks], [False] * len(looks))
+
+    def test_one_slow_look_is_not_movement_but_two_are(self) -> None:
+        # On the CPU a camera is looked at only every few seconds: a change must still be
+        # seen twice, so one bad look does not count, a car that stays gone does.
+        mem = inf.VehicleMemory()
+        mem.look([CAR], now=0)
+        self.assertFalse(mem.look([], now=3.5))
+        self.assertFalse(mem.look([CAR], now=7))
+        self.assertFalse(mem.look([], now=10.5))
+        self.assertTrue(mem.look([], now=14))
 
 
 class EscalationTest(unittest.TestCase):

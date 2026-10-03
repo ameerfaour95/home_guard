@@ -57,6 +57,18 @@ one on. Each camera card's action slot: "Alerts: House default (People)" -> Hous
 Custom with the same tiles. Dashboard status line shows the house choice and marks cameras with
 their own. Live apply with the existing Applying/Applied confirmation.
 
+## Addendum: sensitivity per type (approved 2026-10-03)
+
+Seen live: with one house threshold of 0.7 the detector reported only the car while a man walked
+past; with people-only alerts such a look no longer reaches the AI. Frigate (`objects.filters.<label>
+.threshold`, per camera) and Reolink (a slider per detection type) set certainty per type. So:
+`conf_person` / `conf_vehicle` / `conf_animal` in box.yaml (live; unset = `inference_conf`), per-camera
+overrides in the `sensitivity:` section of camera_alerts.yaml (some or all types). The detector runs
+at the lowest certainty in use, then each find is held to its own type's value
+(`filter_by_thresholds`). Command: `set-camera-sensitivity --camera N --values person=0.5,vehicle=0.8 |
+--default`; `camera-alerts` also reports `house_sensitivity` and each camera's `sensitivity`;
+ai_status settings carry `sensitivity` and `camera_sensitivity`.
+
 ## Out of scope
 
 Objects per zone, hourly schedules per type, packages, notify-vs-record per type.

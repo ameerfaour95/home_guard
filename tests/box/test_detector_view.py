@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from home_guard_project.box.ai_status import read_status
-from home_guard_project.box.app.detector_view import camera_view,box_rect
+from home_guard_project.box.app.detector_view import camera_view,box_rect,entry_opacity
 
 class DetectorViewTests(unittest.TestCase):
     def setUp(self):
@@ -15,8 +15,16 @@ class DetectorViewTests(unittest.TestCase):
         self.assertEqual(objects[1].caption(),'Person \u00b7 71%')
         self.assertNotEqual(objects[0].color,objects[1].color)
         self.assertEqual(camera_view(self.data,'bian_ch3',self.now),((),'Nothing right now'))
-        self.assertEqual(camera_view(self.data,'bian_ch2',self.now+4),((),'Nothing right now'))
         self.assertIn('not looking',camera_view(self.data,'bian_ch2',self.now+11)[1])
+    def test_a_slow_detector_still_draws_what_its_latest_look_found(self):
+        # The N150's CPU looks at each camera only every few seconds: the boxes of its latest
+        # look stay up until a newer look comes back empty.
+        self.assertEqual(len(camera_view(self.data,'bian_ch2',self.now+7)[0]),2)
+        self.assertEqual(entry_opacity(self.data['cameras']['bian_ch2'],self.now+7),1)
+        empty=dict(self.data['cameras']['bian_ch2'],checked_ts=self.now+1)
+        data=dict(self.data,cameras={'bian_ch2':empty})
+        self.assertEqual(camera_view(data,'bian_ch2',self.now+4),((),'Nothing right now'))
+        self.assertEqual(entry_opacity(empty,self.now+4),0)
     def test_stopped_stale_and_bad_values_never_draw_boxes(self):
         self.assertEqual(camera_view(self.data,'bian_ch2',self.now,True),((),'Stopped'))
         self.data['updated']=self.now-16

@@ -74,6 +74,11 @@ class IndexTest(unittest.TestCase):
         self.assertEqual(index["w"], "tagging/b1/clips/w.mp4")                # sorted, deterministic
         self.assertNotIn("vlm_training", index)
 
+    def test_a_crop_never_beats_a_full_clip_across_prefix_tiers(self) -> None:
+        keys = ["dataset_ameer_house/vlm_crops/cam/q.mp4", "tagging/b1/dataset_multi/clips/cam/d/q.mp4"]
+        for ordered in (keys, list(reversed(keys))):
+            self.assertEqual(ev.build_index(ordered)["q"], "tagging/b1/dataset_multi/clips/cam/d/q.mp4")
+
     def test_order_of_keys_does_not_matter(self) -> None:
         keys = ["tagging/b2/clips/w.mp4", "tagging/b1/clips/w.mp4"]
         self.assertEqual(ev.build_index(keys), ev.build_index(list(reversed(keys))))
@@ -259,6 +264,26 @@ class PrepareTest(PreparedDirMixin, unittest.TestCase):
         self.assertEqual((again["new"], again["cached"]), (0, 3))
         self.assertEqual(read_jsonl(os.path.join(self.out, "manifest.jsonl")), manifest)
 
+    def test_temp_mp4_lives_in_the_system_temp_dir_and_is_removed(self) -> None:
+        made: List[tuple] = []
+        real = ev.tempfile.mkstemp
+
+        def spy(*args, **kwargs):
+            fd, path = real(*args, **kwargs)
+            if kwargs.get("suffix") == ".mp4":
+                made.append((kwargs.get("dir"), path))
+            return fd, path
+
+        ev.tempfile.mkstemp = spy
+        try:
+            ev.prepare(self.out, client=self.s3)
+        finally:
+            ev.tempfile.mkstemp = real
+        self.assertEqual(len(made), 3)
+        for directory, path in made:
+            self.assertEqual(directory, tempfile.gettempdir())
+            self.assertFalse(os.path.exists(path))
+
     def test_limit_and_batches(self) -> None:
         counts = ev.prepare(self.out, client=self.s3, limit=1)
         self.assertEqual(counts["new"], 1)
@@ -288,17 +313,19 @@ class RunTest(PreparedDirMixin, unittest.TestCase):
         backend = ev.FakeBackend()
         summary = ev.run_eval(self.out, backend)
         self.assertEqual(backend.calls, 3)
-        tag = ev.default_tag(None, fake=True)
+        tag = ev.default_tag(None, "fake", fake=True)
         results = os.path.join(self.out, "results")
         rows = read_jsonl(os.path.join(results, f"{tag}.jsonl"))
         self.assertEqual([r["clip_id"] for r in rows], [
             "cam_a_1771696897_trigger", "cam_a_1771696900_trigger", "cam_b_1771700000_trigger"])
-        self.assertEqual(set(rows[0]), set(ev.RESULT_COLUMNS))
+        self.assertEqual(set(rows[0]), set(ev.ANSWER_COLUMNS), "the answer only; our truth comes from the manifest")
         by_id = {r["clip_id"]: r for r in rows}
         self.assertEqual(by_id["cam_a_1771696897_trigger"]["ai_label"], "normal")
         self.assertEqual(by_id["cam_a_1771696897_trigger"]["ai_summary"], "A person walks to the door.")
         self.assertEqual(by_id["cam_a_1771696900_trigger"]["ai_summary"], "No special activity.")
         self.assertEqual(by_id["cam_a_1771696900_trigger"]["ai_people"], 0)
+        self.assertEqual(by_id["cam_a_1771696900_trigger"]["ai_animals"], 0)
+        self.assertEqual(list(ev.RESULT_COLUMNS).index("ai_animals"), list(ev.RESULT_COLUMNS).index("ai_people") + 1)
         self.assertIn(by_id["cam_b_1771700000_trigger"]["ai_label"], ("suspicious", "escalation"))
         self.assertEqual(rows[0]["prompt_id"], inference.PROMPT_VERSION)
         self.assertEqual(rows[0]["model"], "fake")
@@ -334,15 +361,161 @@ class RunTest(PreparedDirMixin, unittest.TestCase):
         summary = ev.run_eval(self.out, retry, tag="t1")
         self.assertEqual(retry.calls, 1)
         self.assertEqual(summary["errors"], 0)
-        rows = read_jsonl(os.path.join(self.out, "results", "t1.jsonl"))
-        self.assertEqual(len(rows), 3)
+        path = os.path.join(self.out, "results", "t1.jsonl")
+        self.assertEqual(len(read_jsonl(path)), 4, "the failed attempt stays in the file")
+        self.assertEqual(len(last_by_clip(path)), 3)
 
     def test_a_different_prompt_or_model_is_asked_again(self) -> None:
         ev.run_eval(self.out, ev.FakeBackend(), tag="t2")
         other = ev.FakeBackend()
         other.model_name = "fake-2"
-        ev.run_eval(self.out, other, tag="t2")
+        with self.assertRaises(ev.ResultsConflict):
+            ev.run_eval(self.out, other, tag="t2")
+        self.assertEqual(other.calls, 0)
+        ev.run_eval(self.out, other, tag="t2", overwrite=True)
         self.assertEqual(other.calls, 3)
+
+    def test_default_tag_names_prompt_and_model(self) -> None:
+        self.assertEqual(ev.default_tag(None, "gpt-4o", fake=False), f"{inference.PROMPT_VERSION}__gpt-4o")
+        self.assertEqual(ev.default_tag(None, "ft:gpt/4o mini", fake=False),
+                         f"{inference.PROMPT_VERSION}__ft_gpt_4o_mini")
+        self.assertEqual(ev.default_tag(None, "fake", fake=True), f"fake-{inference.PROMPT_VERSION}__fake")
+
+    def _backend(self, model: str) -> "ev.FakeBackend":
+        b = ev.FakeBackend()
+        b.model_name = model
+        return b
+
+    def test_two_models_under_the_default_tag_keep_two_files(self) -> None:
+        ev.run_eval(self.out, self._backend("model-a"))
+        ev.run_eval(self.out, self._backend("model-b"))
+        results = os.path.join(self.out, "results")
+        files = sorted(n for n in os.listdir(results) if n.endswith(".jsonl"))
+        self.assertEqual(files, [f"fake-{inference.PROMPT_VERSION}__model-a.jsonl",
+                                 f"fake-{inference.PROMPT_VERSION}__model-b.jsonl"])
+        for name, model in zip(files, ("model-a", "model-b")):
+            rows = read_jsonl(os.path.join(results, name))
+            self.assertEqual(len(rows), 3)
+            self.assertEqual({r["model"] for r in rows}, {model})
+
+    def test_an_explicit_tag_with_another_model_is_refused_unless_overwrite(self) -> None:
+        ev.run_eval(self.out, self._backend("model-a"), tag="shared")
+        path = os.path.join(self.out, "results", "shared.jsonl")
+        with open(path, "rb") as f:
+            before = f.read()
+        refused = self._backend("model-b")
+        with self.assertRaises(ev.ResultsConflict) as ctx:
+            ev.run_eval(self.out, refused, tag="shared")
+        self.assertIn("model-a", str(ctx.exception))
+        self.assertIn("model-b", str(ctx.exception))
+        self.assertEqual(refused.calls, 0)
+        with open(path, "rb") as f:
+            self.assertEqual(f.read(), before)
+
+        replaced = self._backend("model-b")
+        ev.run_eval(self.out, replaced, tag="shared", overwrite=True)
+        self.assertEqual(replaced.calls, 3)
+        self.assertEqual({r["model"] for r in read_jsonl(path)}, {"model-b"})
+
+    def test_main_exits_2_and_leaves_the_file_when_the_prompt_differs(self) -> None:
+        ev.run_eval(self.out, ev.FakeBackend(), tag="shared")
+        path = os.path.join(self.out, "results", "shared.jsonl")
+        with open(path, "rb") as f:
+            before = f.read()
+        prompt_file = os.path.join(self.src, "other.txt")
+        with open(prompt_file, "w", encoding="utf-8") as f:
+            f.write("Other wording for {camera_name}")
+        args = ["run", "--dir", self.out, "--fake", "--tag", "shared", "--prompt-file", prompt_file]
+        self.assertEqual(ev.main(args), 2)
+        with open(path, "rb") as f:
+            self.assertEqual(f.read(), before)
+        self.assertEqual(ev.main(args + ["--overwrite"]), 0)
+        self.assertTrue(all(r["prompt_id"].startswith("file-") for r in read_jsonl(path)))
+
+    def test_changed_prompt_wording_with_the_same_version_asks_every_clip_again(self) -> None:
+        original = inference.build_prompt
+        try:
+            inference.build_prompt = lambda *a, **k: "wording one {x}"
+            ev.run_eval(self.out, ev.FakeBackend(), tag="w")
+            inference.build_prompt = lambda *a, **k: "wording two {x}"
+            with self.assertRaises(ev.ResultsConflict):
+                ev.run_eval(self.out, ev.FakeBackend(), tag="w")
+            second = ev.FakeBackend()
+            ev.run_eval(self.out, second, tag="w", overwrite=True)
+            self.assertEqual(second.calls, 3)
+            third = ev.FakeBackend()
+            ev.run_eval(self.out, third, tag="w")
+            self.assertEqual(third.calls, 0)
+        finally:
+            inference.build_prompt = original
+        rows = read_jsonl(os.path.join(self.out, "results", "w.jsonl"))
+        self.assertRegex(rows[0]["prompt_sha12"], r"^[0-9a-f]{12}$")
+
+    def test_a_truncated_last_line_is_skipped_with_a_warning(self) -> None:
+        path = os.path.join(self.out, "rows.jsonl")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write('{"clip_id": "a"}\n{"clip_id": "b"')
+        with self.assertLogs("box.eval_prompt", level="WARNING"):
+            self.assertEqual(ev.read_jsonl(path), [{"clip_id": "a"}])
+        with open(path, "w", encoding="utf-8") as f:
+            f.write('{"clip_id": "a"}\n{"clip_id": "b"\n{"clip_id": "c"}\n')
+        with self.assertRaises(json.JSONDecodeError):
+            ev.read_jsonl(path)
+
+    def test_a_run_over_a_truncated_results_file_still_works(self) -> None:
+        ev.run_eval(self.out, ev.FakeBackend(), tag="cut")
+        path = os.path.join(self.out, "results", "cut.jsonl")
+        with open(path, "a", encoding="utf-8") as f:
+            f.write('{"clip_id": "half')
+        again = ev.FakeBackend()
+        ev.run_eval(self.out, again, tag="cut")
+        self.assertEqual(again.calls, 0)
+        self.assertEqual(len(read_jsonl(path)), 3)
+
+    def test_an_answer_without_animals_records_none(self) -> None:
+        class Old(ev.FakeBackend):
+            def ask(self, row, frames):
+                parsed = {"summary": "x", "label": "normal", "people": 1, "vehicle_moving": False}
+                return json.dumps(parsed), parsed
+
+        ev.run_eval(self.out, Old(), tag="old")
+        self.assertIsNone(read_jsonl(os.path.join(self.out, "results", "old.jsonl"))[0]["ai_animals"])
+
+    def test_the_run_says_what_it_will_ask(self) -> None:
+        lines: List[str] = []
+        ev.run_eval(self.out, ev.FakeBackend(), tag="m1", progress=lines.append)
+        self.assertEqual(lines[0], "asking 3 clips (0 already answered, 0 with errors to retry)")
+        ev.run_eval(self.out, ev.FakeBackend(fail_ids={"cam_a_1771696900_trigger"}), tag="m2")
+        lines = []
+        ev.run_eval(self.out, ev.FakeBackend(), tag="m2", progress=lines.append)
+        self.assertEqual(lines[0], "asking 1 clips (2 already answered, 1 with errors to retry)")
+
+    def test_a_big_real_run_names_the_model_and_waits_unless_yes(self) -> None:
+        slept: List[float] = []
+        saved = (ev.time.sleep, ev.CONFIRM_OVER, ev._make_gpt)
+
+        class Stub:
+            model_name = "gpt-test"
+
+            def ask(self, row, frames):
+                parsed = {"summary": "x", "label": "normal", "people": 0, "vehicle_moving": False}
+                return json.dumps(parsed), parsed
+
+        ev.time.sleep = slept.append
+        ev.CONFIRM_OVER = 2
+        ev._make_gpt = lambda model: Stub()
+        try:
+            self.assertEqual(ev.main(["run", "--dir", self.out, "--tag", "big1"]), 0)
+            self.assertEqual(slept, [5])
+            self.assertEqual(ev.main(["run", "--dir", self.out, "--tag", "big2", "--yes"]), 0)
+            self.assertEqual(slept, [5])
+            self.assertEqual(ev.main(["run", "--dir", self.out, "--fake", "--tag", "big3"]), 0)
+            self.assertEqual(slept, [5])
+            lines: List[str] = []
+            ev.run_eval(self.out, Stub(), tag="big4", progress=lines.append, wait=True)
+            self.assertIn("gpt-test", lines[1])
+        finally:
+            ev.time.sleep, ev.CONFIRM_OVER, ev._make_gpt = saved
 
     def test_limit(self) -> None:
         backend = ev.FakeBackend()
@@ -406,7 +579,7 @@ class PromptFileTest(PreparedDirMixin, unittest.TestCase):
         rows = read_jsonl(os.path.join(self.out, "results", "pf.jsonl"))
         self.assertEqual(rows[0]["prompt_id"], ev.prompt_id_of(text))
         self.assertRegex(ev.prompt_id_of(text), r"^file-[0-9a-f]{12}$")
-        self.assertEqual(ev.default_tag(text, fake=False), ev.prompt_id_of(text))
+        self.assertEqual(ev.default_tag(text, "gpt-4o", fake=False), ev.prompt_id_of(text) + "__gpt-4o")
 
     def test_restored_after_an_exception(self) -> None:
         class Boom(ev.FakeBackend):
@@ -432,12 +605,320 @@ class PromptFileTest(PreparedDirMixin, unittest.TestCase):
         self.assertIn("local time 03:04:05", text)
         self.assertEqual(text, self.original("porch", 0, "03:04:05", 0, 0))
 
+    def test_real_backend_sends_the_prompt_file_text_and_five_images(self) -> None:
+        calls: List[dict] = []
+        answer = {"summary": "A man walks.", "label": "normal", "people": 1, "vehicle_moving": False}
+
+        class Message:
+            content = json.dumps(answer)
+
+        class Choice:
+            message = Message()
+
+        class Response:
+            choices = [Choice()]
+
+        class Completions:
+            def create(self, **kw):
+                calls.append(kw)
+                return Response()
+
+        class Chat:
+            completions = Completions()
+
+        class Client:
+            chat = Chat()
+
+        backend = inference.GptBackend.__new__(inference.GptBackend)
+        backend._client = Client()
+        backend._model = "gpt-stub"
+        backend.model_name = "gpt-stub"
+        backend.last_prompt = ""
+        backend._response_format = inference.VLM_RESPONSE_FORMAT
+        text = "Look at camera {camera_name} and answer in JSON."
+        ev.run_eval(self.out, ev.GptAsker(backend), prompt_text=text, tag="real", limit=1)
+        self.assertEqual(len(calls), 1)
+        content = calls[0]["messages"][0]["content"]
+        self.assertEqual(content[0], {"type": "text", "text": "Look at camera cam_a and answer in JSON."})
+        self.assertEqual(sum(1 for part in content if part["type"] == "image_url"), 5)
+        self.assertEqual(len(content), 6)
+        rows = read_jsonl(os.path.join(self.out, "results", "real.jsonl"))
+        self.assertEqual((rows[0]["ai_label"], rows[0]["model"], rows[0]["error"]), ("normal", "gpt-stub", ""))
+
     def test_main_prompt_file(self) -> None:
         code = ev.main(["run", "--dir", self.out, "--fake", "--prompt-file", self.prompt_file])
         self.assertEqual(code, 0)
         with open(self.prompt_file, encoding="utf-8") as f:
-            tag = ev.default_tag(f.read(), fake=True)
+            tag = ev.default_tag(f.read(), "fake", fake=True)
         self.assertTrue(os.path.isfile(os.path.join(self.out, "results", f"{tag}.jsonl")))
+
+
+def last_by_clip(path: str) -> Dict[str, dict]:
+    """The last line per clip, as resume reads it."""
+    out: Dict[str, dict] = {}
+    for r in read_jsonl(path):
+        out[r["clip_id"]] = r
+    return out
+
+
+class Interrupt(BaseException):
+    """Stands in for Ctrl+C or a killed process after one answer was written."""
+
+
+def stop_after_first_answer(line: str) -> None:
+    if line.startswith("["):
+        raise Interrupt(line)
+
+
+class ReviewFixTest(PreparedDirMixin, unittest.TestCase):
+    """The independent review's findings: the score always comes from the latest answer per clip
+    and the current tags, malformed answers are errors, and no saved answer is ever lost."""
+
+    NORMAL, EMPTY, ALERT = "cam_a_1771696897_trigger", "cam_a_1771696900_trigger", "cam_b_1771700000_trigger"
+
+    def setUp(self) -> None:
+        self.s3 = self.make_bucket()
+        ev.prepare(self.out, client=self.s3)
+        self.manifest_path = os.path.join(self.out, "manifest.jsonl")
+        self.original_prompt = inference.build_prompt
+
+    def tearDown(self) -> None:
+        inference.build_prompt = self.original_prompt
+        self.cleanup()
+
+    def results(self, tag: str, ext: str = "jsonl") -> str:
+        return os.path.join(self.out, "results", f"{tag}.{ext}")
+
+    def rewrite_manifest(self, change) -> None:
+        rows = [change(dict(r)) for r in read_jsonl(self.manifest_path)]
+        with open(self.manifest_path, "w", encoding="utf-8") as f:
+            for r in rows:
+                if r is not None:
+                    f.write(json.dumps(r) + "\n")
+
+    def interrupted_retry(self, tag: str) -> None:
+        """A first run with one failed clip, then a retry killed right after it saved the answer."""
+        ev.run_eval(self.out, ev.FakeBackend(fail_ids={self.EMPTY}), tag=tag)
+        with self.assertRaises(Interrupt):
+            ev.run_eval(self.out, ev.FakeBackend(), tag=tag, progress=stop_after_first_answer)
+        self.assertEqual(len(read_jsonl(self.results(tag))), 4, "the error row and its retry are both in the file")
+
+    # 1. The summary is derived from the answers, never trusted on its own.
+    def test_summary_is_recomputed_after_answers_were_added(self) -> None:
+        self.interrupted_retry("s1")
+        with open(self.results("s1", "summary.json"), encoding="utf-8") as f:
+            self.assertEqual(json.load(f)["errors"], 1, "the killed retry never rewrote the summary")
+        summary = ev.load_summary(self.out, "s1")
+        self.assertEqual((summary["rows"], summary["errors"]), (3, 0))
+        with open(self.results("s1", "summary.json"), encoding="utf-8") as f:
+            self.assertEqual(json.load(f)["errors"], 0, "the summary file is rewritten from the answers")
+
+    def test_summary_without_a_saved_one_counts_each_clip_once(self) -> None:
+        self.interrupted_retry("s2")
+        os.remove(self.results("s2", "summary.json"))
+        summary = ev.load_summary(self.out, "s2")
+        self.assertEqual((summary["rows"], summary["errors"]), (3, 0))
+        self.assertEqual(summary["empty_total"], 1)
+
+    def test_writes_never_use_a_fixed_temp_name(self) -> None:
+        ev.run_eval(self.out, ev.FakeBackend(), tag="tmp")
+        for name in ("tmp.jsonl", "tmp.csv", "tmp.summary.json"):
+            os.makedirs(os.path.join(self.out, "results", name + ".part"))
+        ev.run_eval(self.out, ev.FakeBackend(), tag="tmp")
+        ev.load_summary(self.out, "tmp")
+
+    # 2. Truth comes from the current manifest; changed inputs are asked again.
+    def test_a_changed_tag_is_scored_with_the_new_truth_without_asking(self) -> None:
+        first = ev.run_eval(self.out, ev.FakeBackend(), tag="truth")
+        self.assertEqual((first["alerts_total"], first["normal_total"]), (1, 1))
+
+        def retag(r: dict) -> dict:
+            if r["clip_id"] == self.NORMAL:
+                r["ours_label"], r["ours_text"] = "alert", "A man forces the gate."
+            return r
+
+        self.rewrite_manifest(retag)
+        again = ev.FakeBackend()
+        summary = ev.run_eval(self.out, again, tag="truth")
+        self.assertEqual(again.calls, 0, "a new tag needs no new answer")
+        self.assertEqual((summary["alerts_total"], summary["alerts_caught"], summary["normal_total"]), (2, 1, 0))
+        with open(self.results("truth", "csv"), encoding="utf-8", newline="") as f:
+            table = {r["clip_id"]: r for r in csv.DictReader(f)}
+        self.assertEqual(table[self.NORMAL]["ours_label"], "alert")
+        self.assertEqual(table[self.NORMAL]["ours_text"], "A man forces the gate.")
+        self.assertEqual(ev.load_summary(self.out, "truth")["alerts_total"], 2)
+
+    def test_changed_frames_are_asked_again_and_the_old_answer_kept(self) -> None:
+        import cv2
+
+        ev.run_eval(self.out, ev.FakeBackend(), tag="fp")
+        cv2.imwrite(os.path.join(self.out, "frames", f"{self.ALERT}_2.jpg"), np.full((48, 64, 3), 200, np.uint8))
+        again = ev.FakeBackend()
+        ev.run_eval(self.out, again, tag="fp")
+        self.assertEqual(again.calls, 1)
+        lines = read_jsonl(self.results("fp"))
+        self.assertEqual(len(lines), 4, "the answer to the old frames is kept")
+        old, new = [r for r in lines if r["clip_id"] == self.ALERT]
+        self.assertNotEqual(old["input_sha12"], new["input_sha12"])
+        self.assertRegex(new["input_sha12"], r"^[0-9a-f]{12}$")
+
+    def test_a_changed_camera_or_clip_time_is_asked_again(self) -> None:
+        ev.run_eval(self.out, ev.FakeBackend(), tag="cam")
+
+        def move(r: dict) -> dict:
+            if r["clip_id"] == self.NORMAL:
+                r["camera"] = "porch"
+            if r["clip_id"] == self.EMPTY:
+                r["local_time"] = "03:00:00"
+            return r
+
+        self.rewrite_manifest(move)
+        again = ev.FakeBackend()
+        ev.run_eval(self.out, again, tag="cam")
+        self.assertEqual(again.calls, 2)
+
+    # 3. Answers that are not a JSON object are errors; {} is "normal", as in production.
+    def test_malformed_answers(self) -> None:
+        answers = {self.NORMAL: ("{}", {}), self.EMPTY: ('["bad"]', ["bad"]), self.ALERT: ('"bad"', "bad")}
+
+        class Odd(ev.FakeBackend):
+            def ask(self, row, frames):
+                self.calls += 1
+                return answers[row["clip_id"]]
+
+        summary = ev.run_eval(self.out, Odd(), tag="odd")
+        rows = last_by_clip(self.results("odd"))
+        self.assertEqual((rows[self.NORMAL]["error"], rows[self.NORMAL]["ai_label"]), ("", inference.label_of({})))
+        self.assertEqual(rows[self.NORMAL]["ai_label"], "normal")
+        for clip_id, raw in ((self.EMPTY, '["bad"]'), (self.ALERT, '"bad"')):
+            self.assertEqual(rows[clip_id]["error"], "answer is not a JSON object")
+            self.assertEqual(rows[clip_id]["raw"], raw)
+        self.assertEqual(summary["errors"], 2)
+        self.assertEqual(summary["normal_flagged"], 0)
+
+    # 4. A smaller manifest never deletes answers.
+    def test_a_smaller_manifest_keeps_every_answer(self) -> None:
+        ev.run_eval(self.out, ev.FakeBackend(), tag="small")
+        self.rewrite_manifest(lambda r: None if r["clip_id"] == self.ALERT else r)
+        again = ev.FakeBackend()
+        summary = ev.run_eval(self.out, again, tag="small")
+        self.assertEqual(again.calls, 0)
+        self.assertEqual(set(last_by_clip(self.results("small"))), {self.NORMAL, self.EMPTY, self.ALERT})
+        self.assertEqual((summary["rows"], summary["alerts_total"]), (2, 0))
+        self.assertEqual(ev.load_summary(self.out, "small")["rows"], 2)
+
+    # 5. One writer per results file.
+    def test_a_held_lock_stops_a_second_run_before_any_call(self) -> None:
+        os.makedirs(os.path.join(self.out, "results"), exist_ok=True)
+        lock = self.results("busy", "lock")
+        with open(lock, "w", encoding="utf-8") as f:
+            f.write(str(os.getpid()))
+        backend = ev.FakeBackend()
+        with self.assertRaises(ev.ResultsLocked) as ctx:
+            ev.run_eval(self.out, backend, tag="busy")
+        self.assertIn(str(os.getpid()), str(ctx.exception))
+        self.assertEqual(backend.calls, 0)
+        self.assertTrue(os.path.isfile(lock), "the other run's lock is left alone")
+        self.assertEqual(ev.main(["run", "--dir", self.out, "--fake", "--tag", "busy"]), 3)
+        self.assertFalse(os.path.exists(self.results("busy")))
+
+    def test_the_lock_is_removed_after_a_run_and_after_an_interrupt(self) -> None:
+        ev.run_eval(self.out, ev.FakeBackend(fail_ids={self.EMPTY}), tag="lk")
+        self.assertFalse(os.path.exists(self.results("lk", "lock")))
+        with self.assertRaises(Interrupt):
+            ev.run_eval(self.out, ev.FakeBackend(), tag="lk", progress=stop_after_first_answer)
+        self.assertFalse(os.path.exists(self.results("lk", "lock")))
+
+    def test_a_stale_lock_is_reported_not_taken(self) -> None:
+        try:
+            import psutil  # noqa: F401
+        except ImportError:
+            self.skipTest("psutil is not installed")
+        import subprocess
+        import sys
+
+        done = subprocess.Popen([sys.executable, "-c", "pass"])
+        done.wait()
+        os.makedirs(os.path.join(self.out, "results"), exist_ok=True)
+        lock = self.results("stale", "lock")
+        with open(lock, "w", encoding="utf-8") as f:
+            f.write(str(done.pid))
+        backend = ev.FakeBackend()
+        with self.assertRaises(ev.ResultsLocked) as ctx:
+            ev.run_eval(self.out, backend, tag="stale")
+        self.assertIn("no longer running", str(ctx.exception))
+        self.assertIn(lock, str(ctx.exception))
+        self.assertEqual(backend.calls, 0)
+        self.assertTrue(os.path.isfile(lock))
+
+    # 6. A record cut inside a multibyte character.
+    def test_a_last_line_cut_inside_a_multibyte_character_is_skipped(self) -> None:
+        path = os.path.join(self.out, "cut.jsonl")
+        with open(path, "wb") as f:
+            f.write(b'{"clip_id": "a"}\n{"clip_id": "caf\xe2\x80')
+        with self.assertLogs("box.eval_prompt", level="WARNING"):
+            self.assertEqual(ev.read_jsonl(path), [{"clip_id": "a"}])
+        with open(path, "wb") as f:
+            f.write(b'{"clip_id": "a"}\n{"clip_id": "caf\xe2\x80"}\n{"clip_id": "c"}\n')
+        with self.assertRaises(ValueError):
+            ev.read_jsonl(path)
+
+    # 8. Re-review: an answer that was paid for is never lost or hidden.
+    def test_a_lone_surrogate_in_an_answer_is_saved_and_scored(self) -> None:
+        raw = '{"summary": "caf\ud800 x", "people": 0}'
+
+        class Odd(ev.FakeBackend):
+            def ask(self, row, frames):
+                self.calls += 1
+                return raw, json.loads(raw)
+
+        backend = Odd()
+        summary = ev.run_eval(self.out, backend, tag="sur")
+        self.assertEqual(backend.calls, 3)
+        rows = read_jsonl(self.results("sur"))
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[0]["raw"], raw)
+        self.assertEqual(summary["errors"], 0)
+        self.assertEqual(ev.load_summary(self.out, "sur")["rows"], 3)
+        self.assertEqual(ev.main(["summary", "--dir", self.out, "--tag", "sur"]), 0)
+
+    def test_summary_takes_the_writer_lock(self) -> None:
+        ev.run_eval(self.out, ev.FakeBackend(), tag="sl")
+        summary_path = self.results("sl", "summary.json")
+        os.remove(summary_path)
+        with open(self.results("sl", "lock"), "w", encoding="utf-8") as f:
+            f.write(str(os.getpid()))
+        self.assertEqual(ev.main(["summary", "--dir", self.out, "--tag", "sl"]), 3)
+        self.assertFalse(os.path.exists(summary_path))
+        self.assertTrue(os.path.isfile(self.results("sl", "lock")))
+        os.remove(self.results("sl", "lock"))
+        self.assertEqual(ev.main(["summary", "--dir", self.out, "--tag", "sl"]), 0)
+        self.assertTrue(os.path.isfile(summary_path))
+        self.assertFalse(os.path.exists(self.results("sl", "lock")))
+
+    def test_a_valid_answer_survives_a_later_error_for_the_same_inputs(self) -> None:
+        frame = os.path.join(self.out, "frames", "cam_a_1771696897_trigger_3.jpg")
+        with open(frame, "rb") as f:
+            data = f.read()
+        ev.run_eval(self.out, ev.FakeBackend(), tag="tmp")
+        os.remove(frame)
+        broken = ev.run_eval(self.out, ev.FakeBackend(), tag="tmp")
+        self.assertEqual(broken["errors"], 1)
+        with open(frame, "wb") as f:
+            f.write(data)
+        backend = ev.FakeBackend()
+        summary = ev.run_eval(self.out, backend, tag="tmp")
+        self.assertEqual(backend.calls, 0)
+        self.assertEqual((summary["rows"], summary["errors"], summary["outdated"]), (3, 0, 0))
+        self.assertEqual(ev.load_summary(self.out, "tmp")["rows"], 3)
+
+    # 7. The prompt override takes the coming owner_language argument.
+    def test_override_accepts_owner_language(self) -> None:
+        with ev.prompt_override("cam={camera_name} lang={owner_language}"):
+            self.assertEqual(inference.build_prompt("porch", 0, "10:00:00", 0, 0, owner_language="he"),
+                             "cam=porch lang=he")
+            self.assertEqual(inference.build_prompt("porch", 0, "10:00:00", 0, 0), "cam=porch lang=en")
+        self.assertIs(inference.build_prompt, self.original_prompt)
 
 
 def row(ours: str, ai: str, summary: str = "A man walks.", ours_text: str = "A man walks by.", error: str = "") -> dict:
@@ -496,7 +977,7 @@ class FakeBackendTest(unittest.TestCase):
     def test_answers_match_the_schema(self) -> None:
         raw, parsed = ev.FakeBackend().ask({"clip_id": "x", "camera": "c", "ours_label": "empty"}, [])
         self.assertEqual(json.loads(raw), parsed)
-        self.assertEqual(set(parsed), {"summary", "label", "people", "vehicle_moving"})
+        self.assertEqual(set(parsed), {"summary", "label", "people", "animals", "vehicle_moving"})
         self.assertEqual((parsed["summary"], parsed["people"], parsed["label"]), ("No special activity.", 0, "normal"))
 
 
