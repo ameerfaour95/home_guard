@@ -1,3 +1,4 @@
+from .formatting import camera_name
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, QRectF
 from PySide6.QtGui import QPainter, QColor, QFont, QPixmap
 from PySide6.QtWidgets import QStyledItemDelegate, QStyle
@@ -61,10 +62,10 @@ class TimelineModel(QAbstractTableModel):
             if col == 5:
                 c = e.completeness
                 return '\n'.join(['Video saved' if c.video else 'No video saved', provenance(c.boxes), ai_status(c.ai),
-                                   'Expired' if c.expired else 'Not expired'])
-            return f'{local_time(e.start_utc, e.timezone)}\n{e.summary}'
+                                   'No video copy remains' if c.expired else 'Video retention active'])
+            return f'{e.camera}\n{local_time(e.start_utc, e.timezone)}\n{e.summary}'
         if role == Qt.ItemDataRole.DisplayRole:
-            return ['', local_time(e.start_utc, e.timezone)[13:18]+'  ·  '+age(e.start_utc, self.now())+'\n'+e.camera+'  ·  '+e.summary,
+            return ['', local_time(e.start_utc, e.timezone)[13:18]+'  ·  '+age(e.start_utc, self.now())+'\n'+camera_name(e)+'  ·  '+e.summary,
                     KINDS.get(e.kind, "Unknown"), decision(e.alert_command), ', '.join(VERDICTS.get(v, v.replace('_', ' ')) for v in e.owner_verdicts) or 'No feedback',
                     '', ''][col]
 
@@ -90,7 +91,8 @@ class TimelineDelegate(QStyledItemDelegate):
             if pix and not pix.isNull():
                 p.drawPixmap(area.toRect(), pix)
             else:
-                draw_icon(p, 'video', QRectF(area.center().x()-10, area.center().y()-10, 20, 20), t['muted'])
+                p.setPen(QColor(t['muted'])); p.setFont(QFont('Segoe UI', 8))
+                p.drawText(area, Qt.AlignmentFlag.AlignCenter, 'Preview not\navailable' if not e.thumbnail_url else 'Loading…')
         elif col in (5, 6):
             if col == 5:
                 c = e.completeness

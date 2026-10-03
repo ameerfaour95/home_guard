@@ -1,3 +1,4 @@
+from .formatting import camera_name
 import json
 from PySide6.QtCore import Qt, Signal, QTimer
 from threading import Event
@@ -112,8 +113,9 @@ class EventView(QWidget):
             return
         self.recording = event
         self.zone = event.timezone
-        self.title.setText(f'{event.camera}  ·  {KINDS.get(event.kind, "Unknown")}  ·  {local_time(event.start_utc, self.zone)}')
-        self.title.setToolTip(self.title.text())
+        self.title.setToolTip(event.camera)
+        self.title.setText(f'{camera_name(event)}  ·  {KINDS.get(event.kind, "Unknown")}  ·  {local_time(event.start_utc, self.zone)}')
+        self.title.setToolTip(event.camera+' · '+local_time(event.start_utc, self.zone))
         self.review.setEnabled(True); self.flag.setEnabled(True)
         self.review.setChecked(event.reviewed); self.flag.setChecked(event.flagged)
         self.player.reset(event, self.zone); self.record.set_event(event, self.zone)
@@ -175,7 +177,7 @@ class EventView(QWidget):
                 self.player.audio.setMuted(True); self.player.speed.setCurrentIndex(1)
                 self.player.player.setPlaybackRate(1.0); self.player.player.play()
         else:
-            self.player.media_failed('Recording access is not available yet on this server.' if result['unsupported'] else 'Recording expired or unavailable.' if self.recording.completeness.expired else 'No recording is available for this event.')
+            self.player.media_failed('Recording access is not available yet on this server.' if result['unsupported'] else 'No copy of this video remains.' if self.recording.completeness.expired else 'No recording is available for this event.')
         if result['filmstrip']:
             self.player.scrubber.set_filmstrip(*result['filmstrip'])
         self.load_assets()

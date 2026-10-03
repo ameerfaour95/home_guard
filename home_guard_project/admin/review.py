@@ -1,3 +1,4 @@
+from .formatting import camera_name
 from dataclasses import replace
 from PySide6.QtCore import Qt, Signal, QEvent, QTimer, QRectF, QSize, QModelIndex
 from PySide6.QtGui import QColor, QFont
@@ -33,10 +34,10 @@ class ReviewDelegate(TimelineDelegate):
         p.fillRect(option.rect, QColor(t['raised' if option.state & QStyle.StateFlag.State_Selected else 'surface']))
         p.setPen(QColor(t['border'])); p.drawLine(option.rect.bottomLeft(), option.rect.bottomRight())
         rect = option.rect.adjusted(8, 10, -10, -8)
-        lines = [f'{local_time(e.start_utc, e.timezone)[13:18]}  ·  {e.camera}', e.summary or 'No summary saved',
+        lines = [f'{local_time(e.start_utc, e.timezone)[13:18]}  ·  {camera_name(e)}', e.summary or 'No summary saved',
                  f'{KINDS.get(e.kind, "Unknown")} · '+{'real':'AI answer saved','failed':'AI failed','fallback':'Fallback AI','none':'No AI answer'}.get(e.completeness.ai, 'Unknown AI state'),
                  ('Reviewed' if e.reviewed else 'Unreviewed') + ('  ·  Flagged' if e.flagged else '') +
-                 ('  ·  '+', '.join({'real':'Confirmed','false_alarm':'False alarm','real_but_wrong':'Wrong decision'}.get(v,v.replace('_',' ')) for v in e.owner_verdicts) if e.owner_verdicts else '')]
+                 ('  ·  '+', '.join({'real':'Confirmed','false_alarm':'False alarm','real_but_wrong':'Wrong decision'}.get(v,v.replace('_',' ').capitalize()) for v in e.owner_verdicts) if e.owner_verdicts else '')]
         for i, text in enumerate(lines):
             p.setFont(QFont('Segoe UI', 9 if i < 2 else 8))
             p.setPen(QColor(t['text' if i == 0 else 'action' if i == 3 and e.reviewed else 'muted']))
@@ -74,7 +75,7 @@ class ReviewScreen(QWidget):
         self.saved = QComboBox(); self.saved.addItem('All events', None); filters.addWidget(self.saved)
         self.saved.currentIndexChanged.connect(self.select_filter)
         filters.addSpacing(14); filters.addWidget(label('REFINE EVENTS', 'eyebrow'))
-        self.timeline = TimelineScreen(backend, theme)
+        self.timeline = TimelineScreen(backend, theme, role)
         self.mutation.optimistic.connect(self.timeline.model.update_review)
         self.mutation.optimistic.connect(self.sync_detail)
         for key, combo in self.timeline.filters.items():
@@ -86,6 +87,7 @@ class ReviewScreen(QWidget):
         self.timeline.filters['reviewed'].setCurrentIndex(1)
         self.timeline.filters['reviewed'].blockSignals(False)
         filters.addWidget(self.timeline.search)
+        self.timeline.search.setVisible(role != 'labeler')
         filters.addWidget(button('Reset filters', self.clear_filters, 'link')); filters.addStretch()
         body.addWidget(self.sidebar)
         self.timeline.range_bar.hide(); self.timeline.filter_bar.hide(); self.timeline.density.hide(); self.timeline.key_hint.hide()
@@ -181,7 +183,7 @@ class ReviewScreen(QWidget):
     def detail_loaded(self, result, error):
         view = self.event_view
         if not error and view.recording is result:
-            view.title.setText(f'#{result.id} · {result.camera}')
+            view.title.setText(f'#{result.id} · {camera_name(result)}')
             view.title.setToolTip(f'{result.camera} · {local_time(result.start_utc,result.timezone)}')
             if self.mutation.busy:
                 current = next((e for e in self.timeline.model.rows if e.id == result.id),None)

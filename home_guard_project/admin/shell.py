@@ -88,6 +88,11 @@ class Shell(QWidget):
             self.screens[title] = page
             self.pages.addWidget(page)
         nav_layout.addStretch()
+        if staff.role == 'admin':
+            from .index_problems import IndexProblems
+            problems = IndexProblems(backend); problems.session_expired.connect(self.session_expired)
+            self.screens['Index problems'] = problems; self.pages.addWidget(problems)
+            nav_layout.addWidget(button('Index problems', lambda:self.navigate('Index problems'), 'link'))
         nav_layout.addWidget(label('Home Guard Cloud\nStaff workspace', 'muted'))
         nav_layout.addWidget(button('Sign out', self.signed_out.emit, 'link'))
         layout.addWidget(rail)
@@ -107,6 +112,9 @@ class Shell(QWidget):
         self.search.requested.connect(self.open_palette)
         self.search.setPlaceholderText('Search or run a command…                          Ctrl+K')
         bar.addWidget(self.search, 1)
+        self.search.setVisible(staff.role != 'labeler')
+        if staff.role == 'labeler':
+            bar.addWidget(button('Commands · Ctrl+K', self.open_palette))
         bar.addStretch()
         bar.addWidget(label(environment, 'badge'))
         bar.addSpacing(16)
@@ -188,7 +196,8 @@ class Shell(QWidget):
         elif kind == 'camera':
             self.navigate('Review')
             timeline = self.review_page.timeline
-            timeline.customer_id,value = value
+            customer_id,value = value
+            timeline.customer_id = None if self.staff.role == 'labeler' else customer_id
             timeline.filters['camera'].blockSignals(True)
             if timeline.filters['camera'].findData(value) < 0: timeline.filters['camera'].addItem(value,value)
             timeline.filters['camera'].setCurrentIndex(timeline.filters['camera'].findData(value))
@@ -202,7 +211,10 @@ class Shell(QWidget):
 class AdminWindow(QMainWindow):
     def __init__(self, backend, *, demo=False, theme='dark', prefs=None):
         super().__init__()
+        from .prefs import Preferences
+        prefs = prefs or Preferences()
         self.backend, self.theme, self.prefs = backend, theme, prefs
+        self.retired_backends = []
         self.configured_backend = backend
         self.setWindowTitle('Home Guard · Admin Center')
         self.resize(1366, 768)
@@ -211,6 +223,7 @@ class AdminWindow(QMainWindow):
         self.setCentralWidget(self.session)
         self.signin = None
         self.shell = None
+        self.menuBar().addAction('Settings', self.open_settings)
         self.show_signin()
         if demo:
             self.use_demo()
@@ -255,3 +268,31 @@ class AdminWindow(QMainWindow):
     def expired(self):
         self.show_signin()
         self.signin.error.setText('Your session needs a new sign-in')
+
+    def open_settings(self):
+        from .settings import SettingsDialog
+        server = getattr(self.configured_backend, 'base_url', self.prefs.get('server') or 'http://127.0.0.1:8000')
+        self.settings_dialog = SettingsDialog(server, self.theme, self)
+        self.settings_dialog.saved.connect(self.save_settings); self.settings_dialog.show()
+
+    def save_settings(self, server, theme):
+        from .http_backend import HttpBackend
+        from .theme import apply_theme
+        from .backend import BackendError
+        from PySide6.QtWidgets import QApplication
+        changed = server != getattr(self.configured_backend, 'base_url', self.prefs.get('server') or 'http://127.0.0.1:8000')
+        if changed:
+            try: backend = HttpBackend(server)
+            except BackendError as error:
+                self.statusBar().showMessage(str(error)); return
+            if hasattr(self.configured_backend, 'clear_session'): self.configured_backend.clear_session()
+            self.retired_backends.append(self.configured_backend)
+            self.configured_backend = backend
+        self.prefs.save(server=server, theme=theme)
+        old_theme, self.theme = self.theme, theme
+        apply_theme(QApplication.instance(), theme)
+        if changed: self.show_signin()
+        elif self.shell and old_theme != theme:
+            staff = self.shell.staff
+            old = self.shell; self.session.removeWidget(old); old.hide(); old.deleteLater()
+            self.enter(staff)

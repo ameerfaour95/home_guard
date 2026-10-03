@@ -3,6 +3,7 @@ from PySide6.QtWidgets import (QDialog, QWidget, QVBoxLayout, QHBoxLayout, QLine
     QComboBox, QCheckBox, QSlider, QStackedWidget)
 from .workers import TaskRunner
 from .backend import AuthError
+from .formatting import export_warning
 from collections import Counter
 from .widgets.common import label, button
 from .widgets.data_table import RowsModel, data_table
@@ -23,6 +24,8 @@ class ExportWizard(QDialog):
         self.setWindowTitle('Export training dataset'); self.setModal(True); self.resize(760, 650)
         box = QVBoxLayout(self); box.setContentsMargins(32,28,32,24); box.setSpacing(18)
         box.addWidget(label('Export training dataset', 'title'))
+        if getattr(parent, 'role', None) == 'labeler':
+            box.addWidget(label('Your exports are visible only to you and administrators.', 'muted', True))
         self.steps = label('', 'eyebrow'); box.addWidget(self.steps)
         self.pages = QStackedWidget(); box.addWidget(self.pages,1)
         first = QWidget(); form = QVBoxLayout(first); form.setContentsMargins(0,0,0,0); form.setSpacing(12)
@@ -36,7 +39,7 @@ class ExportWizard(QDialog):
         form.addWidget(label('Lowercase letters, numbers, underscores and hyphens. Each export gets a new version.', 'muted', True))
         form.addSpacing(12); form.addWidget(label('Include in the dataset', 'section'))
         self.formats = {}
-        for key, title, detail in [('yolo','YOLO labels','Detection boxes with saved provenance'),('vlm_jsonl','VLM JSONL','Saved model answers and input frames'),('clips','Video clips','Original moments for review and training')]:
+        for key, title, detail in [('yolo','YOLO labels','Detection boxes with saved provenance'),('vlm_jsonl','VLM JSONL','Saved answers by split; always includes video clips'),('clips','Video clips','Original moments for review and training')]:
             check = QCheckBox(title); check.setChecked(True); self.formats[key] = check
             form.addWidget(check); form.addWidget(label(detail,'muted'))
         form.addStretch(); self.pages.addWidget(first)
@@ -51,7 +54,7 @@ class ExportWizard(QDialog):
             self.sliders[key] = slider; slider.valueChanged.connect(lambda value,k=key:self.balance(k,value)); split.addWidget(slider)
         self.total = label('Total 100%', 'muted'); split.addWidget(self.total)
         self.fallback = QCheckBox('Include fallback AI'); split.addWidget(self.fallback)
-        split.addWidget(label('Off by default. Fallback and failed AI are excluded only from vlm.jsonl. These events still contribute video clips and YOLO labels when those formats are selected.', 'muted', True))
+        split.addWidget(label('Off by default. Fallback and failed AI are excluded from VLM answers. These events can still contribute video clips and YOLO labels. VLM exports include clips even when Video clips is unchecked.', 'muted', True))
         split.addStretch(); self.pages.addWidget(second)
         third = QWidget(); consent = QVBoxLayout(third); consent.setContentsMargins(0,0,0,0); consent.setSpacing(12)
         consent.addWidget(label('Check consent before exporting', 'section'))
@@ -121,8 +124,8 @@ class ExportWizard(QDialog):
             self.check.setEnabled(False); return
         self.check.setEnabled(True)
         eligible, excluded = len(result.included_ids), len(result.excluded)
-        splits = ' · '.join(f'{key}: {value}' for key, value in result.split_counts.items())
-        self.summary.setText(f'{eligible} included events · {excluded} excluded · {result.groups} house/day groups\n{splits}' + ''.join('\n'+w for w in result.warnings))
+        splits = ' · '.join(f'{dict(train="Training",val="Validation",test="Test").get(key,key)}: {value}' for key, value in result.split_counts.items())
+        self.summary.setText(f'{eligible} included events · {excluded} excluded · {result.groups} house/day groups\n{splits}' + ''.join('\n'+export_warning(w) for w in result.warnings))
         self.exclusions.replace([(key.replace('_', ' ').capitalize(), count) for key, count in Counter(e.reason for e in result.excluded).items()])
         self.check.setText(f'Export the {eligible} eligible events')
         self.update_confirm()

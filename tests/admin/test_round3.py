@@ -276,8 +276,12 @@ def test_export_history_actions_use_returned_urls(widgets,wait,app,monkeypatch):
     screen.export_model.replace([ready]); screen.export_table.setCurrentIndex(screen.export_model.index(0,0))
     assert screen.copy.isEnabled() and screen.manifest.isEnabled()
     screen.copy_path(); assert app.clipboard().text() == ready.s3_prefix
-    opened = []; monkeypatch.setattr(QDesktopServices,'openUrl',lambda url:opened.append(url.toString()))
-    screen.open_manifest(); assert opened == [ready.manifest_url]
+    opened = []
+    monkeypatch.setattr(b, 'export', lambda eid: ready)
+    monkeypatch.setattr(b, 'media_bytes', lambda url: opened.append(url) or b'{"schema_version":2,"counts":{"clips":{"train":3}},"warnings":["Small dataset"]}')
+    screen.open_manifest(); wait(lambda: screen.manifest_data is not None)
+    assert opened == [ready.manifest_url]
+    assert 'Training: 3' in screen.manifest_detail.text() and 'Small dataset' in screen.manifest_detail.text()
 
 
 def test_aggregate_ui_does_not_walk_event_cursors(widgets,wait):

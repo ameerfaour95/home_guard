@@ -284,7 +284,7 @@ def test_contract_preview_uses_protocol_and_enables_create(app, wait, widgets):
     wizard.check.setChecked(True)
     assert wizard.next.isEnabled()
     assert 'Small dataset' in wizard.summary.text()
-    assert 'train: 2' in wizard.summary.text()
+    assert 'Training: 2' in wizard.summary.text()
 
 
 def test_thumbnails_only_request_visible_rows(app, wait, widgets):

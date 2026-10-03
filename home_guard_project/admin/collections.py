@@ -7,7 +7,8 @@ from .backend import BackendError, AuthError
 from .widgets.common import label, button
 from .widgets.data_table import RowsModel
 from .theme import PALETTES
-from .formatting import local_time
+from .formatting import local_time, camera_name
+from .event_logic import provenance, ai_status
 
 
 class CollectionPicker(QDialog):
@@ -64,6 +65,8 @@ class CreateCollection(QDialog):
         self.setWindowTitle('New collection'); self.setFixedWidth(480); self.setModal(True)
         box = QVBoxLayout(self); box.setContentsMargins(24, 24, 24, 24); box.setSpacing(14)
         box.addWidget(label('New collection', 'section'))
+        if getattr(parent, 'role', None) == 'labeler':
+            box.addWidget(label('Visible only to you and administrators.', 'muted', True))
         self.name = QLineEdit(); self.name.setPlaceholderText('Collection name')
         self.description = QLineEdit(); self.description.setPlaceholderText('What are you collecting?')
         box.addWidget(self.name); box.addWidget(self.description)
@@ -75,6 +78,8 @@ class CreateCollection(QDialog):
         name, description = self.name.text().strip(), self.description.text().strip()
         if not name:
             self.error.setText('Give this collection a name.'); return
+        if len(name) > 120:
+            self.error.setText('Use 120 characters or fewer for the collection name.'); return
         self.submit.setEnabled(False)
         self.runner.start(lambda: self.backend.create_collection(name, description))
 
@@ -105,10 +110,10 @@ class GridDelegate(QStyledItemDelegate):
         if pix and not pix.isNull():
             p.drawPixmap(photo.toRect(), pix)
         else:
-            p.setPen(QColor(t['muted'])); p.drawText(photo, Qt.AlignmentFlag.AlignCenter, 'Recording unavailable' if e.completeness.expired else 'Recording')
-        lines = [(e.camera, 'text'), (local_time(e.start_utc, e.timezone), 'muted'),
-                 (f'{"Video" if e.completeness.video else "No video"} · {e.completeness.boxes} boxes', 'action'),
-                 (f'AI: {e.completeness.ai}'+(' · Expired' if e.completeness.expired else ''), 'warning' if e.completeness.ai != 'real' else 'muted')]
+            p.setPen(QColor(t['muted'])); p.drawText(photo, Qt.AlignmentFlag.AlignCenter, 'Preview not available' if not e.thumbnail_url else 'Loading preview…')
+        lines = [(camera_name(e), 'text'), (local_time(e.start_utc, e.timezone), 'muted'),
+                 (provenance(e.completeness.boxes), 'action'),
+                 ('No video copy remains' if e.completeness.expired else ai_status(e.completeness.ai), 'warning' if e.completeness.ai != 'real' else 'muted')]
         for i,(text, color) in enumerate(lines):
             p.setFont(QFont('Segoe UI', 9 if i == 0 else 8)); p.setPen(QColor(t[color]))
             p.drawText(QRectF(r.x()+12,r.y()+146+i*20,r.width()-24,20), Qt.AlignmentFlag.AlignVCenter,
@@ -127,7 +132,7 @@ class CollectionGrid(QWidget):
         top = QHBoxLayout(); self.title = label('', 'section'); top.addWidget(self.title,1)
         self.remove = button('Remove selected', self.remove_selected); self.remove.setEnabled(False); top.addWidget(self.remove)
         box.addLayout(top); self.message = label('', 'muted', True); box.addWidget(self.message)
-        self.model = RowsModel([('Event',lambda e:e.summary)])
+        self.model = RowsModel([('Event',lambda e:e.camera+'\n'+e.summary)])
         self.images = {}; self.grid = QListView(); self.grid.setModel(self.model)
         self.grid.setViewMode(QListView.ViewMode.IconMode); self.grid.setResizeMode(QListView.ResizeMode.Adjust)
         self.grid.setMovement(QListView.Movement.Static); self.grid.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)

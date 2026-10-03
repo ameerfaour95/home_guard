@@ -14,6 +14,11 @@ class LoginError(BackendError):
     message = 'Email, password or code is wrong'
 
 
+class ValidationError(BackendError):
+    def __init__(self, message):
+        Exception.__init__(self, message)
+
+
 class AuthError(BackendError):
     message = 'Your session needs a new sign-in'
 
@@ -85,6 +90,8 @@ class AdminBackend(Protocol):
     def export(self, id) -> ExportOut: ...
     def create_export(self, **request) -> ExportOut: ...
     def audit(self, **filters) -> AuditPage: ...
+    def index_problems(self) -> list: ...
+    def update_customer(self, customer: CustomerOut) -> CustomerOut: ...
 
 
 

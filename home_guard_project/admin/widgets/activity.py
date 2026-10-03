@@ -94,7 +94,8 @@ class DensityStrip(QWidget):
         peak = max((v[0] for row in self.rows.values() for v in row), default=1) or 1
         for r, (camera, cells) in enumerate(self.rows.items()):
             p.setPen(QColor(t['muted']))
-            name = camera.replace('_', ' ') if self.fleet else camera
+            from ..formatting import camera_name
+            name = camera_name(camera)
             p.drawText(0, 36+r*22, p.fontMetrics().elidedText(name, Qt.TextElideMode.ElideRight, 142))
             for c, (count, alerts, false) in enumerate(cells):
                 rect = self.cell_rect(r, c)

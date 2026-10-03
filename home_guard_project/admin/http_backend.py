@@ -8,7 +8,8 @@ import certifi
 import httpx
 from .backend import (AuthError, LoginError, ForbiddenError, OfflineError, ServerError,
                       RateLimitError, TlsError, ConfigurationError, UnsupportedError, BackendError)
-from .models import ExportPreview
+from .models import ExportPreview, IndexProblem
+from .backend import ValidationError
 from .models import SavedFilter, CollectionOut, ExportOut, AuditPage, DensityOut, ReviewCount
 from .models import TokenPair, StaffOut, FleetResponse, CustomerOut, EventPage, EventDetail, EventSummary, DetectionsOut, MediaAccess, decode
 
@@ -67,6 +68,14 @@ class HttpBackend:
 
     @staticmethod
     def _parse(response, model):
+        if response.status_code in (400, 422):
+            try:
+                detail = response.json().get('detail')
+            except ValueError:
+                detail = None
+            safe = {'Name must not identify a household', 'Search is not available for this role'}
+            raise ValidationError(detail if isinstance(detail, str) and detail in safe else
+                                  'Check the entered values. Names must be 120 characters or fewer.')
         if response.status_code >= 300:
             error = {401: AuthError, 403: ForbiddenError, 429: RateLimitError, 501: UnsupportedError}.get(response.status_code, ServerError)
             raise error()
@@ -137,6 +146,8 @@ class HttpBackend:
         return self._get(f'customers/{int(id)}', CustomerOut)
 
     def events(self, **filters):
+        if self.tokens and self.tokens.staff.role == 'labeler':
+            filters.pop('customer_id', None); filters.pop('q', None)
         return self._get('events', EventPage, **{k: v for k, v in filters.items() if v is not None})
 
     def event(self, id):
@@ -176,6 +187,8 @@ class HttpBackend:
             raise OfflineError() from None
 
     def density(self, **filters):
+        if self.tokens and self.tokens.staff.role == 'labeler':
+            filters.pop('customer_id', None); filters.pop('q', None)
         return self._get('events/density', DensityOut, **{k: v for k, v in filters.items() if v is not None})
 
     def review_count(self):
@@ -217,3 +230,11 @@ class HttpBackend:
 
     def audit(self, **filters):
         return self._get('audit', AuditPage, **{k: v for k, v in filters.items() if v is not None})
+
+    def index_problems(self):
+        return self._get('index/problems', list[IndexProblem])
+
+    def update_customer(self, customer):
+        body = {key: getattr(customer, key) for key in
+                ('name', 'timezone', 'consent_live', 'consent_recordings', 'consent_training', 'notes')}
+        return self._request('PATCH', f'customers/{int(customer.id)}', CustomerOut, json=body)

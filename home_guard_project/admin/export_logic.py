@@ -4,6 +4,8 @@ import re
 
 
 def validate_export(name, formats, split):
+    if len(name) > 120:
+        return 'Use 120 characters or fewer for the export name.'
     if not re.fullmatch(r'[a-z0-9_-]+', name):
         return 'Use lowercase letters, numbers, underscores or hyphens for the export name.'
     if not formats or not set(formats) <= {'yolo','vlm_jsonl','clips'}:

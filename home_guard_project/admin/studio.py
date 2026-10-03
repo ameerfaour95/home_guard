@@ -3,7 +3,8 @@ from PySide6.QtGui import QDesktopServices, QColor, QFont
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QStackedWidget, QApplication, QStyledItemDelegate, QSizePolicy
 from .workers import TaskRunner
 from .backend import AuthError, UnsupportedError
-from .formatting import local_time
+from .formatting import local_time, humanise, export_warning
+import json
 from .theme import PALETTES
 from .widgets.common import label, button, Skeleton, EmptyState
 from .widgets.data_table import RowsModel, data_table
@@ -62,7 +63,7 @@ class StudioScreen(QWidget):
         filters.addWidget(self.filter_table,1)
         self.filter_table.selectionModel().currentRowChanged.connect(self.count_filter)
         self.filter_table.doubleClicked.connect(self.open_filter)
-        action = QHBoxLayout(); action.addWidget(label('Counts are checked on demand. “1+” means more matches are available.','muted')); action.addStretch()
+        action = QHBoxLayout(); action.addWidget(label('Exact totals are checked on selection. Very large results are capped at 10,000.','muted')); action.addStretch()
         action.addWidget(button('Open in Review',self.open_filter,'primary')); filters.addLayout(action)
         self.tabs.addTab(filters_page,'Saved filters')
         collections_page = QWidget(); collections = QVBoxLayout(collections_page); collections.setContentsMargins(0,12,0,0); collections.setSpacing(12)
@@ -79,6 +80,7 @@ class StudioScreen(QWidget):
         self.open_collection_button = button('Open selected collection',self.open_collection,'link')
         collections.addWidget(self.open_collection_button,alignment=Qt.AlignmentFlag.AlignLeft)
         self.tabs.addTab(collections_page,'Collections')
+        self.tabs.setTabVisible(1, role != 'support')
         history = QWidget(); exports = QVBoxLayout(history); exports.setContentsMargins(0,12,0,0); exports.setSpacing(12)
         exports.addWidget(label('Versioned datasets','section'))
         exports.addWidget(label('Each export freezes its source events, saved evidence and household split.','muted'))
@@ -88,12 +90,15 @@ class StudioScreen(QWidget):
         for i,w in enumerate([280,120,85,80,160,200]): self.export_table.setColumnWidth(i,w)
         self.export_table.setItemDelegateForColumn(1,StateDelegate(theme,self.export_table)); exports.addWidget(self.export_table,1)
         self.export_detail = label('Select an export to see its manifest and storage path.','muted',True); exports.addWidget(self.export_detail)
+        self.manifest_detail = label('', 'muted', True); exports.addWidget(self.manifest_detail)
+        self.manifest_data = None
         actions = QHBoxLayout(); self.copy = button('Copy S3 path',self.copy_path); self.manifest = button('Open manifest',self.open_manifest)
         self.copy.setEnabled(False); self.manifest.setEnabled(False); actions.addWidget(self.copy); actions.addWidget(self.manifest); actions.addStretch(); exports.addLayout(actions)
         self.export_table.selectionModel().currentRowChanged.connect(self.export_selected)
         self.tabs.addTab(history,'Export history'); self.tabs.setTabVisible(2,role != 'support')
         self.runner = TaskRunner(self); self.runner.finished.connect(self.loaded)
         self.count_runner = TaskRunner(self); self.count_runner.finished.connect(self.count_loaded)
+        self.manifest_runner = TaskRunner(self); self.manifest_runner.finished.connect(self.manifest_loaded)
         self.poll = QTimer(self); self.poll.setInterval(15000); self.poll.timeout.connect(self.poll_exports)
 
     def showEvent(self,event):
@@ -112,7 +117,7 @@ class StudioScreen(QWidget):
         self.counts.clear()
         self.refresh_button.setEnabled(False)
         def fetch():
-            return self.backend.saved_filters(),self.backend.collections(),self.backend.exports() if self.role != 'support' else []
+            return self.backend.saved_filters(),self.backend.collections() if self.role != 'support' else [],self.backend.exports() if self.role != 'support' else []
         self.runner.start(fetch)
 
     def loaded(self,result,error):
@@ -198,9 +203,12 @@ class StudioScreen(QWidget):
 
     def export_selected(self,*_):
         e = self.current_export()
+        self.manifest_detail.clear(); self.manifest_data = None
         self.copy.setEnabled(bool(e and e.s3_prefix)); self.manifest.setEnabled(bool(e and e.manifest_url))
         if e:
-            self.export_detail.setText(e.error or e.s3_prefix or 'Cloud is preparing this dataset. This view refreshes every 15 seconds.')
+            detail = e.error or e.s3_prefix or 'Cloud is preparing this dataset. This view refreshes every 15 seconds.'
+            detail += f'\nDownload for training · Ask an administrator to run: manage export-download {e.id} --dest DIR'
+            self.export_detail.setText(detail)
 
     def copy_path(self):
         e = self.current_export()
@@ -208,9 +216,31 @@ class StudioScreen(QWidget):
 
     def open_manifest(self):
         e = self.current_export()
-        if e and e.manifest_url:
-            url = QUrl(e.manifest_url)
-            if url.scheme() in ('https','http'): QDesktopServices.openUrl(url)
+        if e and e.manifest_url and not self.manifest_runner.busy:
+            self.manifest_pending = e.id
+            self.manifest_detail.setText('Opening manifest…')
+            def fetch():
+                current = self.backend.export(e.id)
+                return json.loads(self.backend.media_bytes(current.manifest_url))
+            self.manifest_runner.start(fetch)
+
+    def manifest_loaded(self, data, error):
+        current = self.current_export()
+        if not current or current.id != self.manifest_pending: return
+        if error:
+            self.manifest_detail.setText(str(error))
+            if isinstance(error, AuthError): self.session_expired.emit()
+            return
+        self.manifest_data = data
+        lines = [f'Manifest · schema v{data.get("schema_version", "—")}']
+        for kind, counts in data.get('counts', {}).items():
+            def describe(value):
+                return ', '.join(f'{v} {humanise(k).lower()}' for k,v in value.items()) if isinstance(value,dict) else str(value)
+            lines.append({'vlm':'VLM', 'yolo':'YOLO'}.get(kind,humanise(kind))+' · '+' / '.join(f'{dict(train="Training",val="Validation",test="Test").get(k,k)}: {describe(v)}' for k,v in counts.items()))
+        lines.append('Warnings: '+(' '.join(export_warning(w) for w in data.get('warnings', [])) or 'None'))
+        if 'vlm' in data.get('counts', {}):
+            lines.append('VLM files: vlm/{train,val,test}.jsonl + vlm/dataset_info.json')
+        self.manifest_detail.setText('\n'.join(lines))
 
     def poll_exports(self):
         if self.tabs.currentIndex() == 2 and self.role != 'support' and any(e.state in ('queued','running') for e in self.exports): self.refresh()

@@ -290,7 +290,7 @@ def test_expired_recording_retains_ai_record(widgets, wait):
     wait(lambda: view.recording is not None and not view.evidence_runner.busy)
     assert view.recording.completeness.expired
     assert not view.player.play.isEnabled()
-    assert view.player.error.text() == 'Recording expired or unavailable.'
+    assert view.player.error.text() == 'No copy of this video remains.'
     assert 'Fallback: no model ran' in [w.text() for w in view.record.findChildren(QLabel)]
 
 

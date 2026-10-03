@@ -1,7 +1,7 @@
 import json
 from dataclasses import asdict
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QSplitter, QPlainTextEdit, QStackedWidget, QSizePolicy
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QSplitter, QPlainTextEdit, QStackedWidget, QSizePolicy, QComboBox
 from .widgets.common import label, button, Skeleton, EmptyState
 from .widgets.data_table import RowsModel, data_table
 from .workers import TaskRunner
@@ -10,8 +10,27 @@ from .formatting import local_time
 
 
 def action_words(action):
-    return {'recording.access':'Viewed a recording','artifact.access':'Opened saved evidence','collection.create':'Created a collection',
-            'export.create':'Created a training export','event.review':'Reviewed an event','auth.login':'Signed in'}.get(action,action.replace('.',' ').replace('_',' ').capitalize())
+    return {'recording_access':'Viewed a recording','artifact_access':'Opened saved evidence','collection_create':'Created a collection',
+            'collection_add':'Added collection events', 'collection_remove':'Removed collection events',
+            'export_create':'Created a training export','event_review':'Reviewed an event','auth_login':'Signed in',
+            'dev_seed':'Prepared local sample data', 'event_view':'Opened an event', 'customer_update':'Updated a customer',
+            'thumbnail_access':'Viewed a preview', 'export_view':'Opened an export'}.get(action.replace('.','_'),action.replace('.',' ').replace('_',' ').capitalize())
+
+
+class ActionFilter(QComboBox):
+    def __init__(self):
+        super().__init__(); self.addItem('All actions', '')
+        for key in ('recording_access','artifact_access','event_view','event_review','collection_create',
+                    'collection_add','collection_remove','export_create','export_view','auth_login','customer_update'):
+            self.addItem(action_words(key), key)
+
+    def text(self): return self.currentData() or ''
+
+    def setText(self, value):
+        if self.findData(value) < 0: self.addItem(action_words(value), value)
+        self.setCurrentIndex(self.findData(value))
+
+    def clear(self): self.setCurrentIndex(0)
 
 
 class AuditScreen(QWidget):
@@ -23,9 +42,12 @@ class AuditScreen(QWidget):
         box = QVBoxLayout(self); box.setContentsMargins(32,24,32,20); box.setSpacing(16)
         box.addWidget(label('Audit','title')); box.addWidget(label('A record of staff access and changes across Home Guard.','muted'))
         filters = QHBoxLayout(); self.filters = {}
-        for key,placeholder in [('staff','Staff name or email'),('customer_id','Customer ID'),('action','Action · e.g. recording.access')]:
-            edit = QLineEdit(); edit.setPlaceholderText(placeholder); edit.setAccessibleName(placeholder)
-            edit.returnPressed.connect(self.reload); self.filters[key] = edit; filters.addWidget(edit)
+        for key,placeholder in [('staff','Staff ID or email'),('customer_id','Customer ID'),('action','Action')]:
+            edit = ActionFilter() if key == 'action' else QLineEdit()
+            if key != 'action':
+                edit.setPlaceholderText(placeholder); edit.returnPressed.connect(self.reload)
+            edit.setAccessibleName(placeholder)
+            self.filters[key] = edit; filters.addWidget(edit, 1)
         filters.addWidget(button('Apply filters',self.reload)); filters.addWidget(button('Reset',self.reset,'link')); box.addLayout(filters)
         self.message = label('Loading audit…','muted',True); box.addWidget(self.message)
         self.model = RowsModel([('Time · UTC',lambda a:local_time(a.ts,'UTC')),('Staff',lambda a:a.staff),('Action',lambda a:action_words(a.action)),
@@ -107,5 +129,5 @@ class AuditScreen(QWidget):
     def select(self,current,previous):
         if not current.isValid(): return
         entry = self.model.items[current.row()]; self.title.setText(f'Entry #{entry.id}')
-        self.details.setText(f'{action_words(entry.action)}\n{entry.staff}\n{local_time(entry.ts,"UTC")} UTC\n\n{entry.reason}')
+        self.details.setText(f'{action_words(entry.action)}\n{entry.staff}\n{local_time(entry.ts,"UTC")}\n\n{entry.reason}')
         self.json.setPlainText(json.dumps(asdict(entry),indent=2,default=str,ensure_ascii=False)); self.drawer.show()

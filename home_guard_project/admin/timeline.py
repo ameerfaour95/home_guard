@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QCo
     QHeaderView, QAbstractItemView, QStackedWidget, QDialog, QDateTimeEdit, QDialogButtonBox, QSizePolicy)
 from .backend import AuthError, BackendError
 from PySide6.QtGui import QPixmap
-from .formatting import utcnow, local_time
+from .formatting import utcnow, local_time, camera_name
 from .event_logic import KINDS
 from .timeline_model import TimelineModel, TimelineDelegate
 from .workers import TaskRunner
@@ -17,9 +17,9 @@ class TimelineScreen(QWidget):
     event_requested = Signal(int)
     session_expired = Signal()
 
-    def __init__(self, backend, theme='dark'):
+    def __init__(self, backend, theme='dark', role='admin'):
         super().__init__()
-        self.backend = backend
+        self.backend, self.role = backend, role
         self.customer_id, self.zone, self.cursor = None, 'UTC', None
         self.start, self.end = self.now()-timedelta(hours=24), self.now()
         self.cell = None
@@ -129,7 +129,12 @@ class TimelineScreen(QWidget):
         if self.cell:
             camera, hour = self.cell
             filters['camera'] = camera; start, end = max(start, hour), min(end, hour+timedelta(hours=1))
-        return dict(filters, filter=self.saved_filter, customer_id=self.customer_id, from_utc=start.isoformat(), to_utc=end.isoformat(), q=self.search.text().strip() or None)
+        if self.role != 'labeler' and '/' in (filters.get('camera') or ''):
+            filters['site'], filters['camera'] = filters['camera'].split('/', 1)
+        query = dict(filters, filter=self.saved_filter, from_utc=start.isoformat(), to_utc=end.isoformat())
+        if self.role != 'labeler':
+            query.update(customer_id=self.customer_id, q=self.search.text().strip() or None)
+        return query
 
     def reload(self, *_):
         if hasattr(self, 'thumbnails'): self.thumbnails.schedule()
@@ -196,7 +201,9 @@ class TimelineScreen(QWidget):
             return
         key = self.customer_id, self.start, self.end
         self.density_pending = key
-        self.density_runner.start(lambda: self.backend.density(customer_id=key[0], from_utc=key[1].isoformat(), to_utc=key[2].isoformat()))
+        query = dict(from_utc=key[1].isoformat(), to_utc=key[2].isoformat())
+        if self.role != 'labeler': query['customer_id'] = key[0]
+        self.density_runner.start(lambda: self.backend.density(**query))
 
     def density_loaded(self, events, error):
         if self.density_pending != (self.customer_id, self.start, self.end):
@@ -208,11 +215,12 @@ class TimelineScreen(QWidget):
         combo = self.filters['camera']; selected = combo.currentData(); combo.blockSignals(True)
         combo.clear(); combo.addItem('All cameras', None)
         for camera in sorted({e.camera for e in events.rows}):
-            combo.addItem(camera, camera)
+            combo.addItem(camera_name(camera), camera)
+            combo.setItemData(combo.count()-1, camera, Qt.ItemDataRole.ToolTipRole)
         combo.setCurrentIndex(max(0, combo.findData(selected))); combo.blockSignals(False)
 
     def filter_cell(self, camera, hour):
-        self.cell = camera, hour; self.clear_cell.setText(f'{camera} · {local_time(hour, self.zone)[13:18]}  ×')
+        self.cell = camera, hour; self.clear_cell.setText(f'{camera_name(camera)} · {local_time(hour, self.zone)[13:18]}  ×')
         self.clear_cell.show(); self.reload()
 
     def reset_cell(self):

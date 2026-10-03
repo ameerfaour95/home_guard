@@ -2,7 +2,7 @@ from difflib import SequenceMatcher
 from PySide6.QtCore import Qt, QStringListModel, Signal, QEvent
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QLineEdit, QListView
 from .common import label
-from ..formatting import site_name
+from ..formatting import site_name, camera_name
 
 
 class CommandPalette(QDialog):
@@ -28,7 +28,10 @@ class CommandPalette(QDialog):
         if role != 'labeler':
             self.entries += [(f'{c.name}   ·   Customer', c.id, '') for c in customers]
             self.entries += [(f'{site_name(d.site)}   ·   {d.device_id}   ·   {d.customer_name}', d.customer_id, d.device_id) for d in devices]
-        self.entries += [(f'{name}   ·   Camera', cid, 'camera:'+name) for name,cid in cameras]
+        if role != 'labeler':
+            self.entries += [(f'{camera_name(name)}   ·   Camera', cid, 'camera:'+name) for name,cid in cameras]
+        else:
+            self.search.setPlaceholderText('Find a command or saved filter…')
         self.entries += [('Filter: '+f.title, 0, 'filter:'+f.key) for f in filters]
         commands = ['Go to Studio', 'Go to Review']
         if role != 'labeler': commands += ['Go to Fleet']

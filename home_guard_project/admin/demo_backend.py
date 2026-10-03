@@ -146,3 +146,7 @@ class DemoBackend(DemoStudio):
             return path.read_bytes()
         except OSError:
             raise ServerError() from None
+
+    def index_problems(self):
+        from .models import IndexProblem
+        return [IndexProblem('synthetic/meta/recording.meta.json', 'Invalid metadata: missing start time', datetime.now(timezone.utc))]

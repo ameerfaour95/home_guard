@@ -8,10 +8,15 @@ from pathlib import Path
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--demo', action='store_true')
-    parser.add_argument('--server', default='http://127.0.0.1:8000')
-    parser.add_argument('--theme', choices=['dark', 'light'], default='dark')
+    parser.add_argument('--server')
+    parser.add_argument('--theme', choices=['dark', 'light'])
     parser.add_argument('--smoke-test', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
+    from home_guard_project.admin.prefs import Preferences
+    prefs = Preferences()
+    args.server = args.server or prefs.get('server') or 'http://127.0.0.1:8000'
+    args.theme = args.theme or prefs.get('theme') or 'dark'
+    if args.theme not in ('dark', 'light'): args.theme = 'dark'
     if args.smoke_test:
         os.environ['QT_QPA_PLATFORM'] = 'offscreen'
     from PySide6.QtCore import QTimer, QThreadPool
@@ -35,7 +40,7 @@ def main():
     except BackendError as error:
         startup_error = error
         backend = UnavailableBackend(args.server, error)
-    window = AdminWindow(backend, demo=args.demo, theme=args.theme)
+    window = AdminWindow(backend, demo=args.demo, theme=args.theme, prefs=prefs)
     if startup_error:
         window.signin.error.setText(str(startup_error))
     install_exception_hook(lambda message: window.statusBar().showMessage(message))
@@ -138,8 +143,9 @@ def main():
         smoke_timer.setInterval(100); smoke_timer.timeout.connect(verify); smoke_timer.start()
     result = app.exec()
     drained = shutdown_workers()
-    if drained and hasattr(backend, 'close'):
-        backend.close()
+    if drained:
+        for client in {backend, window.backend, window.configured_backend, *window.retired_backends}:
+            if hasattr(client, 'close'): client.close()
     if not drained:
         # Qt destroys the global pool with an unbounded join. All jobs have
         # cancellation set; enforce the process deadline if a socket is stuck.

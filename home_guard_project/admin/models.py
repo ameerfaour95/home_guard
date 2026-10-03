@@ -16,6 +16,13 @@ EventKind = Literal['alert', 'false_positive', 'paused', 'owner_feedback', 'trig
 
 
 @dataclass
+class IndexProblem:
+    s3_key: str
+    reason: str
+    seen_utc: datetime
+
+
+@dataclass
 class StaffOut:
     id: int
     email: str
@@ -116,6 +123,7 @@ class EventSummary:
     flagged: bool
     thumbnail_url: str | None
     timezone: str = field(default='UTC', kw_only=True)
+    display_name: str | None = field(default=None, kw_only=True)
 
 
 @dataclass

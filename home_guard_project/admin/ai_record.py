@@ -3,7 +3,7 @@ from PySide6.QtCore import Qt, Signal, QTimer, QPoint
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QPlainTextEdit, QApplication
 from .event_logic import decision, ai_status, VERDICTS
-from .formatting import local_time
+from .formatting import local_time, delivery_text
 from .widgets.common import label, button
 
 
@@ -91,8 +91,7 @@ class AiRecord(QScrollArea):
             add(TextDisclosure('Full prompt', run.prompt or 'No prompt was saved.'))
         if self.role in ('admin', 'support'):
             dispatch = event.dispatch
-            sent = 'Sent' if dispatch and dispatch.sent is True else 'Not sent' if dispatch and dispatch.sent is False else 'Not recorded'
-            self.dispatch_label = label(f'Delivery  ·  {sent}'+(f' via {dispatch.channel}' if dispatch and dispatch.channel else ''), 'muted', True)
+            self.dispatch_label = label(delivery_text(dispatch), 'muted', True)
             add(self.dispatch_label)
         add(label('OWNER FEEDBACK', 'eyebrow'))
         if not event.feedback:
