@@ -8785,8 +8785,14 @@ Add before the final `else:` (the settings branch):
                             back = d.get("house_before") if camera is None else (d.get("own_before") or ["default"])
                             api.set_alert_types(camera, back)
                         else:
-                            back = d.get("house_before") if camera is None else (d.get("own_before") or "default")
-                            api.set_sensitivity(camera, back)
+                            # set_sensitivity MERGES into a camera's own values, so clear first, then put back the
+                            # exact earlier values (or leave it on the house defaults when it had none).
+                            if camera is None:
+                                api.set_sensitivity(None, d.get("house_before"))
+                            else:
+                                api.set_sensitivity(camera, "default")
+                                if d.get("own_before"):
+                                    api.set_sensitivity(camera, d["own_before"])
                         _issue(ctx, r.tool, DONE, camera or "house",
                                {"camera": camera or "", "old": d.get("new"), "new": d.get("old")})
 ```
