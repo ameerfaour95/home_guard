@@ -47,6 +47,18 @@ class AliasesTest(unittest.TestCase):
         remap_aliases({"main_entrance": "back_door", "back_door": "main_entrance"}, self.path)
         self.assertEqual(load_aliases(self.path), {"back_door": ["entrance"], "main_entrance": ["back"]})
 
+    def test_damaged_file_reads_as_empty(self) -> None:
+        with open(self.path, "wb") as f:
+            f.write(b"\xff\xfe\x00bad")
+        self.assertEqual(load_aliases(self.path), {})
+
+    def test_remap_renamed_entry_beats_a_stale_one(self) -> None:
+        for text in ("a: [x]\nb: [y]\n", "b: [y]\na: [x]\n"):
+            with open(self.path, "w", encoding="utf-8") as f:
+                f.write(text)
+            remap_aliases({"a": "b"}, self.path)
+            self.assertEqual(load_aliases(self.path), {"b": ["x"]})
+
     def test_apply_changes_carries_aliases_on_rename(self) -> None:
         cameras = os.path.join(self.dir, "cameras.yaml")
         with open(cameras, "w", encoding="utf-8") as f:

@@ -27,7 +27,7 @@ def load_aliases(path: str = ALIASES_PATH) -> Dict[str, List[str]]:
     try:
         with open(path, encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
-    except (OSError, yaml.YAMLError):
+    except (OSError, ValueError, yaml.YAMLError):
         return {}
     if not isinstance(data, dict):
         return {}
@@ -69,6 +69,10 @@ def remap_aliases(renames: Dict[str, str], path: str = ALIASES_PATH) -> None:
     if not data or not renames:
         return
     out: Dict[str, List[str]] = {}
+    for name, aliases in data.items():          # renamed entries first: they win a name clash
+        if name in renames:
+            out[renames[name]] = aliases
     for name, aliases in data.items():
-        out[renames.get(name, name)] = aliases
+        if name not in renames and name not in out:
+            out[name] = aliases
     _save(out, path)
