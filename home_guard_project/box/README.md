@@ -284,6 +284,47 @@ uv run aws s3 cp s3://security-camera-project-v1/dataset_house2/_status/heartbea
 
 On the box itself, without network: `uv run python -m home_guard_project.box status`.
 
+## Scoring the AI's prompt against our tags
+
+`eval_prompt.py` gives one repeatable score for the prompt the box sends to the AI, over every tagged home clip (about 220). It runs in two steps, because only the laptop can read `tagging/` on S3 and only the box needs the OpenAI key.
+
+**1. On the laptop: fetch the clips' frames.** This lists the `ameer_house*` tagging batches, finds each clip's video, and saves the same 5 evenly spaced frames the box would send. Re-running it fetches only what is missing; `--limit N` fetches at most N new clips, and `--batches` picks other batches.
+
+```bash
+env -u SSLKEYLOGFILE -u PYTHONSTARTUP AWS_CA_BUNDLE=<bundle.pem> \
+  .venv/Scripts/python.exe -m home_guard_project.box.eval_prompt prepare --out eval_set
+```
+
+Python can only reach S3 from this laptop with that prefix. The antivirus sets `SSLKEYLOGFILE`, which crashes Python's TLS ("no OPENSSL_Applink"), and it intercepts TLS with a root certificate that is in the Windows store but not in Python's own list ("CERTIFICATE_VERIFY_FAILED"). Build `bundle.pem` once from certifi's bundle plus the Windows `ROOT` and `CA` stores (`ssl.enum_certificates`, converted with `ssl.DER_cert_to_PEM_cert`) and point `AWS_CA_BUNDLE` at it. Never turn certificate checks off. The box does not need any of this.
+
+**2. Copy the folder to the box.**
+
+```bash
+scp -i ~/.ssh/homeguard_box -r eval_set <user>@<box-ip>:C:/home_guard/eval_set
+```
+
+**3. On the box: ask the AI and print the score.** It uses the OpenAI key in `api_key.env` and costs one call per clip. Each clip is told its own time of day, taken from its file name, so the score does not depend on when you run it.
+
+```bash
+.venv\Scripts\python.exe -m home_guard_project.box.eval_prompt run --dir eval_set
+.venv\Scripts\python.exe -m home_guard_project.box.eval_prompt run --dir eval_set --prompt-file new_prompt.txt
+.venv\Scripts\python.exe -m home_guard_project.box.eval_prompt summary --dir eval_set --tag <tag>
+```
+
+`--prompt-file` tries a new wording without touching `inference.py`; `{camera_name}` and `{local_time_str}` in the file are filled in. Results go to `eval_set/results/<tag>.jsonl`, `.csv` and `.summary.json`, where the tag is the prompt version, or `file-<hash>` for a prompt file. A stopped run continues where it left off, and a clip that failed is asked again. `--fake` checks the setup without calling the AI.
+
+What the score means:
+
+| Line | Meaning |
+|---|---|
+| alerts caught | Clips we tagged `[alert]` that the AI called suspicious or escalation |
+| escalation share | Of those, how many it called escalation |
+| normal flagged | Ordinary clips the AI called suspicious or escalation (false alarms) |
+| empty exact | Empty scenes where the AI wrote exactly "No special activity." |
+| padding | Summaries that mention what is absent or the background ("without", "no one", "visible", "background", "parked") |
+| words per summary | The AI's length against ours |
+| errors | Clips the AI could not answer; they are left out of the other lines |
+
 ## Troubleshooting
 
 | Problem | What to do |
