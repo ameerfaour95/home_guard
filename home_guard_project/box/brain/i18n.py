@@ -195,6 +195,9 @@ TEMPLATES: Dict[str, Dict[str, str]] = {
     "tag_expired": {"en": "That tag request expired; tap Other… again.",
                     "he": "בקשת התיוג פגה; לחצו שוב על אחר…",
                     "ar": "انتهت صلاحية طلب الوسم؛ اضغط على غير ذلك… مرة أخرى."},
+    "tag_ask_failed": {"en": "Could not ask for the tag right now; tap Other… again.",
+                       "he": "לא הצלחתי לבקש את התיוג כרגע; לחצו שוב על אחר…",
+                       "ar": "تعذّر طلب الوسم الآن؛ اضغط على غير ذلك… مرة أخرى."},
 }
 
 

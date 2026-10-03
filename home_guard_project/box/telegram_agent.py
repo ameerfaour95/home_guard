@@ -26,7 +26,7 @@ import time
 import urllib.error
 from collections import deque
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from . import telegram_notify
 from .agent import UNAVAILABLE_REPLY, AgentContext, OwnerAgent, make_chat_model
@@ -102,43 +102,60 @@ def box_language() -> str:
 
 
 class PendingTags:
-    """Who tapped "Other…" on which alert: that person's next message in that chat is the tag.
+    """Who tapped "Other…" on which alert: that person's words in that chat become the tag.
 
+    A person may wait on several alerts at once (one entry per chat, user and alert). A text is
+    taken only when it is meant for a wait: a reply to that wait's question or to its alert's
+    message goes to that alert; a text that replies to nothing goes to the newest wait, once - the
+    other waits then take only a reply, so a later question to the assistant is never swallowed.
     Kept as JSON (``<feedback_dir>/.pending_tags.json``) so a restart does not lose a wait. A wait
-    ends after *ttl* seconds; the question it asked is remembered for a day, so a late reply to it
-    can be told that it expired. Never raises: a damaged file is an empty store.
+    ends after *ttl* seconds; its question is remembered for a day with who was asked, so that
+    person's late reply can be told that it expired. Never raises: a damaged file is an empty store.
     """
 
     KEEP_EXPIRED_SEC = 86400.0
     KEEP_EXPIRED_MAX = 100
+    MAX_PROMPTS = 5
 
     def __init__(self, path: str, ttl: float = TAG_WAIT_SEC) -> None:
         self.path, self.ttl = path, float(ttl)
         data = _read_json(path)
         pending = data.get("pending") if isinstance(data.get("pending"), dict) else {}
         expired = data.get("expired_prompts") if isinstance(data.get("expired_prompts"), dict) else {}
-        self._pending: Dict[str, Dict[str, Any]] = {
-            str(k): v for k, v in pending.items() if isinstance(v, dict) and self._valid(v)}
-        self._expired: Dict[str, float] = {}
-        for key, ts in expired.items():
+        self._pending: Dict[str, Dict[str, Any]] = {}
+        for entry in pending.values():
+            if isinstance(entry, dict) and self._valid(entry):
+                entry["prompt_ids"] = self._prompt_ids(entry)
+                self._pending[self._key(entry["chat_id"], entry["user_id"], entry["alert_id"])] = entry
+        self._expired: Dict[str, Dict[str, Any]] = {}
+        for key, value in expired.items():
+            # {"ts", "user_id"}; an older file kept only a time: whose question it was is unknown, so drop it.
+            if not isinstance(value, dict) or value.get("user_id") is None:
+                continue
             try:
-                stamp = float(ts)
+                stamp = float(value.get("ts"))
             except (TypeError, ValueError, OverflowError):
                 continue
             if math.isfinite(stamp):
-                self._expired[str(key)] = stamp
+                self._expired[str(key)] = {"ts": stamp, "user_id": str(value["user_id"])}
 
     @staticmethod
     def _valid(entry: Dict[str, Any]) -> bool:
         try:
-            return isinstance(entry.get("alert_id"), str) and bool(entry["alert_id"]) and math.isfinite(
-                float(entry.get("ts")))
+            return (isinstance(entry.get("alert_id"), str) and bool(entry["alert_id"])
+                    and entry.get("chat_id") is not None and entry.get("user_id") is not None
+                    and math.isfinite(float(entry.get("ts"))))
         except (TypeError, ValueError, OverflowError):
             return False
 
     @staticmethod
-    def _key(chat_id: Any, user_id: Any) -> str:
-        return f"{chat_id}:{user_id}"
+    def _prompt_ids(entry: Dict[str, Any]) -> List[str]:
+        ids = entry.get("prompt_ids") if isinstance(entry.get("prompt_ids"), list) else []
+        return [str(i) for i in ids if i is not None]
+
+    @staticmethod
+    def _key(chat_id: Any, user_id: Any, alert_id: str) -> str:
+        return f"{chat_id}:{user_id}:{alert_id}"
 
     def _save(self) -> None:
         try:
@@ -151,38 +168,78 @@ class PendingTags:
         for key, entry in list(self._pending.items()):
             if now - float(entry["ts"]) > self.ttl:
                 del self._pending[key]
-                if entry.get("prompt_id") is not None:
-                    self._expired[f"{entry.get('chat_id')}:{entry.get('prompt_id')}"] = now
+                for prompt_id in entry["prompt_ids"]:
+                    self._expired[f"{entry['chat_id']}:{prompt_id}"] = {"ts": now, "user_id": str(entry["user_id"])}
                 changed = True
-        keep = sorted(((k, v) for k, v in self._expired.items() if now - v <= self.KEEP_EXPIRED_SEC),
-                      key=lambda kv: kv[1])[-self.KEEP_EXPIRED_MAX:]
+        keep = sorted(((k, v) for k, v in self._expired.items() if now - v["ts"] <= self.KEEP_EXPIRED_SEC),
+                      key=lambda kv: kv[1]["ts"])[-self.KEEP_EXPIRED_MAX:]
         if len(keep) != len(self._expired):
             self._expired = dict(keep)
             changed = True
         return changed
 
+    def _mine(self, chat_id: Any, user_id: Any) -> List[Tuple[str, Dict[str, Any]]]:
+        """This person's waits in this chat, newest first."""
+        found = [(k, e) for k, e in self._pending.items()
+                 if e["chat_id"] == str(chat_id) and e["user_id"] == str(user_id)]
+        return sorted(reversed(found), key=lambda kv: float(kv[1]["ts"]), reverse=True)   # a tie: the later added
+
     def add(self, chat_id: Any, user_id: Any, alert_id: str, now: float, prompt_id: Optional[int] = None) -> None:
         self._purge(now)
-        self._pending[self._key(chat_id, user_id)] = {"chat_id": str(chat_id), "alert_id": str(alert_id),
-                                                      "ts": float(now), "prompt_id": prompt_id}
+        key = self._key(chat_id, user_id, alert_id)
+        # "Other…" on the same alert again: a reply to either of its questions still counts.
+        prompts = self._prompt_ids(self._pending.pop(key, None) or {})     # popped: it is the newest now
+        if prompt_id is not None:
+            prompts.append(str(prompt_id))
+        self._pending[key] = {"chat_id": str(chat_id), "user_id": str(user_id), "alert_id": str(alert_id),
+                              "ts": float(now), "prompt_ids": prompts[-self.MAX_PROMPTS:], "reply_only": False}
         self._save()
 
-    def take(self, chat_id: Any, user_id: Any, now: float) -> Optional[str]:
-        """The alert *user_id* is tagging in *chat_id*, removed from the store; None when nothing waits."""
+    def take(self, chat_id: Any, user_id: Any, now: float, reply_to: Any = None,
+             reply_alert: Optional[str] = None) -> Optional[str]:
+        """The alert a text from *user_id* in *chat_id* tags, removed from the store; None: not a tag.
+
+        *reply_to* is the id of the message the text replies to (None: it replies to nothing) and
+        *reply_alert* the alert that message carried, if any.
+        """
         changed = self._purge(now)
-        entry = self._pending.pop(self._key(chat_id, user_id), None)
-        if changed or entry is not None:
+        mine = self._mine(chat_id, user_id)
+        chosen = None
+        if reply_to is None:
+            open_waits = [kv for kv in mine if not kv[1].get("reply_only")]
+            if open_waits:
+                chosen = open_waits[0]
+                for key, entry in mine:            # the others now take only a reply to their own question
+                    if key != chosen[0] and not entry.get("reply_only"):
+                        entry["reply_only"] = True
+        else:
+            chosen = next((kv for kv in mine if str(reply_to) in kv[1]["prompt_ids"]), None)
+            if chosen is None and reply_alert:
+                chosen = next((kv for kv in mine if kv[1]["alert_id"] == str(reply_alert)), None)
+        if chosen is not None:
+            del self._pending[chosen[0]]
+        if changed or chosen is not None:
             self._save()
-        return str(entry["alert_id"]) if entry else None
+        return str(chosen[1]["alert_id"]) if chosen else None
 
     def cancel(self, chat_id: Any, user_id: Any) -> None:
-        if self._pending.pop(self._key(chat_id, user_id), None) is not None:
+        """End every wait of *user_id* in *chat_id*."""
+        mine = self._mine(chat_id, user_id)
+        for key, _ in mine:
+            del self._pending[key]
+        if mine:
             self._save()
 
-    def expired_prompt(self, chat_id: Any, message_id: Any, now: float) -> bool:
-        """True (once) when *message_id* is an "Other…" question whose wait ran out."""
+    def expired_prompt(self, chat_id: Any, message_id: Any, user_id: Any, now: float) -> bool:
+        """True (once) when *message_id* is an "Other…" question to *user_id* whose wait ran out.
+
+        Someone else's reply to that question is not an answer to it: False, and it stays remembered.
+        """
         changed = self._purge(now)
-        found = self._expired.pop(f"{chat_id}:{message_id}", None) is not None
+        key = f"{chat_id}:{message_id}"
+        found = key in self._expired and self._expired[key]["user_id"] == str(user_id)
+        if found:
+            del self._expired[key]
         if changed or found:
             self._save()
         return found
@@ -715,6 +772,25 @@ class TelegramInbox:
                    "user": {"id": sender.get("id"), "is_bot": False, "first_name": name}}
         return self._say(chat_id, f"{name} {ask}", reply_to=reply_to, markup=force, entities=[mention])
 
+    def _undo_tag(self, alert: Dict[str, Any], who: Dict[str, Any], chat_id: str, now: float) -> bool:
+        """Take a tag back: an undo record (the newest answer wins), then the training copy the tag made.
+
+        Each step is tried even when the other fails; False only when nothing at all was undone.
+        """
+        undone = False
+        try:
+            save_feedback(self.feedback_dir, alert, Feedback(verdict="none", note=TAG_UNDONE_NOTE, source="button"),
+                          "", who, chat_id, now, training_dir=self.training_dir, archive_dir=self.archive_dir)
+            undone = True
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Undo record of %s not saved: %s", alert.get("alert_id"), exc)
+        try:
+            if undo_training_tag(alert, "", who, now, self.training_dir) in ("removed", "noted"):
+                undone = True
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Training copy of %s not taken back: %s", alert.get("alert_id"), exc)
+        return undone
+
     def _on_tag_button(self, query: Dict[str, Any], message: Dict[str, Any], chat_id: str, code: str) -> None:
         """``tag:<label>`` and ``tu:<alert_id>``. A tag never pauses or changes a setting, and never raises."""
         lang = self._language()
@@ -729,9 +805,8 @@ class TelegramInbox:
                 alert_id = code[3:]
                 alert = self.index.alert(alert_id) or {"alert_id": alert_id}
                 self._note("owner", "button", _button_text(message, code, tr("undo_button", lang)), who["name"], alert)
-                save_feedback(self.feedback_dir, alert, Feedback(verdict="none", note=TAG_UNDONE_NOTE, source="button"),
-                              "", who, chat_id, now, training_dir=self.training_dir, archive_dir=self.archive_dir)
-                undo_training_tag(alert, "", who, now, self.training_dir)
+                if not self._undo_tag(alert, who, chat_id, now):
+                    raise RuntimeError("nothing was undone")
                 self._answer_callback(query)
                 answered = True
                 self._say(chat_id, tr("tag_undone", lang), reply_to=message.get("message_id"))
@@ -750,10 +825,19 @@ class TelegramInbox:
             alert_id = str(alert["alert_id"])
             self._mark_answered(alert)
             if label == "other":
-                self._answer_callback(query)
-                answered = True
-                resp = self._ask_for_tag(chat_id, sender, message.get("message_id"), lang)
+                try:
+                    resp = self._ask_for_tag(chat_id, sender, message.get("message_id"), lang)
+                except Exception as exc:  # noqa: BLE001 - the owner must learn the question never came
+                    log.warning("Tag question not sent: %s", exc)
+                    answered = True
+                    self._answer_callback(query, tr("tag_ask_failed", lang))
+                    return
                 self.pending.add(chat_id, user_id, alert_id, now, prompt_id=(resp.get("result") or {}).get("message_id"))
+                answered = True                  # the question is out: a lost spinner answer is no failure
+                try:
+                    self._answer_callback(query)
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("Could not stop the button's spinner: %s", exc)
                 return
             self._cancel_tag(chat_id, user_id)
             feedback = Feedback(verdict=verdict_for(label, str(alert.get("label") or "")), owner_label=label,
@@ -774,8 +858,11 @@ class TelegramInbox:
                     log.warning("Could not answer the tag button: %s", exc2)
 
     def _take_tag_text(self, chat_id: str, sender: Dict[str, Any], text: str, message: Dict[str, Any]) -> bool:
-        """True when *text* was handled as the words of an "Other…" tag (or a late reply to its question):
-        then neither agent sees it. A command ("/...") ends the wait and goes on as usual."""
+        """True when *text* was handled as the words of an "Other…" tag (or its asker's late reply to the
+        question): then neither agent sees it. Only a text meant for the wait is taken - one that replies
+        to nothing, to the question, or to the alert's own message; a reply to anything else (another
+        alert, an answer of the assistant) goes to the agent and the wait stays. A command ("/...") ends
+        the waits and goes on as usual."""
         user_id = sender.get("id")
         if text.startswith("/"):
             self._cancel_tag(chat_id, user_id)
@@ -784,11 +871,15 @@ class TelegramInbox:
         taken = False
         try:
             now = self._now()
-            alert_id = self.pending.take(chat_id, user_id, now)
+            replied = (message.get("reply_to_message") or {}).get("message_id")
+            reply_alert = None
+            if replied is not None:
+                replied_alert = self.index.lookup(chat_id, replied)
+                reply_alert = str((replied_alert or {}).get("alert_id") or "") or None
+            alert_id = self.pending.take(chat_id, user_id, now, reply_to=replied, reply_alert=reply_alert)
             who = _who(sender)
             if not alert_id:
-                replied = (message.get("reply_to_message") or {}).get("message_id")
-                if replied is not None and self.pending.expired_prompt(chat_id, replied, now):
+                if replied is not None and self.pending.expired_prompt(chat_id, replied, user_id, now):
                     self._note("owner", "message", text, who["name"])
                     self._say(chat_id, tr("tag_expired", lang), reply_to=message.get("message_id"))
                     return True

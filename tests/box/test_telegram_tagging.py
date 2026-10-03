@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import urllib.error
 import tempfile
 import unittest
 from typing import Any, Dict, List, Optional
@@ -14,7 +15,9 @@ import numpy as np
 from home_guard_project.box.agent import AgentReply
 from home_guard_project.box.alert_clips import encode_frame, write_alert_clip
 from home_guard_project.box.brain.i18n import t
-from home_guard_project.box.feedback import OWNER_LABELS, AlertIndex, Feedback, MuteState, verdict_for
+from home_guard_project.box.feedback import (
+    OWNER_LABELS, AlertIndex, Feedback, MuteState, undo_training_tag, verdict_for,
+)
 from home_guard_project.box.telegram_agent import PendingTags, TelegramInbox, feedback_keyboard, send_alert
 from home_guard_project.box.telegram_notify import TelegramConfig
 
@@ -205,6 +208,23 @@ class PendingTagsTest(unittest.TestCase):
         pending.cancel(CHAT, 42)
         self.assertIsNone(pending.take(CHAT, 42, NOW + 1))
 
+    def test_a_reply_picks_its_own_wait(self) -> None:
+        pending = PendingTags(self.path)
+        pending.add(CHAT, 42, "a", NOW, prompt_id=901)
+        pending.add(CHAT, 42, "b", NOW + 1, prompt_id=902)
+        self.assertIsNone(pending.take(CHAT, 42, NOW + 2, reply_to=555))              # some other message
+        self.assertEqual(pending.take(CHAT, 42, NOW + 2, reply_to=555, reply_alert="a"), "a")
+        self.assertEqual(pending.take(CHAT, 42, NOW + 3, reply_to=902), "b")
+        self.assertIsNone(pending.take(CHAT, 42, NOW + 4))
+
+    def test_the_expired_prompt_belongs_to_its_user(self) -> None:
+        pending = PendingTags(self.path, ttl=600)
+        pending.add(CHAT, 42, ALERT_ID, NOW, prompt_id=901)
+        self.assertIsNone(pending.take(CHAT, 42, NOW + 601))
+        self.assertFalse(pending.expired_prompt(CHAT, 901, 43, NOW + 602))
+        self.assertTrue(pending.expired_prompt(CHAT, 901, 42, NOW + 603))
+        self.assertFalse(pending.expired_prompt(CHAT, 901, 42, NOW + 604))         # once
+
     def test_a_damaged_file_is_an_empty_store(self) -> None:
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
         with open(self.path, "w", encoding="utf-8") as f:
@@ -337,7 +357,7 @@ class InboxTaggingTest(unittest.TestCase):
         self.assertEqual(self._saved(), [])
 
         self.clock += 30
-        inbox.handle_update(text(2, "  two kids on bikes  ", reply_to=901))
+        inbox.handle_update(text(2, "  two kids on bikes  ", reply_to=ask["message_id"]))
         (saved,) = self._saved()
         self.assertEqual((saved["owner_label"], saved["owner_text"], saved["verdict"]),
                          ("other", "two kids on bikes", "real_but_wrong"))
@@ -466,6 +486,220 @@ class InboxTaggingTest(unittest.TestCase):
         self.assertTrue(said[1].startswith(t("paused_all", "he", until="")[:10]))
         self.assertEqual(said[2], t("button_unused", "he"))
         self.assertTrue(self.mute.is_muted(NOW + 60, "door"))
+
+
+    # -- review fixes: a tag never swallows a message meant for the assistant ----------------
+    B_ID = "front_1800000100_alert"
+
+    def _remember_b(self) -> None:
+        self.index.remember(CHAT, 88, {"alert_id": self.B_ID, "camera": "front", "label": "normal", "ts": NOW})
+
+    def _prompts(self) -> List[int]:
+        return [c["message_id"] for c in self.tg.sent("sendMessage")
+                if t("tag_ask_text", "en") in c["fields"]["text"]]
+
+    def test_a_reply_to_another_alert_reaches_the_agent_and_the_wait_stays(self) -> None:
+        self._remember_b()
+        agent = FakeAgentV1()
+        inbox = self._inbox(agent)
+        inbox.handle_update(tap(1, "tag:other", 77))
+        inbox.handle_update(text(2, "who is this at the front?", reply_to=88))
+        self.assertEqual(agent.seen, ["who is this at the front?"])
+        self.assertEqual(self._saved(), [])
+        (prompt,) = self._prompts()
+        inbox.handle_update(text(3, "the gardener", reply_to=prompt))   # the wait is still there
+        (saved,) = self._saved()
+        self.assertEqual((saved["alert"]["alert_id"], saved["owner_text"]), (ALERT_ID, "the gardener"))
+
+    def test_a_reply_to_an_unrelated_message_reaches_the_agent(self) -> None:
+        agent = FakeAgentV2()
+        inbox = self._inbox(agent)
+        inbox.handle_update(tap(1, "tag:other", 77))
+        inbox.handle_update(text(2, "and the back door?", reply_to=4321))
+        self.assertEqual(agent.seen, ["and the back door?"])
+        self.assertEqual(self._saved(), [])
+
+    def test_a_reply_to_the_pending_alert_itself_is_the_tag(self) -> None:
+        agent = FakeAgentV1()
+        inbox = self._inbox(agent)
+        inbox.handle_update(tap(1, "tag:other", 77))
+        inbox.handle_update(text(2, "the neighbour", reply_to=77))
+        self.assertEqual(agent.seen, [])
+        self.assertEqual(self._saved()[0]["owner_text"], "the neighbour")
+
+    def test_a_reply_to_the_first_prompt_saves_under_the_first_alert(self) -> None:
+        self._remember_b()
+        inbox = self._inbox(FakeAgentV1())
+        inbox.handle_update(tap(1, "tag:other", 77))
+        inbox.handle_update(tap(2, "tag:other", 88))
+        prompt_a, prompt_b = self._prompts()
+        inbox.handle_update(text(3, "the gardener", reply_to=prompt_a))
+        inbox.handle_update(text(4, "a fox", reply_to=prompt_b))
+        self.assertEqual(sorted((s["alert"]["alert_id"], s["owner_text"]) for s in self._saved()),
+                         [(ALERT_ID, "the gardener"), (self.B_ID, "a fox")])
+
+    def test_a_plain_text_answers_the_newest_wait_only_once(self) -> None:
+        self._remember_b()
+        agent = FakeAgentV1()
+        inbox = self._inbox(agent)
+        inbox.handle_update(tap(1, "tag:other", 77))
+        inbox.handle_update(tap(2, "tag:other", 88))
+        inbox.handle_update(text(3, "a fox"))                       # the newest question: B
+        inbox.handle_update(text(4, "is the door locked?"))         # not a second tag
+        self.assertEqual([(s["alert"]["alert_id"], s["owner_text"]) for s in self._saved()], [(self.B_ID, "a fox")])
+        self.assertEqual(agent.seen, ["is the door locked?"])
+        prompt_a = self._prompts()[0]
+        inbox.handle_update(text(5, "the gardener", reply_to=prompt_a))   # A still takes a reply to its question
+        self.assertEqual(sorted((s["alert"]["alert_id"], s["owner_text"]) for s in self._saved()),
+                         [(ALERT_ID, "the gardener"), (self.B_ID, "a fox")])
+        self.assertEqual(agent.seen, ["is the door locked?"])
+
+    def test_another_users_reply_to_an_expired_prompt_reaches_the_agent(self) -> None:
+        agent = FakeAgentV1()
+        inbox = self._inbox(agent)
+        inbox.handle_update(tap(1, "tag:other", 77))
+        (prompt,) = self._prompts()
+        self.clock += 700
+        inbox.handle_update(text(2, "is the door locked?", sender=OMER, reply_to=prompt))
+        self.assertEqual(agent.seen, ["is the door locked?"])
+        self.assertNotIn(t("tag_expired", "en"), self.tg.texts())
+        inbox.handle_update(text(3, "a delivery", reply_to=prompt))       # Dana's own late reply
+        self.assertEqual(self.tg.texts()[-1], t("tag_expired", "en"))
+        self.assertEqual(agent.seen, ["is the door locked?"])
+
+    def test_an_expired_prompt_keeps_its_user_across_a_restart(self) -> None:
+        self._inbox().handle_update(tap(1, "tag:other", 77))
+        (prompt,) = self._prompts()
+        self.clock += 700
+        self._inbox(FakeAgentV1()).handle_update(text(2, "hi", sender=OMER))      # the purge writes the file
+        agent = FakeAgentV1()
+        inbox = self._inbox(agent)
+        inbox.handle_update(text(3, "who?", sender=OMER, reply_to=prompt))
+        inbox.handle_update(text(4, "a delivery", reply_to=prompt))
+        self.assertEqual(agent.seen, ["who?"])
+        self.assertEqual(self.tg.texts()[-1], t("tag_expired", "en"))
+
+    def test_undo_with_a_corrupt_training_meta_still_records_the_undo_and_says_so(self) -> None:
+        inbox = self._inbox()
+        inbox.handle_update(tap(1, "tag:suspicious", 77))
+        meta_path = None
+        for dirpath, _, names in os.walk(os.path.join(self.training, "meta")):
+            if f"{ALERT_ID}.meta.json" in names:
+                meta_path = os.path.join(dirpath, f"{ALERT_ID}.meta.json")
+        with open(meta_path, "w", encoding="utf-8") as f:
+            f.write("{not json")
+        self.clock += 10
+        inbox.handle_update(tap(2, f"tu:{ALERT_ID}", 902))
+        self.assertEqual([s["note"] for s in self._saved()], ["", "tag undone"])
+        self.assertEqual(self.tg.texts()[-1], "Tag removed.")
+        self.assertFalse(self.tg.sent("answerCallbackQuery")[-1]["fields"].get("text"))
+
+    def test_undo_says_failed_only_when_nothing_was_undone(self) -> None:
+        inbox = self._inbox()
+        inbox.handle_update(tap(1, "tag:suspicious", 77))
+        with mock.patch("home_guard_project.box.telegram_agent.save_feedback", side_effect=OSError("disk full")), \
+                mock.patch("home_guard_project.box.telegram_agent.undo_training_tag", side_effect=OSError("disk")):
+            inbox.handle_update(tap(2, f"tu:{ALERT_ID}", 902))
+        self.assertNotEqual(self.tg.texts()[-1], "Tag removed.")
+        self.assertTrue(self.tg.sent("answerCallbackQuery")[-1]["fields"].get("text"))
+
+    def test_undo_still_removes_the_copy_when_the_record_cannot_be_saved(self) -> None:
+        inbox = self._inbox()
+        inbox.handle_update(tap(1, "tag:suspicious", 77))
+        with mock.patch("home_guard_project.box.telegram_agent.save_feedback", side_effect=OSError("disk full")):
+            inbox.handle_update(tap(2, f"tu:{ALERT_ID}", 902))
+        self.assertIsNone(self._training_meta())
+        self.assertEqual(self.tg.texts()[-1], "Tag removed.")
+
+    def test_when_the_other_question_cannot_be_sent_the_tap_says_so_and_nothing_waits(self) -> None:
+        self.lang = "he"
+        real_post = self.tg.post
+
+        def post(token: str, method: str, fields: Dict[str, str], timeout: float = 15.0) -> Dict[str, Any]:
+            if method == "sendMessage":
+                raise urllib.error.URLError("offline")
+            return real_post(token, method, fields, timeout)
+
+        agent = FakeAgentV1()
+        inbox = self._inbox(agent)
+        inbox._post = post
+        with mock.patch("home_guard_project.box.telegram_agent.time.sleep"):
+            inbox.handle_update(tap(1, "tag:other", 77))
+        answers = self.tg.sent("answerCallbackQuery")
+        self.assertEqual([a["fields"].get("text") for a in answers], [t("tag_ask_failed", "he")])
+        inbox._post = real_post
+        inbox.handle_update(text(2, "hello"))
+        self.assertEqual(agent.seen, ["hello"])
+        self.assertEqual(self._saved(), [])
+
+    def test_the_ask_failed_strings(self) -> None:
+        for lang in ("en", "he", "ar"):
+            self.assertTrue(t("tag_ask_failed", lang))
+        self.assertNotEqual(t("tag_ask_failed", "he"), t("tag_ask_failed", "en"))
+        self.assertNotEqual(t("tag_ask_failed", "ar"), t("tag_ask_failed", "en"))
+
+
+class UndoTrainingTagTest(unittest.TestCase):
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.training = tmp.name
+        self.meta_dir = os.path.join(self.training, "meta", "door", "2027-01-15")
+        self.clip_dir = os.path.join(self.training, "clips", "door", "2027-01-15")
+        os.makedirs(self.meta_dir)
+        os.makedirs(self.clip_dir)
+        self.meta_path = os.path.join(self.meta_dir, f"{ALERT_ID}.meta.json")
+        self.clip_path = os.path.join(self.clip_dir, f"{ALERT_ID}.mp4")
+        with open(self.clip_path, "wb") as f:
+            f.write(b"mp4")
+
+    def _meta(self, meta: Any) -> None:
+        with open(self.meta_path, "w", encoding="utf-8") as f:
+            f.write(meta if isinstance(meta, str) else json.dumps(meta))
+
+    def _tagged(self) -> None:
+        self._meta({"kind": "owner_feedback", "clip_path": f"clips/door/2027-01-15/{ALERT_ID}.mp4",
+                    "owner_feedback": [{"owner_label": "suspicious"}]})
+
+    def test_a_corrupt_meta_does_not_raise(self) -> None:
+        self._meta("{not json")
+        self.assertEqual(undo_training_tag(ALERT, "", {"name": "Dana"}, NOW, self.training), "failed")
+
+    def test_a_clip_that_cannot_be_removed_still_drops_the_meta(self) -> None:
+        self._tagged()
+        real_remove = os.remove
+
+        def remove(path: str) -> None:
+            if path.endswith(".mp4"):
+                raise PermissionError("in use")
+            real_remove(path)
+
+        with mock.patch("home_guard_project.box.feedback.os.remove", side_effect=remove):
+            self.assertEqual(undo_training_tag(ALERT, "", {"name": "Dana"}, NOW, self.training), "removed")
+        self.assertFalse(os.path.exists(self.meta_path))
+
+    def test_a_meta_that_cannot_be_removed_still_drops_the_clip(self) -> None:
+        self._tagged()
+        real_remove = os.remove
+
+        def remove(path: str) -> None:
+            if path.endswith(".meta.json"):
+                raise PermissionError("in use")
+            real_remove(path)
+
+        with mock.patch("home_guard_project.box.feedback.os.remove", side_effect=remove):
+            self.assertEqual(undo_training_tag(ALERT, "", {"name": "Dana"}, NOW, self.training), "removed")
+        self.assertFalse(os.path.exists(self.clip_path))
+
+    def test_nothing_removable_is_failed(self) -> None:
+        self._tagged()
+        with mock.patch("home_guard_project.box.feedback.os.remove", side_effect=PermissionError("in use")):
+            self.assertEqual(undo_training_tag(ALERT, "", {"name": "Dana"}, NOW, self.training), "failed")
+
+    def test_a_note_that_cannot_be_written_is_failed(self) -> None:
+        self._meta({"kind": "alert", "clip_path": f"clips/door/2027-01-15/{ALERT_ID}.mp4", "owner_feedback": []})
+        with mock.patch("home_guard_project.box.feedback._write_json", side_effect=OSError("disk full")):
+            self.assertEqual(undo_training_tag(ALERT, "", {"name": "Dana"}, NOW, self.training), "failed")
 
 
 if __name__ == "__main__":

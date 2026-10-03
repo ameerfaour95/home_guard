@@ -767,29 +767,44 @@ def undo_training_tag(
     now: float,
     training_dir: Optional[str] = None,
 ) -> str:
-    """Take back a Telegram tag's training example. Returns ``"removed"``, ``"noted"`` or ``"none"``.
+    """Take back a Telegram tag's training example. Returns ``"removed"``, ``"noted"``, ``"none"``
+    (no training copy) or ``"failed"``; never raises.
 
     A copy that only tags ever answered was created by a tag (``kind`` is ``owner_feedback``): the clip
     and its meta are removed. A copy that was there anyway - inference keeps every real alert, and an
     earlier button or written answer may have made it - stays, and gets an undo answer at the end of
-    ``owner_feedback`` (the newest answer wins, as for the feedback records).
+    ``owner_feedback`` (the newest answer wins, as for the feedback records). Each removal is tried
+    even when the other fails: either one takes the example out of the dataset (a clip without its
+    meta, or a meta whose clip is gone, is skipped). A meta that cannot be read is left alone - who
+    made that copy is unknown - and the undo is ``"failed"``.
     """
     from .boxconfig import LIVE_DIR  # noqa: PLC0415
 
-    training_dir = training_dir or LIVE_DIR
-    alert_id = str((alert or {}).get("alert_id") or "")
-    if not alert_id:
-        return "none"
-    kept = _alert_files(alert_id, [training_dir])
-    if not kept:
-        return "none"
-    meta_path, clip_path = kept
-    with open(meta_path, encoding="utf-8") as f:
-        meta = json.load(f)
+    try:
+        training_dir = training_dir or LIVE_DIR
+        alert_id = str((alert or {}).get("alert_id") or "")
+        if not alert_id:
+            return "none"
+        kept = _alert_files(alert_id, [training_dir])
+        if not kept:
+            return "none"
+        meta_path, clip_path = kept
+        with open(meta_path, encoding="utf-8") as f:
+            meta = json.load(f)
+    except Exception as exc:  # noqa: BLE001 - an unreadable training copy must not stop an undo
+        log.warning("Could not read the training copy of %s to undo its tag: %s", (alert or {}).get("alert_id"), exc)
+        return "failed"
     answers = meta.get("owner_feedback") if isinstance(meta.get("owner_feedback"), list) else []
     if meta.get("kind") == "owner_feedback" and answers and all(_is_tag_answer(a) for a in answers):
-        os.remove(meta_path)                                  # the meta first: a clip without a meta is ignored
-        os.remove(clip_path)
+        removed = False
+        for path in (meta_path, clip_path):                   # the meta first: a clip without a meta is ignored
+            try:
+                os.remove(path)
+                removed = True
+            except OSError as exc:
+                log.warning("Could not remove %s after its tag was undone: %s", path, exc)
+        if not removed:
+            return "failed"
         log.info("Removed the training copy of %s: its tag was undone.", alert_id)
         return "removed"
     answers.append({
@@ -805,6 +820,10 @@ def undo_training_tag(
         "ai_label": str((alert or {}).get("label") or ""),
     })
     meta["owner_feedback"] = answers
-    _write_json(meta_path, meta)
+    try:
+        _write_json(meta_path, meta)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Could not note the undone tag in the training copy of %s: %s", alert_id, exc)
+        return "failed"
     return "noted"
 
