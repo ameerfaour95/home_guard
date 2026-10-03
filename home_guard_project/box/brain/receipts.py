@@ -13,6 +13,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+import math
 import os
 import threading
 import time
@@ -24,6 +25,7 @@ log = logging.getLogger("box.brain.receipts")
 DONE = "done"
 REQUESTED = "requested"
 FAILED = "failed"
+UNDONE = "undone"
 
 ACTING_TOOLS = frozenset({
     "send_media", "check_camera", "record_clip", "pause_alerts", "resume_alerts",
@@ -107,6 +109,40 @@ class ReceiptBook:
             except OSError:
                 continue
         return [r for r in latest.values() if r.tool == tool and r.status == REQUESTED]
+
+    def turn_receipts(self, turn: str, days: int = 2) -> List[Receipt]:
+        """Latest states for this turn on disk. Skip malformed records; never raises."""
+        latest: Dict[str, Receipt] = {}
+        warned = False
+        try:
+            if not isinstance(turn, str) or type(days) is not int or days < 0:
+                raise ValueError("invalid turn or day count")
+            today = dt.datetime.fromtimestamp(self._now()).date()
+            for back in range(days - 1, -1, -1):
+                try:
+                    with open(self._path(today - dt.timedelta(days=back)), encoding="utf-8",
+                              errors="replace") as f:
+                        for line in f:
+                            try:
+                                r = Receipt(**json.loads(line))
+                                if (not all(isinstance(v, str) for v in
+                                            (r.id, r.turn, r.tool, r.status, r.target, r.reason, r.key))
+                                        or not r.id.startswith("R") or not r.id[1:].isdigit()
+                                        or not isinstance(r.detail, dict) or not math.isfinite(float(r.ts))):
+                                    raise ValueError("invalid receipt")
+                                json.dumps(r.to_dict(), allow_nan=False)
+                                if r.turn == turn:
+                                    latest[r.id] = r
+                            except (ValueError, TypeError, OverflowError):
+                                if not warned:
+                                    log.warning("Skipped malformed turn receipt")
+                                    warned = True
+                except OSError:
+                    continue
+            return sorted(latest.values(), key=lambda r: int(r.id[1:]))
+        except Exception as exc:
+            log.warning("Could not read turn receipts: %s", exc)
+            return []
 
     def _path(self, day: dt.date) -> str:
         return os.path.join(self._dir, f"{day.isoformat()}.jsonl")

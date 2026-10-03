@@ -30,14 +30,15 @@ from .claims import unbacked_claims
 from .i18n import LANGUAGE_NAMES, t
 from .memory import ChatMemory, ChatState
 from .profiles import needs_big, system_prompt, tool_names, tools_for
-from .receipts import ACTING_TOOLS, DONE, FAILED, Receipt, ReceiptBook
+from .receipts import ACTING_TOOLS, DONE, FAILED, REQUESTED, UNDONE, Receipt, ReceiptBook
 from .registry import render_block, resolve_camera
-from .render import render_reply
-from .tools import TOOLS, Services, ToolContext, settings_line
+from .render import receipt_line, render_reply
+from .tools import TOOLS, KEYS, Services, ToolContext, _issue, settings_line
 
 log = logging.getLogger("box.brain.agent")
 
 FAST, BIG = "fast", "big"
+UNDOABLE = ("pause_alerts", "set_camera_active", "change_setting")
 
 
 def _finite(value: Any) -> float:
@@ -103,6 +104,7 @@ class AgentReply:
     usage: Dict[str, Tuple[int, int]] = field(default_factory=dict)
     tools_called: Tuple[str, ...] = ()
     answer: str = ""
+    undo_token: str = ""
     clips: Tuple[str, ...] = ()
     photos: Tuple[str, ...] = ()
 
@@ -168,7 +170,46 @@ def _effective(ctx: ToolContext, name: str, args: Dict[str, Any]) -> str:
         out["handle"] = str(ctx.alert_handle).strip().upper()
     if name == "record_clip" and "seconds" not in out:
         out["seconds"] = 10
+    if name == "send_media" and ("seconds" in out or "from_sec" in out):
+        from ..alert_clips import PRE_SECONDS
+
+        out.setdefault("seconds", 10)
+        out.setdefault("from_sec", -PRE_SECONDS)
+    for key in ("seconds", "from_sec"):
+        if key in out:
+            try:
+                value = _finite(out[key])
+                if key == "seconds" and name == "record_clip":
+                    value = float(int(min(30, max(1, value))))
+                elif key == "seconds" and name == "send_media":
+                    value = min(60.0, max(1.0, value))
+                out[key] = value
+            except (TypeError, ValueError, OverflowError):
+                pass  # Keep invalid values distinct; the tool will refuse them.
     return json.dumps(out, sort_keys=True, ensure_ascii=False, default=str)
+
+
+def _undo_token(ctx: ToolContext) -> str:
+    return ctx.turn_id.rsplit(":", 1)[-1] if any(
+        r.tool in UNDOABLE and r.status in (DONE, REQUESTED) and isinstance(r.detail, dict)
+        and not r.detail.get("already") for r in ctx.receipts) else ""
+
+
+def _fallback_reply(ctx: Optional[ToolContext], lang: str) -> AgentReply:
+    text_out = t("unavailable", lang)
+    if ctx is None:
+        return AgentReply(text=text_out, lang=lang)
+    try:
+        lines = [receipt_line(r, lang) for r in ctx.receipts]
+        text_out = "\n".join(line for line in lines if line) or text_out
+    except Exception:
+        pass
+    try:
+        token = _undo_token(ctx) if not ctx.turn_id.endswith(":undo") else ""
+    except Exception:
+        token = ""
+    return AgentReply(text=text_out, after=tuple(ctx.after_reply), receipts=tuple(ctx.receipts),
+                      lang=lang, undo_token=token)
 
 
 class OwnerAgentV2:
@@ -300,6 +341,87 @@ class OwnerAgentV2:
             log.warning("Could not handle clarification callback: %s", exc)
             return None
 
+    def undo_turn(self, chat_id: Any, token: str, who: Optional[Dict[str, Any]] = None) -> AgentReply:
+        """The Undo button: put back what one turn changed (pause, camera on/off, settings). Never raises."""
+        with self._lock:
+            ctx = None
+            lang = "en"
+            try:
+                chat_id, who = str(chat_id), _object(who)
+                if not isinstance(token, str) or not token.isascii() or not token.isdigit():
+                    raise ValueError("invalid undo token")
+                now = _finite(self._now())
+                state = self.memory.load(chat_id)
+                try:
+                    settings = _object(self.services.read_settings()) if self.services.read_settings else {}
+                except Exception:  # noqa: BLE001
+                    settings = {}
+                speaker = str(who.get("user_id") or "")
+                lang = state.language_for(speaker, "", default=str(settings.get("owner_language") or "en"))
+                try:
+                    snapshot = self.registry.snapshot()
+                except Exception:  # noqa: BLE001
+                    return AgentReply(text=t("unavailable", lang), lang=lang)
+                ctx = ToolContext(turn_id=f"{chat_id}:{token}:undo", chat_id=chat_id, speaker=who, text="", lang=lang,
+                                  mode=snapshot.mode, snapshot=snapshot, state=state, services=self.services,
+                                  book=self.book)
+                undone = 0
+                for r in reversed(self.book.turn_receipts(f"{chat_id}:{token}")):     # newest first
+                    if r.tool not in UNDOABLE or r.status not in (DONE, REQUESTED) or r.detail.get("already"):
+                        continue
+                    d = r.detail
+                    try:
+                        if r.tool == "pause_alerts":
+                            camera = d.get("camera") or None
+                            before = d.get("before")
+                            if (not isinstance(before, dict) or "all" not in before
+                                    or not isinstance(before.get("cameras"), dict)):
+                                raise ValueError("invalid pause restore data")
+                            _finite(before["all"])
+                            for name, until in before["cameras"].items():
+                                if not isinstance(name, str):
+                                    raise ValueError("invalid pause camera")
+                                _finite(until)
+                            self.services.mute.restore(before, now)   # an earlier pause survives
+                            _issue(ctx, "resume_alerts", DONE, camera or "all", {"camera": camera or ""})
+                        elif r.tool == "set_camera_active":
+                            if type(d.get("active")) is not bool or not isinstance(d.get("camera"), str):
+                                raise ValueError("invalid camera restore data")
+                            back = not d["active"]
+                            result = self.services.set_camera(d["camera"], back)
+                            if not isinstance(result, dict) or result.get("ok") is not True:
+                                raise ValueError("camera change was refused")
+                            _issue(ctx, "set_camera_active", REQUESTED, d["camera"],
+                                   {"camera": d["camera"], "active": back, "chat_id": chat_id, "lang": lang})
+                            if self.services.request_restart:
+                                ctx.after_reply.append(self.services.request_restart)
+                        else:
+                            restore = d.get("restore")
+                            keys = KEYS.get(d.get("setting"), ())
+                            if not isinstance(restore, dict) or not keys or set(restore) != set(keys):
+                                raise ValueError("missing or invalid setting restore data")
+                            json.dumps(restore, allow_nan=False)
+                            if any(not isinstance(v, (str, int, float, bool)) for v in restore.values()):
+                                raise ValueError("invalid setting restore values")
+                            for key, value in restore.items():
+                                self.services.set_option(key, str(value).lower() if isinstance(value, bool) else str(value))
+                            _issue(ctx, "change_setting", DONE, str(d.get("setting") or ""),
+                                   {"setting": d.get("setting"), "old": d.get("new", ""), "new": d.get("old", "")})
+                    except Exception as exc:  # noqa: BLE001
+                        log.warning("Undo of %s failed: %s", r.summary(), exc)
+                        _issue(ctx, r.tool, FAILED, r.target, dict(d), "error")
+                        undone += 1
+                        continue                                   # not undone: it stays undoable
+                    self.book.update(r, UNDONE)
+                    undone += 1
+                text_out = render_reply("", ctx.receipts, lang, self.retention_days) if undone else t("nothing_to_undo", lang)
+                state.add_turn(speaker, "↩", text_out, [], [r.summary() for r in ctx.receipts], now)
+                self.memory.save(chat_id, state)
+                return AgentReply(text=text_out, after=tuple(ctx.after_reply), lang=lang, receipts=tuple(ctx.receipts))
+            except Exception as exc:
+                log.warning("Undo failed at the poll boundary: %s", exc)
+                return _fallback_reply(ctx, lang)
+
     def _handle(self, text: str, chat_id: str, who: Dict[str, Any], alert: Optional[Dict[str, Any]],
                 threaded: bool, choice: Optional[Tuple[str, int]] = None) -> Optional[AgentReply]:
         now = _finite(self._now())
@@ -399,37 +521,41 @@ class OwnerAgentV2:
             log.warning("The agent could not handle a message: %s", exc)
             failed = True
             answer = ""
-        buttons: Tuple[str, ...] = ()
-        if ctx.clarification is not None:
-            reply_text = ctx.clarification["question"]
-            if ctx.receipts:
-                done = render_reply("", ctx.receipts, lang, self.retention_days)
-                if done:
-                    reply_text = f"{done}\n\n{reply_text}"
-            buttons = tuple(ctx.clarification["choices"])
-            state.pending = dict(ctx.clarification, request=ctx.text, speaker=speaker,
-                                 token=uuid.uuid4().hex[:8])
-        else:
-            reply_text = render_reply(t("unavailable", lang) if failed else answer,
-                                      ctx.receipts, lang, self.retention_days)
-            if not reply_text:
-                reply_text = t("unavailable" if failed else "nothing_done", lang)
         try:
             if not ctx.saved:
                 save_feedback(self.services.feedback_dir, alert, Feedback(), text, who, chat_id, now)
         except Exception as exc:  # noqa: BLE001
             log.warning("Could not save the owner's message: %s", exc)
         try:
-            state.add_turn(speaker, text, reply_text, ctx.shown, [r.summary() for r in ctx.receipts], now)
-            self.memory.save(chat_id, state)
-        except Exception as exc:  # noqa: BLE001 - what was done is still reported, and its restart still runs
-            log.warning("Could not save the conversation: %s", exc)
-        return AgentReply(text=reply_text, buttons=buttons,
-                          question_token=(state.pending or {}).get("token", "") if buttons else "",
-                          after=tuple(ctx.after_reply), lang=lang,
-                          receipts=tuple(ctx.receipts), tier=tier, escalated=escalated, guard_hits=guard_hits,
-                          usage={k: (v[0], v[1]) for k, v in usage.items()}, tools_called=tuple(called),
-                          answer=answer)
+            buttons: Tuple[str, ...] = ()
+            if ctx.clarification is not None:
+                reply_text = ctx.clarification["question"]
+                if ctx.receipts:
+                    done = render_reply("", ctx.receipts, lang, self.retention_days)
+                    if done:
+                        reply_text = f"{done}\n\n{reply_text}"
+                buttons = tuple(ctx.clarification["choices"])
+                state.pending = dict(ctx.clarification, request=ctx.text, speaker=speaker,
+                                     token=uuid.uuid4().hex[:8])
+            else:
+                reply_text = render_reply(t("unavailable", lang) if failed else answer,
+                                          ctx.receipts, lang, self.retention_days)
+                if not reply_text:
+                    reply_text = t("unavailable" if failed else "nothing_done", lang)
+            try:
+                state.add_turn(speaker, text, reply_text, ctx.shown, [r.summary() for r in ctx.receipts], now)
+                self.memory.save(chat_id, state)
+            except Exception as exc:  # noqa: BLE001 - what was done is still reported, and its restart still runs
+                log.warning("Could not save the conversation: %s", exc)
+            return AgentReply(text=reply_text, buttons=buttons,
+                              question_token=(state.pending or {}).get("token", "") if buttons else "",
+                              after=tuple(ctx.after_reply), lang=lang,
+                              receipts=tuple(ctx.receipts), tier=tier, escalated=escalated, guard_hits=guard_hits,
+                              usage={k: (v[0], v[1]) for k, v in usage.items()}, tools_called=tuple(called),
+                              answer=answer, undo_token=_undo_token(ctx))
+        except Exception as exc:
+            log.warning("Could not finish owner reply: %s", exc)
+            return _fallback_reply(ctx, lang)
 
 
 def follow_up_camera_receipts(book: ReceiptBook, registry: Any, deliverer: Any, now: Optional[float] = None,

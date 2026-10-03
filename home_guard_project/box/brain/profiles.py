@@ -43,8 +43,10 @@ _BIG_WORDS_HE = ("תכבה", "תדליק", "תשתיק", "תפסיק", "עצור
                  "שגוי", "לא נכון", "זה אני", "זה אנחנו", "אין אף אחד", "למה", "מעצבן", "לא עובד", "שפה",
                  "עברית", "אנגלית", "חשוד",
                  "תפעיל", "הפעל", "תכבי", "כבה", "תדליקי", "הדלק", "השתק", "תשתיקי", "הפסק", "תפסיקי",
-                 "תגדיר", "הגדר", "בטל", "תבטל", "תחזירי", "תמשיכי")
+                 "תגדיר", "הגדר", "תחזירי", "תמשיכי")
 
+
+_CANCEL_HE = re.compile(r"(?<!\w)[ושהת]?בטל(?!\w)")
 
 def needs_big(text: str, threaded: bool = False) -> bool:
     """True when this message should skip the fast model."""
@@ -53,7 +55,8 @@ def needs_big(text: str, threaded: bool = False) -> bool:
     if text is not None and not isinstance(text, str):
         log.warning("Invalid message text; routing to the big model")
         return True
-    return bool(_BIG_WORDS_EN.search(text or "")) or any(w in (text or "") for w in _BIG_WORDS_HE)
+    return (bool(_BIG_WORDS_EN.search(text or "")) or bool(_CANCEL_HE.search(text or ""))
+            or any(w in (text or "") for w in _BIG_WORDS_HE))
 
 
 def load_schemas(path: str = TOOLS_PATH) -> Dict[str, Dict]:

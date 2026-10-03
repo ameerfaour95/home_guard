@@ -777,6 +777,12 @@ def _hours(value: Any) -> Optional[Tuple[int, int]]:
     return (start % 24, end % 24)            # 24 means midnight
 
 
+KEYS = {"alert_hours": ("alert_start_hour", "alert_end_hour"), "cooldown_minutes": ("alert_cooldown_sec",),
+        "sensitivity": ("inference_conf",), "language": ("owner_language",), "quiet_log": ("quiet_log",)}
+DEFAULTS = {"alert_start_hour": 0, "alert_end_hour": 0, "alert_cooldown_sec": 120,
+            "inference_conf": 0.4, "owner_language": "en", "quiet_log": False}
+
+
 @_safe_tool
 def change_setting(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     if not quoted_from(str(args.get("owner_words") or ""), ctx.text):
@@ -808,6 +814,8 @@ def change_setting(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         seen.setdefault("first", settings)
         return settings_view(settings)
     before = read_view()[name]
+    before_raw = seen["first"]
+    restore = {k: before_raw.get(k, DEFAULTS[k]) for k in KEYS[name]}
     try:
         if name == "alert_hours":
             hours = _hours(value)
@@ -832,7 +840,7 @@ def change_setting(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
                 log.warning("Hours read-back failed: %s", exc)
                 after = settings_view({"alert_start_hour": hours[0], "alert_end_hour": hours[1]})[name]
             return _result(_issue(ctx, "change_setting", DONE, name,
-                                  {"setting": name, "old": before, "new": after}))
+                                  {"setting": name, "old": before, "new": after, "restore": restore}))
         elif name == "cooldown_minutes":
             if isinstance(value, bool) or not isinstance(value, (str, int, float)):
                 raise ValueError("cooldown_minutes must be a number")
@@ -853,7 +861,7 @@ def change_setting(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as exc:  # noqa: BLE001 - BoxConfigError / ValueError: the owner's value was refused
         log.warning("Setting change failed: %s", exc)
         return _result(_issue(ctx, "change_setting", FAILED, name, {"setting": name}, str(exc)))
-    return _result(_issue(ctx, "change_setting", DONE, name, {"setting": name, "old": before, "new": after}))
+    return _result(_issue(ctx, "change_setting", DONE, name, {"setting": name, "old": before, "new": after, "restore": restore}))
 
 TOOLS: Dict[str, Callable[[ToolContext, Dict[str, Any]], Dict[str, Any]]] = {
     "find_events": find_events,

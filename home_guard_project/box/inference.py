@@ -941,8 +941,18 @@ def run() -> int:
     # Camera sub-stream URLs from the data_collection config.
     cameras: Dict[str, str] = dict(getattr(cam_cfg, "CAMERAS", {}) or {})
     if not cameras:
-        log.error("No cameras configured (cameras.yaml). Nothing to watch; exiting.")
-        return 1
+        log.error("No cameras are on (cameras.yaml). Waiting for the owner to turn one on.")
+        try:
+            from . import telegram_agent  # noqa: PLC0415
+
+            telegram_agent.start(box_settings, env, [])
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Owner assistant not started (%s).", exc)
+        while True:              # a camera change restarts the program through the control flag
+            try:
+                time.sleep(5)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("No-camera wait failed: %s", exc)
     # Every alert is saved as a clip (the seconds around it) in the production folder,
     # and the owner can answer it in Telegram. Neither may stop the alerts themselves.
     from .alert_clips import POST_SECONDS, PRE_SECONDS, ClipRing, alert_stem  # noqa: PLC0415

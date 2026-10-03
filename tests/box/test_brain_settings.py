@@ -53,8 +53,10 @@ class SettingsTest(unittest.TestCase):
         out = change_setting(ctx, {"setting": "alert_hours", "value": "23-07", "owner_words": "watch from 23 to 7"})
         self.assertEqual(out["status"], DONE)
         self.assertEqual((self.store["alert_start_hour"], self.store["alert_end_hour"]), (23, 7))
-        self.assertEqual(ctx.receipts[0].detail, {"setting": "alert_hours", "old": "22:00–06:00",
-                                                  "new": "23:00–07:00"})
+        self.assertEqual(ctx.receipts[0].detail["setting"], "alert_hours")
+        self.assertEqual(ctx.receipts[0].detail["old"], "22:00–06:00")
+        self.assertEqual(ctx.receipts[0].detail["new"], "23:00–07:00")
+        self.assertEqual(ctx.receipts[0].detail["restore"], {"alert_start_hour": 22, "alert_end_hour": 6})
         self.assertEqual(receipt_line(ctx.receipts[0], "en"), "✓ Alert hours: 22:00–06:00 → 23:00–07:00")
 
     def test_cooldown_and_sensitivity(self) -> None:

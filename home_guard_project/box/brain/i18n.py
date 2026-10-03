@@ -16,6 +16,9 @@ SUPPORTED_LANGS = ("en", "he")   # what the assistant speaks today; the Arabic s
 LANGUAGE_NAMES = {"en": "English", "he": "Hebrew", "ar": "Arabic"}
 
 TEMPLATES: Dict[str, Dict[str, str]] = {
+    "undo_button": {"en": "↩ Undo", "he": "↩ ביטול", "ar": "↩ تراجع"},
+    "nothing_to_undo": {"en": "There is nothing left to undo here.", "he": "אין כאן מה לבטל.",
+                        "ar": "لا يوجد ما يمكن التراجع عنه هنا."},
     "setting_changed": {"en": "✓ {setting}: {old} → {new}",
                         "he": "✓ {setting}: {old} ← {new}",
                         "ar": "✓ {setting}: {old} ← {new}"},

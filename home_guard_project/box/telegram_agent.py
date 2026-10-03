@@ -22,12 +22,15 @@ import os
 import threading
 import time
 import urllib.error
+from collections import deque
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from . import telegram_notify
 from .agent import UNAVAILABLE_REPLY, AgentContext, OwnerAgent, make_chat_model
 from .chat_feed import ChatFeed
+from .brain.i18n import t as tr
+from .brain.deliver import choice_keyboard
 from .boxconfig import LOG_DIR, PRODUCTION_ARCHIVE_DIR, PRODUCTION_LIVE_DIR, PRODUCTION_RETENTION_DAYS
 from .feedback import (
     FEEDBACK_BUTTONS,
@@ -187,6 +190,27 @@ class OwnerAssistant:
     thread: Optional[threading.Thread] = None
     feed: Optional[ChatFeed] = None
 
+    deliverer: Any = None
+    feedback_dir: str = ""
+
+    def announce(self, text: str) -> None:
+        """One message to every configured chat (mode switches), sent on its own thread so a slow network never
+        holds up the detector loop. Never raises."""
+        try:
+            if self.cfg.dry_run or not self.cfg.enabled:
+                return
+
+            def send() -> None:
+                for chat_id in self.cfg.chat_ids:
+                    try:
+                        telegram_notify._http_post(self.cfg.bot_token, "sendMessage", {"chat_id": chat_id, "text": text})
+                    except Exception as exc:  # noqa: BLE001
+                        log.warning("Announcement not sent to %s: %s", chat_id, exc)
+
+            threading.Thread(target=send, name="announce", daemon=True).start()
+        except Exception as exc:
+            log.warning("Announcement not started: %s", exc)
+
     def is_muted(self, camera: str) -> bool:
         return self.mute.is_muted(time.time(), camera)
 
@@ -217,23 +241,43 @@ def start(
     Without an OpenAI key the buttons still work and written messages are saved
     unread. Without a Telegram token or chat ids nothing is started.
     """
+    if not isinstance(box_settings, dict) or not isinstance(env, dict):
+        log.warning("Ignoring malformed assistant configuration")
+        box_settings = box_settings if isinstance(box_settings, dict) else {}
+        env = env if isinstance(env, dict) else {}
     cfg = telegram_notify.load_telegram_config(box_settings, env)
     mute = MuteState(os.path.join(log_dir, "alert_mute.json"))
     index = AlertIndex(os.path.join(log_dir, "alert_index.json"))
+    feed = ChatFeed(os.path.join(log_dir, "telegram_chat.jsonl"))
     agent = None
+    deliverer = None
     try:
-        model = make_chat_model(env, str(box_settings.get("agent_model", "gpt-4o-mini")))
-        if model is not None:
-            agent = OwnerAgent(model, AgentContext(
-                camera_names=list(camera_names), mute_state=mute, feedback_dir=live_dir,
-                roots=lambda: alert_roots(live_dir, archive_dir),
-                retention_days=PRODUCTION_RETENTION_DAYS,
-            ))
+        version = int(str(box_settings.get("agent_version", 1) or 1))
+    except (ValueError, TypeError, OverflowError):
+        log.warning("Invalid agent_version; using v1")
+        version = 1
+    try:
+        if version == 2:
+            from .brain.agent import build_owner_agent, follow_up_camera_receipts  # noqa: PLC0415
+
+            agent, deliverer = build_owner_agent(box_settings, env, mute, cfg, live_dir, archive_dir, log_dir, feed)
+            if agent is not None:
+                threading.Thread(target=follow_up_camera_receipts, args=(agent.book, agent.registry, deliverer),
+                                 name="camera-follow-up", daemon=True).start()
+        else:
+            model = make_chat_model(env, str(box_settings.get("agent_model", "gpt-4o-mini")))
+            if model is not None:
+                agent = OwnerAgent(model, AgentContext(
+                    camera_names=list(camera_names), mute_state=mute, feedback_dir=live_dir,
+                    roots=lambda: alert_roots(live_dir, archive_dir),
+                    retention_days=PRODUCTION_RETENTION_DAYS,
+                ))
     except Exception as exc:  # noqa: BLE001 - a missing library must not stop the alerts
         log.warning("Owner agent not available (%s); buttons still work.", exc)
-    feed = ChatFeed(os.path.join(log_dir, "telegram_chat.jsonl"))
-    inbox = TelegramInbox(cfg, agent, index, mute, live_dir, os.path.join(log_dir, "telegram_offset.json"), feed=feed)
-    assistant = OwnerAssistant(cfg=cfg, index=index, mute=mute, inbox=inbox, feed=feed)
+    inbox = TelegramInbox(cfg, agent, index, mute, live_dir, os.path.join(log_dir, "telegram_offset.json"),
+                          feed=feed, deliverer=deliverer)
+    assistant = OwnerAssistant(cfg=cfg, index=index, mute=mute, inbox=inbox, feed=feed, deliverer=deliverer,
+                               feedback_dir=live_dir)
     if cfg.enabled and not cfg.dry_run:
         assistant.thread = threading.Thread(target=inbox.run, name="telegram-inbox", daemon=True)
         assistant.thread.start()
@@ -260,8 +304,11 @@ class TelegramInbox:
         post_multipart: Post = telegram_notify._http_post_multipart,
         now: Callable[[], float] = time.time,
         feed: Optional[ChatFeed] = None,
+        deliverer: Any = None,
     ) -> None:
         self.feed = feed
+        self.deliverer = deliverer
+        self._seen = deque(maxlen=200)
         self.cfg, self.agent, self.index, self.mute = cfg, agent, index, mute
         self.feedback_dir, self.offset_path = feedback_dir, offset_path
         self._post, self._post_multipart, self._now = post, post_multipart, now
@@ -272,7 +319,7 @@ class TelegramInbox:
         try:
             with open(self.offset_path, encoding="utf-8") as f:
                 return int(json.load(f)["offset"])
-        except (OSError, ValueError, KeyError, TypeError):
+        except (OSError, ValueError, KeyError, TypeError, OverflowError):
             return 0
 
     def _save_offset(self) -> None:
@@ -283,11 +330,18 @@ class TelegramInbox:
         os.replace(tmp, self.offset_path)
 
     # -- sending ----------------------------------------------------------------
-    def _say(self, chat_id: str, text: str, reply_to: Optional[int] = None) -> None:
+    def _say(self, chat_id: str, text: str, reply_to: Optional[int] = None,
+             buttons: Sequence[str] = (), undo_token: str = "", lang: str = "en",
+             question_token: str = "") -> None:
         fields = {"chat_id": chat_id, "text": text}
         if reply_to is not None:
             fields["reply_to_message_id"] = str(reply_to)
             fields["allow_sending_without_reply"] = "true"
+        if buttons:
+            fields["reply_markup"] = choice_keyboard(buttons, question_token)
+        elif undo_token:
+            fields["reply_markup"] = json.dumps({"inline_keyboard": [[
+                {"text": tr("undo_button", lang), "callback_data": f"u:{undo_token}"}]]})
         # A dropped connection (WinError 10054) once swallowed the confirmation of a pause:
         # the owner never learned the house was unwatched. Try again before giving up.
         for attempt in range(3):
@@ -300,6 +354,21 @@ class TelegramInbox:
                 log.warning("Telegram answer not sent (%s); trying again.", exc)
                 time.sleep(2 * (attempt + 1))
         self._note("assistant", "answer", text)
+
+    def _after(self, reply: Any) -> None:
+        for action in getattr(reply, "after", ()) or ():
+            try:
+                action()
+            except Exception as exc:  # noqa: BLE001
+                log.warning("After-reply action failed: %s", exc)
+
+    def _send_v2(self, chat_id: str, reply: Any, reply_to: Optional[int]) -> None:
+        try:
+            self._say(chat_id, reply.text, reply_to=reply_to, buttons=getattr(reply, "buttons", ()),
+                      undo_token=getattr(reply, "undo_token", ""), lang=getattr(reply, "lang", "en"),
+                      question_token=getattr(reply, "question_token", ""))
+        finally:
+            self._after(reply)       # a camera change must be applied even if the answer could not be sent
 
     def _note(self, who: str, kind: str, text: str, name: str = "", alert: Optional[Dict[str, Any]] = None) -> None:
         """Add a line to the conversation the box's window shows."""
@@ -337,6 +406,22 @@ class TelegramInbox:
         if not self._allowed(chat_id):
             return
         code = str(query.get("data") or "")
+        if getattr(self.agent, "version", 1) == 2 and (code.startswith("cl:") or code.startswith("u:")):
+            self._post(self.cfg.bot_token, "answerCallbackQuery", {"callback_query_id": str(query.get("id"))})
+            who = _who(query.get("from") or {})
+            if code.startswith("cl:"):
+                try:
+                    _, token, index = code.split(":", 2)
+                    index = int(index)
+                except ValueError:
+                    log.warning("Ignoring malformed clarification callback")
+                    return
+                reply = self.agent.handle_choice(chat_id, token, index, who)
+            else:
+                reply = self.agent.undo_turn(chat_id, code[2:], who)
+            if reply is not None:
+                self._send_v2(chat_id, reply, message.get("message_id"))
+            return
         feedback = button_feedback(code, self._now())
         answer = confirmation_text(feedback) if feedback else "That button is no longer in use."
         tapped_alert = self.index.lookup(chat_id, message.get("message_id"))
@@ -357,12 +442,24 @@ class TelegramInbox:
             return
         replied = (message.get("reply_to_message") or {}).get("message_id")
         alert = self.index.lookup(chat_id, replied) if replied is not None else None
+        threaded = alert is not None
+        v2 = getattr(self.agent, "version", 1) == 2
         if alert is None:
-            alert = self.index.latest(chat_id, self._now())
+            if v2:
+                recent = self.index.recent(chat_id, self._now())
+                alert = recent[0] if len(recent) == 1 else None
+            else:
+                alert = self.index.latest(chat_id, self._now())
         self._note("owner", "message", text, _who(sender)["name"], alert)
         if self.agent is None:
             save_feedback(self.feedback_dir, alert, Feedback(), text, _who(sender), chat_id, self._now())
             self._say(chat_id, UNAVAILABLE_REPLY, reply_to=message.get("message_id"))
+            return
+        if v2:
+            if self.deliverer is not None:
+                self.deliverer.typing(chat_id)
+            reply = self.agent.handle(text, chat_id, _who(sender), alert, threaded)
+            self._send_v2(chat_id, reply, message.get("message_id"))
             return
         reply = self.agent.handle(text, chat_id, _who(sender), alert)
         self._say(chat_id, reply.text, reply_to=message.get("message_id"))
@@ -386,12 +483,21 @@ class TelegramInbox:
     def handle_update(self, update: Dict[str, Any]) -> None:
         """Act on one update. Errors are logged, never raised: one bad update must not stop the inbox."""
         try:
+            if not isinstance(update, dict):
+                raise ValueError("update must be an object")
+            uid = update.get("update_id")
+            if uid is not None:
+                if type(uid) is not int:
+                    raise ValueError("update_id must be an integer")
+                if uid in self._seen:
+                    return
+                self._seen.append(uid)
             if "callback_query" in update:
                 self._on_button(update["callback_query"])
             elif "message" in update:
                 self._on_message(update["message"])
         except Exception as exc:  # noqa: BLE001
-            log.warning("Could not handle Telegram update %s: %s", update.get("update_id"), exc)
+            log.warning("Could not handle Telegram update %s: %s", update.get("update_id") if isinstance(update, dict) else None, exc)
 
     # -- the loop -----------------------------------------------------------------
     def poll_once(self, timeout: int = POLL_SECONDS) -> int:
@@ -403,10 +509,22 @@ class TelegramInbox:
             timeout=timeout + 15.0,
         )
         updates: List[Dict[str, Any]] = resp.get("result") or []
+        if not isinstance(updates, list):
+            log.warning("Ignoring malformed Telegram updates collection")
+            return 0
+        warned = False
         for update in updates:
+            if not isinstance(update, dict) or type(update.get("update_id")) is not int:
+                if not warned:
+                    log.warning("Ignoring malformed polled update")
+                    warned = True
+                continue
             # Mark it handled first: an update that crashes the box must not be replayed forever.
-            self._offset = int(update["update_id"]) + 1
-            self._save_offset()
+            self._offset = max(self._offset, update["update_id"] + 1)
+            try:
+                self._save_offset()
+            except Exception as exc:  # noqa: BLE001 - a disk failure must not discard the rest of this batch
+                log.warning("Could not save Telegram offset: %s", exc)
             self.handle_update(update)
         return len(updates)
 
