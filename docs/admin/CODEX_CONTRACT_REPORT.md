@@ -53,3 +53,44 @@ suffix including its dot (e.g. `.json`, `.txt`). Unknown kind tokens stay unknow
 Contradictions: none between Task 3 rules and fixtures. The phrase "third
 segment" for YOLO is interpreted after its two-segment `yolo/images` or
 `yolo/labels` area, as required by the explicit example.
+
+Task 3 commit: `5b0020f`.
+
+## Task 4 — legacy metadata, feedback and heartbeat
+
+The ten supplied tests and additional status/shape/path tests preceded the parser.
+
+RED excerpt:
+
+```text
+E   ModuleNotFoundError: No module named 'home_guard_project.fleet_contract.legacy'
+Interrupted: 1 error during collection
+1 error in 0.18s
+```
+
+GREEN (entire contract suite):
+
+```text
+..................................................                       [100%]
+50 passed in 0.12s
+```
+
+Files: `home_guard_project/fleet_contract/legacy.py`,
+`tests/fleet_contract/test_legacy.py`, this report.
+
+Edges: all supplied JSON fixtures; production copies without AI; NullBackend
+fallback despite a configured model/prompt; teacher present with null response;
+empty string responses; empty summary precedence; collection string responses,
+`prompt_used` and raw-response paths; `owner_feedback` kind preservation;
+malformed nested fields, non-finite numbers, bad frame sizes and top-level
+non-object bodies; rejected paths in teacher inputs/raw outputs and sampled
+frames; inputs are not mutated; feedback alert camera differs from action scope;
+bad heartbeat values remain unknown; dates become timezone-aware UTC.
+
+Contradictions/semantic caveats: the collection fixture's stem epoch
+`1790944263` matches the integer part of `clip_end_ts`, as audit A7 describes,
+not an independently recorded trigger timestamp. Per the brief, `trigger_ts`
+is still taken from the stem, while `start_ts`/`end_ts` retain body epochs.
+No fixture required changing an AI status or parsing rule. Metadata outside a
+recognised meta key returns a record with `invalid meta key` in `problems`;
+without a recognised root it uses `dataset` and an empty site as placeholders.
