@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 from dataclasses import dataclass
 from datetime import datetime
@@ -66,12 +67,13 @@ class S3:
                                ContentType="application/json")
 
     def copy(self, source_key: str, dest_key: str, content_type: Optional[str] = None,
-             sha256: bool = False) -> Optional[str]:
+             sha256: bool = False, if_match: Optional[str] = None) -> Optional[str]:
         """Server-side copy into a writable prefix. Metadata is replaced, not copied, so no stored
         Content-Disposition, filename or user metadata of the source travels with the copy.
 
-        With `sha256`, S3 computes the copy's SHA-256 and its hex digest is returned (None if S3 gave none);
-        the object's bytes never pass through this process."""
+        With `if_match` (an ETag), only that revision of the source is copied (`CopySourceIfMatch`); a source
+        replaced since raises ETagMismatch. With `sha256`, S3 computes the copy's SHA-256 and its hex digest is
+        returned (None if S3 gave none); the object's bytes never pass through this process."""
         if not dest_key.startswith(WRITABLE_PREFIXES):
             raise ValueError(f"refusing to write outside {WRITABLE_PREFIXES}: {dest_key}")
         params = dict(Bucket=self.bucket, Key=dest_key, CopySource={"Bucket": self.bucket, "Key": source_key},
@@ -80,7 +82,18 @@ class S3:
             params["ContentType"] = content_type
         if sha256:
             params["ChecksumAlgorithm"] = "SHA256"
-        resp = self.client.copy_object(**params)
+        if if_match is not None:
+            params["CopySourceIfMatch"] = f'"{if_match}"'
+        from botocore.exceptions import ClientError
+
+        try:
+            resp = self.client.copy_object(**params)
+        except ClientError as e:
+            error = e.response.get("Error", {})
+            status = e.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+            if error.get("Code") in ("PreconditionFailed", "412") or status == 412:
+                raise ETagMismatch(source_key) from e
+            raise
         checksum = (resp.get("CopyObjectResult") or {}).get("ChecksumSHA256")
         if not sha256 or not checksum or "-" in checksum:  # "-N": a per-part checksum, not the object's
             return None
@@ -113,6 +126,40 @@ class S3:
         if not key.startswith(WRITABLE_PREFIXES):
             raise ValueError(f"refusing to write outside {WRITABLE_PREFIXES}: {key}")
         self.client.upload_file(str(path), self.bucket, key, ExtraArgs={"ContentType": content_type})
+
+    def head(self, key: str) -> Optional[ObjInfo]:
+        """The object's current ETag, size and time, or None when there is no such object."""
+        from botocore.exceptions import ClientError
+
+        try:
+            resp = self.client.head_object(Bucket=self.bucket, Key=key)
+        except ClientError as e:
+            if e.response.get("Error", {}).get("Code") in ("404", "NoSuchKey", "NotFound"):
+                return None
+            raise
+        return ObjInfo(key, resp.get("ETag", "").strip('"'), int(resp.get("ContentLength", 0)),
+                       resp.get("LastModified"))
+
+    def sha256(self, key: str, chunk: int = 1 << 20) -> str:
+        """SHA-256 (hex) of the object's bytes, streamed once in chunks (never held in memory whole)."""
+        digest = hashlib.sha256()
+        body = self.client.get_object(Bucket=self.bucket, Key=key)["Body"]
+        try:
+            for part in body.iter_chunks(chunk):
+                digest.update(part)
+        finally:
+            body.close()
+        return digest.hexdigest()
+
+    def delete_prefix(self, prefix: str) -> int:
+        """Delete every object under a writable `prefix`; returns how many."""
+        if not prefix.startswith(WRITABLE_PREFIXES) or prefix in WRITABLE_PREFIXES:
+            raise ValueError(f"refusing to delete outside a folder of {WRITABLE_PREFIXES}: {prefix}")
+        keys = [o.key for o in self.list(prefix)]
+        for start in range(0, len(keys), 1000):
+            self.client.delete_objects(Bucket=self.bucket, Delete={
+                "Objects": [{"Key": k} for k in keys[start:start + 1000]], "Quiet": True})
+        return len(keys)
 
     def exists(self, key: str) -> bool:
         from botocore.exceptions import ClientError

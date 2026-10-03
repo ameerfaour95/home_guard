@@ -227,6 +227,9 @@ class Export(Base):
     request: Mapped[Any] = mapped_column(JSONType, default=dict, server_default=text("'{}'::jsonb"))
     created_by: Mapped[int] = mapped_column(ForeignKey("staff.id"))
     created_at: Mapped[datetime] = mapped_column(TS)
+    # the lease of the worker building it (migration 0006): claimed atomically, refreshed while it runs
+    worker_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    heartbeat_at: Mapped[Optional[datetime]] = mapped_column(TS, nullable=True)
 
 
 class AuditLog(Base):
