@@ -153,11 +153,15 @@ def apply_changes(changes: Dict[str, Any], path: str = CAMERAS_PATH, zones_path:
             new_disabled[name] = url
             final_names.add(name)
 
-    _write_cameras(new_active, new_disabled, path)
-    from ..data_collection.zones import rename_zone  # noqa: PLC0415
+    if renames:
+        from ..data_collection.zones import remap_zones  # noqa: PLC0415
 
-    for old, new in renames.items():
-        rename_zone(old, new, zones_path)      # the watch zone follows its camera
+        # Each watch zone follows its camera, swaps and chains included. The zone
+        # file covers old and new names while cameras.yaml is written, so a
+        # failure part-way never leaves a camera unmasked.
+        remap_zones(renames, zones_path, between=lambda: _write_cameras(new_active, new_disabled, path))
+    else:
+        _write_cameras(new_active, new_disabled, path)
     if restart:
         _restart_running_mode()
     return {"active": sorted(new_active), "disabled": sorted(new_disabled)}

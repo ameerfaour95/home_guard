@@ -64,10 +64,28 @@ def _describe(image_path: str, api_key: str, model: str = VISION_MODEL, timeout:
         return None
 
 
+def _mask_in_place(image_path: str, polygon: Any) -> bool:
+    """Black out everything outside *polygon* in the saved picture. False on any failure."""
+    try:
+        import cv2  # noqa: PLC0415
+
+        from ..data_collection.zones import ZoneMask  # noqa: PLC0415
+
+        img = cv2.imread(image_path)
+        if img is None:
+            return False
+        masked = ZoneMask(polygon).apply(img)
+        return bool(cv2.imwrite(image_path, masked, [cv2.IMWRITE_JPEG_QUALITY, 90]))
+    except Exception as exc:  # noqa: BLE001 - fail closed: the caller drops the picture
+        log.warning("Live-view mask failed: %s", exc)
+        return False
+
+
 def look_now(camera: str, cameras_path: str, env: Dict[str, str], out_dir: str,
              now: Callable[[], float] = time.time,
              grab: Optional[Callable[[str, str], bool]] = None,
-             describe: Optional[Callable[[str, str], Optional[str]]] = None) -> Dict[str, Any]:
+             describe: Optional[Callable[[str, str], Optional[str]]] = None,
+             zones_path: Optional[str] = None) -> Dict[str, Any]:
     """Grab a current frame from *camera* and describe it.
 
     Returns ``{"camera", "description", "image"}`` on success, or ``{"error": ...}``.
@@ -90,6 +108,20 @@ def look_now(camera: str, cameras_path: str, env: Dict[str, str], out_dir: str,
     image_path = os.path.join(out_dir, f"{camera}_{int(now())}.jpg")
     if not grab(url, image_path):
         return {"error": f"could not get a picture from {camera} right now (is it online?)"}
+    from ..data_collection.zones import ZONES_PATH, load_zones  # noqa: PLC0415
+
+    try:
+        polygon = load_zones(ZONES_PATH if zones_path is None else zones_path).get(camera)
+    except Exception:  # noqa: BLE001 - an unreadable zone must not let an unmasked picture through
+        polygon, ok = None, False
+    else:
+        ok = True if not polygon else _mask_in_place(image_path, polygon)
+    if not ok:
+        try:
+            os.remove(image_path)
+        except OSError:
+            pass
+        return {"error": f"could not prepare the picture from {camera} right now"}
     text = describe(image_path, api_key)
     if not text:
         return {"error": f"got a picture from {camera} but could not describe it"}

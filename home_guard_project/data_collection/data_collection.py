@@ -33,9 +33,9 @@ from ultralytics import YOLO
 
 from config import COCO_NAMES, Config, load_config
 try:
-    from zones import ZoneMask, mask_for
-except ModuleNotFoundError:   # loaded by file path with only `config` aliased (the preview test)
-    from home_guard_project.data_collection.zones import ZoneMask, mask_for
+    from .zones import ZoneMask, mask_for   # package mode (the preview test loads this file under the package)
+except ImportError:
+    from zones import ZoneMask, mask_for    # script mode: run_collector.sh puts this dir on sys.path
 
 log = logging.getLogger(__name__)
 
@@ -329,6 +329,30 @@ def _export_yolo_frames(
 # Threaded RTSP capture â€” sub-stream (raw numpy buffer for YOLO)
 # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
+@dataclass
+class _MaskFailState:
+    """Per-reader memory for :func:`_masked_or_none`: who is reading, and whether it already warned."""
+
+    label: str
+    warned: bool = False
+
+
+def _masked_or_none(mask: ZoneMask, frame: np.ndarray, state: _MaskFailState) -> Optional[np.ndarray]:
+    """The frame with the watch zone applied, or None when masking fails.
+
+    A failed mask drops the frame (the caller skips it): the unmasked picture
+    is never stored or published, and the reader thread keeps running. The
+    first failure per reader is logged; repeats are silent.
+    """
+    try:
+        return mask.apply(frame)
+    except Exception as exc:  # noqa: BLE001 - any mask failure must cost one frame, not the reader thread
+        if not state.warned:
+            state.warned = True
+            log.warning("%s: watch zone could not be applied (%s); frame dropped", state.label, exc)
+        return None
+
+
 class SubStreamThread:
     """
     Read sub-stream RTSP continuously, keep JPEG-compressed frames at
@@ -342,11 +366,12 @@ class SubStreamThread:
 
     _BUF_JPEG_QUALITY = 92
 
-    def __init__(self, cfg: Config, src: str, mask: Optional[ZoneMask] = None):
+    def __init__(self, cfg: Config, src: str, mask: Optional[ZoneMask] = None, name: str = ""):
         os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", cfg.OPENCV_FFMPEG_CAPTURE_OPTIONS)
         self.cfg = cfg
         self.src = src
         self.mask = mask or ZoneMask(None)   # blacks out everything outside the camera's watch zone
+        self._mask_state = _MaskFailState(f"{name} sub-stream".strip())   # name only: src holds the password
         self.capture: Optional[cv2.VideoCapture] = None
         self.lock = threading.Lock()
         self.buf: deque[Tuple[float, bytes]] = deque()
@@ -418,7 +443,10 @@ class SubStreamThread:
             if (now - self.last_store_ts) < self.store_interval:
                 continue
             self.last_store_ts = now
-            frame = self.mask.apply(frame)   # before resize, latest_frame and the buffer: nothing sees the outside
+            # Before resize, latest_frame and the buffer: nothing sees the outside.
+            frame = _masked_or_none(self.mask, frame, self._mask_state)
+            if frame is None:
+                continue
 
             if store_size is not None:
                 frame = cv2.resize(frame, store_size, interpolation=cv2.INTER_AREA)
@@ -498,11 +526,12 @@ class MainStreamThread:
     usage ~30-60x lower than raw numpy buffers for high-res streams.
     """
 
-    def __init__(self, cfg: Config, src: str, mask: Optional[ZoneMask] = None):
+    def __init__(self, cfg: Config, src: str, mask: Optional[ZoneMask] = None, name: str = ""):
         os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", cfg.OPENCV_FFMPEG_CAPTURE_OPTIONS)
         self.cfg = cfg
         self.src = src
         self.mask = mask or ZoneMask(None)   # blacks out everything outside the camera's watch zone
+        self._mask_state = _MaskFailState(f"{name} main-stream".strip())  # name only: src holds the password
         self.capture: Optional[cv2.VideoCapture] = None
         self.lock = threading.Lock()
         self.buf: deque[Tuple[float, bytes]] = deque()
@@ -573,7 +602,9 @@ class MainStreamThread:
             if (now - self.last_store_ts) < self.store_interval:
                 continue
             self.last_store_ts = now
-            frame = self.mask.apply(frame)
+            frame = _masked_or_none(self.mask, frame, self._mask_state)
+            if frame is None:
+                continue
 
             self._frame_shape = (frame.shape[0], frame.shape[1])
             ok, encoded = cv2.imencode(".jpg", frame, self._jpeg_params)
@@ -1229,7 +1260,7 @@ def main() -> None:
     now = time.time()
     for name, rtsp_sub in cfg.CAMERAS.items():
         rtsp_main = cfg.CAMERAS_MAIN.get(name, "")
-        cap = SubStreamThread(cfg, rtsp_sub, mask=mask_for(cfg.ROI_ZONES, name))
+        cap = SubStreamThread(cfg, rtsp_sub, mask=mask_for(cfg.ROI_ZONES, name), name=name)
         norm_pts = cfg.ROI_ZONES.get(name)
         if norm_pts:
             log.info("%s: watch zone active (%d corners); everything outside is blacked out", name, len(norm_pts))
@@ -1352,7 +1383,7 @@ def main() -> None:
                     and st.trigger_detected
                     and st.detection_score > 0
                 ):
-                    st.main_cap = MainStreamThread(cfg, st.rtsp_main, mask=ZoneMask(st.roi_norm))
+                    st.main_cap = MainStreamThread(cfg, st.rtsp_main, mask=ZoneMask(st.roi_norm), name=st.name)
                     st.main_connect_ts = now
                     log.info("[%s] Pre-connecting main-stream (score=%.1f)",
                              st.name, st.detection_score)
@@ -1378,7 +1409,7 @@ def main() -> None:
                     st.trigger_ts = 0.0
                     if cfg.MAIN_STREAM_ENABLED and st.rtsp_main:
                         if st.main_cap is None:
-                            st.main_cap = MainStreamThread(cfg, st.rtsp_main, mask=ZoneMask(st.roi_norm))
+                            st.main_cap = MainStreamThread(cfg, st.rtsp_main, mask=ZoneMask(st.roi_norm), name=st.name)
                             st.main_connect_ts = now
                         if st.main_cap.frame_shape is not None:
                             st.trigger_ts = now

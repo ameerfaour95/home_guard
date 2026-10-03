@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import os
 import re
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import yaml
@@ -147,9 +147,17 @@ def clear_zone(camera: str, path: str = ZONES_PATH) -> bool:
 
 
 def rename_zone(old: str, new: str, path: str = ZONES_PATH) -> bool:
-    """Carry a zone along when its camera is renamed. True if there was one to move."""
+    """Carry a zone along when its camera is renamed. True if there was one to move.
+
+    Refuses (False) when ``new`` already has a zone: overwriting it would lose
+    that zone. Several renames at once (a swap, a chain) go through
+    :func:`remap_zones`, which applies them in one pass.
+    """
     zones: Dict[str, Any] = dict(_read_raw(path))
     if str(old) not in zones or old == new:
+        return False
+    if str(new) in zones:
+        log.warning("Zone for %s was not renamed: %s already has a zone", old, new)
         return False
     try:
         validate_points(zones[str(old)])
@@ -159,6 +167,43 @@ def rename_zone(old: str, new: str, path: str = ZONES_PATH) -> bool:
     zones[str(new)] = zones.pop(str(old))
     save_zones(zones, path)
     return True
+
+
+def remapped_zones(entries: Dict[str, Any], renames: Dict[str, str]) -> Dict[str, Any]:
+    """The zone entries after the camera renames ``{old: new}``, applied all at once.
+
+    A renamed camera's zone moves to its new name; a camera that is not renamed
+    keeps its own. A name that another camera takes over loses whatever zone it
+    had, unless that camera brings one along: the old zone belonged to a
+    different camera, and leaving it would mask the wrong picture.
+    """
+    renames = {str(k): str(v) for k, v in renames.items()}
+    targets = set(renames.values())
+    out = {k: v for k, v in entries.items() if k not in renames and k not in targets}
+    for old, new in renames.items():
+        if old in entries:
+            out[new] = entries[old]
+    return out
+
+
+def remap_zones(renames: Dict[str, str], path: str = ZONES_PATH,
+                between: Optional[Callable[[], None]] = None) -> None:
+    """Apply camera renames ``{old: new}`` to the zone file in one pass (swaps and chains included).
+
+    ``between`` (e.g. writing the renamed cameras.yaml) runs while the file holds
+    the zones under BOTH the old and the new names, so a failure part-way never
+    leaves a camera unmasked; the final file, without the old names, is written
+    only after it returns.
+    """
+    entries = _read_raw(path)
+    final = remapped_zones(entries, renames)
+    changed = final != entries
+    if between is not None:
+        if changed:
+            save_zones({**entries, **final}, path)
+        between()
+    if changed:
+        save_zones(final, path)
 
 
 # ----------------------------------------------------------------------------

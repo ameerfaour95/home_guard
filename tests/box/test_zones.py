@@ -179,3 +179,85 @@ class ZoneFileTest(unittest.TestCase):
         self.assertEqual(set(z.load_zones(self.path)), {"123"})
         self.assertTrue(z.clear_zone("123", self.path))
         self.assertEqual(z.load_zones(self.path), {})
+
+
+ZA = [(0.0, 0.0), (0.4, 0.0), (0.4, 1.0)]
+ZB = [(0.6, 0.0), (1.0, 0.0), (1.0, 1.0)]
+ZC = [(0.0, 0.5), (1.0, 0.5), (0.5, 1.0)]
+
+
+class RemapZonesTest(unittest.TestCase):
+    """Renames applied in one pass, so a swap or a chain never loses or misplaces a zone."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = os.path.join(self.tmp.name, "zones.yaml")
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _save(self, zones) -> None:
+        z.save_zones(zones, self.path)
+
+    def test_swapping_two_names_swaps_their_zones(self) -> None:
+        self._save({"front": ZA, "back": ZB})
+        z.remap_zones({"front": "back", "back": "front"}, self.path)
+        self.assertEqual(z.load_zones(self.path), {"back": ZA, "front": ZB})
+
+    def test_a_chain_moves_each_zone_one_step(self) -> None:
+        self._save({"a": ZA, "b": ZB})
+        z.remap_zones({"a": "b", "b": "c"}, self.path)
+        self.assertEqual(z.load_zones(self.path), {"b": ZA, "c": ZB})
+
+    def test_a_stale_zone_on_the_target_name_is_dropped_when_the_source_had_none(self) -> None:
+        self._save({"b": ZB})
+        z.remap_zones({"a": "b"}, self.path)
+        self.assertEqual(z.load_zones(self.path), {})
+
+    def test_a_rename_where_neither_camera_has_a_zone_changes_nothing(self) -> None:
+        self._save({"yard": ZC})
+        before = open(self.path, encoding="utf-8").read()
+        z.remap_zones({"a": "b"}, self.path)
+        self.assertEqual(open(self.path, encoding="utf-8").read(), before)
+
+    def test_no_file_and_no_zones_stays_no_file(self) -> None:
+        z.remap_zones({"a": "b"}, self.path)
+        self.assertFalse(os.path.exists(self.path))
+
+    def test_unrelated_cameras_are_untouched(self) -> None:
+        self._save({"front": ZA, "back": ZB, "yard": ZC})
+        z.remap_zones({"front": "back", "back": "front"}, self.path)
+        self.assertEqual(z.load_zones(self.path)["yard"], ZC)
+
+    def test_between_runs_while_both_old_and_new_names_are_covered(self) -> None:
+        self._save({"a": ZA, "b": ZB, "s": ZC})
+        seen = {}
+        z.remap_zones({"a": "b", "b": "c", "x": "s"}, self.path,
+                      between=lambda: seen.update(z.load_zones(self.path)))
+        self.assertEqual(seen, {"a": ZA, "b": ZA, "c": ZB, "s": ZC})   # old a and stale s still masked mid-way
+        self.assertEqual(z.load_zones(self.path), {"b": ZA, "c": ZB})
+
+    def test_if_between_fails_the_file_still_covers_the_old_names(self) -> None:
+        self._save({"a": ZA})
+
+        def boom() -> None:
+            raise OSError("disk full")
+
+        with self.assertRaises(OSError):
+            z.remap_zones({"a": "b"}, self.path, between=boom)
+        self.assertEqual(z.load_zones(self.path), {"a": ZA, "b": ZA})
+
+
+class RenameZoneRefusesOverwriteTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = os.path.join(self.tmp.name, "zones.yaml")
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_rename_onto_a_camera_that_already_has_a_zone_is_refused(self) -> None:
+        z.save_zones({"front": ZA, "back": ZB}, self.path)
+        with self.assertLogs(z.log, level="WARNING"):
+            self.assertFalse(z.rename_zone("front", "back", self.path))
+        self.assertEqual(z.load_zones(self.path), {"front": ZA, "back": ZB})

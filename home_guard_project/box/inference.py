@@ -87,7 +87,7 @@ def apply_policy_override(parsed: Dict[str, Any], in_window: bool, person: bool,
 
 
 # Bumped whenever the prompt or the answer's schema changes, so training records can be told apart.
-PROMPT_VERSION = "2026-10-03.summary-label"
+PROMPT_VERSION = "2026-10-03.tagged-style-label"
 
 # The three labels the model gives a scene, and what the box does with each. The owner
 # chose them (this is also what a student model will be trained to answer):
@@ -131,28 +131,54 @@ VLM_RESPONSE_FORMAT: Dict[str, Any] = {
 
 
 def build_prompt(camera_name: str, t_sec: int, local_time_str: str, start_hour: int, end_hour: int) -> str:
-    # Descriptive first (a model refuses to judge people, not activity), then one label
-    # for the activity. The label decides what the box does (LABEL_COMMANDS); the two
-    # counts behind it decide whether anything is sent at all (vlm_confirms).
+    # The summary is written the way our taggers wrote the training descriptions
+    # (tagging/*/analysis_output/vlm_training.jsonl): what happens, in order, with what
+    # people wear and hold, and "No special activity." for an empty scene. The examples
+    # are real tagged descriptions. The label replaces the taggers' "[alert]" mark and
+    # decides what the box does (LABEL_COMMANDS); people/vehicle_moving decide whether
+    # anything is sent at all (vlm_confirms).
     return f"""
-You are helping a homeowner by describing what their own home security camera "{camera_name}" sees.
-Look at these sequential frames (about 5 seconds, one short clip) and reply with ONE short, factual
-sentence describing what is happening - for example "a person is walking toward the front door",
-"a car is in the driveway", "a cat is on the porch", or "nothing notable is happening".
-Do not identify anyone and do not describe a person's personal or physical characteristics; describe
-only the activity.
+You are the eyes of a home security system. These are sequential frames (one short clip of a few
+seconds) from the homeowner's own camera "{camera_name}", local time {local_time_str}.
 
-Then give the activity ONE label:
-- "normal": everyday activity - people walking by or coming to the door, a delivery, a car parking
-  or leaving, pets, or nothing notable.
-- "suspicious": something the homeowner would want to look at - a person lingering or loitering,
-  looking into windows or cars, trying doors or gates, walking around the property at night, hiding,
-  or a vehicle stopping and waiting with no clear purpose.
-- "escalation": clear danger or a crime in progress - forced entry, a broken window or door, someone
-  climbing a fence or wall into the property, a fight or an attack, fire or smoke, a weapon, a crash.
+Write "summary": what happens in the clip, in one to three short sentences (usually 10 to 25 words).
+- Say who is there and what they do, in the order it happens: "Two men are standing near the steps,
+  appearing to be talking." / "A man takes a mop and looks at his phone while walking to the step."
+- Mention what matters for safety: clothing that hides the face (hood, mask, covered face), dark or
+  covering clothes, and objects in the hands (phone, bag, tool, hammer, knife, gun, baby, mop).
+- Where something is uncertain, say "appears to" or "seems to".
+- Say "a man", "a woman", "a person", "two men", "a group of people"; never guess names, age,
+  ethnicity or who the person is.
+- If nobody is there and nothing moves (parked cars, plants, light changes), write exactly:
+  "No special activity."
+
+Examples of good summaries:
+- "Two men are standing next to each other, appearing to be engaged in conversation."
+- "A group of people are holding babies, standing outside, and talking."
+- "A woman enters the house while holding two babies simultaneously."
+- "A cat in the yard."
+- "No special activity."
+- "Three men walk slowly toward the entrance, obscuring their faces with hats, while the rear
+  individual uses his shirt to fully cover his face."
+- "A covered person is near a white car with an open door. He appears to be doing something
+  suspicious, looking around cautiously."
+- "Two people dressed in black try to break inside. They appear to be using a tool to break in."
+- "A man in a black hooded sweatshirt obscuring his face walks slowly, looking behind him while
+  holding a knife in his hand."
+
+Then give the clip ONE "label":
+- "normal": everyday life - family and visitors, people talking, walking, smoking, cleaning, carrying
+  babies or bags into the house, deliveries, cars parking or leaving, pets, or no special activity.
+- "suspicious": something the homeowner should look at - faces hidden by hoods, masks or clothing,
+  lingering or loitering, looking around cautiously, looking into windows or cars, trying doors,
+  gates or car doors, walking around the property at night, hiding, or a vehicle waiting with no
+  clear purpose.
+- "escalation": a crime or danger in progress - a break-in or forced entry, breaking a door, window
+  or car, stealing and carrying things away, climbing a fence or wall into the property, a fight or
+  attack, a knife, gun or other weapon in hand, fire or smoke, a crash.
 
 Reply with EXACTLY ONE strict JSON object and nothing else:
-{{"summary": "<one short sentence>",
+{{"summary": "<one to three short sentences>",
   "label": "normal" | "suspicious" | "escalation",
   "people": <how many people are visible in the frames, as a number; 0 if none>,
   "vehicle_moving": <true if a vehicle is driving, arriving or leaving; false if vehicles are only parked or there are none>}}
@@ -554,7 +580,14 @@ class _Stream:
                 self._cap.release()
                 self._cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
                 continue
-            self._ingest(frame, time.time())
+            try:
+                self._ingest(frame, time.time())
+            except Exception as exc:  # noqa: BLE001 - a bad frame is dropped (never stored unmasked); the camera keeps running
+                if not getattr(self, "_ingest_failed", False):
+                    log.warning("[%s] frame dropped: %s", self.name, exc)
+                self._ingest_failed = True
+            else:
+                self._ingest_failed = False
 
     def _ingest(self, frame: Any, now: float) -> None:
         """One decoded frame: masked to the watch zone first, then kept as the latest frame and offered to the clip ring."""
