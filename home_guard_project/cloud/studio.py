@@ -30,6 +30,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
 from home_guard_project.fleet_contract.classes import COCO_NAMES, CONTIGUOUS
+from home_guard_project.fleet_contract.yolo_labels import parse_label
 
 from . import pseudonym, redact
 from .models import (AiRun, Artifact, CollectionItem, Customer, Device, Event, Export, Feedback,
@@ -97,7 +98,9 @@ def _day(ev: Event) -> str:
 def select_export_items(session: Session, collection_id: int, request: ExportRequest, labeler: bool = False):
     """Events of the collection split into (included, excluded).
 
-    Reasons, checked in this order: `no_training_consent` (always), `expired`, `video_unavailable`, and
+    Reasons, checked in this order: `no_training_consent` (always), `expired` (no copy of the video is left and
+    the production retention has passed: a training copy that outlives the production one stays exportable),
+    `video_unavailable`, and
     `no_real_ai` -- only for VLM-only exports (formats == ["vlm_jsonl"]) without `include_fallback_ai`.
     With other formats, fallback/failed AI only drops the event from vlm.jsonl; clips and YOLO labels stay.
     For a `labeler`, events they may not see (no training consent) are dropped before anything else: they appear
@@ -223,13 +226,16 @@ def effective_formats(formats: Iterable[str]) -> list[str]:
     return out
 
 
-def validate_export_request(session: Session, body: ExportRequest) -> list[str]:
-    """Raise RequestError for a request neither the preview nor the export accepts; returns warnings."""
+def validate_export_request(session: Session, body: ExportRequest, labeler: bool = False) -> list[str]:
+    """Raise RequestError for a request neither the preview nor the export accepts; returns warnings.
+
+    A labeler's export name is not checked against household identities: their exports are visible only to them
+    and to admins, and a check that refuses names of households they cannot see would reveal those households."""
     if not body.formats:
         raise RequestError("Choose at least one format")
     if len(body.name) > 100:
         raise RequestError("The export name is too long (at most 100 characters)")
-    if identifies_household(session, body.name):
+    if not labeler and identifies_household(session, body.name):
         raise RequestError(NAME_IDENTIFIES)
     split = body.split or {}
     if not split or any(k not in SPLIT_ORDER for k in split):
@@ -246,6 +252,21 @@ def validate_collection_text(session: Session, *texts: Optional[str]) -> None:
         raise RequestError(NAME_IDENTIFIES)
 
 
+MAX_EXPORT_EVENTS = 20_000  # one export's selection, held in memory as its snapshot
+
+
+def check_selection_size(session: Session, collection_id: int, labeler: bool = False) -> None:
+    """Refuse a collection with more events (that this viewer may see) than one export can take."""
+    stmt = (select(func.count()).select_from(CollectionItem).join(Event, Event.id == CollectionItem.event_id)
+            .where(CollectionItem.collection_id == collection_id))
+    if labeler:
+        stmt = (stmt.join(Device, Device.id == Event.device_pk).join(Customer, Customer.id == Device.customer_id)
+                .where(Customer.consent_training.is_(True)))
+    if (session.scalar(stmt) or 0) > MAX_EXPORT_EVENTS:
+        raise RequestError(f"An export can include at most {MAX_EXPORT_EVENTS} events; this collection has more. "
+                           "Split it into smaller collections.")
+
+
 def small_set_warnings(groups: int) -> list[str]:
     if groups < MIN_GROUPS:
         return [f"Only {groups} site+day groups: too few for train, val and test to be independent "
@@ -260,7 +281,8 @@ PLACEHOLDER_PROMPT = "<video>Describe what happens in this security camera clip.
 YOLO_NAMES = [COCO_NAMES[coco] for coco in sorted(CONTIGUOUS, key=CONTIGUOUS.get)]
 CLASS_MAP = {str(i): label for i, label in enumerate(YOLO_NAMES)}
 CLASS_SCHEMA = "coco→contiguous-9"
-SNAPSHOT_VERSION = 1
+SNAPSHOT_VERSION = 2  # 2: feedback values frozen with their source revision (1: feedback ids only)
+_READABLE_SNAPSHOTS = (1, 2)
 SPLIT_KEY_VERSION = 1
 MANIFEST_SCHEMA = 2
 _SNAP_ROLES = ("original_video", "rendition", "meta", "yolo_image", "yolo_label")
@@ -344,6 +366,16 @@ def _choose_clip(arts: list[Artifact], meta: dict) -> Optional[dict]:
     return {**_art(original), "kind": "original"}
 
 
+def _feedback_utc(value: Optional[datetime]) -> Optional[str]:
+    return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if value else None
+
+
+def _frozen_feedback(fb: Feedback, rev: Optional[str]) -> dict:
+    """What the export will say about one piece of owner feedback, frozen at request time."""
+    return {"id": fb.id, "verdict": fb.verdict, "action": fb.action, "received_utc": _feedback_utc(fb.received_at),
+            "rev": rev}
+
+
 def _run_digest(run: AiRun) -> str:
     blob = json.dumps([run.status, run.model, run.prompt_version, run.prompt, run.parsed, run.input_artifact_ids,
                        run.ai_source_etag], sort_keys=True, default=str)
@@ -352,8 +384,9 @@ def _run_digest(run: AiRun) -> str:
 
 def take_snapshot(session: Session, request: ExportRequest, *, labeler: bool, secret: str) -> dict:
     """Freeze what an export will contain: the included event ids and their splits (the same selection and split
-    code as the preview), and per event the exact source revisions (artifact key + ETag), the AI run and the owner
-    feedback ids. The build reads only this, so later changes cannot leak into a requested export."""
+    code as the preview), and per event the exact source revisions (artifact key + ETag), the AI run (id and
+    digest) and the owner feedback (values and source revision). The build reads only this, so later changes
+    cannot leak into a requested export: a source that changed is reported as `changed_since_request`."""
     included, excluded = select_export_items(session, request.collection_id, request, labeler=labeler)
     splits = assign_splits(included, request.name, request.split, secret=secret)
     formats = effective_formats(request.formats)
@@ -368,10 +401,11 @@ def take_snapshot(session: Session, request: ExportRequest, *, labeler: bool, se
         for run in session.scalars(select(AiRun).where(AiRun.event_id.in_(ids), AiRun.purpose == "guard")
                                    .order_by(AiRun.id)):
             runs[run.event_id] = run  # the newest wins
-        feedback: dict[int, list[int]] = {}
-        for fid, eid in session.execute(select(Feedback.id, Feedback.event_id).where(Feedback.event_id.in_(ids))
-                                        .order_by(Feedback.id)):
-            feedback.setdefault(eid, []).append(fid)
+        feedback: dict[int, list[dict]] = {}
+        for fb, rev in session.execute(select(Feedback, Artifact.applied_etag)
+                                       .outerjoin(Artifact, Artifact.s3_key == Feedback.s3_key)
+                                       .where(Feedback.event_id.in_(ids)).order_by(Feedback.id)):
+            feedback.setdefault(fb.event_id, []).append(_frozen_feedback(fb, rev))
         customers = dict(session.execute(select(Device.id, Device.customer_id)
                                          .where(Device.id.in_({ev.device_pk for ev in chunk}))).all())
         for ev in chunk:
@@ -415,7 +449,7 @@ def take_snapshot(session: Session, request: ExportRequest, *, labeler: bool, se
 def _snapshot(export: Export) -> Optional[dict]:
     stored = export.request if isinstance(export.request, dict) else {}
     snap = stored.get("snapshot")
-    return snap if isinstance(snap, dict) and snap.get("version") == SNAPSHOT_VERSION else None
+    return snap if isinstance(snap, dict) and snap.get("version") in _READABLE_SNAPSHOTS else None
 
 
 def _consenting(session: Session, customer_ids: Iterable[Optional[int]]) -> set[int]:
@@ -491,9 +525,6 @@ def next_version(session: Session, s3, name: str) -> int:
     return top + 1
 
 
-_BOX_EPS = 1e-6
-
-
 def _fmt(value: float) -> str:
     return f"{value:.6f}".rstrip("0").rstrip(".") or "0"
 
@@ -506,31 +537,16 @@ def remap_label(label_text: str) -> tuple[str, int, Optional[str]]:
     `problem` is "invalid_row" when any row is malformed, and "only_unmapped_classes" when a non-empty file
     would come out empty: either way the sample is quarantined (text ""), never turned into an empty negative.
     An empty source file is a negative and stays one."""
+    rows, problem = parse_label(label_text)  # the one strict validator, shared with the detections view
+    if problem is not None:
+        return "", 0, problem
     out, dropped = [], 0
-    for line in label_text.splitlines():
-        parts = line.split()
-        if not parts:
-            continue
-        if len(parts) != 5:
-            return "", 0, "invalid_row"
-        try:
-            cls = float(parts[0])
-            xc, yc, w, h = (float(p) for p in parts[1:])
-        except (ValueError, OverflowError):
-            return "", 0, "invalid_row"
-        if not all(math.isfinite(v) for v in (cls, xc, yc, w, h)) or not cls.is_integer() or cls < 0:
-            return "", 0, "invalid_row"
-        if not (-_BOX_EPS <= xc <= 1 + _BOX_EPS and -_BOX_EPS <= yc <= 1 + _BOX_EPS
-                and 0 < w <= 1 + _BOX_EPS and 0 < h <= 1 + _BOX_EPS):
-            return "", 0, "invalid_row"
-        if int(cls) not in CONTIGUOUS:
+    for row in rows:
+        if row.cls not in CONTIGUOUS:
             dropped += 1
             continue
-        coords = []
-        for raw, v in zip(parts[1:], (xc, yc, w, h)):
-            clipped = min(max(v, 0.0), 1.0)
-            coords.append(raw if clipped == v else _fmt(clipped))
-        out.append(" ".join([str(CONTIGUOUS[int(cls)]), *coords]))
+        coords = [raw if float(raw) == v else _fmt(v) for raw, v in zip(row.raw, (row.xc, row.yc, row.w, row.h))]
+        out.append(" ".join([str(CONTIGUOUS[row.cls]), *coords]))
     if not out and dropped:
         return "", dropped, "only_unmapped_classes"
     return ("\n".join(out) + "\n") if out else "", dropped, None
@@ -742,7 +758,7 @@ class _Build:
                                    "customer_id": device.customer_id, "device_id": device.device_id,
                                    "clip_key": None, "clip_source": None, "clip_etag": None, "yolo": [],
                                    "ai_run_id": (snap.get("ai") or {}).get("id"),
-                                   "feedback_ids": snap.get("feedback", [])}
+                                   "feedback_ids": [_feedback_id(x) for x in snap.get("feedback", [])]}
 
         clip_path, clip_sha, clip_hash, clip_ok = None, None, "not_exported", False
         if "clips" in self.formats:
@@ -802,19 +818,7 @@ class _Build:
             self.vlm_files[split].write(json.dumps(line, ensure_ascii=False) + "\n")
             self.counts["vlm"][split] += 1
 
-        feedback = []
-        fb_ids = snap.get("feedback", [])
-        if fb_ids:
-            rows = {f.id: f for f in self.session.scalars(select(Feedback).where(Feedback.id.in_(fb_ids)))}
-            if set(rows) != set(fb_ids):
-                self.miss(ev.id, "changed_since_request", note="owner feedback")
-            for fid in fb_ids:
-                f = rows.get(fid)
-                if f is not None:
-                    received = (f.received_at.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-                                if f.received_at else None)
-                    feedback.append({"feedback_id": f"feedback-{f.id}", "verdict": ident.text(f.verdict),
-                                     "received_utc": received})
+        feedback = self.feedback(ev.id, snap.get("feedback", []), ident)
 
         group = group_id(ev, self.req.name, self.secret)
         self.groups.add(group)
@@ -835,6 +839,30 @@ class _Build:
         self.private_file.write(("," if self.item_count else "") + json.dumps(str(ev.id)) + ":"
                                 + json.dumps(private, ensure_ascii=False))
         self.item_count += 1
+
+    def feedback(self, event_id: int, frozen: list, ident: redact.Identity) -> list[dict]:
+        """The owner feedback frozen in the snapshot. A piece whose row or source revision has changed since the
+        request (or is gone) is left out and reported as `changed_since_request`."""
+        ids = [_feedback_id(x) for x in frozen]
+        if not ids:
+            return []
+        rows = {fb.id: (fb, rev) for fb, rev in self.session.execute(
+            select(Feedback, Artifact.applied_etag).outerjoin(Artifact, Artifact.s3_key == Feedback.s3_key)
+            .where(Feedback.id.in_(ids)))}
+        out = []
+        for want in frozen:
+            found = rows.get(_feedback_id(want))
+            if not isinstance(want, dict):  # a version-1 snapshot froze ids only: the row as it is now
+                if found is None:
+                    self.miss(event_id, "changed_since_request", note="owner feedback")
+                    continue
+                want = _frozen_feedback(*found)
+            elif found is None or _frozen_feedback(*found) != want:
+                self.miss(event_id, "changed_since_request", note="owner feedback")
+                continue
+            out.append({"feedback_id": f"feedback-{want['id']}", "verdict": ident.text(want["verdict"]),
+                        "received_utc": want["received_utc"]})
+        return out
 
     def yolo(self, ev: Event, snap: dict, split: str, sources: list[str], private: dict) -> int:
         """Every expected sampled frame: image copied and label remapped, or recorded as missing/quarantined."""
@@ -883,6 +911,10 @@ class _Build:
             private["yolo"].append({"frame": frame, "image_key": image["key"], "label_key": label["key"]})
             written += 1
         return written
+
+
+def _feedback_id(entry: Any) -> Optional[int]:
+    return entry.get("id") if isinstance(entry, dict) else entry
 
 
 def _data_yaml(empty: set[str]) -> str:

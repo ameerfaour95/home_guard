@@ -14,14 +14,21 @@ HERE = Path(__file__).resolve().parent
 ROLES = ("admin", "support", "labeler")
 
 
-def run_migrations(db_url: str) -> None:
-    from alembic import command
+def alembic_config(db_url: str):
+    """The Alembic configuration for `db_url`. `manage init-db` is the supported entry point; a bare
+    `alembic upgrade head` has no database URL (migrations/env.py reads it from this config's attributes)."""
     from alembic.config import Config
 
     cfg = Config(str(HERE / "alembic.ini"))
     cfg.set_main_option("script_location", str(HERE / "migrations").replace("%", "%%"))
     cfg.attributes["url"] = db_url
-    command.upgrade(cfg, "head")
+    return cfg
+
+
+def run_migrations(db_url: str) -> None:
+    from alembic import command
+
+    command.upgrade(alembic_config(db_url), "head")
 
 
 class ConfigError(Exception):
@@ -103,6 +110,9 @@ def cmd_enroll(args) -> int:
                      customer_id=cust.id, enrolled_at=datetime.now(timezone.utc))
         s.add(dev)
         s.flush()
+        from . import redact
+
+        redact.remember(s, dev)
         print(f"enrolled device_id={dev.device_id} site={dev.site} customer={cust.name} (id {cust.id})")
     return 0
 
@@ -119,25 +129,51 @@ def _s3():
 
 
 def cmd_index_once(args) -> int:
+    """One index pass, under the same lock as the server's indexer loop (never both at once)."""
     from . import indexer
     from .db import session_scope
+    from .loops import loop_lock
 
-    s3 = _s3()
-    with session_scope(_engine()) as s:
-        results = indexer.index_all(s, s3, full_scan=args.full)
+    engine = _engine()
+    with loop_lock(engine, "indexer") as got:
+        if not got:
+            print("the server is already indexing; try again in a few minutes")
+            return 0
+        s3 = _s3()
+        with session_scope(engine) as s:
+            results = indexer.index_all(s, s3, full_scan=args.full)
     for site, stats in results.items():
         print(f"{site}: {stats}")
     return 0
 
 
 def cmd_media_once(args) -> int:
+    """One media pass, under the same lock as the server's media loop."""
+    from . import media
+    from .db import session_scope
+    from .loops import loop_lock
+
+    engine = _engine()
+    with loop_lock(engine, "media") as got:
+        if not got:
+            print("the server is already making media; try again in a few minutes")
+            return 0
+        s3 = _s3()
+        with session_scope(engine) as s:
+            n = media.process_pending(s, s3, limit=args.limit)
+    print(f"media: {n} event(s) gained artifacts")
+    return 0
+
+
+def cmd_media_retry(args) -> int:
+    """Clear media problems (quarantined or given-up clips) so the media loop tries them again; `--event ID`
+    clears only that event's."""
     from . import media
     from .db import session_scope
 
-    s3 = _s3()
     with session_scope(_engine()) as s:
-        n = media.process_pending(s, s3, limit=args.limit)
-    print(f"media: {n} event(s) gained artifacts")
+        n = media.clear_problems(s, event_id=args.event)
+    print(f"cleared {n} media problem(s); the media loop retries them on its next pass")
     return 0
 
 
@@ -211,6 +247,9 @@ def build_parser() -> argparse.ArgumentParser:
     mo = sub.add_parser("media-once")
     mo.add_argument("--limit", type=int, default=50)
     mo.set_defaults(fn=cmd_media_once)
+    mr = sub.add_parser("media-retry", help="retry clips whose media failed (all, or one event)")
+    mr.add_argument("--event", type=int, default=None, help="only this event id")
+    mr.set_defaults(fn=cmd_media_retry)
     r = sub.add_parser("redact-backfill")
     r.add_argument("--all", action="store_true", help="recompute every event, not only missing ones")
     r.set_defaults(fn=cmd_redact_backfill)

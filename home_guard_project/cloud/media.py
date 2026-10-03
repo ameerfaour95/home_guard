@@ -1,8 +1,21 @@
 """Media worker: thumbnails, filmstrip sprites and browser/Qt-safe H.264 renditions (via ffmpeg).
 
 Failures never propagate: they are recorded as IndexProblem rows ("media: <error>") about the clip's ETag
-(thumbnail/filmstrip failures keyed by the thumbnail key, rendition failures by the rendition key); that part is
-skipped until the clip changes. Every cloud artifact carries detail.src_etag (the clip it was made from).
+(thumbnail/filmstrip failures keyed by the thumbnail key, rendition failures by the rendition key). Every cloud
+artifact carries detail.src_etag (the clip it was made from).
+
+Failures come in two classes:
+- transient (S3 or network errors, timeouts, ffmpeg missing, a full disk): retried with backoff -- attempt n waits
+  2^n minutes (`next_retry_at`), and after MAX_ATTEMPTS the clip is left alone (`next_retry_at` NULL);
+- permanent (a downloaded file ffmpeg cannot decode, a clip over the size or length caps): quarantined at once.
+Either way the part is skipped until the clip changes or an operator runs `manage media-retry [--event ID]`.
+
+Small-server caps: every ffmpeg run uses at most FFMPEG_THREADS threads, and clips over MAX_CLIP_BYTES or
+MAX_CLIP_SECONDS are never downloaded or rendered (a permanent "too large").
+
+Retention: media made in the cloud never outlives its source. When none of an event's clips is available any
+more (the box's retention deleted them), its thumbnails, filmstrips and renditions -- and every labeler opaque
+copy of the event's files -- are deleted from S3 and marked unavailable (`retire_orphans`, each media pass).
 """
 from __future__ import annotations
 
@@ -11,11 +24,11 @@ import logging
 import struct
 import subprocess
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
-from sqlalchemy import String, and_, case, cast, or_, select
+from sqlalchemy import Integer, String, and_, case, cast, delete, exists, or_, select
 from sqlalchemy.orm import Session, aliased
 
 from .models import Artifact, Event, IndexProblem
@@ -28,10 +41,27 @@ THUMB_W = 480
 TILE_W = 160
 MAX_TILES = 60
 MAX_BOXES = 10000
+FFMPEG_THREADS = "2"
+MAX_CLIP_BYTES = 500 * 1024 ** 2
+MAX_CLIP_SECONDS = 15 * 60
+MAX_ATTEMPTS = 8
+RETIRE_BATCH = 500
+DERIVED_ROLES = ("thumbnail", "filmstrip", "rendition")
 
 
 class MediaError(Exception):
-    pass
+    """A media failure; `transient` ones are retried with backoff, the others quarantine the clip."""
+
+    def __init__(self, message: str, transient: bool = False):
+        super().__init__(message)
+        self.transient = transient
+
+
+def is_transient(exc: BaseException) -> bool:
+    """Whether a failure may go away by itself (retry later) rather than being a property of the clip."""
+    if isinstance(exc, MediaError):
+        return exc.transient
+    return True  # S3/network/database errors, a full disk, ...: anything that is not a verdict on the file
 
 
 def _run(cmd: list, timeout: int = TIMEOUT, cwd: Optional[Path] = None) -> subprocess.CompletedProcess:
@@ -39,13 +69,20 @@ def _run(cmd: list, timeout: int = TIMEOUT, cwd: Optional[Path] = None) -> subpr
     try:
         r = subprocess.run(cmd, capture_output=True, timeout=timeout, cwd=cwd)
     except subprocess.TimeoutExpired as e:
-        raise MediaError(f"{name} timed out") from e
-    except OSError as e:
-        raise MediaError(f"cannot run {name}: {e}") from e
+        raise MediaError(f"{name} timed out", transient=True) from e
+    except OSError as e:  # not installed, not executable, out of resources
+        raise MediaError(f"cannot run {name}: {e}", transient=True) from e
     if r.returncode != 0:
-        tail = r.stderr.decode("utf-8", "replace").strip().splitlines()[-1:] or ["failed"]
-        raise MediaError(f"{name} exit {r.returncode}: {tail[0][:200]}")
+        stderr = r.stderr.decode("utf-8", "replace")
+        tail = stderr.strip().splitlines()[-1:] or ["failed"]
+        raise MediaError(f"{name} exit {r.returncode}: {tail[0][:200]}",
+                         transient="No space left on device" in stderr)
     return r
+
+
+def _ffmpeg(ffmpeg: str, *args: str) -> list:
+    """An ffmpeg command line limited to FFMPEG_THREADS threads (decoding and filtering)."""
+    return [ffmpeg, "-threads", FFMPEG_THREADS, "-filter_threads", FFMPEG_THREADS, "-v", "error", "-y", *args]
 
 
 def probe(path: Path, ffprobe: str) -> dict:
@@ -98,8 +135,8 @@ def needs_rendition(info: dict, path: Path) -> bool:
 def _make_thumb(work: Path, duration: float, ffmpeg: str) -> Path:
     out = work / "thumb.jpg"
     for t in (duration * 0.4, 0.0):
-        _run([ffmpeg, "-v", "error", "-y", "-ss", f"{t:.3f}", "-i", "src.mp4", "-frames:v", "1",
-              "-vf", f"scale={THUMB_W}:-2", "-q:v", "3", "thumb.jpg"], cwd=work)
+        _run(_ffmpeg(ffmpeg, "-ss", f"{t:.3f}", "-i", "src.mp4", "-frames:v", "1",
+                     "-vf", f"scale={THUMB_W}:-2", "-q:v", "3", "thumb.jpg"), cwd=work)
         if out.exists() and out.stat().st_size > 0:
             return out
     raise MediaError("no thumbnail frame")
@@ -115,13 +152,13 @@ def _make_filmstrip(work: Path, duration: float, ffmpeg: str, ffprobe: str) -> t
     out = work / "strip.jpg"
     fps = 1.0 if duration <= MAX_TILES else MAX_TILES / duration
     (work / "frames").mkdir(exist_ok=True)
-    _run([ffmpeg, "-v", "error", "-y", "-i", "src.mp4", "-vf", f"fps={fps:.6f},scale={TILE_W}:-2",
-          "-frames:v", str(MAX_TILES), "-q:v", "4", "frames/f_%04d.jpg"], cwd=work)
+    _run(_ffmpeg(ffmpeg, "-i", "src.mp4", "-vf", f"fps={fps:.6f},scale={TILE_W}:-2",
+                 "-frames:v", str(MAX_TILES), "-q:v", "4", "frames/f_%04d.jpg"), cwd=work)
     count = len(list((work / "frames").glob("f_*.jpg")))
     if count == 0:
         raise MediaError("no filmstrip frames")
-    _run([ffmpeg, "-v", "error", "-y", "-framerate", "1", "-i", "frames/f_%04d.jpg",
-          "-vf", f"tile={count}x1", "-frames:v", "1", "-q:v", "4", "strip.jpg"], cwd=work)
+    _run(_ffmpeg(ffmpeg, "-framerate", "1", "-i", "frames/f_%04d.jpg",
+                 "-vf", f"tile={count}x1", "-frames:v", "1", "-q:v", "4", "strip.jpg"), cwd=work)
     if not out.exists() or out.stat().st_size == 0:
         raise MediaError("filmstrip not written")
     height = _image_size(out, ffprobe)[1]
@@ -129,9 +166,9 @@ def _make_filmstrip(work: Path, duration: float, ffmpeg: str, ffprobe: str) -> t
 
 
 def _make_rendition(work: Path, ffmpeg: str) -> Path:
-    _run([ffmpeg, "-v", "error", "-y", "-i", "src.mp4", "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
-          "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "26",
-          "-movflags", "+faststart", "-an", "rendition.mp4"], cwd=work)
+    _run(_ffmpeg(ffmpeg, "-i", "src.mp4", "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+                 "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "26",
+                 "-threads", FFMPEG_THREADS, "-movflags", "+faststart", "-an", "rendition.mp4"), cwd=work)
     return work / "rendition.mp4"
 
 
@@ -144,12 +181,14 @@ def _clip_for(session: Session, event: Event) -> Optional[Artifact]:
 
 def _upsert(session: Session, s3: S3, event: Event, role: str, key: str, path: Path, mime: str,
             detail: dict) -> Artifact:
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
     s3.upload_file(path, key, mime)
     head = s3.client.head_object(Bucket=s3.bucket, Key=key)
-    art = session.scalars(select(Artifact).where(Artifact.s3_key == key)).first()
-    if art is None:
-        art = Artifact(s3_key=key, event_id=event.id, role=role)
-        session.add(art)
+    # conflict-safe: a row for this key made by anyone else is taken over, never a unique violation
+    session.execute(pg_insert(Artifact).values(s3_key=key, event_id=event.id, role=role, provenance="cloud")
+                    .on_conflict_do_nothing(index_elements=[Artifact.s3_key]))
+    art = session.scalars(select(Artifact).where(Artifact.s3_key == key)).one()
     art.event_id, art.role, art.provenance, art.available = event.id, role, "cloud", True
     art.camera, art.stem, art.mime, art.detail = event.camera, event.stem, mime, detail
     art.etag = head.get("ETag", "").strip('"')
@@ -164,15 +203,24 @@ def _problem_key(event_id: int, kind: str = "thumb") -> str:
     return f"admin_cache/thumbs/{event_id}.jpg"
 
 
-def _record_problem(session: Session, key: str, clip_etag: Optional[str], error: str) -> None:
+def _record_problem(session: Session, key: str, clip_etag: Optional[str], error: str, transient: bool = False,
+                    now: Optional[datetime] = None) -> None:
+    """Record a media failure about `clip_etag`: a transient one is retried after 2^attempts minutes (up to
+    MAX_ATTEMPTS), a permanent one is not retried."""
     session.rollback()
+    now = now or datetime.now(timezone.utc)
     row = session.get(IndexProblem, key)
     if row is None:
-        row = IndexProblem(s3_key=key)
+        row = IndexProblem(s3_key=key, attempts=0)
         session.add(row)
+    attempts = (row.attempts or 0) if row.etag == clip_etag else 0
+    attempts += 1
     row.reason = f"media: {error}"[:1000]
-    row.seen_at = datetime.now(timezone.utc)
+    row.seen_at = now
     row.etag = clip_etag
+    row.attempts = attempts
+    row.next_retry_at = (now + timedelta(minutes=2 ** attempts)
+                         if transient and attempts < MAX_ATTEMPTS else None)
     session.commit()
 
 
@@ -182,8 +230,16 @@ def _clear_problem(session: Session, key: str) -> None:
         session.delete(row)
 
 
+def clear_problems(session: Session, event_id: Optional[int] = None) -> int:
+    """`manage media-retry`: forget media failures (all, or one event's) so the next media pass tries again."""
+    stmt = delete(IndexProblem).where(IndexProblem.reason.like("media:%"))
+    if event_id is not None:
+        stmt = stmt.where(IndexProblem.s3_key.in_([_problem_key(event_id), _problem_key(event_id, "rendition")]))
+    return session.execute(stmt.execution_options(synchronize_session=False)).rowcount or 0
+
+
 def ensure_media(session: Session, s3: S3, event: Event, ffmpeg: str = "ffmpeg", ffprobe: str = "ffprobe",
-                 workdir: Optional[Path] = None) -> list:
+                 workdir: Optional[Path] = None, now: Optional[datetime] = None) -> list:
     """Create whichever of thumbnail/filmstrip/rendition the event lacks (or has from a replaced clip).
 
     Each artifact is committed as soon as it is uploaded. Thumbnail/filmstrip failures raise; a rendition
@@ -192,6 +248,8 @@ def ensure_media(session: Session, s3: S3, event: Event, ffmpeg: str = "ffmpeg",
     if clip is None:
         return []
     src_etag = clip.etag
+    if clip.bytes is not None and clip.bytes > MAX_CLIP_BYTES:
+        raise MediaError(f"too large: {clip.bytes // 1024 ** 2} MB (at most {MAX_CLIP_BYTES // 1024 ** 2} MB)")
     current = {}
     for a in session.scalars(select(Artifact).where(
             Artifact.event_id == event.id, Artifact.provenance == "cloud", Artifact.available.is_(True))):
@@ -203,6 +261,8 @@ def ensure_media(session: Session, s3: S3, event: Event, ffmpeg: str = "ffmpeg",
         src = work / "src.mp4"
         s3.download_file(clip.s3_key, src)
         info = probe(src, ffprobe)
+        if info["duration"] > MAX_CLIP_SECONDS:
+            raise MediaError(f"too large: {info['duration'] / 60:.0f} minutes (at most {MAX_CLIP_SECONDS // 60})")
         need = needs_rendition(info, src)
         if "thumbnail" not in current or current["thumbnail"].detail.get("needs_rendition") != need:
             out = _make_thumb(work, info["duration"], ffmpeg)
@@ -232,11 +292,45 @@ def ensure_media(session: Session, s3: S3, event: Event, ffmpeg: str = "ffmpeg",
                 session.commit()
             except Exception as e:  # noqa: BLE001
                 log.warning("media: event %s rendition failed: %s", event.id, e)
-                _record_problem(session, rkey, src_etag, str(e) or type(e).__name__)
+                _record_problem(session, rkey, src_etag, str(e) or type(e).__name__, is_transient(e), now)
     return created
 
 
-def _pending_ids(session: Session, limit: int) -> list:
+def _no_clip(event_id_col):
+    """Condition: the event has no available original clip."""
+    clip = aliased(Artifact)
+    return ~exists().where(clip.event_id == event_id_col, clip.role == "original_video",
+                           clip.available.is_(True))
+
+
+def retire_orphans(session: Session, s3: S3, limit: int = RETIRE_BATCH) -> int:
+    """Delete cloud-made media whose source is gone: the thumbnails, filmstrips and renditions of events with no
+    available clip, and labeler opaque copies whose source artifact is unavailable or belongs to such an event.
+    Objects are deleted first and only then marked unavailable, so a failed delete is retried next pass."""
+    derived = session.scalars(select(Artifact).where(
+        Artifact.provenance == "cloud", Artifact.role.in_(DERIVED_ROLES), Artifact.available.is_(True),
+        Artifact.event_id.is_not(None), _no_clip(Artifact.event_id)).order_by(Artifact.id).limit(limit)).all()
+    src = aliased(Artifact)
+    source_id = cast(Artifact.detail["source_artifact_id"].as_string(), Integer)
+    copies = session.scalars(select(Artifact).outerjoin(src, src.id == source_id).where(
+        Artifact.role == "opaque_copy", Artifact.available.is_(True),
+        or_(src.id.is_(None), src.available.is_(False),
+            and_(src.event_id.is_not(None), _no_clip(src.event_id)),
+            src.id.in_([a.id for a in derived] or [-1])))
+        .order_by(Artifact.id).limit(limit)).all()
+    gone = list(derived) + list(copies)
+    if not gone:
+        return 0
+    s3.delete_keys([a.s3_key for a in gone])
+    for a in gone:
+        a.available = False
+    session.commit()
+    log.info("media: retired %d cloud file(s) whose source clip is gone", len(gone))
+    return len(gone)
+
+
+def _pending_ids(session: Session, limit: int, now: Optional[datetime] = None) -> list:
+    now = now or datetime.now(timezone.utc)
     clip = aliased(Artifact)
     preferred = (select(Artifact.id)
                  .where(Artifact.event_id == Event.id, Artifact.role == "original_video",
@@ -257,8 +351,10 @@ def _pending_ids(session: Session, limit: int) -> list:
         return a.detail["needs_rendition"].as_boolean().is_(True)
 
     def problem(key_expr):
+        """A media problem about this clip revision that is not due for a retry yet (or never will be)."""
         p = aliased(IndexProblem)
-        return select(p.s3_key).where(p.s3_key == key_expr, p.reason.like("media:%"), p.etag == clip.etag)
+        return select(p.s3_key).where(p.s3_key == key_expr, p.reason.like("media:%"), p.etag == clip.etag,
+                                      or_(p.next_retry_at.is_(None), p.next_retry_at > now))
 
     event_id = cast(Event.id, String)
     thumb_key = "admin_cache/thumbs/" + event_id + ".jpg"
@@ -273,11 +369,18 @@ def _pending_ids(session: Session, limit: int) -> list:
 
 
 def process_pending(session: Session, s3: S3, limit: int = 50, ffmpeg: str = "ffmpeg",
-                    ffprobe: str = "ffprobe", workdir: Optional[Path] = None) -> int:
-    """Attempt media for up to `limit` events (successes and failures both count); returns how many events
-    gained artifacts. Never raises."""
+                    ffprobe: str = "ffprobe", workdir: Optional[Path] = None,
+                    now: Optional[datetime] = None) -> int:
+    """Retire media whose source is gone, then attempt media for up to `limit` events (successes and failures
+    both count); returns how many events gained artifacts. Never raises."""
+    now = now or datetime.now(timezone.utc)
     try:
-        event_ids = _pending_ids(session, limit)
+        retire_orphans(session, s3)
+    except Exception:  # noqa: BLE001 -- retried on the next pass
+        log.exception("media: could not retire media of deleted clips")
+        session.rollback()
+    try:
+        event_ids = _pending_ids(session, limit, now)
     except Exception:  # noqa: BLE001
         log.exception("media: could not list pending events")
         session.rollback()
@@ -291,14 +394,16 @@ def process_pending(session: Session, s3: S3, limit: int = 50, ffmpeg: str = "ff
             if clip is None:
                 continue
             clip_etag = clip.etag
-            made = ensure_media(session, s3, event, ffmpeg, ffprobe, workdir)
+            made = ensure_media(session, s3, event, ffmpeg, ffprobe, workdir, now)
             _clear_problem(session, _problem_key(event_id))
             session.commit()
             done += 1 if made else 0
         except Exception as e:  # noqa: BLE001
-            log.warning("media: event %s failed: %s", event_id, e)
+            transient = is_transient(e)
+            log.warning("media: event %s failed (%s): %s", event_id, "will retry" if transient else "quarantined", e)
             try:
-                _record_problem(session, _problem_key(event_id), clip_etag, str(e) or type(e).__name__)
+                _record_problem(session, _problem_key(event_id), clip_etag, str(e) or type(e).__name__,
+                                transient, now)
             except Exception:  # noqa: BLE001
                 log.exception("media: could not record problem")
                 session.rollback()

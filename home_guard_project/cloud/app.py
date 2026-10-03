@@ -14,6 +14,20 @@ from .settings import Settings
 
 log = logging.getLogger(__name__)
 
+LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
+
+
+def configure_logging() -> None:
+    """Server logging: INFO with timestamps on the root logger, so loop failures ("loop indexer iteration failed")
+    and progress appear in the server log. Idempotent. Nothing here logs presigned URLs or secrets."""
+    root = logging.getLogger()
+    if not any(getattr(h, "_home_guard", False) for h in root.handlers):
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter(LOG_FORMAT))
+        handler._home_guard = True
+        root.addHandler(handler)
+    root.setLevel(logging.INFO)
+
 
 def sweep_exports(app: FastAPI) -> int:
     """Startup: exports whose worker is gone (no heartbeat for 5 minutes, or queued for 30) are marked failed;
@@ -84,6 +98,7 @@ def create_app_from_env() -> FastAPI:
 
     from .s3 import S3
 
+    configure_logging()
     settings = Settings.from_env()
     s3 = S3(boto3.client("s3", region_name=settings.region), settings.bucket)
     return create_app(settings, s3=s3, init_db=False)

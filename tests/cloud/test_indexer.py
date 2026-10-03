@@ -284,7 +284,13 @@ def test_expired_when_production_clip_gone_after_14_days(session, s3client, s3, 
     _index(session, s3, device, full_scan=True, now=later)
     session.expire_all()
     ev = _event(session, device)
-    assert ev.completeness["expired"] is True and ev.completeness["video"] is True
+    # final fix round: the training copy is still there, so the event is not expired (and stays exportable)
+    assert ev.completeness["expired"] is False and ev.completeness["video"] is True
+    s3client.delete_object(Bucket=b.BUCKET, Key=b.TRAIN_CLIP)
+    _index(session, s3, device, full_scan=True, now=later)
+    session.expire_all()
+    ev = _event(session, device)
+    assert ev.completeness["expired"] is True and ev.completeness["video"] is False
     # a training-only collection clip never expires on production retention
     assert _event(session, device, b.COLLECT_STEM).completeness["expired"] is False
 
@@ -569,6 +575,7 @@ def test_expiry_advances_with_time_without_listing_changes(session, s3client, s3
     b.seed_bucket(s3client)
     _index(session, s3, device, now=BASE + timedelta(days=1))
     s3client.delete_object(Bucket=b.BUCKET, Key=b.PROD_CLIP)
+    s3client.delete_object(Bucket=b.BUCKET, Key=b.TRAIN_CLIP)  # expired needs every copy of the video gone
     _index(session, s3, device, full_scan=True, now=BASE + timedelta(days=13))
     session.expire_all()
     assert _event(session, device).completeness["expired"] is False

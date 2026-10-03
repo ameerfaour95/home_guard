@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 # Run the Admin Center API on this laptop: embedded Postgres (pgserver), loops on, 127.0.0.1:8600.
 # Reads S3 with the laptop's AWS profile; writes only under fleet/, admin_cache/, training_exports/.
+#
+# Port: set HG_CLOUD_PORT to listen elsewhere (default 8600), e.g. `HG_CLOUD_PORT=8700 ./run_local.sh`.
+# Logs: timestamped INFO lines on stderr ("<time> <LEVEL> <logger> <message>"); a failing background loop shows as
+#   "... ERROR home_guard_project.cloud.loops loop <name> iteration failed" with its traceback.
+# Manual passes (`manage index-once`, `manage media-once`) wait for the server's loops: while the server is indexing
+#   or making media they print "the server is already ..." and do nothing. `manage media-retry [--event ID]` makes
+#   the media loop retry clips whose media failed.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
