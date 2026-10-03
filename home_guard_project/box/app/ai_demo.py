@@ -1,11 +1,12 @@
 """Synthetic local status for safe demonstrations."""
 from .strings import tr
+from .demo_media import detections
 
 def demo_status(names,now,state):
     if state=='live-detections': return recorded_status(names,now)
     data={'updated':now,'cameras':{},'decisions':[]}
     for i,name in enumerate(names):
-        data['cameras'][name]={'checked_ts':now if i!=2 else now-20,'ts':now if i==0 else now-30,'objects':[{'label':'person','conf':.71,'box':[.1,.3,.18,.75]},{'label':'car','conf':.92,'box':[.41,.42,.61,.62]}]}
+        data['cameras'][name]={'checked_ts':now if i!=2 else now-20,'ts':now if i==0 else now-30,'objects':detections(i)}
     if state!='ai-empty' and names:
         samples=[(15,'person','demo_ai_person','[send_message]',True,False,False,''),(75,'car','demo_ai_cars','[none]',False,True,False,''),(150,'person','demo_ai_paused','[send_message]',False,False,True,''),(240,'person','demo_ai_urgent','[call_owner]',True,False,False,'')]
         if state=='ai-urgent': samples[0]=(15,'person','demo_ai_urgent','[call_owner]',True,False,False,'')
@@ -36,7 +37,7 @@ def recorded_status(names,now):
     data=json.loads((Path(__file__).parent/'assets'/'ai_status_recording.json').read_text())
     base=data['updated'];original=data['cameras']['front_door']
     data['updated']=now
-    data['cameras']={name:dict(original,ts=now,checked_ts=now) for name in names}
+    data['cameras']={name:dict(original,ts=now,checked_ts=now,objects=detections(i)) for i,name in enumerate(names)}
     for decision in data['decisions']:
         decision['ts']+=now-base
         decision['camera']=names[0] if names else 'front_door'

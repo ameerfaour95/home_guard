@@ -4,7 +4,7 @@ import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from PySide6.QtCore import Qt, QTimer, QSize, Signal, QRectF, QEvent
+from PySide6.QtCore import Qt, QTimer, QSize, Signal, QRectF, QEvent, QVariantAnimation
 from PySide6.QtGui import QColor, QPainter, QPen, QPixmap, QFont, QLinearGradient, QIcon, QShortcut, QKeySequence
 from PySide6.QtWidgets import (
     QMainWindow,
@@ -87,6 +87,13 @@ class CameraTile(QFrame):
         self.detector_enabled = False
         self.show_detections=False
         self.detection_labels="confidence"
+        from . import motion
+        self.caption_position=0.
+        self.caption_corner=0.
+        self.caption_animation=QVariantAnimation(self)
+        self.caption_animation.setDuration(motion.PANE_MS)
+        self.caption_animation.setEasingCurve(motion.EASING)
+        self.caption_animation.valueChanged.connect(self.move_caption)
         self.detector_note = label("", "muted")
         self.detector_note.setObjectName("cameraDetection")
         self.detector_note.hide()
@@ -158,6 +165,29 @@ class CameraTile(QFrame):
             "badge": QRectF(area.left()+8, area.top()+8, min(width, badge_width), 28),
         }
 
+    def move_caption(self, position):
+        self.caption_position=float(position)
+        self.update()
+
+    def hero_caption_rect(self, visible, obstacles):
+        """Keep the chosen corner until obstructed; never paint over a box."""
+        width=min(visible.width()-32,340)
+        left=QRectF(visible.left()+16,visible.bottom()-76,width,60)
+        travel=max(0,visible.width()-32-width)
+        def at(position): return left.translated(travel*position,0)
+        def blocked(rect): return any(rect.intersects(box.adjusted(-4,-4,4,4)) for box in obstacles)
+        other=1-self.caption_corner
+        if blocked(at(self.caption_corner)) and not blocked(at(other)):
+            self.caption_corner=other
+            self.caption_animation.stop()
+            self.caption_animation.setStartValue(self.caption_position)
+            self.caption_animation.setEndValue(other)
+            self.caption_animation.start()
+        rect=at(self.caption_position)
+        # During travel (or if both corners are occupied), conceal the caption
+        # until it has a clear rectangle instead of obscuring a subject.
+        return rect,not blocked(rect)
+
     def paintEvent(self, event):
         super().paintEvent(event)
         p = QPainter(self)
@@ -165,6 +195,7 @@ class CameraTile(QFrame):
         from .liveness import frame_health
         live_text, reconnecting = frame_health(self.frame_stamp, time.time(), self.live_started)
         self.painted_label_rects = {}
+        self.painted_detection_rects = []
         if self.picture:
             from .detector_view import box_rect,picture_rect
             from .camera_presentation import image_rect
@@ -186,6 +217,7 @@ class CameraTile(QFrame):
                 p.setFont(QFont("Segoe UI",11))
                 for detection in self.detections:
                     rect=QRectF(*box_rect(detection.box,(x,y,w,h)))
+                    self.painted_detection_rects.append(rect)
                     p.setPen(QPen(QColor(detection.color),(3 if self.hero else 2) if detection.width>1 else 1))
                     length=min(24,rect.width()/3,rect.height()/3)
                     for cx,cy,sx,sy in ((rect.left(),rect.top(),1,1),(rect.right(),rect.top(),-1,1),(rect.left(),rect.bottom(),1,-1),(rect.right(),rect.bottom(),-1,-1)):
@@ -205,8 +237,12 @@ class CameraTile(QFrame):
                 p.save();p.translate(area.right()-35,35);p.rotate(45);p.fillRect(QRectF(-80,-15,160,30),QColor('#293945'));p.setPen(QColor('#edf4f6'));p.drawText(QRectF(-60,-15,120,30),Qt.AlignmentFlag.AlignCenter,'Off');p.restore()
             p.setFont(QFont("Segoe UI",11))
             visible=QRectF(x,y,w,h).intersected(QRectF(area))
+            p.save()
+            caption_visible=True
             if self.hero:
-                footer=QRectF(visible.left()+16,visible.bottom()-76,min(visible.width()-32,340),60)
+                obstacles=self.painted_detection_rects+list(self.painted_label_rects.values())
+                footer,caption_visible=self.hero_caption_rect(visible,obstacles)
+                if not caption_visible: p.setOpacity(0)
                 p.setPen(Qt.PenStyle.NoPen);p.setBrush(QColor(12,22,28,220));p.drawRoundedRect(footer,8,8)
             else:
                 footer=QRectF(area.left()+12,area.bottom()-66,area.width()-24,56)
@@ -214,7 +250,8 @@ class CameraTile(QFrame):
                 p.fillRect(QRectF(area.left(),area.bottom()-area.height()*.45,area.width(),area.height()*.45),gradient)
             labels = self.thumbnail_labels(0) if not self.hero else {
                 "name": footer.adjusted(12,0,-12,-28), "caption": footer.adjusted(12,28,-12,0)}
-            self.painted_label_rects.update({key: labels[key] for key in ("name", "caption")})
+            if caption_visible:
+                self.painted_label_rects.update({key: labels[key] for key in ("name", "caption")})
             name = p.fontMetrics().elidedText(self.caption.text(), Qt.TextElideMode.ElideRight, int(labels["name"].width()))
             p.setPen(QColor('#edf4f6'));p.drawText(labels["name"],Qt.AlignmentFlag.AlignVCenter,name)
             p.setFont(QFont('Segoe UI',10));p.setPen(QColor('#bfccd3'))
@@ -224,6 +261,7 @@ class CameraTile(QFrame):
                 note="Last frame "+relative_time(self.frame_stamp,time.time())
             note=p.fontMetrics().elidedText(note,Qt.TextElideMode.ElideRight,int(labels["caption"].width()))
             p.drawText(labels["caption"],Qt.AlignmentFlag.AlignVCenter,note)
+            p.restore()
         else:
             if not self.off and not self.stopped:
                 gradient=QLinearGradient(0,0,area.width(),0);phase=(math.sin(time.monotonic()*2)+1)/2
@@ -709,8 +747,7 @@ class Window(QMainWindow):
             tile.detector_enabled=inference
             tile.detector_note.hide()
             observations,text=camera_view(self.ai_data,tile.name,now,stopped or tile.off)
-            detection_stamp=self.ai_data.get("cameras",{}).get(tile.name,{}).get("ts")
-            if not observations or getattr(tile,"tracked_stamp",None)!=detection_stamp:
+            if not observations or self.args.demo or not hasattr(tile,"tracked_stamp"):
                 tile.detections=observations
             if tile.off: text="Off"
             tile.detector_note.setToolTip(text)

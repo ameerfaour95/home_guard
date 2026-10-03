@@ -170,7 +170,7 @@ def main():
             writer.set_cameras(names)
             stop = threading.Event()
             costs = []
-            from home_guard_project.box.app.demo_media import picture
+            from home_guard_project.box.app.demo_media import picture, detections
             bases = []
             for i in range(6):
                 image = picture(i).toImage().convertToFormat(__import__('PySide6.QtGui', fromlist=['QImage']).QImage.Format.Format_RGB888)
@@ -193,17 +193,12 @@ def main():
                         if (args.capture or args.screenshots_only) and i == 5 and now-start > 4: continue
                         if not writer.wanted(name): continue
                         frame = bases[i].copy()
-                        x = 80+int((now-start)*75) % 1000
-                        cv2.rectangle(frame, (x, 530), (x+70, 610), (150, 195, 205), -1)
-                        for dx,dy in ((10,10),(50,10),(10,60),(50,60)):
-                            cv2.circle(frame,(x+dx,530+dy),4,(60,70,90),-1)
                         before = time.thread_time()
                         writer.publish(name, frame)
                         costs.append(time.thread_time()-before)
                     if now >= next_status:
                         index += 1
-                        x = 80+int((now-start)*75) % 1000
-                        observations={name:{"checked_ts":now,"ts":now,"objects":[{"label":"person","conf":.91,"box":[x/1280,530/720,(x+70)/1280,610/720]}]} for name in names}
+                        observations={name:{"checked_ts":now,"ts":now,"objects":detections(i)} for i,name in enumerate(names)}
                         data = {"updated": now, "measure_id": now, "cameras": observations, "decisions": decisions}
                         if index % 2:
                             data["thinking"] = {"camera": names[0], "ts": now}
