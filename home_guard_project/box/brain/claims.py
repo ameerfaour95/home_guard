@@ -79,6 +79,12 @@ CLAIMS: Dict[str, Dict[str, object]] = {
         "he": ["הקלטתי"],
         "ar": ["سجلت (?:لك )?(?:فيديو|مقطع)"],
     },
+    "setting": {
+        "tools": {"change_setting"},
+        "en": [r"\bI(?:'ve| have| just)?\s+(?:just\s+)?(?:set|changed|updated|switched)\b", r"\b(?:is|are)\s+now\s+set\s+to\b"],
+        "he": ["שיניתי", "עדכנתי", "הגדרתי"],
+        "ar": ["غيرت", "حدثت"],
+    },
 }
 
 _NEGATIONS = {
@@ -122,6 +128,28 @@ def _claimed(patterns: Sequence[str], text: str, flags: int = 0) -> bool:
     return any(not _negated(text, m.start(), m.end()) for p in patterns for m in re.finditer(p, text, flags))
 
 
+_SETTING_SUBJECT = re.compile(
+    r"^\s*(?:(?:the\s+)?(?:alert hours?|hours|cooldown|sensitivity|language|settings?|time between alerts)\b"
+    r"|(?:\u05d0\u05ea\s+)?\u05d4?(?:\u05e9\u05e2\u05d5\u05ea|\u05e8\u05d2\u05d9\u05e9\u05d5\u05ea|\u05e9\u05e4\u05d4|\u05d4\u05d2\u05d3\u05e8\u05d5\u05ea)\b"
+    r"|(?:\u0627\u0644)?(?:\u0633\u0627\u0639\u0627\u062a|\u062d\u0633\u0627\u0633\u064a\u0629|\u0644\u063a\u0629|\u0625\u0639\u062f\u0627\u062f(?:\u0627\u062a)?)\b)", re.IGNORECASE)
+
+
+def _save_claimed(patterns: Sequence[str], text: str, flags: int = 0) -> bool:
+    for pattern in patterns:
+        for match in re.finditer(pattern, text, flags):
+            if _negated(text, match.start(), match.end()):
+                continue
+            # Only overlapping first-person setting verbs need disambiguation. The span following
+            # this match stops at the next clause, so an independent saved alias still counts.
+            tail = re.split(r"[,.!?;\n]|\band\s+I\b", text[match.end():], maxsplit=1, flags=re.IGNORECASE)[0]
+            setting_patterns = list(CLAIMS["setting"]["en"]) + list(CLAIMS["setting"]["he"]) + list(CLAIMS["setting"]["ar"])
+            overlaps = any(re.fullmatch(p, match.group(), re.IGNORECASE) for p in setting_patterns)
+            if overlaps and _SETTING_SUBJECT.match(tail):
+                continue
+            return True
+    return False
+
+
 def unbacked_claims(answer: str, receipts: Sequence[Receipt]) -> List[str]:
     """Claim kinds in *answer* that no ``done`` receipt of this turn backs, in CLAIMS order. A ``requested``
     receipt (a camera change waiting for the restart) backs nothing: "turned off" would be premature.
@@ -145,8 +173,9 @@ def unbacked_claims(answer: str, receipts: Sequence[Receipt]) -> List[str]:
     for name, spec in CLAIMS.items():
         if set(spec["tools"]) & backed:  # type: ignore[arg-type]
             continue
-        hit = _claimed(spec["en"], text, re.IGNORECASE)  # type: ignore[arg-type]
-        hit = hit or _claimed(list(spec["he"]) + list(spec["ar"]), text)  # type: ignore[arg-type]
+        claimed = _save_claimed if name == "save" else _claimed
+        hit = claimed(spec["en"], text, re.IGNORECASE)  # type: ignore[arg-type]
+        hit = hit or claimed(list(spec["he"]) + list(spec["ar"]), text)  # type: ignore[arg-type]
         if hit:
             out.append(name)
     return out

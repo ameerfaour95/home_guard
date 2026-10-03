@@ -15,6 +15,7 @@ import json
 import logging
 import math
 import os
+import re
 import unicodedata
 import time
 from collections import Counter
@@ -37,6 +38,7 @@ from .events import (
     read_desc,
     write_desc,
 )
+from .i18n import LANGUAGE_NAMES
 from .memory import ChatState
 from .media import bounds_text
 from .mode import GUARD, hhmm
@@ -74,6 +76,8 @@ class Services:
     now: Callable[[], float] = time.time
     retention_days: float = 14.0
     max_mute_hours: float = MAX_MUTE_HOURS
+    set_option: Optional[Callable[[str, str], Any]] = None
+    read_settings: Optional[Callable[[], Dict[str, Any]]] = None
 
 
 @dataclass
@@ -704,6 +708,126 @@ def set_alias(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         return _result(_issue(ctx, "set_alias", FAILED, camera, {"camera": camera, "alias": alias}, str(exc)))
     return _result(_issue(ctx, "set_alias", DONE, camera, {"camera": camera, "alias": alias}))
 
+# -- settings --------------------------------------------------------------------
+SETTING_NAMES = ("alert_hours", "cooldown_minutes", "sensitivity", "language")
+SENSITIVITY_LEVELS = {"low": 0.6, "medium": 0.4, "high": 0.25}   # detector confidence: lower = more sensitive
+LANGUAGE_WORDS = {"en": "en", "english": "en", "אנגלית": "en", "he": "he", "hebrew": "he", "עברית": "he"}
+
+
+def settings_view(settings: Dict[str, Any]) -> Dict[str, str]:
+    malformed = not isinstance(settings, dict)
+    source = settings if isinstance(settings, dict) else {}
+    def number(key, default, low, high):
+        nonlocal malformed
+        value = source.get(key, default)
+        try:
+            if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+                raise ValueError("invalid number")
+            result = _finite(value)
+            if not low <= result <= high:
+                raise ValueError("out of range")
+            return result
+        except (ValueError, TypeError, OverflowError):
+            malformed = True
+            return default
+    start = int(number("alert_start_hour", 0, 0, 23))
+    end = int(number("alert_end_hour", 0, 0, 23))
+    conf = number("inference_conf", 0.4, 0.05, 0.95)
+    cooldown = number("alert_cooldown_sec", 120, 0, 86400)
+    code = source.get("owner_language", "en")
+    if code is None or code == "":
+        code = "en"
+    if not isinstance(code, str) or code not in LANGUAGE_NAMES:
+        malformed = True
+        code = "en"
+    if malformed:
+        log.warning("Skipped malformed settings while formatting")
+    level = min(SENSITIVITY_LEVELS, key=lambda k: abs(SENSITIVITY_LEVELS[k] - conf))
+    return {
+        "alert_hours": "all day" if start == end else f"{start:02d}:00–{end:02d}:00",
+        "cooldown_minutes": f"{cooldown / 60:g} min",
+        "sensitivity": f"{level} ({conf:.2f})",
+        "language": LANGUAGE_NAMES[code],
+    }
+
+
+def settings_line(settings: Dict[str, Any]) -> str:
+    v = settings_view(settings)
+    return (f"SETTINGS: alert hours {v['alert_hours']} · time between alerts per camera {v['cooldown_minutes']} · "
+            f"detector sensitivity {v['sensitivity']} · box language {v['language']} (alerts and announcements)")
+
+
+def _hours(value: Any) -> Optional[Tuple[int, int]]:
+    text = str(value or "").strip().lower()
+    if text in ("all day", "24h", "always"):
+        return (0, 0)
+    match = re.fullmatch(r"(\d{1,2})(?::00)?\s*(?:-|–|to)\s*(\d{1,2})(?::00)?", text)
+    if not match:
+        return None
+    start, end = int(match.group(1)), int(match.group(2))
+    if start > 24 or end > 24:
+        return None                         # "99-88" is a mistake, not 03:00-16:00
+    return (start % 24, end % 24)            # 24 means midnight
+
+
+@_safe_tool
+def change_setting(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+    if not quoted_from(str(args.get("owner_words") or ""), ctx.text):
+        return _err("Not changed: change a setting only when this message asks for it; owner_words must be "
+                    "copied from it (two words or more).")
+    name = str(args.get("setting") or "")
+    if name not in SETTING_NAMES:
+        return _err("setting must be one of alert_hours, cooldown_minutes, sensitivity, language")
+    if ctx.services.set_option is None or ctx.services.read_settings is None:
+        return _err("settings cannot be changed on this box")
+    value = args.get("value")
+    def read_view():
+        settings = ctx.services.read_settings()
+        if not isinstance(settings, dict):
+            raise ValueError("settings must be an object")
+        json.dumps(settings, allow_nan=False)
+        for key, low, high in (("alert_start_hour", 0, 23), ("alert_end_hour", 0, 23),
+                               ("inference_conf", 0.05, 0.95), ("alert_cooldown_sec", 0, 86400)):
+            if key in settings:
+                raw = settings[key]
+                if isinstance(raw, bool) or not isinstance(raw, (str, int, float)):
+                    raise ValueError("invalid setting number")
+                if not low <= _finite(raw) <= high:
+                    raise ValueError("setting number out of range")
+        code = settings.get("owner_language", "en")
+        if code is not None and (not isinstance(code, str) or code not in ("", "en", "he", "ar")):
+            raise ValueError("invalid setting language")
+        return settings_view(settings)
+    before = read_view()[name]
+    try:
+        if name == "alert_hours":
+            hours = _hours(value)
+            if hours is None:
+                return _err('alert_hours must look like "22-06" (whole hours) or "all day"')
+            ctx.services.set_option("alert_start_hour", str(hours[0]))
+            ctx.services.set_option("alert_end_hour", str(hours[1]))
+        elif name == "cooldown_minutes":
+            if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+                raise ValueError("cooldown_minutes must be a number")
+            seconds = int(round(_finite(value) * 60))
+            if not 10 <= seconds <= 86400:
+                return _err("cooldown_minutes must be between 0.2 and 1440")
+            ctx.services.set_option("alert_cooldown_sec", str(seconds))
+        elif name == "sensitivity":
+            text = str(value).strip().lower()
+            conf = SENSITIVITY_LEVELS.get(text)
+            ctx.services.set_option("inference_conf", str(conf if conf is not None else _finite(text)))
+        else:
+            code = LANGUAGE_WORDS.get(str(value).strip().lower())
+            if code is None:
+                return _err('language must be "en" (English) or "he" (Hebrew)')
+            ctx.services.set_option("owner_language", code)
+        after = read_view()[name]
+    except Exception as exc:  # noqa: BLE001 - BoxConfigError / ValueError: the owner's value was refused
+        log.warning("Setting change failed: %s", exc)
+        return _result(_issue(ctx, "change_setting", FAILED, name, {"setting": name}, str(exc)))
+    return _result(_issue(ctx, "change_setting", DONE, name, {"setting": name, "old": before, "new": after}))
+
 TOOLS: Dict[str, Callable[[ToolContext, Dict[str, Any]], Dict[str, Any]]] = {
     "find_events": find_events,
     "summarize_period": summarize_period,
@@ -718,4 +842,5 @@ TOOLS: Dict[str, Callable[[ToolContext, Dict[str, Any]], Dict[str, Any]]] = {
     "record_verdict": record_verdict,
     "set_camera_active": set_camera_active,
     "set_alias": set_alias,
+    "change_setting": change_setting,
 }

@@ -16,6 +16,14 @@ SUPPORTED_LANGS = ("en", "he")   # what the assistant speaks today; the Arabic s
 LANGUAGE_NAMES = {"en": "English", "he": "Hebrew", "ar": "Arabic"}
 
 TEMPLATES: Dict[str, Dict[str, str]] = {
+    "setting_changed": {"en": "✓ {setting}: {old} → {new}",
+                        "he": "✓ {setting}: {old} ← {new}",
+                        "ar": "✓ {setting}: {old} ← {new}"},
+    "setting_alert_hours": {"en": "Alert hours", "he": "שעות ההתראות", "ar": "ساعات التنبيه"},
+    "setting_cooldown_minutes": {"en": "Time between alerts", "he": "זמן בין התראות", "ar": "الوقت بين التنبيهات"},
+    "setting_sensitivity": {"en": "Detector sensitivity", "he": "רגישות הזיהוי", "ar": "حساسية الكشف"},
+    "setting_language": {"en": "Box language", "he": "שפת המערכת", "ar": "لغة النظام"},
+    "what_change_setting": {"en": "Changing the setting", "he": "שינוי ההגדרה", "ar": "تغيير الإعداد"},
     # -- receipts that succeeded ------------------------------------------------
     "sent_video": {"en": "✓ Video sent ({bounds})",
                    "he": "✓ הסרטון נשלח ({bounds})",

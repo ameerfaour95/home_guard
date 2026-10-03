@@ -83,6 +83,12 @@ def _receipt_line(receipt: Receipt, lang: str, retention_days: float) -> str:
         return t("verdict_saved", lang, verdict=t(f"verdict_{d.get('verdict')}", lang))
     if receipt.tool == "set_alias":
         return t("alias_saved", lang, alias=d.get("alias", ""), camera=camera)
+    if receipt.tool == "change_setting":
+        for key in ("setting", "old", "new"):
+            if key in d and not isinstance(d[key], str):
+                raise ValueError("Invalid setting receipt text")
+        return t("setting_changed", lang, setting=t(f"setting_{d.get('setting')}", lang), old=d.get("old", ""),
+                 new=d.get("new", ""))
     return f"✓ {receipt.tool}"
 
 
