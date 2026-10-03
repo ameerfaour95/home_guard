@@ -46,13 +46,54 @@ def main():
     window.show()
     if args.smoke_test:
         import time
+        import json
         started = time.monotonic()
         stage = [0]
+        live = os.environ.get('HG_ADMIN_IT') == '1' and not args.demo
+        live_result = {}
+        if live:
+            setup_logging().info('Packaged integration starting pid=%s', os.getpid())
+            stage[0] = -1
+            Path(os.environ['HG_ADMIN_IT_RESULT']).write_text(json.dumps(dict(ready_pid=os.getpid())))
         def verify():
             if time.monotonic()-started > 30:
+                if live:
+                    Path(os.environ['HG_ADMIN_IT_RESULT']).write_text(json.dumps(dict(live_result, stage=stage[0], signin_error=window.signin.error.text())))
                 app.exit(2)
                 return
             ok = window.signin is not None and not window.windowIcon().isNull()
+            if live:
+                if stage[0] == -1:
+                    path = Path(os.environ['HG_ADMIN_IT_LOGIN_FILE'])
+                    if not path.exists(): return
+                    login = json.loads(path.read_text())
+                    if login.get('pid') != os.getpid(): return
+                    path.unlink()
+                    window.signin.email.setText(login['email'])
+                    window.signin.password.setText(login['password'])
+                    for digit, value in zip(window.signin.totp.digits, login['totp']): digit.setText(value)
+                    window.signin.authenticate()
+                    stage[0] = 0
+                    return
+                shell = window.shell
+                if not shell or not shell.fleet.snapshot: return
+                customer = shell.customer_page
+                if stage[0] == 0:
+                    live_result['fleet'] = len(shell.fleet.snapshot.devices)
+                    shell.open_customer(1); stage[0] = 1
+                elif stage[0] == 1 and customer.timeline.model.rows and customer.timeline.density.hours:
+                    live_result['timeline'] = len(customer.timeline.model.rows)
+                    customer.open_event(101); stage[0] = 2
+                elif stage[0] == 2 and customer.event_view.recording and not customer.event_view.evidence_runner.busy:
+                    view = customer.event_view
+                    live_result['detections'] = len(view.player.canvas.overlay.frames)
+                    live_result['media_unavailable'] = 'Not available yet' in view.banner.text()
+                    view.review_runner.finished.connect(lambda result, error: live_result.update(review_saved=error is None))
+                    view.toggle_review('flagged'); stage[0] = 3
+                elif stage[0] == 3 and not customer.event_view.review_runner.busy:
+                    Path(os.environ['HG_ADMIN_IT_RESULT']).write_text(json.dumps(live_result))
+                    app.exit(0 if live_result['detections'] and live_result['review_saved'] else 2)
+                return
             if not args.demo:
                 app.exit(0 if ok else 2)
                 return

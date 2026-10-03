@@ -80,10 +80,11 @@ cloud = [
     "pyotp>=2.9",
     "pyjwt>=2.9",
     "httpx>=0.27",
-    "moto[s3]>=5.0",
+    "moto[s3,server]>=5.0",
     "pgserver>=0.1.4",
     "pytest>=8",
 ]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+markers = ["integration: opt-in tests against local Cloud and moto services"]

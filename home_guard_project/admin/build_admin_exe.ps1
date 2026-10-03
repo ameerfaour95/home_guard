@@ -21,6 +21,12 @@ try {
     & .venv/Scripts/python.exe -m PyInstaller --noconfirm --clean --windowed --onedir `
         --name HomeGuardAdmin --distpath dist --workpath build/admin --specpath build `
         --paths $projectRoot --icon "$projectRoot/home_guard_project/box/assets/logo.ico" `
+        --exclude-module home_guard_project.admin.dev_server `
+        --exclude-module home_guard_project.admin.screenshots `
+        --exclude-module home_guard_project.admin.screenshots_r2 `
+        --exclude-module home_guard_project.admin.screenshots_r3 `
+        --exclude-module home_guard_project.admin.make_demo_media `
+        --exclude-module home_guard_project.admin.make_demo_r3 `
         --add-data "$projectRoot/home_guard_project/admin/demo_data;home_guard_project/admin/demo_data" `
         --add-data "$projectRoot/home_guard_project/box/assets/logo.ico;home_guard_project/box/assets" `
         --collect-data tzdata home_guard_project/admin/__main__.py
