@@ -18,7 +18,8 @@ import logging
 import os
 import ssl
 import time
-from typing import Any, Callable, Dict, Optional
+import uuid
+from typing import Any, Callable, Dict, Optional, Tuple
 
 log = logging.getLogger("box.live_view")
 
@@ -31,12 +32,22 @@ VISION_PROMPT = (
 
 
 def _camera_url(camera: str, cameras_path: str) -> Optional[str]:
-    from .find_cameras import _read_cameras_raw  # noqa: PLC0415 - heavy import kept lazy
+    try:
+        from .find_cameras import _read_cameras_raw  # noqa: PLC0415 - heavy import kept lazy
 
-    data = _read_cameras_raw(cameras_path) or {}
-    cams = data.get("cameras") if isinstance(data.get("cameras"), dict) else {}
-    url = cams.get(camera)
-    return str(url) if url else None
+        data = _read_cameras_raw(cameras_path)
+        if not isinstance(data, dict):
+            raise ValueError("camera file must contain a mapping")
+        cams = data.get("cameras", {})
+        if not isinstance(cams, dict) or not isinstance(camera, str):
+            raise ValueError("invalid camera mapping or name")
+        url = cams.get(camera)
+        if url is not None and not isinstance(url, str):
+            raise ValueError("camera URL must be a string")
+        return url or None
+    except Exception as exc:  # noqa: BLE001 - configuration must not stop the poll loop
+        log.warning("Live-view camera lookup failed: %s", exc)
+        return None
 
 
 def _describe(image_path: str, api_key: str, model: str = VISION_MODEL, timeout: float = 30.0) -> Optional[str]:
@@ -88,6 +99,76 @@ def _remove_quietly(path: str) -> None:
         pass
 
 
+def grab_masked(camera: str, cameras_path: str, out_dir: str, now: Callable[[], float] = time.time,
+                grab: Optional[Callable[[str, str], bool]] = None,
+                zones_path: Optional[str] = None) -> Dict[str, Any]:
+    """A current picture from *camera*, masked to its watch zone: ``{"camera", "image"}`` or ``{"error"}``.
+
+    The unmasked grab only ever exists under a temporary name; if the zone cannot
+    be applied the picture is dropped (fail closed).
+    """
+    temp_path = None
+    try:
+        url = _camera_url(camera, cameras_path)
+        if not url:
+            return {"error": f"no camera named {camera!r} is configured"}
+        if grab is None:
+            from .find_cameras import _grab_snapshot as grab  # noqa: PLC0415
+        try:
+            os.makedirs(out_dir, exist_ok=True)
+        except OSError as exc:
+            return {"error": f"could not prepare a place for the picture ({exc})"}
+        # Independent captures must never share an unmasked temporary file.
+        image_path = os.path.join(out_dir, f"{camera}_{int(now())}_{uuid.uuid4().hex[:8]}.jpg")
+        temp_path = image_path + ".tmp.jpg"
+        polygon, readable = strict_zone(camera, zones_path)
+        if not readable:
+            return {"error": f"could not prepare the picture from {camera} right now"}
+        if not grab(url, temp_path):
+            return {"error": f"could not get a picture from {camera} right now (is it online?)"}
+        if polygon and not _mask_in_place(temp_path, polygon):
+            return {"error": f"could not prepare the picture from {camera} right now"}
+        os.replace(temp_path, image_path)
+        return {"camera": camera, "image": image_path}
+    except Exception as exc:  # noqa: BLE001 - never expose an unmasked picture after a failure
+        log.warning("Live-view capture failed: %s", exc)
+        return {"error": f"could not prepare the picture from {camera} right now"}
+    finally:
+        if temp_path is not None:
+            _remove_quietly(temp_path)
+
+
+def strict_zone(camera: str, zones_path: Optional[str] = None) -> Tuple[Optional[Any], bool]:
+    """``(polygon or None, readable)`` for *camera*. Unlike ``zones.load_zones``, a zone file that exists but
+    cannot be read, or an invalid polygon for this camera, is reported as unreadable, so a capture fails
+    closed instead of going out unmasked. No file, or no zone for this camera, is ``(None, True)``."""
+    try:
+        import yaml  # noqa: PLC0415
+
+        from ..data_collection.zones import ZONES_PATH, validate_points  # noqa: PLC0415
+
+        path = ZONES_PATH if zones_path is None else zones_path
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+        except FileNotFoundError:
+            return None, True
+        if data is None:
+            data = {}
+        if not isinstance(data, dict):
+            raise ValueError("zone file must contain a mapping")
+        entries = data.get("zones", {})
+        if not isinstance(entries, dict):
+            raise ValueError("zones must contain a mapping")
+        raw = entries.get(camera)
+        if raw is None:
+            return None, True
+        return validate_points(raw), True
+    except Exception as exc:  # noqa: BLE001 - imports, encoding, types and I/O all fail closed
+        log.warning("Live-view zone handling failed: %s", exc)
+        return None, False
+
+
 def look_now(camera: str, cameras_path: str, env: Dict[str, str], out_dir: str,
              now: Callable[[], float] = time.time,
              grab: Optional[Callable[[str, str], bool]] = None,
@@ -101,45 +182,31 @@ def look_now(camera: str, cameras_path: str, env: Dict[str, str], out_dir: str,
     url = _camera_url(camera, cameras_path)
     if not url:
         return {"error": f"no camera named {camera!r} is configured"}
-    api_key = env.get("OPENAI_API_KEY", "")
+    api_key = env.get("OPENAI_API_KEY", "") if isinstance(env, dict) else ""
     if not api_key:
         return {"error": "live view needs the vision model, which is not configured on this box"}
-    if grab is None:
-        from .find_cameras import _grab_snapshot as grab  # noqa: PLC0415
     describe = describe or (lambda path, key: _describe(path, key))
-
+    shot = grab_masked(camera, cameras_path, out_dir, now=now, grab=grab, zones_path=zones_path)
+    if shot.get("error"):
+        return shot
     try:
-        os.makedirs(out_dir, exist_ok=True)
-    except OSError as exc:
-        return {"error": f"could not prepare a place for the picture ({exc})"}
-    image_path = os.path.join(out_dir, f"{camera}_{int(now())}.jpg")
-    temp_path = image_path + ".tmp.jpg"   # the unmasked grab lives only under this name
-    if not grab(url, temp_path):
-        _remove_quietly(temp_path)
-        return {"error": f"could not get a picture from {camera} right now (is it online?)"}
-    try:
-        from ..data_collection.zones import ZONES_PATH, load_zones  # noqa: PLC0415
-
-        polygon = load_zones(ZONES_PATH if zones_path is None else zones_path).get(camera)
-        ok = True if not polygon else _mask_in_place(temp_path, polygon)
-        if ok:
-            os.replace(temp_path, image_path)
-    except Exception as exc:  # noqa: BLE001 - an unreadable zone must not let an unmasked picture through
-        log.warning("Live-view zone handling failed: %s", exc)
-        ok = False
-    if not ok:
-        _remove_quietly(temp_path)
-        _remove_quietly(image_path)
-        return {"error": f"could not prepare the picture from {camera} right now"}
-    text = describe(image_path, api_key)
+        text = describe(shot["image"], api_key)
+        if not isinstance(text, str):
+            text = None
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Live-view describe failed: %s", exc)
+        text = None
     if not text:
         return {"error": f"got a picture from {camera} but could not describe it"}
-    return {"camera": camera, "description": text, "image": image_path}
+    return {"camera": camera, "description": text, "image": shot["image"]}
 
 
 def make_look_now(cameras_path: str, env: Optional[Dict[str, str]] = None,
                   out_dir: str = "") -> Optional[Callable[[str], Dict[str, Any]]]:
     """A ``look_now(camera)`` callable for the agent, or None when it can't run (no key / no dir)."""
+    if env is not None and not isinstance(env, dict):
+        log.warning("Live-view environment must be a mapping")
+        return None
     env = dict(os.environ if env is None else env)
     if not env.get("OPENAI_API_KEY") or not out_dir:
         return None

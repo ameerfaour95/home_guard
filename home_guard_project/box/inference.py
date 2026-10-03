@@ -151,6 +151,23 @@ VLM_RESPONSE_FORMAT: Dict[str, Any] = {
 }
 
 
+# The tagging rules for the three labels, shared by the guard loop's prompt and the
+# assistant's guard-mode look at a saved clip, so both judge a scene the same way.
+LABEL_RULES = """
+- "normal": everyday life - family and visitors, people talking, walking, standing or waiting, looking
+  at a phone, smoking, cleaning, carrying babies or bags into the house, deliveries, cars parking or
+  leaving, pets, or no special activity. A person standing still is normal unless they hide their face
+  or do something from the "suspicious" list.
+- "suspicious": something the homeowner should look at - faces hidden by hoods, masks or clothing,
+  lingering or loitering, looking around cautiously, looking into windows or cars, trying doors,
+  gates or car doors, walking around the property at night, hiding, or a vehicle waiting with no
+  clear purpose.
+- "escalation": a crime or danger in progress - a break-in or forced entry, breaking a door, window
+  or car, stealing and carrying things away, climbing a fence or wall into the property, a fight or
+  attack, a knife, gun or other weapon in hand, fire or smoke, a crash.
+""".strip()
+
+
 def build_prompt(camera_name: str, t_sec: int, local_time_str: str, start_hour: int, end_hour: int) -> str:
     # The summary follows the rules our taggers wrote by (tagging/*/analysis_output/
     # vlm_training.jsonl): what happens, in order, with what people wear and hold, and
@@ -175,17 +192,7 @@ Write "summary": what happens in the clip, in one to three short sentences (usua
   "No special activity."
 
 Then give the clip ONE "label":
-- "normal": everyday life - family and visitors, people talking, walking, standing or waiting, looking
-  at a phone, smoking, cleaning, carrying babies or bags into the house, deliveries, cars parking or
-  leaving, pets, or no special activity. A person standing still is normal unless they hide their face
-  or do something from the "suspicious" list.
-- "suspicious": something the homeowner should look at - faces hidden by hoods, masks or clothing,
-  lingering or loitering, looking around cautiously, looking into windows or cars, trying doors,
-  gates or car doors, walking around the property at night, hiding, or a vehicle waiting with no
-  clear purpose.
-- "escalation": a crime or danger in progress - a break-in or forced entry, breaking a door, window
-  or car, stealing and carrying things away, climbing a fence or wall into the property, a fight or
-  attack, a knife, gun or other weapon in hand, fire or smoke, a crash.
+{LABEL_RULES}
 
 Reply with EXACTLY ONE strict JSON object and nothing else:
 {{"summary": "<one to three short sentences>",
