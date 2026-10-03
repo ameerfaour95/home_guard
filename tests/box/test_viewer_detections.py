@@ -21,6 +21,8 @@ class ViewerTests(unittest.TestCase):
             preference.path.write_text('{broken')
             self.assertEqual(preference.load(),ViewerSettings())
     def test_painting_off_matches_no_detections_and_on_draws_boxes(self):
+        # Compare the detection layer with the intentional LIVE pulse held still.
+        self.enterContext(patch('home_guard_project.box.app.ui.time.monotonic',return_value=100.0))
         tile=CameraTile('front');tile.resize(640,420);tile.hero=True
         picture=QPixmap(640,420);picture.fill(QColor('#202020'));tile.update_picture(picture)
         tile.show();self.app.processEvents()

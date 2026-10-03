@@ -1,0 +1,215 @@
+{
+  "hardware": "AMD Ryzen 9 9955HX3D; not the N150 box",
+  "before_open": {
+    "duration_s": 60.0,
+    "one_core_percent": 3.59,
+    "published_frames": {
+      "camera_0": 323,
+      "camera_1": 115,
+      "camera_2": 115,
+      "camera_3": 115,
+      "camera_4": 115,
+      "camera_5": 115
+    },
+    "fps": {
+      "camera_0": 5.38,
+      "camera_1": 1.92,
+      "camera_2": 1.92,
+      "camera_3": 1.92,
+      "camera_4": 1.92,
+      "camera_5": 1.92
+    }
+  },
+  "after_open": {
+    "duration_s": 60.0,
+    "one_core_percent": 8.36,
+    "published_frames": {
+      "camera_0": 491,
+      "camera_1": 137,
+      "camera_2": 137,
+      "camera_3": 137,
+      "camera_4": 137,
+      "camera_5": 137
+    },
+    "fps": {
+      "camera_0": 8.18,
+      "camera_1": 2.28,
+      "camera_2": 2.28,
+      "camera_3": 2.28,
+      "camera_4": 2.28,
+      "camera_5": 2.28
+    },
+    "rate_transitions": [
+      {
+        "seconds": 0.0,
+        "rates": [
+          16,
+          5
+        ]
+      },
+      {
+        "seconds": 3.0,
+        "rates": [
+          12,
+          3
+        ]
+      },
+      {
+        "seconds": 6.03,
+        "rates": [
+          8,
+          2
+        ]
+      },
+      {
+        "seconds": 13.17,
+        "rates": [
+          12,
+          3
+        ]
+      },
+      {
+        "seconds": 17.2,
+        "rates": [
+          8,
+          2
+        ]
+      },
+      {
+        "seconds": 25.3,
+        "rates": [
+          12,
+          3
+        ]
+      },
+      {
+        "seconds": 27.3,
+        "rates": [
+          8,
+          2
+        ]
+      },
+      {
+        "seconds": 34.38,
+        "rates": [
+          12,
+          3
+        ]
+      },
+      {
+        "seconds": 39.41,
+        "rates": [
+          8,
+          2
+        ]
+      },
+      {
+        "seconds": 42.44,
+        "rates": [
+          6,
+          2
+        ]
+      },
+      {
+        "seconds": 51.47,
+        "rates": [
+          8,
+          2
+        ]
+      }
+    ],
+    "cap_percent": 10.0,
+    "telemetry_one_core_percent": 8.36,
+    "overhead_one_core_percent": 2.96,
+    "encode_publish_ema_ms": {
+      "camera_0": 2.506,
+      "camera_1": 2.66,
+      "camera_2": 2.029,
+      "camera_3": 2.025,
+      "camera_4": 2.161,
+      "camera_5": 2.0
+    },
+    "final_estimated_one_core_percent": 7.14,
+    "floor_over_budget": false,
+    "second_half": {
+      "seconds": 30.0,
+      "one_core_percent": 8.33,
+      "fps": {
+        "camera_0": 7.5,
+        "camera_1": 2.13,
+        "camera_2": 2.13,
+        "camera_3": 2.13,
+        "camera_4": 2.13,
+        "camera_5": 2.13
+      }
+    }
+  },
+  "before_hidden": {
+    "duration_s": 10.0,
+    "one_core_percent": 0.16,
+    "published_frames": {
+      "camera_0": 0,
+      "camera_1": 0,
+      "camera_2": 0,
+      "camera_3": 0,
+      "camera_4": 0,
+      "camera_5": 0
+    },
+    "fps": {
+      "camera_0": 0.0,
+      "camera_1": 0.0,
+      "camera_2": 0.0,
+      "camera_3": 0.0,
+      "camera_4": 0.0,
+      "camera_5": 0.0
+    }
+  },
+  "after_hidden": {
+    "duration_s": 10.0,
+    "one_core_percent": 1.88,
+    "published_frames": {
+      "camera_0": 0,
+      "camera_1": 0,
+      "camera_2": 0,
+      "camera_3": 0,
+      "camera_4": 0,
+      "camera_5": 0
+    },
+    "fps": {
+      "camera_0": 0.0,
+      "camera_1": 0.0,
+      "camera_2": 0.0,
+      "camera_3": 0.0,
+      "camera_4": 0.0,
+      "camera_5": 0.0
+    },
+    "rate_transitions": [
+      {
+        "seconds": 0.0,
+        "rates": [
+          16,
+          5
+        ]
+      }
+    ],
+    "cap_percent": 10.0,
+    "telemetry_one_core_percent": 1.88,
+    "overhead_one_core_percent": 1.32,
+    "encode_publish_ema_ms": {},
+    "final_estimated_one_core_percent": 0,
+    "floor_over_budget": false,
+    "second_half": {
+      "seconds": 4.99,
+      "one_core_percent": 0.31,
+      "fps": {
+        "camera_0": 0.0,
+        "camera_1": 0.0,
+        "camera_2": 0.0,
+        "camera_3": 0.0,
+        "camera_4": 0.0,
+        "camera_5": 0.0
+      }
+    }
+  },
+  "extra_one_core_percentage_points": 4.77
+}

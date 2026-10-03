@@ -74,6 +74,7 @@ class BoxControls:
         if self.demo:
             s=self._settings
             return {'updated':self.clock(),'settings':dict(conf=s.inference_conf,alert_start_hour=s.alert_start_hour,alert_end_hour=s.alert_end_hour,cooldown_sec=s.alert_cooldown_sec)}
+        if hasattr(self,'live_status'): return self.live_status
         from ..ai_status import read_status
         return read_status(Path(boxconfig.LOG_DIR)/'ai_status.json')
 
