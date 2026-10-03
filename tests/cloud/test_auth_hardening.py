@@ -181,7 +181,7 @@ def test_refresh_for_disabled_staff_401(client, staff_factory):
 
 def test_role_change_applies_to_issued_access_token(client, staff_factory):
     staff, _, _, headers = staff_factory("admin")
-    assert client.get("/v1/fleet", headers=headers).status_code == 501
+    assert client.get("/v1/fleet", headers=headers).status_code == 200
     with session_scope(client.app.state.engine) as s:
         s.get(Staff, staff.id).role = "labeler"
     assert client.get("/v1/fleet", headers=headers).status_code == 403

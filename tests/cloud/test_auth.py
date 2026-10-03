@@ -96,4 +96,4 @@ def test_labeler_forbidden_on_fleet(client, staff_factory):
     assert client.get("/v1/fleet", headers=headers).status_code == 403
     assert client.get("/v1/fleet").status_code == 401
     _, _, _, admin = staff_factory("admin")
-    assert client.get("/v1/fleet", headers=admin).status_code == 501  # stub body, role passed
+    assert client.get("/v1/fleet", headers=admin).status_code == 200
