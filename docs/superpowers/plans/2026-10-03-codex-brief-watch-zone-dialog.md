@@ -6,7 +6,7 @@ read. The engine is done; this round is the owner-facing part, and the owner's v
 will be the same one he gave the window: it must *feel* premium without him being able to say
 why. Build it so a demanding person opens it and relaxes.
 
-Same boundaries as round 13: merge `origin/beelink-collector-box` first (it brings the zone
+Same boundaries as rounds 13–14 (this worktree is at `d1eb893`, round 14 merged): merge `origin/beelink-collector-box` first (it brings the zone
 engine: `home_guard_project/data_collection/zones.py` and the `find_cameras` commands below),
 `uv sync` with `VIRTUAL_ENV` unset; this checkout only; branch `box-app-ui`; no push; no box,
 camera or Telegram; engine `.ps1` and box runtime modules untouched (edit only
@@ -31,6 +31,8 @@ dependencies. Commit after each part, one-line messages in the branch's style. A
   `ui.py` has `card()`, `label(text, role)`, `layout_for()`.
 - `home_guard_project/box/app/strings.py` — every user-facing string goes through `tr(key)` in
   every language the file carries. No literal strings in widgets.
+- `home_guard_project/box/app/motion.py` — the app's motion system from round 14: `HOVER_MS=120`, `TOGGLE_MS=180`, `PANE_MS=240`, `EASING=OutCubic`, `busy(button, working)`, `toast(window, text)`, `Switch`, `reveal()`. **Use these** for every timing, easing, busy state and confirmation in this round; do not invent parallel constants. Where this brief names a duration, map it to the nearest motion constant.
+- In `CameraPage.render` each photo card already has an empty, reserved row: `QWidget` with object name `cameraActionSlot`, fixed height 36, an `QHBoxLayout` with zero margins (comment: "Reserved for the next camera action and one status line"). **Put the zone button and its status line in that slot**; do not add another row or change the card's layout.
 - `docs/ui/capture.py` and `docs/ui/SCREENSHOTS.md` — offscreen screenshot tooling; `--demo`
   mode has synthetic camera pictures.
 
@@ -129,12 +131,11 @@ by one step, 160 ms. No neon glows, no gradients on text, no purple.
 ### Save
 
 - 3+ corners → `controls.set_zone(name, points)`; fewer → `controls.clear_zone(name)`.
-- On success the dialog closes (reverse animation) and the tile updates (Part 3). On an exception
-  the Error state shows.
+- On success the dialog closes (reverse animation), the tile updates (Part 3), and `motion.toast()` confirms "Area saved" (`camera_zone_saved`). On an exception the Error state shows.
 
 ## Part 3 — the tile (commit 3)
 
-Under each camera photo on the camera page:
+In each card's `cameraActionSlot` (see above):
 
 - The pill button "Set the area to watch" and, beside it, a status line: "Watching: the whole
   picture" or "Watching: the area you drew". It is loaded once with `controls.zones()` after
@@ -154,7 +155,7 @@ area the camera should watch. Everything outside it is ignored by the box." ·
 "Everything outside the shape is ignored." · `camera_zone_small` "This area is very small; the
 camera will see almost nothing." · `camera_zone_undo` "Undo" · `camera_zone_clear` "Clear" ·
 `camera_zone_save` "Save" · `camera_zone_saving` "Saving…" · `camera_zone_cancel` "Cancel" ·
-`camera_zone_save_failed` "The area could not be saved. Try again."
+`camera_zone_save_failed` "The area could not be saved. Try again." · `camera_zone_saved` "Area saved"
 
 ## Tests (`tests/box/test_app_zones.py`, offscreen Qt, same style as `test_app_cameras.py`)
 
