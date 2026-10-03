@@ -89,6 +89,31 @@ class ChatMemoryTest(unittest.TestCase):
             f.write("{oops")
         self.assertEqual(self.memory.load("-5").turns, [])
 
+    def test_a_hand_edited_v2_file_never_raises_and_handles_never_collide(self) -> None:
+        with open(os.path.join(self.dir, "-5.json"), "w", encoding="utf-8") as f:
+            json.dump({"version": 2,
+                       "turns": ["x", {"text": "q", "reply": "a", "ts": "soon"}],
+                       "handles": {"E1": "bad", "Z9": {}, "E3": {"kind": "event", "ref": "r", "ts": "x"}},
+                       "next_handle": "two",
+                       "overrides": {"u1": "fr"},
+                       "languages": {"u2": 5}}, f)
+        s = self.memory.load("-5")
+        s.history_messages(TS)
+        self.assertEqual(s.add_handle("event", "new"), "E4")
+        self.assertIn("E3", s.handles)
+        self.assertEqual(s.language_for("u1", "8"), "en")
+
+    def test_a_v1_file_with_bad_messages_is_a_fresh_chat(self) -> None:
+        with open(os.path.join(self.dir, "-5.json"), "w", encoding="utf-8") as f:
+            json.dump({"messages": "oops"}, f)
+        self.assertEqual(self.memory.load("-5").to_dict(), ChatState().to_dict())
+
+    def test_save_of_unserializable_state_does_not_raise_or_leave_tmp(self) -> None:
+        s = ChatState()
+        s.pending = {"question": "q", "choices": [object()]}
+        self.memory.save("-5", s)
+        self.assertEqual([n for n in os.listdir(self.dir) if n.endswith(".tmp")], [])
+
 
 if __name__ == "__main__":
     unittest.main()

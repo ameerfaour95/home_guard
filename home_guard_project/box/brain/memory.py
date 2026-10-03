@@ -15,7 +15,9 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+import math
 import os
+import re
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -25,6 +27,7 @@ from .i18n import DEFAULT_LANG, SUPPORTED_LANGS, detect_language, language_overr
 log = logging.getLogger("box.brain.memory")
 
 VERSION = 2
+_HANDLE_RE = re.compile(r"^E\d+$")
 HISTORY_HOURS = 24.0  # the model sees the whole conversation of the last day...
 MAX_HISTORY_TURNS = 60  # ...but never more than this many turns
 KEEP_TURNS = 500      # turns kept on disk
@@ -42,7 +45,7 @@ class ChatState:
 
     def add_handle(self, kind: str, ref: str, camera: str = "", ts: float = 0.0, summary: str = "") -> str:
         for handle, entry in self.handles.items():
-            if entry.get("kind") == kind and entry.get("ref") == ref:
+            if isinstance(entry, dict) and entry.get("kind") == kind and entry.get("ref") == ref:
                 return handle
         handle = f"E{self.next_handle}"
         self.next_handle += 1
@@ -56,7 +59,10 @@ class ChatState:
         return self.handles.get(str(handle or "").strip().upper())
 
     def last_turn_handles(self) -> List[str]:
-        return list(self.turns[-1].get("handles") or []) if self.turns else []
+        if not self.turns or not isinstance(self.turns[-1], dict):
+            return []
+        handles = self.turns[-1].get("handles")
+        return list(handles) if isinstance(handles, list) else []
 
     def language_for(self, speaker: str, text: str, default: str = DEFAULT_LANG) -> str:
         """The reply language: what this person explicitly asked for, else the language of the message, else the
@@ -64,13 +70,16 @@ class ChatState:
         chosen = language_override(text)
         if chosen in SUPPORTED_LANGS:
             self.overrides[speaker] = chosen
-        if speaker in self.overrides:
+        if self.overrides.get(speaker) in SUPPORTED_LANGS:
             return self.overrides[speaker]
         found = detect_language(text)
         if found in SUPPORTED_LANGS:
             self.languages[speaker] = found
             return found
-        return self.languages.get(speaker, default if default in SUPPORTED_LANGS else DEFAULT_LANG)
+        last = self.languages.get(speaker)
+        if last in SUPPORTED_LANGS:
+            return last
+        return default if default in SUPPORTED_LANGS else DEFAULT_LANG
 
     def add_turn(self, speaker: str, text: str, reply: str, handles: List[str], receipts: List[str],
                  ts: float) -> None:
@@ -82,21 +91,29 @@ class ChatState:
         entry = self.handles.get(handle)
         if not entry:
             return f"{handle}=(forgotten)"
-        when = dt.datetime.fromtimestamp(entry["ts"]).strftime("%a %d %b %H:%M") if entry.get("ts") else ""
+        when = ""
+        if entry.get("ts"):
+            try:
+                when = dt.datetime.fromtimestamp(entry["ts"]).strftime("%a %d %b %H:%M")
+            except (ValueError, OverflowError, OSError, TypeError):
+                when = ""
         return f"{handle}={entry.get('kind')} {entry.get('camera') or ''} {when}".rstrip()
 
     def history_messages(self, now: float, hours: float = HISTORY_HOURS,
                          max_turns: int = MAX_HISTORY_TURNS) -> List[Dict[str, str]]:
         """Every turn of the last *hours* (at most *max_turns*), with its handles and receipts."""
         out: List[Dict[str, str]] = []
-        recent = [turn for turn in self.turns if now - float(turn.get("ts") or 0) <= hours * 3600]
+        recent = [turn for turn in self.turns
+                  if isinstance(turn, dict) and now - _num(turn.get("ts")) <= hours * 3600]
         for turn in recent[-max_turns:]:
             out.append({"role": "user", "content": str(turn.get("text") or "")})
             notes = []
-            if turn.get("handles"):
-                notes.append("handles: " + ", ".join(self._handle_note(h) for h in turn["handles"]))
-            if turn.get("receipts"):
-                notes.append("receipts: " + "; ".join(turn["receipts"]))
+            handles = turn.get("handles")
+            if isinstance(handles, list) and handles:
+                notes.append("handles: " + ", ".join(self._handle_note(str(h)) for h in handles))
+            receipts = turn.get("receipts")
+            if isinstance(receipts, list) and receipts:
+                notes.append("receipts: " + "; ".join(str(r) for r in receipts))
             reply = str(turn.get("reply") or "")
             out.append({"role": "assistant", "content": reply + (f"\n[{' | '.join(notes)}]" if notes else "")})
         return out
@@ -106,18 +123,64 @@ class ChatState:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ChatState":
-        return cls(
-            turns=list(data.get("turns") or []),
-            handles=dict(data.get("handles") or {}),
-            next_handle=int(data.get("next_handle") or 1),
-            pending=data.get("pending") if isinstance(data.get("pending"), dict) else None,
-            languages=dict(data.get("languages") or {}),
-            overrides=dict(data.get("overrides") or {}),
-        )
+        """Build a state from saved data, dropping anything malformed."""
+        turns: List[Dict[str, Any]] = []
+        raw_turns = data.get("turns")
+        for t in raw_turns if isinstance(raw_turns, list) else []:
+            if not isinstance(t, dict):
+                continue
+            turn = dict(t)
+            turn["ts"] = _num(t.get("ts"))
+            turn["text"] = _text(t.get("text"))
+            turn["reply"] = _text(t.get("reply"))
+            turn["handles"] = _str_list(t.get("handles"))
+            turn["receipts"] = _str_list(t.get("receipts"))
+            turns.append(turn)
+        handles: Dict[str, Dict[str, Any]] = {}
+        raw_handles = data.get("handles")
+        for key, entry in (raw_handles.items() if isinstance(raw_handles, dict) else []):
+            if isinstance(key, str) and _HANDLE_RE.match(key) and isinstance(entry, dict):
+                handles[key] = {**entry, "ts": _num(entry.get("ts"))}
+        try:
+            next_handle = int(data.get("next_handle") or 1)
+        except (TypeError, ValueError, OverflowError):
+            next_handle = 1
+        highest = max((int(h[1:]) for h in handles), default=0)
+        pending = data.get("pending")
+        if not (isinstance(pending, dict) and isinstance(pending.get("question"), str)
+                and isinstance(pending.get("choices"), list)):
+            pending = None
+        return cls(turns=turns, handles=handles, next_handle=max(next_handle, highest + 1, 1), pending=pending,
+                   languages=_lang_map(data.get("languages")), overrides=_lang_map(data.get("overrides")))
 
 
-def _from_v1(messages: List[Any]) -> ChatState:
+def _num(value: Any) -> float:
+    """A finite float, else 0.0."""
+    try:
+        number = float(value or 0)
+    except (TypeError, ValueError, OverflowError):
+        return 0.0
+    return number if math.isfinite(number) else 0.0
+
+
+def _text(value: Any) -> str:
+    return value if isinstance(value, str) else ("" if value is None else str(value))
+
+
+def _str_list(value: Any) -> List[str]:
+    return [item for item in value if isinstance(item, str)] if isinstance(value, list) else []
+
+
+def _lang_map(value: Any) -> Dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    return {k: v for k, v in value.items() if isinstance(k, str) and isinstance(v, str) and v in SUPPORTED_LANGS}
+
+
+def _from_v1(messages: Any) -> ChatState:
     state = ChatState()
+    if not isinstance(messages, list):
+        return state
     question: Optional[Dict[str, Any]] = None
     for m in messages:
         if not isinstance(m, dict):
@@ -126,7 +189,7 @@ def _from_v1(messages: List[Any]) -> ChatState:
             question = m
         elif m.get("role") == "assistant" and question is not None:
             state.add_turn("", str(question.get("content") or ""), str(m.get("content") or ""), [], [],
-                           float(m.get("ts") or 0))
+                           _num(m.get("ts")))
             question = None
     return state
 
@@ -145,11 +208,16 @@ class ChatMemory:
             return ChatState()
         if not isinstance(data, dict):
             return ChatState()
-        if data.get("version") == VERSION:
-            return ChatState.from_dict(data)
-        return _from_v1(data.get("messages") or [])
+        try:
+            if data.get("version") == VERSION:
+                return ChatState.from_dict(data)
+            return _from_v1(data.get("messages"))
+        except Exception as exc:  # a hand-edited or damaged file is a fresh chat
+            log.warning("Ignoring the damaged chat file for %s: %s", chat_id, exc)
+            return ChatState()
 
     def save(self, chat_id: Any, state: ChatState) -> None:
+        tmp = ""
         try:
             os.makedirs(self._dir, exist_ok=True)
             path = _chat_file(self._dir, chat_id)
@@ -157,5 +225,10 @@ class ChatMemory:
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(state.to_dict(), f, ensure_ascii=False)
             os.replace(tmp, path)
-        except OSError as exc:
+        except Exception as exc:
             log.warning("Could not save the chat %s: %s", chat_id, exc)
+            try:
+                if tmp and os.path.exists(tmp):
+                    os.remove(tmp)
+            except OSError:
+                pass
