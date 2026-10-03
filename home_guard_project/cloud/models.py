@@ -309,3 +309,73 @@ class OwnerNotice(Base):
     s3_key: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
     # True while the S3 notice object could not be written; cleared when a retry uploads it
     pending_upload: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+
+
+# ---------------------------------------------------------------- in-app labeling (migration 0011)
+
+class Annotation(Base):
+    """One saved version of a clip's human labels. Append-only: a save adds the next version, never edits one."""
+    __tablename__ = "annotations"
+    __table_args__ = (UniqueConstraint("event_id", "version"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(16))  # edited|submitted as saved (reviews: annotation_reviews)
+    tracks: Mapped[Any] = mapped_column(JSONType)  # [Track] of contract 2f
+    description: Mapped[str] = mapped_column(Text, default="", server_default="")
+    ai_description: Mapped[str] = mapped_column(Text, default="", server_default="")  # the AI summary when saved
+    ai_run_id: Mapped[Optional[int]] = mapped_column(ForeignKey("ai_runs.id", ondelete="SET NULL"), nullable=True)
+    drop_clip: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
+    needs_review: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
+    suggestions_used: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
+    author_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # no FK: versions outlive staff
+    author_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # snapshot at save time
+    created_at: Mapped[datetime] = mapped_column(TS)
+
+
+class AnnotationHead(Base):
+    """The current state of a clip's labels (newest version, its review applied): what lists and filters read."""
+    __tablename__ = "annotation_heads"
+    __table_args__ = (Index("ix_annotation_heads_status", "status"),)
+    event_id: Mapped[int] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"), primary_key=True)
+    version: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(16))  # edited|submitted|reviewed|rejected
+    needs_review: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
+    drop_clip: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
+    updated_at: Mapped[datetime] = mapped_column(TS)
+
+
+class AnnotationReview(Base):
+    """An admin's decision on one annotation version. Append-only."""
+    __tablename__ = "annotation_reviews"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    decision: Mapped[str] = mapped_column(String(16))  # accept|reject
+    note: Mapped[str] = mapped_column(Text, default="", server_default="")
+    frame: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    reviewer_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    reviewer_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(TS)
+
+
+class TaggingPublish(Base):
+    """A collection published as a Label Studio-shaped batch under s3 `tagging/<batch_name>/`."""
+    __tablename__ = "tagging_publishes"
+    __table_args__ = (Index("ix_tagging_publishes_batch_name", "batch_name"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    batch_name: Mapped[str] = mapped_column(String(128))
+    collection_id: Mapped[Optional[int]] = mapped_column(ForeignKey("collections.id", ondelete="SET NULL"),
+                                                         nullable=True)
+    state: Mapped[str] = mapped_column(String(16), default="queued", server_default="queued")
+    s3_prefix: Mapped[str] = mapped_column(String(1024), default="", server_default="")
+    tasks: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    yolo_frames: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    vlm_lines: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    missing: Mapped[Any] = mapped_column(JSONType, default=list, server_default=text("'[]'::jsonb"))
+    snapshot: Mapped[Any] = mapped_column(JSONType, default=dict, server_default=text("'{}'::jsonb"))
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("staff.id"))
+    created_at: Mapped[datetime] = mapped_column(TS)
+    worker_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    heartbeat_at: Mapped[Optional[datetime]] = mapped_column(TS, nullable=True)
