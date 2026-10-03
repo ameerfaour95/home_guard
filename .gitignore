@@ -45,6 +45,7 @@ label_studio_config.xml
 # Camera credentials (RTSP URLs) and deployment-specific zones
 cameras.yaml
 zones.yaml
+camera_alerts.yaml
 
 # Per-deployment config loaders (kept local per machine)
 home_guard_project/*/config.py

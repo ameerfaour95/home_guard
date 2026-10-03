@@ -104,7 +104,7 @@ class _FakeResult:
 
 
 class DetectTriggerTest(unittest.TestCase):
-    NAMES = {0: "person", 2: "car", 15: "cat"}
+    NAMES = {0: "person", 2: "car", 14: "bird", 15: "cat", 16: "dog"}
 
     def test_person_and_car(self) -> None:
         person, vehicle, labels = inf.detect_trigger(_FakeResult([0, 2], self.NAMES))
@@ -112,11 +112,16 @@ class DetectTriggerTest(unittest.TestCase):
         self.assertTrue(vehicle)
         self.assertEqual(labels, ["car", "person"])
 
-    def test_only_cat_no_trigger(self) -> None:
-        person, vehicle, labels = inf.detect_trigger(_FakeResult([15], self.NAMES))
+    def test_a_cat_is_an_animal_not_a_person_or_vehicle(self) -> None:
+        person, vehicle, labels = inf.detect_trigger(_FakeResult([15, 16], self.NAMES))
         self.assertFalse(person)
         self.assertFalse(vehicle)
-        self.assertEqual(labels, [])
+        self.assertEqual(labels, ["cat", "dog"])
+        self.assertTrue(inf.has_animal(labels))
+        self.assertFalse(inf.has_animal(["car", "person"]))
+
+    def test_birds_never_count(self) -> None:
+        self.assertEqual(inf.detect_trigger(_FakeResult([14], self.NAMES)), (False, False, []))
 
     def test_empty(self) -> None:
         self.assertEqual(inf.detect_trigger(_FakeResult([], self.NAMES)), (False, False, []))
@@ -228,6 +233,13 @@ class VlmFilterTest(unittest.TestCase):
         self.assertTrue(inf.vlm_confirms(car, alert_on=("vehicle",)))
         self.assertTrue(inf.vlm_confirms(car, alert_on=("person", "vehicle")))
 
+    def test_animals_count_only_when_the_owner_alerts_on_them(self) -> None:
+        cat = {"summary": "a cat walks", "people": 0, "vehicle_moving": False, "animals": 1}
+        self.assertFalse(inf.vlm_confirms(cat, alert_on=("person",)))
+        self.assertTrue(inf.vlm_confirms(cat, alert_on=("animal",)))
+        self.assertFalse(inf.vlm_confirms({"summary": "x", "people": 0, "vehicle_moving": False, "animals": 0},
+                                          alert_on=("animal",)))
+
     def test_no_verdict_when_the_vlm_did_not_say(self) -> None:
         self.assertIsNone(inf.vlm_confirms(None))
         self.assertIsNone(inf.vlm_confirms({}))
@@ -237,6 +249,8 @@ class VlmFilterTest(unittest.TestCase):
     def test_the_prompt_asks_for_the_facts_the_decision_needs(self) -> None:
         prompt = inf.build_prompt("front_door", 0, "12:00:00", 22, 6)
         self.assertIn('"people"', prompt)
+        self.assertIn('"animals"', prompt)
+        self.assertIn("animals", inf.VLM_SCHEMA["required"])
         self.assertIn('"vehicle_moving"', prompt)
 
     def test_the_prompt_asks_for_summaries_in_the_style_we_tagged(self) -> None:
@@ -306,7 +320,7 @@ class FalsePositiveTest(unittest.TestCase):
         self.assertTrue(job.false_positive)
         self.assertTrue(job.ready.is_set())
         self.assertEqual(job.alert["alert_command"], "[none]")
-        self.assertEqual(job.alert["vlm"], {"people": 0, "vehicle_moving": False})
+        self.assertEqual(job.alert["vlm"], {"people": 0, "vehicle_moving": False, "animals": None})
 
     def test_a_false_positive_clip_goes_to_the_training_folder_not_the_production_one(self) -> None:
         import tempfile
@@ -467,6 +481,22 @@ class EscalationTest(unittest.TestCase):
         self.assertFalse(inf.should_escalate(person=False, vehicle=True, vehicles_moved=False, alert_on=vehicles_only))
 
 
+class AnimalEscalationTest(unittest.TestCase):
+    def test_an_animal_wakes_the_ai_only_where_the_owner_alerts_on_animals(self) -> None:
+        self.assertFalse(inf.should_escalate(person=False, vehicle=False, vehicles_moved=False,
+                                             alert_on=("person",), animal=True))
+        self.assertTrue(inf.should_escalate(person=False, vehicle=False, vehicles_moved=False,
+                                            alert_on=("person", "animal"), animal=True))
+
+
+class QuietReasonTest(unittest.TestCase):
+    def test_the_log_says_why_the_ai_was_not_asked(self) -> None:
+        self.assertEqual(inf.quiet_reason(True, False, ("person", "vehicle")), "vehicles have not moved")
+        self.assertEqual(inf.quiet_reason(True, True, ("person",)), "this camera alerts only on person")
+        self.assertEqual(inf.quiet_reason(False, False, ("person", "vehicle")),
+                         "this camera alerts only on person, vehicle")
+
+
 class AlertOnTest(unittest.TestCase):
     def test_people_only_unless_the_owner_chose_otherwise(self) -> None:
         self.assertEqual(inf.AlertSettings().alert_on, ("person",))
@@ -474,6 +504,8 @@ class AlertOnTest(unittest.TestCase):
         self.assertEqual(inf.AlertSettings.from_box_settings({"alert_on": "vehicle,person"}).alert_on,
                          ("person", "vehicle"))
         self.assertEqual(inf.AlertSettings.from_box_settings({"alert_on": ["vehicle"]}).alert_on, ("vehicle",))
+        self.assertEqual(inf.AlertSettings.from_box_settings({"alert_on": "animal,person"}).alert_on,
+                         ("person", "animal"))
 
     def test_a_broken_value_falls_back_to_people(self) -> None:
         for bad in ("", "cats", None, 5):

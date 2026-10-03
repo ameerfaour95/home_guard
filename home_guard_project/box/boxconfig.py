@@ -108,7 +108,9 @@ def set_site(site: str, path: str = BOX_YAML) -> None:
 #   mode:              what the box runs.
 #   alert_channel:     how inference mode delivers its alerts.
 #   telegram_chat_ids: who receives the Telegram alerts, e.g. -1001234567,987654.
-#   alert_on:          what the owner is alerted about: person, vehicle, or both (person,vehicle).
+#   alert_on:          the house default of what the owner is alerted about: person, vehicle,
+#                      animal - one or more (person,vehicle). A camera can have its own choice
+#                      (camera_alerts.yaml, find_cameras set-camera-alerts).
 BOOLEAN_OPTIONS = ("show_cameras", "notify_dry_run")
 # Whole numbers, each with the smallest and largest value it may take.
 NUMBER_OPTIONS = {"alert_start_hour": (0, 23), "alert_end_hour": (0, 23), "alert_cooldown_sec": (10, 86400)}
@@ -119,7 +121,7 @@ DECIMAL_OPTIONS = {"inference_conf": (0.05, 0.95)}
 CHOICE_OPTIONS = {"mode": MODES, "alert_channel": ("telegram", "twilio", "both")}
 CHAT_IDS_OPTION = "telegram_chat_ids"
 # Options holding a set of choices, written comma-separated in a fixed order (e.g. person,vehicle).
-SET_OPTIONS = {"alert_on": ("person", "vehicle")}
+SET_OPTIONS = {"alert_on": ("person", "vehicle", "animal")}
 OPTIONS = (BOOLEAN_OPTIONS + tuple(NUMBER_OPTIONS) + tuple(DECIMAL_OPTIONS) + tuple(CHOICE_OPTIONS)
            + tuple(SET_OPTIONS) + (CHAT_IDS_OPTION,))
 # Options the running program re-reads while it runs (inference.LiveSettings): a change applies
