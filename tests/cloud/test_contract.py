@@ -39,7 +39,7 @@ def test_contract_amendment_2_additions():
     assert "detail" in schemas["AuditEntry"]["properties"]
     assert set(schemas["ExportPreview"]["properties"]) == {"included_ids", "excluded", "split_counts", "groups",
                                                            "warnings"}
-    assert schemas["ExportExclusion"]["properties"]["reason"]["enum"] == [
+    assert schemas["ExportExclusion"]["properties"]["reason"]["enum"][:4] == [  # 2f appends dropped_by_labeler
         "no_training_consent", "video_unavailable", "no_real_ai", "expired"]
     assert "get" in doc["paths"]["/v1/studio/collections/{collection_id}/items"]
     assert "/v1/studio/exports/preview" in doc["paths"]
@@ -102,3 +102,10 @@ def test_contract_2f_publish_batch():
     assert schemas["PublishOut"]["properties"]["state"]["enum"] == ["queued", "running", "ready", "failed", "partial"]
     assert set(schemas["PublishOut"]["properties"]) == {
         "batch_name", "s3_prefix", "state", "tasks", "yolo_frames", "vlm_lines", "missing", "created_utc", "created_by"}
+
+
+def test_contract_2f_export_exclusion_dropped_by_labeler():
+    app = create_app(Settings.for_tests(db_url="sqlite://"), s3=None, init_db=False)
+    schemas = app.openapi()["components"]["schemas"]
+    assert schemas["ExportExclusion"]["properties"]["reason"]["enum"] == [
+        "no_training_consent", "video_unavailable", "no_real_ai", "expired", "dropped_by_labeler"]

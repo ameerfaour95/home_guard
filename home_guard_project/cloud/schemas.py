@@ -267,7 +267,7 @@ class ExportRequest(BaseModel):
 
 class ExportExclusion(BaseModel):
     event_id: int
-    reason: Literal["no_training_consent", "video_unavailable", "no_real_ai", "expired"]
+    reason: Literal["no_training_consent", "video_unavailable", "no_real_ai", "expired", "dropped_by_labeler"]
 
 
 class ExportPreview(BaseModel):

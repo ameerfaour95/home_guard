@@ -28,3 +28,8 @@ def customer(secret: str, customer_id: int) -> str:
 def camera(secret: str, site: str, camera_name: str) -> str:
     """Pseudonym of one camera of one site (the same camera name on two sites gets two pseudonyms)."""
     return "cam-" + _short(secret, f"camera:{site}\x00{camera_name}")
+
+
+def staff(secret: str, staff_id: int) -> str:
+    """Pseudonym of a staff member (who labeled a clip), for training exports that never name anyone."""
+    return "labeler-" + _short(secret, f"staff:{int(staff_id)}")

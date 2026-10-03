@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import math
+from fractions import Fraction
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -212,21 +213,23 @@ def assistant_answer(parsed: Any, description: str) -> str:
 # ---------------------------------------------------------------- every frame of a clip
 
 def frame_times(src: Path, ffprobe: str = "ffprobe") -> list[float]:
-    """Presentation time (seconds from the first frame) of every decoded frame of the clip's video stream."""
+    """Presentation time (seconds from the first frame) of every decoded frame of the clip's video stream, exact:
+    each frame's timestamp in stream time-base units times the time base (NaN for a frame without one)."""
     r = media._run([ffprobe, "-v", "error", "-select_streams", "v:0", "-show_entries",
-                    "frame=best_effort_timestamp_time", "-of", "csv=p=0", str(src)])
-    out: list[Optional[float]] = []
-    for line in r.stdout.decode("utf-8", "replace").splitlines():
-        value = line.strip().strip(",")
-        if not value:
-            continue
+                    "frame=best_effort_timestamp:stream=time_base", "-of", "json", str(src)])
+    data = json.loads(r.stdout or b"{}")
+    base = Fraction(0)
+    for stream in data.get("streams", []):
         try:
-            out.append(float(value))
-        except ValueError:
-            out.append(None)
-    known = [t for t in out if t is not None]
-    t0 = min(known) if known else 0.0
-    return [(t - t0) if t is not None else math.nan for t in out]
+            base = Fraction(str(stream.get("time_base") or "0"))
+        except (ValueError, ZeroDivisionError):
+            base = Fraction(0)
+    ticks = [f.get("best_effort_timestamp") for f in data.get("frames", [])]
+    known = [t for t in ticks if isinstance(t, int)]
+    if not known or base <= 0:
+        return [math.nan] * len(ticks)
+    t0 = min(known)
+    return [float((t - t0) * base) if isinstance(t, int) else math.nan for t in ticks]
 
 
 def extract_frames(src: Path, work: Path, fps: Optional[float], ffmpeg: str = "ffmpeg",

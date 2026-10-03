@@ -1655,7 +1655,8 @@
               "no_training_consent",
               "video_unavailable",
               "no_real_ai",
-              "expired"
+              "expired",
+              "dropped_by_labeler"
             ],
             "title": "Reason",
             "type": "string"

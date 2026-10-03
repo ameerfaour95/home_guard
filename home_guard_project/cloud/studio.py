@@ -32,7 +32,7 @@ from sqlalchemy.orm import Session
 from home_guard_project.fleet_contract.classes import COCO_NAMES, CONTIGUOUS
 from home_guard_project.fleet_contract.yolo_labels import parse_label
 
-from . import pseudonym, redact
+from . import labeling, media, pseudonym, redact
 from .models import (AiRun, AnnotationHead, Artifact, CollectionItem, Customer, Device, Event, Export, Feedback,
                      RawRevision, Staff)
 from .s3 import ETagMismatch
@@ -57,7 +57,7 @@ def max_class_conf():
 
 
 LOW_CONF = 0.45
-LABEL_DONE = ("submitted", "reviewed")  # a clip counts as labeled once its current annotation is one of these
+LABEL_DONE = labeling.DONE  # a clip counts as labeled once its current annotation is submitted or reviewed
 
 
 def _head_where(*conds):
@@ -113,18 +113,21 @@ def _day(ev: Event) -> str:
 def select_export_items(session: Session, collection_id: int, request: ExportRequest, labeler: bool = False):
     """Events of the collection split into (included, excluded).
 
-    Reasons, checked in this order: `no_training_consent` (always), `expired` (no copy of the video is left and
+    Reasons, checked in this order: `no_training_consent` (always), `dropped_by_labeler` (the clip's submitted or
+    reviewed annotation asks to drop it), `expired` (no copy of the video is left and
     the production retention has passed: a training copy that outlives the production one stays exportable),
     `video_unavailable`, and
-    `no_real_ai` -- only for VLM-only exports (formats == ["vlm_jsonl"]) without `include_fallback_ai`.
+    `no_real_ai` -- only for VLM-only exports (formats == ["vlm_jsonl"]) without `include_fallback_ai`, and never
+    for a clip with a submitted or reviewed annotation (its human description is the answer).
     With other formats, fallback/failed AI only drops the event from vlm.jsonl; clips and YOLO labels stay.
     For a `labeler`, events they may not see (no training consent) are dropped before anything else: they appear
     neither in the result nor as an exclusion, so the preview is that of the visible events alone.
     Returns (list[Event] ordered by id, list[ExportExclusion] ordered by event id).
     """
-    stmt = (select(Event, Customer.consent_training)
+    stmt = (select(Event, Customer.consent_training, AnnotationHead.status, AnnotationHead.drop_clip)
             .join(CollectionItem, CollectionItem.event_id == Event.id)
             .join(Device, Device.id == Event.device_pk).join(Customer, Customer.id == Device.customer_id)
+            .outerjoin(AnnotationHead, AnnotationHead.event_id == Event.id)
             .where(CollectionItem.collection_id == collection_id))
     if labeler:
         stmt = stmt.where(Customer.consent_training.is_(True))
@@ -132,16 +135,19 @@ def select_export_items(session: Session, collection_id: int, request: ExportReq
     vlm_only = list(request.formats) == ["vlm_jsonl"]
     included: list[Event] = []
     excluded: list[ExportExclusion] = []
-    for ev, consent in rows:
+    for ev, consent, label_status, drop_clip in rows:
         comp = ev.completeness if isinstance(ev.completeness, dict) else {}
         reason = None
         if not consent:
             reason = "no_training_consent"
+        elif label_status in LABEL_DONE and drop_clip:
+            reason = "dropped_by_labeler"
         elif comp.get("expired"):
             reason = "expired"
         elif not comp.get("video"):
             reason = "video_unavailable"
-        elif vlm_only and not request.include_fallback_ai and comp.get("ai") != "real":
+        elif (vlm_only and not request.include_fallback_ai and comp.get("ai") != "real"
+              and label_status not in LABEL_DONE):  # a human description needs no AI answer
             reason = "no_real_ai"
         if reason:
             excluded.append(ExportExclusion(event_id=ev.id, reason=reason))
@@ -380,6 +386,12 @@ def _choose_clip(arts: list[Artifact], meta: dict) -> Optional[dict]:
     return {**_art(original), "kind": "original"}
 
 
+def _original_clip(arts: list[Artifact]) -> Optional[dict]:
+    """The original clip (training copy first): human labels are per native frame of exactly this file."""
+    originals = sorted((a for a in arts if a.role == "original_video" and a.available), key=_training_first)
+    return _art(originals[0]) if originals else None
+
+
 def _feedback_utc(value: Optional[datetime]) -> Optional[str]:
     return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if value else None
 
@@ -422,6 +434,7 @@ def take_snapshot(session: Session, request: ExportRequest, *, labeler: bool, se
             feedback.setdefault(fb.event_id, []).append(_frozen_feedback(fb, rev))
         customers = dict(session.execute(select(Device.id, Device.customer_id)
                                          .where(Device.id.in_({ev.device_pk for ev in chunk}))).all())
+        heads = labeling.labeled_versions(session, ids)  # submitted or reviewed annotations win over weak labels
         for ev in chunk:
             mine = arts.get(ev.id, [])
             meta = _meta_body(session, mine)
@@ -434,6 +447,10 @@ def take_snapshot(session: Session, request: ExportRequest, *, labeler: bool, se
                        if run is not None and run.status != "none" else None),
                 "clip": _choose_clip(mine, meta) if "clips" in formats else None,
             }
+            head = heads.get(ev.id)
+            snap["annotation"] = ({"version": head.version, "status": head.status,
+                                   "clip": _original_clip(mine) if "yolo" in formats else None}
+                                  if head is not None and not head.drop_clip else None)
             if "yolo" in formats:
                 labels: dict[int, Artifact] = {}
                 images: dict[int, list[Artifact]] = {}
@@ -640,10 +657,11 @@ def claim_export(session: Session, export_id: int, worker_id: str) -> bool:
 
 class _Lease:
     """Refreshes the export's heartbeat every HEARTBEAT_EVERY seconds on its own connection; notices when the
-    export is no longer this worker's (swept as stale)."""
+    export is no longer this worker's (swept as stale). `model` is the leased table: Export, or TaggingPublish for
+    a tagging publish (same columns: state, worker_id, heartbeat_at)."""
 
-    def __init__(self, engine, export_id: int, worker_id: str):
-        self.engine, self.export_id, self.worker_id = engine, export_id, worker_id
+    def __init__(self, engine, export_id: int, worker_id: str, model=Export):
+        self.engine, self.export_id, self.worker_id, self.model = engine, export_id, worker_id, model
         self.lost = threading.Event()
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name=f"export-lease-{export_id}", daemon=True)
@@ -663,9 +681,10 @@ class _Lease:
                 log.warning("export %s heartbeat failed", self.export_id)
 
     def beat(self) -> None:
+        m = self.model
         with self.engine.begin() as conn:
-            n = conn.execute(update(Export).where(Export.id == self.export_id, Export.worker_id == self.worker_id,
-                                                  Export.state == "running")
+            n = conn.execute(update(m).where(m.id == self.export_id, m.worker_id == self.worker_id,
+                                             m.state == "running")
                              .values(heartbeat_at=func.now())).rowcount
         if not n:
             self.lost.set()
@@ -675,10 +694,10 @@ class _Lease:
             raise LeaseLost(self.export_id)
 
 
-def _finish(session: Session, export_id: int, worker_id: str, **values) -> bool:
-    """Set the final state only while this worker still owns the running export."""
-    n = session.execute(update(Export).where(Export.id == export_id, Export.worker_id == worker_id,
-                                             Export.state == "running").values(**values)
+def _finish(session: Session, export_id: int, worker_id: str, model=Export, **values) -> bool:
+    """Set the final state only while this worker still owns the running export (or publish: `model`)."""
+    n = session.execute(update(model).where(model.id == export_id, model.worker_id == worker_id,
+                                            model.state == "running").values(**values)
                         .execution_options(synchronize_session=False)).rowcount
     session.commit()
     return bool(n)
@@ -714,6 +733,7 @@ class _Build:
         if "clips" in formats:
             self.counts["clips"] = {n: 0 for n in SPLIT_ORDER}
         self.referenced: list[str] = []  # every key the bundle points at, verified before publishing
+        self.label_sources: set[str] = set()  # "human" and/or "detector_weak_label"
         self._identities: dict[int, redact.Identity] = {}
 
     def close(self) -> None:
@@ -795,12 +815,21 @@ class _Build:
                 self.counts["clips"][split] += 1
                 self.referenced.append(self.prefix + dest)
 
+        ann = self.annotation(ev, snap)
+        who = (pseudonym.staff(self.secret, ann.author_id) if ann is not None and ann.author_id is not None
+               else "labeler-unknown")
         frames, yolo_prov = 0, None
-        if "yolo" in self.formats:
+        if "yolo" in self.formats and ann is not None:  # human labels win over the weak labels
+            frames = self.human_yolo(ev, snap, split, sources, private, ann)
+            yolo_prov = {"source": "human", "annotation_version": ann.version, "labeled_by": who,
+                         "class_schema": CLASS_SCHEMA}
+            self.label_sources.add("human")
+        elif "yolo" in self.formats:
             frames = self.yolo(ev, snap, split, sources, private)
             if snap.get("frames"):
                 yolo_prov = {"source": "detector_weak_label", "model": snap.get("detector_model") or "unknown",
                              "class_schema": CLASS_SCHEMA}
+                self.label_sources.add("detector_weak_label")
 
         ai_snap = snap.get("ai")
         run = self.session.get(AiRun, ai_snap["id"]) if ai_snap else None
@@ -816,7 +845,25 @@ class _Build:
                        "input": "sampled_frames" if run.input_artifact_ids else "clip"}
 
         wants_ai = ai_status == "real" or (self.req.include_fallback_ai and ai_status in ("fallback", "failed"))
-        if ("vlm_jsonl" in self.formats and clip_ok and wants_ai and run is not None
+        if ann is not None:  # the human description is the answer, whatever the AI said
+            if "vlm_jsonl" in self.formats and clip_ok and (ann.description or "").strip():
+                content, redacted = vlm_prompt(ident, run.prompt if run is not None else None)
+                parsed = (_strip_tokens_json(ident.json(run.parsed))
+                          if run is not None and isinstance(run.parsed, dict) else None)
+                answer = labeling.assistant_answer(parsed, strip_media_tokens(ident.text(ann.description)))
+                line = {
+                    "messages": [{"role": "user", "content": content}, {"role": "assistant", "content": answer}],
+                    "videos": [clip_path],
+                    "event_id": ev.id, "split": split,
+                    "owner_verdicts": [ident.text(v) for v in snap.get("verdicts", [])], "ai_status": ai_status,
+                    "prompt_redacted": redacted,
+                    "prompt_source": "placeholder" if content == PLACEHOLDER_PROMPT else "teacher",
+                    "prompt_version": ident.text(run.prompt_version) if run and run.prompt_version else None,
+                    "label_source": "human_corrected", "annotation_version": ann.version, "labeled_by": who,
+                }
+                self.vlm_files[split].write(json.dumps(line, ensure_ascii=False) + "\n")
+                self.counts["vlm"][split] += 1
+        elif ("vlm_jsonl" in self.formats and clip_ok and wants_ai and run is not None
                 and isinstance(run.parsed, dict) and run.parsed):
             content, redacted = vlm_prompt(ident, run.prompt)
             answer = json.dumps(_strip_tokens_json(ident.json(run.parsed)), ensure_ascii=False)
@@ -848,11 +895,65 @@ class _Build:
             "owner_verdicts": [ident.text(v) for v in snap.get("verdicts", [])],
             "yolo_frames": frames, "sources": sources,
             "yolo": yolo_prov, "ai": ai_prov, "owner_feedback": feedback,
+            "annotation": ({"version": ann.version, "labeled_by": who, "status": snap["annotation"].get("status")}
+                           if ann is not None else None),
         }
         self.items_file.write(json.dumps(item, ensure_ascii=False) + "\n")
         self.private_file.write(("," if self.item_count else "") + json.dumps(str(ev.id)) + ":"
                                 + json.dumps(private, ensure_ascii=False))
         self.item_count += 1
+
+    def annotation(self, ev: Event, snap: dict):
+        """The annotation version frozen in the snapshot (versions are append-only), or None."""
+        info = snap.get("annotation")
+        if not info:
+            return None
+        row = labeling.version_row(self.session, ev.id, info["version"])
+        if row is None:
+            self.miss(ev.id, "changed_since_request", note="annotation")
+        return row
+
+    def human_yolo(self, ev: Event, snap: dict, split: str, sources: list[str], private: dict, ann) -> int:
+        """EVERY frame of the clip: the image extracted with ffmpeg at its native index, and its label rows from the
+        human tracks at the frame's own time (box_at); a frame with no box gets an empty label (a human negative)."""
+        clip = snap["annotation"].get("clip")
+        if clip is None:
+            self.miss(ev.id, "clip_missing")
+            return 0
+        tracks = labeling.to_tracks(ann.tracks)
+        written = 0
+        with tempfile.TemporaryDirectory(prefix="hgframes_") as tmp:
+            work = Path(tmp)
+            try:
+                self.s3.download_to(clip["key"], work / "src.mp4", if_match=clip.get("etag") or None)
+            except ETagMismatch:
+                self.miss(ev.id, "changed_since_request")
+                return 0
+            except Exception as e:
+                if not _not_found(e):
+                    raise
+                self.miss(ev.id, "clip_missing")
+                return 0
+            try:
+                frames = labeling.extract_frames(work / "src.mp4", work, ev.fps)
+            except media.MediaError as e:
+                self.miss(ev.id, "frames_unavailable", note=error_text(e))
+                return 0
+            for index, t_sec, path in frames:
+                stem = f"{ev.id}_f{index:04d}"
+                image_key = f"{self.prefix}yolo/images/{split}/{stem}.jpg"
+                label_key = f"{self.prefix}yolo/labels/{split}/{stem}.txt"
+                rows = labeling.yolo_rows(tracks, t_sec)
+                self.s3.upload_file(path, image_key, "image/jpeg")
+                self.s3.put_bytes(label_key, labeling.label_text(rows).encode("utf-8"), "text/plain")
+                self.counts["yolo"][split]["images"] += 1
+                self.counts["yolo"][split]["boxes"] += len(rows)
+                self.referenced += [image_key, label_key]
+                written += 1
+        sources.append(_ref(clip["id"]))
+        private["human_labels"] = {"clip_key": clip["key"], "clip_etag": clip.get("etag"),
+                                   "annotation_version": ann.version, "frames": written}
+        return written
 
     def feedback(self, event_id: int, frozen: list, ident: redact.Identity) -> list[dict]:
         """The owner feedback frozen in the snapshot. A piece whose row or source revision has changed since the
@@ -970,8 +1071,10 @@ def readme_text(export: Export, formats: list[str], datasets: list[str]) -> str:
     ]
     if "yolo" in formats:
         out += [
-            "YOLO (Ultralytics). Labels are detector weak labels (COCO ids remapped to contiguous 0-8),",
-            "not human ground truth. An empty val/test split points at train (see the manifest warnings).",
+            "YOLO (Ultralytics), contiguous class ids 0-8. A clip whose manifest item says yolo.source = human",
+            "has human labels on EVERY frame (an empty label file is a human negative); the others carry",
+            "detector weak labels (COCO ids remapped), not human ground truth.",
+            "An empty val/test split points at train (see the manifest warnings).",
             f"  yolo detect train data={DEST}/yolo/data.yaml model=yolo11s.pt epochs=100 imgsz=640 batch=16 "
             f"project=runs/detect name={tag}",
             f"  yolo detect val data={DEST}/yolo/data.yaml model=runs/detect/{tag}/weights/best.pt imgsz=640",
@@ -1128,7 +1231,9 @@ def _run_build(session: Session, s3, export: Export, secret: str, lease: _Lease)
         if "vlm_jsonl" in formats:
             head["vlm"] = {"jsonl_dir": "vlm", "media_dir": ".", "datasets": datasets}
         if "yolo" in formats:
-            head["yolo"] = {"data_yaml": "yolo/data.yaml", "labels": "detector_weak_label"}
+            sources = build.label_sources
+            head["yolo"] = {"data_yaml": "yolo/data.yaml",
+                            "labels": "mixed" if len(sources) > 1 else next(iter(sources), "detector_weak_label")}
         manifest_path = tmp / "manifest.json"
         with manifest_path.open("w", encoding="utf-8") as out, \
                 (tmp / "items.jsonl").open("r", encoding="utf-8") as items:

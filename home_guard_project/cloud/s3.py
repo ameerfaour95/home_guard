@@ -25,9 +25,20 @@ class ObjInfo:
 
 
 class S3:
-    def __init__(self, client, bucket: str):
+    def __init__(self, client, bucket: str, writable: tuple = WRITABLE_PREFIXES):
         self.client = client
         self.bucket = bucket
+        self.writable = tuple(writable)
+
+    def scoped(self, prefix: str) -> "S3":
+        """The same bucket, writable ONLY under `prefix` (one folder, never a top-level area)."""
+        if not prefix.endswith("/") or prefix.count("/") < 2 or ".." in prefix.split("/"):
+            raise ValueError(f"refusing to scope writes to {prefix!r}")
+        return S3(self.client, self.bucket, writable=(prefix,))
+
+    def _check_write(self, key: str) -> None:
+        if not key.startswith(self.writable) or key in self.writable:
+            raise ValueError(f"refusing to write outside {self.writable}: {key}")
 
     def list(self, prefix: str) -> Iterator[ObjInfo]:
         paginator = self.client.get_paginator("list_objects_v2")
@@ -54,6 +65,31 @@ class S3:
             raise ETagMismatch(key)
         return resp["Body"].read()
 
+    def download_to(self, key: str, path, if_match: Optional[str] = None, chunk: int = 1 << 20) -> None:
+        """Stream the object into the local file `path`; with `if_match` only that revision, else ETagMismatch."""
+        from botocore.exceptions import ClientError
+
+        params = dict(Bucket=self.bucket, Key=key)
+        if if_match is not None:
+            params["IfMatch"] = f'"{if_match}"'
+        try:
+            resp = self.client.get_object(**params)
+        except ClientError as e:
+            error = e.response.get("Error", {})
+            status = e.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+            if error.get("Code") in ("PreconditionFailed", "412") or status == 412:
+                raise ETagMismatch(key) from e
+            raise
+        body = resp["Body"]
+        try:
+            if if_match is not None and resp.get("ETag", "").strip('"') != if_match:
+                raise ETagMismatch(key)
+            with open(path, "wb") as out:
+                for part in body.iter_chunks(chunk):
+                    out.write(part)
+        finally:
+            body.close()
+
     def get_text(self, key: str, if_match: Optional[str] = None) -> str:
         return self.get_bytes(key, if_match).decode("utf-8", errors="replace")
 
@@ -61,8 +97,7 @@ class S3:
         return json.loads(self.get_text(key))
 
     def put_json(self, key: str, body: Any) -> None:
-        if not key.startswith(WRITABLE_PREFIXES):
-            raise ValueError(f"refusing to write outside {WRITABLE_PREFIXES}: {key}")
+        self._check_write(key)
         self.client.put_object(Bucket=self.bucket, Key=key, Body=json.dumps(body).encode("utf-8"),
                                ContentType="application/json")
 
@@ -74,8 +109,7 @@ class S3:
         With `if_match` (an ETag), only that revision of the source is copied (`CopySourceIfMatch`); a source
         replaced since raises ETagMismatch. With `sha256`, S3 computes the copy's SHA-256 and its hex digest is
         returned (None if S3 gave none); the object's bytes never pass through this process."""
-        if not dest_key.startswith(WRITABLE_PREFIXES):
-            raise ValueError(f"refusing to write outside {WRITABLE_PREFIXES}: {dest_key}")
+        self._check_write(dest_key)
         params = dict(Bucket=self.bucket, Key=dest_key, CopySource={"Bucket": self.bucket, "Key": source_key},
                       MetadataDirective="REPLACE")
         if content_type:
@@ -100,8 +134,7 @@ class S3:
         return base64.b64decode(checksum).hex()
 
     def put_bytes(self, key: str, body: bytes, content_type: str) -> None:
-        if not key.startswith(WRITABLE_PREFIXES):
-            raise ValueError(f"refusing to write outside {WRITABLE_PREFIXES}: {key}")
+        self._check_write(key)
         self.client.put_object(Bucket=self.bucket, Key=key, Body=body, ContentType=content_type)
 
     def list_dirs(self, prefix: str) -> list[str]:
@@ -123,8 +156,7 @@ class S3:
         self.client.download_file(self.bucket, key, str(path))
 
     def upload_file(self, path, key: str, content_type: str) -> None:
-        if not key.startswith(WRITABLE_PREFIXES):
-            raise ValueError(f"refusing to write outside {WRITABLE_PREFIXES}: {key}")
+        self._check_write(key)
         self.client.upload_file(str(path), self.bucket, key, ExtraArgs={"ContentType": content_type})
 
     def head(self, key: str) -> Optional[ObjInfo]:
@@ -153,8 +185,8 @@ class S3:
 
     def delete_prefix(self, prefix: str) -> int:
         """Delete every object under a writable `prefix`; returns how many."""
-        if not prefix.startswith(WRITABLE_PREFIXES) or prefix in WRITABLE_PREFIXES:
-            raise ValueError(f"refusing to delete outside a folder of {WRITABLE_PREFIXES}: {prefix}")
+        if not prefix.startswith(self.writable) or prefix in self.writable:
+            raise ValueError(f"refusing to delete outside a folder of {self.writable}: {prefix}")
         keys = [o.key for o in self.list(prefix)]
         for start in range(0, len(keys), 1000):
             self.client.delete_objects(Bucket=self.bucket, Delete={
@@ -167,8 +199,7 @@ class S3:
         deleted (empty when all were). A request that fails as a whole raises."""
         keys = sorted(set(keys))
         for key in keys:
-            if not key.startswith(WRITABLE_PREFIXES) or key in WRITABLE_PREFIXES:
-                raise ValueError(f"refusing to delete outside {WRITABLE_PREFIXES}: {key}")
+            self._check_write(key)
         failed: dict[str, str] = {}
         for start in range(0, len(keys), 1000):
             batch = keys[start:start + 1000]
