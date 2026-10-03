@@ -340,5 +340,64 @@ class ActToolsTest(unittest.TestCase):
         self.assertEqual(calls[0][2:5], (NOW - 5 * HOUR, NOW - 5 * HOUR - 10, 4.0))
 
 
+    def test_pause_that_took_effect_keeps_its_receipt_when_saving_fails(self) -> None:
+        ctx = self.ctx(text="stop until six please")
+        with patch("home_guard_project.box.feedback._write_json", side_effect=OSError("disk full")):
+            out = pause_alerts(ctx, {"owner_words": "stop until six", "cameras": ["entrance"], "until": "06:00"})
+        self.assertEqual((out["ok"], out["status"]), (True, DONE))
+        self.assertEqual((ctx.receipts[0].status, ctx.receipts[0].detail["saved"]), (DONE, False))
+        self.assertTrue(self.mute.is_muted(NOW, "main_entrance"))
+
+    def test_resume_that_took_effect_keeps_its_receipt_when_saving_fails(self) -> None:
+        self.mute.apply(Feedback(action="mute", mute_until=NOW + HOUR, camera="main_entrance"), NOW)
+        ctx = self.ctx(text="resume please")
+        with patch("home_guard_project.box.feedback._write_json", side_effect=OSError("disk full")):
+            out = resume_alerts(ctx, {"cameras": ["entrance"]})
+        self.assertEqual((out["ok"], ctx.receipts[0].status), (True, DONE))
+        self.assertFalse(self.mute.is_muted(NOW, "main_entrance"))
+
+    def test_pause_that_did_not_take_effect_is_failed(self) -> None:
+        ctx = self.ctx(text="stop until six please")
+        with patch.object(MuteState, "apply", side_effect=OSError("boom")):
+            out = pause_alerts(ctx, {"owner_words": "stop until six", "cameras": ["entrance"], "until": "06:00"})
+        self.assertEqual((out["ok"], ctx.receipts[0].status, ctx.receipts[0].reason), (False, FAILED, "error"))
+
+    def test_pointer_words_are_never_a_quote(self) -> None:
+        self.assertFalse(quoted_from("this one", "this one"))
+        self.assertFalse(quoted_from("הזה הזה", "הזה הזה"))
+        self.assertFalse(quoted_from("هذا هنا", "هذا هنا"))
+        self.assertTrue(quoted_from("stop until six", "ok stop until six"))
+        ctx = self.ctx(text="this one")
+        ctx.alert_handle = ctx.state.add_handle("event", "main_entrance_1_alert", "main_entrance", NOW, "x")
+        out = record_verdict(ctx, {"verdict": "false_alarm", "owner_words": "this one"})
+        self.assertFalse(out["ok"])
+        self.assertEqual(ctx.saved, 0)
+
+    def test_quote_must_be_whole_words(self) -> None:
+        self.assertFalse(quoted_from("op unt", "stop until six"))
+        self.assertTrue(quoted_from("Until, SIX", "stop until six."))
+
+    def test_live_photos_count_toward_the_media_cap(self) -> None:
+        ctx = self.ctx()
+        for _ in range(3):
+            self.assertEqual(check_camera(ctx, {"camera": "entrance"})["status"], DONE)
+        out = check_camera(ctx, {"camera": "entrance"})
+        self.assertEqual((out["ok"], out["reason"]), (False, "too_many"))
+        self.assertEqual(len(self.deliver.sent), 3)
+
+    def test_repeating_a_camera_change_in_one_turn_is_requested(self) -> None:
+        ctx = self.ctx()
+        set_camera_active(ctx, {"camera": "front", "active": False})
+        set_camera_active(ctx, {"camera": "front", "active": False})
+        self.assertEqual([r.status for r in ctx.receipts], [REQUESTED, REQUESTED])
+        self.assertTrue(ctx.receipts[1].detail["already"])
+
+    def test_call_key_never_carries_over(self) -> None:
+        ctx = self.ctx()
+        ctx.call_key = "k1"
+        check_camera(ctx, {"camera": "nowhere"})      # fails before any receipt
+        self.assertEqual(ctx.call_key, "")
+
+
 if __name__ == "__main__":
     unittest.main()

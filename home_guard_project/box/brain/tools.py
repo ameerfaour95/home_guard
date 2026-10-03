@@ -15,6 +15,7 @@ import json
 import logging
 import math
 import os
+import string
 import time
 from collections import Counter
 from dataclasses import dataclass, field
@@ -118,6 +119,8 @@ def _safe_tool(function):
         except Exception as exc:
             log.warning("%s failed: %s", function.__name__, exc)
             return _err(f"{function.__name__} could not complete; check the arguments or try again")
+        finally:
+            ctx.call_key = ""      # a key never carries over to a later call
     return wrapped
 
 
@@ -326,11 +329,25 @@ def ask_clarification(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # -- acting ----------------------------------------------------------------------
+_FILLER = frozenset({
+    "this", "that", "one", "it", "here", "there", "the", "a", "yes", "no", "ok", "okay", "these", "those",
+    "הזה", "הזאת", "זה", "זאת", "הזו", "זו", "הנה", "פה", "כאן", "כן", "לא", "אוקיי",
+    "هذا", "هذه", "ذلك", "تلك", "هنا", "نعم", "لا",
+})
+
+
+def _words(value: Any) -> List[str]:
+    out = [w.strip(string.punctuation + "־׳״،؟؛‘’“”…")
+           for w in str(value).casefold().split()]
+    return [w for w in out if w]
+
+
 def quoted_from(quote: str, text: str) -> bool:
-    """True if *quote* is a real piece of *text* of at least two words (ignoring case and spacing)."""
-    squeeze = lambda s: " ".join(str(s).casefold().split())  # noqa: E731
-    q = squeeze(quote)
-    return len(q) >= 3 and len(q.split()) >= 2 and q in squeeze(text)
+    """True if *quote* is a run of whole words of *text*: two or more, at least one not a pointer word."""
+    q, t = _words(quote), _words(text)
+    if len(q) < 2 or all(w in _FILLER for w in q):
+        return False
+    return any(t[i:i + len(q)] == q for i in range(len(t) - len(q) + 1))
 
 
 def _issue(ctx: ToolContext, tool: str, status: str, target: str = "", detail: Optional[Dict[str, Any]] = None,
@@ -360,7 +377,8 @@ def _service_result(value: Any) -> Dict[str, Any]:
 
 
 def _media_sent(ctx: ToolContext) -> int:
-    return sum(1 for r in ctx.receipts if r.tool in ("send_media", "record_clip") and r.status == DONE)
+    return sum(1 for r in ctx.receipts if r.tool in ("send_media", "record_clip", "check_camera")
+               and r.status == DONE)
 
 
 def _one_camera(ctx: ToolContext, words: Any) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
@@ -377,6 +395,8 @@ def check_camera(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         return bad
     if not ctx.snapshot.camera(camera).enabled:
         return _result(_issue(ctx, "check_camera", FAILED, camera, {"camera": camera}, "camera_off"))
+    if _media_sent(ctx) >= 3:
+        return _result(_issue(ctx, "check_camera", FAILED, camera, {"camera": camera}, "too_many"))
     shot = ctx.services.grab_photo(camera) if ctx.services.grab_photo else {"error": "no live view"}
     if not isinstance(shot, dict):
         raise ValueError("photo result must be an object")
@@ -517,16 +537,31 @@ def pause_alerts(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     for camera in sorted(cameras) if cameras else [None]:
         feedback = Feedback(action="mute", mute_until=fb.mute_until, camera=camera)
         before = ctx.services.mute.snapshot()            # what Undo puts back (an earlier pause survives)
-        ctx.services.mute.apply(feedback, now)
-        out.append(_issue(ctx, "pause_alerts", DONE, camera or "all",
-                          {"camera": camera or "", "until": hhmm(fb.mute_until), "before": before}))
+        detail = {"camera": camera or "", "until": hhmm(fb.mute_until), "before": before}
+        try:
+            ctx.services.mute.apply(feedback, now)
+        except Exception as exc:  # noqa: BLE001 - memory may have changed even though saving failed
+            log.warning("Pause apply failed: %s", exc)
+            targets = [camera] if camera else list(ctx.snapshot.names)
+            held = bool(targets) and all(
+                (ctx.services.mute.muted_until(now, c) or 0.0) >= fb.mute_until for c in targets)
+            if not held:
+                out.append(_issue(ctx, "pause_alerts", FAILED, camera or "all", detail, "error"))
+                continue
+            detail["saved"] = False
+        out.append(_issue(ctx, "pause_alerts", DONE, camera or "all", detail))
         alert = _alert_of(ctx.state.resolve(ctx.alert_handle) or {}) if ctx.alert_handle else None
         try:
             save_feedback(ctx.services.feedback_dir, alert, feedback, ctx.text, ctx.speaker, ctx.chat_id, now)
             ctx.saved += 1
         except Exception as exc:  # noqa: BLE001 - the pause happened and has its receipt
             log.warning("Pause applied but its feedback file was not saved: %s", exc)
-    return {"ok": True, "status": DONE, "receipts": [r.id for r in out], "until": hhmm(fb.mute_until)}
+    ok = any(r.status == DONE for r in out)
+    result = {"ok": ok, "status": DONE if ok else FAILED, "receipts": [r.id for r in out],
+              "until": hhmm(fb.mute_until)}
+    if not ok:
+        result["reason"] = "error"
+    return result
 
 
 @_safe_tool
@@ -537,15 +572,28 @@ def resume_alerts(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     now = _finite(ctx.services.now())
     out = []
     for camera in sorted(cameras) if cameras else [None]:
-        ctx.services.mute.resume(camera, now, cameras=ctx.snapshot.names)
-        out.append(_issue(ctx, "resume_alerts", DONE, camera or "all", {"camera": camera or ""}))
+        detail = {"camera": camera or ""}
+        try:
+            ctx.services.mute.resume(camera, now, cameras=ctx.snapshot.names)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Resume failed: %s", exc)
+            targets = [camera] if camera else list(ctx.snapshot.names)
+            if any(ctx.services.mute.is_muted(now, c) for c in targets):
+                out.append(_issue(ctx, "resume_alerts", FAILED, camera or "all", detail, "error"))
+                continue
+            detail["saved"] = False
+        out.append(_issue(ctx, "resume_alerts", DONE, camera or "all", detail))
     try:
         save_feedback(ctx.services.feedback_dir, None, Feedback(action="resume"), ctx.text, ctx.speaker,
                       ctx.chat_id, now)
         ctx.saved += 1
     except Exception as exc:  # noqa: BLE001
         log.warning("Alerts resumed but the feedback file was not saved: %s", exc)
-    return {"ok": True, "status": DONE, "receipts": [r.id for r in out]}
+    ok = any(r.status == DONE for r in out)
+    result = {"ok": ok, "status": DONE if ok else FAILED, "receipts": [r.id for r in out]}
+    if not ok:
+        result["reason"] = "error"
+    return result
 
 
 @_safe_tool
@@ -580,6 +628,8 @@ def set_camera_active(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     detail = {"camera": camera, "active": active, "chat_id": ctx.chat_id, "lang": ctx.lang}
     current = {c.name: ctx.camera_states.get(c.name, c.enabled) for c in ctx.snapshot.cameras}
     if current[camera] == active:
+        if ctx.camera_states.get(camera) is active:   # only because an earlier call this turn asked for it
+            return _result(_issue(ctx, "set_camera_active", REQUESTED, camera, dict(detail, already=True)))
         return _result(_issue(ctx, "set_camera_active", DONE, camera, dict(detail, already=True)))
     if not active and sum(1 for on in current.values() if on) <= 1:
         # The last camera stays on: with none, the box would stop listening to this chat.
