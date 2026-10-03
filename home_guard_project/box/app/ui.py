@@ -165,6 +165,10 @@ class CameraTile(QFrame):
             "badge": QRectF(area.left()+8, area.top()+8, min(width, badge_width), 28),
         }
 
+    def thumbnail_scrim(self):
+        area=QRectF(self.rect().adjusted(1,1,-1,-1))
+        return QRectF(area.left(),area.bottom()-area.height()*.45,area.width(),area.height()*.45)
+
     def move_caption(self, position):
         self.caption_position=float(position)
         self.update()
@@ -213,11 +217,18 @@ class CameraTile(QFrame):
             p.drawPixmap(QRectF(x,y,w,h),self.picture,QRectF(self.picture.rect()))
             if reconnecting: p.fillRect(area, QColor(0,0,0,110))
             if not self.off and not self.stopped and not reconnecting and self.show_detections:
+                p.save()
+                detection_area=QRectF(area)
+                if not self.hero:
+                    detection_area.setBottom(self.thumbnail_scrim().top())
+                    p.setClipRect(detection_area,Qt.ClipOperation.IntersectClip)
                 p.setOpacity(self.box_opacity)
                 p.setFont(QFont("Segoe UI",11))
                 for detection in self.detections:
                     rect=QRectF(*box_rect(detection.box,(x,y,w,h)))
-                    self.painted_detection_rects.append(rect)
+                    painted=rect.intersected(detection_area)
+                    if painted.isEmpty(): continue
+                    self.painted_detection_rects.append(painted)
                     p.setPen(QPen(QColor(detection.color),(3 if self.hero else 2) if detection.width>1 else 1))
                     length=min(24,rect.width()/3,rect.height()/3)
                     for cx,cy,sx,sy in ((rect.left(),rect.top(),1,1),(rect.right(),rect.top(),-1,1),(rect.left(),rect.bottom(),1,-1),(rect.right(),rect.bottom(),-1,-1)):
@@ -231,7 +242,7 @@ class CameraTile(QFrame):
                     tag=QRectF(tx,ty,metrics.horizontalAdvance(text)+16,metrics.height()+8)
                     self.painted_label_rects[f"chip_{len(self.painted_label_rects)}"] = tag
                     p.fillRect(tag,QColor("#101a21"));p.drawText(tag.adjusted(8,0,-8,0),Qt.AlignmentFlag.AlignVCenter,text)
-                p.setOpacity(1)
+                p.restore()
             if self.off:
                 p.fillRect(area,QColor(0,0,0,155))
                 p.save();p.translate(area.right()-35,35);p.rotate(45);p.fillRect(QRectF(-80,-15,160,30),QColor('#293945'));p.setPen(QColor('#edf4f6'));p.drawText(QRectF(-60,-15,120,30),Qt.AlignmentFlag.AlignCenter,'Off');p.restore()
@@ -246,8 +257,9 @@ class CameraTile(QFrame):
                 p.setPen(Qt.PenStyle.NoPen);p.setBrush(QColor(12,22,28,220));p.drawRoundedRect(footer,8,8)
             else:
                 footer=QRectF(area.left()+12,area.bottom()-66,area.width()-24,56)
-                gradient=QLinearGradient(0,area.bottom()-area.height()*.45,0,area.bottom());gradient.setColorAt(0,QColor(0,0,0,0));gradient.setColorAt(1,QColor(0,0,0,225))
-                p.fillRect(QRectF(area.left(),area.bottom()-area.height()*.45,area.width(),area.height()*.45),gradient)
+                scrim=self.thumbnail_scrim()
+                gradient=QLinearGradient(0,scrim.top(),0,scrim.bottom());gradient.setColorAt(0,QColor(0,0,0,0));gradient.setColorAt(1,QColor(0,0,0,225))
+                p.fillRect(scrim,gradient)
             labels = self.thumbnail_labels(0) if not self.hero else {
                 "name": footer.adjusted(12,0,-12,-28), "caption": footer.adjusted(12,28,-12,0)}
             if caption_visible:
