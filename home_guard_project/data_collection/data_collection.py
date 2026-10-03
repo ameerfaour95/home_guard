@@ -33,8 +33,10 @@ from ultralytics import YOLO
 
 from config import COCO_NAMES, Config, load_config
 if __package__:
+    from .detector import load_detector
     from .zones import ZoneMask, mask_for   # package mode (the preview test loads this file under the package)
 else:
+    from detector import load_detector
     from zones import ZoneMask, mask_for    # script mode: run_collector.sh puts this dir on sys.path
 
 log = logging.getLogger(__name__)
@@ -1300,7 +1302,8 @@ def main() -> None:
             st.cap.release()
         return
 
-    detector = YOLO(cfg.YOLO_MODEL)
+    # An NVIDIA card (the laptop) beats the Intel graphics chip: plain PyTorch already uses it.
+    detector = load_detector(cfg.YOLO_MODEL, cfg.YOLO_DEVICE if cfg.DEVICE == "cpu" else "cpu")
     vlm: Optional[VLMWorker] = VLMWorker(cfg) if cfg.RUN_VLM_ON_SAVED_CLIPS else None
     crop_worker: Optional[_VlmCropWorker] = _VlmCropWorker() if cfg.MAIN_STREAM_ENABLED else None
 
@@ -1327,7 +1330,8 @@ def main() -> None:
 
                 # â”€â”€ YOLO detection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                 run_yolo = True
-                if cfg.DEVICE == "cpu" and cfg.YOLO_EVERY_N_FRAMES_CPU > 1:
+                # Every picture on the graphics chip; on the CPU only every Nth, it cannot keep up.
+                if cfg.DEVICE == "cpu" and not detector.on_graphics_chip and cfg.YOLO_EVERY_N_FRAMES_CPU > 1:
                     run_yolo = st.frame_i % cfg.YOLO_EVERY_N_FRAMES_CPU == 0
 
                 if run_yolo:

@@ -1,0 +1,45 @@
+{
+  "duration_s": 15.01,
+  "source": "six synthetic 1280x720 camera frames; local Windows workstation",
+  "transport": "local files",
+  "fps": {
+    "front_door": 16.2,
+    "garden": 5.5,
+    "driveway": 5.5,
+    "side_gate": 5.5,
+    "patio": 5.42,
+    "garage": 5.42
+  },
+  "file_to_paint": {
+    "p50_ms": 9.88,
+    "p95_ms": 27.65,
+    "max_ms": 73.64
+  },
+  "ai_write_to_paint": {
+    "p50_ms": 41.13,
+    "p95_ms": 61.92,
+    "max_ms": 61.92
+  },
+  "event_loop_lateness_10ms_probe": {
+    "p50_ms": 5.34,
+    "p95_ms": 9.0,
+    "max_ms": 40.74
+  },
+  "ui_callback_block": {
+    "p50_ms": 0.73,
+    "p95_ms": 2.57,
+    "max_ms": 28.85
+  },
+  "chat_write_to_paint": {
+    "p50_ms": 24.58,
+    "p95_ms": 60.16,
+    "max_ms": 60.16
+  },
+  "posted_input_to_paint": {
+    "p50_ms": 3.43,
+    "p95_ms": 9.36,
+    "max_ms": 20.71
+  },
+  "publisher_one_core_percent": 11.87,
+  "publisher_frames": 634
+}

@@ -31,6 +31,9 @@ class CameraPage:
         self.search_button.clicked.connect(self.show_search)
         self.search_button.setVisible(not wizard)
         heading.insertWidget(1,self.search_button)
+        self.house_alerts=QPushButton(tr("alert_house_title"));self.house_alerts.setObjectName("secondary")
+        self.house_alerts.clicked.connect(lambda:self.open_alerts(None));heading.insertWidget(1,self.house_alerts)
+        self.house_alerts.setVisible(bool(getattr(controls,"remote",False)))
         self.search_form=card()
         search_layout=layout_for(self.search_form,24)
         search_layout.addWidget(label(tr('camera_search_title'),'section'))
@@ -85,11 +88,20 @@ class CameraPage:
         self.zone_load_failed = False
         self.zone_widgets = {}
         self.zone_dialog = None
+        self.alert_dialog = None
+        self.alert_house = ["person"]
+        self.alert_values = {}
+        self.sensitivity_values = {}
+        self.alert_widgets = {}
+        self.alert_load_failed = False
         self.timer = QTimer(self.widget)
         self.timer.timeout.connect(self.poll)
         self.timer.start(100)
 
     def open(self):
+        if self.controls.box.demo or not getattr(self.controls, 'remote', False):
+            self.alert_house=self.controls.box.load_settings().alert_on.split(',')
+            self.refresh_alert_labels()
         if not self.loaded and self.future is None:
             self.begin(self.load_photos)
 
@@ -120,6 +132,14 @@ class CameraPage:
             self.zone_load_failed = False
         except Exception:
             self.zone_load_failed = True
+        try:
+            alerts = self.controls.camera_alerts()
+            self.alert_house = alerts['house']
+            self.alert_values = {row['name']: row['alert_on'] for row in alerts['cameras']}
+            self.sensitivity_values = {row['name']: row.get('sensitivity') for row in alerts['cameras']}
+            self.alert_load_failed = False
+        except Exception:
+            self.alert_load_failed = True
         return records
 
     def begin(self, task):
@@ -134,6 +154,7 @@ class CameraPage:
             field.setEnabled(False)
             enabled.setEnabled(False)
         for button, _, _ in self.zone_widgets.values(): button.setEnabled(False)
+        for button in self.alert_widgets.values(): button.setEnabled(False)
         from .motion import busy
         busy(self.search_start if getattr(self,'searching',False) else self.save if getattr(self,'saving',False) else self.refresh,True)
         self.progress.hide()
@@ -146,7 +167,7 @@ class CameraPage:
             self.begin(lambda:self.read_zones(self.controls.snapshots()) if self.loaded else self.load_photos())
 
     def poll(self):
-        if self.future is None and not self.wizard and not self.controls.box.demo and self.widget.isVisible() and not (self.zone_dialog and self.zone_dialog.isVisible()):
+        if self.future is None and not self.wizard and not self.controls.box.demo and self.widget.isVisible() and not (self.zone_dialog and self.zone_dialog.isVisible()) and not (self.alert_dialog and self.alert_dialog.isVisible()):
             import time
             if time.monotonic()-getattr(self,'last_names_poll',0)>=1:
                 self.last_names_poll=time.monotonic()
@@ -205,6 +226,7 @@ class CameraPage:
         grid.setSpacing(16)
         self.rows = []
         self.zone_widgets = {}
+        self.alert_widgets = {}
         self.record_signature=tuple((r.name,r.enabled) for r in records)
         if not records:
             grid.addWidget(label(tr("camera_empty"), "muted"), 0, 0)
@@ -230,8 +252,13 @@ class CameraPage:
                 status=WatchingStatus(tr('camera_error') if self.zone_load_failed else tr('camera_zone_drawn' if self.zone_values.get(camera.name) else 'camera_zone_whole'), bool(self.zone_values.get(camera.name)))
                 status.setStyleSheet(f'color: {colors(self.widget)["secondary"]}; font-size: 13px;')
                 status.setAccessibleName(status.text())
-                actions.addWidget(zone_button);actions.addWidget(status,1)
+                actions.addWidget(zone_button);status.hide();zone_button.setToolTip(status.text())
                 self.zone_widgets[camera.name]=(zone_button,status,photo)
+            from .alert_types_ui import CameraAlertButton
+            alert_button=CameraAlertButton(self.alert_house,self.alert_values.get(camera.name),self.sensitivity_values.get(camera.name))
+            if self.alert_load_failed: alert_button.setToolTip(tr('alert_read_error'))
+            alert_button.clicked.connect(lambda checked=False,n=camera.name:self.open_alerts(n))
+            actions.addWidget(alert_button,1);self.alert_widgets[camera.name]=alert_button
             line = QHBoxLayout()
             name = QLineEdit(camera.name)
             name.setAccessibleName(tr("camera_name"))
@@ -252,6 +279,45 @@ class CameraPage:
         grid.setRowStretch((len(records)+(1 if self.wizard else 2))//(2 if self.wizard else 3), 1)
         self.scroll.setWidget(content)
         self.validate()
+
+    def open_alerts(self, name):
+        if self.future is not None: return
+        from .alert_types_ui import CameraAlertsDialog
+        # Refresh the house choice if Settings changed since the photos were loaded.
+        if self.controls.box.demo or not getattr(self.controls, 'remote', False):
+            self.alert_house = self.controls.box.load_settings().alert_on.split(',')
+        dialog=CameraAlertsDialog(self.controls,name,self.alert_house,self.alert_values.get(name),self.widget)
+        self.alert_dialog=dialog
+        dialog.saved.connect(lambda value:self.alert_saved(name,value))
+        dialog.house_saved.connect(self.house_alert_saved)
+        if dialog.sensitivity_panel:
+            dialog.sensitivity_panel.saved.connect(lambda value:self.sensitivity_saved(name,value))
+        def finished(result):
+            self.alert_house=dialog.house
+            if name is not None:
+                self.alert_values[name]=dialog.own
+                self.sensitivity_values[name]=dialog.sensitivity_panel.own
+            self.refresh_alert_labels()
+            self.alert_dialog=None
+            dialog.deleteLater()
+        dialog.finished.connect(finished)
+        dialog.open()
+
+    def refresh_alert_labels(self):
+        for name,button in self.alert_widgets.items():
+            button.refresh(self.alert_house,self.alert_values.get(name),self.sensitivity_values.get(name))
+
+    def sensitivity_saved(self,name,value):
+        self.sensitivity_values[name]=value
+        self.refresh_alert_labels();self.changed()
+
+    def alert_saved(self,name,value):
+        self.alert_values[name]=value
+        self.refresh_alert_labels();self.changed()
+
+    def house_alert_saved(self,value):
+        self.alert_house=value
+        self.refresh_alert_labels();self.changed()
 
     def open_zone(self, name, photo):
         if self.future is not None or self.zone_load_failed or not self.zones_loaded: return
@@ -330,10 +396,13 @@ class CameraPage:
         def save():
             records=self.controls.save(changes)
             self.zone_values={new:self.zone_values.get(old,[]) for old,new,_ in changes}
+            self.alert_values={new:self.alert_values.get(old) for old,new,_ in changes}
+            self.sensitivity_values={new:self.sensitivity_values.get(old) for old,new,_ in changes}
             return records
         self.begin(save)
 
     def close(self):
+        if self.alert_dialog: self.alert_dialog.shutdown();self.alert_dialog.hide()
         self.timer.stop()
         if hasattr(self.controls,"cancel"):
             self.controls.cancel()

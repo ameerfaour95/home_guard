@@ -184,5 +184,106 @@
         "required": ["alert_id"]
       }
     }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "set_alert_types",
+      "description": "Change WHAT a camera (or the house default) alerts about: people, vehicles, animals. To ADD a type pass [\"+vehicle\"], to REMOVE one [\"-vehicle\"] - the box applies it to the current list ('alert me about cars on Main Entrance' = [\"+vehicle\"], 'animals too in the whole house' = camera \"house\", [\"+animal\"], 'no more car alerts' = [\"-vehicle\"]). Pass a plain list only when the owner says 'only ...' ('only people on the back door' = [\"person\"]). [\"default\"] puts a camera back on the house default. Vehicles alert only when they move; parked cars never alert. Applies within seconds, no restart. Not for pausing alerts.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "camera": {
+            "type": "string",
+            "description": "The camera's name as the owner wrote it (e.g. \"Main Entrance\"), or \"house\" for the house default that every camera without its own choice follows."
+          },
+          "types": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "person",
+                "vehicle",
+                "animal",
+                "+person",
+                "+vehicle",
+                "+animal",
+                "-person",
+                "-vehicle",
+                "-animal",
+                "default"
+              ]
+            },
+            "description": "Changes like [\"+vehicle\"] / [\"-animal\"], or with 'only ...' the complete list like [\"person\"]; or [\"default\"] for a camera."
+          },
+          "owner_words": {
+            "type": "string",
+            "description": "The owner's own words from their latest message that ask for this change, copied exactly."
+          }
+        },
+        "required": [
+          "camera",
+          "types",
+          "owner_words"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "set_sensitivity",
+      "description": "Change how SURE the detector must be before it counts a person, vehicle or animal, for a camera or the house default. Lower catches more (a half-hidden person) but brings more false alarms; higher only counts clear sightings. Use when the owner says e.g. 'people at 50%', 'it misses people at the gate, make it more sensitive', 'too many false car alerts'. Only the types given change. values maps type to a percentage from 5 to 95. Applies within seconds.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "camera": {
+            "type": "string",
+            "description": "The camera's name as the owner wrote it (e.g. \"Main Entrance\"), or \"house\" for the house default that every camera without its own choice follows."
+          },
+          "values": {
+            "type": "object",
+            "properties": {
+              "person": {
+                "type": "number"
+              },
+              "vehicle": {
+                "type": "number"
+              },
+              "animal": {
+                "type": "number"
+              }
+            },
+            "description": "Type -> percentage (5-95), e.g. {\"person\": 50}. For a camera, pass {\"default\": true} to go back to the house values."
+          },
+          "owner_words": {
+            "type": "string",
+            "description": "The owner's own words from their latest message that ask for this change, copied exactly."
+          }
+        },
+        "required": [
+          "camera",
+          "values",
+          "owner_words"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_alert_settings",
+      "description": "Read what each camera alerts about (people / vehicles / animals) and how sensitive the detector is, for one camera or for the whole house. Use when the owner asks 'what does each camera alert on?', 'is Main Entrance alerting on cars?', or before changing a camera's list.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "camera": {
+            "type": "string",
+            "description": "One camera's name, or leave empty / \"house\" for the house and every camera."
+          }
+        },
+        "required": []
+      }
+    }
   }
 ]

@@ -218,17 +218,29 @@ def camera_alert_rows(cameras_path: str = CAMERAS_PATH, alerts_path: str = CAMER
     ``{"house": ["person"], "cameras": [{"name", "alert_on": [...] | None}]}``
     """
     from .boxconfig import BOX_YAML, BoxConfigError, load_box_settings  # noqa: PLC0415
-    from .camera_alerts import DEFAULT, load_camera_alerts, parse_types  # noqa: PLC0415
+    from .camera_alerts import DEFAULT, load_camera_alerts, load_camera_sensitivity, parse_types  # noqa: PLC0415
+    from .inference import AlertSettings  # noqa: PLC0415
 
     try:
-        house = parse_types(load_box_settings(box_path or BOX_YAML).get("alert_on") or ",".join(DEFAULT))
-    except (BoxConfigError, ValueError, OSError):
+        box = load_box_settings(box_path or BOX_YAML)
+    except (BoxConfigError, OSError):
+        box = {}
+    try:
+        house = parse_types(box.get("alert_on") or ",".join(DEFAULT))
+    except ValueError:
         house = DEFAULT
+    try:
+        house_sensitivity = AlertSettings.from_box_settings(box).thresholds()
+    except (TypeError, ValueError):
+        house_sensitivity = AlertSettings().thresholds()
     raw = _read_cameras_raw(cameras_path)
     own = load_camera_alerts(alerts_path)
+    own_sensitivity = load_camera_sensitivity(alerts_path)
     names = list(dict(raw.get("cameras") or {})) + list(dict(raw.get("disabled") or {}))
-    return {"house": list(house),
-            "cameras": [{"name": n, "alert_on": list(own[n]) if n in own else None} for n in names]}
+    return {"house": list(house), "house_sensitivity": house_sensitivity,
+            "cameras": [{"name": n, "alert_on": list(own[n]) if n in own else None,
+                         "sensitivity": dict(own_sensitivity[n]) if n in own_sensitivity else None}
+                        for n in names]}
 
 
 def set_camera_alerts_command(camera: str, types: Optional[str], cameras_path: str = CAMERAS_PATH,
@@ -244,6 +256,21 @@ def set_camera_alerts_command(camera: str, types: Optional[str], cameras_path: s
         clear_camera_alerts(name, alerts_path)
         return {"camera": name, "alert_on": None}
     return {"camera": name, "alert_on": list(set_camera_alerts(name, types, alerts_path))}
+
+
+def set_camera_sensitivity_command(camera: str, values: Optional[str], cameras_path: str = CAMERAS_PATH,
+                                   alerts_path: str = CAMERA_ALERTS_PATH) -> Dict[str, Any]:
+    """Give a camera its own detector certainty per type (``person=0.5,vehicle=0.8``), or the house values (None).
+
+    No restart: inference mode re-reads it within seconds.
+    """
+    from .camera_alerts import clear_camera_sensitivity, set_camera_sensitivity  # noqa: PLC0415
+
+    name = _known_camera(str(camera), cameras_path)
+    if values is None:
+        clear_camera_sensitivity(name, alerts_path)
+        return {"camera": name, "sensitivity": None}
+    return {"camera": name, "sensitivity": set_camera_sensitivity(name, values, alerts_path)}
 
 
 def set_zone(camera: str, points_text: str, cameras_path: str = CAMERAS_PATH,
@@ -605,6 +632,12 @@ def main() -> None:
     which = seta.add_mutually_exclusive_group(required=True)
     which.add_argument("--on", help="person, vehicle, animal - one or more, comma-separated, no spaces.")
     which.add_argument("--default", action="store_true", help="Use the house default (alert_on in box.yaml).")
+    sens = sub.add_parser("set-camera-sensitivity",
+                          help="How sure the detector must be on one camera, per type (person/vehicle/animal).")
+    sens.add_argument("--camera", required=True)
+    pick = sens.add_mutually_exclusive_group(required=True)
+    pick.add_argument("--values", help="type=certainty pairs from 0.05 to 0.95, e.g. person=0.5,vehicle=0.8 (no spaces).")
+    pick.add_argument("--default", action="store_true", help="Use the house values (conf_* / inference_conf in box.yaml).")
 
     args = parser.parse_args()
     # Progress goes to stderr so --json output on stdout stays parseable.
@@ -636,10 +669,13 @@ def main() -> None:
             sys.exit(1)
         return
 
-    if args.command in ("camera-alerts", "set-camera-alerts"):
+    if args.command in ("camera-alerts", "set-camera-alerts", "set-camera-sensitivity"):
         try:
             if args.command == "camera-alerts":
                 result = camera_alert_rows(CAMERAS_PATH, CAMERA_ALERTS_PATH)
+            elif args.command == "set-camera-sensitivity":
+                result = set_camera_sensitivity_command(args.camera, None if args.default else args.values,
+                                                        CAMERAS_PATH, CAMERA_ALERTS_PATH)
             else:
                 result = set_camera_alerts_command(args.camera, None if args.default else args.on,
                                                    CAMERAS_PATH, CAMERA_ALERTS_PATH)
@@ -649,6 +685,10 @@ def main() -> None:
             sys.exit(1)
         if args.json:
             print(json.dumps(result, indent=2))
+        elif "sensitivity" in result and "cameras" not in result:
+            own = result["sensitivity"]
+            print(f"  {result['camera']:<22} "
+                  f"{', '.join(f'{k} {v}' for k, v in own.items()) if own else 'house sensitivity'}")
         else:
             if "house" in result:
                 print(f"  house default          {'+'.join(result['house'])}")

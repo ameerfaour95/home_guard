@@ -253,24 +253,23 @@ class StartupTest(unittest.TestCase):
         assistant.cfg = []
         assistant.announce("mode")
 
-    def test_no_camera_wait_starts_assistant_even_if_it_raises(self):
+    def test_no_cameras_hands_over_to_the_assistant_only_wait(self):
+        # serve_without_cameras itself (assistant started even if it raises, waits) is
+        # covered in test_inference.py; here run() must hand over to it, not exit.
         from types import SimpleNamespace
         from unittest.mock import patch
         from home_guard_project.box import inference
-        for failure in (None, ValueError("bad settings")):
-            with (
-                patch("home_guard_project.box.boxconfig.load_box_settings", return_value={}),
-                patch("home_guard_project.data_collection.config.load_config", return_value=SimpleNamespace(CAMERAS={})),
-                patch.object(inference, "make_backend"),
-                patch.object(inference, "load_detector", return_value=(None, None)),
-                patch("home_guard_project.box.telegram_agent.start", side_effect=failure) as start,
-                patch.object(inference.time, "sleep", side_effect=KeyboardInterrupt) as sleep,
-            ):
-                with self.assertRaises(KeyboardInterrupt):
-                    inference.run()
-                start.assert_called_once()
-                self.assertEqual(start.call_args.args[2], [])
-                sleep.assert_called_once_with(5)
+        with (
+            patch("home_guard_project.box.boxconfig.load_box_settings", return_value={}),
+            patch("home_guard_project.data_collection.config.load_config", return_value=SimpleNamespace(CAMERAS={})),
+            patch.object(inference, "make_backend"),
+            patch.object(inference, "load_detector", return_value=(None, None)),
+            patch("home_guard_project.box.alert_settings.camera_names", return_value=["yard"]),
+            patch.object(inference, "serve_without_cameras", return_value=0) as wait,
+        ):
+            self.assertEqual(inference.run(), 0)
+        wait.assert_called_once()
+        self.assertEqual(list(wait.call_args.args[2]), ["yard"])
 
 
 if __name__ == "__main__":

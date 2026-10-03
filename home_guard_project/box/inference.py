@@ -31,7 +31,7 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 log = logging.getLogger("box.inference")
 
@@ -241,12 +241,21 @@ class AlertSettings:
     alert_channel: str = "telegram"  # telegram | twilio | both
     dry_run: bool = False
     alert_on: Tuple[str, ...] = DEFAULT_ALERT_ON   # what reaches the owner: people, vehicles or both
+    # The detector's certainty per type; None -> conf (the single house threshold).
+    conf_person: Optional[float] = None
+    conf_vehicle: Optional[float] = None
+    conf_animal: Optional[float] = None
+
+    def thresholds(self) -> Dict[str, float]:
+        """The house's certainty per type (person / vehicle / animal)."""
+        own = {"person": self.conf_person, "vehicle": self.conf_vehicle, "animal": self.conf_animal}
+        return {kind: float(self.conf if value is None else value) for kind, value in own.items()}
 
     def live_values(self) -> Dict[str, Any]:
         """The values the window shows and the owner can change while the program runs."""
         return {"conf": self.conf, "alert_start_hour": self.alert_start_hour,
                 "alert_end_hour": self.alert_end_hour, "cooldown_sec": self.cooldown_sec,
-                "alert_on": list(self.alert_on)}
+                "alert_on": list(self.alert_on), "sensitivity": self.thresholds()}
 
     @classmethod
     def from_box_settings(cls, s: Dict[str, Any]) -> "AlertSettings":
@@ -265,7 +274,20 @@ class AlertSettings:
             alert_channel=str(g("alert_channel", "telegram")),
             dry_run=bool(g("notify_dry_run", False)),
             alert_on=parse_alert_on(g("alert_on", ",".join(DEFAULT_ALERT_ON))),
+            conf_person=_optional_float(g("conf_person")),
+            conf_vehicle=_optional_float(g("conf_vehicle")),
+            conf_animal=_optional_float(g("conf_animal")),
         )
+
+
+def _optional_float(value: Any) -> Optional[float]:
+    """A box.yaml number, or None when it is unset or not a number (then the single threshold applies)."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def frame_to_jpeg_bytes(frame_bgr: Any) -> bytes:
@@ -438,6 +460,48 @@ Box = Tuple[float, float, float, float]   # normalised xyxy, as results[0].boxes
 VEHICLE_SAME_PLACE_IOU = 0.7              # a vehicle box overlapping its old box this much has not moved
 
 
+def kind_of(label: str) -> Optional[str]:
+    """person / vehicle / animal for a detector class name; None for anything else (and birds)."""
+    if label in PERSON_CLASSES:
+        return "person"
+    if label in VEHICLE_CLASSES:
+        return "vehicle"
+    if label in ANIMAL_CLASSES:
+        return "animal"
+    return None
+
+
+class _Kept:
+    """A detector result holding only the finds that passed their type's certainty."""
+
+    def __init__(self, boxes: List[Any], names: Dict[int, str]) -> None:
+        self.boxes = boxes
+        self.names = names
+
+
+def filter_by_thresholds(result: Any, thresholds: Dict[str, float], other: float) -> Any:
+    """Keep each find only if the detector is as sure as its type requires (*other* for the rest).
+
+    The detector is asked down to the lowest certainty in use (:func:`detector_floor`),
+    so a person the owner wants caught at 50% is not lost while cars need 80%.
+    """
+    boxes = getattr(result, "boxes", None)
+    names = getattr(result, "names", {})
+    if boxes is None or len(boxes) == 0:
+        return _Kept([], names)
+    kept = []
+    for b in boxes:
+        kind = kind_of(names.get(int(b.cls[0]), ""))
+        if float(b.conf[0]) >= thresholds.get(kind, other) if kind else float(b.conf[0]) >= other:
+            kept.append(b)
+    return _Kept(kept, names)
+
+
+def detector_floor(thresholds: Dict[str, float], other: float) -> float:
+    """The certainty the detector itself is run at: the lowest any type needs."""
+    return min([other, *thresholds.values()])
+
+
 def vehicle_boxes(result) -> List[Box]:
     """Normalised xyxy boxes of the vehicles in a YOLO result, in detection order."""
     boxes = getattr(result, "boxes", None)
@@ -562,7 +626,8 @@ def apply_live_settings(settings: AlertSettings, box_settings: Dict[str, Any]) -
     """Take over the values the program re-reads while running. Returns the names that changed."""
     fresh = AlertSettings.from_box_settings(box_settings)
     changed = []
-    for name in ("alert_start_hour", "alert_end_hour", "cooldown_sec", "conf", "alert_on"):
+    for name in ("alert_start_hour", "alert_end_hour", "cooldown_sec", "conf", "alert_on",
+                 "conf_person", "conf_vehicle", "conf_animal"):
         if getattr(settings, name) != getattr(fresh, name):
             # The settings object is frozen and shared with the worker threads: the same
             # instance must carry the new value, so the one write goes around the freeze.
@@ -903,6 +968,31 @@ def load_detector(model_path: str, device: str = "auto") -> Tuple[Any, Optional[
     return YOLO(model_path), None
 
 
+def serve_without_cameras(box_settings: Dict[str, Any], env: Dict[str, str], turned_off: Sequence[str],
+                          start_assistant: Optional[Callable[..., Any]] = None,
+                          keep_running: Callable[[], bool] = lambda: True,
+                          sleep: Callable[[float], None] = time.sleep) -> int:
+    """No camera is on: run only the owner's assistant, until the runner restarts us.
+
+    *turned_off* are the cameras the owner can turn back on. Turning one on (Telegram,
+    the app, the setup program) asks for a restart, and the program comes back
+    watching it.
+    """
+    log.warning("No camera is on (turned off: %s). Nothing to watch; the assistant keeps listening "
+                "so a camera can be turned back on.", ", ".join(turned_off) or "none")
+    if start_assistant is None:
+        from . import telegram_agent  # noqa: PLC0415
+
+        start_assistant = telegram_agent.start
+    try:
+        start_assistant(box_settings, env, list(turned_off))
+    except Exception as exc:  # noqa: BLE001 - without the assistant there is still nothing to watch
+        log.warning("Owner assistant not started (%s).", exc)
+    while keep_running():
+        sleep(5.0)
+    return 0
+
+
 def run() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", stream=sys.stdout)
     # Use the OS certificate store for all HTTPS (urllib + httpx), so Telegram
@@ -941,18 +1031,12 @@ def run() -> int:
     # Camera sub-stream URLs from the data_collection config.
     cameras: Dict[str, str] = dict(getattr(cam_cfg, "CAMERAS", {}) or {})
     if not cameras:
-        log.error("No cameras are on (cameras.yaml). Waiting for the owner to turn one on.")
-        try:
-            from . import telegram_agent  # noqa: PLC0415
+        # Every camera is turned off (or none was found yet). Keep the owner's assistant
+        # listening, so "turn the cameras back on" in Telegram still works: exiting here
+        # left the owner without an answer while the runner restarted us every 15 s.
+        from .alert_settings import camera_names  # noqa: PLC0415
 
-            telegram_agent.start(box_settings, env, [])
-        except Exception as exc:  # noqa: BLE001
-            log.warning("Owner assistant not started (%s).", exc)
-        while True:              # a camera change restarts the program through the control flag
-            try:
-                time.sleep(5)
-            except Exception as exc:  # noqa: BLE001
-                log.warning("No-camera wait failed: %s", exc)
+        return serve_without_cameras(box_settings, env, camera_names())
     # Every alert is saved as a clip (the seconds around it) in the production folder,
     # and the owner can answer it in Telegram. Neither may stop the alerts themselves.
     from .alert_clips import POST_SECONDS, PRE_SECONDS, ClipRing, alert_stem  # noqa: PLC0415
@@ -981,7 +1065,8 @@ def run() -> int:
 
     def reported_settings() -> Dict[str, Any]:
         return {**settings.live_values(),
-                "camera_alert_on": {c: list(t) for c, t in sorted(camera_alerts.overrides.items())}}
+                "camera_alert_on": {c: list(t) for c, t in sorted(camera_alerts.overrides.items())},
+                "camera_sensitivity": {c: dict(t) for c, t in sorted(camera_alerts.sensitivity.items())}}
 
     status.settings(reported_settings())
     worker = {"t": None}  # single in-flight VLM call across cameras (N150 budget)
@@ -1026,7 +1111,12 @@ def run() -> int:
                 continue
             last_look_ts[name] = now_ts
 
-            results = model.predict(frame, conf=settings.conf, verbose=False, **predict_args)
+            # Each type is held to its own certainty (house value, or the camera's own);
+            # the detector runs at the lowest of them and the rest are filtered here.
+            thresholds = camera_alerts.thresholds_for(name, settings.thresholds())
+            raw = model.predict(frame, conf=detector_floor(thresholds, settings.conf), verbose=False,
+                                **predict_args)
+            results = [filter_by_thresholds(raw[0], thresholds, settings.conf)] if raw else []
             seen_ts = time.time()   # when the picture was looked at, not when this round over the cameras began
             try:
                 status.detection(name, objects_from_result(results[0]) if results else [], now=seen_ts)

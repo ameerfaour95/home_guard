@@ -7421,7 +7421,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 **Files:**
 - Create: `tests/__init__.py` (empty; without it `import tests` finds an installed third-party `tests` package), `tests/agent_eval/__init__.py` (empty), `tests/agent_eval/harness.py`
-- Create: `tests/agent_eval/cases/critical/*.yaml` (9 files) and `tests/agent_eval/cases/general/*.yaml` (31 files)
+- Create: `tests/agent_eval/cases/critical/*.yaml` (9 files) and `tests/agent_eval/cases/general/*.yaml` (34 files; g32-g34 need Task 24's tools)
 - Test: `tests/box/test_agent_eval_harness.py`
 
 **Interfaces:**
@@ -7915,7 +7915,7 @@ expect:
   language: he
 ```
 
-- [ ] **Step 5: Write the 31 general cases (`tests/agent_eval/cases/general/`)**
+- [ ] **Step 5: Write the 34 general cases (`tests/agent_eval/cases/general/`)**
 
 Every file follows the format above. The shared recorded results used below are:
 
@@ -7964,6 +7964,9 @@ Write each file with exactly these fields (YAML; `tool_results` values are the l
 | `g29_last_event_video_he` | 2026-10-03 23:40 | "שלח לי את הסרטון של האירוע האחרון" | as g27 | required [find_events, send_media]; language he |
 | `g30_greeting_en` | 2026-10-03 12:00 | "hi" | (none) | forbidden [pause_alerts, set_camera_active, change_setting, record_verdict, send_media, record_clip]; must_clarify false; language en |
 | `g31_this_one_en` | 2026-10-03 23:20 | "this one" (alert `{alert_id: front_side_3_alert, camera: front_side, summary: "A man walks to the door.", age_sec: 60}`, threaded) | `record_verdict: {ok: true, receipt: {status: done, detail: {verdict: false_alarm}}}` | must_clarify true; forbidden [record_verdict, pause_alerts]; language en |
+| `g32_cars_on_entrance_en` | 2026-10-03 12:00 | "alert me about cars on the entrance camera too" | `set_alert_types: {ok: true, receipt: {status: done, detail: {camera: main_entrance, old: [person], new: [person, vehicle], own_before: null}}}` | required [set_alert_types]; args {camera: main_entrance, types: ["+vehicle"]}; forbidden [change_setting]; language en |
+| `g33_animals_house_he` | 2026-10-03 12:00 | "תתריע גם על בעלי חיים בכל הבית" | `set_alert_types: {ok: true, receipt: {status: done, detail: {camera: "", old: [person], new: [person, animal], house_before: [person]}}}` | required [set_alert_types]; args {types: ["+animal"]}; language he |
+| `g34_people_sensitivity_en` | 2026-10-03 12:00 | "make the back camera more sensitive to people, 30 percent" | `set_sensitivity: {ok: true, receipt: {status: done, detail: {camera: back_door, old: {person: 0.4}, new: {person: 0.3}, own_before: null}}}` | required [set_sensitivity]; args {camera: back_door}; language en |
 
 For example, `g09_pause_back_hour_en.yaml` is:
 
@@ -8455,6 +8458,357 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ## Self-review notes (for the executor)
 
-- Order matters: Tasks 1→16 build the brain bottom-up; 17 needs 16; 18 and 19 touch `inference.py` (coordinate with sessions `home-guard-fa`, `home-guard-99`, `home-guard-04` first); 20 needs 8 and 17; 21–22 need 16; 23 last.
+- Order matters: Tasks 1→16 build the brain bottom-up; 17 needs 16; then Task 24 (alert types, needs 17's Undo); 18 and 19 touch `inference.py` (coordinate with sessions `home-guard-fa`, `home-guard-99`, `home-guard-04` first); 20 needs 8 and 17; 21–22 need 16; 23 last.
 - Tasks 13, 17 and 19 each extend `change_setting` (language, Undo restore, quiet log); apply them in order.
 - Every task ends with the full suite green; v1 tests must keep passing until v1 is removed in a later change.
+
+---
+
+### Task 24: Alert types and per-type sensitivity in v2 (wrapping `alert_settings.py`) - run right after Task 17
+
+Added 2026-10-03 after planning: session `home-guard-04` built these for v1 (ccc4c26) with the logic in
+`home_guard_project/box/alert_settings.py`, so v2 wraps the same functions - same tool names and arguments - and adds
+receipts, Undo and the code-written confirmation lines. Run it after Task 17 (it needs `undo_turn`) and before
+Task 21 (whose cases include three for these tools).
+
+`alert_settings` API (read it in your checkout): `get_alert_settings(camera=None)`, `set_alert_types(camera, types)`,
+`set_sensitivity(camera, values)`, each with keyword-only `cameras_path=`, `alerts_path=`, `box_path=`; `camera` None
+means the house. One camera's state: `{"camera", "alert_on", "own_alert_on", "sensitivity", "own_sensitivity"}`
+(`own_*` None = follows the house); the house: `{"house": {"alert_on", "sensitivity"}, "cameras": [...]}`.
+`set_alert_types` accepts a full list or changes (`["+vehicle"]`, `["-animal"]`) and, for a camera, `["default"]`
+(back to the house default); `set_sensitivity` takes `{type: fraction or percent}` or `"default"` (camera only).
+Both raise `ValueError` with a plain message.
+
+**Files:**
+- Modify: `home_guard_project/box/brain/tools.py`, `brain/agent.py` (`UNDOABLE`, `undo_turn`), `brain/receipts.py` (`ACTING_TOOLS`), `brain/profiles.py` (`COMMON_TOOLS`, `STATE_TOOLS`), `brain/agent_tools_v2.json`, `brain/prompts/common.txt`, `brain/i18n.py`, `brain/render.py`, `brain/claims.py`
+- Test: `tests/box/test_brain_alert_types.py`; update the tool counts in `tests/box/test_brain_tools_act.py` / `test_brain_settings.py` (14 → 17)
+
+**Interfaces:**
+- `Services` gains `alert_settings: Any = None` (production: the `home_guard_project.box.alert_settings` module).
+- Tools: `get_alert_settings(ctx, {"camera"?})` (read), `set_alert_types(ctx, {"camera", "types", "owner_words"})`, `set_sensitivity(ctx, {"camera", "values", "owner_words"})`. `camera` is a camera word (resolved through the registry) or `"house"`.
+- Receipt details: `set_alert_types` → `{"camera": name or "", "old": [types], "new": [types], "own_before": own_alert_on or None, "house_before": [types] (house only)}`; `set_sensitivity` → `{"camera": name or "", "old": {type: f}, "new": {type: f}, "own_before": own_sensitivity or None, "house_before": {type: f} (house only)}`.
+- i18n keys: `alert_types_changed`, `sensitivity_changed`, `type_person`, `type_vehicle`, `type_animal`, `the_house`, `what_set_alert_types`, `what_set_sensitivity`.
+
+- [ ] **Step 1: Write the failing test**
+
+```python
+# tests/box/test_brain_alert_types.py
+from __future__ import annotations
+
+import datetime as dt
+import os
+import tempfile
+import unittest
+
+from test_brain_agent import FakeRegistry, Scripted, call, reply
+from test_brain_tools_read import snapshot
+
+from home_guard_project.box.brain.agent import OwnerAgentV2
+from home_guard_project.box.brain.memory import ChatMemory
+from home_guard_project.box.brain.receipts import DONE, FAILED, ReceiptBook
+from home_guard_project.box.brain.render import receipt_line
+from home_guard_project.box.brain.tools import (
+    TOOLS,
+    Services,
+    ToolContext,
+    get_alert_settings,
+    set_alert_types,
+    set_sensitivity,
+)
+
+NOW = dt.datetime(2026, 10, 3, 12, 0).timestamp()
+
+
+class FakeAlertSettings:
+    """Stands in for home_guard_project.box.alert_settings: a house default plus per-camera overrides."""
+
+    def __init__(self):
+        self.house = {"alert_on": ["person"], "sensitivity": {"person": 0.4, "vehicle": 0.5, "animal": 0.5}}
+        self.own_types, self.own_sens = {}, {}
+
+    def _row(self, name):
+        return {"camera": name, "alert_on": list(self.own_types.get(name, self.house["alert_on"])),
+                "own_alert_on": self.own_types.get(name), "sensitivity": dict(self.own_sens.get(name, self.house["sensitivity"])),
+                "own_sensitivity": self.own_sens.get(name)}
+
+    def get_alert_settings(self, camera=None, **_):
+        if camera:
+            return self._row(camera)
+        return {"house": {"alert_on": list(self.house["alert_on"]), "sensitivity": dict(self.house["sensitivity"])},
+                "cameras": [self._row(n) for n in ("main_entrance", "back_door", "front_side")]}
+
+    def set_alert_types(self, camera, types, **_):
+        words = [str(t).strip().lower() for t in types]
+        current = list(self.own_types.get(camera, self.house["alert_on"])) if camera else list(self.house["alert_on"])
+        if words and all(w[:1] in "+-" for w in words):
+            for w in words:
+                if w[0] == "+" and w[1:] not in current:
+                    current.append(w[1:])
+                if w[0] == "-" and w[1:] in current:
+                    current.remove(w[1:])
+            words = current
+        if not camera:
+            if not words or any(w == "default" for w in words):
+                raise ValueError("the house default needs real types: person, vehicle or animal")
+            self.house["alert_on"] = words
+            return self.get_alert_settings(None)
+        if words == ["default"]:
+            self.own_types.pop(camera, None)
+        else:
+            if not words:
+                raise ValueError("at least one type")
+            self.own_types[camera] = words
+        return self._row(camera)
+
+    def set_sensitivity(self, camera, values, **_):
+        if values == "default":
+            self.own_sens.pop(camera, None)
+            return self._row(camera)
+        values = {k: (v / 100 if v > 1 else v) for k, v in dict(values).items()}
+        if not camera:
+            self.house["sensitivity"].update(values)
+            return self.get_alert_settings(None)
+        self.own_sens[camera] = {**self.own_sens.get(camera, {}), **values}
+        return self._row(camera)
+
+
+class AlertTypesTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.dir = tempfile.mkdtemp()
+        self.fake = FakeAlertSettings()
+
+    def ctx(self, text) -> ToolContext:
+        services = Services(roots=lambda: [], desc_dir=self.dir, feedback_dir=self.dir, work_dir=self.dir, mute=None,
+                            deliver=None, alert_settings=self.fake, now=lambda: NOW)
+        return ToolContext(turn_id="t1", chat_id="-5", speaker={}, text=text, lang="en", mode="assistant",
+                           snapshot=snapshot("assistant"), state=ChatState(), services=services,
+                           book=ReceiptBook(os.path.join(self.dir, "r"), now=lambda: NOW))
+
+    def test_registered(self) -> None:
+        for name in ("get_alert_settings", "set_alert_types", "set_sensitivity"):
+            self.assertIn(name, TOOLS)
+
+    def test_read(self) -> None:
+        out = get_alert_settings(self.ctx("what do you alert on?"), {"camera": "entrance"})
+        self.assertEqual((out["ok"], out["camera"], out["alert_on"]), (True, "main_entrance", ["person"]))
+        self.assertIn("house", get_alert_settings(self.ctx("and the house?"), {}))
+
+    def test_add_vehicles_on_one_camera_with_a_receipt(self) -> None:
+        ctx = self.ctx("alert me about cars on the entrance too")
+        self.assertFalse(set_alert_types(ctx, {"camera": "entrance", "types": ["+vehicle"],
+                                               "owner_words": "please"})["ok"])          # not the owner's words
+        out = set_alert_types(ctx, {"camera": "entrance", "types": ["+vehicle"], "owner_words": "cars on the entrance"})
+        self.assertEqual(out["status"], DONE)
+        d = ctx.receipts[-1].detail
+        self.assertEqual((d["camera"], d["old"], d["new"], d["own_before"]),
+                         ("main_entrance", ["person"], ["person", "vehicle"], None))
+        self.assertEqual(receipt_line(ctx.receipts[-1], "en"),
+                         "✓ main_entrance alerts on: people → people, vehicles")
+
+    def test_house_and_refusals(self) -> None:
+        ctx = self.ctx("for the whole house, animals too")
+        out = set_alert_types(ctx, {"camera": "house", "types": ["+animal"], "owner_words": "animals too"})
+        self.assertEqual(ctx.receipts[-1].detail["new"], ["person", "animal"])
+        self.assertEqual(out["status"], DONE)
+        bad = set_alert_types(ctx, {"camera": "house", "types": ["default"], "owner_words": "animals too"})
+        self.assertEqual(bad["status"], FAILED)
+        self.assertIn("garage", set_alert_types(ctx, {"camera": "garage", "types": ["person"],
+                                                      "owner_words": "animals too"})["error"])
+
+    def test_sensitivity(self) -> None:
+        ctx = self.ctx("make people 30% on the back camera")
+        out = set_sensitivity(ctx, {"camera": "back", "values": {"person": 30}, "owner_words": "people 30%"})
+        self.assertEqual(out["status"], DONE)
+        self.assertEqual(ctx.receipts[-1].detail["new"]["person"], 0.3)
+        self.assertIn("back_door", receipt_line(ctx.receipts[-1], "en"))
+
+    def test_undo_puts_back_the_exact_previous_choice(self) -> None:
+        services = Services(roots=lambda: [], desc_dir=self.dir, feedback_dir=self.dir, work_dir=self.dir, mute=None,
+                            deliver=None, alert_settings=self.fake, now=lambda: NOW)
+        agent = OwnerAgentV2(Scripted([call("set_alert_types", camera="entrance", types=["+vehicle"],
+                                            owner_words="cars on the entrance"),
+                                       call("set_sensitivity", camera="house", values={"person": 30},
+                                            owner_words="people at 30"),
+                                       reply("")]),
+                             FakeRegistry("assistant"), ChatMemory(os.path.join(self.dir, "c")),
+                             ReceiptBook(os.path.join(self.dir, "u"), now=lambda: NOW), services, now=lambda: NOW)
+        first = agent.handle("alert on cars on the entrance and people at 30 for the house", "-5", {})
+        self.assertTrue(first.undo_token)
+        agent.undo_turn("-5", first.undo_token, {})
+        self.assertNotIn("main_entrance", self.fake.own_types)          # back to following the house
+        self.assertEqual(self.fake.house["sensitivity"]["person"], 0.4)
+
+
+if __name__ == "__main__":
+    unittest.main()
+```
+
+(Add `from home_guard_project.box.brain.memory import ChatState` to the imports.)
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `env -u SSLKEYLOGFILE .venv/Scripts/python.exe -m unittest discover -s tests/box -p "test_brain_alert_types.py" -v`
+Expected: FAIL with `ImportError: cannot import name 'get_alert_settings'`
+
+- [ ] **Step 3: The tools (`brain/tools.py`)**
+
+Add the field `alert_settings: Any = None` at the end of `Services`, then append before the `TOOLS` table:
+
+```python
+# -- alert types and sensitivity (logic in box/alert_settings.py, shared with v1) ---------------------------
+def _alert_target(ctx: ToolContext, words: Any) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+    """``(camera name or None for the house, None)`` or ``(None, error)``."""
+    text = str(words or "").strip()
+    if not text or text.casefold() in ("house", "the house", "default", "בית", "הבית", "כל הבית"):
+        return None, None
+    camera, bad = _one_camera(ctx, text)
+    return camera, bad
+
+
+def get_alert_settings(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+    if ctx.services.alert_settings is None:
+        return _err("alert settings are not available on this box")
+    camera, bad = _alert_target(ctx, args.get("camera"))
+    if bad:
+        return bad
+    try:
+        return dict(ctx.services.alert_settings.get_alert_settings(camera), ok=True)
+    except ValueError as exc:
+        return _err(str(exc))
+
+
+def _change_alerts(ctx: ToolContext, args: Dict[str, Any], tool: str, key: str, value: Any) -> Dict[str, Any]:
+    if not quoted_from(str(args.get("owner_words") or ""), ctx.text):
+        return _err("Not changed: change alert settings only when this message asks for it; owner_words must be "
+                    "copied from it (two words or more).")
+    if ctx.services.alert_settings is None:
+        return _err("alert settings are not available on this box")
+    camera, bad = _alert_target(ctx, args.get("camera"))
+    if bad:
+        return bad
+    api = ctx.services.alert_settings
+    before = api.get_alert_settings(camera)
+    old = before["house"][key] if camera is None else before[key]
+    own_key = "own_alert_on" if key == "alert_on" else "own_sensitivity"
+    detail: Dict[str, Any] = {"camera": camera or "", "old": old,
+                              "own_before": None if camera is None else before.get(own_key)}
+    if camera is None:
+        detail["house_before"] = old
+    try:
+        after = api.set_alert_types(camera, value) if tool == "set_alert_types" else api.set_sensitivity(camera, value)
+    except ValueError as exc:
+        return _result(_issue(ctx, tool, FAILED, camera or "house", detail, str(exc)))
+    detail["new"] = after["house"][key] if camera is None else after[key]
+    return _result(_issue(ctx, tool, DONE, camera or "house", detail), state=after)
+
+
+def set_alert_types(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+    types = args.get("types")
+    return _change_alerts(ctx, args, "set_alert_types", "alert_on", types if isinstance(types, list) else [types])
+
+
+def set_sensitivity(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+    return _change_alerts(ctx, args, "set_sensitivity", "sensitivity", args.get("values"))
+```
+
+Add the three to `TOOLS`. In `build_owner_agent` (agent.py) pass `alert_settings=importlib.import_module("home_guard_project.box.alert_settings")` (or a plain `from .. import alert_settings` lazily) to `Services`.
+
+- [ ] **Step 4: Receipts, profiles, schemas, prompt**
+
+- `receipts.ACTING_TOOLS` and `agent.UNDOABLE` gain `"set_alert_types"` and `"set_sensitivity"`; `profiles.COMMON_TOOLS` gains all three (before `"reply"`), `profiles.STATE_TOOLS` gains the two setters (the fast tier keeps `get_alert_settings`); `claims.CLAIMS["setting"]["tools"]` gains the two setters.
+- `agent_tools_v2.json` gains:
+
+```json
+  {"type": "function", "function": {"name": "get_alert_settings",
+    "description": "What a camera (or the whole house) alerts on - people, vehicles, animals - and how sure the detector must be for each.",
+    "parameters": {"type": "object", "properties": {
+      "camera": {"type": "string", "description": "A camera name or word for it, or \"house\"; omit for the whole house."}}}}},
+  {"type": "function", "function": {"name": "set_alert_types",
+    "description": "Change what a camera (or the house default) alerts on. Prefer changes: [\"+vehicle\"] adds vehicles, [\"-animal\"] removes animals; a full list replaces; for a camera [\"default\"] goes back to the house default. Only when this message asks for it.",
+    "parameters": {"type": "object", "properties": {
+      "camera": {"type": "string", "description": "A camera name or word for it, or \"house\"."},
+      "types": {"type": "array", "items": {"type": "string"}, "description": "person / vehicle / animal, or +type / -type, or default."},
+      "owner_words": {"type": "string", "description": "The owner's words asking for it, copied exactly from this message (two words or more)."}
+    }, "required": ["camera", "types", "owner_words"]}}},
+  {"type": "function", "function": {"name": "set_sensitivity",
+    "description": "Change how sure the detector must be, per type, for a camera or the house (percent 5-95, lower = more alerts); for a camera \"default\" goes back to the house values. Only when this message asks for it.",
+    "parameters": {"type": "object", "properties": {
+      "camera": {"type": "string", "description": "A camera name or word for it, or \"house\"."},
+      "values": {"description": "{\"person\": 30} or \"default\"."},
+      "owner_words": {"type": "string", "description": "The owner's words asking for it, copied exactly from this message (two words or more)."}
+    }, "required": ["camera", "values", "owner_words"]}}}
+```
+
+- `prompts/common.txt`, under "Choosing tools", add: `- What a camera alerts on (people, vehicles, animals) and how sure it must be: get_alert_settings to read, set_alert_types / set_sensitivity to change (prefer "+vehicle" / "-animal" changes over rebuilding the list). These are per camera or for the whole house.`
+
+- [ ] **Step 5: Sentences and the receipt line**
+
+`i18n.TEMPLATES` gains:
+
+```python
+    "alert_types_changed": {"en": "✓ {camera} alerts on: {old} → {new}", "he": "✓ {camera} מתריעה על: {old} ← {new}",
+                            "ar": "✓ {camera} تنبه على: {old} ← {new}"},
+    "sensitivity_changed": {"en": "✓ {camera} detector sureness: {old} → {new}",
+                            "he": "✓ {camera} רמת הוודאות של הזיהוי: {old} ← {new}",
+                            "ar": "✓ {camera} درجة يقين الكشف: {old} ← {new}"},
+    "type_person": {"en": "people", "he": "אנשים", "ar": "أشخاص"},
+    "type_vehicle": {"en": "vehicles", "he": "רכבים", "ar": "مركبات"},
+    "type_animal": {"en": "animals", "he": "בעלי חיים", "ar": "حيوانات"},
+    "the_house": {"en": "the house", "he": "הבית", "ar": "المنزل"},
+    "what_set_alert_types": {"en": "Changing the alert types", "he": "שינוי סוגי ההתראות", "ar": "تغيير أنواع التنبيهات"},
+    "what_set_sensitivity": {"en": "Changing the sensitivity", "he": "שינוי הרגישות", "ar": "تغيير الحساسية"},
+```
+
+In `render.receipt_line`, before the final return:
+
+```python
+    if receipt.tool in ("set_alert_types", "set_sensitivity"):
+        where = d.get("camera") or t("the_house", lang)
+        name = lambda kind: t(f"type_{kind}", lang) if f"type_{kind}" in TEMPLATES else kind  # noqa: E731
+        if receipt.tool == "set_alert_types":
+            show = lambda types: ", ".join(name(k) for k in types or [])  # noqa: E731
+            return t("alert_types_changed", lang, camera=where, old=show(d.get("old")), new=show(d.get("new")))
+        show = lambda vals: ", ".join(f"{name(k)} {round(float(v) * 100)}%"  # noqa: E731
+                                      for k, v in sorted((vals or {}).items()))
+        return t("sensitivity_changed", lang, camera=where, old=show(d.get("old")), new=show(d.get("new")))
+```
+
+- [ ] **Step 6: Undo (`brain/agent.py`, inside `undo_turn`'s per-receipt branch)**
+
+Add before the final `else:` (the settings branch):
+
+```python
+                    elif r.tool in ("set_alert_types", "set_sensitivity"):
+                        api = self.services.alert_settings
+                        camera = d.get("camera") or None
+                        if r.tool == "set_alert_types":
+                            back = d.get("house_before") if camera is None else (d.get("own_before") or ["default"])
+                            api.set_alert_types(camera, back)
+                        else:
+                            # set_sensitivity MERGES into a camera's own values, so clear first, then put back the
+                            # exact earlier values (or leave it on the house defaults when it had none).
+                            if camera is None:
+                                api.set_sensitivity(None, d.get("house_before"))
+                            else:
+                                api.set_sensitivity(camera, "default")
+                                if d.get("own_before"):
+                                    api.set_sensitivity(camera, d["own_before"])
+                        _issue(ctx, r.tool, DONE, camera or "house",
+                               {"camera": camera or "", "old": d.get("new"), "new": d.get("old")})
+```
+
+(make the existing settings branch an `elif r.tool == "change_setting":` and keep a final `else: continue` so an unknown tool is skipped).
+
+- [ ] **Step 7: Run the tests**
+
+Run: `env -u SSLKEYLOGFILE .venv/Scripts/python.exe -m unittest discover -s tests/box -p "test_brain_*.py" -v`, then the full suite.
+Expected: PASS. Update the counts: `TOOLS` has 17 entries; `test_brain_profiles` still compares `schemas - {reply, hand_off}` with `TOOLS`.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add home_guard_project/box/brain tests/box/test_brain_alert_types.py tests/box/test_brain_tools_act.py tests/box/test_brain_settings.py
+git commit -m "Brain: alert types and per-type sensitivity by chat, on the same functions as v1, with receipts and Undo
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```

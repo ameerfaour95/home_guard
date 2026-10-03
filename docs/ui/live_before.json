@@ -1,0 +1,29 @@
+{
+  "duration_s": 12.01,
+  "source": "six synthetic 1280x720 camera frames; local Windows workstation",
+  "fps": {
+    "front_door": 5.81,
+    "garden": 2.09,
+    "driveway": 2.09,
+    "side_gate": 2.09,
+    "patio": 2.09,
+    "garage": 2.09
+  },
+  "file_to_paint": {
+    "p50_ms": 134.69,
+    "p95_ms": 186.2,
+    "max_ms": 519.61
+  },
+  "ai_write_to_paint": {
+    "p50_ms": 443.79,
+    "p95_ms": 834.48,
+    "max_ms": 834.48
+  },
+  "event_loop_lateness_10ms_probe": {
+    "p50_ms": 5.39,
+    "p95_ms": 28.45,
+    "max_ms": 53.72
+  },
+  "publisher_one_core_percent": 4.16,
+  "publisher_frames": 190
+}
