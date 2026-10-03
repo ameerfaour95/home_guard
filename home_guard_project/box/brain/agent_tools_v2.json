@@ -1,0 +1,108 @@
+[
+  {"type": "function", "function": {"name": "find_events",
+    "description": "Search the saved events (alerts from the guard hours and quiet events from the rest of the day). Returns events with handles, label, people, whether they are described, and coverage (what could not be seen). Filters by time and camera first; 'what' ranks by meaning.",
+    "parameters": {"type": "object", "properties": {
+      "cameras": {"type": "array", "items": {"type": "string"}, "description": "Camera names or the owner's words for them; omit for all cameras."},
+      "day": {"type": "string", "description": "\"today\", \"yesterday\" or \"YYYY-MM-DD\"."},
+      "time_from": {"type": "string", "description": "Start of a time range, 24-hour local \"HH:MM\"."},
+      "time_to": {"type": "string", "description": "End of a time range, 24-hour local \"HH:MM\"."},
+      "last_hours": {"type": "number", "description": "Look back this many hours."},
+      "latest": {"type": "boolean", "description": "true for \"the last one\"."},
+      "kind": {"type": "string", "enum": ["alert", "quiet"], "description": "Only alerts (guard hours) or only quiet events."},
+      "label": {"type": "string", "enum": ["normal", "suspicious", "escalation"], "description": "Only events with this label."},
+      "what": {"type": "string", "description": "A few English words for what the owner is looking for, e.g. \"a courier at the door\"."}
+    }}}},
+  {"type": "function", "function": {"name": "summarize_period",
+    "description": "Everything saved over a period, for a summary: totals by camera, label and kind, the notable events with handles, and coverage. Write a short natural summary from it.",
+    "parameters": {"type": "object", "properties": {
+      "day": {"type": "string", "description": "\"today\", \"yesterday\" or \"YYYY-MM-DD\"."},
+      "last_hours": {"type": "number", "description": "Summarize the last this-many hours."},
+      "cameras": {"type": "array", "items": {"type": "string"}, "description": "Limit to these cameras."}
+    }}}},
+  {"type": "function", "function": {"name": "describe_event",
+    "description": "Assistant mode: re-watch a saved event's video and describe it, answering the owner's question if given. Use for quiet events that are not described yet.",
+    "parameters": {"type": "object", "properties": {
+      "handle": {"type": "string", "description": "An event handle from find_events or summarize_period."},
+      "question": {"type": "string", "description": "The owner's question about the video, in English, or empty."}
+    }, "required": ["handle"]}}},
+  {"type": "function", "function": {"name": "assess_event",
+    "description": "Guard mode: re-watch a saved event's video and judge it normal, suspicious or escalation, with the reason. May come back 'unavailable', which never means normal.",
+    "parameters": {"type": "object", "properties": {
+      "handle": {"type": "string", "description": "An event handle from find_events or summarize_period."}
+    }, "required": ["handle"]}}},
+  {"type": "function", "function": {"name": "ask_clarification",
+    "description": "Ask the owner one short question with 2 to 5 button choices when the camera, the event or the request is unclear. Then stop; nothing else runs this turn.",
+    "parameters": {"type": "object", "properties": {
+      "question": {"type": "string", "description": "The question, in the language of the context block."},
+      "choices": {"type": "array", "items": {"type": "string"}, "description": "2 to 5 short choices."}
+    }, "required": ["question", "choices"]}}},
+  {"type": "function", "function": {"name": "check_camera",
+    "description": "Take a live photo from one camera now, send it to the chat, and describe it (with the picture quality; in guard mode also a label).",
+    "parameters": {"type": "object", "properties": {
+      "camera": {"type": "string", "description": "A camera name or the owner's word for it."}
+    }, "required": ["camera"]}}},
+  {"type": "function", "function": {"name": "record_clip",
+    "description": "Record a new video from one camera now and send it.",
+    "parameters": {"type": "object", "properties": {
+      "camera": {"type": "string", "description": "A camera name or the owner's word for it."},
+      "seconds": {"type": "number", "description": "1 to 30 seconds; default 10."}
+    }, "required": ["camera"]}}},
+  {"type": "function", "function": {"name": "send_media",
+    "description": "Send the video (or photo) behind a handle. For part of a saved video give from_sec (seconds from the moment the detector fired; negative = before) and seconds.",
+    "parameters": {"type": "object", "properties": {
+      "handle": {"type": "string", "description": "A handle from an earlier tool result."},
+      "from_sec": {"type": "number", "description": "Start, in seconds from the detector's trigger; e.g. -4 for the 4 seconds before."},
+      "seconds": {"type": "number", "description": "Length of the part to send, 1 to 60."}
+    }, "required": ["handle"]}}},
+  {"type": "function", "function": {"name": "pause_alerts",
+    "description": "Mute alerts for a while (the cameras keep watching). Only when this message asks for it.",
+    "parameters": {"type": "object", "properties": {
+      "owner_words": {"type": "string", "description": "The owner's words asking for the pause, copied exactly from this message (two words or more)."},
+      "cameras": {"type": "array", "items": {"type": "string"}, "description": "Only these cameras; omit for all."},
+      "until": {"type": "string", "description": "A 24-hour local time \"HH:MM\" if the owner named one."},
+      "minutes": {"type": "number", "description": "A duration if the owner named one."}
+    }, "required": ["owner_words"]}}},
+  {"type": "function", "function": {"name": "resume_alerts",
+    "description": "Turn alerts back on, for some cameras or all.",
+    "parameters": {"type": "object", "properties": {
+      "cameras": {"type": "array", "items": {"type": "string"}, "description": "Only these cameras; omit for all."}
+    }}}},
+  {"type": "function", "function": {"name": "record_verdict",
+    "description": "File the owner's judgement of an alert. Only when this message judges it.",
+    "parameters": {"type": "object", "properties": {
+      "handle": {"type": "string", "description": "The event handle; omit for the alert this message answers."},
+      "verdict": {"type": "string", "enum": ["true_alert", "false_alarm", "real_but_wrong", "expected", "missed_event"]},
+      "owner_words": {"type": "string", "description": "The owner's judgement, copied exactly from this message (two words or more)."},
+      "note": {"type": "string", "description": "One short English sentence with any detail, or empty."}
+    }, "required": ["verdict", "owner_words"]}}},
+  {"type": "function", "function": {"name": "set_camera_active",
+    "description": "Really turn a camera off (active=false) or on (active=true). The box restarts briefly to apply it.",
+    "parameters": {"type": "object", "properties": {
+      "camera": {"type": "string", "description": "A camera name or the owner's word for it."},
+      "active": {"type": "boolean"}
+    }, "required": ["camera", "active"]}}},
+  {"type": "function", "function": {"name": "set_alias",
+    "description": "Give a camera another name the family uses (\"call camera 6 the entrance\").",
+    "parameters": {"type": "object", "properties": {
+      "camera": {"type": "string", "description": "The camera, by name or an existing word for it."},
+      "alias": {"type": "string", "description": "The new name, as the owner wrote it."}
+    }, "required": ["camera", "alias"]}}},
+  {"type": "function", "function": {"name": "change_setting",
+    "description": "Change one setting. alert_hours: \"22-06\" (whole hours) or \"all day\"; cooldown_minutes: minutes between two alerts from one camera; sensitivity: \"low\", \"medium\", \"high\" or a detector threshold 0.05-0.95; language: \"en\" or \"he\" (the language of alerts and announcements). Only when this message asks for it.",
+    "parameters": {"type": "object", "properties": {
+      "setting": {"type": "string", "enum": ["alert_hours", "cooldown_minutes", "sensitivity", "language"]},
+      "value": {"type": "string", "description": "The new value, as described above."},
+      "owner_words": {"type": "string", "description": "The owner's words asking for the change, copied exactly from this message (two words or more)."}
+    }, "required": ["setting", "value", "owner_words"]}}},
+  {"type": "function", "function": {"name": "reply",
+    "description": "Finish the turn: the answer to send, with facts from tool results only.",
+    "parameters": {"type": "object", "properties": {
+      "answer": {"type": "string", "description": "Short plain text in the language of the context block. Never describe actions; the box adds those lines."},
+      "uses": {"type": "array", "items": {"type": "string"}, "description": "The handles and receipt ids the answer relies on."}
+    }, "required": ["answer"]}}},
+  {"type": "function", "function": {"name": "hand_off",
+    "description": "Fast responder only: give this message to the bigger model because it needs judgement or care.",
+    "parameters": {"type": "object", "properties": {
+      "reason": {"type": "string", "description": "A few words on why."}
+    }, "required": ["reason"]}}}
+]
