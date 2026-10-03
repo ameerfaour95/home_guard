@@ -496,3 +496,43 @@ class StreamMaskTest(unittest.TestCase):
         stream._mask = None
         stream._ingest(np.full((4, 4, 3), 7, dtype=np.uint8), now=1.0)
         self.assertEqual(int(stream.read().min()), 7)
+
+    def test_a_frame_the_mask_cannot_handle_is_dropped_and_the_reader_survives(self) -> None:
+        import threading
+
+        import numpy as np
+
+        stream = inf._Stream.__new__(inf._Stream)
+        stream.name = "cam"
+        stream.url = "rtsp://x"
+        stream._lock = threading.Lock()
+        stream._frame = None
+        stream._ring = None
+        stream._running = True
+        frames = [np.full((4, 4, 3), 9, dtype=np.uint8), np.full((4, 4, 3), 5, dtype=np.uint8)]
+
+        class _Mask:
+            calls = 0
+
+            def apply(self, frame):
+                _Mask.calls += 1
+                if _Mask.calls == 1:
+                    raise RuntimeError("bad frame")
+                return frame * 0 + 3
+
+        class _Cap:
+            def read(self_inner):
+                if frames:
+                    return True, frames.pop(0)
+                stream._running = False
+                return False, None
+
+            def release(self_inner):
+                pass
+
+        stream._mask = _Mask()
+        stream._cap = _Cap()
+        with mock.patch("time.sleep"), mock.patch("cv2.VideoCapture", return_value=_Cap()),                 self.assertLogs("box.inference", "WARNING") as logs:
+            stream._loop()
+        self.assertEqual(len(logs.records), 1)
+        self.assertEqual(int(stream.read().max()), 3)

@@ -580,7 +580,14 @@ class _Stream:
                 self._cap.release()
                 self._cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
                 continue
-            self._ingest(frame, time.time())
+            try:
+                self._ingest(frame, time.time())
+            except Exception as exc:  # noqa: BLE001 - a bad frame is dropped (never stored unmasked); the camera keeps running
+                if not getattr(self, "_ingest_failed", False):
+                    log.warning("[%s] frame dropped: %s", self.name, exc)
+                self._ingest_failed = True
+            else:
+                self._ingest_failed = False
 
     def _ingest(self, frame: Any, now: float) -> None:
         """One decoded frame: masked to the watch zone first, then kept as the latest frame and offered to the clip ring."""
