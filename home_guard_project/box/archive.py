@@ -91,6 +91,26 @@ def _finite(value: Any) -> float:
     return number
 
 
+def _optional_ts(value: Any) -> Optional[float]:
+    """A usable timestamp, or None when the field is missing or bad (one bad field never hides an alert)."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return _finite(value)
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
+
+
+def _text(value: Any, default: str) -> str:
+    return value if isinstance(value, str) and value else default
+
+
+def _people(value: Any) -> Optional[int]:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return None
+    return int(value)
+
+
 def load_records(roots: Sequence[str]) -> List[AlertRecord]:
     """Every saved alert under *roots* (dataset folders), oldest first. Damaged metas are skipped."""
     verdicts = _verdicts(roots)
@@ -107,6 +127,8 @@ def load_records(roots: Sequence[str]) -> List[AlertRecord]:
                 alert_id = name[: -len(META_SUFFIX)]
                 alert = meta.get("alert") if isinstance(meta.get("alert"), dict) else {}
                 try:
+                    # Falsy or missing falls back to the file time; a present but unusable value is a bad record.
+                    ts = _finite(meta.get("clip_end_ts") or os.path.getmtime(meta_path))
                     clip = os.path.join(root, str(meta.get("clip_path") or "").replace("\\", os.sep))
                     summary = str(alert.get("summary") or "")
                     yolo = meta.get("yolo") if isinstance(meta.get("yolo"), dict) else {}
@@ -115,23 +137,23 @@ def load_records(roots: Sequence[str]) -> List[AlertRecord]:
                         people = (alert.get("vlm") or {}).get("people") if isinstance(alert.get("vlm"), dict) else None
                     detector_labels = yolo.get("trigger_classes") or alert.get("labels") or []
                     if not isinstance(detector_labels, (list, tuple)):
-                        raise ValueError("detector labels must be a list")
+                        detector_labels = []
                     records.append(AlertRecord(
                         alert_id=alert_id,
-                        camera=str(meta.get("camera_name") or ""),
-                        ts=_finite(meta["clip_end_ts"] if meta.get("clip_end_ts") is not None else os.path.getmtime(meta_path)),
+                        camera=_text(meta.get("camera_name"), ""),
+                        ts=ts,
                         summary=summary,
-                        command=str(alert.get("alert_command") or ""),
+                        command=_text(alert.get("alert_command"), ""),
                         clip_path=clip if meta.get("clip_path") and os.path.isfile(clip) else None,
                         verdicts=tuple(v for _, v in sorted(verdicts.get(alert_id, []))),
-                        kind=str(meta.get("kind") or "alert"),
-                        label=str(alert.get("label") or ""),
-                        people=int(people) if isinstance(people, (int, float)) and not isinstance(people, bool) else None,
-                        mode=str(meta.get("mode") or ""),
+                        kind=_text(meta.get("kind"), "alert"),
+                        label=_text(alert.get("label"), ""),
+                        people=_people(people),
+                        mode=_text(meta.get("mode"), ""),
                         detector_labels=tuple(str(x) for x in detector_labels),
                         described=bool(summary),
-                        clip_start_ts=_finite(meta["clip_start_ts"]) if meta.get("clip_start_ts") is not None else None,
-                        trigger_ts=_finite(meta["trigger_ts"]) if meta.get("trigger_ts") is not None else None,
+                        clip_start_ts=_optional_ts(meta.get("clip_start_ts")),
+                        trigger_ts=_optional_ts(meta.get("trigger_ts")),
                     ))
                 except (OSError, TypeError, ValueError, OverflowError) as exc:
                     log.warning("Skipping damaged meta %s: %s", meta_path, exc)

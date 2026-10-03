@@ -20,14 +20,17 @@ import math
 from functools import wraps
 import os
 import re
+from uuid import uuid4
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set
 
-from ..archive import AlertRecord, _finite, _semantic_rank, _words, load_records
+from ..archive import AlertRecord, _finite, _words, load_records
+from ..embeddings import cosine
 from ..inference import PERSON_CLASSES, VEHICLE_CLASSES
 
 log = logging.getLogger("box.brain.events")
 
 DESC_DIR_NAME = ".desc"
+MIN_SIMILARITY = 0.3  # a meaning search keeps only events at least this close in meaning
 SEVERITY = {"escalation": 0, "suspicious": 1, "normal": 2, "": 3}
 
 _PERSON_WORDS = ("person", "people", "someone", "somebody", "anyone", "anybody", "man", "woman", "men", "women",
@@ -85,10 +88,17 @@ def write_desc(desc_dir: str, alert_id: str, key: str, value: Dict[str, Any]) ->
         serialized = json.dumps(data, ensure_ascii=False, allow_nan=False)
         os.makedirs(desc_dir, exist_ok=True)
         path = _desc_path(desc_dir, alert_id)
-        tmp = path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            f.write(serialized)
-        os.replace(tmp, path)
+        tmp = f"{path}.{os.getpid()}.{uuid4().hex[:6]}.tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(serialized)
+            os.replace(tmp, path)
+        except BaseException:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            raise
     except OSError as exc:
         log.warning("Description of %s not cached: %s", alert_id, exc)
 
@@ -155,6 +165,22 @@ def class_words(what: str) -> Set[str]:
     return out
 
 
+def _meaning_rank(described: Sequence[AlertRecord], what: str, embedder: Any) -> Optional[List[AlertRecord]]:
+    """Described events close enough in meaning to *what*, closest first; None if the embedder is unavailable."""
+    if not described:
+        return []
+    query_vec = embedder.embed_one(what)
+    if query_vec is None:
+        return None
+    vectors = embedder.embed([r.summary for r in described])
+    if vectors is None:
+        return None
+    scored = [(cosine(query_vec, vec), i, r) for i, (r, vec) in enumerate(zip(described, vectors)) if vec is not None]
+    scored = [t for t in scored if t[0] >= MIN_SIMILARITY]
+    scored.sort(key=lambda t: (-t[0], t[1]))
+    return [r for _, _, r in scored]
+
+
 @_safe(list)
 def rank_events(records: Sequence[AlertRecord], what: str, embedder: Any = None) -> List[AlertRecord]:
     """Events matching *what*: described ones by meaning (or keyword), then undescribed detector hits."""
@@ -163,7 +189,7 @@ def rank_events(records: Sequence[AlertRecord], what: str, embedder: Any = None)
     described = [r for r in records if r.described]
     undescribed = [r for r in records if not r.described]
     try:
-        ranked = _semantic_rank(described, what, embedder) if embedder is not None else None
+        ranked = _meaning_rank(described, what, embedder) if embedder is not None else None
     except Exception as exc:
         log.warning("Meaning search failed; using keywords: %s", exc)
         ranked = None

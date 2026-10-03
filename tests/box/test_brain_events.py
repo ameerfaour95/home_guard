@@ -140,7 +140,8 @@ class EventsTest(unittest.TestCase):
                            "clip_start_ts": "bad", "yolo": {"trigger_classes": 5}}, f)
         with self.assertLogs("box.archive", level="WARNING"):
             records = load_records([self.root])
-        self.assertEqual(len(records), 4)
+        # "bad", nan and inf end times are unusable; [] is falsy so it falls back to the file time (kept).
+        self.assertEqual(len(records), 5)
 
     def test_read_desc_invalid_utf8_and_shapes(self):
         os.makedirs(self.desc)
@@ -163,16 +164,68 @@ class EventsTest(unittest.TestCase):
             write_desc(self.desc, "x", "bad", ["not a description"])
         self.assertEqual(read_desc(self.desc, "x"), {"good": {"text": "saved"}})
 
-    def test_archive_skips_invalid_optional_fields_and_utf8(self):
-        for i, fields in enumerate([{"alert": {"people": float("nan")}},
-                                    {"trigger_ts": float("inf")},
-                                    {"yolo": {"trigger_classes": "person"}}]):
+    def test_archive_keeps_alert_and_defaults_invalid_optional_fields(self):
+        cases = [{"alert": {"people": float("nan")}}, {"alert": {"people": "two"}},
+                 {"trigger_ts": float("inf")}, {"trigger_ts": "soon"}, {"clip_start_ts": "bad"},
+                 {"yolo": {"trigger_classes": "person"}}, {"alert": {"label": ["x"]}},
+                 {"kind": ["x"]}, {"mode": {"a": 1}}]
+        for i, fields in enumerate(cases):
             with open(os.path.join(self.root, "meta", f"extra{i}.meta.json"), "w") as f:
                 json.dump(dict(clip_end_ts=NOW, **fields), f)
         with open(os.path.join(self.root, "meta", "utf8.meta.json"), "wb") as f:
             f.write(b"\xff")
         with self.assertLogs("box.archive", level="WARNING"):
-            self.assertEqual(len(load_records([self.root])), 4)
+            records = load_records([self.root])
+        extras = {r.alert_id: r for r in records if r.alert_id.startswith("extra")}
+        self.assertEqual(len(extras), len(cases))
+        self.assertEqual(len(records), 4 + len(cases))
+        for r in extras.values():
+            self.assertEqual(r.ts, NOW)
+        self.assertIsNone(extras["extra0"].people)
+        self.assertIsNone(extras["extra1"].people)
+        self.assertIsNone(extras["extra2"].trigger_ts)
+        self.assertIsNone(extras["extra3"].trigger_ts)
+        self.assertIsNone(extras["extra4"].clip_start_ts)
+        self.assertEqual(extras["extra5"].detector_labels, ())
+        self.assertEqual(extras["extra6"].label, "")
+        self.assertEqual(extras["extra7"].kind, "alert")
+        self.assertEqual(extras["extra8"].mode, "")
+
+    def test_archive_falsy_clip_end_ts_falls_back_to_mtime(self):
+        path = os.path.join(self.root, "meta", "zero.meta.json")
+        with open(path, "w") as f:
+            json.dump({"clip_end_ts": 0}, f)
+        record = next(r for r in load_records([self.root]) if r.alert_id == "zero")
+        self.assertEqual(record.ts, os.path.getmtime(path))
+
+    def test_archive_skips_record_without_usable_ts(self):
+        with open(os.path.join(self.root, "meta", "nots.meta.json"), "w") as f:
+            json.dump({"clip_end_ts": "bad"}, f)
+        with self.assertLogs("box.archive", level="WARNING"):
+            ids = [r.alert_id for r in load_records([self.root])]
+        self.assertNotIn("nots", ids)
+
+    def test_write_desc_uses_unique_temp_and_cleans_up(self):
+        import unittest.mock as mock
+        seen = []
+        real = os.replace
+        def spy(src, dst):
+            seen.append(src)
+            return real(src, dst)
+        with mock.patch("os.replace", spy):
+            write_desc(self.desc, "u", "a", {"text": "1"})
+            write_desc(self.desc, "u", "b", {"text": "2"})
+        self.assertEqual(len(set(seen)), 2)
+        with mock.patch("os.replace", side_effect=OSError("boom")):
+            with self.assertLogs("box.brain.events", level="WARNING"):
+                write_desc(self.desc, "u", "c", {"text": "3"})
+        self.assertEqual([n for n in os.listdir(self.desc) if n.endswith(".tmp")], [])
+
+    def test_meaning_search_drops_non_matches(self):
+        recs = load_events([self.root], self.desc)
+        ranked = rank_events(recs, "giraffe", embedder=FakeEmbedder())
+        self.assertEqual([r for r in ranked if r.described], [])
+        self.assertEqual(ranked, [])
 
     def test_archive_skips_deeply_nested_meta_and_feedback(self):
         feedback = os.path.join(self.root, "feedback")
