@@ -1,11 +1,12 @@
 """Tolerant readers for the box's unversioned metadata documents."""
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 import math
 from typing import Literal, Optional
 
 from .keys import normalize_rel, parse_key, stem_kind
+from ._time import parse_utc
 
 
 @dataclass
@@ -87,18 +88,6 @@ def _number(value) -> Optional[float]:
     return None
 
 
-def _utc(value) -> Optional[datetime]:
-    if not isinstance(value, str):
-        return None
-    try:
-        parsed = datetime.fromisoformat(value)
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        return parsed.astimezone(timezone.utc)
-    except (ValueError, OverflowError):
-        return None
-
-
 class _Fields:
     """Read typed JSON fields while collecting diagnostics for malformed values."""
 
@@ -160,7 +149,8 @@ def parse_meta(key: str, body: dict) -> ClipRecord:
     response = fields.body.get("model_response")
     if response is not None and not isinstance(response, (dict, str)):
         problems.append("invalid model_response")
-    if fields.body.get("teacher") is None and response is None:
+        status = "failed"
+    elif fields.body.get("teacher") is None and response is None:
         status = "none"
     elif (isinstance(response, dict) and response.get("summary") == ""
           and not any(value for name, value in response.items() if name != "summary")
@@ -179,11 +169,9 @@ def parse_meta(key: str, body: dict) -> ClipRecord:
             problems.append(f"teacher.input_frames[{index}] outside site")
         else:
             input_frames.append(normalized)
-    raw_rel = teacher.path("raw_path")
-    if "raw_path" not in teacher.body:
-        raw_rel = fields.path("model_raw_text_path")
-        if "model_raw_text_path" not in fields.body:
-            raw_rel = fields.path("model_response_path")
+    raw_rel = (teacher.path("raw_path") if "raw_path" in teacher.body else
+               fields.path("model_raw_text_path") if "model_raw_text_path" in fields.body else
+               fields.path("model_response_path"))
     prompt = teacher.text("prompt")
     if prompt is None:
         prompt = fields.text("prompt_used")
@@ -260,7 +248,7 @@ def parse_feedback(key: str, body: dict) -> FeedbackRecord:
         camera=alert.text("camera"), verdict=fields.text("verdict", "none"),
         action=fields.text("action", "none"), note=fields.text("note", ""),
         raw_text=fields.text("raw_text", ""), source=fields.text("source", ""),
-        time_utc=_utc(fields.body.get("time_utc")), scope_camera=fields.text("camera"),
+        time_utc=parse_utc(fields.body.get("time_utc")), scope_camera=fields.text("camera"),
     )
 
 
@@ -269,13 +257,13 @@ def parse_heartbeat(body: dict) -> Heartbeat:
     cameras = {}
     for name, camera in fields.typed("cameras", dict, {}).items():
         if isinstance(name, str):
-            cameras[name] = _utc(camera.get("newest_clip_utc")) if isinstance(camera, dict) else None
+            cameras[name] = parse_utc(camera.get("newest_clip_utc")) if isinstance(camera, dict) else None
     outbox = fields.body.get("clips_outbox")
     return Heartbeat(
         site=fields.text("site", ""), mode=fields.text("mode"), host=fields.text("host"),
-        time_utc=_utc(fields.body.get("time_utc")),
+        time_utc=parse_utc(fields.body.get("time_utc")),
         collector_running=fields.typed("collector_running", bool),
         stopped=fields.typed("stopped", bool), disk_free_gb=fields.number("disk_free_gb"),
-        newest_clip_utc=_utc(fields.body.get("newest_clip_utc")), cameras=cameras,
+        newest_clip_utc=parse_utc(fields.body.get("newest_clip_utc")), cameras=cameras,
         clips_outbox=outbox if type(outbox) is int and outbox >= 0 else 0,
     )

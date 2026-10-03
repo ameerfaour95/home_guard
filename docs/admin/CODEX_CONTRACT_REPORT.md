@@ -150,3 +150,54 @@ not independently verified capture times.
   `Co-Authored-By: Codex <noreply@openai.com>` trailer.
 - The pre-existing untracked `docs/admin/codex_contract_run.log` was not edited
   or staged. The report is force-added despite the `*.md` ignore rule.
+
+## Fix round
+
+All regression tests and refactor characterization tests were written and run
+before changing implementation. The literal requested pytest launcher again
+failed with Application Control error 4551. The same previously documented
+offline PowerShell command using `python -m pytest` ran the full contract suite:
+
+```powershell
+Remove-Item Env:VIRTUAL_ENV -ErrorAction SilentlyContinue
+$env:UV_SYSTEM_CERTS='1'
+$env:UV_OFFLINE='1'
+uv run --group cloud --system-certs python -m pytest tests/fleet_contract -q
+```
+
+RED excerpts:
+
+```text
+test_heartbeat_without_valid_time_is_offline
+E AssertionError: assert ('healthy', []) == ('offline', [...])
+test_invalid_model_response_is_failed
+E AssertionError: assert 'real' == 'failed'
+test_camera_quiet / test_camera_never / test_reasons_are_human
+E AssertionError: old combined camera reason differs from required reasons
+19 failed, 91 passed in 0.30s
+```
+
+| Item | Test | Result |
+|---|---|---|
+| 1. Missing heartbeat time | `test_heartbeat_without_valid_time_is_offline`; `test_offline_wins_and_retains_other_reasons[None]` | RED then GREEN: `offline`, exact `heartbeat_old` message and severity; disk, engine, camera and backlog reasons retained. |
+| 2. Invalid model response | `test_invalid_model_response_is_failed` (12 cases: integers, float, boolean, empty/nonempty lists; teacher absent/present) | RED then GREEN: `failed`, `parsed=None`, `invalid model_response` retained. |
+| 3. Flat raw-path expression | `test_raw_path_precedence_preserves_explicit_values` (7 cases); existing collection/path tests | GREEN before and after refactor. One conditional expression preserves teacher, raw-text, response precedence by field presence, including explicit nulls, rejected paths and short-circuit diagnostics. |
+| 4. Separate camera reasons | `test_camera_quiet`; `test_camera_never`; `test_reasons_are_human`; `test_naive_and_offset_datetimes` | RED then GREEN: exact messages, warning severities, mixed quiet/never cameras, recent-camera exclusion, and 26 h for an oldest newest-clip age of 26 h 59 min. Names replace underscores and capitalize the first letter, following heartbeat camera order. |
+| 5. Shared private time module | `test_legacy_time_fields_keep_utc_parsing_semantics` (9 cases); existing UTC and health boundary tests; expanded `test_naive_and_offset_datetimes` | Legacy characterization tests GREEN before and after extraction. `_time.py` owns string-only `parse_utc` and its shared datetime `normalize_utc`, also used directly by health. Naive UTC, Z, offsets, malformed/non-string inputs and overflow semantics are preserved; health datetime callers pass. |
+
+GREEN (entire contract suite):
+
+```text
+........................................................................ [ 65%]
+......................................                                   [100%]
+110 passed in 0.14s
+```
+
+Files: `home_guard_project/fleet_contract/{_time,health,legacy}.py`,
+`tests/fleet_contract/test_{health,legacy}.py`, this report.
+
+Validation: all six contract modules pass the stdlib-only AST import audit and
+import under Python `-I -S`; `git diff --check` passes. Dependency files and
+fixtures are unchanged. No network, AWS, SSH, push, or other worktree operations.
+The two pre-existing untracked run logs are left unstaged and unedited.
+One fix commit uses the requested co-author trailer. No new contradictions.

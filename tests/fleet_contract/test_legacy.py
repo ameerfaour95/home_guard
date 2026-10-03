@@ -76,6 +76,31 @@ def test_ai_status_rules(extra, status):
         assert r.ai.parsed == {"text": extra["model_response"]}
 
 
+@pytest.mark.parametrize("response", [0, 3, 1.5, False, [], ["text"]])
+@pytest.mark.parametrize("teacher", [None, {"model": "gpt-4o"}])
+def test_invalid_model_response_is_failed(response, teacher):
+    r = parse_meta(P, {"model_response": response, "teacher": teacher})
+    assert r.ai.status == "failed"
+    assert r.ai.parsed is None
+    assert "invalid model_response" in r.problems
+
+
+@pytest.mark.parametrize("extra,expected,problem", [
+    ({}, "responses/parsed.json", None),
+    ({"model_raw_text_path": "responses/raw.txt"}, "responses/raw.txt", None),
+    ({"teacher": {"raw_path": "responses/teacher.txt"}, "model_raw_text_path": "../unused"},
+     "responses/teacher.txt", None),
+    ({"teacher": {"raw_path": None}}, None, None),
+    ({"teacher": {"raw_path": "../invalid"}}, None, "teacher.raw_path outside site"),
+    ({"model_raw_text_path": None}, None, None),
+    ({"model_raw_text_path": "../invalid"}, None, "model_raw_text_path outside site"),
+])
+def test_raw_path_precedence_preserves_explicit_values(extra, expected, problem):
+    r = parse_meta(P, load("prod_alert.meta.json") | {"model_response_path": "responses/parsed.json"} | extra)
+    assert r.ai.raw_rel == expected
+    assert [p for p in r.problems if "outside site" in p] == ([problem] if problem else [])
+
+
 @pytest.mark.parametrize("alert,response,expected", [
     ({"summary": "owner-facing"}, {"summary": "model"}, "owner-facing"),
     ({"summary": ""}, {"summary": "model"}, ""),
@@ -166,4 +191,16 @@ def test_heartbeat_utc_normalization():
     h = parse_heartbeat(load("heartbeat.json") | {"time_utc": "2026-10-03T14:15:14+03:00"})
     assert h.time_utc == datetime(2026, 10, 3, 11, 15, 14, tzinfo=timezone.utc)
     assert h.newest_clip_utc.tzinfo == timezone.utc
+
+
+@pytest.mark.parametrize("value", [
+    "2026-10-03T11:15:14", "2026-10-03T11:15:14Z", "2026-10-03T14:15:14+03:00",
+    None, "invalid", 42, [], datetime(2026, 10, 3), "0001-01-01T00:00:00+01:00",
+])
+def test_legacy_time_fields_keep_utc_parsing_semantics(value):
+    expected = datetime(2026, 10, 3, 11, 15, 14, tzinfo=timezone.utc) if isinstance(value, str) and value.startswith("2026-") else None
+    h = parse_heartbeat({"time_utc": value, "newest_clip_utc": value,
+                         "cameras": {"front_side": {"newest_clip_utc": value}}})
+    f = parse_feedback("production_test/feedback/_general/2026-10-03/x.feedback.json", {"time_utc": value})
+    assert h.time_utc == h.newest_clip_utc == h.cameras["front_side"] == f.time_utc == expected
 
