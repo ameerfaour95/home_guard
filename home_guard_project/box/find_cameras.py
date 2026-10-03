@@ -540,7 +540,7 @@ def main() -> None:
     setz = sub.add_parser("set-zone", help="Store a camera's watch zone; everything outside it is blacked out.")
     setz.add_argument("--camera", required=True)
     setz.add_argument("--points", required=True,
-                      help="Corners as x,y;x,y;x,y in 0-1 picture fractions, 3 to 32 of them, no spaces or quotes.")
+                      help="Corners as x,y;x,y;x,y in 0-1 picture fractions, 3 to 32 of them, no spaces (quote the value in PowerShell).")
     clrz = sub.add_parser("clear-zone", help="Watch the whole picture again for a camera.")
     clrz.add_argument("--camera", required=True)
 
@@ -587,6 +587,14 @@ def main() -> None:
                 print(json.dumps({"error": str(exc)}))
             else:
                 print(f"Error: {exc}")
+            sys.exit(1)
+        except Exception as exc:  # noqa: BLE001 - the app needs a plain error, never a traceback
+            log.exception("zone command failed")
+            message = f"could not change the zone: {exc}"
+            if args.json:
+                print(json.dumps({"error": message}))
+            else:
+                print(f"Error: {message}")
             sys.exit(1)
         if args.json:
             print(json.dumps(result, indent=2))

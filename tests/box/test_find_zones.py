@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import contextlib
+import io
+import json
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 from home_guard_project.box import find_cameras as fc
 from home_guard_project.data_collection import zones as z
@@ -64,3 +68,13 @@ class ZoneCommandsTest(unittest.TestCase):
         fc.apply_changes({"cameras": [{"name": "yard", "enabled": False}]}, self.cameras, zones_path=self.zones,
                          restart=False)
         self.assertEqual(set(z.load_zones(self.zones)), {"yard"})
+
+
+class ZoneCliFailureTest(unittest.TestCase):
+    def test_an_unexpected_failure_still_prints_a_json_error(self) -> None:
+        argv = ["find_cameras", "--json", "set-zone", "--camera", "yard", "--points", "0,0;1,0;1,1"]
+        out = io.StringIO()
+        with mock.patch("sys.argv", argv),                 mock.patch("home_guard_project.data_collection.zones.save_zone", side_effect=OSError("disk full")),                 mock.patch.object(fc, "_known_camera", side_effect=lambda name, *a, **k: name),                 mock.patch.object(fc, "_restart_running_mode", lambda *a, **k: None),                 contextlib.redirect_stdout(out), self.assertRaises(SystemExit) as cm:
+            fc.main()
+        self.assertEqual(cm.exception.code, 1)
+        self.assertIn("disk full", json.loads(out.getvalue())["error"])

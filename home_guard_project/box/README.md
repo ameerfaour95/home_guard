@@ -209,9 +209,11 @@ the box:
 
 ```
 .venv\Scripts\python.exe -m home_guard_project.box.find_cameras --json zones
-.venv\Scripts\python.exe -m home_guard_project.box.find_cameras --json set-zone --camera yard --points 0.1,0.2;0.9,0.2;0.9,0.9;0.1,0.9
+.venv\Scripts\python.exe -m home_guard_project.box.find_cameras --json set-zone --camera yard --points "0.1,0.2;0.9,0.2;0.9,0.9;0.1,0.9"
 .venv\Scripts\python.exe -m home_guard_project.box.find_cameras --json clear-zone --camera yard
 ```
+
+Quote the corners as shown: in PowerShell an unquoted `;` ends the command. The setup app sends them without quotes over SSH, where the box's shell is cmd.exe.
 
 `set-zone` / `clear-zone` ask the running mode to restart so the change is live within seconds.
 Renaming a camera carries its zone along; disabling keeps it.
