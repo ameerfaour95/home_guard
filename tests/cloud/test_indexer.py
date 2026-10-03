@@ -1,4 +1,5 @@
 """Task 8: S3 wrapper + indexer that merges the production and training copies of a clip."""
+import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -363,3 +364,552 @@ def test_index_all_covers_every_device(session, s3client, s3, device):
     assert isinstance(result["bian"], IndexStats) and result["bian"].artifacts == 1
     art = _artifact(session, "production_bian/clips/bian_ch2/2026-10-02/bian_ch2_1790972298_alert.mp4")
     assert art.event_id is None and other.id
+
+
+# ================================================================ fix round (Codex review of Task 8)
+
+BASE = datetime.fromtimestamp(1791020177, timezone.utc)
+
+
+def _put_etag(s3client, key, body) -> str:
+    if isinstance(body, (dict, list)):
+        body = json.dumps(body).encode("utf-8")
+    return s3client.put_object(Bucket=b.BUCKET, Key=key, Body=body)["ETag"].strip('"')
+
+
+def _run(session, device, stem=b.STEM):
+    return session.scalars(select(m.AiRun).where(m.AiRun.event_id == _event(session, device, stem).id)).one()
+
+
+def _teacher_meta(summary="Teacher: a man in a red coat tries the side gate.", label="suspicious", feedback=()):
+    body = b.fixture_json("train_alert.meta.json")
+    body["alert"]["summary"] = summary
+    body["alert"]["label"] = label
+    body["alert"]["alert_command"] = "[call_owner]"
+    body["model_response"]["summary"] = summary
+    body["owner_feedback"] = list(feedback)
+    return body
+
+
+def _recreated_meta(feedback):
+    """What box/feedback.py writes after the training copy was uploaded: production meta + owner_feedback."""
+    body = b.fixture_json("prod_alert.meta.json")
+    body["kind"] = "owner_feedback"
+    body["owner_feedback"] = list(feedback)
+    return body
+
+
+def _verdict(verdict, minute):
+    return {"time_utc": f"2026-10-03T09:{minute:02d}:00Z", "verdict": verdict, "note": "", "raw_text": verdict,
+            "source": "button", "from": "Owner"}
+
+
+def _get_counter(monkeypatch, s3client):
+    calls = []
+    real = s3client.get_object
+
+    def spy(**kw):
+        calls.append(kw["Key"])
+        return real(**kw)
+
+    monkeypatch.setattr(s3client, "get_object", spy)
+    return calls
+
+
+# ---- 1: historical merge keeps the winning AI revision's fields and every verdict ever seen
+
+def test_recreated_training_meta_keeps_teacher_fields_and_all_verdicts(session, s3client, s3, device):
+    b.seed_bucket(s3client, exclude={b.FEEDBACK, b.TRAIN_META})
+    teacher_etag = _put_etag(s3client, b.TRAIN_META, _teacher_meta(feedback=[_verdict("true_alert", 40)]))
+    _index(session, s3, device)
+    ev = _event(session, device)
+    assert ev.label == "suspicious" and ev.alert_command == "[call_owner]"
+
+    _put_etag(s3client, b.TRAIN_META, _recreated_meta([_verdict("false_alarm", 45)]))  # teacher-free
+    _index(session, s3, device)
+    _put_etag(s3client, b.TRAIN_META, _recreated_meta([_verdict("real_but_wrong", 50)]))  # recreated again
+    _index(session, s3, device)
+    session.expire_all()
+    ev = _event(session, device)
+    assert ev.summary.startswith("Teacher:") and ev.label == "suspicious" and ev.alert_command == "[call_owner]"
+    assert ev.owner_verdicts == ["true_alert", "false_alarm", "real_but_wrong"]
+    run = _run(session, device)
+    assert run.status == "real" and run.ai_source_key == b.TRAIN_META and run.ai_source_etag == teacher_etag
+
+
+# ---- 2: the retained AI picks up sidecars that arrive late
+
+def test_retained_ai_links_sidecars_that_arrive_after_a_poorer_copy(session, s3client, s3, device):
+    sidecars = {b.RAW_ANSWER, *b.CROPS}
+    b.seed_bucket(s3client, exclude=sidecars)
+    _index(session, s3, device)
+    assert _run(session, device).raw_artifact_id is None
+    _put_etag(s3client, b.TRAIN_META, _recreated_meta([_verdict("false_alarm", 45)]))
+    _index(session, s3, device)
+    for key in sidecars:
+        b.put(s3client, key, b.RAW_TEXT if key == b.RAW_ANSWER else b.FAKE_JPG)
+    _index(session, s3, device)
+    session.expire_all()
+    run = _run(session, device)
+    assert run.status == "real"
+    assert run.raw_artifact_id == _artifact(session, b.RAW_ANSWER).id
+    assert run.input_artifact_ids == [_artifact(session, k).id for k in b.CROPS]
+
+
+# ---- 3: dispatch and muted come only from the production copy
+
+def _prod_muted_no_dispatch():
+    body = b.fixture_json("prod_alert.meta.json")
+    body["alert"].pop("dispatch")
+    body["alert"]["muted"] = True
+    return body
+
+
+@pytest.mark.parametrize("production_first", [True, False])
+def test_dispatch_and_muted_come_only_from_production(session, s3client, s3, device, production_first):
+    b.seed_bucket(s3client, exclude={b.PROD_META, b.TRAIN_META})
+    first, second = (b.PROD_META, _prod_muted_no_dispatch()), (b.TRAIN_META, b.fixture_json("train_alert.meta.json"))
+    if not production_first:
+        first, second = second, first
+    b.put(s3client, *first)
+    _index(session, s3, device)
+    session.expire_all()
+    ev = _event(session, device)
+    if production_first:
+        assert ev.dispatch is None and ev.muted is True
+    else:  # no production copy yet: delivery is unknown, not the training copy's claim
+        assert ev.dispatch is None and ev.muted is None
+    b.put(s3client, *second)
+    _index(session, s3, device)
+    session.expire_all()
+    ev = _event(session, device)
+    assert ev.dispatch is None and ev.muted is True
+    assert ev.completeness["copies"] == ["production", "training"]
+
+
+# ---- 4: returning to a cached revision is re-applied without another GET
+
+def test_heartbeat_returning_to_a_cached_revision_is_reapplied(session, s3client, s3, device, monkeypatch):
+    b.seed_bucket(s3client)
+    _index(session, s3, device)
+    hb = b.fixture_json("heartbeat.json")
+    hb["time_utc"] = "2026-10-03T11:20:14Z"
+    b.put(s3client, b.HEARTBEAT, hb)
+    _index(session, s3, device)
+    b.put(s3client, b.HEARTBEAT, (b.FIXTURES / "heartbeat.json").read_bytes())  # back to A
+    gets = _get_counter(monkeypatch, s3client)
+    _index(session, s3, device)
+    session.expire_all()
+    assert session.get(m.Device, device.id).last_heartbeat_at == datetime(2026, 10, 3, 11, 15, 14, tzinfo=timezone.utc)
+    assert gets == []
+
+
+def test_feedback_returning_to_a_cached_revision_is_reapplied(session, s3client, s3, device, monkeypatch):
+    b.seed_bucket(s3client)
+    _index(session, s3, device)
+    b.put(s3client, b.FEEDBACK, b.feedback_body(verdict="false_alarm"))
+    _index(session, s3, device)
+    b.put(s3client, b.FEEDBACK, b.feedback_body())  # back to A
+    gets = _get_counter(monkeypatch, s3client)
+    _index(session, s3, device)
+    session.expire_all()
+    assert session.scalars(select(m.Feedback).where(m.Feedback.s3_key == b.FEEDBACK)).one().verdict == "true_alert"
+    assert _event(session, device).owner_verdicts == ["true_alert"]
+    assert gets == []
+
+
+# ---- 5: an object replaced between LIST and GET is never recorded under the listed ETag
+
+class _RacingS3:
+    """Lists the bucket, then replaces `key` before the indexer's GET (a box re-uploading mid-pass)."""
+
+    def __init__(self, s3, s3client, key):
+        self.s3, self.client, self.key, self.uploads = s3, s3client, key, {}
+
+    def list(self, prefix):
+        objs = list(self.s3.list(prefix))
+        if any(o.key == self.key for o in objs):
+            body = _teacher_meta(summary=f"Race {len(self.uploads)}")
+            self.uploads[_put_etag(self.client, self.key, body)] = body["alert"]["summary"]
+        yield from objs
+
+    def __getattr__(self, name):
+        return getattr(self.s3, name)
+
+
+def test_object_replaced_between_list_and_get_is_not_recorded_under_the_listed_etag(session, s3client, s3, device):
+    b.seed_bucket(s3client)
+    _index(session, s3, device)
+    listed = _put_etag(s3client, b.TRAIN_META, _teacher_meta(summary="Listed body"))
+    racer = _RacingS3(s3, s3client, b.TRAIN_META)
+    _index(session, racer, device)
+    session.expire_all()
+    for rev in session.scalars(select(m.RawRevision).where(m.RawRevision.s3_key == b.TRAIN_META)):
+        assert rev.etag != listed, "the GET returned a newer body; it must not be saved under the listed ETag"
+    assert session.get(m.IndexProblem, b.TRAIN_META) is None  # one race is not a problem
+    assert _event(session, device).summary.startswith("A person appears")  # previous state kept
+    _index(session, racer, device)
+    _index(session, racer, device)
+    session.expire_all()
+    assert "changed during fetch" in session.get(m.IndexProblem, b.TRAIN_META).reason  # third race in a row
+    _index(session, s3, device)  # the uploader settled
+    session.expire_all()
+    assert session.get(m.IndexProblem, b.TRAIN_META) is None
+    last_etag, last_summary = list(racer.uploads.items())[-1]
+    rev = session.scalars(select(m.RawRevision).where(m.RawRevision.s3_key == b.TRAIN_META,
+                                                      m.RawRevision.etag == last_etag)).one()
+    assert rev.body["alert"]["summary"] == last_summary == _event(session, device).summary
+
+
+# ---- 6: expiry advances with time even when nothing in S3 changes
+
+def test_expiry_advances_with_time_without_listing_changes(session, s3client, s3, device):
+    from home_guard_project.cloud.indexer import refresh_expiry
+
+    b.seed_bucket(s3client)
+    _index(session, s3, device, now=BASE + timedelta(days=1))
+    s3client.delete_object(Bucket=b.BUCKET, Key=b.PROD_CLIP)
+    _index(session, s3, device, full_scan=True, now=BASE + timedelta(days=13))
+    session.expire_all()
+    assert _event(session, device).completeness["expired"] is False
+    _index(session, s3, device, now=BASE + timedelta(days=15))  # listing unchanged
+    session.expire_all()
+    assert _event(session, device).completeness["expired"] is True
+    assert _event(session, device, b.COLLECT_STEM).completeness["expired"] is False
+    b.put(s3client, b.PROD_CLIP, b.FAKE_MP4)  # the production video reappears
+    _index(session, s3, device, now=BASE + timedelta(days=16))
+    session.expire_all()
+    assert _event(session, device).completeness["expired"] is False
+    # refresh_expiry alone also reverses a stale flag
+    ev = _event(session, device)
+    ev.completeness = {**ev.completeness, "expired": True}
+    session.commit()
+    refresh_expiry(session, device, BASE + timedelta(days=16))
+    session.commit()
+    session.expire_all()
+    assert _event(session, device).completeness["expired"] is False
+
+
+# ---- 7: one malformed timestamp is one problem, not a blocked site
+
+@pytest.mark.parametrize("stem,start", [("front_side_1791030000_alert", 1e20),
+                                        ("front_side_1791030001_alert", 1e9),  # 2001: before the system existed
+                                        ("front_side_99999999999999_alert", None)])
+def test_out_of_range_timestamp_is_one_problem_and_the_site_continues(session, s3client, s3, device, stem, start):
+    b.seed_bucket(s3client)
+    body = b.fixture_json("prod_alert.meta.json")
+    if start is None:
+        body.pop("clip_start_ts")
+    else:
+        body["clip_start_ts"] = start
+    bad = f"production_test/meta/front_side/2026-10-03/{stem}.meta.json"
+    b.put(s3client, bad, body)
+    _index(session, s3, device)
+    session.expire_all()
+    assert "timestamp" in session.get(m.IndexProblem, bad).reason
+    assert not session.scalars(select(m.Event).where(m.Event.stem == stem)).all()
+    assert _event(session, device).completeness["ai"] == "real"
+    assert session.get(m.Device, device.id).last_heartbeat is not None
+
+
+def test_database_failure_still_rolls_back_only_that_device(session, s3client, s3, device, db_engine):
+    from sqlalchemy import event as sa_event
+
+    from home_guard_project.cloud.indexer import index_all
+
+    b.enroll(session, site="bian", customer_name="Other")
+    session.commit()
+    b.seed_bucket(s3client)
+    bian_clip = "production_bian/clips/bian_ch2/2026-10-02/bian_ch2_1790972298_alert.mp4"
+    b.put(s3client, bian_clip, b.FAKE_MP4)
+
+    def boom(conn, cursor, statement, params, context, executemany):
+        if statement.lstrip().upper().startswith("INSERT INTO EVENTS"):
+            raise RuntimeError("database went away")
+
+    sa_event.listen(db_engine, "before_cursor_execute", boom)
+    try:
+        result = index_all(session, s3)
+    finally:
+        sa_event.remove(db_engine, "before_cursor_execute", boom)
+    assert set(result) == {"bian"}
+    session.expire_all()
+    assert _count(session, m.Event) == 0
+    assert session.scalars(select(m.Artifact).where(m.Artifact.s3_key.startswith("production_test/"))).all() == []
+    assert _artifact(session, bian_clip).available is True
+
+
+# ---- 8: listed keys with traversal or a bad layout never become artifacts
+
+@pytest.mark.parametrize("key", [
+    "production_test/meta/front_side/2026-10-03/../front_side_1791020177_alert.meta.json",
+    "production_test/clips/front_side/2026-10-03" + "9" * 300 + "/front_side_1791020177_alert.mp4",
+    "production_test/meta/front_side/2026-10-03/extra/front_side_1791020177_alert.meta.json",
+    "production_test/meta/front side!/2026-10-03/front side!_1791020177_alert.meta.json",
+])
+def test_invalid_key_layout_is_a_problem_not_an_artifact(session, s3client, s3, device, key):
+    b.seed_bucket(s3client)
+    evil = b.fixture_json("prod_alert.meta.json")
+    evil["alert"]["summary"] = "Injected summary"
+    b.put(s3client, key, evil)
+    _index(session, s3, device)
+    session.expire_all()
+    assert session.get(m.IndexProblem, key).reason == "invalid key layout"
+    assert session.scalars(select(m.Artifact).where(m.Artifact.s3_key == key)).all() == []
+    assert _event(session, device).summary.startswith("A person appears")
+
+
+# ---- 9: problems describe the current revision and clear only when it applies
+
+def test_fetch_failure_keeps_previous_state_and_the_problem(session, s3client, s3, device, monkeypatch):
+    b.seed_bucket(s3client)
+    _index(session, s3, device)
+    _put_etag(s3client, b.TRAIN_META, _teacher_meta(summary="Teacher: new revision"))
+    real = s3client.get_object
+
+    def failing(**kw):
+        if kw["Key"] == b.TRAIN_META:
+            raise RuntimeError("throttled")
+        return real(**kw)
+
+    monkeypatch.setattr(s3client, "get_object", failing)
+    _index(session, s3, device)
+    session.expire_all()
+    problem = session.get(m.IndexProblem, b.TRAIN_META)
+    assert problem is not None and "fetch failed" in problem.reason
+    assert _event(session, device).summary.startswith("A person appears")
+    monkeypatch.setattr(s3client, "get_object", real)
+    _index(session, s3, device)
+    session.expire_all()
+    assert session.get(m.IndexProblem, b.TRAIN_META) is None
+    assert _event(session, device).summary == "Teacher: new revision"
+
+
+@pytest.mark.parametrize("key,good", [(b.FEEDBACK, lambda: b.feedback_body()),
+                                      (b.HEARTBEAT, lambda: b.fixture_json("heartbeat.json"))])
+def test_fixed_feedback_and_heartbeat_clear_their_problem(session, s3client, s3, device, key, good):
+    b.seed_bucket(s3client)
+    b.put(s3client, key, [1, 2, 3])  # valid JSON, wrong shape
+    _index(session, s3, device)
+    assert session.get(m.IndexProblem, key) is not None
+    b.put(s3client, key, good())
+    _index(session, s3, device)
+    session.expire_all()
+    assert session.get(m.IndexProblem, key) is None
+
+
+# ---- 10: bulk-loaded passes: bounded statements, measured on a 5,000-key site
+
+class _FakeS3:
+    """In-memory listing/GET with the S3 semantics the indexer relies on (ETag = md5 of the body)."""
+
+    def __init__(self, objects: dict):
+        import hashlib
+
+        self.objects = {k: (v, hashlib.md5(v).hexdigest()) for k, v in objects.items()}
+        self.gets = 0
+
+    def list(self, prefix):
+        from home_guard_project.cloud.s3 import ObjInfo
+
+        for key in sorted(self.objects):
+            if key.startswith(prefix):
+                body, etag = self.objects[key]
+                yield ObjInfo(key, etag, len(body), BASE)
+
+    def get_text(self, key, if_match=None):
+        self.gets += 1
+        return self.objects[key][0].decode("utf-8")
+
+
+def _synthetic_site(n_events: int) -> dict:
+    """n events x 5 keys: production + training meta, production + training clip, one teacher crop."""
+    prod = (b.FIXTURES / "prod_alert.meta.json").read_text(encoding="utf-8")
+    train = (b.FIXTURES / "train_alert.meta.json").read_text(encoding="utf-8")
+    objects = {}
+    for i in range(n_events):
+        camera, ts = f"cam{i % 10}", 1791020177 + i * 60
+        stem, day = f"{camera}_{ts}_alert", "2026-10-03"
+        for root, text in (("production", prod), ("dataset", train)):
+            body = text.replace("front_side_1791020177_alert", stem).replace("front_side", camera)
+            body = body.replace("1791020174.1329982", f"{ts - 3}.5").replace("1791020183.9285913", f"{ts + 6}.5")
+            objects[f"{root}_test/meta/{camera}/{day}/{stem}.meta.json"] = body.encode("utf-8")
+            objects[f"{root}_test/clips/{camera}/{day}/{stem}.mp4"] = b.FAKE_MP4
+        objects[f"dataset_test/vlm_crops/{camera}/{day}/{stem}_f0.jpg"] = b.FAKE_JPG
+    return objects
+
+
+def test_index_pass_statement_count_is_bounded(session, device, db_engine):
+    import time
+
+    from sqlalchemy import event as sa_event
+
+    n = 1000
+    fake = _FakeS3(_synthetic_site(n))
+    statements = []
+
+    def count(conn, cursor, statement, params, context, executemany):
+        statements.append(statement)
+
+    sa_event.listen(db_engine, "before_cursor_execute", count)
+    try:
+        t0 = time.perf_counter()
+        stats = _index(session, fake, device)
+        first_secs = time.perf_counter() - t0
+        first = len(statements)
+        statements.clear()
+        t0 = time.perf_counter()
+        again = _index(session, fake, device)
+        second_secs = time.perf_counter() - t0
+        second = len(statements)
+    finally:
+        sa_event.remove(db_engine, "before_cursor_execute", count)
+    print(f"\n5,000-key site: first pass {first} statements in {first_secs:.2f}s; "
+          f"unchanged re-pass {second} statements in {second_secs:.2f}s")
+    assert stats.new_events == n and again.new_events == again.updated_events == 0
+    assert first <= 60 * n // 100, first
+    assert second <= 20, second
+    assert fake.gets == 2 * n  # each meta fetched exactly once
+    assert session.scalar(select(func.count()).select_from(m.AiRun)) == n
+
+
+# ---- 11: a size-only change is still a change
+
+class _ResizingS3:
+    def __init__(self, s3, key, size):
+        self.s3, self.key, self.size = s3, key, size
+
+    def list(self, prefix):
+        from dataclasses import replace
+
+        for obj in self.s3.list(prefix):
+            yield replace(obj, size=self.size) if obj.key == self.key else obj
+
+    def __getattr__(self, name):
+        return getattr(self.s3, name)
+
+
+def test_size_only_change_updates_the_artifact(session, s3client, s3, device):
+    b.seed_bucket(s3client)
+    _index(session, s3, device)
+    stats = _index(session, _ResizingS3(s3, b.PROD_CLIP, 200), device)
+    session.expire_all()
+    assert _artifact(session, b.PROD_CLIP).bytes == 200 and stats.artifacts == 1
+
+
+# ---- 12: a feedback artifact follows its feedback row's event, including to none
+
+def test_feedback_artifact_follows_feedback_event(session, s3client, s3, device):
+    b.seed_bucket(s3client)
+    _index(session, s3, device)
+    b.put(s3client, b.FEEDBACK, b.feedback_body(alert_id=b.FP_STEM, verdict="false_alarm"))  # reassigned
+    _index(session, s3, device)
+    session.expire_all()
+    fp = _event(session, device, b.FP_STEM)
+    assert _artifact(session, b.FEEDBACK).event_id == fp.id
+    assert fp.owner_verdicts == ["false_alarm"]
+    assert _event(session, device).owner_verdicts == []  # the old event no longer claims it
+    general = b.feedback_body()
+    general["alert"] = None
+    b.put(s3client, b.FEEDBACK, general)  # now general feedback
+    _index(session, s3, device)
+    session.expire_all()
+    fb = session.scalars(select(m.Feedback).where(m.Feedback.s3_key == b.FEEDBACK)).one()
+    assert fb.event_id is None and _artifact(session, b.FEEDBACK).event_id is None
+
+
+# ================================================================ fix round 2 (Codex re-review of Task 8)
+
+# ---- 8: a key with an impossible calendar day never reaches the event it collides with
+
+@pytest.mark.parametrize("day", ["2026-99-99", "2026-02-30"])
+def test_invalid_calendar_day_colliding_with_a_real_event_is_a_problem(session, s3client, s3, device, day):
+    b.seed_bucket(s3client)
+    _index(session, s3, device)
+    key = f"production_test/meta/front_side/{day}/{b.STEM}.meta.json"  # same camera + stem as the real event
+    evil = b.fixture_json("prod_alert.meta.json")
+    evil["alert"]["summary"] = "Injected summary"
+    b.put(s3client, key, evil)
+    _index(session, s3, device)
+    session.expire_all()
+    assert session.get(m.IndexProblem, key).reason == "invalid key layout"
+    assert session.scalars(select(m.Artifact).where(m.Artifact.s3_key == key)).all() == []
+    ev = _event(session, device)
+    assert ev.day == "2026-10-03" and ev.summary.startswith("A person appears")
+
+
+# ---- 9: A -> invalid B -> A, where A is still the applied revision, replays cached A and clears B's problem
+
+@pytest.mark.parametrize("key", [b.TRAIN_META, b.FEEDBACK, b.HEARTBEAT])
+def test_return_to_the_applied_revision_after_an_invalid_one_clears_the_problem(session, s3client, s3, device,
+                                                                                 monkeypatch, key):
+    objects = b.seed_bucket(s3client)
+    _index(session, s3, device)
+    applied = _artifact(session, key).applied_etag
+    b.put(s3client, key, "{not json")
+    _index(session, s3, device)
+    session.expire_all()
+    assert session.get(m.IndexProblem, key).reason == "invalid json"
+    assert _artifact(session, key).applied_etag == applied  # B never applied
+    b.put(s3client, key, objects[key])  # back to A
+    gets = _get_counter(monkeypatch, s3client)
+    _index(session, s3, device)
+    session.expire_all()
+    assert session.get(m.IndexProblem, key) is None
+    art = _artifact(session, key)
+    assert art.etag == art.applied_etag == applied
+    assert gets == []
+    assert _event(session, device).summary.startswith("A person appears")
+
+
+# ---- N1: persisted artifacts whose keys parse_key now rejects are quarantined, never a crashed rebuild
+
+LEGACY = {"production_test/meta/front_side/2026-10-03/../front_side_1791020177_alert.meta.json": "meta",
+          "production_test/clips/front_side/2026-02-30/front_side_1791020177_alert.mp4": "original_video"}
+
+
+def test_legacy_artifacts_with_now_invalid_keys_are_quarantined(session, s3client, s3, device):
+    b.seed_bucket(s3client)
+    _index(session, s3, device)
+    ev = _event(session, device)
+    for key, role in LEGACY.items():  # rows a pre-validation indexer created
+        session.add(m.Artifact(role=role, s3_key=key, etag="legacy", bytes=10, available=True, provenance="box",
+                               detail={"copy": "production"}, camera="front_side", stem=b.STEM, event_id=ev.id,
+                               applied_etag="legacy" if role == "meta" else None, etag_mismatches=0))
+    session.commit()
+    b.put(s3client, next(iter(LEGACY)), b.fixture_json("prod_alert.meta.json"))  # one is still listed
+    _index(session, s3, device, full_scan=True)
+    session.expire_all()
+    for key in LEGACY:
+        art = _artifact(session, key)
+        assert art.available is False and art.event_id is None
+        assert session.get(m.IndexProblem, key).reason == "invalid key layout (legacy)"
+    ev = _event(session, device)
+    assert ev.summary.startswith("A person appears") and ev.completeness["copies"] == ["production", "training"]
+    again = _index(session, s3, device, full_scan=True)
+    assert again.problems == 0
+
+
+# ---- N2: after migration 0003 (applied_etag NULL), a vanished production meta is recovered from its revision
+
+def test_upgrade_replays_the_stored_production_meta_after_it_disappeared(session, s3client, s3, device):
+    from sqlalchemy import update
+
+    b.seed_bucket(s3client, exclude={b.PROD_META})
+    prod = b.fixture_json("prod_alert.meta.json")
+    prod["alert"]["muted"] = True
+    prod_etag = _put_etag(s3client, b.PROD_META, prod)
+    _index(session, s3, device, now=BASE + timedelta(days=1))
+    ev = _event(session, device)
+    before = (ev.dispatch, ev.muted, ev.expires_at)
+    assert ev.dispatch["channel"] == "telegram" and ev.muted is True and ev.expires_at is not None
+    session.execute(update(m.Artifact).values(applied_etag=None))  # the state migration 0003 leaves behind
+    session.commit()
+    s3client.delete_object(Bucket=b.BUCKET, Key=b.PROD_META)
+    _index(session, s3, device, full_scan=True, now=BASE + timedelta(days=2))
+    session.expire_all()
+    ev = _event(session, device)
+    assert (ev.dispatch, ev.muted, ev.expires_at) == before
+    assert ev.completeness["copies"] == ["production", "training"]
+    art = _artifact(session, b.PROD_META)
+    assert art.available is False and art.applied_etag == prod_etag

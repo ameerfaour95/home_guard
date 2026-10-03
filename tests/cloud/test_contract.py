@@ -29,3 +29,19 @@ def test_committed_openapi_is_current():
 
     committed = json.loads(pathlib.Path("docs/admin/openapi.json").read_text(encoding="utf-8"))
     assert committed == build()
+
+
+def test_contract_amendment_2_additions():
+    app = create_app(Settings.for_tests(db_url="sqlite://"), s3=None, init_db=False)
+    doc = app.openapi()
+    schemas = doc["components"]["schemas"]
+    assert {"total", "total_capped"} <= set(schemas["EventPage"]["properties"])
+    assert "detail" in schemas["AuditEntry"]["properties"]
+    assert set(schemas["ExportPreview"]["properties"]) == {"included_ids", "excluded", "split_counts", "groups",
+                                                           "warnings"}
+    assert schemas["ExportExclusion"]["properties"]["reason"]["enum"] == [
+        "no_training_consent", "video_unavailable", "no_real_ai", "expired"]
+    assert "get" in doc["paths"]["/v1/studio/collections/{collection_id}/items"]
+    assert "/v1/studio/exports/preview" in doc["paths"]
+    names = [p["name"] for p in doc["paths"]["/v1/events"]["get"]["parameters"]]
+    assert "with_total" in names and "collection_id" in names
