@@ -126,20 +126,46 @@ def teacher_record(root_dir: str, camera: str, day: str, stem: str, teacher: Dic
     }
 
 
+def _write_crop(root_dir: str, camera: str, day: str, stem: str,
+                crop: Any, settings: Any, fps: float) -> Dict[str, Any]:
+    """Save the same pre-encode crop frames and mp4v format as data collection."""
+    import cv2
+    from ..data_collection import vlm_crop
+
+    rel = os.path.join("vlm_crops", camera, day, f"{stem}.mp4")
+    path = os.path.join(root_dir, rel)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    writer = cv2.VideoWriter(path, cv2.VideoWriter_fourcc(*"mp4v"), float(fps), (crop.width, crop.height))
+    try:
+        if not writer.isOpened():
+            raise RuntimeError("Failed to open VLM crop VideoWriter")
+        for frame in crop.frames:
+            writer.write(frame)
+    finally:
+        writer.release()
+    return vlm_crop.crop_meta(crop, settings, rel, fps)
+
+
 def write_alert_clip(
     root_dir: str,
     camera: str,
     stem: str,
-    frames: List[Tuple[float, bytes]],
+    frames: List[Tuple[float, Any]],
     alert: Dict[str, Any],
     h264: bool = True,
     kind: str = "alert",
     teacher: Optional[Dict[str, Any]] = None,
     extra: Optional[Dict[str, Any]] = None,
+    fps: Optional[float] = None,
+    crop: Any = None,
+    crop_settings: Any = None,
+    crop_fps: Optional[float] = None,
 ) -> Optional[str]:
     """Write the clip and then its meta under *root_dir*. Returns the meta path, or None with no frames.
 
     *extra* fields are merged into the meta (``trigger_ts``, ``mode``).
+    Frames may be JPEG bytes (older callers) or the collector's decoded sub
+    frames. Inference supplies their configured *fps* and the shared *crop*.
 
     The meta is written last and through a temp file: a meta on disk means
     the clip is complete. With a *teacher* record (what the VLM was asked and
@@ -162,11 +188,12 @@ def write_alert_clip(
     os.makedirs(os.path.dirname(meta_path), exist_ok=True)
 
     duration = max(end_ts - start_ts, 1e-3)
-    fps = max(1.0, round((len(frames) - 1) / duration, 1)) if len(frames) > 1 else 1.0
+    if fps is None:
+        fps = max(1.0, round((len(frames) - 1) / duration, 1)) if len(frames) > 1 else 1.0
     writer = None
     written = 0
     for _, data in frames:
-        image = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
+        image = data if isinstance(data, np.ndarray) else cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
         if image is None:
             continue
         if writer is None:
@@ -204,6 +231,12 @@ def write_alert_clip(
         "alert": alert,
     }
     meta.update(extra or {})
+    if crop is not None:
+        try:
+            meta["vlm_crop"] = _write_crop(root_dir, camera, day, stem, crop, crop_settings, crop_fps)
+        except Exception as exc:  # the owner's whole-frame clip must survive a crop disk/codec failure
+            log.warning("[%s] could not save VLM crop: %s", camera, exc)
+            meta["vlm_crop_save_error"] = str(exc)
     if teacher:
         meta.update(teacher_record(root_dir, camera, day, stem, teacher))
     tmp = f"{meta_path}.tmp"

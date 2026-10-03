@@ -5,7 +5,7 @@ Launched by run_collector.sh when box.yaml has ``mode: inference``:
     python -u -m home_guard_project.box.inference
 
 Pipeline, per camera: YOLO gate (is anyone/anything there?) -> only inside the
-owner's alert time window, buffer a few frames -> a VLM backend (GPT-4V now,
+owner's alert time window, wait for the complete crop clip -> a VLM backend (GPT-4o now,
 pluggable) returns {summary, alert_command, alert_reason} -> the alert is sent
 to the owner over the configured channel (Telegram by default). The VLM call
 runs off the capture loop, and a per-camera cooldown bounds cost and spam.
@@ -28,7 +28,6 @@ import os
 import sys
 import threading
 import time
-from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
@@ -279,8 +278,6 @@ class AlertSettings:
     alert_start_hour: int = 0
     alert_end_hour: int = 0          # 0,0 -> always in window (handy for testing)
     cooldown_sec: float = 120.0      # min seconds between VLM calls per camera
-    clip_frames: int = 5             # frames sent to the VLM per escalation
-    frame_interval_sec: float = 1.0  # spacing of buffered frames
     model: str = "yolo11s.pt"        # the model shipped in the bundle (avoids a download on the box)
     device: str = "auto"             # auto: the Intel graphics chip when there is one, else the CPU; cpu: always the CPU
     conf: float = 0.4
@@ -312,8 +309,6 @@ class AlertSettings:
             alert_start_hour=int(g("alert_start_hour", 0)),
             alert_end_hour=int(g("alert_end_hour", 0)),
             cooldown_sec=float(g("alert_cooldown_sec", 120.0)),
-            clip_frames=int(g("alert_clip_frames", 5)),
-            frame_interval_sec=float(g("alert_frame_interval_sec", 1.0)),
             model=str(g("inference_yolo_model", "yolo11s.pt")),
             device=str(g("inference_device", "auto")).strip().lower(),
             conf=float(g("inference_conf", 0.4)),
@@ -396,9 +391,12 @@ class GptBackend:
                               owner_language=owner_language)
         self.last_prompt = prompt
         content: List[Dict[str, Any]] = [{"type": "text", "text": prompt}]
+        self.last_frame_jpegs = []
         for fr in frames_bgr:
-            b64 = frame_to_jpeg_b64(fr)
-            if b64:
+            data = frame_to_jpeg_bytes(fr)
+            if data:
+                self.last_frame_jpegs.append(data)
+                b64 = base64.b64encode(data).decode("utf-8")
                 content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
         try:
             resp = self._complete(content, self._response_format)
@@ -737,17 +735,21 @@ class LiveSettings:
 
 
 class _Stream:
-    """Threaded RTSP reader keeping only the latest frame (drops stale frames).
+    """Preview-compatible adapter over the collector's sub reader.
 
-    With a *ring* (alert_clips.ClipRing) it also keeps the last seconds for the
-    alert clip. That happens here, at the camera's own pace: the detection loop
-    visits a camera only every second or two, too rarely for a video.
+    The legacy constructor/ingest path remains for existing stream consumers;
+    run() always supplies sub_cap and opens no capture through this adapter.
     """
 
-    def __init__(self, name: str, url: str, ring: Any = None, mask: Any = None) -> None:
+    def __init__(self, name: str, url: str, ring: Any = None, mask: Any = None, sub_cap: Any = None) -> None:
         import cv2  # noqa: PLC0415
 
         self.name = name
+        self.sub_cap = sub_cap
+        if sub_cap is not None:
+            # Runtime uses the collector reader; retain read() for the preview adapter.
+            self._frame = None
+            return
         self.url = url
         self._ring = ring
         self._mask = mask                    # zones.ZoneMask, or None to watch the whole picture
@@ -790,7 +792,23 @@ class _Stream:
 
             self._ring.add(now, encode_frame(frame))
 
+    @property
+    def last_ts(self):
+        if getattr(self, "sub_cap", None) is not None:
+            # The reader also updates last_frame_ts on reconnect: an empty camera
+            # must not count as having delivered its first picture.
+            with self.sub_cap.buf_lock:
+                return self.sub_cap.buf[-1][0] if self.sub_cap.buf else 0.0
+        return self._last_ts
+
+    @last_ts.setter
+    def last_ts(self, value):
+        self._last_ts = value
+
     def read(self):
+        if getattr(self, "sub_cap", None) is not None:
+            ok, self._frame = self.sub_cap.get_latest()
+            return self._frame.copy() if ok else None
         with self._lock:
             return None if self._frame is None else self._frame.copy()
 
@@ -808,6 +826,113 @@ class AlertJob:
     paused: bool = False             # the owner had paused alerts: the AI was not asked, saved for training
     teacher: Dict[str, Any] = field(default_factory=dict)   # what the VLM was asked and answered (alert_clips.teacher_record)
     ready: threading.Event = field(default_factory=threading.Event)
+    snapshot: Any = None             # whole sub frame for Telegram, never the VLM crop
+    alert_on: Optional[Sequence[str]] = None
+    clip_fps: Optional[float] = None
+    crop: Any = None
+    crop_settings: Any = None
+    crop_fps: Optional[float] = None
+    input_meta: Dict[str, Any] = field(default_factory=dict)
+
+
+def _camera_streams(cfg: Any) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Exactly one collector sub reader and one main reader per configured camera."""
+    from ..data_collection.streams import SubStreamThread, MainStreamThread
+    from ..data_collection.zones import mask_for
+
+    streams, main_caps = {}, {}
+    for name, url in cfg.CAMERAS.items():
+        sub = SubStreamThread(cfg, url, mask=mask_for(cfg.ROI_ZONES, name), name=name)
+        streams[name] = _Stream(name, url, sub_cap=sub)
+        main_url = cfg.CAMERAS_MAIN.get(name)
+        main_caps[name] = (MainStreamThread(cfg, main_url, mask=mask_for(cfg.ROI_ZONES, name), name=name)
+                           if cfg.MAIN_STREAM_ENABLED and main_url else None)
+    return streams, main_caps
+
+
+def _prepare_alert(job: AlertJob, cfg: Any, detector: Any, sub_cap: Any, main_cap: Any,
+                   predict_args: Dict[str, Any]) -> Tuple[List[Any], List[Any]]:
+    """Freeze the completed window, then use the collector's crop and sampling verbatim.
+
+    Called on the detection loop so the shared YOLO model is never used concurrently.
+    Reader threads keep buffering while this per-alert work runs.
+    """
+    from ..data_collection import vlm_crop
+
+    reason = ""
+    try:
+        sub_frames, start, end, sub_fps = sub_cap.get_clip_last_seconds(cfg.CLIP_SECONDS)
+    except Exception:
+        log.exception("[%s] sub-stream window unavailable; retaining the trigger snapshot", job.camera)
+        sub_frames, start, end, sub_fps = [], job.ts, job.ts, cfg.STORE_FPS
+        reason = "sub_stream_read_error"
+    try:
+        main = main_cap.get_clip_frames(cfg.CLIP_SECONDS) if main_cap is not None else None
+    except Exception:
+        log.exception("[%s] main-stream window unavailable; using whole sub frames", job.camera)
+        main, reason = None, "main_stream_read_error"
+    job.clip_fps = sub_fps
+    if len(sub_frames) < 2:
+        reason = reason or "too_few_sub_frames"
+        # A reconnect may leave an empty ring. Preserve the triggering picture
+        # so a capture gap cannot swallow the alert.
+        if not sub_frames and job.snapshot is not None:
+            sub_frames, start, end = [job.snapshot], job.ts, job.ts
+    if sub_frames:
+        job.snapshot = sub_frames[-1]
+    clip = [(start + i * (end - start) / max(1, len(sub_frames) - 1), frame)
+            for i, frame in enumerate(sub_frames)]
+    job.crop_settings = vlm_crop.settings_from_config(cfg)
+    if not reason:
+        if main is None:
+            reason = "no_main_stream"
+        elif len(main[0]) < 2:
+            reason = "too_few_main_frames"
+        else:
+            try:
+                # The crop supplies conf/imgsz from cfg; only device comes from inference.
+                def crop_detector(frame, **kwargs):
+                    return detector(frame, **kwargs, **predict_args)
+
+                job.crop = vlm_crop.crop_clip(crop_detector, job.crop_settings, sub_frames, start, end,
+                                               main[0], main[1], name=job.camera)
+                job.crop_fps = main[3]
+                if job.crop is None:
+                    reason = "no_trigger_class_detection_or_usable_crop"
+            except Exception:
+                log.exception("[%s] crop failed; using the whole sub-stream window", job.camera)
+                reason = "crop_error"
+    if job.crop is not None:
+        job.input_meta = {"vlm_input": "crop"}
+        frames = vlm_crop.sample_for_vlm(job.crop.frames, fps=job.crop_fps, sample_fps=cfg.VLM_SAMPLE_FPS)
+    else:
+        job.input_meta = {"vlm_input": "whole_frame_fallback", "vlm_fallback_reason": reason}
+        log.warning("[%s] VLM whole_frame_fallback: %s", job.camera, reason)
+        frames = vlm_crop.sample_for_vlm(sub_frames, fps=sub_fps, sample_fps=cfg.VLM_SAMPLE_FPS)
+    return frames, clip
+
+
+def _start_due_alerts(pending: List[AlertJob], now: float, cfg: Any, detector: Any,
+                      streams: Dict[str, Any], main_caps: Dict[str, Any], predict_args: Dict[str, Any],
+                      backend: Any, box_settings: Dict[str, Any], env: Dict[str, str], settings: AlertSettings,
+                      assistant: Any, status: Any, production_dir: str, training_dir: str) -> Any:
+    """Start the reserved VLM call once its post-roll is complete; consume each job once."""
+    from .alert_clips import POST_SECONDS
+
+    for job in list(pending):
+        if now < job.ts + POST_SECONDS:
+            continue
+        frames, clip = _prepare_alert(job, cfg, detector, streams[job.camera].sub_cap,
+                                      main_caps[job.camera], predict_args)
+        pending.remove(job)
+        thread = threading.Thread(target=_worker,
+                                  args=(backend, box_settings, env, settings, job.camera, frames,
+                                        assistant, job, status, job.alert_on), daemon=True)
+        thread.start()
+        threading.Thread(target=_save_clip, args=(job, clip, production_dir, training_dir, assistant),
+                         daemon=True).start()
+        return thread
+    return None
 
 
 def delivery(res: Dict[str, Any]) -> Tuple[bool, str]:
@@ -864,7 +989,9 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
     labels = job.labels if job is not None else []
     alert_on = tuple(alert_on or settings.alert_on)   # this camera's own choice, else the house default
     try:
-        now = datetime.now()
+        # A job admitted before the alert window closes keeps its reserved call
+        # after post-roll; the six-second wait must not silently discard it.
+        now = datetime.fromtimestamp(job.ts) if job is not None and job.input_meta else datetime.now()
         in_win = in_alert_window(now.hour, settings.alert_start_hour, settings.alert_end_hour)
         if not in_win:
             return
@@ -888,7 +1015,7 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                 "model": getattr(backend, "model_name", settings.vlm_model),
                 "prompt_version": PROMPT_VERSION,
                 "prompt": getattr(backend, "last_prompt", ""),
-                "frames": _jpegs(frames),
+                "frames": list(backend.last_frame_jpegs) if isinstance(backend, GptBackend) else _jpegs(frames),
                 "raw": raw,
                 "parsed": parsed,
             }
@@ -929,7 +1056,8 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
         # Attach the most recent frame of the clip as the alert snapshot.
         image = b""
         try:
-            image = frame_to_jpeg_bytes(frames[-1]) if frames else b""
+            snapshot = job.snapshot if job is not None and job.snapshot is not None else (frames[-1] if frames else None)
+            image = frame_to_jpeg_bytes(snapshot) if snapshot is not None else b""
         except Exception as exc:  # noqa: BLE001
             log.warning("[%s] could not encode snapshot: %s", camera_name, exc)
         muted = bool(assistant is not None and assistant.is_muted(camera_name))
@@ -983,18 +1111,20 @@ def _save_clip(job: AlertJob, frames: List[Any], production_dir: str, training_d
 
         job.ready.wait(timeout=90)
         alert = job.alert or {"summary": "", "alert_command": "[none]", "alert_reason": "", "labels": job.labels}
+        clip_options = dict(fps=job.clip_fps, crop=job.crop, crop_settings=job.crop_settings, crop_fps=job.crop_fps)
         if job.false_positive:
             meta = write_alert_clip(training_dir, job.camera, false_positive_stem(job.camera, job.ts), frames,
-                                    alert, kind="false_positive", teacher=job.teacher)
+                                    alert, kind="false_positive", teacher=job.teacher, extra=job.input_meta, **clip_options)
         elif job.paused:
             meta = write_alert_clip(training_dir, job.camera, f"{job.camera}_{int(job.ts)}_paused", frames,
-                                    alert, kind="paused")
+                                    alert, kind="paused", extra=job.input_meta, **clip_options)
         else:
             meta = write_alert_clip(production_dir, job.camera, job.stem, frames, alert,
-                                    extra={"trigger_ts": job.ts, "mode": "guard"})
+                                    extra={"trigger_ts": job.ts, "mode": "guard", **job.input_meta}, **clip_options)
             # The owner's copy above expires in two weeks; the training set keeps every
             # alert with the teacher's answer, so a student model can be trained on it.
-            write_alert_clip(training_dir, job.camera, job.stem, frames, alert, kind="alert", teacher=job.teacher)
+            write_alert_clip(training_dir, job.camera, job.stem, frames, alert, kind="alert", teacher=job.teacher,
+                             extra=job.input_meta, **clip_options)
         if meta:
             log.info("[%s] clip saved: %s (%d frames)", job.camera, os.path.basename(meta), len(frames))
         if (meta and assistant is not None and not job.false_positive and not job.paused
@@ -1113,20 +1243,17 @@ def run() -> int:
         return serve_without_cameras(box_settings, env, camera_names())
     # Every alert is saved as a clip (the seconds around it) in the production folder,
     # and the owner can answer it in Telegram. Neither may stop the alerts themselves.
-    from .alert_clips import POST_SECONDS, PRE_SECONDS, ClipRing, alert_stem  # noqa: PLC0415
+    from .alert_clips import POST_SECONDS, PRE_SECONDS, alert_stem  # noqa: PLC0415
     from .ai_status import AiStatus, objects_from_result  # noqa: PLC0415
     from .boxconfig import LIVE_DIR, LOG_DIR, PRODUCTION_LIVE_DIR  # noqa: PLC0415
 
-    rings: Dict[str, ClipRing] = {name: ClipRing() for name in cameras}
-    from ..data_collection.zones import mask_for  # noqa: PLC0415
+    assert PRE_SECONDS + POST_SECONDS == cam_cfg.CLIP_SECONDS == 10, "alert and collector windows must match"
 
     zones = dict(getattr(cam_cfg, "ROI_ZONES", {}) or {})
     for name in cameras:
         if name in zones:
             log.info("[%s] watch zone active (%d corners); everything outside is blacked out", name, len(zones[name]))
-    streams = {name: _Stream(name, url, ring=rings[name], mask=mask_for(zones, name)) for name, url in cameras.items()}
-    buffers: Dict[str, deque] = {name: deque(maxlen=settings.clip_frames) for name in cameras}
-    last_buf_ts: Dict[str, float] = {name: 0.0 for name in cameras}
+    streams, main_caps = _camera_streams(cam_cfg)
     last_alert_ts: Dict[str, float] = {name: 0.0 for name in cameras}
     last_look_ts: Dict[str, float] = {name: 0.0 for name in cameras}
     vehicles: Dict[str, VehicleMemory] = {name: VehicleMemory() for name in cameras}
@@ -1181,22 +1308,17 @@ def run() -> int:
                                                            len(cameras), owner_language(), logging_on))
             except Exception as exc:  # noqa: BLE001 - the status line must never stop the alerts
                 log.warning("Mode status not updated: %s", exc)
-        for job in [j for j in pending if now_ts >= j.ts + POST_SECONDS]:
-            pending.remove(job)
-            clip = rings[job.camera].between(job.ts - PRE_SECONDS, job.ts + POST_SECONDS)
-            threading.Thread(target=_save_clip, args=(job, clip, PRODUCTION_LIVE_DIR, LIVE_DIR, assistant),
-                             daemon=True).start()
+        due_worker = _start_due_alerts(pending, now_ts, cam_cfg, model, streams, main_caps, predict_args,
+                                       backend, box_settings, env, settings, assistant, status,
+                                       PRODUCTION_LIVE_DIR, LIVE_DIR)
+        if due_worker is not None:
+            worker["t"] = due_worker
         for name in cameras:
             frame = streams[name].read()
             if frame is None:
                 continue
             if time.time() - streams[name].last_ts > 5:   # a frozen camera: its last picture is not seen again
                 continue
-            # Maintain a rolling buffer, one frame every frame_interval_sec.
-            if now_ts - last_buf_ts[name] >= settings.frame_interval_sec:
-                buffers[name].append(frame)
-                last_buf_ts[name] = now_ts
-
             now = datetime.now()
             if not in_alert_window(now.hour, settings.alert_start_hour, settings.alert_end_hour):
                 continue
@@ -1204,7 +1326,7 @@ def run() -> int:
             # running. The detector still looks about once a second then, only so the
             # window can show what it sees.
             waiting = (now_ts - last_alert_ts[name] < settings.cooldown_sec
-                       or (worker["t"] is not None and worker["t"].is_alive()))
+                       or bool(pending) or (worker["t"] is not None and worker["t"].is_alive()))
             if waiting and now_ts - last_look_ts[name] < STATUS_LOOK_SEC:
                 continue
             last_look_ts[name] = now_ts
@@ -1238,20 +1360,13 @@ def run() -> int:
                     parked[name] = True
                 continue
             parked[name] = False
-            if len(buffers[name]) == 0:
-                buffers[name].append(frame)
-            frames = list(buffers[name])
-            last_alert_ts[name] = now_ts
-            log.info("[%s] escalating (labels=%s), calling VLM", name, labels)
-            status.thinking(name, labels, now=now_ts)
-            job = AlertJob(camera=name, stem=alert_stem(name, now_ts), ts=now_ts, labels=labels)
-            pending.append(job)
-            t = threading.Thread(target=_worker,
-                                 args=(backend, box_settings, env, settings, name, frames, assistant, job, status,
-                                       alert_on),
-                                 daemon=True)
-            t.start()
-            worker["t"] = t
+            trigger_ts = time.time()
+            last_alert_ts[name] = trigger_ts
+            log.info("[%s] escalating (labels=%s), waiting for the complete crop window", name, labels)
+            status.thinking(name, labels, now=trigger_ts)
+            job = AlertJob(camera=name, stem=alert_stem(name, trigger_ts), ts=trigger_ts, labels=labels,
+                           snapshot=frame, alert_on=tuple(alert_on))
+            pending.append(job)   # reserves the single VLM slot throughout post-roll
         time.sleep(0.05)
 
 
