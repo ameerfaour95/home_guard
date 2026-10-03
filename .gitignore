@@ -74,3 +74,6 @@ production_archive/
 
 # OpenVINO copies of the YOLO models, made on the box at start
 *_openvino_model/
+
+# Customer registration (box): name, phone, consents
+home_guard_project/box/registration.json

@@ -5,6 +5,7 @@ Usage:
     python -m home_guard_project.box upload           # move finished clips to the outbox, sync to S3, heartbeat
     python -m home_guard_project.box heartbeat        # write the status JSON to S3
     python -m home_guard_project.box status           # print the status JSON locally (no network)
+    python -m home_guard_project.box register --owner NAME --consent-live no ...   # record whose box this is; see registration.py
     python -m home_guard_project.box mode             # print the box's mode (read by run_collector.sh)
     python -m home_guard_project.box set-site house2  # name the house; clips then go to s3://<bucket>/dataset_house2/
     python -m home_guard_project.box set-option show_cameras true   # camera windows on the box's own screen
@@ -48,6 +49,16 @@ from .boxconfig import (
     set_site,
 )
 from .heartbeat import build_heartbeat, put_heartbeat
+from .registration import (
+    REGISTRATION_PATH,
+    RegistrationError,
+    load_registration,
+    put_registration,
+    register_from_json,
+    registration_summary,
+    update_site,
+    write_registration,
+)
 from .outbox import ORPHAN_AGE_SEC, move_feedback, move_finished_clips, move_orphans
 
 log = logging.getLogger("box")
@@ -168,10 +179,66 @@ def _clip_dirs(mode: str) -> Tuple[str, str]:
     return LIVE_DIR, OUTBOX_DIR
 
 
+def registration_status(reg: Optional[dict]) -> dict:
+    """Whether the box is registered and what the owner agreed to (never the name or phone)."""
+    if reg is None:
+        return {"registered": False}
+    return {"registered": True, "consent": {k: bool((reg.get("consent") or {}).get(k)) for k in ("live", "recordings", "training")}}
+
+
+def parse_register_args(argv: Sequence[str]) -> dict:
+    """The ``register`` command line -> fields for ``write_registration`` (``--from-json`` is read separately)."""
+    p = argparse.ArgumentParser(prog="box register", description="Record the owner and their consents.")
+    yes_no = lambda v: {"yes": True, "no": False}[v]  # noqa: E731
+    p.add_argument("--owner", dest="owner_name")
+    p.add_argument("--phone", dest="owner_phone")
+    for k in ("live", "recordings", "training"):
+        p.add_argument(f"--consent-{k}", dest=f"consent_{k}", choices=["yes", "no"], type=str)
+    p.add_argument("--installer")
+    p.add_argument("--tailscale-host", dest="tailscale_host")
+    p.add_argument("--from-json", dest="from_json", help="read the answers from this file, then delete it")
+    args = vars(p.parse_args(list(argv)))
+    out = {k: v for k, v in args.items() if v is not None}
+    for k in ("consent_live", "consent_recordings", "consent_training"):
+        if k in out:
+            out[k] = yes_no(out[k])
+    return out
+
+
+def run_register(argv: Sequence[str]) -> int:
+    """``box register``: save the registration and publish it. A failed publish is only a warning."""
+    args = parse_register_args(argv)
+    from_json = args.pop("from_json", None)
+    try:
+        reg = register_from_json(from_json) if from_json else write_registration(REGISTRATION_PATH, **args)
+    except (RegistrationError, BoxConfigError, OSError, ValueError) as exc:
+        log.error("%s", exc)
+        return 1
+    print(registration_summary(reg))
+    publish_registration(reg)
+    return 0
+
+
+def publish_registration(reg: Optional[dict]) -> None:
+    """Send the registration to S3 if it changed. Best effort: the next upload tries again."""
+    if reg is None:
+        return
+    try:
+        from home_guard_project.s3_upload.config import load_config as load_s3_config
+
+        key = put_registration(reg, load_s3_config().bucket, s3_prefix(reg["site"]))
+        if key:
+            log.info("Registration written to %s", key)
+    except Exception as exc:  # noqa: BLE001 - never block setup or the upload on this
+        log.warning("Could not publish the registration yet (%s); it will be retried.", exc)
+        print(f"warning: registration not published yet ({exc}); it is retried with the next upload")
+
+
 def _status(cfg: BoxConfig) -> dict:
     """The status report: the heartbeat, plus whether the box was stopped on purpose."""
     status = build_heartbeat(cfg.site, *_clip_dirs(cfg.mode), ALIVE_FILE, mode=cfg.mode)
     status["stopped"] = control.is_stopped()
+    status["registration"] = registration_status(load_registration())
     if status["stopped"]:
         status["collector_running"] = False   # the alive file can be up to three minutes behind
     return status
@@ -185,6 +252,10 @@ def _shown(value: Any) -> str:
 
 
 def main() -> None:
+    if len(sys.argv) > 1 and sys.argv[1] == "register":
+        logging.basicConfig(level=logging.INFO, format="%(levelname)-8s %(message)s")
+        run_register(sys.argv[2:])   # always exit 0: setup goes on without a registration
+        return
     parser = argparse.ArgumentParser(description="Collector box: upload, heartbeat, status, mode, settings.")
     parser.add_argument("command", choices=["upload", "heartbeat", "status", "mode", "set-site", "set-option",
                                             "get-option", "stop", "start", "restart"])
@@ -245,6 +316,10 @@ def main() -> None:
         if clips:
             log.info("Set aside %d clip(s) saved under the previous site name.", clips)
         print(f"site set to {args.value}; clips go to the S3 folder {s3_prefix(args.value)}/")
+        try:
+            publish_registration(update_site(REGISTRATION_PATH, args.value))
+        except RegistrationError as exc:
+            log.warning("Registration not moved to the new site: %s", exc)
         return
 
     try:
@@ -282,6 +357,7 @@ def main() -> None:
 
     key = put_heartbeat(_status(cfg), s3_cfg.bucket, s3_prefix(cfg.site))
     log.info("Heartbeat written to s3://%s/%s", s3_cfg.bucket, key)
+    publish_registration(load_registration())
 
 
 if __name__ == "__main__":
