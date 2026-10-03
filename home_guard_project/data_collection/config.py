@@ -82,6 +82,7 @@ class Config:
 
     # ── Models ────────────────────────────────────────────────────────────
     YOLO_MODEL: str = "yolov8n.pt"
+    YOLO_DEVICE: str = "auto"   # auto: the Intel graphics chip (OpenVINO) when there is one; cpu: plain PyTorch (an NVIDIA card if any)
     VLM_MODEL_ID: str = "HuggingFaceTB/SmolVLM2-500M-Video-Instruct"
 
     # ── Hardware (auto-detected, not in YAML) ─────────────────────────────
@@ -226,6 +227,7 @@ def load_config(
         CAMERAS_MAIN=cameras_main,
 
         YOLO_MODEL=_deep_get(cfg_data, "models", "yolo", default="yolov8n.pt"),
+        YOLO_DEVICE=str(_deep_get(cfg_data, "models", "yolo_device", default="auto")),
         VLM_MODEL_ID=_deep_get(cfg_data, "models", "vlm", default="HuggingFaceTB/SmolVLM2-500M-Video-Instruct"),
 
         CLIP_SECONDS=float(_deep_get(cfg_data, "clip", "seconds", default=10.0)),

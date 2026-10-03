@@ -227,18 +227,28 @@ class AlertSettings:
     clip_frames: int = 5             # frames sent to the VLM per escalation
     frame_interval_sec: float = 1.0  # spacing of buffered frames
     model: str = "yolo11s.pt"        # the model shipped in the bundle (avoids a download on the box)
+    device: str = "auto"             # auto: the Intel graphics chip when there is one, else the CPU; cpu: always the CPU
     conf: float = 0.4
     vlm_backend: str = "gpt"
     vlm_model: str = "gpt-4o"
     alert_channel: str = "telegram"  # telegram | twilio | both
     dry_run: bool = False
     alert_on: Tuple[str, ...] = DEFAULT_ALERT_ON   # what reaches the owner: people, vehicles or both
+    # The detector's certainty per type; None -> conf (the single house threshold).
+    conf_person: Optional[float] = None
+    conf_vehicle: Optional[float] = None
+    conf_animal: Optional[float] = None
+
+    def thresholds(self) -> Dict[str, float]:
+        """The house's certainty per type (person / vehicle / animal)."""
+        own = {"person": self.conf_person, "vehicle": self.conf_vehicle, "animal": self.conf_animal}
+        return {kind: float(self.conf if value is None else value) for kind, value in own.items()}
 
     def live_values(self) -> Dict[str, Any]:
         """The values the window shows and the owner can change while the program runs."""
         return {"conf": self.conf, "alert_start_hour": self.alert_start_hour,
                 "alert_end_hour": self.alert_end_hour, "cooldown_sec": self.cooldown_sec,
-                "alert_on": list(self.alert_on)}
+                "alert_on": list(self.alert_on), "sensitivity": self.thresholds()}
 
     @classmethod
     def from_box_settings(cls, s: Dict[str, Any]) -> "AlertSettings":
@@ -250,13 +260,27 @@ class AlertSettings:
             clip_frames=int(g("alert_clip_frames", 5)),
             frame_interval_sec=float(g("alert_frame_interval_sec", 1.0)),
             model=str(g("inference_yolo_model", "yolo11s.pt")),
+            device=str(g("inference_device", "auto")).strip().lower(),
             conf=float(g("inference_conf", 0.4)),
             vlm_backend=str(g("vlm_backend", "gpt")),
             vlm_model=str(g("vlm_model", "gpt-4o")),
             alert_channel=str(g("alert_channel", "telegram")),
             dry_run=bool(g("notify_dry_run", False)),
             alert_on=parse_alert_on(g("alert_on", ",".join(DEFAULT_ALERT_ON))),
+            conf_person=_optional_float(g("conf_person")),
+            conf_vehicle=_optional_float(g("conf_vehicle")),
+            conf_animal=_optional_float(g("conf_animal")),
         )
+
+
+def _optional_float(value: Any) -> Optional[float]:
+    """A box.yaml number, or None when it is unset or not a number (then the single threshold applies)."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def frame_to_jpeg_bytes(frame_bgr: Any) -> bytes:
@@ -429,6 +453,48 @@ Box = Tuple[float, float, float, float]   # normalised xyxy, as results[0].boxes
 VEHICLE_SAME_PLACE_IOU = 0.7              # a vehicle box overlapping its old box this much has not moved
 
 
+def kind_of(label: str) -> Optional[str]:
+    """person / vehicle / animal for a detector class name; None for anything else (and birds)."""
+    if label in PERSON_CLASSES:
+        return "person"
+    if label in VEHICLE_CLASSES:
+        return "vehicle"
+    if label in ANIMAL_CLASSES:
+        return "animal"
+    return None
+
+
+class _Kept:
+    """A detector result holding only the finds that passed their type's certainty."""
+
+    def __init__(self, boxes: List[Any], names: Dict[int, str]) -> None:
+        self.boxes = boxes
+        self.names = names
+
+
+def filter_by_thresholds(result: Any, thresholds: Dict[str, float], other: float) -> Any:
+    """Keep each find only if the detector is as sure as its type requires (*other* for the rest).
+
+    The detector is asked down to the lowest certainty in use (:func:`detector_floor`),
+    so a person the owner wants caught at 50% is not lost while cars need 80%.
+    """
+    boxes = getattr(result, "boxes", None)
+    names = getattr(result, "names", {})
+    if boxes is None or len(boxes) == 0:
+        return _Kept([], names)
+    kept = []
+    for b in boxes:
+        kind = kind_of(names.get(int(b.cls[0]), ""))
+        if float(b.conf[0]) >= thresholds.get(kind, other) if kind else float(b.conf[0]) >= other:
+            kept.append(b)
+    return _Kept(kept, names)
+
+
+def detector_floor(thresholds: Dict[str, float], other: float) -> float:
+    """The certainty the detector itself is run at: the lowest any type needs."""
+    return min([other, *thresholds.values()])
+
+
 def vehicle_boxes(result) -> List[Box]:
     """Normalised xyxy boxes of the vehicles in a YOLO result, in detection order."""
     boxes = getattr(result, "boxes", None)
@@ -474,6 +540,9 @@ def vehicles_moved(previous_boxes: Optional[Sequence[Box]], current_boxes: Seque
     return any(all(_iou(cur, old) < iou_threshold for old in previous_boxes) for cur in current_boxes)
 
 
+VEHICLE_MOVE_CONFIRM_SEC = 1.0   # a change must last this long, over two looks or more, to be movement
+
+
 class VehicleMemory:
     """Where a camera's vehicles were the last time they moved.
 
@@ -483,17 +552,36 @@ class VehicleMemory:
     quiet. The reference is replaced only when the vehicles moved: comparing
     each look only with the one before would let a car creep in unnoticed, a
     few centimetres per look.
+
+    A change counts as movement only once it has lasted *confirm_sec* over two
+    looks or more. On the graphics chip each camera is looked at several times
+    a second, and the detector missing a parked car for a look or two must not
+    read as "a car left".
     """
 
-    def __init__(self) -> None:
+    def __init__(self, confirm_sec: float = VEHICLE_MOVE_CONFIRM_SEC) -> None:
         self._reference: Optional[List[Box]] = None
+        self._confirm_sec = confirm_sec
+        self._changed_since: Optional[float] = None   # first look of the current change
+        self._changed_looks = 0
 
-    def look(self, boxes: Sequence[Box]) -> bool:
+    def look(self, boxes: Sequence[Box], now: Optional[float] = None) -> bool:
         """Record one look; True if the vehicles moved since the reference."""
-        moved = vehicles_moved(self._reference, boxes)
-        if moved:
+        if self._reference is None:   # the first look: whatever is there counts as arrived
             self._reference = list(boxes)
-        return moved
+            return True
+        if not vehicles_moved(self._reference, boxes):
+            self._changed_since, self._changed_looks = None, 0
+            return False
+        now = time.monotonic() if now is None else now
+        if self._changed_since is None:
+            self._changed_since = now
+        self._changed_looks += 1
+        if self._changed_looks < 2 or now - self._changed_since < self._confirm_sec:
+            return False
+        self._reference = list(boxes)
+        self._changed_since, self._changed_looks = None, 0
+        return True
 
 
 def has_animal(labels: Sequence[str]) -> bool:
@@ -531,7 +619,8 @@ def apply_live_settings(settings: AlertSettings, box_settings: Dict[str, Any]) -
     """Take over the values the program re-reads while running. Returns the names that changed."""
     fresh = AlertSettings.from_box_settings(box_settings)
     changed = []
-    for name in ("alert_start_hour", "alert_end_hour", "cooldown_sec", "conf", "alert_on"):
+    for name in ("alert_start_hour", "alert_end_hour", "cooldown_sec", "conf", "alert_on",
+                 "conf_person", "conf_vehicle", "conf_animal"):
         if getattr(settings, name) != getattr(fresh, name):
             # The settings object is frozen and shared with the worker threads: the same
             # instance must carry the new value, so the one write goes around the freeze.
@@ -835,6 +924,43 @@ def _save_clip(job: AlertJob, frames: List[Any], production_dir: str, training_d
         log.warning("[%s] could not save the clip %s: %s", job.camera, job.stem, exc)
 
 
+def load_detector(model_path: str, device: str = "auto") -> Tuple[Any, Optional[str]]:
+    """The YOLO detector, and the device to pass to predict(): the Intel graphics chip when it works, else the CPU.
+
+    On the N150 the graphics chip (through OpenVINO) runs yolo11s in ~65 ms a picture, the
+    CPU (PyTorch) in ~550 ms: with five cameras that is a look at each camera about every
+    0.35 s instead of every 3.5 s, and the CPU is left for the cameras' video. The OpenVINO
+    copy of the model is made once, next to the .pt file. Anything that goes wrong (no
+    openvino, no graphics driver, a broken copy) leaves the detector on the CPU.
+    """
+    from ultralytics import YOLO  # noqa: PLC0415
+
+    if device == "auto" and model_path.endswith(".pt"):
+        ov_dir = os.path.join(os.path.dirname(model_path), os.path.splitext(os.path.basename(model_path))[0] + "_openvino_model")
+        copied = False   # the failure came from the OpenVINO copy itself (not a missing chip or package)
+        try:
+            import numpy as np  # noqa: PLC0415
+            import openvino as ov  # noqa: PLC0415
+
+            if not any(d.startswith("GPU") for d in ov.Core().available_devices):
+                raise RuntimeError("no Intel graphics chip")
+            copied = True
+            if not os.path.isfile(os.path.join(ov_dir, "metadata.yaml")):   # written last by the export
+                log.info("Preparing %s for the Intel graphics chip (once, about 10 s)...", model_path)
+                YOLO(model_path).export(format="openvino", imgsz=640, verbose=False)
+            model = YOLO(ov_dir, task="detect")
+            model.predict(np.zeros((576, 704, 3), dtype=np.uint8), device="intel:gpu", verbose=False)  # compile + warm up
+            log.info("Detector: %s on the Intel graphics chip (OpenVINO)", model_path)
+            return model, "intel:gpu"
+        except Exception as exc:  # noqa: BLE001 - the CPU always works
+            log.warning("Intel graphics chip not used (%s); the detector runs on the CPU", exc)
+            if copied and os.path.isdir(ov_dir):
+                import shutil  # noqa: PLC0415
+                shutil.rmtree(ov_dir, ignore_errors=True)   # a broken copy: made again at the next start
+    log.info("Detector: %s on the CPU", model_path)
+    return YOLO(model_path), None
+
+
 def run() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", stream=sys.stdout)
     # Use the OS certificate store for all HTTPS (urllib + httpx), so Telegram
@@ -858,8 +984,6 @@ def run() -> int:
 
     from .boxconfig import load_box_settings  # noqa: PLC0415
     from ..data_collection.config import load_config  # noqa: PLC0415
-    from ultralytics import YOLO  # noqa: PLC0415
-
     box_settings = load_box_settings()
     settings = AlertSettings.from_box_settings(box_settings)
     cam_cfg = load_config()
@@ -869,7 +993,8 @@ def run() -> int:
              settings.vlm_backend, settings.dry_run)
 
     backend = make_backend(settings, env)
-    model = YOLO(settings.model)
+    model, device = load_detector(settings.model, settings.device)
+    predict_args = {"device": device} if device else {}
 
     # Camera sub-stream URLs from the data_collection config.
     cameras: Dict[str, str] = dict(getattr(cam_cfg, "CAMERAS", {}) or {})
@@ -904,7 +1029,8 @@ def run() -> int:
 
     def reported_settings() -> Dict[str, Any]:
         return {**settings.live_values(),
-                "camera_alert_on": {c: list(t) for c, t in sorted(camera_alerts.overrides.items())}}
+                "camera_alert_on": {c: list(t) for c, t in sorted(camera_alerts.overrides.items())},
+                "camera_sensitivity": {c: dict(t) for c, t in sorted(camera_alerts.sensitivity.items())}}
 
     status.settings(reported_settings())
     worker = {"t": None}  # single in-flight VLM call across cameras (N150 budget)
@@ -949,15 +1075,21 @@ def run() -> int:
                 continue
             last_look_ts[name] = now_ts
 
-            results = model.predict(frame, conf=settings.conf, verbose=False)
+            # Each type is held to its own certainty (house value, or the camera's own);
+            # the detector runs at the lowest of them and the rest are filtered here.
+            thresholds = camera_alerts.thresholds_for(name, settings.thresholds())
+            raw = model.predict(frame, conf=detector_floor(thresholds, settings.conf), verbose=False,
+                                **predict_args)
+            results = [filter_by_thresholds(raw[0], thresholds, settings.conf)] if raw else []
+            seen_ts = time.time()   # when the picture was looked at, not when this round over the cameras began
             try:
-                status.detection(name, objects_from_result(results[0]) if results else [], now=now_ts)
+                status.detection(name, objects_from_result(results[0]) if results else [], now=seen_ts)
             except Exception as exc:  # noqa: BLE001 - what the window shows must never stop the alerts
                 log.debug("[%s] status not updated: %s", name, exc)
             # Every look feeds the camera's vehicle memory - the once-a-second looks of the
             # cooldown too - so a car that arrives and parks during the cooldown is compared
             # with its own parked position afterwards, and stays quiet.
-            moved = vehicles[name].look(vehicle_boxes(results[0]) if results else [])
+            moved = vehicles[name].look(vehicle_boxes(results[0]) if results else [], now=seen_ts)
             if waiting:
                 continue
             person, vehicle, labels = detect_trigger(results[0]) if results else (False, False, [])

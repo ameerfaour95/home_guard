@@ -46,6 +46,7 @@ class CollectorPreviewTest(unittest.TestCase):
                     RUN_VLM_ON_SAVED_CLIPS=False,
                     RANDOM_CLIP_ENABLED=False,
                     YOLO_EVERY_N_FRAMES_CPU=1,
+                    YOLO_DEVICE="cpu",
                 )
                 stream = mock.Mock()
                 # Initial readiness, one actual main-loop frame, then exit safely.

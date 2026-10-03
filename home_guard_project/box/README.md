@@ -234,7 +234,19 @@ if the AI sees only something not chosen, the clip is kept for training and noth
 .venv\Scripts\python.exe -m home_guard_project.box.find_cameras --json set-camera-alerts --camera driveway --default
 ```
 
-Renaming a camera carries its choice along. Design: `docs/superpowers/specs/2026-10-03-alert-types-design.md`.
+Each type also has its own detector certainty, like Frigate's per-object thresholds: `conf_person`,
+`conf_vehicle`, `conf_animal` in box.yaml (0.05-0.95; unset = `inference_conf`), and a camera can
+override some or all of them. A lower value for people than for cars means a half-hidden person is
+still caught while a car needs to be clear. The detector runs at the lowest value in use; each find
+is then held to its own type's value.
+
+```
+.venv\Scripts\python.exe -m home_guard_project.box set-option conf_person=0.5
+.venv\Scripts\python.exe -m home_guard_project.box.find_cameras --json set-camera-sensitivity --camera driveway --values person=0.5,vehicle=0.8
+.venv\Scripts\python.exe -m home_guard_project.box.find_cameras --json set-camera-sensitivity --camera driveway --default
+```
+
+Renaming a camera carries its choices along. Design: `docs/superpowers/specs/2026-10-03-alert-types-design.md`.
 
 ## Telegram alerts for a new customer
 
@@ -306,7 +318,7 @@ On the box itself, without network: `uv run python -m home_guard_project.box sta
 
 `eval_prompt.py` gives one repeatable score for the prompt the box sends to the AI, over every tagged home clip (about 220). It runs in two steps, because only the laptop can read `tagging/` on S3 and only the box needs the OpenAI key.
 
-**1. On the laptop: fetch the clips' frames.** This lists the `ameer_house*` tagging batches, finds each clip's video, and saves the same 5 evenly spaced frames the box would send. Re-running it fetches only what is missing; `--limit N` fetches at most N new clips, and `--batches` picks other batches.
+**1. On the laptop: fetch the clips' frames.** This lists the `ameer_house*` tagging batches, finds each clip's video, and saves 5 frames spaced evenly across it. Re-running it fetches only what is missing; `--limit N` fetches at most N new clips, and `--batches` picks other batches.
 
 ```bash
 env -u SSLKEYLOGFILE -u PYTHONSTARTUP AWS_CA_BUNDLE=<bundle.pem> \
@@ -329,7 +341,15 @@ scp -i ~/.ssh/homeguard_box -r eval_set <user>@<box-ip>:C:/home_guard/eval_set
 .venv\Scripts\python.exe -m home_guard_project.box.eval_prompt summary --dir eval_set --tag <tag>
 ```
 
-`--prompt-file` tries a new wording without touching `inference.py`; `{camera_name}` and `{local_time_str}` in the file are filled in. Results go to `eval_set/results/<tag>.jsonl`, `.csv` and `.summary.json`, where the tag is the prompt version, or `file-<hash>` for a prompt file. A stopped run continues where it left off, and a clip that failed is asked again. `--fake` checks the setup without calling the AI.
+`--prompt-file` tries a new wording without touching `inference.py`; `{camera_name}`, `{local_time_str}` and `{owner_language}` (default `en`) in the file are filled in. Results go to `eval_set/results/<tag>.jsonl`, `.csv` and `.summary.json`, named by the tag. A stopped run continues where it left off, and a clip that failed is asked again. `--fake` checks the setup without calling the AI.
+
+The `.jsonl` holds the AI's answers only, and answers are only ever appended. The score, the `.csv` and the `.summary.json` are rebuilt every time from the last answer per clip and the tags in the current `manifest.jsonl`. So after re-tagging clips, re-run `prepare` and then `run` or `summary`: the new tags are scored without any new AI call. Each answer also records a fingerprint of what the AI saw (camera name, the clip's time of day, the frame files). If any of these changed, that clip is asked again; the old answer stays in the file. Answers for clips that left the manifest are kept, just not scored. Only one run at a time may write a results file: a second run on the same tag exits with code 3 before asking anything. If a run crashed and left `results/<tag>.lock` behind, the message says so; delete the lock and run again.
+
+Paid answers are never deleted silently. The default tag is `<prompt version or file-hash>__<model>`, so a second model gets its own file. Every row also stores a hash of the prompt wording, so editing the prompt in `inference.py` without bumping its version is noticed. If a results file (usually one picked with `--tag`) holds answers from another prompt, wording or model, `run` prints which and exits with code 2 without touching it; pass `--overwrite` to replace them. A cut-off last line left by a killed run is skipped with a warning.
+
+Before the first call, `run` prints `asking N clips (M already answered, K with errors to retry)`. For a real run of more than 20 clips it also names the model and waits 5 seconds (Ctrl+C aborts); `--yes` skips the wait.
+
+**Caveat: the eval sees the whole clip.** The box sends the AI the last 5 buffered frames, 1 second apart, up to the trigger, with the camera's zone mask applied. The eval takes 5 frames evenly across the whole tagged clip, unmasked. So alert recall reads somewhat optimistic compared with the box. Frames are also JPEG-encoded twice (quality 90 on disk, 85 when sent); the effect is negligible.
 
 What the score means:
 
@@ -342,6 +362,7 @@ What the score means:
 | padding | Summaries that mention what is absent or the background ("without", "no one", "visible", "background", "parked") |
 | words per summary | The AI's length against ours |
 | errors | Clips the AI could not answer; they are left out of the other lines |
+| outdated | Shown only when some saved answers were for other frames, camera or time (not yet asked again); they are left out |
 
 ## Troubleshooting
 
