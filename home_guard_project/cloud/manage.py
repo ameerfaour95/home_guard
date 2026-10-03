@@ -29,7 +29,7 @@ class ConfigError(Exception):
 
 
 def _db_url() -> str:
-    """One resolver for every command: HG_CLOUD_DB_URL, else the full settings."""
+    """One resolver for every command: HG_CLOUD_DB_URL only."""
     import os
 
     url = os.environ.get("HG_CLOUD_DB_URL")

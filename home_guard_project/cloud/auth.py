@@ -51,7 +51,7 @@ MAX_TOTP_LEN = 16
 def totp_counter(secret: str, code: str, now: Optional[float] = None) -> Optional[int]:
     """The time-step counter (within +-1 step) whose code matches, else None."""
     code = (code or "").strip()
-    if not code:
+    if not (code and code.isascii() and code.isdigit()):  # non-ASCII would make compare_digest raise
         return None
     totp = pyotp.TOTP(secret, interval=TOTP_STEP)
     current = int((now if now is not None else datetime.now(timezone.utc).timestamp()) // TOTP_STEP)

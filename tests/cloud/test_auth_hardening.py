@@ -36,13 +36,28 @@ def test_login_visible_to_a_new_session_and_committed_in_handler(client, staff_f
         assert getattr(inspect.signature(fn).parameters["session"].default, "scope", None) == "function"
 
 
-def test_concurrent_wrong_attempts_cannot_beat_lockout(client, staff_factory):
-    staff, pw, secret, _ = staff_factory("admin")
-    body = {"email": staff.email, "password": "wrong-password", "totp": "000000"}
+def test_concurrent_wrong_attempts_cannot_beat_lockout(client, monkeypatch):
+    import time
+
+    from home_guard_project.cloud import auth as auth_mod
+
+    def slow_verify(*_a):  # widen the check-then-act window so a missing lock shows
+        time.sleep(0.2)
+        return False
+
+    monkeypatch.setattr(auth_mod, "verify_dummy", slow_verify)
+    monkeypatch.setattr(auth_mod, "verify_password", slow_verify)
+    body = {"email": "ghost@example.com", "password": "wrong-password", "totp": "000000"}  # unknown: no staff-row lock
     with cf.ThreadPoolExecutor(10) as ex:
         codes = list(ex.map(lambda _: client.post("/v1/auth/login", json=body).status_code, range(10)))
-    assert set(codes) <= {401, 429}
-    assert codes.count(401) <= 5 and codes.count(429) >= 5
+    assert codes.count(401) == 5 and codes.count(429) == 5, codes
+
+
+def test_non_ascii_totp_is_a_normal_failed_login(client, staff_factory):
+    staff, pw, secret, _ = staff_factory("admin")
+    r = _login(client, staff, pw, secret, code="١٢٣٤٥٦")
+    assert r.status_code == 401
+    assert len(_audit(client, "login_failed")) == 1
 
 
 def test_totp_code_cannot_be_replayed(client, staff_factory):

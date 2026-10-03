@@ -16,4 +16,12 @@ Tests in tests/cloud/test_auth_hardening.py (all written first; 11 of 13 new aut
 15. password > 1024 or totp > 16 chars: same 401, no hashing, still audited as login_failed; index ix_audit_log_action_ts -> test_oversized_credentials_rejected_without_hashing (index: test_keyset_indexes)
 16. test_padded_uppercase_email_shares_lockout, test_refresh_for_disabled_staff_401, test_role_change_applies_to_issued_access_token (these passed against the existing behaviour; they pin it)
 Suite: `cd /c/Users/ameer/Ameer/home_guard_admin && unset VIRTUAL_ENV; export UV_SYSTEM_CERTS=1; uv run --group cloud --system-certs pytest tests/fleet_contract tests/cloud -q`
-Output: `41 passed in 27.60s`
+Output: `152 passed in 35.80s` (full suite after fix round 2; the earlier count was stale)
+
+## Fix round 2
+1. totp_counter returns None unless code.isascii() and code.isdigit() (Arabic-Indic digits made compare_digest raise TypeError -> 500, unaudited). Test test_non_ascii_totp_is_a_normal_failed_login: failed with TypeError before the fix; now 401 + login_failed row.
+2. test_concurrent_wrong_attempts_cannot_beat_lockout rewritten: verify_dummy/verify_password monkeypatched to sleep 0.2 s and return False, unknown email, 10 threads, asserts exactly 5x401 and 5x429.
+   Race detection proof: with the pg_advisory_xact_lock line in routes/auth.py commented out locally, the test FAILED (AssertionError at the codes assertion); lock restored (not committed), test passes.
+3. manage._db_url docstring now "HG_CLOUD_DB_URL only".
+Command: `cd /c/Users/ameer/Ameer/home_guard_admin && unset VIRTUAL_ENV; export UV_SYSTEM_CERTS=1; uv run --group cloud --system-certs python -m pytest tests/fleet_contract tests/cloud -q`
+Output: `152 passed in 35.80s`

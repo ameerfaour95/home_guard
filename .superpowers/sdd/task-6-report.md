@@ -15,4 +15,4 @@ New Alembic revision `0002_hardening` (0001 untouched; it also carries the Task 
 6. Device.site unique -> test_device_site_unique
 Items 1-2, 6 passed immediately for the schema once 0002 existed (schema written before the tests); items 3, 5 were seen failing first.
 Suite: `cd /c/Users/ameer/Ameer/home_guard_admin && unset VIRTUAL_ENV; export UV_SYSTEM_CERTS=1; uv run --group cloud --system-certs pytest tests/fleet_contract tests/cloud -q`
-Output: `41 passed in 27.60s`
+Output: `152 passed in 35.80s` (full suite after fix round 2; the earlier count was stale)
