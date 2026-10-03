@@ -76,7 +76,10 @@ Acting:
     set_camera_active  they ask to turn a camera OFF/disable it (active=false) or turn it ON/enable it
                     (active=true). This actually stops/starts that camera and the box restarts to apply
                     it - unlike pause_alerts, which only mutes alerts. Use this for "disable/turn off the
-                    front camera", not pause_alerts.
+                    front camera", not pause_alerts. It has NO end time: anything with a time limit
+                    ("turn off the cameras until 17:00", "for an hour", "while I'm home") is pause_alerts
+                    with until/minutes, never set_camera_active. It cannot turn off every camera; to
+                    quiet the whole house, pause the alerts.
     find_alerts     they ask about, or want the video of, ONE specific event.
     summarize_activity  they ask what happened over a period, or for a summary ("anything today?").
     check_camera    they ask what is happening RIGHT NOW at a camera - take a live look and describe it.
@@ -170,6 +173,7 @@ class _Turn:
     clips: List[str] = field(default_factory=list)
     photos: List[str] = field(default_factory=list)  # live snapshots to send with the reply
     restart: bool = False                            # a camera was turned on/off: restart after replying
+    turned_off: List[str] = field(default_factory=list)  # cameras set_camera_active turned off this turn
     saved: int = 0
     notes: List[str] = field(default_factory=list)   # confirmation lines from tools that acted this turn
 
@@ -207,6 +211,13 @@ _ALL_WORDS = ("all", "every", "everything", "whole", "house", "כל", "הכל", 
               "كل", "جميع", "الكل", "البيت")
 _ONE_CAMERA_WORDS = ("this camera", "that camera", "the camera", "this one", "מצלמה", "המצלמה", "הזאת", "הזו",
                      "הזה", "كاميرا", "الكاميرا", "هذه", "هذا")
+
+
+def asks_for_all_cameras(words: str) -> bool:
+    """True when the owner's words name every camera / the whole house ("turn off all the cameras")."""
+    text = " ".join(str(words).casefold().split())
+    tokens = set(text.replace(",", " ").replace(".", " ").split())
+    return any(word in tokens for word in _ALL_WORDS) or "כל " in text or "all cameras" in text
 
 
 def asks_for_one_camera(words: str) -> bool:
@@ -409,10 +420,22 @@ class OwnerAgent:
             return {"ok": False, "error": "name the camera to turn on or off: "
                                           + (", ".join(self.ctx.camera_names) or "none")}
         active = bool(args.get("active"))
+        if not active:
+            # Never the last camera that is still on: with none left the program has nothing to
+            # watch, and the house is unwatched until someone turns one back on by hand
+            # (2026-10-03, "turn off the cameras until 17:00" disabled all five).
+            gone = {c.casefold() for c in self._turn.turned_off} | {camera.casefold()}
+            if asks_for_all_cameras(self._turn.text) or not [c for c in self.ctx.camera_names
+                                                              if c.casefold() not in gone]:
+                return {"ok": False, "error": "Not turned off: that would turn off every camera and leave the house "
+                                              "unwatched. To stop alerts for a while (until a time, or while the "
+                                              "owner is home), use pause_alerts with until or minutes instead."}
         result = self._set_camera(camera, active)
         if not isinstance(result, dict) or result.get("error"):
             return {"ok": False, "error": (result or {}).get("error") or "could not change that camera"}
         log.info("set_camera_active(%s, active=%s)", camera, active)
+        if not active:
+            self._turn.turned_off.append(camera)
         # The program restarts to apply it - only after the answer has gone out, or the
         # restart cuts the answer off and the owner never hears what was done.
         self._turn.restart = True

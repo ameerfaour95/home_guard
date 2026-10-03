@@ -332,6 +332,37 @@ class OwnerAgentTest(unittest.TestCase):
         tool_msgs = [m for m in model.seen[1] if m.get("role") == "tool"]
         self.assertIn("turned off", tool_msgs[0]["content"])
 
+    def test_the_last_cameras_are_never_turned_off_from_telegram(self) -> None:
+        # 2026-10-03: "turn off the cameras until 17:00" disabled all five; with no camera
+        # left the program exited and the assistant never heard "turn them back on".
+        calls = []
+        ctx = self._ctx()                                            # cameras: front_door, back_yard
+        ctx.set_camera = lambda cam, active: (calls.append((cam, active)) or {"ok": True})
+        model = RecordingModel([call("set_camera_active", camera="front_door", active=False),
+                                call("set_camera_active", camera="back_yard", active=False),
+                                say("Alerts are paused until 17:00.")])
+        OwnerAgent(model, ctx).handle("turn off the cameras until 17:00", "-1001", {}, None)
+        self.assertEqual(calls, [("front_door", False)])             # the last one stays on
+        tool_msgs = [m for m in model.seen[-1] if m.get("role") == "tool"]
+        self.assertIn("pause_alerts", tool_msgs[-1]["content"])
+
+    def test_all_the_cameras_is_refused_before_any_is_turned_off(self) -> None:
+        calls = []
+        ctx = self._ctx()
+        ctx.set_camera = lambda cam, active: (calls.append((cam, active)) or {"ok": True})
+        model = RecordingModel([call("set_camera_active", camera="front_door", active=False),
+                                say("I can pause the alerts instead.")])
+        OwnerAgent(model, ctx).handle("turn off all the cameras", "-1001", {}, None)
+        self.assertEqual(calls, [])
+
+    def test_turning_a_camera_back_on_is_always_allowed(self) -> None:
+        calls = []
+        ctx = self._ctx()
+        ctx.set_camera = lambda cam, active: (calls.append((cam, active)) or {"ok": True})
+        model = RecordingModel([call("set_camera_active", camera="garage", active=True), say("On.")])
+        OwnerAgent(model, ctx).handle("turn the garage camera back on", "-1001", {}, None)
+        self.assertEqual(calls, [("garage", True)])
+
     def test_set_camera_active_relays_an_error(self) -> None:
         ctx = self._ctx()
         ctx.set_camera = lambda cam, active: {"error": "unknown camera 'garage'"}

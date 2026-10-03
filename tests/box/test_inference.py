@@ -624,3 +624,23 @@ class StreamMaskTest(unittest.TestCase):
             stream._loop()
         self.assertEqual(len(logs.records), 1)
         self.assertEqual(int(stream.read().max()), 3)
+
+
+class NoCamerasTest(unittest.TestCase):
+    """With every camera turned off the program must keep listening to the owner."""
+
+    def test_the_assistant_keeps_running_and_knows_the_turned_off_cameras(self) -> None:
+        started = []
+        looks = iter([True, True, False])                       # keep running for two rounds
+        code = inf.serve_without_cameras({"site": "x"}, {}, ["front_door", "yard"],
+                                         start_assistant=lambda bs, env, names: started.append(list(names)),
+                                         keep_running=lambda: next(looks), sleep=lambda s: None)
+        self.assertEqual(started, [["front_door", "yard"]])
+        self.assertEqual(code, 0)
+
+    def test_an_assistant_that_cannot_start_does_not_crash_the_wait(self) -> None:
+        def broken(bs, env, names):
+            raise RuntimeError("no token")
+        looks = iter([True, False])
+        self.assertEqual(inf.serve_without_cameras({}, {}, [], start_assistant=broken,
+                                                   keep_running=lambda: next(looks), sleep=lambda s: None), 0)

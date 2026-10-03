@@ -31,7 +31,7 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 log = logging.getLogger("box.inference")
 
@@ -961,6 +961,31 @@ def load_detector(model_path: str, device: str = "auto") -> Tuple[Any, Optional[
     return YOLO(model_path), None
 
 
+def serve_without_cameras(box_settings: Dict[str, Any], env: Dict[str, str], turned_off: Sequence[str],
+                          start_assistant: Optional[Callable[..., Any]] = None,
+                          keep_running: Callable[[], bool] = lambda: True,
+                          sleep: Callable[[float], None] = time.sleep) -> int:
+    """No camera is on: run only the owner's assistant, until the runner restarts us.
+
+    *turned_off* are the cameras the owner can turn back on. Turning one on (Telegram,
+    the app, the setup program) asks for a restart, and the program comes back
+    watching it.
+    """
+    log.warning("No camera is on (turned off: %s). Nothing to watch; the assistant keeps listening "
+                "so a camera can be turned back on.", ", ".join(turned_off) or "none")
+    if start_assistant is None:
+        from . import telegram_agent  # noqa: PLC0415
+
+        start_assistant = telegram_agent.start
+    try:
+        start_assistant(box_settings, env, list(turned_off))
+    except Exception as exc:  # noqa: BLE001 - without the assistant there is still nothing to watch
+        log.warning("Owner assistant not started (%s).", exc)
+    while keep_running():
+        sleep(5.0)
+    return 0
+
+
 def run() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", stream=sys.stdout)
     # Use the OS certificate store for all HTTPS (urllib + httpx), so Telegram
@@ -999,8 +1024,12 @@ def run() -> int:
     # Camera sub-stream URLs from the data_collection config.
     cameras: Dict[str, str] = dict(getattr(cam_cfg, "CAMERAS", {}) or {})
     if not cameras:
-        log.error("No cameras configured (cameras.yaml). Nothing to watch; exiting.")
-        return 1
+        # Every camera is turned off (or none was found yet). Keep the owner's assistant
+        # listening, so "turn the cameras back on" in Telegram still works: exiting here
+        # left the owner without an answer while the runner restarted us every 15 s.
+        from .alert_settings import camera_names  # noqa: PLC0415
+
+        return serve_without_cameras(box_settings, env, camera_names())
     # Every alert is saved as a clip (the seconds around it) in the production folder,
     # and the owner can answer it in Telegram. Neither may stop the alerts themselves.
     from .alert_clips import POST_SECONDS, PRE_SECONDS, ClipRing, alert_stem  # noqa: PLC0415
