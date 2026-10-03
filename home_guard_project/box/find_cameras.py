@@ -81,6 +81,7 @@ def redact(url: str) -> str:
 # ── Camera confirmation (snapshots + apply), for the setup UI ────────────────
 _NAME_RE = re.compile(r"^[a-z0-9_]+$")
 CAMERAS_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data_collection", "cameras.yaml"))
+ZONES_PATH = os.path.join(os.path.dirname(CAMERAS_PATH), "zones.yaml")
 _YAML_HEADER = (
     "# ──────────────────────────────────────────────────────────────────────────────\n"
     "#  Camera RTSP streams — DO NOT COMMIT (contains credentials)\n"
@@ -106,7 +107,8 @@ def _write_cameras(active: Dict[str, str], disabled: Dict[str, str], path: str =
     os.replace(tmp, path)
 
 
-def apply_changes(changes: Dict[str, Any], path: str = CAMERAS_PATH) -> Dict[str, Any]:
+def apply_changes(changes: Dict[str, Any], path: str = CAMERAS_PATH, zones_path: str = ZONES_PATH,
+                  restart: bool = True) -> Dict[str, Any]:
     """Rewrite cameras.yaml from {"cameras":[{"name","new_name","enabled"}]}.
 
     A disabled camera is kept (recoverable) in a 'disabled:' section the loader
@@ -123,6 +125,7 @@ def apply_changes(changes: Dict[str, Any], path: str = CAMERAS_PATH) -> Dict[str
     new_disabled: Dict[str, str] = {}
     final_names: set = set()
     handled: set = set()
+    renames: Dict[str, str] = {}
 
     for ch in changes.get("cameras", []):
         old = str(ch.get("name", ""))
@@ -137,6 +140,8 @@ def apply_changes(changes: Dict[str, Any], path: str = CAMERAS_PATH) -> Dict[str
         final_names.add(new)
         handled.add(old)
         (new_active if enabled else new_disabled)[new] = known[old]
+        if new != old:
+            renames[old] = new
 
     # Cameras not mentioned keep their current bucket (unless a rename took the name).
     for name, url in active.items():
@@ -149,13 +154,64 @@ def apply_changes(changes: Dict[str, Any], path: str = CAMERAS_PATH) -> Dict[str
             final_names.add(name)
 
     _write_cameras(new_active, new_disabled, path)
+    from ..data_collection.zones import rename_zone  # noqa: PLC0415
+
+    for old, new in renames.items():
+        rename_zone(old, new, zones_path)      # the watch zone follows its camera
+    if restart:
+        _restart_running_mode()
+    return {"active": sorted(new_active), "disabled": sorted(new_disabled)}
+
+
+def _restart_running_mode() -> None:
     try:
         from . import control  # noqa: PLC0415
 
         control.request_restart()
     except Exception:  # noqa: BLE001
         pass
-    return {"active": sorted(new_active), "disabled": sorted(new_disabled)}
+
+
+def _known_camera(name: str, cameras_path: str) -> str:
+    raw = _read_cameras_raw(cameras_path)
+    known = {**dict(raw.get("disabled") or {}), **dict(raw.get("cameras") or {})}
+    if name not in known:
+        raise ValueError(f"unknown camera: {name!r}")
+    return name
+
+
+def zone_rows(cameras_path: str = CAMERAS_PATH, zones_path: str = ZONES_PATH) -> Dict[str, Any]:
+    """Every camera with its watch zone: ``{"cameras": [{"name", "points"}]}``; ``points`` is [] for the whole picture."""
+    from ..data_collection.zones import load_zones  # noqa: PLC0415
+
+    raw = _read_cameras_raw(cameras_path)
+    zones = load_zones(zones_path)
+    names = list(dict(raw.get("cameras") or {})) + list(dict(raw.get("disabled") or {}))
+    return {"cameras": [{"name": n, "points": [[x, y] for x, y in zones.get(n, [])]} for n in names]}
+
+
+def set_zone(camera: str, points_text: str, cameras_path: str = CAMERAS_PATH,
+             zones_path: str = ZONES_PATH, restart: bool = True) -> Dict[str, Any]:
+    """Store a camera's watch zone from ``x,y;x,y;...`` and ask the running mode to restart."""
+    from ..data_collection.zones import parse_points, save_zone  # noqa: PLC0415
+
+    name = _known_camera(str(camera), cameras_path)
+    corners = save_zone(name, parse_points(points_text), zones_path)
+    if restart:
+        _restart_running_mode()
+    return {"camera": name, "points": [[x, y] for x, y in corners]}
+
+
+def clear_zone_command(camera: str, cameras_path: str = CAMERAS_PATH,
+                       zones_path: str = ZONES_PATH, restart: bool = True) -> Dict[str, Any]:
+    """Watch the whole picture again for this camera."""
+    from ..data_collection.zones import clear_zone  # noqa: PLC0415
+
+    name = _known_camera(str(camera), cameras_path)
+    clear_zone(name, zones_path)
+    if restart:
+        _restart_running_mode()
+    return {"camera": name, "points": []}
 
 
 def looks_blank(frame: Any) -> bool:
@@ -480,6 +536,14 @@ def main() -> None:
     applyp.add_argument("--changes", required=True,
                         help='JSON file: {"cameras":[{"name","new_name","enabled"}]}.')
 
+    sub.add_parser("zones", help="List every camera with its watch zone (empty = whole picture).")
+    setz = sub.add_parser("set-zone", help="Store a camera's watch zone; everything outside it is blacked out.")
+    setz.add_argument("--camera", required=True)
+    setz.add_argument("--points", required=True,
+                      help="Corners as x,y;x,y;x,y in 0-1 picture fractions, 3 to 32 of them, no spaces or quotes.")
+    clrz = sub.add_parser("clear-zone", help="Watch the whole picture again for a camera.")
+    clrz.add_argument("--camera", required=True)
+
     args = parser.parse_args()
     # Progress goes to stderr so --json output on stdout stays parseable.
     logging.basicConfig(
@@ -508,6 +572,29 @@ def main() -> None:
                 print(f"  {s['name']:<22} {'ok' if s['ok'] else 'FAILED'}  {s['file']}")
         if not any(s["ok"] for s in result["snapshots"]):
             sys.exit(1)
+        return
+
+    if args.command in ("zones", "set-zone", "clear-zone"):
+        try:
+            if args.command == "zones":
+                result = zone_rows()
+            elif args.command == "set-zone":
+                result = set_zone(args.camera, args.points)
+            else:
+                result = clear_zone_command(args.camera)
+        except ValueError as exc:
+            if args.json:
+                print(json.dumps({"error": str(exc)}))
+            else:
+                print(f"Error: {exc}")
+            sys.exit(1)
+        if args.json:
+            print(json.dumps(result, indent=2))
+        else:
+            for row in result.get("cameras", [result]):
+                corners = row.get("points") or []
+                print(f"  {row['camera' if 'camera' in row else 'name']:<22} "
+                      f"{'whole picture' if not corners else str(len(corners)) + ' corners'}")
         return
 
     if args.command == "apply":

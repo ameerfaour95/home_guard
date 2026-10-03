@@ -197,6 +197,25 @@ Passwords are sent in a temporary file that is deleted from the box afterwards. 
 
 Build the program with `powershell -ExecutionPolicy Bypass -File home_guard_project\box\build_exe.ps1` (writes `dist\HomeGuardSetup.exe`).
 
+### Watch zones: look only at part of a camera's picture
+
+A camera can be given a zone (for example the yard, not the street). Everything outside it is
+blacked out as the frame is read, so no detector, AI call, clip, snapshot or preview ever contains
+it. The zone is a polygon in picture fractions (0–1), 3 to 32 corners, kept in
+`home_guard_project/data_collection/zones.yaml` on the box (not in git). It applies in both modes.
+
+Normally the owner draws it in the setup app (camera page → "Set the area to watch"). By hand, on
+the box:
+
+```
+.venv\Scripts\python.exe -m home_guard_project.box.find_cameras --json zones
+.venv\Scripts\python.exe -m home_guard_project.box.find_cameras --json set-zone --camera yard --points 0.1,0.2;0.9,0.2;0.9,0.9;0.1,0.9
+.venv\Scripts\python.exe -m home_guard_project.box.find_cameras --json clear-zone --camera yard
+```
+
+`set-zone` / `clear-zone` ask the running mode to restart so the change is live within seconds.
+Renaming a camera carries its zone along; disabling keeps it.
+
 ## Telegram alerts for a new customer
 
 AI alerts are delivered over Telegram: it is free, and one message reaches a whole family group (so every family member is covered at no extra cost). **One bot serves every box; each customer gets their own group.**
