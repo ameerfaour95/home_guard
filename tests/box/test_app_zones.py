@@ -94,6 +94,40 @@ class ZoneEditorTests(unittest.TestCase):
         self.dialog.stage.set_points([(.1, .1), (.9, .1), (.9, .9)])
         self.assertEqual(self.dialog.warning.text(), '')
 
+    def test_coverage_and_footer_alignment_in_each_state(self):
+        for size in ((1100, 700), (1280, 800)):
+            self.dialog.resize(*size)
+            for points in ([], [[.1, .1]], [[0, 0], [1, 0], [1, .46], [0, .46]]):
+                self.dialog.stage.set_points(points)
+                QTest.qWait(motion.PANE_MS + 30)
+                stage = self.dialog.stage.geometry()
+                top = self.dialog.eyebrow.mapTo(self.dialog, self.dialog.eyebrow.rect().topLeft())
+                bottom = self.dialog.save_button.mapTo(self.dialog, self.dialog.save_button.rect().bottomLeft())
+                self.assertEqual(top.y(), stage.top())
+                self.assertEqual(bottom.y(), stage.bottom())
+                self.assertEqual(self.dialog.undo_button.height(), 32)
+                self.assertEqual(self.dialog.clear_button.height(), 32)
+                self.assertEqual(self.dialog.save_button.y() - self.dialog.undo_button.geometry().bottom() - 1, 12)
+                expected = 1. if not points else .46 if len(points) >= 3 else 0.
+                self.assertAlmostEqual(self.dialog.coverage.fraction, expected)
+        self.assertEqual(self.dialog.status.text(), 'Watching 46 % of the picture')
+        self.assertEqual(self.dialog.corners.text(), '4 corners')
+
+    def test_error_chip_takes_warning_slot_without_moving_footer(self):
+        self.controls.set_zone.side_effect = RuntimeError('offline')
+        self.dialog.stage.set_points([[.1, .1], [.2, .1], [.2, .2]])
+        self.app.processEvents()
+        slot = self.dialog.warning.geometry()
+        footer = self.dialog.save_button.geometry()
+        self.dialog.save()
+        try: self.dialog.future.result(timeout=3)
+        except RuntimeError: pass
+        self.dialog.poll(); self.app.processEvents()
+        self.assertIs(self.dialog.messages.currentWidget(), self.dialog.error)
+        self.assertEqual(self.dialog.error.geometry(), slot)
+        self.assertFalse(self.dialog.warning.isVisible())
+        self.assertEqual(self.dialog.save_button.geometry(), footer)
+
     def test_failed_save_keeps_dialog_open_enabled_and_preserves_points(self):
         self.controls.set_zone.side_effect = RuntimeError('offline')
         points = [[.1, .1], [.9, .1], [.9, .9]]

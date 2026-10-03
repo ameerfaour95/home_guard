@@ -4,7 +4,7 @@ import math
 
 from PySide6.QtCore import Qt, QPoint, QPointF, QRectF, QSize, Signal, QTimer, QVariantAnimation, QPropertyAnimation, QParallelAnimationGroup
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPixmap
-from PySide6.QtWidgets import QDialog, QWidget, QLabel, QPushButton, QHBoxLayout, QVBoxLayout, QProgressBar, QSizePolicy
+from PySide6.QtWidgets import QDialog, QWidget, QLabel, QPushButton, QHBoxLayout, QVBoxLayout, QStackedLayout, QProgressBar, QSizePolicy
 
 from . import motion
 from .camera_presentation import ambient_picture
@@ -72,6 +72,11 @@ class ZonePill(QPushButton):
     def sizeHint(self):
         return QSize(self.fontMetrics().horizontalAdvance(self.text()) + (64 if self.primary else 28), self.height())
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, '_busy_bar'):
+            self._busy_bar.setGeometry(24, self.height()-8, max(0, self.width()-48), 3)
+
     def target(self, name, value, duration):
         previous = getattr(self, '_' + name, None)
         if previous:
@@ -113,6 +118,9 @@ class ZonePill(QPushButton):
             p.setPen(QPen(QColor(foreground), 1.7, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
             check = QPainterPath(); check.moveTo(circle.center() + QPointF(-4, 0)); check.lineTo(circle.center() + QPointF(-1, 3)); check.lineTo(circle.center() + QPointF(5, -3)); p.drawPath(check)
             text_rect.adjust(28 if rtl else 0, 0, 0 if rtl else -28, 0)
+        if not self.isEnabled() and not self.primary:
+            p.setOpacity(1.)
+            foreground = alpha(t['muted'], .7)
         p.setPen(QColor(foreground)); p.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, self.text())
         if self.hasFocus() and self.property('keyboardFocus'):
             p.setBrush(Qt.BrushStyle.NoBrush); p.setPen(QPen(QColor(t['action']), 2)); p.drawRoundedRect(rect.adjusted(2, 2, -2, -2), rect.height()/2, rect.height()/2)
@@ -155,6 +163,32 @@ class FadingLabel(QLabel):
         p.setPen(self.palette().windowText().color())
         flags = self.alignment() | Qt.TextFlag.TextWordWrap
         p.drawText(self.contentsRect(), flags, self.text())
+
+
+class CoverageBar(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.fraction = 0.
+        self.whole = False
+        self.setFixedHeight(4)
+
+    def set_coverage(self, fraction, whole=False):
+        self.whole = whole
+        if getattr(self, 'animation', None): self.animation.stop()
+        self.animation = animate(self, self.fraction, fraction, motion.PANE_MS, self.advance)
+
+    def advance(self, value):
+        self.fraction = float(value); self.update()
+
+    def paintEvent(self, event):
+        t = colors(self)
+        p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        track = QPainterPath(); track.addRoundedRect(QRectF(self.rect()), 2, 2)
+        p.fillPath(track, QColor(t['raised'])); p.setClipPath(track)
+        width = self.width() * self.fraction
+        left = self.width()-width if self.layoutDirection() == Qt.LayoutDirection.RightToLeft else 0
+        p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor(t['muted' if self.whole else 'action']))
+        p.drawRoundedRect(QRectF(left, 0, width, 4), 2, 2)
 
 
 class ZoneStage(QWidget):
@@ -358,7 +392,7 @@ class ZoneEditorDialog(QDialog):
         column = QWidget(self); column.setMinimumWidth(282)
         column.setStyleSheet('background: transparent;')
         root.addWidget(column, 28)
-        side = QVBoxLayout(column); side.setContentsMargins(0, 12, 0, 8); side.setSpacing(16)
+        side = QVBoxLayout(column); side.setContentsMargins(0, 0, 0, 0); side.setSpacing(16)
         self.eyebrow = QLabel(tr('camera_zone_eyebrow', camera=name.replace('_', ' ').upper()).upper())
         self.eyebrow.setTextFormat(Qt.TextFormat.PlainText); self.eyebrow.setWordWrap(True)
         self.eyebrow.setStyleSheet(f'color: {t["muted"]}; font-size: 8.25pt; letter-spacing: 1.6px; font-weight: 600;')
@@ -371,35 +405,42 @@ class ZoneEditorDialog(QDialog):
         side.addWidget(help_text)
         side.addSpacing(18)
         self.status = FadingLabel(parent=column)
-        self.status.setMinimumHeight(68); self.status.setContentsMargins(14, 12, 14, 12)
+        self.status.setFixedHeight(24)
         self.status.setStyleSheet(f'color: {t["secondary"]}; font-size: 11.25pt;')
-        status_shell = QWidget(); status_shell.setStyleSheet(f'background: {t["raised"]}; border-radius: 14px;')
-        status_layout = QVBoxLayout(status_shell); status_layout.setContentsMargins(0, 0, 0, 0); status_layout.addWidget(self.status)
+        status_shell = QWidget(); status_shell.setStyleSheet(f'background: {t["surface"]}; border-radius: 14px;')
+        status_layout = QVBoxLayout(status_shell); status_layout.setContentsMargins(14, 14, 14, 14); status_layout.setSpacing(10)
+        status_layout.addWidget(self.status)
+        self.coverage = CoverageBar(); status_layout.addWidget(self.coverage)
+        self.corners = FadingLabel(); self.corners.setFixedHeight(18)
+        self.corners.setStyleSheet(f'color: {t["muted"]}; font-size: 13px;')
+        status_layout.addWidget(self.corners)
         side.addWidget(status_shell)
-        self.warning = FadingLabel(parent=column); self.warning.setMinimumHeight(76)
-        self.warning.chip_color = t['warning']
-        self.warning.setContentsMargins(12, 8, 12, 8)
-        self.warning.setStyleSheet(f'color: {t["warning"]}; font-size: 9.75pt;')
-        side.addWidget(self.warning)
+        message_slot = QWidget(); message_slot.setFixedHeight(76)
+        self.messages = QStackedLayout(message_slot); self.messages.setContentsMargins(0, 0, 0, 0)
+        self.warning = FadingLabel(); self.error = FadingLabel()
+        for chip, color in ((self.warning, 'warning'), (self.error, 'error')):
+            chip.chip_color = t[color]
+            chip.setContentsMargins(12, 8, 12, 8)
+            chip.setStyleSheet(f'color: {t[color]}; font-size: 13px;')
+            self.messages.addWidget(chip)
+        side.addWidget(message_slot)
         side.addStretch(1)
+        footer = QVBoxLayout(); footer.setSpacing(12)
         edits = QHBoxLayout(); edits.setSpacing(10)
         self.undo_button = ZonePill(tr('camera_zone_undo'), compact=True)
         self.clear_button = ZonePill(tr('camera_zone_clear'), compact=True)
+        self.undo_button.setFixedHeight(32); self.clear_button.setFixedHeight(32)
         edits.addWidget(self.undo_button); edits.addWidget(self.clear_button); edits.addStretch()
-        side.addLayout(edits)
+        footer.addLayout(edits)
         self.undo_button.clicked.connect(self.stage.undo); self.clear_button.clicked.connect(self.stage.clear)
         self.save_button = ZonePill(tr('camera_zone_save'), primary=True)
         self.cancel_button = ZonePill(tr('camera_zone_cancel'))
         buttons = QHBoxLayout(); buttons.setSpacing(10); buttons.addWidget(self.save_button, 3); buttons.addWidget(self.cancel_button, 2)
-        side.addLayout(buttons)
-        bar_slot = QWidget(); bar_slot.setFixedHeight(5)
-        bar_layout = QHBoxLayout(bar_slot); bar_layout.setContentsMargins(0, 0, 0, 0); bar_layout.setSpacing(10)
-        self.progress = QProgressBar(); self.progress.setRange(0, 0); self.progress.setTextVisible(False); self.progress.setFixedHeight(3)
+        footer.addLayout(buttons); side.addLayout(footer)
+        self.progress = QProgressBar(self.save_button); self.progress.setRange(0, 0); self.progress.setTextVisible(False); self.progress.setFixedHeight(3)
         self.progress.setStyleSheet(f'QProgressBar {{ background: {t["raised"]}; border: none; border-radius: 1px; }} QProgressBar::chunk {{ background: {t["action"]}; }}')
-        bar_layout.addWidget(self.progress, 3); bar_layout.addStretch(2); self.progress.hide(); side.addWidget(bar_slot)
+        self.progress.hide()
         self.save_button.setProperty('busyIndicator', 'bar'); self.save_button._busy_bar = self.progress
-        self.error = FadingLabel(parent=column); self.error.setMinimumHeight(44)
-        self.error.setStyleSheet(f'color: {t["error"]}; font-size: 9.75pt;'); side.addWidget(self.error)
         self.save_button.clicked.connect(self.save); self.cancel_button.clicked.connect(self.reject)
         self.stage.changed.connect(self.update_state)
         self.timer = QTimer(self); self.timer.setInterval(motion.HOVER_MS); self.timer.timeout.connect(self.poll)
@@ -409,8 +450,11 @@ class ZoneEditorDialog(QDialog):
     def update_state(self):
         count = len(self.stage.points)
         key = 'empty' if count == 0 else 'drawing' if count < 3 else 'closed'
-        self.status.change(tr('camera_zone_status_' + key))
+        self.status.change(tr('camera_zone_status_' + key, percent=round(self.stage.area()*100)))
+        self.coverage.set_coverage(1. if count == 0 else self.stage.area(), whole=count == 0)
+        self.corners.change(tr('camera_zone_one_corner' if count == 1 else 'camera_zone_corners', count=count) if count else '')
         self.warning.change(tr('camera_zone_small') if count >= 3 and self.stage.area() < .05 else '')
+        self.messages.setCurrentWidget(self.error if self.error.text() else self.warning)
         self.save_button.setEnabled(not self.saving and (count == 0 or count >= 3))
         self.undo_button.setEnabled(not self.saving and count > 0)
         self.clear_button.setEnabled(not self.saving and count > 0)
@@ -442,6 +486,7 @@ class ZoneEditorDialog(QDialog):
             self.saved_points = future.result()
         except Exception:
             self.error.change(tr('camera_zone_save_failed'))
+            self.update_state()
             return
         self.zone_saved.emit(self.saved_points)
         self.done(QDialog.DialogCode.Accepted)
