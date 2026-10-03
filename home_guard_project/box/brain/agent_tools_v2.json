@@ -104,5 +104,81 @@
     "description": "Fast responder only: give this message to the bigger model because it needs judgement or care.",
     "parameters": {"type": "object", "properties": {
       "reason": {"type": "string", "description": "A few words on why."}
-    }, "required": ["reason"]}}}
+    }, "required": ["reason"]}}},
+{
+  "type": "function",
+  "function": {
+    "name": "get_alert_settings",
+    "description": "What a camera (or the whole house) alerts on - people, vehicles, animals - and how sure the detector must be for each.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "camera": {
+          "type": "string",
+          "description": "A camera name or word for it, or \"house\"; omit for the whole house."
+        }
+      }
+    }
+  }
+},
+{
+  "type": "function",
+  "function": {
+    "name": "set_alert_types",
+    "description": "Change what a camera (or the house default) alerts on. Prefer changes: [\"+vehicle\"] adds vehicles, [\"-animal\"] removes animals; a full list replaces; for a camera [\"default\"] goes back to the house default. Only when this message asks for it.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "camera": {
+          "type": "string",
+          "description": "A camera name or word for it, or \"house\"."
+        },
+        "types": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "person / vehicle / animal, or +type / -type, or default."
+        },
+        "owner_words": {
+          "type": "string",
+          "description": "The owner's words asking for it, copied exactly from this message (two words or more)."
+        }
+      },
+      "required": [
+        "camera",
+        "types",
+        "owner_words"
+      ]
+    }
+  }
+},
+{
+  "type": "function",
+  "function": {
+    "name": "set_sensitivity",
+    "description": "Change how sure the detector must be, per type, for a camera or the house (percent 5-95, lower = more alerts); for a camera \"default\" goes back to the house values. Only when this message asks for it.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "camera": {
+          "type": "string",
+          "description": "A camera name or word for it, or \"house\"."
+        },
+        "values": {
+          "description": "{\"person\": 30} or \"default\"."
+        },
+        "owner_words": {
+          "type": "string",
+          "description": "The owner's words asking for it, copied exactly from this message (two words or more)."
+        }
+      },
+      "required": [
+        "camera",
+        "values",
+        "owner_words"
+      ]
+    }
+  }
+}
 ]

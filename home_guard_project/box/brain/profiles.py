@@ -23,10 +23,11 @@ PROMPTS_DIR = os.path.join(_DIR, "prompts")
 
 COMMON_TOOLS = ("find_events", "summarize_period", "check_camera", "record_clip", "send_media", "pause_alerts",
                 "resume_alerts", "set_camera_active", "set_alias", "change_setting", "record_verdict",
-                "ask_clarification", "reply")
+                "ask_clarification", "get_alert_settings", "set_alert_types", "set_sensitivity", "reply")
 GUARD_TOOLS = COMMON_TOOLS[:2] + ("assess_event",) + COMMON_TOOLS[2:]
 ASSISTANT_TOOLS = COMMON_TOOLS[:2] + ("describe_event",) + COMMON_TOOLS[2:]
-STATE_TOOLS = ("pause_alerts", "resume_alerts", "set_camera_active", "set_alias", "change_setting", "record_verdict")
+STATE_TOOLS = ("pause_alerts", "resume_alerts", "set_camera_active", "set_alias", "change_setting", "record_verdict",
+               "set_alert_types", "set_sensitivity")
 PROMPT_VERSIONS = {"guard": "2026-10-03.guard.v1", "assistant": "2026-10-03.assistant.v1"}
 
 # Messages that go straight to the big model, decided in code (the fast model would have to judge its own

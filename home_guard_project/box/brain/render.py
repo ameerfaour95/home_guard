@@ -125,6 +125,24 @@ def _receipt_line(receipt: Receipt, lang: str, retention_days: float) -> str:
                 raise ValueError("Invalid setting receipt text")
         return t("setting_changed", lang, setting=t(f"setting_{d.get('setting')}", lang), old=d.get("old", ""),
                  new=d.get("new", ""))
+    if receipt.tool in ("set_alert_types", "set_sensitivity"):
+        where = d.get("camera") or t("the_house", lang)
+        name = lambda kind: t(f"type_{kind}", lang) if f"type_{kind}" in TEMPLATES else kind  # noqa: E731
+        if receipt.tool == "set_alert_types":
+            if any(not isinstance(d.get(key), list) or not all(isinstance(k, str) for k in d[key])
+                   for key in ("old", "new")):
+                raise ValueError("invalid alert types receipt")
+            show = lambda types: ", ".join(name(k) for k in types or [])  # noqa: E731
+            return t("alert_types_changed", lang, camera=where, old=show(d.get("old")), new=show(d.get("new")))
+        for key in ("old", "new"):
+            if not isinstance(d.get(key), dict):
+                raise ValueError("invalid sensitivity receipt")
+            for kind, value in d[key].items():
+                if not isinstance(kind, str) or not 0.05 <= _nonnegative_number(value) <= 0.95:
+                    raise ValueError("invalid sensitivity receipt value")
+        show = lambda vals: ", ".join(f"{name(k)} {round(float(v) * 100)}%"  # noqa: E731
+                                      for k, v in sorted((vals or {}).items()))
+        return t("sensitivity_changed", lang, camera=where, old=show(d.get("old")), new=show(d.get("new")))
     return f"✓ {receipt.tool}"
 
 

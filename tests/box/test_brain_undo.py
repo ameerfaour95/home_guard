@@ -5,6 +5,7 @@ import datetime as dt
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import dataclasses
 
@@ -93,6 +94,59 @@ class UndoTest(unittest.TestCase):
     def test_no_undo_button_when_nothing_changed(self) -> None:
         agent = self.agent(Scripted([reply("Nothing was recorded today.")]))
         self.assertEqual(agent.handle("anything today?", "-5", {}).undo_token, "")
+
+    def test_expired_pause_is_never_restored(self):
+        from home_guard_project.box.feedback import Feedback
+        self.mute.apply(Feedback(action="mute", camera="back_door", mute_until=NOW + 7200), NOW)
+        agent = self.agent(Scripted([call("pause_alerts", camera="back", minutes=1,
+                                         owner_words="pause back"), reply("")]))
+        first = agent.handle("pause back", "-5")
+        self.tick(61)
+        undone = agent.undo_turn("-5", first.undo_token)
+        self.assertIn("Changed since", undone.text)
+        self.assertFalse(self.mute.is_muted(NOW, "back_door"))
+
+    def test_resume_one_rewrites_other_pause_entries(self):
+        agent = self.agent(Scripted([call("pause_alerts", camera="back", minutes=60,
+                                         owner_words="pause back"), reply("")]))
+        first = agent.handle("pause back", "-5")
+        self.tick(1)
+        agent.model = Scripted([call("pause_alerts", minutes=60, owner_words="pause house"), reply("")])
+        agent.handle("pause house", "-5")
+        # Same until as the earlier camera pause: only the later receipt reveals the rewrite.
+        self.mute.set_entry(None, START + 3600, NOW)
+        self.tick(2)
+        agent.model = Scripted([call("resume_alerts", camera="entrance"), reply("")])
+        agent.handle("resume entrance", "-5")
+        undone = agent.undo_turn("-5", first.undo_token)
+        self.assertIn("Changed since", undone.text)
+        self.assertTrue(self.mute.is_muted(NOW, "back_door"))
+
+    def test_pause_undo_reports_failed_or_silently_lost_disk_write(self):
+        for failure in (OSError("disk full"), None):
+            with self.subTest(failure=failure):
+                agent = self.agent(Scripted([call("pause_alerts", minutes=60,
+                                                 owner_words="pause house"), reply("")]))
+                first = agent.handle("pause house", "-5")
+                with patch("home_guard_project.box.feedback._write_json", side_effect=failure):
+                    undone = agent.undo_turn("-5", first.undo_token)
+                self.assertIn("Could not undo", undone.text)
+                self.assertEqual(undone.receipts[0].detail["undo_of"], "pause_alerts")
+                self.assertEqual(agent.book.turn_receipts("-5:" + first.undo_token)[0].status, "done")
+                self.tick(1)
+
+    def test_external_resume_survives_stale_instance_pause(self):
+        from home_guard_project.box.feedback import Feedback
+        self.mute.apply(Feedback(action="mute", camera="back_door", mute_until=NOW + 7200), NOW)
+        other = MuteState(self.mute.path)
+        other.resume("back_door", NOW)
+        # Force a distinct mtime even on filesystems with coarse clocks.
+        stamp = os.stat(self.mute.path).st_mtime_ns + 1000000000
+        os.utime(self.mute.path, ns=(stamp, stamp))
+        self.mute.apply(Feedback(action="mute", camera="front_side", mute_until=NOW + 3600), NOW)
+        stored = MuteState(self.mute.path)
+        self.assertFalse(stored.is_muted(NOW, "back_door"))
+        self.assertTrue(stored.is_muted(NOW, "front_side"))
 
 
 
@@ -357,6 +411,54 @@ class UndoRaceTest(UndoTest):
         self.assertTrue(t("undo_changed_since", "ar", what="X"))
         self.assertEqual(t("undo_failed", "en", what="X", reason="r"), "✗ Could not undo X: r")
         self.assertTrue(t("undo_failed", "he", what="X", reason="r").startswith("✗"))
+
+
+class MuteStateRefreshTest(unittest.TestCase):
+    def test_changed_malformed_files_are_contained_by_every_mutator(self):
+        import json
+        from home_guard_project.box.feedback import Feedback
+
+        with tempfile.TemporaryDirectory() as root:
+            path = os.path.join(root, "mute.json")
+            for raw in (b"\xff", b"[]", b'{"all":"bad","cameras":[]}',
+                        b'{"all":NaN,"cameras":{"back_door":Infinity}}'):
+                for method in ("apply", "resume", "set_entry", "restore", "snapshot"):
+                    with self.subTest(raw=raw, method=method):
+                        mute = MuteState(path)
+                        with open(path, "wb") as f:
+                            f.write(raw)
+                        stamp = os.stat(path).st_mtime_ns + 1000000000
+                        os.utime(path, ns=(stamp, stamp))
+                        if method == "apply":
+                            mute.apply(Feedback(action="mute", camera="front_side", mute_until=NOW + 60), NOW)
+                        elif method == "resume":
+                            mute.resume("back_door", NOW)
+                        elif method == "set_entry":
+                            self.assertTrue(mute.set_entry("front_side", NOW + 60, NOW))
+                        elif method == "restore":
+                            mute.restore({"all": 0, "cameras": {"front_side": NOW + 60}}, NOW)
+                        state = mute.snapshot()
+                        json.dumps(state, allow_nan=False)
+                        self.assertEqual(state["all"], 0)
+                        self.assertNotIn("back_door", state["cameras"])
+
+    def test_malformed_mutator_arguments_and_write_errors_are_contained(self):
+        from home_guard_project.box.feedback import Feedback
+
+        with tempfile.TemporaryDirectory() as root:
+            mute = MuteState(os.path.join(root, "mute.json"))
+            for bad in ([], "bad", float("nan"), float("inf"), object()):
+                with self.subTest(bad=bad):
+                    mute.apply(Feedback(action="mute", mute_until=bad), NOW)
+                    mute.resume([], bad)
+                    mute.restore([], bad)
+                    with self.assertRaises((ValueError, TypeError)):
+                        mute.set_entry(None, bad, NOW)
+                    self.assertEqual(mute.snapshot(), {"all": 0, "cameras": {}})
+            # Serialization failures take the same contained persistence path as a failed disk write.
+            with patch("home_guard_project.box.feedback._write_json", side_effect=TypeError("not serializable")):
+                self.assertFalse(mute.set_entry("front_side", NOW + 60, NOW))
+            self.assertEqual(mute.snapshot(), {"all": 0, "cameras": {}})
 
 
 if __name__ == "__main__":

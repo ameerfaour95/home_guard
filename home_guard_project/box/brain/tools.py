@@ -78,6 +78,7 @@ class Services:
     max_mute_hours: float = MAX_MUTE_HOURS
     set_option: Optional[Callable[[str, str], Any]] = None
     read_settings: Optional[Callable[[], Dict[str, Any]]] = None
+    alert_settings: Any = None
 
 
 @dataclass
@@ -872,6 +873,135 @@ def change_setting(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     return _result(_issue(ctx, "change_setting", DONE, name, {"setting": name, "old": before, "new": after,
                                                              "restore": restore, "wrote": wrote}))
 
+# -- alert types and sensitivity (logic in box/alert_settings.py, shared with v1) ---------------------------
+def _alert_types(value: Any) -> List[str]:
+    words = value.split(",") if isinstance(value, str) else value
+    if not isinstance(words, list) or not words or not all(isinstance(w, str) for w in words):
+        raise ValueError("types must be a list or comma-separated string")
+    words = [w.strip().casefold() for w in words]
+    if any(w not in ("person", "vehicle", "animal", "default", "+person", "-person",
+                     "+vehicle", "-vehicle", "+animal", "-animal") for w in words):
+        raise ValueError("types must be person, vehicle or animal, changes, or default")
+    if any(w.startswith(("+", "-")) for w in words):
+        if not all(w.startswith(("+", "-")) for w in words) or any(
+                "+" + k in words and "-" + k in words for k in ("person", "vehicle", "animal")):
+            raise ValueError("use unambiguous changes or a complete type list")
+    elif "default" in words and words != ["default"]:
+        raise ValueError("default must be used alone")
+    return list(dict.fromkeys(words))
+
+
+def _alert_values(value: Any) -> Any:
+    if isinstance(value, str) and value.strip().casefold() == "default":
+        return "default"
+    if not isinstance(value, dict) or not value:
+        raise ValueError("values must be a type-to-number object or default")
+    out = {}
+    for key, raw in value.items():
+        if not isinstance(key, str) or key.strip().casefold() not in ("person", "vehicle", "animal"):
+            raise ValueError("unknown sensitivity type")
+        if isinstance(raw, bool) or not isinstance(raw, (str, int, float)):
+            raise ValueError("sensitivity must be a number")
+        number = _finite(str(raw).strip().rstrip("%"))
+        number = number / 100 if number > 1 else number
+        if not 0.05 <= number <= 0.95:
+            raise ValueError("sensitivity must be between 5 and 95 percent")
+        kind = key.strip().casefold()
+        if kind in out and out[kind] != number:
+            raise ValueError("conflicting sensitivity values")
+        out[kind] = number
+    return out
+
+
+def _alert_state(state: Any, camera: Optional[str]) -> Dict[str, Any]:
+    """Validate and detach API state before using it as restore data or a confirmation."""
+    state = json.loads(json.dumps(state, allow_nan=False))
+    if not isinstance(state, dict):
+        raise ValueError("alert settings must be an object")
+    rows = [state] if camera is not None else [state["house"], *state["cameras"]]
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ValueError("alert settings row must be an object")
+        for key in ("alert_on", "own_alert_on"):
+            value = row.get(key)
+            if key == "own_alert_on" and value is None:
+                continue
+            if not isinstance(value, list) or not value or any(
+                    k not in ("person", "vehicle", "animal") for k in value):
+                raise ValueError("invalid alert types in state")
+        for key in ("sensitivity", "own_sensitivity"):
+            value = row.get(key)
+            if key == "own_sensitivity" and value is None:
+                continue
+            if not isinstance(value, dict) or not value or _alert_values(value) != value:
+                raise ValueError("invalid sensitivity in state")
+    return state
+
+
+def _alert_target(ctx: ToolContext, words: Any) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+    """``(camera name or None for the house, None)`` or ``(None, error)``."""
+    if words is not None and not isinstance(words, str):
+        return None, _err("camera must be a camera name or house")
+    text = str(words or "").strip()
+    if not text or text.casefold() in ("house", "the house", "default", "בית", "הבית", "כל הבית"):
+        return None, None
+    camera, bad = _one_camera(ctx, text)
+    return camera, bad
+
+
+@_safe_tool
+def get_alert_settings(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+    if ctx.services.alert_settings is None:
+        return _err("alert settings are not available on this box")
+    camera, bad = _alert_target(ctx, args.get("camera"))
+    if bad:
+        return bad
+    try:
+        return dict(_alert_state(ctx.services.alert_settings.get_alert_settings(camera), camera), ok=True)
+    except ValueError as exc:
+        return _err(str(exc))
+
+
+def _change_alerts(ctx: ToolContext, args: Dict[str, Any], tool: str, key: str, value: Any) -> Dict[str, Any]:
+    if not quoted_from(str(args.get("owner_words") or ""), ctx.text):
+        return _err("Not changed: change alert settings only when this message asks for it; owner_words must be "
+                    "copied from it (two words or more).")
+    if ctx.services.alert_settings is None:
+        return _err("alert settings are not available on this box")
+    camera, bad = _alert_target(ctx, args.get("camera"))
+    if bad:
+        return bad
+    api = ctx.services.alert_settings
+    own_key = "own_alert_on" if key == "alert_on" else "own_sensitivity"
+    detail: Dict[str, Any] = {"camera": camera or ""}
+    try:
+        value = _alert_types(value) if key == "alert_on" else _alert_values(value)
+        before = _alert_state(api.get_alert_settings(camera), camera)
+        old = before["house"][key] if camera is None else before[key]
+        detail.update(old=old, own_before=None if camera is None else before.get(own_key))
+        if camera is None:
+            detail["house_before"] = old
+        after = api.set_alert_types(camera, value) if tool == "set_alert_types" else api.set_sensitivity(camera, value)
+        after = _alert_state(after, camera)
+        detail["new"] = after["house"][key] if camera is None else after[key]
+        if camera is not None:
+            detail["own_after"] = after.get(own_key)
+    except Exception as exc:
+        log.warning("Alert setting change failed: %s", exc)
+        return _result(_issue(ctx, tool, FAILED, camera or "house", detail, str(exc)))
+    return _result(_issue(ctx, tool, DONE, camera or "house", detail), state=after)
+
+
+@_safe_tool
+def set_alert_types(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+    return _change_alerts(ctx, args, "set_alert_types", "alert_on", args.get("types"))
+
+
+@_safe_tool
+def set_sensitivity(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+    return _change_alerts(ctx, args, "set_sensitivity", "sensitivity", args.get("values"))
+
+
 TOOLS: Dict[str, Callable[[ToolContext, Dict[str, Any]], Dict[str, Any]]] = {
     "find_events": find_events,
     "summarize_period": summarize_period,
@@ -887,4 +1017,7 @@ TOOLS: Dict[str, Callable[[ToolContext, Dict[str, Any]], Dict[str, Any]]] = {
     "set_camera_active": set_camera_active,
     "set_alias": set_alias,
     "change_setting": change_setting,
+    "get_alert_settings": get_alert_settings,
+    "set_alert_types": set_alert_types,
+    "set_sensitivity": set_sensitivity,
 }

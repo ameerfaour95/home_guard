@@ -29,7 +29,7 @@ UNDONE = "undone"
 
 ACTING_TOOLS = frozenset({
     "send_media", "check_camera", "record_clip", "pause_alerts", "resume_alerts",
-    "set_camera_active", "record_verdict", "set_alias", "change_setting",
+    "set_camera_active", "record_verdict", "set_alias", "change_setting", "set_alert_types", "set_sensitivity",
 })
 
 

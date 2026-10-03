@@ -16,6 +16,17 @@ SUPPORTED_LANGS = ("en", "he")   # what the assistant speaks today; the Arabic s
 LANGUAGE_NAMES = {"en": "English", "he": "Hebrew", "ar": "Arabic"}
 
 TEMPLATES: Dict[str, Dict[str, str]] = {
+    "alert_types_changed": {"en": "✓ {camera} alerts on: {old} → {new}", "he": "✓ {camera} מתריעה על: {old} ← {new}",
+                            "ar": "✓ {camera} تنبه على: {old} ← {new}"},
+    "sensitivity_changed": {"en": "✓ {camera} detector sureness: {old} → {new}",
+                            "he": "✓ {camera} רמת הוודאות של הזיהוי: {old} ← {new}",
+                            "ar": "✓ {camera} درجة يقين الكشف: {old} ← {new}"},
+    "type_person": {"en": "people", "he": "אנשים", "ar": "أشخاص"},
+    "type_vehicle": {"en": "vehicles", "he": "רכבים", "ar": "مركبات"},
+    "type_animal": {"en": "animals", "he": "בעלי חיים", "ar": "حيوانات"},
+    "the_house": {"en": "the house", "he": "הבית", "ar": "المنزل"},
+    "what_set_alert_types": {"en": "Changing the alert types", "he": "שינוי סוגי ההתראות", "ar": "تغيير أنواع التنبيهات"},
+    "what_set_sensitivity": {"en": "Changing the sensitivity", "he": "שינוי הרגישות", "ar": "تغيير الحساسية"},
     "undo_button": {"en": "↩ Undo", "he": "↩ ביטול", "ar": "↩ تراجع"},
     "nothing_to_undo": {"en": "There is nothing left to undo here.", "he": "אין כאן מה לבטל.",
                         "ar": "لا يوجد ما يمكن التراجع عنه هنا."},

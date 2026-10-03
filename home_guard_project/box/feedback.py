@@ -377,7 +377,21 @@ class MuteState:
 
     def __init__(self, path: str) -> None:
         self.path = path
+        self._mtime = self._stamp()
         self._all, self._cameras = _pause_state(_read_json(path))
+
+    def _stamp(self):
+        try:
+            stat = os.stat(self.path)
+            return stat.st_mtime_ns, stat.st_size, stat.st_ino
+        except OSError:
+            return None
+
+    def _refresh(self) -> None:
+        stamp = self._stamp()
+        if stamp != self._mtime:
+            self._all, self._cameras = _pause_state(_read_json(self.path))
+            self._mtime = stamp
 
     def muted_until(self, now: float, camera: str) -> Optional[float]:
         until = max(self._all, self._cameras.get(camera, 0.0))
@@ -388,17 +402,28 @@ class MuteState:
 
     def apply(self, feedback: Feedback, now: float) -> None:
         """Carry out a pause or a resume. Any other feedback changes nothing."""
+        self._refresh()
+        try:
+            now = _finite_number(now)
+            if not isinstance(feedback, Feedback):
+                raise ValueError("feedback must be Feedback")
+            if feedback.camera is not None and not isinstance(feedback.camera, str):
+                raise ValueError("camera must be a name")
+            until = _finite_number(feedback.mute_until or 0)
+        except (TypeError, ValueError, OverflowError) as exc:
+            log.warning("Cannot pause alerts: %s", exc)
+            return
         if feedback.action == "mute" and feedback.mute_until:
             if feedback.camera:
-                self._cameras[feedback.camera] = feedback.mute_until
+                self._cameras[feedback.camera] = until
             else:
-                self._all = feedback.mute_until
+                self._all = until
         elif feedback.action == "resume":
             self._all, self._cameras = 0.0, {}
         else:
             return
         self._cameras = {k: v for k, v in self._cameras.items() if v > now}
-        _write_json(self.path, {"all": self._all, "cameras": self._cameras})
+        self._save()
 
     def resume(self, camera: Optional[str], now: float, cameras: Sequence[str] = ()) -> None:
         """Turn alerts back on for *camera*, or for every camera when None.
@@ -406,6 +431,7 @@ class MuteState:
         Resuming one camera while all cameras are paused keeps the others paused:
         the all-camera pause becomes a pause per camera (*cameras* lists them).
         """
+        self._refresh()
         try:
             now = _finite_number(now)
             if camera is not None and (not isinstance(camera, str) or not camera):
@@ -431,9 +457,11 @@ class MuteState:
 
     def snapshot(self) -> Dict[str, Any]:
         """The whole pause state, to put back later (Undo)."""
+        self._refresh()
         return {"all": self._all, "cameras": dict(self._cameras)}
 
     def restore(self, snapshot: Dict[str, Any], now: float) -> None:
+        self._refresh()
         try:
             now = _finite_number(now)
         except (TypeError, ValueError, OverflowError) as exc:
@@ -443,9 +471,10 @@ class MuteState:
         self._cameras = {k: v for k, v in cameras.items() if v > now}
         self._save()
 
-    def set_entry(self, camera: Optional[str], until: float, now: float) -> None:
+    def set_entry(self, camera: Optional[str], until: float, now: float) -> bool:
         """Set one pause entry - *camera*'s, or the whole house's when None - to *until*; a past *until* removes it.
-        Every other entry is left alone (Undo of one turn). Raises ValueError on bad input."""
+        Every other entry is left alone. Returns False if persistence fails; raises ValueError on bad input."""
+        self._refresh()
         now, until = _finite_number(now), _finite_number(until)
         if camera is not None and (not isinstance(camera, str) or not camera):
             raise ValueError("camera must be a name or None")
@@ -456,13 +485,25 @@ class MuteState:
         else:
             self._cameras.pop(camera, None)
         self._cameras = {k: v for k, v in self._cameras.items() if v > now}
-        self._save()
+        saved = self._save()
+        if not saved:
+            # Keep failed Undo retryable against the state that actually survived on disk.
+            self._all, self._cameras = _pause_state(_read_json(self.path))
+            self._mtime = self._stamp()
+        return saved
 
-    def _save(self) -> None:
+    def _save(self) -> bool:
         try:
-            _write_json(self.path, self.snapshot())
+            desired = {"all": self._all, "cameras": dict(self._cameras)}
+            _write_json(self.path, desired)
+            with open(self.path, encoding="utf-8") as f:
+                if json.load(f) != desired:
+                    raise ValueError("pause state read-back differs")
+            self._mtime = self._stamp()
+            return True
         except Exception as exc:  # noqa: BLE001 - pause persistence must not stop polling
             log.warning("Pause state not saved: %s", exc)
+            return False
 
 
 class AlertIndex:

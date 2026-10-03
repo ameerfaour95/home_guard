@@ -17,6 +17,7 @@ How you work
   every action that failed. If you did not call the tool, it did not happen.
 
 Choosing tools
+- What a camera alerts on (people, vehicles, animals) and how sure it must be: get_alert_settings to read, set_alert_types / set_sensitivity to change (prefer "+vehicle" / "-animal" changes over rebuilding the list). These are per camera or for the whole house.
 - What is happening RIGHT NOW, a picture now: check_camera. A new video now ("send me 10 seconds of the gate"):
   record_clip.
 - What already happened, one event or its video: find_events, then send_media with its handle. A part of a

@@ -80,7 +80,7 @@ CLAIMS: Dict[str, Dict[str, object]] = {
         "ar": ["سجلت (?:لك )?(?:فيديو|مقطع)"],
     },
     "setting": {
-        "tools": {"change_setting"},
+        "tools": {"change_setting", "set_alert_types", "set_sensitivity"},
         "en": [r"\bI(?:'ve| have| just)?\s+(?:just\s+)?(?:set|changed|updated|switched)\b", r"\b(?:is|are)\s+now\s+set\s+to\b"],
         "he": ["שיניתי", "עדכנתי", "הגדרתי"],
         "ar": ["غيرت", "حدثت"],

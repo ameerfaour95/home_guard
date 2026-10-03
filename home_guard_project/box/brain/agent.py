@@ -35,11 +35,12 @@ from .mode import hhmm
 from .registry import render_block, resolve_camera
 from .render import receipt_line, render_reply, undo_what
 from .tools import DEFAULTS, TOOLS, KEYS, Services, ToolContext, _issue, settings_line
+from .tools import _alert_state, _alert_target, _alert_types, _alert_values
 
 log = logging.getLogger("box.brain.agent")
 
 FAST, BIG = "fast", "big"
-UNDOABLE = ("pause_alerts", "set_camera_active", "change_setting")
+UNDOABLE = ("pause_alerts", "set_camera_active", "change_setting", "set_alert_types", "set_sensitivity")
 
 
 def _finite(value: Any) -> float:
@@ -148,8 +149,8 @@ def _touches_pause(entry: Optional[str], later: Receipt) -> bool:
     if later.tool == "pause_alerts":
         return camera == entry
     if later.tool == "resume_alerts":
-        # Resuming everything clears every entry; resuming one camera clears its entry and rewrites the house's.
-        return camera is None or entry is None or camera == entry
+        # A one-camera resume can replace a house pause with entries for every other camera.
+        return True
     return False
 
 
@@ -190,12 +191,19 @@ def _effective(ctx: ToolContext, name: str, args: Dict[str, Any]) -> str:
     explanatory fields left out - so "front" and "the front camera" are the same action."""
     out: Dict[str, Any] = {}
     cameras: set = set()
+    alert_change = name in ("set_alert_types", "set_sensitivity")
     for key, value in args.items():
         if key in _NOT_PART_OF_THE_ACTION or value is None or value == "" or value == []:
             continue
         if key in ("camera", "cameras"):
             items = value if isinstance(value, list) else [value]
             for v in items:
+                if alert_change:
+                    camera, bad = _alert_target(ctx, v)
+                    if not bad:
+                        if camera:
+                            cameras.add(camera)
+                        continue
                 if ctx.snapshot is not None:
                     cameras.add(resolve_camera(ctx.snapshot, str(v)).camera or str(v))
                 else:
@@ -203,6 +211,14 @@ def _effective(ctx: ToolContext, name: str, args: Dict[str, Any]) -> str:
             continue
         if key == "handle":
             value = str(value).strip().upper()
+        if alert_change:
+            try:
+                if key == "types":
+                    value = sorted(_alert_types(value))
+                elif key == "values":
+                    value = _alert_values(value)
+            except (TypeError, ValueError, OverflowError):
+                pass  # Invalid arguments stay distinct and are refused by the tool.
         out[key] = value
     if cameras:
         out["cameras"] = sorted(cameras)
@@ -232,7 +248,7 @@ def _effective(ctx: ToolContext, name: str, args: Dict[str, Any]) -> str:
 def _undo_token(ctx: ToolContext) -> str:
     return ctx.turn_id.rsplit(":", 1)[-1] if any(
         r.tool in UNDOABLE and r.status in (DONE, REQUESTED) and isinstance(r.detail, dict)
-        and not r.detail.get("already") for r in ctx.receipts) else ""
+        and not r.detail.get("already") and not r.detail.get("undo_of") for r in ctx.receipts) else ""
 
 
 def _fallback_reply(ctx: Optional[ToolContext], lang: str) -> AgentReply:
@@ -408,7 +424,8 @@ class OwnerAgentV2:
                 processed = 0
                 lines: List[str] = []
                 for r in reversed(self.book.turn_receipts(f"{chat_id}:{token}")):     # newest first
-                    if r.tool not in UNDOABLE or r.status not in (DONE, REQUESTED) or r.detail.get("already"):
+                    if (r.tool not in UNDOABLE or r.status not in (DONE, REQUESTED)
+                            or r.detail.get("already") or r.detail.get("undo_of")):
                         continue
                     processed += 1
                     first = len(ctx.receipts)
@@ -457,12 +474,13 @@ class OwnerAgentV2:
             held = []
             for entry, until in entries:
                 now_until = current["all"] if entry is None else current["cameras"].get(entry, 0.0)
-                if float(now_until) == until and not any(_touches_pause(entry, x) for x in later):
+                if until > now and float(now_until) == until and not any(_touches_pause(entry, x) for x in later):
                     held.append(entry)
             if not held:
                 raise _ChangedSince()
             for entry in held:                        # only this turn's entries; every other pause is untouched
-                self.services.mute.set_entry(entry, earlier.get(entry, 0.0), now)
+                if self.services.mute.set_entry(entry, earlier.get(entry, 0.0), now) is False:
+                    raise ValueError("pause restore was not saved")
             for entry in held:
                 detail: Dict[str, Any] = {"camera": entry or "", "undo_of": "pause_alerts"}
                 if entry:
@@ -496,7 +514,47 @@ class OwnerAgentV2:
                     "undo_of": "set_camera_active"})
             if self.services.request_restart and self.services.request_restart not in ctx.after_reply:
                 ctx.after_reply.append(self.services.request_restart)
-        else:
+        elif r.tool in ("set_alert_types", "set_sensitivity"):
+            api = self.services.alert_settings
+            camera = d.get("camera") or None
+            key = "alert_on" if r.tool == "set_alert_types" else "sensitivity"
+            own_key = "own_alert_on" if key == "alert_on" else "own_sensitivity"
+            if camera is not None and not isinstance(camera, str):
+                raise ValueError("invalid alert restore camera")
+            if "new" not in d or "own_before" not in d or (camera is not None and "own_after" not in d):
+                raise ValueError("missing alert restore data")
+            back = d["house_before"] if camera is None else d["own_before"]
+            if camera is None and back is None:
+                raise ValueError("missing house restore data")
+            if back is not None:
+                # Receipts hold exact stored values, never commands such as default or +animal.
+                if key == "alert_on":
+                    if not isinstance(back, list) or not back or any(
+                            kind not in ("person", "vehicle", "animal") for kind in back):
+                        raise ValueError("invalid alert types restore data")
+                elif not isinstance(back, dict) or _alert_values(back) != back:
+                    raise ValueError("invalid sensitivity restore data")
+            current = _alert_state(api.get_alert_settings(camera), camera)
+            row = current["house"] if camera is None else current
+            if (row[key] != d["new"] or (camera is not None and row.get(own_key) != d["own_after"])
+                    or any(x.tool == r.tool and (x.detail.get("camera") or None) == camera for x in later)):
+                raise _ChangedSince()
+            if r.tool == "set_alert_types":
+                after = api.set_alert_types(camera, ["default"] if back is None else back)
+            elif camera is None:
+                after = api.set_sensitivity(None, back)
+            else:
+                # Camera sensitivity updates merge: clear before restoring the exact partial override.
+                after = api.set_sensitivity(camera, "default")
+                if back is not None:
+                    after = api.set_sensitivity(camera, back)
+            after = _alert_state(after, camera)
+            row = after["house"] if camera is None else after
+            if (row[key] if camera is None else row.get(own_key)) != back:
+                raise ValueError("alert restore was not saved")
+            _issue(ctx, r.tool, DONE, camera or "house",
+                   {"camera": camera or "", "old": d["new"], "new": row[key], "undo_of": r.tool})
+        elif r.tool == "change_setting":
             setting = d.get("setting")
             restore, wrote = d.get("restore"), d.get("wrote")
             keys = KEYS.get(setting, ()) if isinstance(setting, str) else ()
@@ -707,7 +765,7 @@ def _budgeted(vision: Any, limit: int, path: str, wrapper: Any) -> Any:
 def build_owner_agent(box_settings: Dict[str, Any], env: Dict[str, str], mute: Any, cfg: Any, live_dir: str,
                       archive_dir: str, log_dir: str, feed: Any = None) -> Tuple[Optional[OwnerAgentV2], Any]:
     """The production agent and its Telegram deliverer (the agent is None when no model key is set)."""
-    from .. import boxconfig  # noqa: PLC0415
+    from .. import alert_settings, boxconfig  # noqa: PLC0415
     from ..embeddings import make_embedder  # noqa: PLC0415
     from ..find_cameras import _restart_running_mode, apply_changes  # noqa: PLC0415
     from ..telegram_agent import alert_roots  # noqa: PLC0415
@@ -752,6 +810,7 @@ def build_owner_agent(box_settings: Dict[str, Any], env: Dict[str, str], mute: A
         request_restart=_restart_running_mode,
         embedder=make_embedder(env, os.path.join(live_dir, ".alert_embeddings.json")),
         retention_days=retention, set_option=boxconfig.set_option, read_settings=boxconfig.load_box_settings,
+        alert_settings=alert_settings,
     )
     def quiet_log_on() -> bool:
         return bool(boxconfig.load_box_settings().get("quiet_log", False))
