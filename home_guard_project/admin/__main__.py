@@ -141,7 +141,28 @@ def main():
                     app.exit(2); return
                 wizard.reject(); shell.navigate('Audit'); stage[0] = 7
             elif stage[0] == 7 and shell.screens['Audit'].loaded_once:
-                app.exit(0 if shell.screens['Audit'].model.items else 2)
+                if not shell.screens['Audit'].model.items:
+                    app.exit(2); return
+                shell.open_label(101); stage[0] = 8
+            elif stage[0] == 8 and shell.label_page.doc and not shell.label_page.canvas.image.isNull():
+                view = shell.label_page
+                view.doc.accept_all(); view.doc.selected = view.doc.tracks[0].track_id
+                view.description.setPlainText('A person approaches the entrance. Verified in the packaged Label editor.')
+                view.seek(36); stage[0] = 9
+            elif stage[0] == 9 and shell.label_page.pending_frame is None:
+                view = shell.label_page
+                if view.doc.frame != 36:
+                    app.exit(2); return
+                view.doc.set_enabled(); view.save(); stage[0] = 10
+            elif stage[0] == 10 and shell.label_page.doc.annotation.version == 1:
+                view = shell.label_page
+                view.queue = [view.recording]; view.queue_index = 0
+                view.submit(); stage[0] = 11
+            elif stage[0] == 11 and shell.label_page.doc.annotation.status == 'submitted':
+                view = shell.label_page
+                view.review_note.setText('Packaged annotation workflow verified.'); view.review('accept'); stage[0] = 12
+            elif stage[0] == 12 and shell.label_page.doc.annotation.status == 'reviewed':
+                app.exit(0)
         smoke_timer = QTimer(window)
         smoke_timer.setInterval(100); smoke_timer.timeout.connect(verify); smoke_timer.start()
     result = app.exec()

@@ -123,4 +123,10 @@ class TimelineDelegate(QStyledItemDelegate):
                                p.fontMetrics().elidedText(lines[1], Qt.TextElideMode.ElideRight, rect.width()))
         if selected and col == 0:
             p.fillRect(option.rect.x(), option.rect.y(), 2, option.rect.height(), QColor(t['action']))
+        if col == 0:
+            text = (e.annotation_status or 'new').title()
+            chip = QRectF(rect.x(), rect.bottom()-18, 88, 19)
+            p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor(t['bubble'])); p.drawRoundedRect(chip, 3, 3)
+            p.setPen(QColor(t['error'] if e.annotation_status == 'rejected' else t['action']))
+            p.setFont(QFont('Segoe UI', 8)); p.drawText(chip, Qt.AlignmentFlag.AlignCenter, text)
         p.restore()

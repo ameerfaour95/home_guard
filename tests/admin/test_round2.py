@@ -194,7 +194,7 @@ def test_role_tabs_dispatch_raw_and_owner_text(role, widgets, wait):
         assert view.record.dispatch_label is None and view.raw is None
         assert not any('Owner raw text' in s for s in disclosures)
         assert screen.name.text().startswith('customer-') and view.recording.camera.startswith('cam-')
-        assert view.record.frames and view.record.raw_answers
+        assert view.record.frames and not view.record.raw_answers
     else:
         assert 'Conversation' in names and 'Access' in names
         assert view.record.dispatch_label is not None

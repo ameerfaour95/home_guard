@@ -98,7 +98,7 @@ def test_totp_auto_advance_and_paste(widgets, app, tmp_path):
     assert screen.totp.code() == '654321'
 
 
-@pytest.mark.parametrize('role,expected', [('admin', ['Fleet', 'Review', 'Studio', 'Audit']), ('support', ['Fleet', 'Review', 'Studio']), ('labeler', ['Review', 'Studio'])])
+@pytest.mark.parametrize('role,expected', [('admin', ['Fleet', 'Review', 'Studio', 'Label', 'Audit']), ('support', ['Fleet', 'Review', 'Studio']), ('labeler', ['Label', 'Review', 'Studio'])])
 def test_role_navigation(role, expected, widgets, wait):
     class CountBackend(DemoBackend):
         calls = 0
@@ -115,7 +115,7 @@ def test_role_navigation(role, expected, widgets, wait):
         shell.open_customer(1)
         shell.open_palette()
         assert shell.customer_page is None and shell.palette_dialog is not None
-        assert shell.pages.currentWidget() is shell.screens['Studio']
+        assert shell.pages.currentWidget() is shell.screens['Label']
     else:
         wait(lambda: shell.fleet.snapshot is not None)
 

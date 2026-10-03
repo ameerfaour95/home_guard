@@ -64,11 +64,13 @@ class StudioScreen(QWidget):
         self.filter_table.selectionModel().currentRowChanged.connect(self.count_filter)
         self.filter_table.doubleClicked.connect(self.open_filter)
         action = QHBoxLayout(); action.addWidget(label('Exact totals are checked on selection. Very large results are capped at 10,000.','muted')); action.addStretch()
-        action.addWidget(button('Open in Review',self.open_filter,'primary')); filters.addLayout(action)
+        action.addWidget(button('Open selected view',self.open_filter,'primary')); filters.addLayout(action)
         self.tabs.addTab(filters_page,'Saved filters')
         collections_page = QWidget(); collections = QVBoxLayout(collections_page); collections.setContentsMargins(0,12,0,0); collections.setSpacing(12)
         tools = QHBoxLayout(); self.back = button('← All collections',self.close_collection,'link'); self.back.hide(); tools.addWidget(self.back)
         tools.addStretch(); tools.addWidget(button('New collection',self.new_collection)); collections.addLayout(tools)
+        self.publish_button = button('Publish as tagging batch', self.open_publish, 'primary')
+        self.publish_button.hide(); tools.addWidget(self.publish_button)
         self.collection_stack = QStackedWidget(); collections.addWidget(self.collection_stack,1)
         self.collection_model = RowsModel([('Collection',lambda c:c.name),('Description',lambda c:c.description),('Events',lambda c:c.event_count),('Created by',lambda c:c.created_by),('Created',lambda c:local_time(c.created_utc,'UTC'))])
         self.collection_table = data_table(self.collection_model,1)
@@ -96,6 +98,10 @@ class StudioScreen(QWidget):
         self.copy.setEnabled(False); self.manifest.setEnabled(False); actions.addWidget(self.copy); actions.addWidget(self.manifest); actions.addStretch(); exports.addLayout(actions)
         self.export_table.selectionModel().currentRowChanged.connect(self.export_selected)
         self.tabs.addTab(history,'Export history'); self.tabs.setTabVisible(2,role != 'support')
+        if role == 'admin':
+            from .publish import PublishList
+            self.publishes = PublishList(backend, theme); self.publishes.session_expired.connect(self.session_expired)
+            self.tabs.addTab(self.publishes, 'Tagging batches')
         self.runner = TaskRunner(self); self.runner.finished.connect(self.loaded)
         self.count_runner = TaskRunner(self); self.count_runner.finished.connect(self.count_loaded)
         self.manifest_runner = TaskRunner(self); self.manifest_runner.finished.connect(self.manifest_loaded)
@@ -178,10 +184,20 @@ class StudioScreen(QWidget):
             self.grid.session_expired.connect(self.session_expired, Qt.ConnectionType.UniqueConnection)
             self.grid.open(self.collection_model.items[index.row()]); self.collection_stack.setCurrentWidget(self.grid); self.back.show()
             self.open_collection_button.hide()
+            self.publish_button.setVisible(self.role == 'admin')
 
     def close_collection(self):
+        self.publish_button.hide()
         self.collection_stack.setCurrentWidget(self.collection_table); self.back.hide()
         self.open_collection_button.show()
+
+    def open_publish(self):
+        if self.role != 'admin' or not self.grid.collection: return
+        from .publish import PublishDialog
+        self.publish_dialog = PublishDialog(self.backend, self.grid.collection, self)
+        self.publish_dialog.session_expired.connect(self.session_expired)
+        self.publish_dialog.published.connect(lambda _: self.tabs.setCurrentWidget(self.publishes))
+        self.publish_dialog.show()
 
     def open_export(self):
         if self.role == 'support': return

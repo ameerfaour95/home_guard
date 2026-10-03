@@ -10,6 +10,9 @@ from .backend import (AuthError, LoginError, ForbiddenError, OfflineError, Serve
                       RateLimitError, TlsError, ConfigurationError, UnsupportedError, BackendError)
 from .models import ExportPreview, IndexProblem
 from .backend import ValidationError
+from .backend import ConflictError
+from .models import AnnotationOut, AnnotationVersion, PublishOut
+from dataclasses import asdict
 from .models import SavedFilter, CollectionOut, ExportOut, AuditPage, DensityOut, ReviewCount
 from .models import TokenPair, StaffOut, FleetResponse, CustomerOut, EventPage, EventDetail, EventSummary, DetectionsOut, MediaAccess, decode
 
@@ -68,6 +71,10 @@ class HttpBackend:
 
     @staticmethod
     def _parse(response, model):
+        if response.status_code == 409:
+            if model is PublishOut:
+                raise ValidationError('That batch name cannot be published. Choose a new batch name.')
+            raise ConflictError()
         if response.status_code in (400, 422):
             try:
                 detail = response.json().get('detail')
@@ -146,6 +153,24 @@ class HttpBackend:
 
     def me(self):
         return self._get('me', StaffOut)
+
+    def annotation(self, event_id):
+        return self._get(f'events/{int(event_id)}/annotation', AnnotationOut)
+
+    def save_annotation(self, event_id, annotation):
+        return self._request('PUT', f'events/{int(event_id)}/annotation', AnnotationOut, json=asdict(annotation))
+
+    def review_annotation(self, event_id, decision):
+        return self._request('POST', f'events/{int(event_id)}/annotation/review', AnnotationOut, json=asdict(decision))
+
+    def annotation_history(self, event_id):
+        return self._get(f'events/{int(event_id)}/annotation/history', list[AnnotationVersion])
+
+    def publish_collection(self, collection_id, batch_name):
+        return self._request('POST', f'studio/collections/{int(collection_id)}/publish', PublishOut, json={'batch_name': batch_name})
+
+    def publishes(self):
+        return self._get('studio/publishes', list[PublishOut])
 
     def fleet(self):
         return self._get('fleet', FleetResponse)

@@ -15,6 +15,7 @@ from .widgets.common import label, button
 
 
 class EventView(QWidget):
+    label_requested = Signal(int)
     navigate = Signal(int)
     review_changed = Signal(object)
     session_expired = Signal()
@@ -37,6 +38,8 @@ class EventView(QWidget):
         self.runner.finished.connect(self.loaded); self.evidence_runner.finished.connect(self.evidence_loaded); self.review_runner.finished.connect(self.review_done)
         layout = QVBoxLayout(self); layout.setContentsMargins(0, 0, 0, 0); layout.setSpacing(12)
         top = QHBoxLayout(); self.title = label('Select an event', 'section'); top.addWidget(self.title, 1)
+        self.label_button = button('Label', lambda: self.event_id is not None and self.label_requested.emit(self.event_id))
+        self.label_button.setVisible(role in ('admin', 'labeler')); top.addWidget(self.label_button)
         self.review = button('Reviewed  R', lambda: self.toggle_review('reviewed')); self.review.setCheckable(True); top.addWidget(self.review)
         self.flag = button('Flag  F', lambda: self.toggle_review('flagged')); self.flag.setCheckable(True); top.addWidget(self.flag)
         self.prev = button('←', lambda: self.navigate.emit(-1)); self.prev.setToolTip('Previous event · k / ←')

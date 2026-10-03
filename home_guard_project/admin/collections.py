@@ -111,6 +111,10 @@ class GridDelegate(QStyledItemDelegate):
             p.drawPixmap(photo.toRect(), pix)
         else:
             p.setPen(QColor(t['muted'])); p.drawText(photo, Qt.AlignmentFlag.AlignCenter, 'Preview not available' if not e.thumbnail_url else 'Loading preview…')
+        chip = QRectF(photo.right()-100, photo.top()+8, 92, 24)
+        p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor(t['bubble'])); p.drawRoundedRect(chip, 4, 4)
+        p.setPen(QColor(t['error'] if e.annotation_status == 'rejected' else t['action']))
+        p.drawText(chip, Qt.AlignmentFlag.AlignCenter, (e.annotation_status or 'new').title())
         lines = [(camera_name(e), 'text'), (local_time(e.start_utc, e.timezone), 'muted'),
                  (provenance(e.completeness.boxes), 'action'),
                  ('No video copy remains' if e.completeness.expired else ai_status(e.completeness.ai), 'warning' if e.completeness.ai != 'real' else 'muted')]

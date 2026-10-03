@@ -124,6 +124,7 @@ class EventSummary:
     thumbnail_url: str | None
     timezone: str = field(default='UTC', kw_only=True)
     display_name: str | None = field(default=None, kw_only=True)
+    annotation_status: str | None = field(default=None, kw_only=True)
 
 
 @dataclass
@@ -307,6 +308,91 @@ class DensityOut:
 class ReviewCount:
     unreviewed_24h: int
     flagged_open: int
+
+
+@dataclass
+class Keyframe:
+    frame: int
+    t_sec: float
+    xyxy: list[float]
+    enabled: bool = True
+
+
+@dataclass
+class Track:
+    track_id: str
+    label: str
+    keyframes: list[Keyframe]
+    source: Literal['human', 'suggestion'] = 'human'
+
+
+@dataclass
+class AnnotationIn:
+    base_version: int
+    tracks: list[Track]
+    description: str
+    drop_clip: bool = False
+    needs_review: bool = False
+    status: Literal['edited', 'submitted'] = 'edited'
+
+
+@dataclass
+class AnnotationOut:
+    event_id: int
+    version: int
+    status: str
+    tracks: list[Track]
+    description: str
+    ai_description: str
+    ai_status: AiStatus
+    ai_model: str | None
+    ai_prompt_version: str | None
+    drop_clip: bool
+    needs_review: bool
+    author: str | None
+    updated_utc: datetime | None
+    fps: float | None
+    frame_count: int | None
+    frame_size: list[int] | None
+    suggestions_used: bool
+    review_note: str = ''
+    review_frame: int | None = None
+
+
+@dataclass
+class ReviewDecision:
+    decision: Literal['accept', 'reject']
+    note: str = ''
+    frame: int | None = None
+
+
+@dataclass
+class AnnotationVersion:
+    version: int
+    status: str
+    author: str | None
+    created_utc: datetime
+    tracks_count: int
+    description_changed: bool
+
+
+@dataclass
+class PublishMissing:
+    event_id: int
+    reason: str
+
+
+@dataclass
+class PublishOut:
+    batch_name: str
+    s3_prefix: str
+    state: str
+    tasks: int
+    yolo_frames: int
+    vlm_lines: int
+    missing: list[PublishMissing]
+    created_utc: datetime
+    created_by: str
 
 
 def decode(cls, value):
