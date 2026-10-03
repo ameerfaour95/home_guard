@@ -18,11 +18,11 @@ BUCKET = 'homeguard-admin-local'
 
 
 def seed(engine, s3, credentials):
-    from sqlalchemy import select, text, delete
+    from sqlalchemy import select, text as sql_text, delete
     from sqlalchemy.orm import Session
     from home_guard_project.cloud import auth
     from home_guard_project.cloud.models import (Staff, Customer, Device, Camera, Event, Artifact,
-        AiRun, Feedback, ReviewState, Collection, CollectionItem, AuditLog, RawRevision)
+        AiRun, Feedback, ReviewState, Collection, CollectionItem, AuditLog, RawRevision, IndexProblem, Export)
     now = datetime.now(timezone.utc)
     read = lambda name: json.loads((DATA/name).read_text(encoding='utf-8'))
     reference = datetime(2026, 10, 3, 12, tzinfo=timezone.utc)
@@ -30,7 +30,10 @@ def seed(engine, s3, credentials):
     def stamp(value):
         return datetime.fromisoformat(value)+shift if value else None
     with Session(engine) as session:
-        session.execute(text("SELECT setval(pg_get_serial_sequence('artifacts', 'id'), GREATEST(100000, COALESCE((SELECT max(id) FROM artifacts), 0)))"))
+        # This dedicated synthetic DB is reused, but moto starts empty each run.
+        # Remove export rows whose objects disappeared with the previous moto process.
+        session.execute(delete(Export))
+        session.execute(sql_text("SELECT setval(pg_get_serial_sequence('artifacts', 'id'), GREATEST(100000, COALESCE((SELECT max(id) FROM artifacts), 0)))"))
         for role, login in credentials.items():
             staff = session.scalar(select(Staff).where(Staff.email == login['email']))
             if staff is None:
@@ -75,9 +78,10 @@ def seed(engine, s3, credentials):
             event.start_ts, event.end_ts = start.timestamp(), stamp(detail['end_utc']).timestamp()
             event.day, event.created_at, event.updated_at = start.strftime('%Y-%m-%d'), now, now
             event.completeness = dict(detail['completeness'], boxes='sampled')
+            event.class_max_conf = {'person': .32 if event.id % 5 == 0 else .91}
             session.add(event)
             camera_row = session.scalar(select(Camera).where(Camera.device_pk == device.id, Camera.name == camera))
-            if camera_row is None: session.add(Camera(device_pk=device.id, name=camera))
+            if camera_row is None: session.add(Camera(device_pk=device.id, name=camera, display_name=detail['camera']))
             heartbeat = dict(device.last_heartbeat)
             latest = max(start.isoformat(), heartbeat['cameras'].get(camera, {}).get('newest_clip_utc', ''))
             heartbeat['cameras'] = dict(heartbeat['cameras'], **{camera: dict(newest_clip_utc=latest, clips_waiting=0)})
@@ -157,12 +161,55 @@ def seed(engine, s3, credentials):
         for cid, ids in read('studio_members.json').items():
             for eid in ids:
                 session.merge(CollectionItem(collection_id=int(cid), event_id=eid, added_by=admin.id, added_at=now))
+        session.merge(Collection(id=4, name='Training starter', description='A small set with saved clips and real AI answers.', created_by=admin.id, created_at=now))
+        session.flush()
+        for eid in (101, 102, 104):
+            session.merge(CollectionItem(collection_id=4, event_id=eid, added_by=admin.id, added_at=now))
+        for key, reason in [('synthetic/meta/missing-time.json', 'Missing recording start time'),
+                            ('synthetic/yolo/invalid-label.txt', 'Detection box is outside the image')]:
+            session.merge(IndexProblem(s3_key=key, reason=reason, seen_at=now))
+        for i, (action, target, reason) in enumerate([
+            ('recording_access', 'event/101', 'Investigating an owner-reported alert'),
+            ('event_review', 'event/104', 'Confirmed the saved AI answer'),
+            ('collection_create', 'collection/4', 'Prepared a training review set')]):
+            session.add(AuditLog(ts=now-timedelta(minutes=i+1), staff_id=admin.id, staff_name=admin.name,
+                action=action, target=target, customer_id=1, reason=reason,
+                detail={'synthetic': True, 'event_id': 101+i, 'reviewed': True}))
         session.add(AuditLog(ts=now, staff_id=admin.id, staff_name=admin.name, action='dev_seed',
                             target='synthetic-fixtures', reason='Local integration run', detail={'synthetic': True}))
         from home_guard_project.cloud.redact import backfill
         for device in devices.values():
             backfill(session, device, everything=True)
         session.commit()
+        session.execute(sql_text("SELECT setval(pg_get_serial_sequence('collections', 'id'), (SELECT max(id) FROM collections))"))
+        session.commit()
+
+
+def seed_export(app, credentials):
+    """Exercise the actual authenticated create route and builder against moto."""
+    import pyotp
+    from fastapi.testclient import TestClient
+    from sqlalchemy import select
+    from home_guard_project.cloud.models import Staff
+    app.state.export_runner = lambda job: job()
+    login = credentials['admin']
+    try:
+        with TestClient(app) as client:
+            response = client.post('/v1/auth/login', json=dict(email=login['email'], password=login['password'],
+                totp=pyotp.TOTP(login['totp_secret']).now()))
+            response.raise_for_status()
+            headers = {'Authorization': 'Bearer '+response.json()['access_token']}
+            result = client.post('/v1/studio/exports', headers=headers, json=dict(collection_id=4,
+                name='training_starter', formats=['vlm_jsonl'], split={'train':.8,'val':.1,'test':.1}))
+            result.raise_for_status()
+            if result.json()['state'] != 'ready':
+                raise RuntimeError('Synthetic starter export did not reach ready: '+str(result.json()))
+    finally:
+        app.state.export_runner = None
+        with app.state.sessionmaker() as session:
+            staff = session.scalar(select(Staff).where(Staff.email == login['email']))
+            staff.totp_last_counter = None
+            session.commit()
 
 
 @contextmanager
@@ -178,7 +225,7 @@ def local_service(*, credentials_path=None):
     from home_guard_project.cloud.app import create_app
     from home_guard_project.cloud.settings import Settings
     from home_guard_project.cloud.s3 import S3
-    root = Path(os.environ['LOCALAPPDATA'])/'HomeGuardAdmin'/'devdb'
+    root = Path(__file__).resolve().parents[2]/'build'/'devdb-r5'
     root.mkdir(parents=True, exist_ok=True)
     postgres = pgserver.get_server(str(root), cleanup_mode='stop')
     moto = ThreadedMotoServer(ip_address='127.0.0.1', port=8601, verbose=False)
@@ -194,6 +241,7 @@ def local_service(*, credentials_path=None):
         credentials = {role: dict(email=f'{role}@homeguard.local', password=secrets.token_urlsafe(18),
                                   totp_secret=pyotp.random_base32()) for role in ('admin', 'support', 'labeler')}
         seed(app.state.engine, s3, credentials)
+        seed_export(app, credentials)
         if credentials_path:
             path = Path(credentials_path)
             path.parent.mkdir(parents=True, exist_ok=True)
