@@ -14,6 +14,8 @@ from .label_document import LabelDocument, CLASSES
 from .label_canvas import LabelCanvas, TrackTimeline
 from .models import ReviewDecision
 
+STALE_REVIEW = 'This clip changed since you opened it — reload'
+
 HELP = [('← / →', 'One frame'), ('Shift + ← / →', 'Five frames'), ('Space', 'Play / pause in real time'),
         ('. / ,', 'Next / previous keyframe'), ('1–9', 'Class: person, bicycle, car, motorcycle, bus, truck, bird, cat, dog'),
         ('K', 'Add / remove keyframe'), ('H', 'Hide / keep segment'), ('C', 'Copy box to next frame'),
@@ -335,7 +337,9 @@ class LabelView(QWidget):
         self.set_ready(True)
         if error:
             self.submit_pending = False
-            if isinstance(error, ConflictError):
+            if isinstance(error, ConflictError) and self.write_kind == 'review':
+                self.show_error(STALE_REVIEW)
+            elif isinstance(error, ConflictError):
                 self.conflicted = True; self.autosave.stop(); self.conflict_bar.show()
             else: self.show_error(error)
             self.update_save_state(); return
@@ -388,7 +392,7 @@ class LabelView(QWidget):
         if self.doc.dirty: self.show_error('Save and submit your changes before reviewing.'); return
         if decision == 'reject' and not self.review_note.text().strip(): self.show_error('Add a note explaining what needs to change.'); self.review_note.setFocus(); return
         eid = self.doc.annotation.event_id
-        request = ReviewDecision(decision, self.review_note.text().strip(), self.doc.frame if self.at_frame.isChecked() else None)
+        request = ReviewDecision(decision, self.review_note.text().strip(), self.doc.frame if self.at_frame.isChecked() else None, self.doc.annotation.version)
         self.sent_snapshot = self.doc.snapshot(); self.write_kind, self.write_status = 'review', 'reviewed'
         self.set_ready(False); self.writer.start(lambda: self.backend.review_annotation(eid, request))
 

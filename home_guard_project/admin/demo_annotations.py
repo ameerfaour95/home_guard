@@ -62,6 +62,8 @@ class DemoAnnotations:
             raise ForbiddenError()
         with self._lock:
             old = self.annotation(event_id)
+            if decision.version is not None and decision.version != old.version:
+                raise ConflictError()
             if old.status != 'submitted':
                 raise ValidationError('Submit this clip before reviewing it.')
             result = deepcopy(old)

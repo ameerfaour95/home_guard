@@ -209,10 +209,24 @@ def test_http_annotation_contract_and_conflict():
         if path.endswith('/publish'): return httpx.Response(200, json=encode(b.publish_collection(1, 'site_batch_1')))
         return httpx.Response(200, json=encode(b.annotation(101)))
     h = HttpBackend('http://localhost:8610', transport=httpx.MockTransport(respond))
-    h.annotation(101); h.save_annotation(101, AnnotationIn(0, [], 'Text')); h.review_annotation(101, ReviewDecision('reject', 'note', 4)); h.annotation_history(101); h.publishes()
+    h.annotation(101); h.save_annotation(101, AnnotationIn(0, [], 'Text')); h.review_annotation(101, ReviewDecision('reject', 'note', 4, 3)); h.annotation_history(101); h.publishes()
     result = h.publish_collection(1, 'site_batch_1')
     assert result.s3_prefix == 's3://security-camera-project-v1/tagging/site_batch_1/'
     assert calls[-1] == ('POST', '/v1/studio/collections/1/publish', {'batch_name': 'site_batch_1'})
     assert calls[1] == ('PUT', '/v1/events/101/annotation', {'base_version': 0, 'tracks': [], 'description': 'Text', 'drop_clip': False, 'needs_review': False, 'status': 'edited'})
-    assert calls[2][2] == {'decision': 'reject', 'note': 'note', 'frame': 4}
+    assert calls[2][2] == {'decision': 'reject', 'note': 'note', 'frame': 4, 'version': 3}
     with pytest.raises(ConflictError): h._parse(httpx.Response(409), object)
+
+
+def test_review_sends_the_displayed_version_and_a_stale_review_says_reload(widgets, wait):
+    b = DemoBackend(); v = view(widgets, wait, b)
+    v.queue = [b.event(101)]; v.queue_index = 0
+    v.submit(); wait(lambda: v.doc.annotation.status == 'submitted')
+    shown = v.doc.annotation.version
+    sent = []; real = b.review_annotation
+    b.review_annotation = lambda eid, decision: (sent.append(decision), real(eid, decision))[1]
+    b.save_annotation(101, AnnotationIn(shown, [], 'Changed elsewhere', status='submitted'))  # someone else saves
+    v.review('accept'); wait(lambda: not v.writer.busy)
+    assert sent[0].version == shown
+    assert v.error.isVisible() and 'changed since you opened it' in v.error.text() and 'reload' in v.error.text()
+    assert b.annotation(101).status == 'submitted'  # nothing approved unseen

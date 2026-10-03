@@ -364,6 +364,7 @@ class ReviewDecision:
     decision: Literal['accept', 'reject']
     note: str = ''
     frame: int | None = None
+    version: int | None = None  # the annotation version on screen; the server answers 409 when it is not current
 
 
 @dataclass
