@@ -1,6 +1,6 @@
 """Saved watch areas on camera cards; the pixmap stays raw for the editor."""
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QPainter, QPainterPath, QPen, QColor
+from PySide6.QtGui import QPainter, QPainterPath, QPen, QColor, QPixmap
 
 from .ai_activity_ui import AlertPicture
 from .zone_editor import FadingLabel, alpha, animate, colors, polygon_path
@@ -9,7 +9,11 @@ from . import motion
 
 class ZonePicture(AlertPicture):
     def __init__(self, path, points=()):
-        super().__init__(path)
+        # Load now, not on AlertPicture's background thread: the camera card decides
+        # "photo" vs "photo failed" and enables the zone button from self.pix right
+        # after creating this widget, so an empty pixmap there hid every photo.
+        super().__init__(None)
+        self.pix = QPixmap(str(path)) if path else QPixmap()
         self.points = list(points)
         self.previous = []
         self.fade = 1.
