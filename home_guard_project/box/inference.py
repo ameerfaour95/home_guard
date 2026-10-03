@@ -1247,7 +1247,10 @@ def run() -> int:
     from .ai_status import AiStatus, objects_from_result  # noqa: PLC0415
     from .boxconfig import LIVE_DIR, LOG_DIR, PRODUCTION_LIVE_DIR  # noqa: PLC0415
 
-    assert PRE_SECONDS + POST_SECONDS == cam_cfg.CLIP_SECONDS == 10, "alert and collector windows must match"
+    if PRE_SECONDS + POST_SECONDS != cam_cfg.CLIP_SECONDS:
+        # Never stop watching over this: log it loudly; the crop then covers clip.seconds, not the alert clip.
+        log.error("Alert window (%.0f s) and collector clip.seconds (%.0f s) differ: the AI's crop no longer "
+                  "matches the saved alert clip exactly", PRE_SECONDS + POST_SECONDS, cam_cfg.CLIP_SECONDS)
 
     zones = dict(getattr(cam_cfg, "ROI_ZONES", {}) or {})
     for name in cameras:
