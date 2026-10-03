@@ -1,4 +1,4 @@
-"""Remember only the last validated box address; never persist form secrets."""
+"""Local viewer and installer preferences; never persist customer details or secrets."""
 from pathlib import Path
 import json
 import os
@@ -58,4 +58,30 @@ class AddressPreference:
             with os.fdopen(descriptor,'w',encoding='utf-8') as stream:
                 json.dump(data,stream)
             os.replace(temporary,self.path)
+        finally: temporary.unlink(missing_ok=True)
+
+
+class InstallerPreference:
+    def __init__(self, path=None):
+        self.path = Path(path) if path else Path.home()/'.homeguard'/'installer.json'
+
+    @staticmethod
+    def validate(value):
+        if not isinstance(value, str) or len(value.strip()) > 120 or any(ord(c) < 32 or ord(c) == 127 for c in value):
+            raise ValueError('Invalid installer name')
+        return value.strip()
+
+    def load(self):
+        try: return self.validate(json.loads(self.path.read_text(encoding='utf-8'))['installer'])
+        except (OSError, ValueError, KeyError, TypeError): return ''
+
+    def save(self, name):
+        name = self.validate(name)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, name_tmp = tempfile.mkstemp(prefix='installer-', suffix='.tmp', dir=self.path.parent)
+        temporary = Path(name_tmp)
+        try:
+            with os.fdopen(descriptor, 'w', encoding='utf-8') as stream:
+                json.dump({'installer': name}, stream, ensure_ascii=False)
+            os.replace(temporary, self.path)
         finally: temporary.unlink(missing_ok=True)

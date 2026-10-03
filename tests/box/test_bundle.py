@@ -30,6 +30,7 @@ MUST_EXCLUDE_NAMES = {
     "box.yaml",
     "network.json",
     "api_key.env",
+    "registration.json",
     "run_with_gpt.py",
     "open_camera.py",
     "fortified_security_smolvlm.py",

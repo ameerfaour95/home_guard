@@ -58,6 +58,7 @@ QSpinBox::up-button, QDoubleSpinBox::up-button { border: none; background: @rais
 QSpinBox::down-button, QDoubleSpinBox::down-button { border: none; background: @raised; width: 24px; }
 QCheckBox { spacing: 12px; padding: 8px 0; background: transparent; }
 QCheckBox::indicator { width: 22px; height: 22px; border: 1px solid @border; border-radius: 6px; background: @surface; }
+QCheckBox:focus::indicator { border-color: @action; }
 QCheckBox::indicator:checked { background: @action; image: url(@check); border-color: @action; }
 QScrollArea { border: none; background: transparent; }
 QScrollBar:vertical { width: 6px; background: transparent; margin: 0; }

@@ -37,7 +37,7 @@ def main():
     parser.add_argument("--theme", choices=("dark","light"), default="dark")
     parser.add_argument("--panel", choices=("settings", "cameras"))
     parser.add_argument("--setup", action="store_true")
-    parser.add_argument("--fail", nargs="?", const="network", choices=("connect","update","site","network","cameras","alerts","readiness"))
+    parser.add_argument("--fail", nargs="?", const="network", choices=("connect","update","site","register","network","cameras","alerts","readiness"))
     parser.add_argument("--wifi", action="store_true")
     parser.add_argument("--skip-cameras", action="store_true")
     parser.add_argument("--alerts", action="store_true")
@@ -66,6 +66,7 @@ def main():
             "address",
             "network",
             "house",
+            "owner-consent",
             "cameras",
             "progress",
             "summary",

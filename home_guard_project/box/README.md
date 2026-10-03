@@ -248,6 +248,23 @@ is then held to its own type's value.
 
 Renaming a camera carries its choices along. Design: `docs/superpowers/specs/2026-10-03-alert-types-design.md`.
 
+## Registration with the Admin Center
+
+The setup program asks for the owner's name, phone (optional) and three consents (live cameras, saved recordings, training), all default no, and runs the `register` step on the box. The box saves them in `home_guard_project/box/registration.json` (gitignored, never bundled) and publishes `dataset_<site>/_status/registration.json` next to the heartbeat, so the customer appears in the Admin Center by itself.
+
+```bash
+python -m home_guard_project.box register --owner "Dana Cohen" --phone +972...     --consent-live yes --consent-recordings no --consent-training no --installer Ameer
+python -m home_guard_project.box register --from-json answers.json   # what setup uses; the file is deleted after reading
+python -m home_guard_project.box status                              # "registration": registered + consents (no name or phone)
+```
+
+- CLI field updates preserve omitted fields; a changed consent or installer updates `consent.recorded_utc`. Setup/`--from-json` replaces owner details, including clearing a blank phone; missing permissions default off.
+- The graphical Owner & consent page follows Home. The owner name is required (1-120 characters); the installer name alone is remembered locally. Owner details never appear in setup logs, SSH arguments, or heartbeat data.
+- A failed publish only prints a warning (exit 0). The hourly upload retries; it sends the file only when its content changed (`logs/registration.published` holds the hash).
+- `set-site` moves the registration to the new site and publishes it under the new folder; the old folder keeps its copy. The next heartbeat repairs an interrupted local site update before publishing.
+- Re-running setup on an already registered box is safe. An older answers file without these fields registers with all consents off and the house name as the owner.
+- Manual check of the setup step (no box needed): `powershell -File setup_customer.ps1 -AnswersFile a.json -DryRun -SkipUpdate` shows `@@step register ok`.
+
 ## Telegram alerts for a new customer
 
 AI alerts are delivered over Telegram: it is free, and one message reaches a whole family group (so every family member is covered at no extra cost). **One bot serves every box; each customer gets their own group.**

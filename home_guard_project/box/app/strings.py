@@ -150,7 +150,7 @@ TEXT = {
     "house_error": "Use lowercase letters, numbers and underscores, like cedar_house.",
     "camera_user_error": "Enter the login name used by the cameras.",
     "camera_password_error": "Enter the password used by the cameras.",
-    "step_names": ["Connect", "Network", "Home", "Cameras", "Ready"],
+    "step_names": ["Connect", "Network", "Home", "Owner", "Cameras", "Ready"],
     "step_number": "{number}. {name}",
     "step_done": "\u2713 {name}",
     "event_line": "{time}  {text}",
@@ -476,3 +476,24 @@ TEXT.update(catches_more="Catches more", reset_sensitivity="Reset to recommended
             sensitivity_custom="Own sensitivity", alert_types_custom="Own alert types")
 
 TEXT.update(camera_detection_title="{camera} · Alerts & detection")
+
+TEXT.update(
+    owner_title="Owner & consent",
+    owner_hint="Add the owner so Home Guard support knows who to help.",
+    owner_name_label="Owner's &name (required)",
+    owner_phone_label="Owner's &phone (optional)",
+    installer_label="&Installer name (optional)",
+    installer_remembered="Remembered on this laptop for your next setup.",
+    owner_permissions="The owner's permissions",
+    owner_permissions_hint="Ask the owner about each permission. Leave it off unless they agree.",
+    consent_live="Home Guard support may look at live cameras when you ask for help.",
+    consent_recordings="Home Guard support may look at saved alert recordings.",
+    consent_training="Home Guard may use your clips to train and improve the AI. Your address and faces are never shared.",
+    consent_change_help="You can change these any time by calling Home Guard support.",
+    owner_name_error="Enter the owner's name (1-120 characters, on one line).",
+    owner_phone_error="Use up to 200 characters for the phone, on one line, or leave it empty.",
+    installer_error="Use up to 120 characters for the installer name, on one line.",
+    installer_not_remembered="Setup can continue, but the installer name could not be remembered on this laptop.",
+    step_register="Adding the customer to Home Guard",
+    demo_setup_register="Saving the owner's details and permissions.",
+)

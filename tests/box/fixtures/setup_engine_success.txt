@@ -5,6 +5,8 @@ Home Guard setup
 @@step update ok Finished
 @@step site start
 @@step site ok Finished
+@@step register start
+@@step register ok Customer registered
 @@step network start
 @@step network ok Finished
 @@step cameras start

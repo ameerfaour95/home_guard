@@ -26,10 +26,17 @@
 #     "wifi_password":"","site":"cohen_haifa","show_cameras":false,
 #     "find_cameras":true,"camera_user":"","camera_password":"",
 #     "alerts":false,"alert_start_hour":0,"alert_end_hour":0,
-#     "alert_cooldown_sec":120}
+#     "alert_cooldown_sec":120,
+#     "owner_name":"Dana Cohen","owner_phone":"","consent_live":false,
+#     "consent_recordings":false,"consent_training":false,"installer":"Ameer"}
+#    The last six are optional (an older answers file still works): consents
+#    default to no and owner_name to the house name. The register step sends
+#    them to the box (`box register --from-json`) so the customer appears in
+#    the Admin Center; the name and phone travel in a temp file, never on a
+#    command line.
 #  Event lines (stdout) in -AnswersFile mode:
 #    @@step <id> start | ok|warn|fail|skip <text>   ids: connect update site
-#                                                    network cameras alerts readiness
+#                                                    register network cameras alerts readiness
 #    @@camera <name> <w>x<h>     @@check PASS|WARN|FAIL <text>
 #    @@rescue <ssid> <password>  @@done ok|fail
 #  Exit code 0 when no step failed, 1 otherwise.
@@ -135,6 +142,8 @@ New-Item -ItemType Directory -Force -Path $HgDir | Out-Null
 $Mode = ''; $WifiSsid = ''; $WifiPass = ''; $Site = ''
 $ShowCameras = $false; $UseAI = $false; $AlertStart = 0; $AlertEnd = 0; $AlertCooldown = 120
 $DoCameras = $false; $CamUser = ''; $CamPass = ''
+$OwnerName = ''; $OwnerPhone = ''; $Installer = $env:USERNAME
+$ConsentLive = $false; $ConsentRecordings = $false; $ConsentTraining = $false
 
 if ($NonInteractive) {
     if (-not (Test-Path $AnswersFile)) { throw "Answers file not found: $AnswersFile" }
@@ -154,6 +163,11 @@ if ($NonInteractive) {
     if ($null -ne $a.alert_start_hour) { $AlertStart = [int]$a.alert_start_hour }
     if ($null -ne $a.alert_end_hour)   { $AlertEnd   = [int]$a.alert_end_hour }
     if ($a.alert_cooldown_sec)         { $AlertCooldown = [int]$a.alert_cooldown_sec }
+    $OwnerName = [string]$a.owner_name; $OwnerPhone = [string]$a.owner_phone
+    if ($a.installer) { $Installer = [string]$a.installer }
+    $ConsentLive = ($a.consent_live -is [bool] -and $a.consent_live)
+    $ConsentRecordings = ($a.consent_recordings -is [bool] -and $a.consent_recordings)
+    $ConsentTraining = ($a.consent_training -is [bool] -and $a.consent_training)
     if ($Target -notmatch '^[^@\s]+@\S+$') { throw "answers: 'target' must be user@host (got '$Target')" }
     if (@('ethernet', 'wifi') -notcontains $Mode) { throw "answers: 'network' must be ethernet or wifi (got '$Mode')" }
     if ($Site -notmatch '^[a-z0-9_]+$') { throw "answers: 'site' must be lowercase letters, digits or underscores (got '$Site')" }
@@ -286,6 +300,14 @@ if (-not $NonInteractive) {
     Write-Host '  and the cameras are labelled with it. Lowercase letters, digits and underscores only.'
     $Site = Read-NonEmpty 'House name, for example cohen_haifa' '[a-z0-9_]+'
 
+    Info "`nThe owner."
+    $OwnerName = (Read-Host "Owner's name (Enter = $Site)").Trim()
+    $OwnerPhone = (Read-Host "Owner's phone number (optional, Enter to skip)").Trim()
+    Write-Host '  Three questions for the owner. Anything not clearly agreed to stays off.'
+    $ConsentLive = ((Read-Host 'May Home Guard support look at live cameras when you ask for help? [y/N]') -match '^[Yy]')
+    $ConsentRecordings = ((Read-Host 'May Home Guard support look at saved recordings of alerts? [y/N]') -match '^[Yy]')
+    $ConsentTraining = ((Read-Host 'May Home Guard use your clips to train and improve the AI? (faces and your address are never shared) [y/N]') -match '^[Yy]')
+
     if ((Read-Host "Show the live camera pictures on the box's own screen? [y/N]") -match '^[Yy]') { $ShowCameras = $true }
 
     Info "`nWhat is this box for?"
@@ -352,6 +374,33 @@ Invoke-Box "cd /d $InstallDir && $Python -m home_guard_project.box set-option sh
 Ok "Camera windows on the box's own screen: $showVal"
 Invoke-Box "powershell -ExecutionPolicy Bypass -File $BoxBox\make_shortcut.ps1" | ForEach-Object { Note "    $_" }
 Step-Ok 'site' "dataset_$Site, show_cameras=$showVal"
+
+# ---- register the customer (shows up in the Admin Center) -------------------
+Step-Start 'register'
+Info "`n[2b] Registering the customer..."
+$regLocal = [IO.Path]::GetTempFileName()
+$regRemote = "$RemoteHome\registration_$([Guid]::NewGuid().ToString('N')).json"
+$regName = $OwnerName; if (-not $regName) { $regName = $Site }
+$regHost = $Target.Substring($Target.IndexOf('@') + 1)
+$regJson = [ordered]@{ owner_name = $regName; owner_phone = $OwnerPhone; installer = $Installer
+                       consent_live = $ConsentLive; consent_recordings = $ConsentRecordings
+                       consent_training = $ConsentTraining; tailscale_host = $regHost } | ConvertTo-Json
+try {
+    [IO.File]::WriteAllText($regLocal, $regJson, (New-Object Text.UTF8Encoding($false)))
+    Copy-ToBox $regLocal $regRemote
+    $regOut = (Invoke-Box "cd /d $InstallDir && $Python -m home_guard_project.box register --from-json $regRemote" | Out-String)
+    # Older boxes echo the owner's name. Never copy their raw response into setup logs.
+    if ($regOut -match 'registration not published yet') { Step-Warn 'register' 'saved on the box; will retry adding to Home Guard with the next upload' }
+    elseif ($DryRun -or ($LASTEXITCODE -eq 0 -and $regOut -match 'registered ')) { Ok 'Customer registered.'; Step-Ok 'register' 'registered' }
+    else { Bad 'The customer could not be registered. Setup goes on; register again later.'; Step-Warn 'register' 'not registered; run setup again to retry' }
+} catch {
+    Bad 'The customer could not be registered. Check the owner details and try setup again.'
+    Step-Warn 'register' 'not registered; run setup again to retry'
+} finally {
+    try { Invoke-Box "cmd /c if exist $regRemote del $regRemote" | Out-Null }
+    catch { Step-Warn 'register' 'could not remove the temporary answers from the box' }
+    finally { Remove-Item -LiteralPath $regLocal -Force -ErrorAction SilentlyContinue }
+}
 
 # ---- network configuration --------------------------------------------------
 Step-Start 'network'

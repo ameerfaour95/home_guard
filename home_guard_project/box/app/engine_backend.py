@@ -12,8 +12,11 @@ import threading
 from .model import redact
 from .strings import tr
 
-ENGINE_STEPS = ('connect','update','site','network','cameras','alerts','readiness')
-OWNERS = {'connect':0,'update':0,'site':2,'network':1,'cameras':3,'alerts':2,'readiness':0}
+from .setup_pages import Page
+
+ENGINE_STEPS = ('connect','update','site','register','network','cameras','alerts','readiness')
+OWNERS = {'connect':Page.ADDRESS,'update':Page.ADDRESS,'site':Page.HOUSE,'register':Page.OWNER,
+          'network':Page.NETWORK,'cameras':Page.CAMERAS,'alerts':Page.HOUSE,'readiness':Page.ADDRESS}
 
 def is_progress_warning(event):
     return event.kind=='step' and event.step=='network' and event.status=='warn' and 'switching' in event.text.lower()
@@ -57,7 +60,7 @@ class OutputParser:
         return Event('detail',text=self.safe(line),facts=facts)
 
 def answers_payload(answers):
-    return dict(target=answers.address,network=answers.network,wifi_ssid=answers.ssid,wifi_password=answers.wifi_password,site=answers.house,show_cameras=answers.show_cameras,find_cameras=answers.find_cameras,camera_user=answers.camera_user,camera_password=answers.camera_password,alerts=answers.alerts,alert_start_hour=answers.start_hour,alert_end_hour=answers.end_hour,alert_cooldown_sec=answers.cooldown_sec)
+    return dict(owner_name=answers.owner_name,owner_phone=answers.owner_phone,installer=answers.installer,consent_live=answers.consent_live,consent_recordings=answers.consent_recordings,consent_training=answers.consent_training,target=answers.address,network=answers.network,wifi_ssid=answers.ssid,wifi_password=answers.wifi_password,site=answers.house,show_cameras=answers.show_cameras,find_cameras=answers.find_cameras,camera_user=answers.camera_user,camera_password=answers.camera_password,alerts=answers.alerts,alert_start_hour=answers.start_hour,alert_end_hour=answers.end_hour,alert_cooldown_sec=answers.cooldown_sec)
 
 class ProcessRunner:
     def spawn(self,args):
@@ -79,7 +82,7 @@ class EngineBackend:
         self.cancelled=threading.Event()
     def cancel(self): self.cancelled.set()
     def run(self,answers,emit):
-        parser=OutputParser((answers.address,answers.address.rsplit("@",1)[-1],answers.wifi_password,answers.camera_password))
+        parser=OutputParser((answers.address,answers.address.rsplit("@",1)[-1],answers.wifi_password,answers.camera_password,answers.owner_name,answers.owner_phone))
         process=None
         try:
             executable=self.executable or shutil.which('powershell')

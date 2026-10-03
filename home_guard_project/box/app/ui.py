@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 from .strings import tr, TEXT
+from .setup_pages import Page
 from .model import State, Activity, ActivityFeed
 from .backend import Answers, SimulatedBackend, Sequence, STEPS
 from ..preview import PreviewReader
@@ -1137,6 +1138,7 @@ class Window(QMainWindow):
             ("address_title", "address_hint"),
             ("network_title", "network_hint"),
             ("house_title", "house_hint"),
+            ("owner_title", "owner_hint"),
             ("camera_title", "camera_hint"),
             ("progress_title", "progress_hint"),
             ("summary_title", "summary_hint"),
@@ -1155,79 +1157,82 @@ class Window(QMainWindow):
             if hint=="summary_hint": self.summary_hint=hint_widget
             if hint == "progress_hint": self.progress_hint = hint_widget
             self.page_layouts.append(lay)
-            if title == "summary_title":
+            if title in ("summary_title", "owner_title"):
                 summary_scroll = QScrollArea()
                 summary_scroll.setWidgetResizable(True)
                 summary_scroll.setWidget(panel)
                 self.pages.addWidget(summary_scroll)
+                if title == "owner_title": self.owner_scroll = summary_scroll
             else:
                 self.pages.addWidget(panel)
         self.inputs["address"] = QLineEdit()
         self.inputs["address"].hide()
         self.field_guidance["address"] = label("")
         self.field_guidance["address"].setStyleSheet("color: " + ERROR)
-        self.page_layouts[0].addWidget(label(tr("box_label")))
+        self.page_layouts[Page.ADDRESS].addWidget(label(tr("box_label")))
         self.box_picker = QComboBox()
         self.box_picker.addItem(tr("box_loading"), None)
-        self.page_layouts[0].addWidget(self.box_picker)
+        self.page_layouts[Page.ADDRESS].addWidget(self.box_picker)
         self.box_address = QLineEdit()
         self.box_address.setPlaceholderText(tr("box_address_placeholder"))
-        self.page_layouts[0].addWidget(self.box_address)
+        self.page_layouts[Page.ADDRESS].addWidget(self.box_address)
         self.box_hint = label(tr("box_loading"), "muted")
-        self.page_layouts[0].addWidget(self.box_hint)
-        self.page_layouts[0].addWidget(label(tr("box_user_label")))
+        self.page_layouts[Page.ADDRESS].addWidget(self.box_hint)
+        self.page_layouts[Page.ADDRESS].addWidget(label(tr("box_user_label")))
         self.box_user = QLineEdit()
-        self.page_layouts[0].addWidget(self.box_user)
-        self.page_layouts[0].addWidget(label(tr("box_user_help"), "muted"))
-        self.page_layouts[0].addWidget(self.field_guidance["address"])
+        self.page_layouts[Page.ADDRESS].addWidget(self.box_user)
+        self.page_layouts[Page.ADDRESS].addWidget(label(tr("box_user_help"), "muted"))
+        self.page_layouts[Page.ADDRESS].addWidget(self.field_guidance["address"])
         self.only_cameras = QPushButton(tr("only_check_cameras"))
-        self.page_layouts[0].setSpacing(8)
+        self.page_layouts[Page.ADDRESS].setSpacing(8)
         self.only_cameras.setMinimumHeight(44)
         self.only_cameras.setObjectName("secondary")
         self.only_cameras.clicked.connect(self.check_only)
-        self.page_layouts[0].addWidget(self.only_cameras)
+        self.page_layouts[Page.ADDRESS].addWidget(self.only_cameras)
         self.box_picker.currentIndexChanged.connect(self.choose_box)
         self.box_address.textChanged.connect(self.compose_box_target)
         self.box_user.textChanged.connect(self.compose_box_target)
         self.network = QComboBox()
         self.network.addItems([tr("ethernet"), tr("wifi")])
-        self.page_layouts[1].addWidget(self.network)
-        self.add_input(1, "ssid", tr("ssid"))
-        self.add_input(1, "wifi_password", tr("wifi_password"), True)
+        self.page_layouts[Page.NETWORK].addWidget(self.network)
+        self.add_input(Page.NETWORK, "ssid", tr("ssid"))
+        self.add_input(Page.NETWORK, "wifi_password", tr("wifi_password"), True)
         self.network.currentIndexChanged.connect(self.network_changed)
         self.network_changed(0)
-        self.add_input(2, "house", tr("house"))
+        self.add_input(Page.HOUSE, "house", tr("house"))
         self.show_pictures = QCheckBox(tr("show"))
         self.alerts = QCheckBox(tr("alerts"))
-        self.page_layouts[2].addWidget(self.show_pictures)
-        self.page_layouts[2].addWidget(self.alerts)
+        self.page_layouts[Page.HOUSE].addWidget(self.show_pictures)
+        self.page_layouts[Page.HOUSE].addWidget(self.alerts)
         from .alert_hours import AlertHours
         self.wizard_hours = AlertHours()
         self.hour_start, self.hour_end = self.wizard_hours.start, self.wizard_hours.end
-        self.page_layouts[2].setSpacing(10)
-        self.page_layouts[2].addWidget(self.wizard_hours)
-        self.page_layouts[2].addWidget(label(tr("cooldown")))
+        self.page_layouts[Page.HOUSE].setSpacing(10)
+        self.page_layouts[Page.HOUSE].addWidget(self.wizard_hours)
+        self.page_layouts[Page.HOUSE].addWidget(label(tr("cooldown")))
         self.wizard_cooldown = QDoubleSpinBox()
         self.wizard_cooldown.setDecimals(2)
         self.wizard_cooldown.setRange(.17,1440)
         self.wizard_cooldown.setValue(2)
         self.wizard_cooldown.setSuffix(tr("minutes_suffix"))
-        self.page_layouts[2].addWidget(self.wizard_cooldown)
+        self.page_layouts[Page.HOUSE].addWidget(self.wizard_cooldown)
         self.alerts.toggled.connect(self.wizard_hours.setEnabled)
         self.wizard_hours.setEnabled(False)
+        from .owner_consent import build_owner_page
+        build_owner_page(self)
         self.find = QCheckBox(tr("find"))
         self.find.setChecked(True)
-        self.page_layouts[3].addWidget(self.find)
-        self.add_input(3, "camera_user", tr("camera_user"))
-        self.add_input(3, "camera_password", tr("camera_password"), True)
+        self.page_layouts[Page.CAMERAS].addWidget(self.find)
+        self.add_input(Page.CAMERAS, "camera_user", tr("camera_user"))
+        self.add_input(Page.CAMERAS, "camera_password", tr("camera_password"), True)
         self.camera_retry_message = label("")
         self.camera_retry_message.setStyleSheet("color: " + ERROR)
-        self.page_layouts[3].addWidget(self.camera_retry_message)
-        self.page_layouts[3].addWidget(label(tr("camera_login_help"), "muted"))
+        self.page_layouts[Page.CAMERAS].addWidget(self.camera_retry_message)
+        self.page_layouts[Page.CAMERAS].addWidget(label(tr("camera_login_help"), "muted"))
         self.camera_lock_warning = label(tr("camera_lock_warning"))
         self.camera_lock_warning.setStyleSheet("color: " + WARNING)
         self.camera_lock_warning.hide()
-        self.page_layouts[3].addWidget(self.camera_lock_warning)
+        self.page_layouts[Page.CAMERAS].addWidget(self.camera_lock_warning)
         self.find.toggled.connect(
             lambda enabled: [
                 self.inputs[key].setEnabled(enabled)
@@ -1237,23 +1242,23 @@ class Window(QMainWindow):
         self.fail = QCheckBox(tr("failure"))
         self.fail.setChecked(bool(self.args.fail))
         self.fail.setVisible(self.args.demo)
-        self.page_layouts[3].addWidget(self.fail)
+        self.page_layouts[Page.CAMERAS].addWidget(self.fail)
         from .setup_details_ui import DetailsPanel
         from .setup_workspace import SetupWorkspace
         self.setup_details=DetailsPanel()
         self.setup_workspace=SetupWorkspace(self.setup_details)
         self.step_rows=[row.status for row in self.setup_workspace.rows]
         self.engine_step_names=[row.title for row in self.setup_workspace.rows]
-        self.camera_search_note=self.setup_workspace.rows[4].note
-        self.network_progress_note=self.setup_workspace.rows[3].note
+        self.camera_search_note=next(row.note for row in self.setup_workspace.rows if row.step=="cameras")
+        self.network_progress_note=next(row.note for row in self.setup_workspace.rows if row.step=="network")
         self.setup_details_toggle=self.setup_workspace.toggle
-        self.page_layouts[4].setContentsMargins(16,16,16,16)
-        self.page_layouts[4].setSpacing(8)
-        self.page_layouts[4].addWidget(self.setup_workspace,1)
+        self.page_layouts[Page.PROGRESS].setContentsMargins(12,12,12,12)
+        self.page_layouts[Page.PROGRESS].setSpacing(8)
+        self.page_layouts[Page.PROGRESS].addWidget(self.setup_workspace,1)
         self.setup_cancel = QPushButton(tr("cancel_setup"))
         self.setup_cancel.setObjectName("secondary")
         self.setup_cancel.clicked.connect(self.cancel_setup)
-        self.page_layouts[4].addWidget(self.setup_cancel)
+        self.page_layouts[Page.PROGRESS].addWidget(self.setup_cancel)
         self.failure_actions = QWidget()
         self.failure_actions.setObjectName('failureActions')
         self.failure_actions.setStyleSheet('QWidget#failureActions { background: transparent; }')
@@ -1297,11 +1302,11 @@ class Window(QMainWindow):
         self.summary_details_action.setCheckable(True)
         self.summary_details_action.toggled.connect(self.toggle_summary_details)
         summary_header.addWidget(self.summary_details_action)
-        self.page_layouts[5].addLayout(summary_header)
+        self.page_layouts[Page.SUMMARY].addLayout(summary_header)
         self.summary_network=label("", "muted")
         self.summary_count=label("", "section")
-        self.page_layouts[5].addWidget(self.summary_network)
-        self.page_layouts[5].addWidget(self.summary_count)
+        self.page_layouts[Page.SUMMARY].addWidget(self.summary_network)
+        self.page_layouts[Page.SUMMARY].addWidget(self.summary_count)
         summary_columns = QHBoxLayout()
         summary_columns.setSpacing(28)
         summary_left = QWidget()
@@ -1339,14 +1344,14 @@ class Window(QMainWindow):
         self.summary_overview=QWidget()
         self.summary_overview.setObjectName("summaryOverview")
         self.summary_overview.setLayout(summary_columns)
-        self.page_layouts[5].addWidget(self.summary_overview)
+        self.page_layouts[Page.SUMMARY].addWidget(self.summary_overview)
         self.summary_details=DetailsPanel(self.setup_details.model)
         self.summary_workspace=SetupWorkspace(self.summary_details)
         self.summary_workspace.toggle.hide()
         self.summary_workspace.hide()
-        self.page_layouts[5].addWidget(self.summary_workspace,1)
-        self.page_layouts[5].setContentsMargins(16,16,16,16)
-        self.page_layouts[5].setSpacing(8)
+        self.page_layouts[Page.SUMMARY].addWidget(self.summary_workspace,1)
+        self.page_layouts[Page.SUMMARY].setContentsMargins(12,12,12,12)
+        self.page_layouts[Page.SUMMARY].setSpacing(8)
         for lay in self.page_layouts:
             lay.addStretch()
         review = card()
@@ -1363,7 +1368,7 @@ class Window(QMainWindow):
         self.back = QPushButton(tr("back"))
         self.back.setObjectName("secondary")
         self.back.clicked.connect(
-            lambda: self.set_page(3 if self.pages.currentIndex()==6 else max(0, self.pages.currentIndex() - 1))
+            lambda: self.set_page(Page.CAMERAS if self.pages.currentIndex()==Page.REVIEW else max(0, self.pages.currentIndex() - 1))
         )
         nav.addWidget(self.back)
         nav.addStretch()
@@ -1407,21 +1412,22 @@ class Window(QMainWindow):
         self.alerts.setChecked(self.args.alerts)
         if self.args.wifi:
             self.network.setCurrentIndex(1)
-        self.set_page(0)
+        self.set_page(Page.ADDRESS)
         if self.args.page:
             index = {
-                "address": 0,
-                "network": 1,
-                "house": 2,
-                "cameras": 3,
-                "progress": 4,
-                "summary": 5,
-                "failure": 4,
-                "validation": 0,
-                "review": 6,
-                "camera-check": 7,
+                "address": Page.ADDRESS,
+                "network": Page.NETWORK,
+                "house": Page.HOUSE,
+                "owner-consent": Page.OWNER,
+                "cameras": Page.CAMERAS,
+                "progress": Page.PROGRESS,
+                "summary": Page.SUMMARY,
+                "failure": Page.PROGRESS,
+                "validation": Page.ADDRESS,
+                "review": Page.REVIEW,
+                "camera-check": Page.CAMERA_CHECK,
             }[self.args.page]
-            if index == 7:
+            if index == Page.CAMERA_CHECK:
                 self.run_answers=self.collect_answers()
                 self.engine_cameras=[]
                 self.open_camera_check()
@@ -1430,21 +1436,24 @@ class Window(QMainWindow):
             if self.args.page == "validation":
                 self.inputs["address"].clear()
                 self.next_page()
-            if index in (4,5):
+            if index in (Page.PROGRESS,Page.SUMMARY):
                 if not self.args.demo:
                     return  # Render flags never launch a real setup process.
                 self.begin_setup(instant=True)
-                if self.args.page=='summary': self.set_page(5)
+                if self.args.page=='summary': self.set_page(Page.SUMMARY)
 
         if self.args.details:
-            if self.pages.currentIndex()==5: self.summary_details_action.setChecked(True)
+            if self.pages.currentIndex()==Page.SUMMARY: self.summary_details_action.setChecked(True)
             else: self.setup_details_toggle.setChecked(True)
         if getattr(self.args,"technical_log",False):
-            (self.summary_details if self.pages.currentIndex()==5 else self.setup_details).technical.setChecked(True)
+            (self.summary_details if self.pages.currentIndex()==Page.SUMMARY else self.setup_details).technical.setChecked(True)
 
     def add_input(self, page, key, caption, secret=False):
-        self.page_layouts[page].addWidget(label(caption))
+        caption_widget = label(caption)
+        self.page_layouts[page].addWidget(caption_widget)
         field = QLineEdit()
+        caption_widget.setBuddy(field)
+        field.setAccessibleName(caption.replace('&', ''))
         field.textChanged.connect(lambda: field.setStyleSheet(""))
         if secret:
             field.setEchoMode(QLineEdit.EchoMode.Password)
@@ -1479,7 +1488,7 @@ class Window(QMainWindow):
 
     def set_page(self, index):
         self.pages.setCurrentIndex(index)
-        if index == 5:
+        if index == Page.SUMMARY:
             self.summary_house.setText(tr("summary_house", house=self.inputs["house"].text()))
             from .availability import network_description
             self.summary_network.setText(tr("summary_network",network=network_description(getattr(self,"run_answers",self.collect_answers()))))
@@ -1487,22 +1496,25 @@ class Window(QMainWindow):
             self.summary_count.setText(tr("summary_camera_count",count=count) if count else tr("zero_cameras_summary"))
             self.later.hide()
         self.validation.setText("")
+        self.validation.setVisible(index != Page.PROGRESS)
         self.update_step_bar(index)
-        if index == 6:
+        if index == Page.REVIEW:
             self.populate_review()
-        self.back.setVisible(0 < index < 4 or index == 6)
-        self.next.setVisible(index != 4)
+        if index == Page.OWNER:
+            self.inputs['owner_name'].setFocus()
+        self.back.setVisible(Page.ADDRESS < index < Page.PROGRESS or index == Page.REVIEW)
+        self.next.setVisible(index != Page.PROGRESS)
         self.next.setText(
-            tr("camera_check_continue") if index == 7 else tr("start_setup") if index == 6 else tr("open_home_guard") if index == 5 else tr("next")
+            tr("camera_check_continue") if index == Page.CAMERA_CHECK else tr("start_setup") if index == Page.REVIEW else tr("open_home_guard") if index == Page.SUMMARY else tr("next")
         )
 
     def update_step_bar(self,index):
-        current = 3 if index == 6 else 4 if index == 7 else min(index,4)
+        current = Page.CAMERAS if index == Page.REVIEW else Page.PROGRESS if index == Page.CAMERA_CHECK else min(index,Page.PROGRESS)
         for i,(item,name) in enumerate(zip(self.step_labels,TEXT["step_names"])):
-            done = i < current or index == 5
+            done = i < current or index == Page.SUMMARY
             self.step_icons[i].setVisible(done)
             item.setText(name if done else tr("step_number",number=i+1,name=name))
-            item.setStyleSheet(f"color: {OK if done else '#edf1f7' if i == current else MUTED}; padding: 8px; border-bottom: 2px solid {'#edf1f7' if i == current and index != 5 else 'transparent'};")
+            item.setStyleSheet(f"color: {OK if done else '#edf1f7' if i == current else MUTED}; padding: 8px; border-bottom: 2px solid {'#edf1f7' if i == current and index != Page.SUMMARY else 'transparent'};")
 
     def errors_for_page(self,index):
         from .guidance import field_errors
@@ -1543,7 +1555,7 @@ class Window(QMainWindow):
 
     def next_page(self):
         index = self.pages.currentIndex()
-        if index == 5:
+        if index == Page.SUMMARY:
             from types import SimpleNamespace
             values=vars(self.args).copy()
             values.update(setup=False,page=None,panel=None,state="no-cameras" if not getattr(self,"engine_cameras",[]) else "inference")
@@ -1551,7 +1563,7 @@ class Window(QMainWindow):
             self.main_window.show()
             self.close()
             return
-        if index == 7:
+        if index == Page.CAMERA_CHECK:
             if self.wizard_cameras.check_state.photo_failed:
                 self.skip_camera_check()
                 return
@@ -1562,37 +1574,44 @@ class Window(QMainWindow):
                 self.validation.setText(tr("camera_check_unsaved"))
                 return
             if getattr(self,"camera_check_only",False): self.close()
-            else: self.set_page(5)
+            else: self.set_page(Page.SUMMARY)
             return
-        if index == 6:
+        if index == Page.REVIEW:
             self.begin_setup()
             return
-        if index == 0: self.compose_box_target()
+        if index == Page.ADDRESS: self.compose_box_target()
         errors = self.errors_for_page(index)
         if errors:
             for key,message in errors.items():
                 self.inputs[key].setStyleSheet(f"border: 1px solid {ERROR};")
-                self.field_guidance[key].setText(tr("box_target_error") if index == 0 and key == "address" else tr(message))
+                self.field_guidance[key].setText(tr("box_target_error") if index == Page.ADDRESS and key == "address" else tr(message))
                 self.field_guidance[key].show()
-            (self.box_user if not self.box_user.text().strip() else self.box_address).setFocus() if index == 0 else self.inputs[next(iter(errors))].setFocus()
+            (self.box_user if not self.box_user.text().strip() else self.box_address).setFocus() if index == Page.ADDRESS else self.inputs[next(iter(errors))].setFocus()
             return
-        if index == 0 and not self.args.demo:
+        if index == Page.ADDRESS and not self.args.demo:
             try: self.address_preference.save(self.inputs["address"].text().strip())
             except OSError:
-                self.set_page(1)
+                self.set_page(Page.NETWORK)
                 self.validation.setText(tr("address_not_remembered"))
                 return
-        if index == 3:
+        if index == Page.OWNER and not self.args.demo:
+            try: self.installer_preference.save(self.inputs['installer'].text().strip())
+            except OSError:
+                self.set_page(Page.CAMERAS)
+                self.validation.setText(tr('installer_not_remembered'))
+                return
+        if index == Page.CAMERAS:
             if self.camera_retry.pending:
                 self.begin_setup()
             else:
-                self.set_page(6)
+                self.set_page(Page.REVIEW)
         else:
             self.set_page(index + 1)
 
     def collect_answers(self):
         from .box_controls import minutes_to_seconds
         return Answers(**{key:w.text() if key.endswith("password") else w.text().strip() for key,w in self.inputs.items()},
+            **{'consent_' + key: toggle.isChecked() for key, toggle in self.consent_toggles.items()},
             network="wifi" if self.network.currentIndex() else "ethernet",
             show_cameras=self.show_pictures.isChecked(), alerts=self.alerts.isChecked(),
             start_hour=self.wizard_hours.values()[0], end_hour=self.wizard_hours.values()[1],
@@ -1638,7 +1657,7 @@ class Window(QMainWindow):
         for name in self.engine_step_names: name.setStyleSheet('color: '+MUTED)
         for item in self.check_labels: item.clear()
         self.setup_cancel.setEnabled(True)
-        self.set_page(4)
+        self.set_page(Page.PROGRESS)
         if not hasattr(self,"setup_pool"): self.setup_pool=ThreadPoolExecutor(max_workers=1)
         if instant:
             events=[]
@@ -1760,7 +1779,8 @@ class Window(QMainWindow):
             for step,row in zip(ENGINE_STEPS,self.step_rows):
                 group=self.setup_details.model.groups[step]
                 row.setText(tr("FAIL") if group.status=="fail" else tr("PASS") if group.status=="ok" else tr("pending") if group.status in ("pending","start") else group.status.upper())
-            if self.engine_backend.cancelled.is_set(): self.validation.setText(tr("setup_cancelled"))
+            if self.engine_backend.cancelled.is_set():
+                self.validation.setText(tr("setup_cancelled"));self.validation.show()
             self.next.setText(tr("retry"));self.next.hide()
             self.next.clicked.disconnect();self.next.clicked.connect(self.retry_setup)
             self.setup_workspace.refresh()
@@ -1782,7 +1802,7 @@ class Window(QMainWindow):
         self.setup_completed=True
         if hasattr(self,"saved_run_answers"):
             self.saved_run_answers.wifi_password="";self.saved_run_answers.camera_password=""
-        if not self.engine_cameras: self.set_page(5)
+        if not self.engine_cameras: self.set_page(Page.SUMMARY)
         else: self.open_camera_check()
 
     def check_only(self):
@@ -1800,13 +1820,13 @@ class Window(QMainWindow):
     def skip_camera_check(self):
         self.wizard_cameras.close()
         if getattr(self,"camera_check_only",False): self.close()
-        else: self.set_page(5)
+        else: self.set_page(Page.SUMMARY)
 
     def open_camera_check(self):
         from .camera_ui import CameraPage
         if hasattr(self,"wizard_cameras"):
             self.wizard_cameras.close()
-            old=self.pages.widget(7)
+            old=self.pages.widget(Page.CAMERA_CHECK)
             self.pages.removeWidget(old)
             old.deleteLater()
         if self.args.demo:
@@ -1820,7 +1840,7 @@ class Window(QMainWindow):
         state=CameraCheckState(setup_finished=getattr(self,"setup_completed",False),house=self.run_answers.house,cameras=tuple(self.engine_cameras))
         self.wizard_cameras=CameraPage(controls,lambda:self.validation.clear(),wizard=True,check_state=state,skip=self.skip_camera_check)
         self.pages.addWidget(self.wizard_cameras.widget)
-        self.set_page(7)
+        self.set_page(Page.CAMERA_CHECK)
         self.wizard_cameras.open()
 
     def replay_setup(self):
