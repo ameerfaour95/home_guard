@@ -279,7 +279,7 @@ def test_labeler_sees_pseudonyms_and_no_dispatch(client, staff_factory, indexed_
 def test_labeler_without_training_consent_sees_nothing(client, staff_factory, indexed):
     _, _, _, h = staff_factory("labeler")
     eid = _event_id(client, b.STEM)
-    assert client.get("/v1/events", headers=h).json() == {"items": [], "next_cursor": None}
+    assert client.get("/v1/events", headers=h).json() == {"items": [], "next_cursor": None, "total": None, "total_capped": False}
     assert client.get(f"/v1/events/{eid}", headers=h).status_code == 404
     assert client.get(f"/v1/events/{eid}/detections", headers=h).status_code == 404
     assert client.patch(f"/v1/events/{eid}/review", json={"reviewed": True}, headers=h).status_code == 404

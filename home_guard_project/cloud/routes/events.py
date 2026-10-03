@@ -26,7 +26,7 @@ from home_guard_project.fleet_contract.legacy import parse_heartbeat, parse_meta
 
 from .. import audit, pseudonym
 from ..deps import current_staff, get_session
-from ..models import (AiRun, Artifact, AuditLog, Camera, Customer, Device, Event, Feedback, RawRevision, ReviewState,
+from ..models import (AiRun, Artifact, AuditLog, Camera, CollectionItem, Customer, Device, Event, Feedback, RawRevision, ReviewState,
                       Staff)
 from ..schemas import (AiRunOut, ArtifactOut, Box, DensityOut, DensityRow, DetectionsOut, DispatchOut, EventDetail,
                        EventKind, EventPage, EventSummary, FeedbackOut, FrameBoxes, ReviewCount, ReviewUpdate)
@@ -212,11 +212,15 @@ def list_events(
     reviewed: Optional[bool] = None,
     flagged: Optional[bool] = None,
     filter: Optional[str] = None,
+    collection_id: Optional[int] = None,
+    with_total: bool = False,
     cursor: Optional[str] = None,
     limit: int = Query(100, ge=1, le=500),
     staff: Staff = Depends(current_staff),
     session: Session = Depends(get_session),
 ):
+    """Event history, newest first. `with_total=true` also fills `total` (counted up to 10000; beyond that
+    `total` is 10000 and `total_capped` is true). `collection_id` keeps only events in that collection."""
     viewer = _Viewer(staff, request)
     conds = [viewer.visible()]
     if site is not None:
@@ -246,9 +250,31 @@ def list_events(
         if builder is None:
             raise HTTPException(status_code=400, detail=f"Unknown filter: {filter}")
         conds.append(builder())
+    if collection_id is not None:
+        conds.append(_in_collection(collection_id))
+    return event_page(session, viewer, conds, cursor, limit, with_total)
+
+
+TOTAL_CAP = 10_000
+
+
+def _in_collection(collection_id: int):
+    return Event.id.in_(select(CollectionItem.event_id).where(CollectionItem.collection_id == collection_id))
+
+
+def event_page(session: Session, viewer: _Viewer, conds: list, cursor: Optional[str], limit: int,
+               with_total: bool = False) -> EventPage:
+    """One keyset page of events matching `conds` (which already include viewer.visible()), newest first.
+    Shared by /events and the studio collection items route so both show identical rows and pseudonyms."""
+    total, capped = None, False
+    if with_total:
+        counted = session.scalar(select(func.count()).select_from(
+            _event_select().where(*conds).order_by(None).limit(TOTAL_CAP + 1).subquery()))
+        capped = counted > TOTAL_CAP
+        total = TOTAL_CAP if capped else counted
     if cursor:
         ts, last_id = _decode_cursor(cursor)
-        conds.append(or_(Event.start_ts < ts, and_(Event.start_ts == ts, Event.id < last_id)))
+        conds = [*conds, or_(Event.start_ts < ts, and_(Event.start_ts == ts, Event.id < last_id))]
     rows = session.execute(_event_select().where(*conds)
                            .order_by(Event.start_ts.desc(), Event.id.desc()).limit(limit + 1)).all()
     more = len(rows) > limit
@@ -257,7 +283,7 @@ def list_events(
     items = [EventSummary(**_summary_fields(viewer, ev, cid, name, tz, rv, fl, ev.id in thumbs))
              for ev, cid, name, tz, rv, fl in rows]
     next_cursor = _encode_cursor(rows[-1][0].start_ts, rows[-1][0].id) if more and rows else None
-    return EventPage(items=items, next_cursor=next_cursor)
+    return EventPage(items=items, next_cursor=next_cursor, total=total, total_capped=capped)
 
 
 # ---------------------------------------------------------------- density and review counts

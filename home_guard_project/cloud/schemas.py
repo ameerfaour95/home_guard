@@ -130,6 +130,8 @@ class EventSummary(BaseModel):
 class EventPage(BaseModel):
     items: list[EventSummary]
     next_cursor: Optional[str]
+    total: Optional[int] = None  # only with with_total=true; capped at 10000 (then total_capped is true)
+    total_capped: bool = False
 
 
 class AiRunOut(BaseModel):
@@ -250,6 +252,19 @@ class ExportRequest(BaseModel):
     include_fallback_ai: bool = False
 
 
+class ExportExclusion(BaseModel):
+    event_id: int
+    reason: Literal["no_training_consent", "video_unavailable", "no_real_ai", "expired"]
+
+
+class ExportPreview(BaseModel):
+    included_ids: list[int]
+    excluded: list[ExportExclusion]
+    split_counts: dict[str, int]  # events per split after the group-aware split
+    groups: int  # number of (site, day) groups
+    warnings: list[str]
+
+
 class ExportOut(BaseModel):
     id: int
     name: str
@@ -272,6 +287,7 @@ class AuditEntry(BaseModel):
     device_id: Optional[str]
     target: str
     reason: str
+    detail: Optional[dict] = None
 
 
 class AuditPage(BaseModel):

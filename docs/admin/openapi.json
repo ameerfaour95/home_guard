@@ -174,6 +174,18 @@
             ],
             "title": "Customer Id"
           },
+          "detail": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
           "device_id": {
             "anyOf": [
               {
@@ -1104,6 +1116,22 @@
               }
             ],
             "title": "Next Cursor"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          },
+          "total_capped": {
+            "default": false,
+            "title": "Total Capped",
+            "type": "boolean"
           }
         },
         "required": [
@@ -1255,6 +1283,30 @@
         "title": "EventSummary",
         "type": "object"
       },
+      "ExportExclusion": {
+        "properties": {
+          "event_id": {
+            "title": "Event Id",
+            "type": "integer"
+          },
+          "reason": {
+            "enum": [
+              "no_training_consent",
+              "video_unavailable",
+              "no_real_ai",
+              "expired"
+            ],
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "reason"
+        ],
+        "title": "ExportExclusion",
+        "type": "object"
+      },
       "ExportOut": {
         "properties": {
           "created_by": {
@@ -1333,6 +1385,51 @@
           "created_by"
         ],
         "title": "ExportOut",
+        "type": "object"
+      },
+      "ExportPreview": {
+        "properties": {
+          "excluded": {
+            "items": {
+              "$ref": "#/components/schemas/ExportExclusion"
+            },
+            "title": "Excluded",
+            "type": "array"
+          },
+          "groups": {
+            "title": "Groups",
+            "type": "integer"
+          },
+          "included_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Included Ids",
+            "type": "array"
+          },
+          "split_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Split Counts",
+            "type": "object"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "included_ids",
+          "excluded",
+          "split_counts",
+          "groups",
+          "warnings"
+        ],
+        "title": "ExportPreview",
         "type": "object"
       },
       "ExportRequest": {
@@ -2290,6 +2387,7 @@
     },
     "/v1/events": {
       "get": {
+        "description": "Event history, newest first. `with_total=true` also fills `total` (counted up to 10000; beyond that\n`total` is 10000 and `total_capped` is true). `collection_id` keeps only events in that collection.",
         "operationId": "list_events_v1_events_get",
         "parameters": [
           {
@@ -2484,6 +2582,32 @@
                 }
               ],
               "title": "Filter"
+            }
+          },
+          {
+            "in": "query",
+            "name": "collection_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Collection Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "with_total",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "With Total",
+              "type": "boolean"
             }
           },
           {
@@ -3168,6 +3292,80 @@
           "studio"
         ]
       },
+      "get": {
+        "description": "Events in a collection, newest first, same rows and pseudonyms as /events. Labelers only see events\nof customers who gave training consent.",
+        "operationId": "list_collection_items_v1_studio_collections__collection_id__items_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "collection_id",
+            "required": true,
+            "schema": {
+              "title": "Collection Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Collection Items",
+        "tags": [
+          "studio"
+        ]
+      },
       "post": {
         "operationId": "add_collection_items_v1_studio_collections__collection_id__items_post",
         "parameters": [
@@ -3293,6 +3491,53 @@
           }
         ],
         "summary": "Create Export",
+        "tags": [
+          "studio"
+        ]
+      }
+    },
+    "/v1/studio/exports/preview": {
+      "post": {
+        "description": "What an export of this request would contain, using the same selection and split code as the builder.\n\n`include_fallback_ai=false` excludes only fallback/failed AI from vlm.jsonl; such events still contribute\nclips and YOLO labels, so `no_real_ai` is reported only for VLM-only exports (formats == [\"vlm_jsonl\"]).\nEvents of customers without training consent are always excluded (`no_training_consent`).",
+        "operationId": "preview_export_v1_studio_exports_preview_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Preview Export",
         "tags": [
           "studio"
         ]
