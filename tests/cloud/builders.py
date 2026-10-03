@@ -130,3 +130,16 @@ def enroll(session, site: str = SITE, customer_name: str = "Acme"):
     session.add(dev)
     session.flush()
     return dev
+
+
+def index_fixture_bucket(session, s3, site: str = SITE, customer_name: str = "Acme",
+                         consent_training: bool = False, now=None):
+    """Enrol `site` for a new customer and index the (already seeded) bucket; returns the Device (committed)."""
+    from home_guard_project.cloud.indexer import index_device
+    from home_guard_project.cloud.models import Customer
+
+    dev = enroll(session, site, customer_name)
+    session.get(Customer, dev.customer_id).consent_training = consent_training
+    session.commit()
+    index_device(session, s3, dev, full_scan=True, now=now)
+    return dev
