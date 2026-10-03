@@ -214,7 +214,7 @@ class Window(QMainWindow):
         self.setWindowTitle(tr("setup_window_title") if args.setup else tr("brand"))
         self.setWindowIcon(QIcon(str(Path(__file__).parents[1] / "assets" / "home_guard.ico")))
         self.resize(*map(int, args.size.split("x")))
-        self.setMinimumSize(640, 650)
+        self.setMinimumSize(1000, 650)
         self.setStyleSheet(stylesheet(getattr(args,"theme","dark")))
         self.root = QWidget()
         self.setCentralWidget(self.root)
@@ -246,10 +246,13 @@ class Window(QMainWindow):
         titles.addWidget(self.house_label)
         self.header_hint = label(tr("simulation") if args.setup and args.demo else tr("setup_live_hint") if args.setup else tr("close_hint"), "muted")
         if not args.setup:
+            from .alert_types_ui import ElidedLabel
+            self.header_hint.deleteLater()
+            self.header_hint = ElidedLabel(tr('close_hint'))
             self.header_hint.setObjectName("headline");self.header_hint.setWordWrap(False)
         if args.setup: titles.addWidget(self.header_hint)
         else:
-            self.status_header=QHBoxLayout();self.status_header.setSpacing(16);self.status_header.addWidget(self.header_hint);self.status_header.addStretch();titles.addLayout(self.status_header)
+            self.status_header=QHBoxLayout();self.status_header.setSpacing(16);self.status_header.addWidget(self.header_hint,1);titles.addLayout(self.status_header)
             from .alert_types_ui import ElidedLabel
             self.alert_status=ElidedLabel();self.alert_status.setObjectName("muted");titles.addWidget(self.alert_status)
         header.addLayout(titles, 1)
@@ -579,11 +582,12 @@ class Window(QMainWindow):
                     self.demo_history_state=self.args.state
                     self.demo_decisions=self.ai_data['decisions']
                 self.ai_data['decisions']=self.demo_decisions
-                self.ai_data['settings']=self.box_controls.reported_status()['settings']
+            self.ai_data['settings']=self.box_controls.reported_status()['settings']
         elif time.monotonic()-self.last_ai_poll>=1:
             data=read_status(str(Path(bc.LOG_DIR)/"ai_status.json"))
             if data: self.ai_data=data
             self.last_ai_poll=time.monotonic()
+        self.update_alert_status()
         inference=self.current_state is not None and self.current_state.mode=="inference"
         from .ai_view import undelivered_alert
         failed=undelivered_alert(self.ai_data) if inference else None
@@ -682,9 +686,7 @@ class Window(QMainWindow):
         except Exception:
             from .box_controls import Settings
             settings=Settings()
-        from .alert_types_ui import alert_summary
-        self.alert_status.setText(hours_description(settings.alert_start_hour,settings.alert_end_hour) + " · " + alert_summary(self.ai_data,settings.alert_on))
-        self.alert_status.setVisible(state.mode == "inference")
+        self.update_alert_status()
         until, some = self.alert_pause.status(state.cameras) if state.mode == "inference" else (None,False)
         paused = tr("paused_some" if some else "paused_until", time=time.strftime("%H:%M",time.localtime(until))) if until else ""
         self.pause_label.setText(paused)
@@ -812,6 +814,16 @@ class Window(QMainWindow):
         if self.current_state:
             self.apply_state(self.current_state, self.box_controls.load_settings().show_cameras, self.events)
         self.tick()
+
+    def update_alert_status(self):
+        if not self.current_state: return
+        from .alert_types_ui import alert_summary
+        from .alert_hours import hours_description
+        from .box_controls import Settings
+        try: settings = self.box_controls.load_settings()
+        except Exception: settings = Settings()
+        self.alert_status.setText(hours_description(settings.alert_start_hour, settings.alert_end_hour) + " · " + alert_summary(self.ai_data, settings.alert_on))
+        self.alert_status.setVisible(self.current_state.mode == 'inference')
 
     def toggle_running(self):
         if self.box_controls.is_stopped():

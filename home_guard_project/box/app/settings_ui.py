@@ -57,7 +57,7 @@ class SettingsPage:
         detect.addStretch()
         self.start.editingFinished.connect(self.live_hours);self.end.editingFinished.connect(self.live_hours);self.hours.all_day.toggled.connect(self.live_hours)
         self.cooldown.editingFinished.connect(self.live_cooldown)
-        side=QWidget();side_layout=layout_for(side,0);side_layout.addWidget(viewing);side_layout.addWidget(detection)
+        side=QWidget();side.setMaximumWidth(400);side_layout=layout_for(side,0);side_layout.addWidget(viewing);side_layout.addWidget(detection)
         columns.addWidget(security,7);columns.addWidget(side,3);layout.addWidget(columns_widget,1)
         footer=QHBoxLayout();self.note=label("","muted");footer.addWidget(self.note,1)
         self.save=QPushButton(tr("save_settings"));self.save.clicked.connect(self.save_clicked);footer.addWidget(self.save);layout.addLayout(footer)

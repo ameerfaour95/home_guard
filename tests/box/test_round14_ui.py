@@ -54,7 +54,9 @@ class OffCameraTests(unittest.TestCase):
         from PySide6.QtWidgets import QWidget
         slots=page.widget.findChildren(QWidget,'cameraActionSlot')
         self.assertEqual(len(slots),3)
-        self.assertTrue(all(slot.layout().count()==0 for slot in slots))
+        from home_guard_project.box.app.alert_types_ui import CameraAlertButton
+        self.assertTrue(all(slot.height()==36 for slot in slots))
+        self.assertTrue(all(len(slot.findChildren(CameraAlertButton))==1 for slot in slots))
         page.rows[0][1].setText("renamed_door")
         off.turn_on.click()
         self.assertTrue(all(c.enabled for c in w.camera_controls.records))

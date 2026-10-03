@@ -51,8 +51,13 @@ class ResponsiveColumns(QWidget):
         self.row.setContentsMargins(0, 0, 0, 0)
         self.row.setSpacing(16)
 
+    def minimumSizeHint(self):
+        # A wide row must not pin the scroll viewport wider than the window;
+        # allow resizeEvent to switch to the stacked layout first.
+        return QSize(0, super().minimumSizeHint().height())
+
     def resizeEvent(self, event):
-        self.row.setDirection(QBoxLayout.Direction.TopToBottom if self.width() < 1000 else QBoxLayout.Direction.LeftToRight)
+        self.row.setDirection(QBoxLayout.Direction.TopToBottom if self.width() < 850 else QBoxLayout.Direction.LeftToRight)
         super().resizeEvent(event)
 
 
@@ -158,7 +163,7 @@ class AlertTiles(QWidget):
         self.hint.hide(); self.changed.emit(self.value())
 
     def resizeEvent(self, event):
-        compact = self.width() < 590
+        compact = self.width() < 640
         self.row.setDirection(QBoxLayout.Direction.TopToBottom if compact else QBoxLayout.Direction.LeftToRight)
         for tile in self.tiles.values():
             tile.compact = compact; tile.setFixedHeight(90 if compact else 154); tile.update()
@@ -206,6 +211,13 @@ class CameraAlertsDialog(QDialog):
         self.house, self.own = house, own
         self.ack = AppliedState(); self.future = None; self.operation = ''; self.loading = True
         self.pool = ThreadPoolExecutor(max_workers=1)
+        t = colors(self)
+        self.setObjectName('alertTypesDialog')
+        self.setStyleSheet(f'QDialog#alertTypesDialog {{ background: {t["bg"]}; border: 1px solid {t["border"]}; border-radius: 16px; }} '
+                          f'QRadioButton {{ background: transparent; spacing: 12px; padding: 10px; border: 1px solid {t["border"]}; border-radius: 9px; }} '
+                          f'QRadioButton:checked {{ background: {t["raised"]}; border-color: {t["action"]}; }} '
+                          f'QRadioButton::indicator {{ width: 16px; height: 16px; border: 1px solid {t["secondary"]}; border-radius: 9px; background: {t["surface"]}; }} '
+                          f'QRadioButton::indicator:checked {{ background: {t["action"]}; border: 3px solid {t["surface"]}; }}')
         self.setWindowTitle(tr('alert_camera_title', camera=name.replace('_', ' ').title()) if name else tr('alert_house_title'))
         self.setModal(True); self.resize(760, 420)
         root = QVBoxLayout(self); root.setContentsMargins(28, 24, 28, 24); root.setSpacing(14)

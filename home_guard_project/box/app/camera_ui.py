@@ -290,6 +290,7 @@ class CameraPage:
         dialog.house_saved.connect(self.house_alert_saved)
         def finished(result):
             self.alert_house=dialog.house
+            if name is not None: self.alert_values[name]=dialog.own
             self.refresh_alert_labels()
             self.alert_dialog=None
             dialog.deleteLater()

@@ -79,3 +79,10 @@ class AlertDataTests(unittest.TestCase):
             self.assertEqual(ack.status(data, 110), 'live_not_picked_up')
             data['updated'] = 110
             self.assertEqual(ack.status(data, 110), 'applied')
+
+    def test_demo_rename_preserves_override(self):
+        box = BoxControls(demo=True)
+        cameras = CameraControls(box, ['driveway', 'yard'])
+        cameras.set_camera_alerts('driveway', 'vehicle')
+        cameras.save([('driveway', 'gate', True), ('yard', 'yard', True)])
+        self.assertEqual(box.reported_status()['settings']['camera_alert_on'], {'gate': ['vehicle']})
