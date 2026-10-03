@@ -1,0 +1,39 @@
+{
+  "camera_name": "left_side_1",
+  "kind": "paused",
+  "clip_path": "clips\\left_side_1\\2026-10-03\\left_side_1_1791014883_paused.mp4",
+  "clip_start_ts": 1791014879.5801756,
+  "clip_end_ts": 1791014889.3821764,
+  "clip_start_local": "2026-10-03 11:07:59",
+  "clip_end_local": "2026-10-03 11:08:09",
+  "duration_sec": 9.802000761032104,
+  "frames_written": 44,
+  "fps_estimated": 4.4,
+  "codec": "h264",
+  "buffer": {
+    "store_fps": 4.4,
+    "store_size": [
+      704,
+      576
+    ]
+  },
+  "yolo": {
+    "class_counts": {
+      "car": 1
+    },
+    "trigger_classes": [
+      "car"
+    ],
+    "trigger_detected": true
+  },
+  "alert": {
+    "summary": "",
+    "alert_command": "[none]",
+    "alert_reason": "alerts paused by the owner",
+    "labels": [
+      "car"
+    ],
+    "muted": true,
+    "paused": true
+  }
+}

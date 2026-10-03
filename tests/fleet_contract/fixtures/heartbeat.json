@@ -1,0 +1,59 @@
+{
+  "site": "test",
+  "mode": "inference",
+  "host": "DESKTOP-43DP1TI",
+  "local_ip": "192.168.68.120",
+  "time_utc": "2026-10-03T11:15:14Z",
+  "collector_running": true,
+  "disk_free_gb": 937.1,
+  "clips_live": 4,
+  "clips_outbox": 31,
+  "newest_clip_utc": "2026-10-03T11:14:32Z",
+  "cameras": {
+    "bian_ch2": {
+      "clips_waiting": 3,
+      "newest_clip_utc": "2026-10-02T20:24:27Z"
+    },
+    "bian_ch3": {
+      "clips_waiting": 1,
+      "newest_clip_utc": "2026-10-02T20:17:50Z"
+    },
+    "bian_ch4": {
+      "clips_waiting": 1,
+      "newest_clip_utc": "2026-10-02T20:18:46Z"
+    },
+    "front_side": {
+      "clips_waiting": 3,
+      "newest_clip_utc": "2026-10-03T11:14:02Z"
+    },
+    "left_side_1": {
+      "clips_waiting": 2,
+      "newest_clip_utc": "2026-10-03T10:57:47Z"
+    },
+    "left_side_2": {
+      "clips_waiting": 2,
+      "newest_clip_utc": "2026-10-03T09:30:36Z"
+    },
+    "main_entrance": {
+      "clips_waiting": 5,
+      "newest_clip_utc": "2026-10-03T11:14:32Z"
+    },
+    "test2_ch1": {
+      "clips_waiting": 1,
+      "newest_clip_utc": "2026-10-02T16:15:45Z"
+    },
+    "test2_ch2": {
+      "clips_waiting": 3,
+      "newest_clip_utc": "2026-10-02T16:57:03Z"
+    },
+    "test2_ch5": {
+      "clips_waiting": 2,
+      "newest_clip_utc": "2026-10-02T16:33:23Z"
+    },
+    "test_ch6": {
+      "clips_waiting": 12,
+      "newest_clip_utc": "2026-10-02T23:12:07Z"
+    }
+  },
+  "stopped": false
+}

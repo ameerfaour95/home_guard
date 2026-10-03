@@ -1,0 +1,299 @@
+{
+  "camera_name": "back_door",
+  "kind": "trigger",
+  "clip_path": "clips\\back_door\\2026-10-02\\back_door_1790944263_trigger.mp4",
+  "clip_start_ts": 1790944253.6613626,
+  "clip_end_ts": 1790944263.4002116,
+  "clip_start_utc": "2026-10-02 12:30:53",
+  "clip_end_utc": "2026-10-02 12:31:03",
+  "clip_start_local": "2026-10-02 15:30:53",
+  "clip_end_local": "2026-10-02 15:31:03",
+  "duration_sec": 9.73884892463684,
+  "frames_written": 63,
+  "fps_estimated": 7.0,
+  "vlm_sample_fps": 2,
+  "buffer": {
+    "store_fps": 7.0,
+    "store_size": [
+      704,
+      576
+    ]
+  },
+  "yolo": {
+    "class_counts": {
+      "person": 2
+    },
+    "class_max_conf": {
+      "person": 0.765583872795105
+    },
+    "trigger_classes": [
+      "person",
+      "cat",
+      "dog"
+    ],
+    "trigger_detected": true,
+    "trigger_conf_max": 0.765583872795105,
+    "detection_score": 4.0
+  },
+  "roi": {
+    "active": false,
+    "polygon_normalized": null
+  },
+  "yolo_export": {
+    "enabled": true,
+    "export_fps": 3.0,
+    "conf": 0.25,
+    "images_root": "yolo\\images",
+    "labels_root": "yolo\\labels",
+    "exported_frames": [
+      {
+        "frame_index": 0,
+        "approx_time_offset_sec": 0.0,
+        "image_path": "yolo\\images\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0000.jpg",
+        "label_path": "yolo\\labels\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0000.txt",
+        "num_boxes": 5
+      },
+      {
+        "frame_index": 2,
+        "approx_time_offset_sec": 0.2857142857142857,
+        "image_path": "yolo\\images\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0002.jpg",
+        "label_path": "yolo\\labels\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0002.txt",
+        "num_boxes": 5
+      },
+      {
+        "frame_index": 4,
+        "approx_time_offset_sec": 0.5714285714285714,
+        "image_path": "yolo\\images\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0004.jpg",
+        "label_path": "yolo\\labels\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0004.txt",
+        "num_boxes": 4
+      },
+      {
+        "frame_index": 6,
+        "approx_time_offset_sec": 0.8571428571428571,
+        "image_path": "yolo\\images\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0006.jpg",
+        "label_path": "yolo\\labels\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0006.txt",
+        "num_boxes": 5
+      },
+      {
+        "frame_index": 8,
+        "approx_time_offset_sec": 1.1428571428571428,
+        "image_path": "yolo\\images\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0008.jpg",
+        "label_path": "yolo\\labels\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0008.txt",
+        "num_boxes": 4
+      },
+      {
+        "frame_index": 10,
+        "approx_time_offset_sec": 1.4285714285714286,
+        "image_path": "yolo\\images\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0010.jpg",
+        "label_path": "yolo\\labels\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0010.txt",
+        "num_boxes": 5
+      },
+      {
+        "frame_index": 12,
+        "approx_time_offset_sec": 1.7142857142857142,
+        "image_path": "yolo\\images\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0012.jpg",
+        "label_path": "yolo\\labels\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0012.txt",
+        "num_boxes": 5
+      },
+      {
+        "frame_index": 14,
+        "approx_time_offset_sec": 2.0,
+        "image_path": "yolo\\images\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0014.jpg",
+        "label_path": "yolo\\labels\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0014.txt",
+        "num_boxes": 5
+      },
+      {
+        "frame_index": 16,
+        "approx_time_offset_sec": 2.2857142857142856,
+        "image_path": "yolo\\images\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0016.jpg",
+        "label_path": "yolo\\labels\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0016.txt",
+        "num_boxes": 6
+      },
+      {
+        "frame_index": 18,
+        "approx_time_offset_sec": 2.5714285714285716,
+        "image_path": "yolo\\images\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0018.jpg",
+        "label_path": "yolo\\labels\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0018.txt",
+        "num_boxes": 4
+      },
+      {
+        "frame_index": 20,
+        "approx_time_offset_sec": 2.857142857142857,
+        "image_path": "yolo\\images\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0020.jpg",
+        "label_path": "yolo\\labels\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0020.txt",
+        "num_boxes": 4
+      },
+      {
+        "frame_index": 22,
+        "approx_time_offset_sec": 3.142857142857143,
+        "image_path": "yolo\\images\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0022.jpg",
+        "label_path": "yolo\\labels\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0022.txt",
+        "num_boxes": 4
+      },
+      {
+        "frame_index": 24,
+        "approx_time_offset_sec": 3.4285714285714284,
+        "image_path": "yolo\\images\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0024.jpg",
+        "label_path": "yolo\\labels\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0024.txt",
+        "num_boxes": 4
+      },
+      {
+        "frame_index": 26,
+        "approx_time_offset_sec": 3.7142857142857144,
+        "image_path": "yolo\\images\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0026.jpg",
+        "label_path": "yolo\\labels\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0026.txt",
+        "num_boxes": 3
+      },
+      {
+        "frame_index": 28,
+        "approx_time_offset_sec": 4.0,
+        "image_path": "yolo\\images\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0028.jpg",
+        "label_path": "yolo\\labels\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0028.txt",
+        "num_boxes": 4
+      },
+      {
+        "frame_index": 30,
+        "approx_time_offset_sec": 4.285714285714286,
+        "image_path": "yolo\\images\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0030.jpg",
+        "label_path": "yolo\\labels\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0030.txt",
+        "num_boxes": 3
+      },
+      {
+        "frame_index": 32,
+        "approx_time_offset_sec": 4.571428571428571,
+        "image_path": "yolo\\images\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0032.jpg",
+        "label_path": "yolo\\labels\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0032.txt",
+        "num_boxes": 3
+      },
+      {
+        "frame_index": 34,
+        "approx_time_offset_sec": 4.857142857142857,
+        "image_path": "yolo\\images\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0034.jpg",
+        "label_path": "yolo\\labels\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0034.txt",
+        "num_boxes": 3
+      },
+      {
+        "frame_index": 36,
+        "approx_time_offset_sec": 5.142857142857143,
+        "image_path": "yolo\\images\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0036.jpg",
+        "label_path": "yolo\\labels\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0036.txt",
+        "num_boxes": 4
+      },
+      {
+        "frame_index": 38,
+        "approx_time_offset_sec": 5.428571428571429,
+        "image_path": "yolo\\images\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0038.jpg",
+        "label_path": "yolo\\labels\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0038.txt",
+        "num_boxes": 3
+      },
+      {
+        "frame_index": 40,
+        "approx_time_offset_sec": 5.714285714285714,
+        "image_path": "yolo\\images\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0040.jpg",
+        "label_path": "yolo\\labels\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0040.txt",
+        "num_boxes": 4
+      },
+      {
+        "frame_index": 42,
+        "approx_time_offset_sec": 6.0,
+        "image_path": "yolo\\images\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0042.jpg",
+        "label_path": "yolo\\labels\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0042.txt",
+        "num_boxes": 3
+      },
+      {
+        "frame_index": 44,
+        "approx_time_offset_sec": 6.285714285714286,
+        "image_path": "yolo\\images\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0044.jpg",
+        "label_path": "yolo\\labels\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0044.txt",
+        "num_boxes": 4
+      },
+      {
+        "frame_index": 46,
+        "approx_time_offset_sec": 6.571428571428571,
+        "image_path": "yolo\\images\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0046.jpg",
+        "label_path": "yolo\\labels\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0046.txt",
+        "num_boxes": 3
+      },
+      {
+        "frame_index": 48,
+        "approx_time_offset_sec": 6.857142857142857,
+        "image_path": "yolo\\images\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0048.jpg",
+        "label_path": "yolo\\labels\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0048.txt",
+        "num_boxes": 3
+      },
+      {
+        "frame_index": 50,
+        "approx_time_offset_sec": 7.142857142857143,
+        "image_path": "yolo\\images\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0050.jpg",
+        "label_path": "yolo\\labels\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0050.txt",
+        "num_boxes": 4
+      },
+      {
+        "frame_index": 52,
+        "approx_time_offset_sec": 7.428571428571429,
+        "image_path": "yolo\\images\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0052.jpg",
+        "label_path": "yolo\\labels\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0052.txt",
+        "num_boxes": 4
+      },
+      {
+        "frame_index": 54,
+        "approx_time_offset_sec": 7.714285714285714,
+        "image_path": "yolo\\images\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0054.jpg",
+        "label_path": "yolo\\labels\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0054.txt",
+        "num_boxes": 4
+      },
+      {
+        "frame_index": 56,
+        "approx_time_offset_sec": 8.0,
+        "image_path": "yolo\\images\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0056.jpg",
+        "label_path": "yolo\\labels\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0056.txt",
+        "num_boxes": 4
+      },
+      {
+        "frame_index": 58,
+        "approx_time_offset_sec": 8.285714285714286,
+        "image_path": "yolo\\images\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0058.jpg",
+        "label_path": "yolo\\labels\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0058.txt",
+        "num_boxes": 5
+      },
+      {
+        "frame_index": 60,
+        "approx_time_offset_sec": 8.571428571428571,
+        "image_path": "yolo\\images\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0060.jpg",
+        "label_path": "yolo\\labels\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0060.txt",
+        "num_boxes": 6
+      },
+      {
+        "frame_index": 62,
+        "approx_time_offset_sec": 8.857142857142858,
+        "image_path": "yolo\\images\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0062.jpg",
+        "label_path": "yolo\\labels\\back_door\\2026-10-02\\back_door_1790944263_trigger_f0062.txt",
+        "num_boxes": 4
+      }
+    ]
+  },
+  "vlm_crop": {
+    "enabled": true,
+    "vlm_crop_path": "vlm_crops\\back_door\\2026-10-02\\back_door_1790944263_trigger.mp4",
+    "crop_padding": 0.3,
+    "crop_min_size": 384,
+    "source_resolution": [
+      2592,
+      1520
+    ],
+    "crop_region": [
+      571,
+      0,
+      1854,
+      1282
+    ],
+    "crop_resolution": [
+      950,
+      950
+    ],
+    "frames_written": 36,
+    "fps": 5.0,
+    "per_frame_tracking": true
+  },
+  "model_response": "A person walks."
+}
