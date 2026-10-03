@@ -305,8 +305,10 @@ def confirmation_text(feedback: Feedback) -> str:
     if verdict_text:
         parts.append(verdict_text)
     if feedback.action == "mute" and feedback.mute_until:
-        until = dt.datetime.fromtimestamp(feedback.mute_until).strftime("%H:%M")
-        where = f" for {feedback.camera}" if feedback.camera else ""
+        end = dt.datetime.fromtimestamp(feedback.mute_until)
+        until = end.strftime("%H:%M") if end.date() == dt.date.today() else end.strftime("%H:%M tomorrow" if (
+            end.date() - dt.date.today()).days == 1 else "%H:%M on %d/%m")
+        where = f" for {feedback.camera}" if feedback.camera else " for ALL cameras"
         parts.append(f'Alerts{where} are paused until {until}. Send "continue" to turn them back on sooner.')
     elif feedback.action == "resume":
         parts.append("Alerts are back on.")

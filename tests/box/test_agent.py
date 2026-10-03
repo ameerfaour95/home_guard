@@ -236,6 +236,38 @@ class OwnerAgentTest(unittest.TestCase):
         self.assertFalse(self.mute.is_muted(NOW + 60, "front_door"))   # NOT silently widened to all cameras
         self.assertFalse(self.mute.is_muted(NOW + 60, "back_yard"))
 
+    def test_mute_this_camera_never_pauses_the_whole_house(self) -> None:
+        """2026-10-03: "mute this camera" (about back_door) paused every camera for a day."""
+        model = RecordingModel([call("pause_alerts", owner_words="תשתיק את המצלמה הזאת"),
+                                call("pause_alerts", owner_words="תשתיק את המצלמה הזאת", camera="back_yard"),
+                                say("Paused back_yard.")])
+        OwnerAgent(model, self._ctx()).handle("תשתיק את המצלמה הזאת", "-1001", {}, None)
+        refused = [m for m in model.seen[1] if m.get("role") == "tool"][0]["content"]
+        self.assertIn("ONE camera", refused)
+        self.assertFalse(self.mute.is_muted(NOW + 60, "front_door"))      # the rest of the house still alerts
+        self.assertTrue(self.mute.is_muted(NOW + 60, "back_yard"))
+
+    def test_asking_for_all_cameras_still_pauses_all(self) -> None:
+        from home_guard_project.box.agent import asks_for_one_camera
+
+        for words in ("mute this camera", "תשתיק את המצלמה הזאת", "תכבה את המצלמה", "اسكت هذه الكاميرا"):
+            self.assertTrue(asks_for_one_camera(words), words)
+        for words in ("stop alerts for an hour", "mute all cameras", "תשתיק את כל המצלמות", "תשתיק הכל לשעה",
+                      "اسكت كل الكاميرات"):
+            self.assertFalse(asks_for_one_camera(words), words)
+        agent = self._agent([call("pause_alerts", owner_words="stop alerts for an hour", minutes=60), say("ok")])
+        agent.handle("stop alerts for an hour", "-1001", {}, None)
+        self.assertTrue(self.mute.is_muted(NOW + 60, "front_door") and self.mute.is_muted(NOW + 60, "back_yard"))
+
+    def test_turning_a_camera_off_restarts_only_after_the_reply(self) -> None:
+        calls = []
+        ctx = self._ctx()
+        ctx.set_camera = lambda camera, active: calls.append((camera, active)) or {"ok": True}
+        reply = OwnerAgent(ScriptedModel([call("set_camera_active", camera="back_yard", active=False),
+                                          say("back_yard is off.")]), ctx).handle("turn off back yard", "-1001", {}, None)
+        self.assertEqual(calls, [("back_yard", False)])
+        self.assertTrue(reply.restart)
+
     def test_find_with_an_unknown_camera_is_refused(self) -> None:
         model = RecordingModel([call("find_alerts", camera="garden", what="car"), say("which camera?")])
         OwnerAgent(model, self._ctx()).handle("the car on garden", "-1001", {}, None)

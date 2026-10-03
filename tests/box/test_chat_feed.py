@@ -151,6 +151,42 @@ class ConversationInTheWindowTest(unittest.TestCase):
         self.assertEqual([(e["who"], e["kind"]) for e in read_feed(self.path)],
                          [("owner", "message"), ("assistant", "answer"), ("assistant", "photo")])
 
+    def test_the_answer_is_retried_and_a_restart_waits_for_it(self) -> None:
+        from unittest import mock
+
+        order = []
+        failures = [OSError(10054, "connection reset")]
+
+        def post(token, method, fields, files=None, timeout=20.0):
+            if method == "sendMessage" and failures:
+                raise failures.pop()
+            order.append(method)
+            return {"ok": True, "result": {"message_id": 71}}
+
+        class TurningOff:
+            def handle(self, text, chat_id, who, alert):
+                return AgentReply(text="back_door is off.", clips=(), restart=True)
+
+        inbox = TelegramInbox(self.cfg, TurningOff(), self.index, MuteState(os.path.join(self.tmp, "m2.json")),
+                              os.path.join(self.tmp, "production"), os.path.join(self.tmp, "offset2.json"),
+                              post=post, post_multipart=post, now=lambda: NOW, feed=self.feed)
+        with mock.patch("home_guard_project.box.telegram_agent.time.sleep"),                 mock.patch("home_guard_project.box.control.request_restart",
+                           side_effect=lambda *a, **k: order.append("restart")):
+            inbox.handle_update({"update_id": 11, "message": {
+                "message_id": 90, "chat": {"id": int(CHAT)}, "from": {"id": 5, "first_name": "Ameer"},
+                "text": "turn off the back door camera"}})
+        self.assertEqual(order, ["sendMessage", "restart"])      # retried once, then the restart
+
+    def test_a_pause_for_all_cameras_says_so(self) -> None:
+        import time as _time
+
+        from home_guard_project.box.feedback import Feedback, confirmation_text
+
+        text = confirmation_text(Feedback(action="mute", mute_until=_time.time() + 600))
+        self.assertIn("ALL cameras", text)
+        text = confirmation_text(Feedback(action="mute", mute_until=_time.time() + 600, camera="back_door"))
+        self.assertIn("for back_door", text)
+
     def test_strangers_are_not_recorded(self) -> None:
         self._inbox(_Agent()).handle_update({"update_id": 3, "message": {
             "message_id": 60, "chat": {"id": 999}, "from": {"id": 9, "first_name": "X"}, "text": "hello"}})

@@ -43,7 +43,7 @@
           },
           "camera": {
             "type": "string",
-            "description": "A camera name to pause only that one camera, otherwise omit to pause all cameras."
+            "description": "The camera to pause. Give it whenever the owner means one camera (\"this camera\", a camera you just showed them, a named place). Omit it ONLY when the owner asked for all cameras or the whole house."
           }
         },
         "required": ["owner_words"]

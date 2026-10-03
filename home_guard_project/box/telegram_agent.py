@@ -288,7 +288,17 @@ class TelegramInbox:
         if reply_to is not None:
             fields["reply_to_message_id"] = str(reply_to)
             fields["allow_sending_without_reply"] = "true"
-        self._post(self.cfg.bot_token, "sendMessage", fields)
+        # A dropped connection (WinError 10054) once swallowed the confirmation of a pause:
+        # the owner never learned the house was unwatched. Try again before giving up.
+        for attempt in range(3):
+            try:
+                self._post(self.cfg.bot_token, "sendMessage", fields)
+                break
+            except (urllib.error.URLError, OSError) as exc:
+                if attempt == 2:
+                    raise
+                log.warning("Telegram answer not sent (%s); trying again.", exc)
+                time.sleep(2 * (attempt + 1))
         self._note("assistant", "answer", text)
 
     def _note(self, who: str, kind: str, text: str, name: str = "", alert: Optional[Dict[str, Any]] = None) -> None:
@@ -368,6 +378,10 @@ class TelegramInbox:
             except (urllib.error.URLError, OSError) as exc:
                 log.warning("Could not send %s: %s", path, exc)
                 self._say(chat_id, "I could not send that video right now.")
+        if getattr(reply, "restart", False):
+            from . import control  # noqa: PLC0415
+
+            control.request_restart()        # a camera was turned on/off; the answer is out now
 
     def handle_update(self, update: Dict[str, Any]) -> None:
         """Act on one update. Errors are logged, never raised: one bad update must not stop the inbox."""

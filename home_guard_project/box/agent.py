@@ -129,6 +129,7 @@ class AgentReply:
     text: str
     clips: Tuple[str, ...] = ()                # paths of the videos to send with the reply
     photos: Tuple[str, ...] = ()               # paths of live snapshots to send with the reply
+    restart: bool = False                      # restart the program once the reply is sent (a camera changed)
 
 
 @dataclass(frozen=True)
@@ -159,6 +160,7 @@ class _Turn:
     found: Dict[str, AlertRecord] = field(default_factory=dict)
     clips: List[str] = field(default_factory=list)
     photos: List[str] = field(default_factory=list)  # live snapshots to send with the reply
+    restart: bool = False                            # a camera was turned on/off: restart after replying
     saved: int = 0
     notes: List[str] = field(default_factory=list)   # confirmation lines from tools that acted this turn
 
@@ -191,6 +193,26 @@ def _reply_language(text: str) -> str:
     return "the language of this message (English if it is English)"
 
 
+# Words that ask for every camera, and words that point at one camera ("this camera").
+_ALL_WORDS = ("all", "every", "everything", "whole", "house", "כל", "הכל", "כולן", "כולם", "הבית",
+              "كل", "جميع", "الكل", "البيت")
+_ONE_CAMERA_WORDS = ("this camera", "that camera", "the camera", "this one", "מצלמה", "המצלמה", "הזאת", "הזו",
+                     "הזה", "كاميرا", "الكاميرا", "هذه", "هذا")
+
+
+def asks_for_one_camera(words: str) -> bool:
+    """True when the owner's words point at a single camera and do not ask for all of them.
+
+    "Mute this camera" without a camera name must not become "mute every camera": that
+    left a whole house unwatched for a day (2026-10-03).
+    """
+    text = " ".join(str(words).casefold().split())
+    tokens = set(text.replace(",", " ").replace(".", " ").split())
+    if any(word in tokens for word in _ALL_WORDS) or "כל " in text or "all cameras" in text:
+        return False
+    return any(word in text for word in _ONE_CAMERA_WORDS)
+
+
 def _quoted_from(quote: str, text: str) -> bool:
     """True if *quote* is a real, substantial piece of *text* (ignoring case and spacing).
 
@@ -214,7 +236,9 @@ def _apply_camera_default(camera: str, active: bool) -> Dict[str, Any]:
     from .find_cameras import apply_changes  # noqa: PLC0415 - heavy (cv2), kept lazy
 
     try:
-        apply_changes({"cameras": [{"name": camera, "new_name": camera, "enabled": active}]}, CAMERAS_PATH)
+        # No restart here: the inbox restarts the program once the answer is sent (AgentReply.restart).
+        apply_changes({"cameras": [{"name": camera, "new_name": camera, "enabled": active}]}, CAMERAS_PATH,
+                      restart=False)
         return {"ok": True}
     except Exception as exc:  # noqa: BLE001 - unknown camera / bad name / write error: report it to the model
         return {"error": str(exc)}
@@ -282,6 +306,11 @@ class OwnerAgent:
         if not _quoted_from(str(args.get("owner_words") or ""), self._turn.text):
             return {"ok": False, "error": "Not paused: pause only when the owner asked for it in this message, "
                                           "and owner_words must be copied from that message."}
+        if not str(args.get("camera") or "").strip() and asks_for_one_camera(self._turn.text):
+            return {"ok": False, "error": "Not paused: the owner asked about ONE camera, not all of them. "
+                                          "Call again with that camera's name (the one this conversation is "
+                                          "about), or ask the owner which camera. The cameras are: "
+                                          + (", ".join(self.ctx.camera_names) or "none")}
         feedback = self._checked({"action": "mute", "mute_until": args.get("until"),
                                   "mute_minutes": args.get("minutes"), "camera": args.get("camera")})
         bad = self._unknown_camera(args.get("camera"), feedback.camera)
@@ -372,6 +401,9 @@ class OwnerAgent:
         if not isinstance(result, dict) or result.get("error"):
             return {"ok": False, "error": (result or {}).get("error") or "could not change that camera"}
         log.info("set_camera_active(%s, active=%s)", camera, active)
+        # The program restarts to apply it - only after the answer has gone out, or the
+        # restart cuts the answer off and the owner never hears what was done.
+        self._turn.restart = True
         state = "turned on" if active else "turned off"
         return {"ok": True, "message": f"Camera {camera} is being {state} - the box restarts briefly to apply it."}
 
@@ -470,7 +502,7 @@ class OwnerAgent:
             clips = tuple(turn.clips)
             photos = tuple(turn.photos)
             self._turn = None
-            return AgentReply(text=reply, clips=clips, photos=photos)
+            return AgentReply(text=reply, clips=clips, photos=photos, restart=turn.restart)
 
 
 class _OpenAIChat:
