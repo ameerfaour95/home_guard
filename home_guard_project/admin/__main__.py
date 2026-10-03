@@ -21,12 +21,15 @@ def main():
     from home_guard_project.admin.http_backend import HttpBackend
     from home_guard_project.admin.demo_backend import DemoBackend
     from home_guard_project.admin.shell import AdminWindow
+    import home_guard_project.admin as admin_package
     app = QApplication(sys.argv[:1])
     app.setApplicationName('HomeGuardAdmin')
     apply_theme(app, args.theme)
     backend = DemoBackend() if args.demo else HttpBackend(args.server)
     window = AdminWindow(backend, demo=args.demo, theme=args.theme)
-    icon = Path(__file__).parent.parent / 'box' / 'assets' / 'logo.ico'
+    # PyInstaller places the entry script at bundle root. Package __file__ keeps
+    # the package-relative resource path in both source and frozen builds.
+    icon = Path(admin_package.__file__).parent.parent / 'box' / 'assets' / 'logo.ico'
     window.setWindowIcon(QIcon(str(icon)))
     window.show()
     if args.smoke_test:
