@@ -180,6 +180,8 @@ class BoxConfigTest(unittest.TestCase):
         self.assertEqual(set_option("alert_on", "Vehicle, person", self.path), "person,vehicle")
         self.assertEqual(get_option("alert_on", self.path), "person,vehicle")
         self.assertEqual(load_box_settings(self.path)["alert_on"], "person,vehicle")
+        self.assertEqual(set_option("alert_on", "animal,person", self.path), "person,animal")
+        set_option("alert_on", "person,vehicle", self.path)
         for bad in ("", "cats", "person,cats", ","):
             with self.assertRaises(BoxConfigError, msg=bad):
                 set_option("alert_on", bad, self.path)

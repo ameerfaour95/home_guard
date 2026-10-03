@@ -82,6 +82,7 @@ def redact(url: str) -> str:
 _NAME_RE = re.compile(r"^[a-z0-9_]+$")
 CAMERAS_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data_collection", "cameras.yaml"))
 ZONES_PATH = os.path.join(os.path.dirname(CAMERAS_PATH), "zones.yaml")
+CAMERA_ALERTS_PATH = os.path.join(os.path.dirname(CAMERAS_PATH), "camera_alerts.yaml")
 _YAML_HEADER = (
     "# ──────────────────────────────────────────────────────────────────────────────\n"
     "#  Camera RTSP streams — DO NOT COMMIT (contains credentials)\n"
@@ -108,7 +109,7 @@ def _write_cameras(active: Dict[str, str], disabled: Dict[str, str], path: str =
 
 
 def apply_changes(changes: Dict[str, Any], path: str = CAMERAS_PATH, zones_path: str = ZONES_PATH,
-                  restart: bool = True) -> Dict[str, Any]:
+                  restart: bool = True, alerts_path: Optional[str] = None) -> Dict[str, Any]:
     """Rewrite cameras.yaml from {"cameras":[{"name","new_name","enabled"}]}.
 
     A disabled camera is kept (recoverable) in a 'disabled:' section the loader
@@ -160,6 +161,14 @@ def apply_changes(changes: Dict[str, Any], path: str = CAMERAS_PATH, zones_path:
         # file covers old and new names while cameras.yaml is written, so a
         # failure part-way never leaves a camera unmasked.
         remap_zones(renames, zones_path, between=lambda: _write_cameras(new_active, new_disabled, path))
+        try:
+            from .camera_alerts import remap_camera_alerts  # noqa: PLC0415
+
+            # Each camera's alert choice follows it too. A failure here only puts the
+            # renamed camera on the house default - never a camera left unwatched.
+            remap_camera_alerts(renames, alerts_path or CAMERA_ALERTS_PATH)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Alert choices not carried over the rename: %s", exc)
     else:
         _write_cameras(new_active, new_disabled, path)
     if restart:
@@ -192,6 +201,41 @@ def zone_rows(cameras_path: str = CAMERAS_PATH, zones_path: str = ZONES_PATH) ->
     zones = load_zones(zones_path)
     names = list(dict(raw.get("cameras") or {})) + list(dict(raw.get("disabled") or {}))
     return {"cameras": [{"name": n, "points": [[x, y] for x, y in zones.get(n, [])]} for n in names]}
+
+
+def camera_alert_rows(cameras_path: str = CAMERAS_PATH, alerts_path: str = CAMERA_ALERTS_PATH,
+                      box_path: Optional[str] = None) -> Dict[str, Any]:
+    """The house default and every camera's own choice (``None`` = the house default).
+
+    ``{"house": ["person"], "cameras": [{"name", "alert_on": [...] | None}]}``
+    """
+    from .boxconfig import BOX_YAML, BoxConfigError, load_box_settings  # noqa: PLC0415
+    from .camera_alerts import DEFAULT, load_camera_alerts, parse_types  # noqa: PLC0415
+
+    try:
+        house = parse_types(load_box_settings(box_path or BOX_YAML).get("alert_on") or ",".join(DEFAULT))
+    except (BoxConfigError, ValueError, OSError):
+        house = DEFAULT
+    raw = _read_cameras_raw(cameras_path)
+    own = load_camera_alerts(alerts_path)
+    names = list(dict(raw.get("cameras") or {})) + list(dict(raw.get("disabled") or {}))
+    return {"house": list(house),
+            "cameras": [{"name": n, "alert_on": list(own[n]) if n in own else None} for n in names]}
+
+
+def set_camera_alerts_command(camera: str, types: Optional[str], cameras_path: str = CAMERAS_PATH,
+                              alerts_path: str = CAMERA_ALERTS_PATH) -> Dict[str, Any]:
+    """Give a camera its own alert types, or put it back on the house default (*types* None).
+
+    No restart: inference mode re-reads the choices within seconds.
+    """
+    from .camera_alerts import clear_camera_alerts, set_camera_alerts  # noqa: PLC0415
+
+    name = _known_camera(str(camera), cameras_path)
+    if types is None:
+        clear_camera_alerts(name, alerts_path)
+        return {"camera": name, "alert_on": None}
+    return {"camera": name, "alert_on": list(set_camera_alerts(name, types, alerts_path))}
 
 
 def set_zone(camera: str, points_text: str, cameras_path: str = CAMERAS_PATH,
@@ -547,6 +591,12 @@ def main() -> None:
                       help="Corners as x,y;x,y;x,y in 0-1 picture fractions, 3 to 32 of them, no spaces (quote the value in PowerShell).")
     clrz = sub.add_parser("clear-zone", help="Watch the whole picture again for a camera.")
     clrz.add_argument("--camera", required=True)
+    sub.add_parser("camera-alerts", help="List the house's alert types and each camera's own choice.")
+    seta = sub.add_parser("set-camera-alerts", help="Choose what one camera alerts about (person/vehicle/animal).")
+    seta.add_argument("--camera", required=True)
+    which = seta.add_mutually_exclusive_group(required=True)
+    which.add_argument("--on", help="person, vehicle, animal - one or more, comma-separated, no spaces.")
+    which.add_argument("--default", action="store_true", help="Use the house default (alert_on in box.yaml).")
 
     args = parser.parse_args()
     # Progress goes to stderr so --json output on stdout stays parseable.
@@ -576,6 +626,26 @@ def main() -> None:
                 print(f"  {s['name']:<22} {'ok' if s['ok'] else 'FAILED'}  {s['file']}")
         if not any(s["ok"] for s in result["snapshots"]):
             sys.exit(1)
+        return
+
+    if args.command in ("camera-alerts", "set-camera-alerts"):
+        try:
+            if args.command == "camera-alerts":
+                result = camera_alert_rows(CAMERAS_PATH, CAMERA_ALERTS_PATH)
+            else:
+                result = set_camera_alerts_command(args.camera, None if args.default else args.on,
+                                                   CAMERAS_PATH, CAMERA_ALERTS_PATH)
+        except Exception as exc:  # noqa: BLE001 - the app needs a plain error, never a traceback
+            message = str(exc) if isinstance(exc, ValueError) else f"could not change the alert choice: {exc}"
+            print(json.dumps({"error": message}) if args.json else f"Error: {message}")
+            sys.exit(1)
+        if args.json:
+            print(json.dumps(result, indent=2))
+        else:
+            if "house" in result:
+                print(f"  house default          {'+'.join(result['house'])}")
+            for row in result.get("cameras", [{"name": result.get("camera"), "alert_on": result.get("alert_on")}]):
+                print(f"  {row['name']:<22} {'+'.join(row['alert_on']) if row['alert_on'] else 'house default'}")
         return
 
     if args.command in ("zones", "set-zone", "clear-zone"):

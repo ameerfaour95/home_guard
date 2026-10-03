@@ -218,6 +218,24 @@ Quote the corners as shown: in PowerShell an unquoted `;` ends the command. The 
 `set-zone` / `clear-zone` ask the running mode to restart so the change is live within seconds.
 Renaming a camera carries its zone along; disabling keeps it.
 
+### What alerts the owner: people, vehicles, animals
+
+In inference mode the owner chooses what sends an alert. The house default is `alert_on` in
+box.yaml (unset = people only); a camera can have its own choice, kept in
+`home_guard_project/data_collection/camera_alerts.yaml` on the box (not in git). Both apply
+within seconds, without a restart. A vehicle alerts only when it moves (parked cars never do);
+animals are cats, dogs and other animals, not birds. Whatever is not chosen never wakes the AI;
+if the AI sees only something not chosen, the clip is kept for training and nothing is sent.
+
+```
+.venv\Scripts\python.exe -m home_guard_project.box set-option alert_on=person,vehicle
+.venv\Scripts\python.exe -m home_guard_project.box.find_cameras --json camera-alerts
+.venv\Scripts\python.exe -m home_guard_project.box.find_cameras --json set-camera-alerts --camera driveway --on person,vehicle
+.venv\Scripts\python.exe -m home_guard_project.box.find_cameras --json set-camera-alerts --camera driveway --default
+```
+
+Renaming a camera carries its choice along. Design: `docs/superpowers/specs/2026-10-03-alert-types-design.md`.
+
 ## Telegram alerts for a new customer
 
 AI alerts are delivered over Telegram: it is free, and one message reaches a whole family group (so every family member is covered at no extra cost). **One bot serves every box; each customer gets their own group.**
