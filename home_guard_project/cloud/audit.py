@@ -39,6 +39,8 @@ def camera_label(session: Session, device_pk: int, camera: str) -> str:
 
 
 def _join(names: list[str]) -> str:
+    if not names:
+        return ""
     return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
 
 
@@ -51,8 +53,10 @@ def _notice_body(session: Session, row: OwnerNotice, device: Device, staff_name:
     first = datetime.fromtimestamp(row.first_ts, timezone.utc)
     last = datetime.fromtimestamp(row.last_ts, timezone.utc)
     cameras = list(row.cameras or [])
-    message = (f"Home Guard support viewed recordings from {_join(cameras)} "
-               f"({first.astimezone(tz):%H:%M}\u2013{last.astimezone(tz):%H:%M})")
+    t1, t2 = f"{first.astimezone(tz):%H:%M}", f"{last.astimezone(tz):%H:%M}"
+    when = t1 if t1 == t2 else f"{t1}–{t2}"
+    where = f" from {_join(cameras)}" if cameras else ""
+    message = f"Home Guard support viewed recordings{where} ({when})"
     return {"schema_version": 1, "id": row.id, "kind": row.kind, "staff_name": staff_name, "cameras": cameras,
             "from_utc": first.strftime("%Y-%m-%dT%H:%M:%SZ"), "to_utc": last.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "message": message}
@@ -63,8 +67,8 @@ def _upload_notice(session: Session, s3, row: OwnerNotice, device: Device, staff
     try:
         s3.put_json(row.s3_key, _notice_body(session, row, device, staff_name))
         row.pending_upload = False
-    except Exception:
-        log.warning("owner notice %s could not be written to S3; kept for retry", row.id, exc_info=False)
+    except Exception as e:
+        log.warning("owner notice %s could not be written to S3 (%s); kept for retry", row.id, type(e).__name__)
         row.pending_upload = True
 
 
@@ -75,7 +79,9 @@ def owner_notice(session: Session, s3, device: Device, staff: Staff, kind: str, 
     Views by the same staff on the same device within 30 minutes share one notice object. The advisory lock
     (held until the caller's transaction ends) serialises concurrent views of one (staff, device, kind), so two
     views can never both decide to start a notice. The DB row is decided first; the S3 write comes after, and its
-    failure only marks the row `pending_upload`.
+    failure only marks the row `pending_upload`. Every DB write that could fail is flushed before the put. If the
+    surrounding transaction still rolls back after a successful put, that is harmless: the object only names the
+    time window, and the next view rewrites it from DB state (same key while the window is open, a new key after).
     """
     now = now or datetime.now(timezone.utc)
     ts = now.timestamp()

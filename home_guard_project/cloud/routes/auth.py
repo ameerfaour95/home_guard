@@ -5,7 +5,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from .. import audit, auth
-from ..deps import current_staff, get_session
+from ..deps import SessionDep, current_staff
 from ..models import AuditLog, Staff
 from ..schemas import LoginRequest, RefreshRequest, StaffOut, TokenPair
 
@@ -20,7 +20,7 @@ def _recent_failures(session: Session, email: str) -> int:
 
 
 @router.post("/auth/login", response_model=TokenPair)
-def login(body: LoginRequest, request: Request, session: Session = Depends(get_session, scope="function")):
+def login(body: LoginRequest, request: Request, session: Session = SessionDep):
     # scope="function": the session commits before the response is sent
     settings = request.app.state.settings
     email = body.email.strip().lower()
@@ -56,7 +56,7 @@ def login(body: LoginRequest, request: Request, session: Session = Depends(get_s
 
 
 @router.post("/auth/refresh", response_model=TokenPair)
-def refresh(body: RefreshRequest, request: Request, session: Session = Depends(get_session, scope="function")):
+def refresh(body: RefreshRequest, request: Request, session: Session = SessionDep):
     pair = auth.rotate(session, body.refresh_token, request.app.state.settings)
     if pair is None:
         session.commit()

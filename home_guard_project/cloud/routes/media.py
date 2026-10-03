@@ -23,7 +23,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from .. import audit
-from ..deps import current_staff, get_session
+from ..deps import SessionDep, current_staff
 from ..models import Artifact, AuditLog, Customer, Device, Event, Staff
 from ..schemas import MediaAccess, MediaAccessRequest
 from .events import _Viewer, _load_one
@@ -84,14 +84,29 @@ def _labeler_url(session: Session, request: Request, s3, art: Artifact, mime: st
 def _device_of(session: Session, art: Artifact, ev: Optional[Event]) -> Optional[Device]:
     if ev is not None:
         return session.get(Device, ev.device_pk)
+    device_pk = getattr(art, "device_pk", None)
+    if device_pk is not None:
+        return session.get(Device, device_pk)
     top = art.s3_key.split("/", 1)[0]  # dataset_<site> / production_<site>
     site = top.split("_", 1)[1] if "_" in top else None
-    return session.scalar(select(Device).where(Device.site == site)) if site else None
+    if not site:
+        return None
+    found = session.scalars(select(Device).where(Device.site == site).limit(2)).all()
+    return found[0] if len(found) == 1 else None  # none or ambiguous: the caller answers 404
+
+
+def _deny(session: Session, staff: Staff, art: Artifact, customer: Customer, device: Device, purpose: str,
+          reason: str, status: int = 403):
+    """Audit a refused access (committed now: the raise below would roll the request back), then refuse."""
+    audit.record(session, staff.id, "media_denied", target=art.s3_key, reason=reason, customer_id=customer.id,
+                 device_id=device.device_id, detail={"reason": reason, "purpose": purpose})
+    session.commit()
+    raise HTTPException(status_code=status, detail=reason)
 
 
 @router.post("/artifacts/{artifact_id}/access", response_model=MediaAccess)
 def artifact_access(artifact_id: int, body: MediaAccessRequest, request: Request,
-                    staff: Staff = Depends(current_staff), session: Session = Depends(get_session)):
+                    staff: Staff = Depends(current_staff), session: Session = SessionDep):
     art = session.get(Artifact, artifact_id)
     if art is None:
         raise HTTPException(status_code=404, detail="Artifact not found")
@@ -104,16 +119,16 @@ def artifact_access(artifact_id: int, body: MediaAccessRequest, request: Request
         raise HTTPException(status_code=404, detail="Artifact not found")
     if body.purpose == "training":
         if staff.role not in ("labeler", "admin"):
-            raise HTTPException(status_code=403, detail="Your role cannot open training data")
+            _deny(session, staff, art, customer, device, body.purpose, "Your role cannot open training data")
         if not customer.consent_training:
-            raise HTTPException(status_code=403, detail="This customer has not agreed to training use")
+            _deny(session, staff, art, customer, device, body.purpose, "This customer has not agreed to training use")
         if staff.role == "labeler" and art.role in LABELER_HIDDEN_ROLES:
-            raise HTTPException(status_code=403, detail="Your role cannot open this file")
+            _deny(session, staff, art, customer, device, body.purpose, "Your role cannot open this file")
     else:
         if staff.role == "labeler":
-            raise HTTPException(status_code=403, detail="Your role cannot do this")
+            _deny(session, staff, art, customer, device, body.purpose, "Your role cannot do this")
         if not customer.consent_recordings:
-            raise HTTPException(status_code=403, detail="This customer has not agreed to recordings access")
+            _deny(session, staff, art, customer, device, body.purpose, "This customer has not agreed to recordings access")
     s3 = _s3(request)
     now: datetime = request.app.state.clock()
     camera = art.camera or (ev.camera if ev is not None else None)
@@ -124,8 +139,9 @@ def artifact_access(artifact_id: int, body: MediaAccessRequest, request: Request
     url = (_labeler_url(session, request, s3, art, mime) if staff.role == "labeler"
            else s3.presign(art.s3_key, URL_TTL_SECONDS))
     if body.purpose != "training":
-        label = audit.camera_label(session, device.id, camera) if camera else "a camera"
-        audit.owner_notice(session, s3, device, staff, kind="recording", cameras=[label], now=now)
+        cameras = [audit.camera_label(session, device.id, camera)] if camera else []
+        # All DB writes above are flushed; the S3 put happens last (see audit.owner_notice).
+        audit.owner_notice(session, s3, device, staff, kind="recording", cameras=cameras, now=now)
     return MediaAccess(url=url, expires_utc=now + timedelta(seconds=URL_TTL_SECONDS), mime=mime)
 
 
@@ -135,7 +151,7 @@ def artifact_access(artifact_id: int, body: MediaAccessRequest, request: Request
     responses={307: {"description": "Redirect to a presigned thumbnail URL"}},
 )
 def event_thumbnail(event_id: int, request: Request, staff: Staff = Depends(current_staff),
-                    session: Session = Depends(get_session)):
+                    session: Session = SessionDep):
     viewer = _Viewer(staff, request)
     row = _load_one(session, viewer, event_id)  # 404 for events a labeler may not see
     ev, customer_id = row[0], row[1]

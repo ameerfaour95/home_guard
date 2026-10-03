@@ -26,13 +26,18 @@ def get_session(request: Request) -> Iterator[Session]:
         session.close()
 
 
+# The ONLY way routes get a session. scope="function": the dependency exits (commits) before the response is sent,
+# so a failed commit is a 500 and never a delivered success. Do not use Depends(get_session) directly.
+SessionDep = Depends(get_session, scope="function")
+
+
 def _unauthorized() -> HTTPException:
     return HTTPException(status_code=401, detail="Not signed in", headers={"WWW-Authenticate": "Bearer"})
 
 
 def current_staff(request: Request,
                   creds: Optional[HTTPAuthorizationCredentials] = Depends(bearer),
-                  session: Session = Depends(get_session)) -> Staff:
+                  session: Session = SessionDep) -> Staff:
     if creds is None:
         raise _unauthorized()
     claims = auth.decode_access_token(creds.credentials, request.app.state.settings)

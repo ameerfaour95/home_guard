@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from .. import studio as studio_logic
-from ..deps import current_staff, get_session, require_role
+from ..deps import SessionDep, current_staff, require_role
 from ..models import Collection, Staff
 from ..schemas import (
     CollectionIn,
@@ -66,7 +66,7 @@ def list_collection_items(
     cursor: Optional[str] = None,
     limit: int = Query(100, ge=1, le=500),
     staff: Staff = Depends(current_staff),
-    session: Session = Depends(get_session),
+    session: Session = SessionDep,
 ):
     """Events in a collection, newest first, same rows and pseudonyms as /events. Labelers only see events
     of customers who gave training consent."""
@@ -77,7 +77,7 @@ def list_collection_items(
 
 
 @router.post("/exports/preview", response_model=ExportPreview, dependencies=[Depends(_studio_staff)])
-def preview_export(body: ExportRequest, session: Session = Depends(get_session)):
+def preview_export(body: ExportRequest, session: Session = SessionDep):
     """What an export of this request would contain, using the same selection and split code as the builder.
 
     `include_fallback_ai=false` excludes only fallback/failed AI from vlm.jsonl; such events still contribute

@@ -31,7 +31,7 @@ from home_guard_project.fleet_contract.keys import parse_key
 from home_guard_project.fleet_contract.legacy import parse_heartbeat, parse_meta
 
 from .. import audit, pseudonym, redact
-from ..deps import current_staff, get_session
+from ..deps import SessionDep, current_staff
 from ..models import (AiRun, Artifact, AuditLog, Camera, CollectionItem, Customer, Device, Event, Feedback, RawRevision, ReviewState,
                       Staff)
 from ..schemas import (AiRunOut, ArtifactOut, Box, DensityOut, DensityRow, DetectionsOut, DispatchOut, EventDetail,
@@ -255,7 +255,7 @@ def list_events(
     cursor: Optional[str] = None,
     limit: int = Query(100, ge=1, le=500),
     staff: Staff = Depends(current_staff),
-    session: Session = Depends(get_session),
+    session: Session = SessionDep,
 ):
     """Event history, newest first. `with_total=true` also fills `total` (counted up to 10000; beyond that
     `total` is 10000 and `total_capped` is true). `collection_id` keeps only events in that collection."""
@@ -372,7 +372,7 @@ def events_density(
     kind: Optional[str] = None,
     bucket: Literal["hour", "day"] = "hour",
     staff: Staff = Depends(current_staff),
-    session: Session = Depends(get_session),
+    session: Session = SessionDep,
 ):
     # Counts per camera per hour/day bucket covering [from_utc, to_utc). Buckets are aligned to the hour/day in
     # UTC (not the customer's timezone); `timezone` is the customer's when exactly one customer is in scope, else
@@ -444,7 +444,7 @@ def fleet_activity_density(session: Session, now: datetime, hours: int) -> Densi
 
 
 @router.get("/events/review-count", response_model=ReviewCount)
-def review_count(request: Request, staff: Staff = Depends(current_staff), session: Session = Depends(get_session)):
+def review_count(request: Request, staff: Staff = Depends(current_staff), session: Session = SessionDep):
     # unreviewed_24h: events of the last 24 h not reviewed; flagged_open: flagged and not reviewed.
     viewer = _Viewer(staff, request)
     since = (_now(request) - timedelta(hours=24)).timestamp()
@@ -552,7 +552,7 @@ def _audit_view(session: Session, request: Request, staff: Staff, ev: Event, cus
 
 @router.get("/events/{event_id}", response_model=EventDetail)
 def get_event(event_id: int, request: Request, staff: Staff = Depends(current_staff),
-              session: Session = Depends(get_session)):
+              session: Session = SessionDep):
     viewer = _Viewer(staff, request)
     row = _load_one(session, viewer, event_id)
     ev, customer_id = row[0], row[1]
@@ -693,7 +693,7 @@ def _read_label(s3, key: str, etag: Optional[str]) -> Optional[str]:
 
 @router.get("/events/{event_id}/detections", response_model=DetectionsOut)
 def get_detections(event_id: int, request: Request, staff: Staff = Depends(current_staff),
-                   session: Session = Depends(get_session)):
+                   session: Session = SessionDep):
     viewer = _Viewer(staff, request)
     ev = _load_one(session, viewer, event_id)[0]
     completeness = ev.completeness if isinstance(ev.completeness, dict) else {}
@@ -734,7 +734,7 @@ def get_detections(event_id: int, request: Request, staff: Staff = Depends(curre
 
 @router.patch("/events/{event_id}/review", response_model=EventSummary)
 def review_event(event_id: int, body: ReviewUpdate, request: Request, staff: Staff = Depends(current_staff),
-                 session: Session = Depends(get_session)):
+                 session: Session = SessionDep):
     viewer = _Viewer(staff, request)
     row = _load_one(session, viewer, event_id)
     ev, customer_id = row[0], row[1]

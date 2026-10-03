@@ -227,3 +227,88 @@ def test_thumbnail_labeler_without_consent_404(client, staff_factory, s3client):
         eid = s.scalar(select(m.Event.id).where(m.Event.stem == b.STEM))
         s.add(m.Artifact(event_id=eid, role="thumbnail", s3_key="admin_cache/test/thumb.jpg", provenance="cloud"))
     assert client.get(f"/v1/events/{eid}/thumbnail", headers=h, follow_redirects=False).status_code == 404
+
+
+# ---------------------------------------------------------------- fix round 11
+
+def test_failed_commit_is_a_500_and_never_returns_a_presigned_url(client, staff_factory, s3client, monkeypatch):
+    from fastapi.testclient import TestClient
+    from sqlalchemy.orm import Session
+
+    _, device_id = _setup(client, s3client)
+    _, _, _, h = staff_factory("support")
+    aid = _art(client, b.PROD_CLIP)
+    real = Session.commit
+    state = {"fail": True}
+
+    def boom(self):
+        if state["fail"]:
+            raise RuntimeError("commit failed")
+        return real(self)
+
+    monkeypatch.setattr(Session, "commit", boom)
+    quiet = TestClient(client.app, raise_server_exceptions=False)
+    r = quiet.post(f"/v1/artifacts/{aid}/access", json={"purpose": "support"}, headers=h)
+    state["fail"] = False
+    assert r.status_code == 500
+    assert "X-Amz" not in r.text and b.PROD_CLIP not in r.text
+    with session_scope(client.app.state.engine) as s:
+        assert s.scalars(select(m.AuditLog).where(m.AuditLog.action == "media_view")).all() == []
+
+
+def test_audit_row_is_visible_to_a_new_session_when_the_response_arrives(client, staff_factory, s3client):
+    _setup(client, s3client)
+    _, _, _, h = staff_factory("support")
+    aid = _art(client, b.PROD_CLIP)
+    assert client.post(f"/v1/artifacts/{aid}/access", json={"purpose": "support"}, headers=h).status_code == 200
+    with session_scope(client.app.state.engine) as s:
+        assert len(s.scalars(select(m.AuditLog).where(m.AuditLog.action == "media_view")).all()) == 1
+
+
+def test_no_route_uses_the_request_scoped_session():
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parents[2] / "home_guard_project" / "cloud"
+    for p in list(root.glob("routes/*.py")) + [root / "deps.py"]:
+        for line in p.read_text(encoding="utf-8").splitlines():
+            if "Depends(get_session" in line and not line.lstrip().startswith("#"):
+                assert 'scope="function"' in line, f"{p.name}: {line.strip()}"
+
+
+def test_notice_without_camera_has_no_camera_list_and_no_fake_label(client, staff_factory, s3client):
+    _, device_id = _setup(client, s3client)
+    _, _, _, h = staff_factory("support")
+    aid = _art(client, b.PROD_CLIP)
+    _set_camera(client, aid, None)
+    with session_scope(client.app.state.engine) as s:
+        s.get(m.Artifact, aid).event_id = None  # camera comes from the artifact alone
+    assert client.post(f"/v1/artifacts/{aid}/access", json={"purpose": "support"}, headers=h).status_code == 200
+    notice = _body(s3client, _notice_keys(s3client, device_id)[0])
+    assert notice["cameras"] == []
+    assert " from " not in notice["message"]
+    assert notice["message"].startswith("Home Guard support viewed recordings (")
+    # first == last: a single time, no range
+    assert "–" not in notice["message"]
+
+
+def test_denied_access_is_audited_as_media_denied(client, staff_factory, s3client):
+    _setup(client, s3client, consent_recordings=False)
+    _, _, _, h = staff_factory("support")
+    aid = _art(client, b.PROD_CLIP)
+    assert client.post(f"/v1/artifacts/{aid}/access", json={"purpose": "support"}, headers=h).status_code == 403
+    with session_scope(client.app.state.engine) as s:
+        rows = s.scalars(select(m.AuditLog).where(m.AuditLog.action == "media_denied")).all()
+        assert len(rows) == 1 and rows[0].target == b.PROD_CLIP
+        assert rows[0].detail["purpose"] == "support" and rows[0].detail["reason"]
+        assert "X-Amz" not in json.dumps(rows[0].detail)
+        assert s.scalars(select(m.AuditLog).where(m.AuditLog.action == "media_view")).all() == []
+
+
+def test_unattached_artifact_resolves_device_by_key_prefix(client, staff_factory, s3client):
+    _, device_id = _setup(client, s3client)
+    _, _, _, h = staff_factory("support")
+    aid = _art(client, b.PROD_CLIP)
+    with session_scope(client.app.state.engine) as s:
+        s.get(m.Artifact, aid).event_id = None
+    assert client.post(f"/v1/artifacts/{aid}/access", json={"purpose": "support"}, headers=h).status_code == 200
+    with session_scope(client.app.state.engine) as s:
+        assert s.scalars(select(m.AuditLog).where(m.AuditLog.action == "media_view")).one().device_id == device_id
