@@ -39,7 +39,8 @@ class TeacherRecordTest(unittest.TestCase):
         self.assertEqual(VLM_RESPONSE_FORMAT["type"], "json_schema")
         self.assertTrue(VLM_RESPONSE_FORMAT["json_schema"]["strict"])
         self.assertEqual(set(VLM_SCHEMA["required"]),
-                         {"summary", "label", "people", "vehicle_moving", "animals", "why", "summary_owner"})
+                         {"summary", "label", "raw_label", "applied_fact_id", "serious_behaviour",
+                          "people", "vehicle_moving", "animals", "why", "summary_owner"})
         self.assertEqual(VLM_SCHEMA["properties"]["label"]["enum"], ["normal", "suspicious", "escalation"])
         self.assertFalse(VLM_SCHEMA["additionalProperties"])
         prompt = inf.build_prompt("door", 0, "01:00:00", 0, 0)

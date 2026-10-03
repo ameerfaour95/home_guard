@@ -102,7 +102,15 @@ def _http_post_multipart(token: str, method: str, fields: Dict[str, str],
         return json.loads(resp.read().decode("utf-8", errors="replace"))
 
 
-def send_photo(cfg: TelegramConfig, image_bytes: bytes, caption: str = "") -> Dict[str, Any]:
+def _notification_fields(silent: bool, reply_markup: Optional[str]) -> Dict[str, str]:
+    fields = {"disable_notification": "true"} if silent else {}
+    if reply_markup:
+        fields["reply_markup"] = reply_markup
+    return fields
+
+
+def send_photo(cfg: TelegramConfig, image_bytes: bytes, caption: str = "", *,
+               silent: bool = False, reply_markup: Optional[str] = None) -> Dict[str, Any]:
     """Send a JPEG photo with an optional caption to every chat. Never raises."""
     if cfg.dry_run or not cfg.enabled:
         reason = "dry_run" if cfg.dry_run else "not_configured"
@@ -113,7 +121,7 @@ def send_photo(cfg: TelegramConfig, image_bytes: bytes, caption: str = "") -> Di
         try:
             resp = _http_post_multipart(
                 cfg.bot_token, "sendPhoto",
-                {"chat_id": chat_id, "caption": caption},
+                {"chat_id": chat_id, "caption": caption, **_notification_fields(silent, reply_markup)},
                 {"photo": ("alert.jpg", image_bytes, "image/jpeg")},
             )
             ok = bool(resp.get("ok"))
@@ -126,7 +134,8 @@ def send_photo(cfg: TelegramConfig, image_bytes: bytes, caption: str = "") -> Di
     return {"sent": any(r["ok"] for r in results), "results": results}
 
 
-def send_message(cfg: TelegramConfig, text: str) -> Dict[str, Any]:
+def send_message(cfg: TelegramConfig, text: str, *, silent: bool = False,
+                 reply_markup: Optional[str] = None) -> Dict[str, Any]:
     """Send *text* to every configured chat. Never raises; returns a status dict."""
     if cfg.dry_run or not cfg.enabled:
         reason = "dry_run" if cfg.dry_run else "not_configured"
@@ -135,7 +144,8 @@ def send_message(cfg: TelegramConfig, text: str) -> Dict[str, Any]:
     results = []
     for chat_id in cfg.chat_ids:
         try:
-            resp = _http_post(cfg.bot_token, "sendMessage", {"chat_id": chat_id, "text": text})
+            resp = _http_post(cfg.bot_token, "sendMessage",
+                              {"chat_id": chat_id, "text": text, **_notification_fields(silent, reply_markup)})
             ok = bool(resp.get("ok"))
             results.append({"chat_id": chat_id, "ok": ok})
             if not ok:
