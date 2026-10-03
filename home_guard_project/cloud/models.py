@@ -359,6 +359,16 @@ class AnnotationReview(Base):
     created_at: Mapped[datetime] = mapped_column(TS)
 
 
+class AnnotationSuggestion(Base):
+    """A clip's suggestion tracks linked from its YOLO weak labels (precomputed by the media loop, migration 0012),
+    valid while `sources` (fps, applied meta revision, every label file's etag) is what the database says now."""
+    __tablename__ = "annotation_suggestions"
+    event_id: Mapped[int] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"), primary_key=True)
+    tracks: Mapped[Any] = mapped_column(JSONType)  # [Track] of contract 2f, source "suggestion"
+    sources: Mapped[Any] = mapped_column(JSONType)  # labeling.suggestion_sources()
+    computed_at: Mapped[datetime] = mapped_column(TS)
+
+
 class TaggingPublish(Base):
     """A collection published as a Label Studio-shaped batch under s3 `tagging/<batch_name>/`."""
     __tablename__ = "tagging_publishes"

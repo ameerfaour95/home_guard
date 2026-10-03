@@ -20,6 +20,7 @@ import math
 import re
 import threading
 from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Literal, Optional, get_args
 
@@ -754,6 +755,41 @@ def _read_label(s3, key: str, etag: Optional[str]) -> Optional[str]:
     return text
 
 
+LABEL_READERS = 8  # label files read at once for one clip (one sequential read each took ~6 s for 25 files)
+
+
+def _read_labels(s3, keys: list[tuple[str, Optional[str]]]) -> dict[str, Optional[str]]:
+    """{key: text or None} of many label files, the uncached ones read concurrently (S3 clients are thread-safe)."""
+    out: dict[str, Optional[str]] = {}
+    todo = []
+    for key, etag in keys:
+        cached = LABEL_CACHE.get((key, etag))
+        if cached is not None:
+            out[key] = cached
+        else:
+            todo.append((key, etag))
+    if len(todo) == 1:
+        out[todo[0][0]] = _read_label(s3, *todo[0])
+    elif todo:
+        with ThreadPoolExecutor(max_workers=min(LABEL_READERS, len(todo)), thread_name_prefix="hg-labels") as pool:
+            for (key, _), text in zip(todo, pool.map(lambda kv: _read_label(s3, *kv), todo)):
+                out[key] = text
+    return out
+
+
+def weak_label_sources(session: Session, ev: Event) -> dict:
+    """What the event's weak labels are made of, from the database only: the applied meta revision and each label
+    file's indexed etag (None = not readable). Equal sources = equal suggestions."""
+    arts = list(session.scalars(select(Artifact).where(Artifact.event_id == ev.id)))
+    spec, prefix = _sampled_frames(session, arts)
+    keys = sorted({prefix + f["label_path"] for f in spec if isinstance(f.get("label_path"), str)})
+    labels = {a.s3_key: a for a in session.scalars(select(Artifact).where(
+        Artifact.s3_key.in_(keys), Artifact.role == "yolo_label"))} if keys else {}
+    metas = sorted(f"{a.s3_key}@{a.applied_etag}" for a in arts if a.role == "meta" and a.applied_etag)
+    return {"meta": metas, "labels": {k: (labels[k].etag if k in labels and labels[k].available else None)
+                                      for k in keys}}
+
+
 @router.get("/events/{event_id}/detections", response_model=DetectionsOut)
 def get_detections(event_id: int, request: Request, staff: Staff = Depends(current_staff),
                    session: Session = SessionDep):
@@ -778,6 +814,7 @@ def weak_label_frames(session: Session, s3, ev: Event, now: datetime, fps: Optio
     keys = sorted({prefix + f["label_path"] for f in spec if isinstance(f.get("label_path"), str)})
     labels = {a.s3_key: a for a in session.scalars(select(Artifact).where(
         Artifact.s3_key.in_(keys), Artifact.role == "yolo_label"))} if keys else {}
+    texts = _read_labels(s3, [(k, a.etag) for k, a in labels.items() if a.available])
     frames: dict[int, FrameBoxes] = {}
     for f in spec:
         index = f.get("frame_index")
@@ -792,7 +829,7 @@ def weak_label_frames(session: Session, s3, ev: Event, now: datetime, fps: Optio
             t_sec = 0.0
         key = prefix + f["label_path"] if isinstance(f.get("label_path"), str) else None
         art = labels.get(key) if key else None
-        text = _read_label(s3, key, art.etag) if art is not None and art.available else None
+        text = texts.get(key) if art is not None and art.available else None
         boxes = _boxes(text) if text is not None else None
         if text is not None:
             _label_problem(session, key, art.etag, now, bad=boxes is None)

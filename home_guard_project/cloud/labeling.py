@@ -8,21 +8,26 @@ read a human annotation the same way.
 from __future__ import annotations
 
 import json
+import logging
 import math
 import re
 from fractions import Fraction
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from sqlalchemy import select
+from sqlalchemy import exists, or_, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from home_guard_project.fleet_contract import tracks as ft
 from home_guard_project.fleet_contract.classes import COCO_NAMES, CONTIGUOUS, name_to_coco
 
 from . import media
-from .models import AiRun, Annotation, AnnotationHead, AnnotationReview, Artifact, Event, RawRevision
+from .models import (AiRun, Annotation, AnnotationHead, AnnotationReview, AnnotationSuggestion, Artifact,
+                     Event, RawRevision)
+
+log = logging.getLogger(__name__)
 
 DONE = ("submitted", "reviewed")  # a clip counts as labeled once its current annotation is one of these
 MAX_TRACKS = 500
@@ -189,24 +194,84 @@ def problems(tracks: list[ft.Track], duration: Optional[float], frame_count: Opt
     return list(dict.fromkeys(out))
 
 
-def suggestions(session: Session, s3, ev: Event, fps: Optional[float], now: datetime) -> list[ft.Track]:
-    """Suggestion tracks linked from the event's YOLO weak labels (fleet_contract.tracks.tracks_from_weak_labels).
-    Frames whose label file could not be read are left out (unknown, not empty); classes outside the nine are
-    dropped."""
-    comp = ev.completeness if isinstance(ev.completeness, dict) else {}
-    if s3 is None or comp.get("boxes") != "sampled":
-        return []
+def suggestion_sources(session: Session, ev: Event, fps: Optional[float]) -> dict:
+    """What a clip's suggestions are computed from (database only): fps, the applied meta revision, the label
+    files' etags."""
+    from .routes.events import weak_label_sources
+
+    return {"fps": fps, **weak_label_sources(session, ev)}
+
+
+def _compute_suggestions(session: Session, s3, ev: Event, fps: Optional[float],
+                         now: datetime) -> tuple[list[ft.Track], bool]:
+    """(tracks, complete): complete = every sampled frame's label file was read."""
     from .routes.events import weak_label_frames  # the one reader of weak labels (shared with /detections)
 
-    frames = []
+    frames, complete = [], True
     for f in weak_label_frames(session, s3, ev, now, fps):
         if f.status == "not_run":
+            complete = False
             continue
         frames.append((f.frame_index, f.t_sec, [(b.label, b.xyxy) for b in f.boxes if b.label in _KNOWN]))
     tracks = ft.tracks_from_weak_labels(frames)
     for n, tr in enumerate(tracks, start=1):
         tr.track_id = f"t-{n}"
+    return tracks, complete
+
+
+def suggestions(session: Session, s3, ev: Event, fps: Optional[float], now: datetime) -> list[ft.Track]:
+    """Suggestion tracks linked from the event's YOLO weak labels (fleet_contract.tracks.tracks_from_weak_labels).
+    Frames whose label file could not be read are left out (unknown, not empty); classes outside the nine are
+    dropped. Precomputed by the media loop (annotation_suggestions) and used while their sources are current;
+    otherwise computed now (label files read concurrently) and stored when every file was read."""
+    comp = ev.completeness if isinstance(ev.completeness, dict) else {}
+    if s3 is None or comp.get("boxes") != "sampled":
+        return []
+    sources = suggestion_sources(session, ev, fps)
+    row = session.get(AnnotationSuggestion, ev.id, populate_existing=True)
+    if row is not None and row.sources == sources:
+        return to_tracks(row.tracks)
+    tracks, complete = _compute_suggestions(session, s3, ev, fps, now)
+    if complete:
+        _store_suggestions(session, ev.id, tracks, sources, now)
     return tracks
+
+
+def _store_suggestions(session: Session, event_id: int, tracks: list[ft.Track], sources: dict,
+                       now: datetime) -> None:
+    values = dict(event_id=event_id, tracks=track_dicts(tracks), sources=sources, computed_at=now)
+    session.execute(pg_insert(AnnotationSuggestion).values(**values).on_conflict_do_update(
+        index_elements=[AnnotationSuggestion.event_id], set_={k: v for k, v in values.items() if k != "event_id"}))
+
+
+def precompute_suggestions(session: Session, s3, now: Optional[datetime] = None, limit: int = 25) -> int:
+    """Media loop step: compute the suggestions of up to `limit` clips with weak labels that have none yet, or whose
+    label/meta files changed since (newest clips first); commits per clip. Returns how many were stored."""
+    now = now or datetime.now(timezone.utc)
+    if s3 is None:
+        return 0
+    sug = AnnotationSuggestion
+    changed = exists().where(Artifact.event_id == Event.id, Artifact.role.in_(("meta", "yolo_label")),
+                             Artifact.last_modified > sug.computed_at)
+    ids = list(session.scalars(
+        select(Event.id).outerjoin(sug, sug.event_id == Event.id)
+        .where(Event.completeness["boxes"].as_string() == "sampled", or_(sug.event_id.is_(None), changed))
+        .order_by(Event.start_ts.desc(), Event.id.desc()).limit(limit)))
+    stored = 0
+    for event_id in ids:
+        try:
+            ev = session.get(Event, event_id)
+            fps = clip_timing(ev, meta_body(session, ev.id))[0]
+            sources = suggestion_sources(session, ev, fps)
+            tracks, complete = _compute_suggestions(session, s3, ev, fps, now)
+            if complete:
+                _store_suggestions(session, ev.id, tracks, sources, now)
+                stored += 1
+            session.commit()
+        except Exception:  # noqa: BLE001 -- one clip never stops the pass; the request path computes on demand
+            log.exception("suggestions for event %s failed", event_id)
+            session.rollback()
+    return stored
 
 
 def yolo_rows(tracks: list[ft.Track], t_sec: float) -> list[str]:

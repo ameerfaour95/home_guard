@@ -131,6 +131,13 @@ def _media_job(session, s3):
     from . import media
 
     media.process_pending(session, s3, limit=50)
+    from . import labeling
+
+    try:
+        labeling.precompute_suggestions(session, s3)  # GET /annotation then answers from the database
+    except Exception:  # noqa: BLE001 -- retried next pass; requests compute on demand meanwhile
+        log.exception("media: could not precompute suggestions")
+        session.rollback()
 
 
 def _notices_job(session, s3):

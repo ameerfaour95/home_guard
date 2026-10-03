@@ -274,3 +274,78 @@ def test_review_requires_the_version_it_decides_on(client, staff_factory, seeded
     assert client.get(_url(eid), headers=adm).json()["status"] == "submitted"  # nothing was approved unseen
     ok = client.post(_url(eid, "/review"), headers=adm, json={"decision": "accept", "version": 2})
     assert ok.status_code == 200 and (ok.json()["status"], ok.json()["version"]) == ("reviewed", 2)
+
+
+# ---------------------------------------------------------------- fix round L1: suggestions are fast
+
+class _CountingReads:
+    """Wraps S3.get_text: counts reads and the most that ran at once (each read takes `delay` seconds)."""
+
+    def __init__(self, real, delay=0.05):
+        import threading
+
+        self.real, self.delay, self.calls, self.now, self.peak = real, delay, 0, 0, 0
+        self.lock = threading.Lock()
+
+    def __call__(self, key, if_match=None):
+        import time
+
+        with self.lock:
+            self.calls += 1
+            self.now += 1
+            self.peak = max(self.peak, self.now)
+        try:
+            time.sleep(self.delay)
+            return self.real(key, if_match=if_match)
+        finally:
+            with self.lock:
+                self.now -= 1
+
+
+def _fresh_label_cache():
+    from home_guard_project.cloud.routes import events
+
+    events.LABEL_CACHE.clear()
+
+
+def test_suggestions_read_label_files_concurrently(client, staff_factory, seeded, monkeypatch):
+    _, _, _, h = staff_factory("admin")
+    eid = _event_id(client, b.COLLECT_STEM)
+    _fresh_label_cache()
+    reads = _CountingReads(client.app.state.s3.get_text)
+    monkeypatch.setattr(client.app.state.s3, "get_text", reads)
+    r = client.get(_url(eid), headers=h)
+    assert r.status_code == 200 and r.json()["tracks"], r.text
+    assert reads.calls >= 8 and reads.peak > 1, (reads.calls, reads.peak)
+
+
+def test_media_loop_precomputes_suggestions_and_get_reads_no_label_file(client, staff_factory, seeded, monkeypatch):
+    import time
+
+    from home_guard_project.cloud import labeling, loops, media
+
+    _, _, _, h = staff_factory("admin")
+    eid = _event_id(client, b.COLLECT_STEM)
+    s3 = client.app.state.s3
+    monkeypatch.setattr(media, "process_pending", lambda *a, **k: 0)  # the media part of the loop is tested elsewhere
+    with session_scope(client.app.state.engine) as s:
+        loops._media_job(s, s3)
+        row = s.get(m.AnnotationSuggestion, eid)
+        assert row is not None and row.tracks and row.sources
+    expected = client.get(_url(eid), headers=h).json()["tracks"]
+    _fresh_label_cache()
+    reads = _CountingReads(s3.get_text)
+    monkeypatch.setattr(s3, "get_text", reads)
+    start = time.perf_counter()
+    r = client.get(_url(eid), headers=h)
+    elapsed = time.perf_counter() - start
+    assert r.status_code == 200 and r.json()["tracks"] == expected
+    assert reads.calls == 0  # precomputed: no S3 read on the request path
+    assert elapsed < 1.0, elapsed  # the target is < 300 ms; generous for a loaded test machine
+    # a label file replaced since (the indexer recorded a new etag): the suggestions are recomputed on demand
+    with session_scope(client.app.state.engine) as s:
+        art = s.scalar(select(m.Artifact).where(m.Artifact.s3_key == b.YOLO_LABELS[0]))
+        art.etag = "changed"
+    client.get(_url(eid), headers=h)
+    assert reads.calls >= 1
+    assert labeling.SUGGESTION_MODEL  # unchanged model tag for predictions
