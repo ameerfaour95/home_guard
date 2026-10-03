@@ -105,6 +105,9 @@ class Vision:
             "people": people,
         }
         if guard:
+            if str(parsed.get("label") or "").strip().lower() not in LABELS:
+                log.warning("Guard look returned no valid label")
+                return {"ok": False, "refused": False, "error": "no_answer"}
             out["label"] = label_of(parsed)
             out["why"] = str(parsed.get("why") or "").strip() if out["label"] != "normal" else ""
         return out
@@ -202,7 +205,7 @@ def make_vision(env: Dict[str, str], model: str = "gpt-4o") -> Optional[Vision]:
         from openai import OpenAI  # noqa: PLC0415
 
         http_client = httpx.Client(verify=ssl.create_default_context())
-        client = OpenAI(api_key=key, http_client=http_client)
+        client = OpenAI(api_key=key, http_client=http_client, timeout=30.0, max_retries=1)
     except Exception as exc:  # noqa: BLE001 - unavailable client/TLS configuration
         log.warning("Vision client could not be created: %s", exc)
         if http_client is not None:

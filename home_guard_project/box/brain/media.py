@@ -211,8 +211,17 @@ def cut_segment(clip_path: str, clip_start_ts: float, clip_end_ts: float, start_
     try:
         code = (run or _run)(cmd)
         if code != 0 or not os.path.isfile(out_path):
+            _remove_quietly(out_path)
             return None
     except Exception as exc:  # noqa: BLE001
         log.warning("Cutting %s failed: %s", clip_path, exc)
+        _remove_quietly(out_path)
         return None
     return (begin, end)
+
+
+def _remove_quietly(path: str) -> None:
+    try:
+        os.remove(path)
+    except OSError:
+        pass

@@ -97,13 +97,34 @@ class VisionRobustnessTest(unittest.TestCase):
             message.refusal = "no"
             self.assertTrue(vision.look("c", [b"jpg"], False)["refused"])
 
+    def test_guard_look_without_a_valid_label_is_no_answer(self) -> None:
+        def vision_for(answer):
+            return Vision(lambda prompt, images, schema: json.dumps(answer))
+
+        base = {"description": "A man at the door.", "quality": "clear", "people": 1, "why": ""}
+        for label in ({}, {"label": ""}, {"label": None}, {"label": "maybe"}):
+            with self.subTest(label=label):
+                out = vision_for({**base, **label}).look("c", [b"jpg"], True)
+                self.assertEqual(out, {"ok": False, "refused": False, "error": "no_answer"})
+        out = vision_for({**base, "label": "Suspicious", "why": "tries the handle"}).look("c", [b"jpg"], True)
+        self.assertTrue(out["ok"])
+        self.assertEqual(out["label"], "suspicious")
+        self.assertTrue(vision_for(base).look("c", [b"jpg"], False)["ok"])
+
+    def test_factory_client_has_a_timeout_and_one_retry(self) -> None:
+        with mock.patch("openai.OpenAI", return_value=mock.Mock()) as ctor, mock.patch("httpx.Client"):
+            self.assertIsNotNone(make_vision({"OPENAI_API_KEY": "fake"}))
+        self.assertEqual(ctor.call_args.kwargs.get("timeout"), 30.0)
+        self.assertEqual(ctor.call_args.kwargs.get("max_retries"), 1)
+
     def test_malformed_model_answers_and_people(self) -> None:
         for raw in ([], {"description": "x"}, 123, b"\xff", '[]', '{"description": []}'):
             with self.subTest(raw=raw):
                 self.assertFalse(Vision(lambda *_: raw).look("c", [b"x"], False)["ok"])
         for people in ("bad", [], float("nan"), float("inf")):
             with self.subTest(people=people):
-                raw = json.dumps({"description": "x", "quality": "clear", "people": people})
+                raw = json.dumps({"description": "x", "quality": "clear", "people": people,
+                                  "label": "normal"})
                 self.assertEqual(Vision(lambda *_: raw).look("c", [b"x"], True)["people"], 0)
 
     def test_budget_malformed_files_and_invalid_limits(self) -> None:

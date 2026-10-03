@@ -160,7 +160,7 @@ def strict_zone(camera: str, zones_path: Optional[str] = None) -> Tuple[Optional
         entries = data.get("zones", {})
         if not isinstance(entries, dict):
             raise ValueError("zones must contain a mapping")
-        raw = entries.get(camera)
+        raw = {str(k): v for k, v in entries.items()}.get(camera)
         if raw is None:
             return None, True
         return validate_points(raw), True

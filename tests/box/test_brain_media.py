@@ -86,6 +86,34 @@ class MediaTest(unittest.TestCase):
         self.assertIsNone(cut_segment("clip.mp4", 100.0, 110.0, 90.0, 5, out, run=run, ffmpeg="ffmpeg"))
         self.assertIsNone(cut_segment("clip.mp4", 100.0, 110.0, 102.5, 4, out, run=lambda cmd: 1, ffmpeg="ffmpeg"))
 
+    def test_cut_segment_removes_a_partial_file_on_failure(self) -> None:
+        out = os.path.join(self.dir, "partial.mp4")
+
+        def bad_exit(cmd):
+            with open(cmd[-1], "wb") as f:
+                f.write(b"half")
+            return 1
+
+        def boom(cmd):
+            with open(cmd[-1], "wb") as f:
+                f.write(b"half")
+            raise RuntimeError("killed")
+
+        for run in (bad_exit, boom):
+            with self.subTest(run=run.__name__):
+                self.assertIsNone(cut_segment("clip.mp4", 100.0, 110.0, 102.5, 4, out, run=run, ffmpeg="ffmpeg"))
+                self.assertFalse(os.path.exists(out))
+
+    def test_strict_zone_masks_a_numeric_camera_key(self) -> None:
+        with open(self.zones, "w", encoding="utf-8") as f:
+            f.write("zones:\n  101: [[0,0],[0.5,0],[0.5,1],[0,1]]\n")
+        poly, readable = live_view.strict_zone("101", self.zones)
+        self.assertTrue(readable)
+        self.assertIsNotNone(poly)
+        with open(self.zones, "w", encoding="utf-8") as f:
+            f.write("zones:\n  101: [[0,0],[1,1]]\n")
+        self.assertEqual(live_view.strict_zone("101", self.zones), (None, False))
+
     def test_bounds_text(self) -> None:
         self.assertRegex(bounds_text(1000.0, 1010.0), r"^\d\d:\d\d:\d\d–\d\d:\d\d:\d\d$")
 
