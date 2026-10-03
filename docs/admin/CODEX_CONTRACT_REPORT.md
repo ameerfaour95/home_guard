@@ -94,3 +94,59 @@ is still taken from the stem, while `start_ts`/`end_ts` retain body epochs.
 No fixture required changing an AI status or parsing rule. Metadata outside a
 recognised meta key returns a record with `invalid meta key` in `problems`;
 without a recognised root it uses `dataset` and an empty site as placeholders.
+
+Task 4 commit: `f41ca85`.
+
+## Task 5 — heartbeat health verdict
+
+Tests for each rule, worst-wins behavior, human-readable reasons and threshold
+edges preceded the implementation.
+
+RED excerpt:
+
+```text
+E   ModuleNotFoundError: No module named 'home_guard_project.fleet_contract.health'
+Interrupted: 1 error during collection
+1 error in 0.16s
+```
+
+GREEN (entire contract suite):
+
+```text
+........................................................................ [ 91%]
+.......                                                                  [100%]
+79 passed in 0.11s
+```
+
+Files: `home_guard_project/fleet_contract/health.py`,
+`tests/fleet_contract/test_health.py`, this report.
+
+Edges: exactly 90 minutes is not offline; exactly 24 hours without a clip is
+stale; missing camera clip dates are stale; 20 GB is warning and 50 GB healthy;
+500 outbox clips is not a backlog warning; owner stop suppresses engine-down
+only; disk critical beats owner-stop warning; offline wins while retaining all
+other reasons; unknown collector state is not treated as false; future dates;
+naive UTC and offset-aware timestamps; camera names appear in reasons.
+Disk warnings/critical reasons both use `disk_low` with the applicable severity.
+`alert_hours` is accepted with the exact required signature and does not alter
+rules: the brief specifies no schedule-based exception. Missing optional
+heartbeat values do not establish faults beyond the explicitly specified
+missing-camera-date rule.
+
+Contradictions/semantic caveats: no health fixture contradicts the required
+thresholds. Audit A7 warns that `clips_outbox` includes retained archive metadata
+and is not proof of unuploaded clips; the mandated `> 500` rule is implemented
+unchanged. Camera recency likewise uses the heartbeat's metadata-mtime values,
+not independently verified capture times.
+
+## Final verification
+
+- 79 tests pass: Task 3 contributes 13, Task 4 contributes 37, Task 5 contributes 29.
+- AST audit of all five package files (including `__init__.py`) allows only
+  standard-library absolute imports and internal relative imports.
+- All contract modules import under Python `-I -S` with site-packages disabled.
+- `git diff --check` passes; dependency files and fixtures are unchanged.
+- Three task commits use the requested subjects and the exact
+  `Co-Authored-By: Codex <noreply@openai.com>` trailer.
+- The pre-existing untracked `docs/admin/codex_contract_run.log` was not edited
+  or staged. The report is force-added despite the `*.md` ignore rule.
