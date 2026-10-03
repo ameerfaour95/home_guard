@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Iterable, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -15,7 +15,7 @@ from home_guard_project.fleet_contract.legacy import parse_heartbeat
 from .. import audit
 from ..deps import get_session, require_role
 from ..models import Camera, Customer, Device, Event, Feedback, Staff
-from ..schemas import DeviceSummary, EnrollRequest, FleetResponse, HealthReason
+from ..schemas import DensityOut, DeviceSummary, EnrollRequest, FleetResponse, HealthReason
 
 router = APIRouter(tags=["fleet"])
 
@@ -74,6 +74,11 @@ def build_summaries(session: Session, now: datetime, customer_id: Optional[int] 
 def fleet(request: Request, session: Session = Depends(get_session)):
     now = now_of(request)
     return FleetResponse(devices=build_summaries(session, now), generated_utc=now)
+
+
+@router.get("/fleet/activity", response_model=DensityOut, dependencies=[Depends(require_role("admin", "support"))])
+def fleet_activity(hours: int = Query(24, ge=1, le=168)):
+    raise HTTPException(status_code=501)
 
 
 @router.post("/devices/enroll", response_model=DeviceSummary)

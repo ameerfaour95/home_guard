@@ -1,0 +1,1 @@
+Task 2b: added ArtifactOut.detail, EventSummary.timezone, DensityRow/DensityOut/ReviewCount, 501 stubs for /events/density, /events/review-count (before {event_id}), /fleet/activity (admin,support). openapi regenerated. 174 passed.

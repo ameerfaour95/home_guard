@@ -124,6 +124,7 @@ class EventSummary(BaseModel):
     reviewed: bool
     flagged: bool
     thumbnail_url: Optional[str]
+    timezone: str = "UTC"
 
 
 class EventPage(BaseModel):
@@ -160,6 +161,7 @@ class ArtifactOut(BaseModel):
     bytes: Optional[int]
     available: bool
     provenance: str
+    detail: Optional[dict] = None
 
 
 class DispatchOut(BaseModel):
@@ -281,3 +283,22 @@ class IndexProblem(BaseModel):
     s3_key: str
     reason: str
     seen_utc: datetime
+
+
+class DensityRow(BaseModel):
+    camera: str
+    events: list[int]
+    alerts: list[int]
+    false_alarms: list[int]
+
+
+class DensityOut(BaseModel):
+    bucket: Literal["hour", "day"]
+    starts_utc: list[datetime]
+    timezone: str
+    rows: list[DensityRow]
+
+
+class ReviewCount(BaseModel):
+    unreviewed_24h: int
+    flagged_open: int

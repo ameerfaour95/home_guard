@@ -117,6 +117,18 @@
             ],
             "title": "Bytes"
           },
+          "detail": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -491,6 +503,82 @@
           "id"
         ],
         "title": "CustomerOut",
+        "type": "object"
+      },
+      "DensityOut": {
+        "properties": {
+          "bucket": {
+            "enum": [
+              "hour",
+              "day"
+            ],
+            "title": "Bucket",
+            "type": "string"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/DensityRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "starts_utc": {
+            "items": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "title": "Starts Utc",
+            "type": "array"
+          },
+          "timezone": {
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bucket",
+          "starts_utc",
+          "timezone",
+          "rows"
+        ],
+        "title": "DensityOut",
+        "type": "object"
+      },
+      "DensityRow": {
+        "properties": {
+          "alerts": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Alerts",
+            "type": "array"
+          },
+          "camera": {
+            "title": "Camera",
+            "type": "string"
+          },
+          "events": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "false_alarms": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "False Alarms",
+            "type": "array"
+          }
+        },
+        "required": [
+          "camera",
+          "events",
+          "alerts",
+          "false_alarms"
+        ],
+        "title": "DensityRow",
         "type": "object"
       },
       "DetectionsOut": {
@@ -958,6 +1046,11 @@
               }
             ],
             "title": "Thumbnail Url"
+          },
+          "timezone": {
+            "default": "UTC",
+            "title": "Timezone",
+            "type": "string"
           }
         },
         "required": [
@@ -1133,6 +1226,11 @@
               }
             ],
             "title": "Thumbnail Url"
+          },
+          "timezone": {
+            "default": "UTC",
+            "title": "Timezone",
+            "type": "string"
           }
         },
         "required": [
@@ -1531,6 +1629,24 @@
           "refresh_token"
         ],
         "title": "RefreshRequest",
+        "type": "object"
+      },
+      "ReviewCount": {
+        "properties": {
+          "flagged_open": {
+            "title": "Flagged Open",
+            "type": "integer"
+          },
+          "unreviewed_24h": {
+            "title": "Unreviewed 24H",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "unreviewed_24h",
+          "flagged_open"
+        ],
+        "title": "ReviewCount",
         "type": "object"
       },
       "ReviewUpdate": {
@@ -2430,6 +2546,168 @@
         ]
       }
     },
+    "/v1/events/density": {
+      "get": {
+        "operationId": "events_density_v1_events_density_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "from_utc",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "title": "From Utc",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to_utc",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "title": "To Utc",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "site",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Site"
+            }
+          },
+          {
+            "in": "query",
+            "name": "customer_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Customer Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "camera",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Camera"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "bucket",
+            "required": false,
+            "schema": {
+              "default": "hour",
+              "enum": [
+                "hour",
+                "day"
+              ],
+              "title": "Bucket",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DensityOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Events Density",
+        "tags": [
+          "events"
+        ]
+      }
+    },
+    "/v1/events/review-count": {
+      "get": {
+        "operationId": "review_count_v1_events_review_count_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewCount"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Review Count",
+        "tags": [
+          "events"
+        ]
+      }
+    },
     "/v1/events/{event_id}": {
       "get": {
         "operationId": "get_event_v1_events__event_id__get",
@@ -2647,6 +2925,56 @@
           }
         ],
         "summary": "Fleet",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/v1/fleet/activity": {
+      "get": {
+        "operationId": "fleet_activity_v1_fleet_activity_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "hours",
+            "required": false,
+            "schema": {
+              "default": 24,
+              "maximum": 168,
+              "minimum": 1,
+              "title": "Hours",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DensityOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Fleet Activity",
         "tags": [
           "fleet"
         ]

@@ -1,10 +1,10 @@
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 
 from ..deps import current_staff
-from ..schemas import DetectionsOut, EventDetail, EventPage, EventSummary, ReviewUpdate
+from ..schemas import DensityOut, DetectionsOut, EventDetail, EventPage, EventSummary, ReviewCount, ReviewUpdate
 
 router = APIRouter(tags=["events"], dependencies=[Depends(current_staff)])
 
@@ -26,6 +26,24 @@ def list_events(
     cursor: Optional[str] = None,
     limit: int = 50,
 ):
+    raise HTTPException(status_code=501)
+
+
+@router.get("/events/density", response_model=DensityOut)
+def events_density(
+    from_utc: datetime,
+    to_utc: datetime,
+    site: Optional[str] = None,
+    customer_id: Optional[int] = None,
+    camera: Optional[str] = None,
+    kind: Optional[str] = None,
+    bucket: Literal["hour", "day"] = "hour",
+):
+    raise HTTPException(status_code=501)
+
+
+@router.get("/events/review-count", response_model=ReviewCount)
+def review_count():
     raise HTTPException(status_code=501)
 
 
