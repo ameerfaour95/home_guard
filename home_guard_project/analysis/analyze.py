@@ -718,10 +718,24 @@ def write_yolo_labels(
     total_files = 0
     total_boxes = 0
     skipped_labels: Counter = Counter()
+    skipped_fps_unknown: Counter = Counter()
 
     for pt in tasks:
         if pt.num_annotations <= 0:
             continue
+
+        # Check if native fps is unknowable: LS capped at 10, and we can't find the true fps
+        if pt.frame_space != "native" and pt.fps == 10:
+            native_fps = pt.native_fps or _native_fps_from_meta(pt, dataset_dir)
+            if native_fps is None:
+                log.warning(
+                    "Skipping %s: native fps unknown (capped at 10 in LS) — "
+                    "run with --dataset-dir pointing at the clips' meta",
+                    pt.clip_id
+                )
+                skipped_fps_unknown[pt.clip_id] += 1
+                continue
+
         cam_date_dir = os.path.join(labels_dir, pt.camera_name, pt.date)
         os.makedirs(cam_date_dir, exist_ok=True)
 
@@ -760,6 +774,10 @@ def write_yolo_labels(
 
     if skipped_labels:
         log.warning("Skipped labels not in COCO map: %s", dict(skipped_labels))
+
+    if skipped_fps_unknown:
+        log.warning("Skipped %d tasks with unknown native fps: %s",
+                    len(skipped_fps_unknown), dict(skipped_fps_unknown))
 
     import yaml
     if os.path.isdir(os.path.join(yolo_dir, "images")):

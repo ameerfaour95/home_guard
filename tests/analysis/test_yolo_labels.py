@@ -111,3 +111,43 @@ def test_empty_negatives_and_yaml(tmp_path):
     write_yolo_labels(parse_export(str(exp), CFG), CFG, str(out))
     y = yaml.safe_load((out / "yolo" / "data.yaml").read_text())
     assert y["path"] == "." and y["train"] == "images" and y["val"] == "images" and y["nc"] == 2
+
+
+def test_fps_capped_at_10_with_no_meta_skips_task(tmp_path, caplog):
+    """When fps=10 (capped) and no meta.json, task should be skipped."""
+    result = [{"type": "videorectangle",
+               "value": {"labels": ["person"], "sequence": [kf(1, 10), kf(100, 40)], "framesCount": 100, "duration": 1}}]
+    task = {"id": 1, "data": dict(meta_path=META, fps=10),
+            "annotations": [{"result": result}]}
+    exp = tmp_path / "export.json"
+    exp.write_text(json.dumps([task]))
+    out = tmp_path / "out"
+    tasks = parse_export(str(exp), CFG)
+    write_yolo_labels(tasks, CFG, str(out), dataset_dir=None)
+    d = out / "yolo" / "labels" / "cam" / "2026-01-01"
+    # Directory should not exist or be empty because task was skipped
+    assert not d.exists() or len(list(d.iterdir())) == 0
+    assert "unknown native fps" in caplog.text.lower()
+
+
+def test_fps_capped_at_10_with_meta_recovers(tmp_path):
+    """When fps=10 (capped) but meta.json has native fps, task should process."""
+    meta_dir = tmp_path / "ds" / "meta" / "cam" / "2026-01-01"
+    meta_dir.mkdir(parents=True)
+    (meta_dir / "clip1.meta.json").write_text(json.dumps({"fps_estimated": 30.0}))
+
+    result = [{"type": "videorectangle",
+               "value": {"labels": ["person"], "sequence": [kf(1, 10), kf(100, 40)], "framesCount": 100, "duration": 1}}]
+    task = {"id": 1, "data": dict(meta_path=META, fps=10),
+            "annotations": [{"result": result}]}
+    exp = tmp_path / "export.json"
+    exp.write_text(json.dumps([task]))
+    out = tmp_path / "out"
+    tasks = parse_export(str(exp), CFG)
+    # Pass dataset_dir so it can read the meta.json
+    write_yolo_labels(tasks, CFG, str(out), dataset_dir=str(tmp_path / "ds"))
+    d = out / "yolo" / "labels" / "cam" / "2026-01-01"
+    files = {p.name: p.read_text() for p in d.iterdir()}
+    # Should have labels for the clip
+    assert len(files) > 0
+    assert any(f != "" for f in files.values())
