@@ -4,7 +4,7 @@ import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from PySide6.QtCore import Qt, QTimer, QSize, Signal, QRectF, QEvent
+from PySide6.QtCore import Qt, QTimer, QSize, Signal, QRectF, QEvent, QVariantAnimation
 from PySide6.QtGui import QColor, QPainter, QPen, QPixmap, QFont, QLinearGradient, QIcon, QShortcut, QKeySequence
 from PySide6.QtWidgets import (
     QMainWindow,
@@ -76,6 +76,8 @@ class CameraTile(QFrame):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.name = name
         self.picture = None
+        self.frame_stamp = None
+        self.live_started = time.time()
         self.stopped = False
         self.off = False
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -85,6 +87,13 @@ class CameraTile(QFrame):
         self.detector_enabled = False
         self.show_detections=False
         self.detection_labels="confidence"
+        from . import motion
+        self.caption_position=0.
+        self.caption_corner=0.
+        self.caption_animation=QVariantAnimation(self)
+        self.caption_animation.setDuration(motion.PANE_MS)
+        self.caption_animation.setEasingCurve(motion.EASING)
+        self.caption_animation.valueChanged.connect(self.move_caption)
         self.detector_note = label("", "muted")
         self.detector_note.setObjectName("cameraDetection")
         self.detector_note.hide()
@@ -106,6 +115,9 @@ class CameraTile(QFrame):
         layout.setSpacing(3)
         self.skeleton_timer=QTimer(self);self.skeleton_timer.setInterval(50);self.skeleton_timer.timeout.connect(self.update)
         self.skeleton_timer.start()
+        self.heartbeat = QTimer(self)
+        self.heartbeat.timeout.connect(self.live_tick)
+        self.heartbeat.start(1000)
         self.setMinimumSize(180, 140)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
@@ -120,6 +132,8 @@ class CameraTile(QFrame):
     def update_picture(self, pix, stamp=None):
         if stamp is not None:
             self.frame_stamp = stamp
+        elif pix and not pix.isNull() and pix is not self.picture:
+            self.frame_stamp = time.time()
         self.picture = pix if pix and not pix.isNull() else None
         if self.picture or self.stopped or self.off: self.skeleton_timer.stop()
         elif not self.skeleton_timer.isActive(): self.skeleton_timer.start()
@@ -129,10 +143,63 @@ class CameraTile(QFrame):
         self.update()
         self.frame_changed.emit()
 
+    def live_tick(self):
+        if self.isVisible(): self.update()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.heartbeat.start(1000)
+
+    def hideEvent(self, event):
+        self.heartbeat.stop()
+        self.skeleton_timer.stop()
+        super().hideEvent(event)
+
+    def thumbnail_labels(self, badge_width):
+        """Shared paint/test geometry, including the 80 px thumbnail rail floor."""
+        area = QRectF(self.rect().adjusted(1, 1, -1, -1))
+        width = max(0, area.width() - 16)
+        return {
+            "name": QRectF(area.left()+8, area.bottom()-62, width, 24),
+            "caption": QRectF(area.left()+8, area.bottom()-34, width, 24),
+            "badge": QRectF(area.left()+8, area.top()+8, min(width, badge_width), 28),
+        }
+
+    def thumbnail_scrim(self):
+        area=QRectF(self.rect().adjusted(1,1,-1,-1))
+        return QRectF(area.left(),area.bottom()-area.height()*.45,area.width(),area.height()*.45)
+
+    def move_caption(self, position):
+        self.caption_position=float(position)
+        self.update()
+
+    def hero_caption_rect(self, visible, obstacles):
+        """Keep the chosen corner until obstructed; never paint over a box."""
+        width=min(visible.width()-32,340)
+        left=QRectF(visible.left()+16,visible.bottom()-76,width,60)
+        travel=max(0,visible.width()-32-width)
+        def at(position): return left.translated(travel*position,0)
+        def blocked(rect): return any(rect.intersects(box.adjusted(-4,-4,4,4)) for box in obstacles)
+        other=1-self.caption_corner
+        if blocked(at(self.caption_corner)) and not blocked(at(other)):
+            self.caption_corner=other
+            self.caption_animation.stop()
+            self.caption_animation.setStartValue(self.caption_position)
+            self.caption_animation.setEndValue(other)
+            self.caption_animation.start()
+        rect=at(self.caption_position)
+        # During travel (or if both corners are occupied), conceal the caption
+        # until it has a clear rectangle instead of obscuring a subject.
+        return rect,not blocked(rect)
+
     def paintEvent(self, event):
         super().paintEvent(event)
         p = QPainter(self)
         area = self.rect().adjusted(1,1,-1,-1)
+        from .liveness import frame_health
+        live_text, reconnecting = frame_health(self.frame_stamp, time.time(), self.live_started)
+        self.painted_label_rects = {}
+        self.painted_detection_rects = []
         if self.picture:
             from .detector_view import box_rect,picture_rect
             from .camera_presentation import image_rect
@@ -148,42 +215,65 @@ class CameraTile(QFrame):
                 p.drawPixmap(QRectF(area),self._ambient,QRectF(self._ambient.rect()))
                 p.fillRect(area,QColor(0,0,0,165))
             p.drawPixmap(QRectF(x,y,w,h),self.picture,QRectF(self.picture.rect()))
-            if not self.off and not self.stopped and self.show_detections:
+            if reconnecting: p.fillRect(area, QColor(0,0,0,110))
+            if not self.off and not self.stopped and not reconnecting and self.show_detections:
+                p.save()
+                detection_area=QRectF(area)
+                if not self.hero:
+                    detection_area.setBottom(self.thumbnail_scrim().top())
+                    p.setClipRect(detection_area,Qt.ClipOperation.IntersectClip)
                 p.setOpacity(self.box_opacity)
                 p.setFont(QFont("Segoe UI",11))
                 for detection in self.detections:
                     rect=QRectF(*box_rect(detection.box,(x,y,w,h)))
+                    painted=rect.intersected(detection_area)
+                    if painted.isEmpty(): continue
+                    self.painted_detection_rects.append(painted)
                     p.setPen(QPen(QColor(detection.color),(3 if self.hero else 2) if detection.width>1 else 1))
                     length=min(24,rect.width()/3,rect.height()/3)
                     for cx,cy,sx,sy in ((rect.left(),rect.top(),1,1),(rect.right(),rect.top(),-1,1),(rect.left(),rect.bottom(),1,-1),(rect.right(),rect.bottom(),-1,-1)):
                         from PySide6.QtCore import QLineF
                         p.drawLine(QLineF(cx,cy,cx+sx*length,cy));p.drawLine(QLineF(cx,cy,cx,cy+sy*length))
-                    if self.detection_labels=="none": continue
+                    if not self.hero or self.detection_labels=="none": continue
                     from .detector_view import object_name
                     text=detection.caption() if self.detection_labels=="confidence" else object_name(detection.label).capitalize();metrics=p.fontMetrics()
                     tx=max(x,min(rect.left(),x+w-metrics.horizontalAdvance(text)-16))
                     ty=max(y,rect.top()-metrics.height()-12)
                     tag=QRectF(tx,ty,metrics.horizontalAdvance(text)+16,metrics.height()+8)
+                    self.painted_label_rects[f"chip_{len(self.painted_label_rects)}"] = tag
                     p.fillRect(tag,QColor("#101a21"));p.drawText(tag.adjusted(8,0,-8,0),Qt.AlignmentFlag.AlignVCenter,text)
-                p.setOpacity(1)
+                p.restore()
             if self.off:
                 p.fillRect(area,QColor(0,0,0,155))
                 p.save();p.translate(area.right()-35,35);p.rotate(45);p.fillRect(QRectF(-80,-15,160,30),QColor('#293945'));p.setPen(QColor('#edf4f6'));p.drawText(QRectF(-60,-15,120,30),Qt.AlignmentFlag.AlignCenter,'Off');p.restore()
             p.setFont(QFont("Segoe UI",11))
             visible=QRectF(x,y,w,h).intersected(QRectF(area))
+            p.save()
+            caption_visible=True
             if self.hero:
-                footer=QRectF(visible.left()+16,visible.bottom()-76,min(visible.width()-32,340),60)
+                obstacles=self.painted_detection_rects+list(self.painted_label_rects.values())
+                footer,caption_visible=self.hero_caption_rect(visible,obstacles)
+                if not caption_visible: p.setOpacity(0)
                 p.setPen(Qt.PenStyle.NoPen);p.setBrush(QColor(12,22,28,220));p.drawRoundedRect(footer,8,8)
             else:
                 footer=QRectF(area.left()+12,area.bottom()-66,area.width()-24,56)
-                gradient=QLinearGradient(0,area.bottom()-area.height()*.45,0,area.bottom());gradient.setColorAt(0,QColor(0,0,0,0));gradient.setColorAt(1,QColor(0,0,0,225))
-                p.fillRect(QRectF(area.left(),area.bottom()-area.height()*.45,area.width(),area.height()*.45),gradient)
-            p.setPen(QColor('#edf4f6'));p.drawText(footer.adjusted(12,0,-72,-28),Qt.AlignmentFlag.AlignVCenter,self.caption.text())
+                scrim=self.thumbnail_scrim()
+                gradient=QLinearGradient(0,scrim.top(),0,scrim.bottom());gradient.setColorAt(0,QColor(0,0,0,0));gradient.setColorAt(1,QColor(0,0,0,225))
+                p.fillRect(scrim,gradient)
+            labels = self.thumbnail_labels(0) if not self.hero else {
+                "name": footer.adjusted(12,0,-12,-28), "caption": footer.adjusted(12,28,-12,0)}
+            if caption_visible:
+                self.painted_label_rects.update({key: labels[key] for key in ("name", "caption")})
+            name = p.fontMetrics().elidedText(self.caption.text(), Qt.TextElideMode.ElideRight, int(labels["name"].width()))
+            p.setPen(QColor('#edf4f6'));p.drawText(labels["name"],Qt.AlignmentFlag.AlignVCenter,name)
             p.setFont(QFont('Segoe UI',10));p.setPen(QColor('#bfccd3'))
-            note=p.fontMetrics().elidedText(self.detector_note.text(),Qt.TextElideMode.ElideRight,max(1,int(footer.width()-24)))
-            p.drawText(footer.adjusted(12,28,-12,0),Qt.AlignmentFlag.AlignVCenter,note)
-            p.setBrush(QColor(OK));p.setPen(Qt.PenStyle.NoPen);p.drawEllipse(QRectF(footer.right()-61,footer.top()+13,5,5)) if not self.off and not self.stopped else None
-            p.setPen(QColor('#c5e4dc'));p.drawText(QRectF(footer.right()-50,footer.top(),46,30),Qt.AlignmentFlag.AlignVCenter,self.status.text())
+            note=self.detector_note.text()
+            if reconnecting:
+                from .liveness import relative_time
+                note="Last frame "+relative_time(self.frame_stamp,time.time())
+            note=p.fontMetrics().elidedText(note,Qt.TextElideMode.ElideRight,int(labels["caption"].width()))
+            p.drawText(labels["caption"],Qt.AlignmentFlag.AlignVCenter,note)
+            p.restore()
         else:
             if not self.off and not self.stopped:
                 gradient=QLinearGradient(0,0,area.width(),0);phase=(math.sin(time.monotonic()*2)+1)/2
@@ -191,6 +281,19 @@ class CameraTile(QFrame):
             p.setPen(QColor("#98a6ba"))
             p.setFont(QFont("Segoe UI", 14))
             p.drawText(area, Qt.AlignmentFlag.AlignCenter, "Off" if self.off else tr("stopped") if self.stopped else tr("offline_hint"))
+        if not self.off and not self.stopped:
+            p.setClipping(False)
+            p.setFont(QFont("Segoe UI", 10))
+            width = p.fontMetrics().horizontalAdvance(live_text)+38
+            badge = QRectF(area.left()+12, area.top()+12, width, 28)
+            if not self.hero: badge = self.thumbnail_labels(width)["badge"]
+            self.painted_label_rects["badge"] = badge
+            live_text = p.fontMetrics().elidedText(live_text, Qt.TextElideMode.ElideRight, max(0, int(badge.width()-30)))
+            p.setPen(Qt.PenStyle.NoPen);p.setBrush(QColor(12,22,28,225));p.drawRoundedRect(badge,7,7)
+            color = QColor(WARNING if reconnecting else OK)
+            color.setAlphaF(1 if reconnecting else .65+.35*(math.sin(time.monotonic()*3)+1)/2)
+            p.setBrush(color);p.drawEllipse(QRectF(badge.left()+10,badge.top()+11,6,6))
+            p.setPen(QColor('#edf4f6'));p.drawText(badge.adjusted(23,0,-7,0),Qt.AlignmentFlag.AlignVCenter,live_text)
         p.end()
 
 
@@ -200,15 +303,17 @@ class Window(QMainWindow):
         from .motion import install
         install()
         self.args = args
+        self.remote_target = getattr(args,"remote_box",None)
         from .preferences import ViewerPreference
         from dataclasses import replace
         self.viewer_preference=ViewerPreference()
         self.viewer_settings=self.viewer_preference.load()
         if getattr(args,"detections",False): self.viewer_settings=replace(self.viewer_settings,detections=True)
         from .box_controls import BoxControls, Settings
-        self.box_controls = BoxControls(demo=args.demo, stopped=args.state in ("stopped","ai-stopped"), settings=Settings(mode="inference" if (args.state in ("inference","live-detections","off-camera","no-cameras","box-unreachable") or args.state.startswith("ai-")) else "data_collection", show_cameras=args.state != "hidden"))
+        self.box_controls = BoxControls(demo=args.demo or bool(self.remote_target), stopped=args.state in ("stopped","ai-stopped"), settings=Settings(mode="inference" if (args.state in ("inference","live-detections","off-camera","no-cameras","box-unreachable") or args.state.startswith("ai-")) else "data_collection", show_cameras=args.state != "hidden"))
         self.start_requested = False
         self.box_unreachable = not args.setup and (args.state=="box-unreachable" if args.demo else not Path(bc.BOX_YAML).is_file())
+        if self.remote_target: self.box_unreachable=False
         from .preferences import AddressPreference
         self.last_box_address=tr("demo_address").split("@")[-1] if args.demo else AddressPreference().load().split("@")[-1]
         self.setWindowTitle(tr("setup_window_title") if args.setup else tr("brand"))
@@ -311,7 +416,7 @@ class Window(QMainWindow):
         self.outer.addWidget(self.stop_banner)
         self.stop_banner.hide()
         from .alert_pause import AlertPause
-        self.alert_pause = AlertPause(demo=self.args.demo)
+        self.alert_pause = AlertPause(demo=self.args.demo or bool(self.remote_target))
         if self.args.demo and self.args.state == "paused":
             self.box_controls._settings = __import__("dataclasses").replace(self.box_controls._settings,mode="inference")
             self.alert_pause.demo_until = time.time()+3600
@@ -452,6 +557,9 @@ class Window(QMainWindow):
             self.open_cameras()
         if getattr(self.args, "panel", None) == "settings":
             self.open_settings()
+        if self.remote_target:
+            for button in (cameras_button,settings_button,self.run_button,self.resume_button):
+                button.setEnabled(False);button.setToolTip("Change settings on the box")
 
     def fetch(self):
         from ..heartbeat import build_heartbeat
@@ -472,6 +580,16 @@ class Window(QMainWindow):
         )
 
     def tick(self):
+        if self.remote_target:
+            if not hasattr(self,"live_transport"):
+                from .remote_live import RemoteLiveTransport
+                self.live_transport=RemoteLiveTransport(self.remote_target,self)
+                self.live_transport.frames.connect(self.receive_frames)
+                self.live_transport.status.connect(self.receive_status)
+                self.apply_state(State(mode="inference",cameras=[],site=self.remote_target.split('@')[-1]),True,[])
+            self.update_demand()
+            self.update_detector()
+            return
         if self.box_unreachable:
             self.apply_state(State(site=tr("demo_house") if self.args.demo else "",mode="inference",error=True),True,[])
             self.update_detector()
@@ -536,6 +654,7 @@ class Window(QMainWindow):
             from .live_transport import LiveTransport
             self.live_transport = LiveTransport(self.reader.directory, self)
             self.live_transport.frames.connect(self.receive_frames)
+            self.live_transport.status.connect(self.receive_status)
             self.content_stack.currentChanged.connect(lambda _: self.update_demand())
         self.update_demand()
         self.update_detector()
@@ -548,13 +667,37 @@ class Window(QMainWindow):
                    and not self.box_controls.is_stopped())
         hero = getattr(self, "expanded_tile", None)
         self.live_transport.demand([t.name for t in self.tiles if not t.off],
-                                   hero.name if hero else None, visible)
+                                   hero.name if hero else None, visible, self.viewer_settings.detections)
 
     def receive_frames(self, frames):
         for tile in self.tiles:
             if tile.name in frames and not tile.off:
-                image, stamp = frames[tile.name]
+                image, stamp, *overlay = frames[tile.name]
+                if overlay and overlay[0] is not None:
+                    tile.detections=overlay[0]
+                    tile.tracked_stamp=self.ai_data.get("cameras",{}).get(tile.name,{}).get("ts")
                 tile.update_picture(QPixmap.fromImage(image), stamp)
+
+    def receive_status(self, packet):
+        if "images" in packet: self.ai_panel.receive_images(packet["images"])
+        overview={key:packet.get("overview",{}).get(key) for key in ("box","settings","cameras")}
+        if "overview" in packet and overview!=getattr(self,"remote_overview",None):
+            self.remote_overview=overview
+            data=packet["overview"];box=data.get("box",{});settings=data.get("settings",{})
+            cameras=data.get("cameras",{});active=cameras.get("active",[]);disabled=cameras.get("disabled",[])
+            from .box_controls import Settings
+            self.box_controls._settings=Settings.from_options(settings)
+            self.box_controls._stopped=bool(box.get("stopped",False))
+            self.apply_state(State(site=settings.get("site") or box.get("site") or self.remote_target.split('@')[-1],
+                mode=settings.get("mode") or "inference",collecting=not self.box_controls._stopped,
+                cameras=list(dict.fromkeys(active+disabled)),disabled=disabled),
+                settings.get("show_cameras") is not False,[])
+        if "status" in packet:
+            self.ai_data = packet["status"]
+            self.box_controls.live_status = self.ai_data
+            if hasattr(self,"settings_page"): self.settings_page.check_applied()
+        if "chat" in packet: self.chat_data = packet["chat"]
+        self.update_detector()
 
     def changeEvent(self, event):
         super().changeEvent(event)
@@ -570,7 +713,6 @@ class Window(QMainWindow):
 
     def update_detector(self):
         from .detector_view import camera_view
-        from ..ai_status import read_status
         now=time.time()
         stopped=self.box_controls.is_stopped()
         if self.args.demo:
@@ -583,10 +725,6 @@ class Window(QMainWindow):
                     self.demo_decisions=self.ai_data['decisions']
                 self.ai_data['decisions']=self.demo_decisions
             self.ai_data['settings']=self.box_controls.reported_status()['settings']
-        elif time.monotonic()-self.last_ai_poll>=1:
-            data=read_status(str(Path(bc.LOG_DIR)/"ai_status.json"))
-            if data: self.ai_data=data
-            self.last_ai_poll=time.monotonic()
         self.update_alert_status()
         inference=self.current_state is not None and self.current_state.mode=="inference"
         from .ai_view import undelivered_alert
@@ -612,12 +750,7 @@ class Window(QMainWindow):
                     for message in self.chat_data: message['ts']-=100
             image_dir=Path(self.demo_media_dir.name)
         else:
-            from ..chat_feed import read_feed
-            if time.monotonic()-getattr(self,'last_chat_poll',-10)>=1:
-                try: self.chat_data=read_feed(str(Path(bc.LOG_DIR)/'telegram_chat.jsonl'),limit=200)
-                except (OSError,UnicodeError,ValueError): pass
-                self.last_chat_poll=time.monotonic()
-            image_dir=Path(bc.LOG_DIR)/'chat_images'
+            image_dir=None if self.remote_target else Path(bc.LOG_DIR)/'chat_images'
         if inference:
             until,some=self.alert_pause.status(self.current_state.cameras)
             self.ai_panel.render(self.ai_data,now,stopped,self.chat_data,image_dir,until,sum(not t.off for t in self.tiles),failed is not None)
@@ -631,7 +764,9 @@ class Window(QMainWindow):
             tile.detection_labels=self.viewer_settings.detection_labels
             tile.detector_enabled=inference
             tile.detector_note.hide()
-            tile.detections,text=camera_view(self.ai_data,tile.name,now,stopped or tile.off)
+            observations,text=camera_view(self.ai_data,tile.name,now,stopped or tile.off)
+            if not observations or self.args.demo or not hasattr(tile,"tracked_stamp"):
+                tile.detections=observations
             if tile.off: text="Off"
             tile.detector_note.setToolTip(text)
             if not tile.hero: text=tile.detector_note.fontMetrics().elidedText(text,Qt.TextElideMode.ElideRight,max(120,tile.width()-48))
@@ -658,6 +793,7 @@ class Window(QMainWindow):
         from .motion import busy
         busy(self.run_button,self.start_requested)
         self.run_button.setEnabled(not self.start_requested and not self.box_unreachable)
+        if self.remote_target: self.run_button.setEnabled(False)
         self.run_button.setToolTip(tr("offline_controls") if self.box_unreachable else "")
         if self.box_unreachable: self.header_hint.setText(tr("box_unreachable"))
         elif not state.cameras and not stopped: self.header_hint.setText(tr('ready_for_cameras'))
@@ -693,6 +829,7 @@ class Window(QMainWindow):
         self.pause_label.hide()
         if paused and not stopped and not self.box_unreachable: self.header_hint.setText(paused)
         self.resume_button.setVisible(bool(paused) and not stopped)
+        if self.remote_target: self.resume_button.setEnabled(False)
         self.stats[0][1].setText(tr("close_stopped") if stopped else hours_description(settings.alert_start_hour,settings.alert_end_hour) if state.mode == "inference" else tr("collection"))
         if self.box_unreachable: self.stats[0][1].setText(tr('offline_controls'))
         self.camera_heading.setText(
@@ -735,6 +872,7 @@ class Window(QMainWindow):
             }[message]
             self.message_hint.setText(tr(hint,address=self.last_box_address or tr("no_known_address")) if hint else "")
             self.message_action.setVisible(message in ("no_cameras","box_unreachable"))
+            self.message_action.setEnabled(not self.remote_target)
             self.message_icon.setVisible(message in ("no_cameras","box_unreachable"))
             self.message_action.setText(tr("retry_setup_action" if message=="box_unreachable" else "find_cameras_action"))
             return
@@ -754,6 +892,7 @@ class Window(QMainWindow):
         for tile in self.tiles:
             tile.off=tile.name in state.disabled
             tile.turn_on.setVisible(tile.off)
+            tile.turn_on.setEnabled(not self.remote_target)
             tile.stopped = stopped
             tile.update_picture(tile.picture)
             if stopped: tile.update_picture(None)
@@ -780,6 +919,7 @@ class Window(QMainWindow):
         self.update_detector()
         for tile in self.tiles:
             tile.show_detections=self.viewer_settings.detections;tile.detection_labels=self.viewer_settings.detection_labels;tile.update()
+        self.update_demand()
 
     def stage_action(self):
         if self.box_unreachable:

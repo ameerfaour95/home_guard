@@ -22,19 +22,24 @@ class _Reader(QObject):
         self.stamps = {}
         self.inflight = False
         self.last_touch = 0
+        self.ai_data = {}
+        from .live_tracking import OverlayTracker
+        self.tracker = OverlayTracker()
+        self.overlays = False
 
     @Slot()
     def start(self):
         self.directory.mkdir(parents=True, exist_ok=True)
-        self.watcher = QFileSystemWatcher([str(self.directory)], self)
+        self.watcher = QFileSystemWatcher([str(self.directory), str(self.directory.parent)], self)
         self.watcher.directoryChanged.connect(self.scan)
+        self.watcher.fileChanged.connect(self.scan)
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.scan)
         self.timer.start(250)
 
     @Slot(object)
     def demand(self, request):
-        self.names, self.hero, self.visible = request
+        self.names, self.hero, self.visible, self.overlays = request
         self.last_touch = 0
         self.scan()
 
@@ -52,10 +57,29 @@ class _Reader(QObject):
                 self.last_touch = now
             except OSError:
                 pass
-        if self.inflight or not self.visible:
+        if self.inflight:
             return
+        status = {}
+        for filename, key in (("ai_status.json", "status"), ("telegram_chat.jsonl", "chat")):
+            path = self.directory.parent/filename
+            try:
+                stamp = (path.stat().st_mtime_ns, path.stat().st_size)
+                if str(path) not in self.watcher.files(): self.watcher.addPath(str(path))
+                if self.stamps.get(filename) == stamp: continue
+                if key == "status":
+                    from ..ai_status import read_status
+                    data = read_status(str(path))
+                    if not data: continue  # retry a partial/malformed write
+                else:
+                    from ..chat_feed import read_feed
+                    data = read_feed(str(path), limit=200)
+                status[key] = data
+                if key == "status": self.ai_data = data
+                self.stamps[filename] = stamp
+            except (OSError, ValueError, UnicodeError):
+                continue
         frames = {}
-        for name in self.names:
+        for name in self.names if self.visible else ():
             path = self.directory/(camera_key(name)+".jpg")
             try:
                 stamp = path.stat().st_mtime_ns
@@ -65,12 +89,13 @@ class _Reader(QObject):
                 # Don't associate an old decode with a file replaced during the read.
                 if path.stat().st_mtime_ns != stamp: continue
                 self.stamps[name] = stamp
-                frames[name] = (image, stamp/1e9)
+                objects=self.tracker.update(name,image,self.ai_data,time.time()) if self.overlays else None
+                frames[name] = (image, stamp/1e9, objects)
             except OSError:
                 continue
-        if frames:
+        if frames or status:
             self.inflight = True
-            self.ready.emit(frames)
+            self.ready.emit(dict(status, frames=frames))
 
     @Slot()
     def stop(self):
@@ -81,6 +106,7 @@ class _Reader(QObject):
 
 class LiveTransport(QObject):
     frames = Signal(object)
+    status = Signal(object)
     request = Signal(object)
     ack = Signal()
     stopping = Signal()
@@ -99,12 +125,13 @@ class LiveTransport(QObject):
         self.thread.start()
 
     @Slot(object)
-    def deliver(self, frames):
-        self.frames.emit(frames)
+    def deliver(self, packet):
+        if "status" in packet or "chat" in packet: self.status.emit(packet)
+        self.frames.emit(packet["frames"])
         self.ack.emit()
 
-    def demand(self, names, hero, visible):
-        self.request.emit((tuple(names), hero, bool(visible)))
+    def demand(self, names, hero, visible, overlays=False):
+        self.request.emit((tuple(names), hero, bool(visible), bool(overlays)))
 
     def close(self):
         if self.thread.isRunning():

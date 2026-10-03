@@ -341,6 +341,78 @@ class OwnerAgentTest(unittest.TestCase):
         tool_msgs = [m for m in model.seen[1] if m.get("role") == "tool"]
         self.assertIn("unknown camera", tool_msgs[0]["content"])
 
+    def _alert_paths(self) -> dict:
+        root = os.path.dirname(self.live)
+        paths = dict(cameras_path=os.path.join(root, "cameras.yaml"),
+                     alerts_path=os.path.join(root, "camera_alerts.yaml"),
+                     box_path=os.path.join(root, "box.yaml"))
+        with open(paths["cameras_path"], "w", encoding="utf-8") as f:
+            f.write("cameras:\n  front_door: rtsp://a\n  back_yard: rtsp://b\n")
+        with open(paths["box_path"], "w", encoding="utf-8") as f:
+            f.write('site: "test"\ninference_conf: 0.7\n')
+        return paths
+
+    def test_the_owner_turns_on_car_alerts_for_one_camera(self) -> None:
+        ctx = self._ctx()
+        ctx.alert_settings_paths = self._alert_paths()
+        model = RecordingModel([call("set_alert_types", camera="Front Door", types=["person", "vehicle"],
+                                     owner_words="alert me about cars"),
+                                say("Front door now alerts on people and cars.")])
+        reply = OwnerAgent(model, ctx).handle("alert me about cars on the front door too", "-1001", {}, None)
+        self.assertFalse(reply.restart)                                  # applies live, no restart
+        tool_msgs = [m for m in model.seen[1] if m.get("role") == "tool"]
+        self.assertIn("front_door alerts on people and vehicles (its own choice)", tool_msgs[0]["content"])
+        result = json.loads(tool_msgs[0]["content"])
+        self.assertEqual((result["turned_on"], result["turned_off"]), (["vehicle"], []))
+
+    def test_turning_a_type_off_is_reported_so_the_owner_is_told(self) -> None:
+        ctx = self._ctx()
+        ctx.alert_settings_paths = self._alert_paths()
+        model = RecordingModel([call("set_alert_types", camera="front_door", types=["vehicle"],
+                                     owner_words="only cars on the front door"),
+                                say("Front door: cars only; people alerts are off there.")])
+        OwnerAgent(model, ctx).handle("only cars on the front door", "-1001", {}, None)
+        result = json.loads([m for m in model.seen[1] if m.get("role") == "tool"][0]["content"])
+        self.assertEqual(result["turned_off"], ["person"])
+        self.assertIn("now OFF", result["note"])
+
+    def test_alert_types_are_not_changed_without_the_owners_words(self) -> None:
+        ctx = self._ctx()
+        ctx.alert_settings_paths = self._alert_paths()
+        model = RecordingModel([call("set_alert_types", camera="house", types=["vehicle"],
+                                     owner_words="change everything"),
+                                say("Sorry, what should I change?")])
+        OwnerAgent(model, ctx).handle("who was at the door?", "-1001", {}, None)
+        tool_msgs = [m for m in model.seen[1] if m.get("role") == "tool"]
+        self.assertIn("Not changed", tool_msgs[0]["content"])
+        self.assertFalse(os.path.exists(ctx.alert_settings_paths["alerts_path"]))
+
+    def test_the_owner_sets_people_sensitivity_and_reads_it_back(self) -> None:
+        ctx = self._ctx()
+        ctx.alert_settings_paths = self._alert_paths()
+        model = RecordingModel([call("set_sensitivity", camera="back_yard", values={"person": 50},
+                                     owner_words="people at 50%"),
+                                say("Done."),
+                                call("get_alert_settings"),
+                                say("Here is each camera.")])
+        agent = OwnerAgent(model, ctx)
+        agent.handle("back yard: people at 50% please", "-1001", {}, None)
+        agent.handle("what does each camera alert on?", "-1001", {}, None)
+        tool_msgs = [m for m in model.seen[-1] if m.get("role") == "tool"]
+        self.assertIn("back_yard alerts on people (the house default); the detector must be sure: people 50%",
+                      tool_msgs[-1]["content"])
+
+    def test_an_unknown_camera_is_named_back_to_the_model(self) -> None:
+        ctx = self._ctx()
+        ctx.alert_settings_paths = self._alert_paths()
+        model = RecordingModel([call("set_alert_types", camera="garage", types=["person"],
+                                     owner_words="only people on the garage"),
+                                say("Which camera?")])
+        OwnerAgent(model, ctx).handle("only people on the garage", "-1001", {}, None)
+        tool_msgs = [m for m in model.seen[1] if m.get("role") == "tool"]
+        self.assertIn("unknown camera", tool_msgs[0]["content"])
+        self.assertIn("front_door", tool_msgs[0]["content"])
+
     def test_invalid_json_arguments_return_an_error_without_running_the_tool(self) -> None:
         bad = ModelMessage(tool_calls=(ToolCall(id="c1", name="record_verdict", arguments={},
                                                 raw_arguments="{bad json", valid=False),))

@@ -31,6 +31,7 @@ def main():
     _drop_own_console()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--demo", action="store_true")
+    parser.add_argument("--remote-box", metavar="USER@BOX", help="View a box through the existing SSH key (read only)")
     parser.add_argument("--aspect",choices=("16:9","4:3"),default="16:9")
     parser.add_argument("--detections", action="store_true")
     parser.add_argument("--theme", choices=("dark","light"), default="dark")
@@ -77,6 +78,11 @@ def main():
     parser.add_argument("--size", default="1366x768")
     parser.add_argument("--screenshot")
     args = parser.parse_args()
+    if args.remote_box and (args.demo or args.setup): parser.error("--remote-box is a live dashboard option")
+    if args.remote_box:
+        from .remote_cameras import target_user
+        try: target_user(args.remote_box)
+        except ValueError: parser.error("Invalid remote box address")
     args.details = args.details or args.technical_log
     if args.screenshot:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")

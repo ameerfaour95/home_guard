@@ -2,6 +2,14 @@
 from PySide6.QtCore import Qt,QRectF
 from PySide6.QtGui import QPixmap,QPainter,QColor,QLinearGradient,QPen,QFont
 
+def detections(index=0):
+    """Bounds of the figures below, in normalized source-image coordinates."""
+    x=160+index*65
+    return [
+        {'label':'person','conf':.91,'box':[(x-43)/1280,234/720,(x+53)/1280,530/720]},
+        {'label':'car','conf':.92,'box':[526/1280,300/720,774/1280,445/720]},
+    ]
+
 def picture(index=0,aspect="16:9"):
     pix=QPixmap(1280,960 if aspect=="4:3" else 720);p=QPainter(pix);p.setRenderHint(QPainter.RenderHint.Antialiasing)
     if aspect=="4:3": p.scale(1,4/3)

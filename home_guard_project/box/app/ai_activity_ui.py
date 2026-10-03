@@ -1,7 +1,7 @@
 import time,math
 from pathlib import Path
-from PySide6.QtCore import Qt,QTimer,QVariantAnimation,QRectF,QSize,QEvent
-from PySide6.QtGui import QPixmap,QPainter,QPainterPath,QIcon
+from PySide6.QtCore import Qt,QTimer,QVariantAnimation,QRectF,QSize,QEvent,QObject,Signal,Slot,QRunnable,QThreadPool
+from PySide6.QtGui import QPixmap,QPainter,QPainterPath,QIcon,QImage
 from PySide6.QtWidgets import QWidget,QHBoxLayout,QScrollArea,QGraphicsOpacityEffect,QLabel,QPushButton,QVBoxLayout
 from .ai_view import status_note
 from .timeline import merge_timeline,thinking_camera,image_path,group_quiet,QuietGroup,text_direction
@@ -10,9 +10,25 @@ from .theme import WARNING, ERROR
 
 def icon(name): return QIcon(str(Path(__file__).parent/'assets'/'icons'/(name+'.svg')))
 
+class _ImageResult(QObject):
+    ready=Signal(object)
+
+
+class _ImageJob(QRunnable):
+    def __init__(self,path):
+        super().__init__();self.path=path;self.result=_ImageResult()
+    def run(self): self.result.ready.emit(QImage(str(self.path)))
+
+
 class AlertPicture(QWidget):
     def __init__(self,path):
-        super().__init__();self.pix=QPixmap(str(path)) if path else QPixmap();self.setMinimumHeight(120)
+        super().__init__();self.pix=QPixmap();self.setMinimumHeight(120)
+        if path:
+            self.job=_ImageJob(path);self.job.result.ready.connect(self.loaded)
+            QThreadPool.globalInstance().start(self.job)
+    @Slot(object)
+    def loaded(self,image):
+        self.pix=QPixmap.fromImage(image);self.update()
     def resizeEvent(self,event):
         height=min(getattr(self,"height_limit",16777215),max(120,round(self.width()*9/16)))
         if self.height()!=height: self.setFixedHeight(height)
@@ -46,6 +62,11 @@ class AiActivity(QWidget):
         self.animation=QVariantAnimation(self);self.animation.setStartValue(0.0);self.animation.setEndValue(2*math.pi);self.animation.setDuration(1800);self.animation.setLoopCount(-1)
         self.animation.valueChanged.connect(lambda value:self.pulse.setOpacity(.7+.3*math.sin(float(value))))
         self.key=None
+        self.row_widgets={}
+        self.image_cache={}
+        self.clock_timer=QTimer(self)
+        self.clock_timer.timeout.connect(self.refresh_times)
+        self.clock_timer.start(1000)
         self.expanded_groups=set()
         self.sticky_day=label(tr("today"),"muted");self.sticky_day.setAlignment(Qt.AlignmentFlag.AlignCenter);outer.insertWidget(3,self.sticky_day)
         self.follow_bottom=True
@@ -73,23 +94,49 @@ class AiActivity(QWidget):
         except (KeyError,TypeError,ValueError): conf=None
         self.sensitivity.setVisible(conf is not None and math.isfinite(conf))
         if conf is not None and math.isfinite(conf): self.sensitivity.setText(tr("sensitivity_in_force",percent=round(conf*100)))
-        self.note.setText(note);self.note.setObjectName('error' if refused else 'muted');self.note.style().unpolish(self.note);self.note.style().polish(self.note)
+        self.note.setText(note)
+        role='error' if refused else 'muted'
+        if self.note.objectName()!=role:
+            self.note.setObjectName(role);self.note.style().unpolish(self.note);self.note.style().polish(self.note)
         self.opacity.setOpacity(.45 if stopped else 1)
         key=tuple(rows)
+        self.refresh_times(now)
         if key==self.key: return
         stick=self.follow_bottom
         value=self.scroll.verticalScrollBar().value();self.key=key
-        content=QWidget();content.setObjectName("timelineBody");layout=layout_for(content,0);layout.setSpacing(16)
-        if not rows: layout.addWidget(label(tr('ai_empty'),'muted'))
+        content=self.scroll.widget()
+        if content is None:
+            content=QWidget();content.setObjectName("timelineBody")
+            body=layout_for(content,0);body.setSpacing(16);body.addStretch()
+            self.scroll.setWidget(content)
+        body=content.layout()
+        old_widgets=self.row_widgets
+        anchor=next((w for w in old_widgets.values() if w.y()+w.height()>value),None)
+        anchor_y=anchor.y() if anchor else 0
+        self.row_widgets={};new_widgets=[]
         day=None;previous=None
         for entry in group_quiet(rows):
             record=entry.records[-1] if isinstance(entry,QuietGroup) else entry
             date=time.strftime('%d %b',time.localtime(record.ts))
+            separator_text=None
             if date!=day:
                 if day is not None or time.localtime(record.ts)[:3]!=time.localtime(now)[:3]:
-                    separator=label(tr('today') if time.localtime(record.ts)[:3]==time.localtime(now)[:3] else date,'muted');separator.setAlignment(Qt.AlignmentFlag.AlignCenter);layout.addWidget(separator)
+                    separator_text=tr('today') if time.localtime(record.ts)[:3]==time.localtime(now)[:3] else date
                 day=date;previous=None
-            stamp=time.strftime('%H:%M',time.localtime(record.ts))
+            same_run=previous is not None and previous.who==record.who and previous.name==record.name and record.who in ('owner','assistant')
+            identity=(entry,separator_text,same_run)
+            previous=None if isinstance(entry,QuietGroup) or record.kind=='button' else record
+            if identity in old_widgets:
+                wrapper=old_widgets[identity]
+                self.row_widgets[identity]=wrapper
+                body.insertWidget(len(self.row_widgets)-1,wrapper)
+                continue
+            wrapper=QWidget();wrapper.setObjectName('timelineBody')
+            layout=layout_for(wrapper,0);layout.setSpacing(8)
+            self.row_widgets[identity]=wrapper;new_widgets.append(wrapper)
+            body.insertWidget(len(self.row_widgets)-1,wrapper)
+            if separator_text:
+                separator=label(separator_text,'muted');separator.setAlignment(Qt.AlignmentFlag.AlignCenter);layout.addWidget(separator)
             if isinstance(entry,QuietGroup):
                 group=QWidget();group.setProperty('feedDay',date);group.setObjectName('quietGroup');group_layout=layout_for(group,8);group_layout.setSpacing(8)
                 heading=QHBoxLayout();glyph=QLabel();glyph.setPixmap(icon('bell-off' if record.muted else 'bot').pixmap(18,18));heading.addWidget(glyph)
@@ -100,6 +147,7 @@ class AiActivity(QWidget):
                     sentence=tr('quiet_paused_description' if record.muted else 'quiet_no_alert',text=record.text.rstrip('.'))
                     text=tr('quiet_group' if count_>1 else 'quiet_once',camera=name,count=count_,time=first,text=sentence)
                 heading.addWidget(label(text,'muted'),1)
+                heading.addWidget(self.time_label(record.ts))
                 group_layout.addLayout(heading)
                 if count_>1:
                     key=(record.camera,entry.records[0].ts)
@@ -118,7 +166,6 @@ class AiActivity(QWidget):
             item=card();item.setProperty('feedDay',date);item.setObjectName('familyBubble' if record.who=='owner' else 'assistantBubble' if record.who=='assistant' else 'alertCard')
             if record.urgent: item.setProperty('urgent',True)
             row=layout_for(item,16);row.setSpacing(8)
-            same_run=previous is not None and previous.who==record.who and previous.name==record.name and record.who in ('owner','assistant')
             meta=QHBoxLayout()
             if not same_run:
                 glyph=QLabel();glyph.setPixmap(icon('user' if record.who=='owner' else 'bot' if record.who=='assistant' else 'camera').pixmap(18,18))
@@ -130,10 +177,12 @@ class AiActivity(QWidget):
             if record.label in ('suspicious','escalation'):
                 from .motion import DecisionChip
                 meta.addWidget(DecisionChip(record.label.capitalize(),WARNING if record.label=='suspicious' else ERROR))
-            meta.addWidget(label(stamp,'muted'));row.addLayout(meta)
+            meta.addWidget(self.time_label(record.ts));row.addLayout(meta)
             if record.who=='box' and record.image:
                 path=image_path(image_dir,record.image) if image_dir else None
-                row.addWidget(AlertPicture(path))
+                picture=AlertPicture(path);picture.remote_name=record.image
+                if record.image in self.image_cache: picture.loaded(self.image_cache[record.image])
+                row.addWidget(picture)
             message=label(record.text,'section' if record.who=='box' else None);self.direction(message,record.text);row.addWidget(message)
             if record.who=='box':
                 mark=label(tr('chat_delivered' if record.delivered else 'chat_refused'),'ok' if record.delivered else 'error');delivery=QHBoxLayout();glyph=QLabel();glyph.setPixmap(icon('check' if record.delivered else 'warning').pixmap(18,18));delivery.addWidget(glyph);delivery.addWidget(mark,1);row.addLayout(delivery)
@@ -143,11 +192,45 @@ class AiActivity(QWidget):
             bubble.addWidget(item,4)
             if record.who=='assistant': bubble.addStretch(1)
             layout.addLayout(bubble);previous=record
-        layout.addStretch()
-        old=self.scroll.takeWidget()
-        if old: old.deleteLater()
-        self.scroll.setWidget(content)
-        QTimer.singleShot(0,lambda:self.scroll.verticalScrollBar().setValue(self.scroll.verticalScrollBar().maximum() if stick else value))
+        if not rows:
+            empty=old_widgets.get('empty') or label(tr('ai_empty'),'muted')
+            self.row_widgets['empty']=empty;body.insertWidget(0,empty)
+        for identity,widget in old_widgets.items():
+            if identity not in self.row_widgets:
+                body.removeWidget(widget);widget.hide();widget.deleteLater()
+        body.activate()
+        def settle():
+            bar=self.scroll.verticalScrollBar()
+            retained=anchor in self.row_widgets.values()
+            bar.setValue(bar.maximum() if stick else value+(anchor.y()-anchor_y if retained else 0))
+            if old_widgets:
+                from .motion import reveal
+                for widget in new_widgets:
+                    if widget.visibleRegion().isEmpty(): continue
+                    reveal(widget,True)
+        QTimer.singleShot(0,self,settle)
+
+    def time_label(self,stamp):
+        from .ui import label
+        from .liveness import relative_time
+        widget=label(relative_time(stamp,time.time()),'muted')
+        widget.setProperty('timestamp',stamp)
+        widget.setToolTip(time.strftime('%d %b %Y %H:%M:%S',time.localtime(stamp)))
+        return widget
+
+    def receive_images(self,images):
+        self.image_cache.update(images)
+        while len(self.image_cache)>32: self.image_cache.pop(next(iter(self.image_cache)))
+        for picture in self.findChildren(AlertPicture):
+            name=getattr(picture,'remote_name',None)
+            if name in images: picture.loaded(images[name])
+
+    def refresh_times(self,now=None):
+        from .liveness import relative_time
+        now=time.time() if now is None else now
+        for widget in self.findChildren(QLabel):
+            stamp=widget.property('timestamp')
+            if stamp is not None: widget.setText(relative_time(stamp,now))
 
     def direction(self,label,text):
         rtl=text_direction(text)=='rtl'
