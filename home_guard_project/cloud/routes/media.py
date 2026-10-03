@@ -1,9 +1,17 @@
 """Presigned media access. Every view is audited; recordings viewed by staff are also announced to the owner.
 
 Presigned URLs are secrets for their lifetime: they are returned to the caller and never logged or audited.
+
+A storage key names the household (`dataset_<site>/clips/<camera>/...`), and so would a URL presigned for it.
+Labelers therefore never get the real key: on first access the file is copied server-side to
+`admin_cache/opaque/<hmac(artifact id, etag)>.<ext>` (recorded as an `opaque_copy` artifact with provenance
+"cloud", never shown to labelers) and that copy is presigned, without any filename hint. Owner documents and raw
+AI text (meta, feedback, raw answers) are not media and are refused to labelers outright.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import mimetypes
 from datetime import datetime, timedelta
 from typing import Optional
@@ -11,6 +19,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from .. import audit
@@ -22,6 +31,9 @@ from .events import _Viewer, _load_one
 router = APIRouter(tags=["media"], dependencies=[Depends(current_staff)])
 
 URL_TTL_SECONDS = 300
+OPAQUE_PREFIX = "admin_cache/opaque/"
+_OPAQUE_DOMAIN = b"home-guard-admin/opaque-media/v1"
+LABELER_HIDDEN_ROLES = frozenset({"meta", "feedback", "raw_answer", "opaque_copy"})
 THUMBNAIL_AUDIT_WINDOW = timedelta(minutes=10)
 _MIME = {".mp4": "video/mp4", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
          ".json": "application/json", ".txt": "text/plain"}
@@ -38,6 +50,35 @@ def _s3(request: Request):
     if s3 is None:
         raise HTTPException(status_code=503, detail="Storage is not configured")
     return s3
+
+
+def opaque_key(secret: str, art: Artifact) -> str:
+    """Where a labeler's copy of `art` lives: a keyed digest of (artifact id, etag) and the extension only."""
+    sub_key = hmac.new(secret.encode("utf-8"), _OPAQUE_DOMAIN, hashlib.sha256).digest()
+    digest = hmac.new(sub_key, f"{art.id}:{art.etag or ''}".encode("utf-8"), hashlib.sha256).hexdigest()[:40]
+    name = art.s3_key.rsplit("/", 1)[-1]
+    ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+    return f"{OPAQUE_PREFIX}{digest}.{ext if ext.isalnum() and len(ext) <= 8 else 'bin'}"
+
+
+def _labeler_url(session: Session, request: Request, s3, art: Artifact, mime: str) -> str:
+    """A presigned URL of the labeler's opaque copy of `art`, copying it on first access."""
+    from botocore.exceptions import ClientError
+
+    key = opaque_key(request.app.state.settings.jwt_secret, art)
+    copy = session.scalar(select(Artifact).where(Artifact.s3_key == key))
+    if copy is None or not copy.available:
+        try:
+            s3.copy(art.s3_key, key, content_type=mime)
+        except ClientError as e:
+            if e.response.get("Error", {}).get("Code") in ("404", "NoSuchKey", "NotFound"):
+                raise HTTPException(status_code=410, detail="This file is no longer available")
+            raise
+        values = dict(role="opaque_copy", s3_key=key, provenance="cloud", detail={"source_artifact_id": art.id},
+                      bytes=art.bytes, mime=mime, available=True)
+        session.execute(pg_insert(Artifact).values(**values).on_conflict_do_update(
+            index_elements=[Artifact.s3_key], set_={"available": True, "detail": values["detail"]}))
+    return s3.presign(key, URL_TTL_SECONDS)
 
 
 def _device_of(session: Session, art: Artifact, ev: Optional[Event]) -> Optional[Device]:
@@ -66,6 +107,8 @@ def artifact_access(artifact_id: int, body: MediaAccessRequest, request: Request
             raise HTTPException(status_code=403, detail="Your role cannot open training data")
         if not customer.consent_training:
             raise HTTPException(status_code=403, detail="This customer has not agreed to training use")
+        if staff.role == "labeler" and art.role in LABELER_HIDDEN_ROLES:
+            raise HTTPException(status_code=403, detail="Your role cannot open this file")
     else:
         if staff.role == "labeler":
             raise HTTPException(status_code=403, detail="Your role cannot do this")
@@ -77,11 +120,13 @@ def artifact_access(artifact_id: int, body: MediaAccessRequest, request: Request
     audit.record(session, staff.id, "media_view", target=art.s3_key, reason=body.purpose,
                  customer_id=customer.id, device_id=device.device_id, detail={"role": art.role, "camera": camera},
                  ts=now)
-    url = s3.presign(art.s3_key, URL_TTL_SECONDS)
+    mime = _mime(art.s3_key, art.mime)
+    url = (_labeler_url(session, request, s3, art, mime) if staff.role == "labeler"
+           else s3.presign(art.s3_key, URL_TTL_SECONDS))
     if body.purpose != "training":
         label = audit.camera_label(session, device.id, camera) if camera else "a camera"
         audit.owner_notice(session, s3, device, staff, kind="recording", cameras=[label], now=now)
-    return MediaAccess(url=url, expires_utc=now + timedelta(seconds=URL_TTL_SECONDS), mime=_mime(art.s3_key, art.mime))
+    return MediaAccess(url=url, expires_utc=now + timedelta(seconds=URL_TTL_SECONDS), mime=mime)
 
 
 @router.get(
@@ -108,5 +153,6 @@ def event_thumbnail(event_id: int, request: Request, staff: Staff = Depends(curr
         device_id = session.scalar(select(Device.device_id).where(Device.id == ev.device_pk))
         audit.record(session, staff.id, "thumbnail_view", target=target, customer_id=customer_id,
                      device_id=device_id, ts=now)
-    return Response(status_code=307, headers={"Location": s3.presign(art.s3_key, URL_TTL_SECONDS),
-                                              "Cache-Control": "no-store"})
+    location = (_labeler_url(session, request, s3, art, _mime(art.s3_key, art.mime)) if viewer.labeler
+                else s3.presign(art.s3_key, URL_TTL_SECONDS))
+    return Response(status_code=307, headers={"Location": location, "Cache-Control": "no-store"})

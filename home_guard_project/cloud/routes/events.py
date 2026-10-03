@@ -2,20 +2,26 @@
 
 Labelers see only events of customers who gave training consent, with the customer's identity replaced by
 pseudonyms (`customer-<6 hex>` for the customer and site, `cam-<6 hex>` for each camera), and without delivery
-details or the owner's words. Admin and support see everything.
+details or the owner's words. Their responses are built from allowlisted projections, never by deleting fields
+from real data: free text (summaries, reasons, prompts, AI output) passes through `redact`, storage keys become
+opaque `artifact-<id>` references, and `raw_meta` keeps only a fixed set of non-identifying fields. Their search
+runs over the redacted summaries, and a query naming the household returns nothing. Admin and support see
+everything.
 """
 from __future__ import annotations
 
 import base64
 import binascii
 import math
+import re
 import threading
 from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Literal, Optional, get_args
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import Float, Integer, and_, case, cast, false, func, or_, select, true, tuple_, type_coerce
+from sqlalchemy import (BigInteger, Float, Integer, and_, case, cast, false, func, literal, or_, select, text, true,
+                        tuple_, type_coerce)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
@@ -24,7 +30,7 @@ from home_guard_project.fleet_contract.classes import COCO_NAMES
 from home_guard_project.fleet_contract.keys import parse_key
 from home_guard_project.fleet_contract.legacy import parse_heartbeat, parse_meta
 
-from .. import audit, pseudonym
+from .. import audit, pseudonym, redact
 from ..deps import current_staff, get_session
 from ..models import (AiRun, Artifact, AuditLog, Camera, CollectionItem, Customer, Device, Event, Feedback, RawRevision, ReviewState,
                       Staff)
@@ -39,7 +45,13 @@ SAMPLED_MODEL = "yolo (collection export)"
 _KINDS = set(get_args(EventKind))
 _COMPLETENESS_DEFAULT = {"video": False, "boxes": "none", "ai": "none", "owner_feedback": False, "expired": False,
                          "copies": []}
-_FEEDBACK_PRIVATE = ("raw_text", "note", "from", "chat_id")
+# What a labeler may see of an artifact's detail and of the raw meta document (allowlists, not blocklists).
+_LABELER_ARTIFACT_DETAIL = ("fps", "tile_w", "tile_h", "count", "copy")
+_LABELER_META = {
+    "kind": None, "duration_sec": None, "fps_estimated": None, "frames_written": None, "codec": None,
+    "buffer": ("store_size",), "yolo": ("class_counts", "class_max_conf", "trigger_classes"),
+    "model_response": None, "teacher": ("model", "prompt_version", "temperature", "prompt"),
+}
 
 
 # ---------------------------------------------------------------- helpers: time, viewer, visibility
@@ -63,6 +75,17 @@ class _Viewer:
         self.staff = staff
         self.labeler = staff.role == "labeler"
         self.secret = request.app.state.settings.jwt_secret
+        self._identities: dict[int, redact.Identity] = {}
+
+    def identity(self, session: Session, device_pk: int) -> redact.Identity:
+        """The device's identity terms mapped to this labeler's pseudonyms (cached for the request)."""
+        if device_pk not in self._identities:
+            self._identities[device_pk] = redact.identity(session, session.get(Device, device_pk), self.secret)
+        return self._identities[device_pk]
+
+    def text(self, session: Session, device_pk: int, value: Optional[str]) -> str:
+        """Free text as this viewer may read it."""
+        return self.identity(session, device_pk).text(value) if self.labeler else (value or "")
 
     def visible(self):
         """Condition over a query joined to Customer: what this viewer may see."""
@@ -135,15 +158,26 @@ def _encode_cursor(start_ts: float, event_id: int) -> str:
     return base64.urlsafe_b64encode(f"{start_ts!r}:{event_id}".encode("ascii")).decode("ascii")
 
 
+_CURSOR = re.compile(r"(-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?):([1-9]\d{0,18})")
+MAX_EVENT_ID = 2 ** 63 - 1  # the database's integer domain for ids
+
+
 def _decode_cursor(cursor: str) -> tuple[float, int]:
+    """(start_ts, id) of a cursor; anything else -- empty, bad base64, extra parts, a non-finite time, an id
+    outside 1..2^63-1 -- is a 400 before any query runs."""
+    bad = HTTPException(status_code=400, detail="Invalid cursor")
+    if not cursor or len(cursor) > 128:
+        raise bad
     try:
         raw = base64.b64decode(cursor + "=" * (-len(cursor) % 4), altchars=b"-_", validate=True).decode("ascii")
-        ts_text, _, id_text = raw.rpartition(":")
-        ts, event_id = float(ts_text), int(id_text)
     except (binascii.Error, UnicodeDecodeError, ValueError):
-        raise HTTPException(status_code=400, detail="Invalid cursor")
-    if not math.isfinite(ts):
-        raise HTTPException(status_code=400, detail="Invalid cursor")
+        raise bad
+    match = _CURSOR.fullmatch(raw)
+    if match is None:
+        raise bad
+    ts, event_id = float(match.group(1)), int(match.group(2))
+    if not math.isfinite(ts) or not 1 <= event_id <= MAX_EVENT_ID:
+        raise bad
     return ts, event_id
 
 
@@ -154,17 +188,20 @@ def _event_select():
                           ReviewState.flagged)).outerjoin(ReviewState, ReviewState.event_id == Event.id)
 
 
-def _summary_fields(viewer: _Viewer, ev: Event, customer_id: int, customer_name: str, tz: Optional[str],
-                    reviewed: Optional[bool], flagged: Optional[bool], has_thumbnail: bool) -> dict[str, Any]:
+def _summary_fields(session: Session, viewer: _Viewer, ev: Event, customer_id: int, customer_name: str,
+                    tz: Optional[str], reviewed: Optional[bool], flagged: Optional[bool],
+                    has_thumbnail: bool) -> dict[str, Any]:
     completeness = {**_COMPLETENESS_DEFAULT, **(ev.completeness if isinstance(ev.completeness, dict) else {})}
+    shown = lambda value: viewer.text(session, ev.device_pk, value)  # noqa: E731
     return dict(
         id=ev.id, site=viewer.site(customer_id, ev.site), customer_id=customer_id,
         customer_name=viewer.customer_name(customer_id, customer_name), camera=viewer.camera(ev.site, ev.camera),
         kind=ev.kind if ev.kind in _KINDS else "unknown",
-        start_utc=_ts_utc(ev.start_ts), end_utc=_ts_utc(ev.end_ts), summary=ev.summary or "", label=ev.label,
+        start_utc=_ts_utc(ev.start_ts), end_utc=_ts_utc(ev.end_ts), summary=shown(ev.summary),
+        label=shown(ev.label) if ev.label is not None else None,
         alert_command=ev.alert_command,
-        detected=[d for d in (ev.detected or []) if isinstance(d, str)],
-        owner_verdicts=[v for v in (ev.owner_verdicts or []) if isinstance(v, str)],
+        detected=[shown(d) for d in (ev.detected or []) if isinstance(d, str)],
+        owner_verdicts=[shown(v) for v in (ev.owner_verdicts or []) if isinstance(v, str)],
         completeness=completeness, reviewed=bool(reviewed), flagged=bool(flagged),
         thumbnail_url=f"/v1/events/{ev.id}/thumbnail" if has_thumbnail else None,
         timezone=tz or "UTC",
@@ -188,7 +225,8 @@ def _load_one(session: Session, viewer: _Viewer, event_id: int):
 
 def _summary_of(session: Session, viewer: _Viewer, row) -> dict[str, Any]:
     ev, cid, name, tz, reviewed, flagged = row
-    return _summary_fields(viewer, ev, cid, name, tz, reviewed, flagged, ev.id in _thumbnail_ids(session, [ev.id]))
+    return _summary_fields(session, viewer, ev, cid, name, tz, reviewed, flagged,
+                           ev.id in _thumbnail_ids(session, [ev.id]))
 
 
 def _device_id(session: Session, ev: Event) -> Optional[str]:
@@ -236,7 +274,12 @@ def list_events(
     if verdict is not None:
         conds.append(_has_verdict(verdict))
     if q:
-        conds.append(Event.search.op("@@")(func.websearch_to_tsquery("simple", q)))
+        if viewer.labeler:
+            if _names_household(session, viewer, q):  # no identity oracle: such a query matches nothing
+                return EventPage(items=[], next_cursor=None, total=0 if with_total else None, total_capped=False)
+            conds.append(Event.search_redacted.op("@@")(func.websearch_to_tsquery("simple", q)))
+        else:
+            conds.append(Event.search.op("@@")(func.websearch_to_tsquery("simple", q)))
     if from_utc is not None:
         conds.append(Event.start_ts >= _utc(from_utc).timestamp())
     if to_utc is not None:
@@ -258,6 +301,13 @@ def list_events(
 TOTAL_CAP = 10_000
 
 
+def _names_household(session: Session, viewer: _Viewer, q: str) -> bool:
+    """Whether a labeler's query contains an identity term of any device the labeler may see."""
+    pks = session.scalars(select(Device.id).join(Customer, Customer.id == Device.customer_id)
+                          .where(viewer.visible()).order_by(Device.id)).all()
+    return any(viewer.identity(session, pk).mentions(q) for pk in pks)
+
+
 def _in_collection(collection_id: int):
     return Event.id.in_(select(CollectionItem.event_id).where(CollectionItem.collection_id == collection_id))
 
@@ -272,15 +322,16 @@ def event_page(session: Session, viewer: _Viewer, conds: list, cursor: Optional[
             _event_select().where(*conds).order_by(None).limit(TOTAL_CAP + 1).subquery()))
         capped = counted > TOTAL_CAP
         total = TOTAL_CAP if capped else counted
-    if cursor:
+    if cursor is not None:  # absent: the first page; present but empty or malformed: 400
         ts, last_id = _decode_cursor(cursor)
-        conds = [*conds, or_(Event.start_ts < ts, and_(Event.start_ts == ts, Event.id < last_id))]
+        last = literal(last_id, BigInteger)  # compared as bigint: any id of the cursor domain is a valid bound
+        conds = [*conds, or_(Event.start_ts < ts, and_(Event.start_ts == ts, Event.id < last))]
     rows = session.execute(_event_select().where(*conds)
                            .order_by(Event.start_ts.desc(), Event.id.desc()).limit(limit + 1)).all()
     more = len(rows) > limit
     rows = rows[:limit]
     thumbs = _thumbnail_ids(session, [r[0].id for r in rows])
-    items = [EventSummary(**_summary_fields(viewer, ev, cid, name, tz, rv, fl, ev.id in thumbs))
+    items = [EventSummary(**_summary_fields(session, viewer, ev, cid, name, tz, rv, fl, ev.id in thumbs))
              for ev, cid, name, tz, rv, fl in rows]
     next_cursor = _encode_cursor(rows[-1][0].start_ts, rows[-1][0].id) if more and rows else None
     return EventPage(items=items, next_cursor=next_cursor, total=total, total_capped=capped)
@@ -330,10 +381,11 @@ def events_density(
     # `<site>/<camera>`; a labeler's row is the camera pseudonym. (Comments, not a docstring: the OpenAPI is frozen.)
     viewer = _Viewer(staff, request)
     step = 3600 if bucket == "hour" else 86400
-    start = math.floor(_utc(from_utc).timestamp() / step) * step
-    end = math.ceil(_utc(to_utc).timestamp() / step) * step
-    if end <= start:
+    begin, finish = _utc(from_utc), _utc(to_utc)  # naive endpoints are UTC
+    if finish <= begin:  # the requested interval, before any rounding to buckets
         raise HTTPException(status_code=400, detail="to_utc must be after from_utc")
+    start = math.floor(begin.timestamp() / step) * step
+    end = math.ceil(finish.timestamp() / step) * step
     n = int((end - start) // step)
     if n > MAX_DENSITY_BUCKETS:
         raise HTTPException(status_code=400, detail=f"Too many buckets (max {MAX_DENSITY_BUCKETS})")
@@ -404,37 +456,34 @@ def review_count(request: Request, staff: Staff = Depends(current_staff), sessio
 
 # ---------------------------------------------------------------- detail
 
-def _drop_keys(node: Any, names: frozenset) -> Any:
-    """A copy of `node` without any dict key in `names`, at any depth."""
-    if isinstance(node, dict):
-        return {k: _drop_keys(v, names) for k, v in node.items() if k not in names}
-    if isinstance(node, list):
-        return [_drop_keys(v, names) for v in node]
-    return node
+def _labeler_meta(body: dict, ident: redact.Identity) -> dict:
+    """The raw meta document as a labeler sees it: only the allowlisted fields, free text redacted. No paths of
+    any kind, no delivery details, no owner feedback, no timestamps beyond what the summary already shows."""
+    out: dict[str, Any] = {}
+    for key, children in _LABELER_META.items():
+        if key not in body:
+            continue
+        value = body[key]
+        if children is None:
+            out[key] = value
+        elif isinstance(value, dict):
+            picked = {k: value[k] for k in children if k in value}
+            if picked:
+                out[key] = picked
+    return ident.json(out)
 
 
-def _redact_meta(body: dict, camera_pseudonym: str) -> dict:
-    """A meta document as a labeler sees it: no delivery details, no owner words, pseudonymous camera."""
-    body = _drop_keys(body, frozenset({"dispatch"}))
-    feedback = body.get("owner_feedback")
-    if isinstance(feedback, list):
-        body["owner_feedback"] = [{k: v for k, v in e.items() if k not in _FEEDBACK_PRIVATE}
-                                  if isinstance(e, dict) else e for e in feedback]
-    if "camera_name" in body:
-        body["camera_name"] = camera_pseudonym
-    return body
+def _labeler_artifact_detail(detail: Any, ident: redact.Identity) -> Optional[dict]:
+    if not isinstance(detail, dict):
+        return None
+    picked = {k: detail[k] for k in _LABELER_ARTIFACT_DETAIL
+              if k in detail and isinstance(detail[k], (str, int, float, bool))}
+    return ident.json(picked) or None
 
 
-def _mask_key(key: str, ev: Event, site_p: str, cam_p: str) -> str:
-    """An S3 key with the site and camera replaced by the labeler's pseudonyms."""
-    head, _, rest = key.partition("/")
-    for root in ("dataset", "production"):
-        if head == f"{root}_{ev.site}":
-            head = f"{root}_{site_p}"
-            break
-    else:
-        head = "hidden"
-    return f"{head}/{rest.replace(ev.camera, cam_p)}" if rest else head
+def labeler_artifact_ref(artifact_id: int) -> str:
+    """What a labeler sees instead of a storage key: an opaque reference, no path at all."""
+    return f"artifact-{artifact_id}"
 
 
 def _newest_meta_body(session: Session, arts: Iterable[Artifact]) -> dict:
@@ -483,15 +532,22 @@ def _dispatch_out(dispatch: Any) -> Optional[DispatchOut]:
 
 
 def _audit_view(session: Session, request: Request, staff: Staff, ev: Event, customer_id: int) -> None:
-    """One `event_view` row per (staff, event) per 10 minutes."""
+    """One `event_view` row per (staff, event) per 10 minutes.
+
+    The transaction-scoped advisory lock on (staff, event) serialises concurrent views, so the check and the
+    insert act as one step: a second request waits, then sees the first one's row. One clock (the app's) both
+    decides the window and stamps the row."""
     target = f"event/{ev.id}"
+    session.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:k, 0))"),
+                    {"k": f"event_view:{staff.id}:{ev.id}"})
+    now = _now(request)
     last = session.scalar(select(AuditLog.ts).where(
         AuditLog.action == "event_view", AuditLog.staff_id == staff.id, AuditLog.target == target)
         .order_by(AuditLog.ts.desc()).limit(1))
-    if last is not None and last > _now(request) - VIEW_AUDIT_WINDOW:
+    if last is not None and last > now - VIEW_AUDIT_WINDOW:
         return
     audit.record(session, staff.id, "event_view", target=target, customer_id=customer_id,
-                 device_id=_device_id(session, ev))
+                 device_id=_device_id(session, ev), ts=now)
 
 
 @router.get("/events/{event_id}", response_model=EventDetail)
@@ -507,30 +563,42 @@ def get_event(event_id: int, request: Request, staff: Staff = Depends(current_st
                                .order_by(Feedback.received_at.asc().nulls_last(), Feedback.id)).all()
     arts = session.scalars(select(Artifact).where(Artifact.event_id == ev.id).order_by(Artifact.id)).all()
     raw_meta = _newest_meta_body(session, arts)
+    parsed = lambda r: r.parsed if isinstance(r.parsed, dict) else None  # noqa: E731
+    frame_ids = lambda r: [i for i in (r.input_artifact_ids or []) if isinstance(i, int)]  # noqa: E731
     if viewer.labeler:
-        raw_meta = _redact_meta(raw_meta, fields["camera"])
+        ident = viewer.identity(session, ev.device_pk)
+        optional = lambda value: ident.text(value) if value is not None else None  # noqa: E731
+        ai_runs = [AiRunOut(id=r.id, purpose="guard", status=r.status, model=optional(r.model),
+                            prompt_version=optional(r.prompt_version), prompt=optional(r.prompt),
+                            parsed=ident.json(parsed(r)), raw_text_artifact_id=r.raw_artifact_id,
+                            input_frame_artifact_ids=frame_ids(r)) for r in runs]
+        feedback_out = [FeedbackOut(id=f.id, verdict=ident.text(f.verdict), action=ident.text(f.action), note="",
+                                    raw_text="", source=ident.text(f.source),
+                                    received_utc=f.received_at or fields["start_utc"]) for f in feedback]
+        artifacts = [ArtifactOut(id=a.id, role=a.role, s3_key=labeler_artifact_ref(a.id), bytes=a.bytes,
+                                 available=a.available, provenance=a.provenance,
+                                 detail=_labeler_artifact_detail(a.detail, ident))
+                     for a in arts if a.role != "opaque_copy"]
+        raw_meta, alert_reason = _labeler_meta(raw_meta, ident), ident.text(ev.alert_reason)
+    else:
+        ai_runs = [AiRunOut(id=r.id, purpose="guard", status=r.status, model=r.model,
+                            prompt_version=r.prompt_version, prompt=r.prompt, parsed=parsed(r),
+                            raw_text_artifact_id=r.raw_artifact_id, input_frame_artifact_ids=frame_ids(r))
+                   for r in runs]
+        feedback_out = [FeedbackOut(id=f.id, verdict=f.verdict, action=f.action, note=f.note, raw_text=f.raw_text,
+                                    source=f.source, received_utc=f.received_at or fields["start_utc"])
+                        for f in feedback]
+        artifacts = [ArtifactOut(id=a.id, role=a.role, s3_key=a.s3_key, bytes=a.bytes, available=a.available,
+                                 provenance=a.provenance, detail=a.detail if isinstance(a.detail, dict) else None)
+                     for a in arts]
+        alert_reason = ev.alert_reason or ""
     detail = EventDetail(
         **fields,
         clip_start_local=ev.clip_start_local, duration_sec=ev.duration_sec, fps=ev.fps,
         frame_size=ev.frame_size if isinstance(ev.frame_size, list) else None,
-        alert_reason=ev.alert_reason or "",
+        alert_reason=alert_reason,
         dispatch=None if viewer.labeler else _dispatch_out(ev.dispatch),
-        ai_runs=[AiRunOut(id=r.id, purpose="guard", status=r.status, model=r.model, prompt_version=r.prompt_version,
-                          prompt=r.prompt, parsed=r.parsed if isinstance(r.parsed, dict) else None,
-                          raw_text_artifact_id=r.raw_artifact_id,
-                          input_frame_artifact_ids=[i for i in (r.input_artifact_ids or []) if isinstance(i, int)])
-                 for r in runs],
-        feedback=[FeedbackOut(id=f.id, verdict=f.verdict, action=f.action,
-                              note="" if viewer.labeler else f.note, raw_text="" if viewer.labeler else f.raw_text,
-                              source=f.source, received_utc=f.received_at or fields["start_utc"])
-                  for f in feedback],
-        artifacts=[ArtifactOut(id=a.id, role=a.role,
-                               s3_key=_mask_key(a.s3_key, ev, fields["site"], fields["camera"]) if viewer.labeler
-                               else a.s3_key,
-                               bytes=a.bytes, available=a.available, provenance=a.provenance,
-                               detail=a.detail if isinstance(a.detail, dict) else None)
-                   for a in arts],
-        raw_meta=raw_meta,
+        ai_runs=ai_runs, feedback=feedback_out, artifacts=artifacts, raw_meta=raw_meta,
     )
     _audit_view(session, request, staff, ev, customer_id)
     return detail

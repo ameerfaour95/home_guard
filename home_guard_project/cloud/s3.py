@@ -64,6 +64,17 @@ class S3:
         self.client.put_object(Bucket=self.bucket, Key=key, Body=json.dumps(body).encode("utf-8"),
                                ContentType="application/json")
 
+    def copy(self, source_key: str, dest_key: str, content_type: Optional[str] = None) -> None:
+        """Server-side copy into a writable prefix. Metadata is replaced, not copied, so no stored
+        Content-Disposition, filename or user metadata of the source travels with the copy."""
+        if not dest_key.startswith(WRITABLE_PREFIXES):
+            raise ValueError(f"refusing to write outside {WRITABLE_PREFIXES}: {dest_key}")
+        params = dict(Bucket=self.bucket, Key=dest_key, CopySource={"Bucket": self.bucket, "Key": source_key},
+                      MetadataDirective="REPLACE")
+        if content_type:
+            params["ContentType"] = content_type
+        self.client.copy_object(**params)
+
     def presign(self, key: str, ttl: int = 300) -> str:
         return self.client.generate_presigned_url(
             "get_object", Params={"Bucket": self.bucket, "Key": key}, ExpiresIn=ttl)

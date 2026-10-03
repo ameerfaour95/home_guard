@@ -466,3 +466,91 @@ def test_fleet_activity(client, staff_factory, indexed):
     assert client.get("/v1/fleet/activity", params={"hours": 4}, headers=h).json()["rows"][0]["events"] == [2, 0, 0, 0]
     assert client.get("/v1/fleet/activity", headers=lab).status_code == 403
     assert client.get("/v1/fleet/activity", params={"hours": 169}, headers=h).status_code == 422
+
+
+# ---------------------------------------------------------------- fix round (Codex review of Task 10)
+
+def _b64(text: str) -> str:
+    return base64.urlsafe_b64encode(text.encode("ascii")).decode("ascii")
+
+
+def test_invalid_cursors_are_400_before_any_query(client, staff_factory, indexed):
+    _, _, _, h = staff_factory("admin")
+    bad = ["", "=", _b64("1791020174.1329982:999999999999999999999999999999"), _b64(f"1791020174.1:{2 ** 63}"),
+           _b64("1791020174.1:0"), _b64("1791020174.1:-1"), _b64("1.0:2:3"), _b64("inf:1"), _b64("-inf:1"),
+           _b64("1e999:1"), _b64(" 1.0:2"), _b64("1.0: 2"), _b64("1.0:"), _b64(":1"), _b64("1.0:+2"), _b64("1_0:2")]
+    for cursor in bad:
+        r = client.get("/v1/events", params={"cursor": cursor}, headers=h)
+        assert r.status_code == 400, (cursor, r.status_code, r.text)
+    ok = client.get("/v1/events", params={"cursor": _b64(f"1791020174.1:{2 ** 63 - 1}")}, headers=h)
+    assert ok.status_code == 200 and ok.json()["items"]
+    assert len(client.get("/v1/events", headers=h).json()["items"]) == 6  # absent cursor: first page
+    with session_scope(client.app.state.engine) as s:
+        col = m.Collection(name="c", created_at=NOW)
+        s.add(col)
+        s.flush()
+        cid = col.id
+    for cursor in ("", _b64(f"1.0:{2 ** 63}")):
+        r = client.get(f"/v1/studio/collections/{cid}/items", params={"cursor": cursor}, headers=h)
+        assert r.status_code == 400, (cursor, r.text)
+
+
+def test_density_validates_the_requested_interval_not_the_rounded_one(client, staff_factory, indexed):
+    _, _, _, h = staff_factory("admin")
+
+    def status(f, t, bucket="hour"):
+        return client.get("/v1/events/density", params={"from_utc": f, "to_utc": t, "bucket": bucket},
+                          headers=h).status_code
+
+    for bucket in ("hour", "day"):
+        assert status("2026-10-03T10:50:00Z", "2026-10-03T10:10:00Z", bucket) == 400  # reversed, one bucket
+        assert status("2026-10-03T10:30:00Z", "2026-10-03T10:30:00Z", bucket) == 400  # empty, one bucket
+        assert status("2026-10-03T10:10:00Z", "2026-10-03T10:50:00Z", bucket) == 200
+    # naive endpoints are UTC; an offset endpoint is compared after conversion to UTC
+    assert status("2026-10-03T10:10:00", "2026-10-03T10:50:00") == 200
+    assert status("2026-10-03T10:10:00", "2026-10-03T10:50:00+03:00") == 400  # 07:50Z is before 10:10Z
+    d = client.get("/v1/events/density", params={"from_utc": "2026-10-03T10:10:00Z",
+                                                 "to_utc": "2026-10-03T10:50:00Z"}, headers=h).json()
+    assert len(d["starts_utc"]) == 1 and d["starts_utc"][0].startswith("2026-10-03T10:00:00")
+
+
+def test_event_view_audit_is_race_free(client, staff_factory, indexed, monkeypatch):
+    import threading
+    import time
+    from types import SimpleNamespace
+
+    from home_guard_project.cloud import audit
+    from home_guard_project.cloud.routes import events as events_routes
+
+    staff, _, _, _ = staff_factory("admin")
+    eid = _event_id(client, b.STEM)
+    real_record = audit.record
+
+    def slow_record(*args, **kwargs):  # widen the window between the check and the insert
+        time.sleep(0.3)
+        return real_record(*args, **kwargs)
+
+    monkeypatch.setattr(audit, "record", slow_record)
+    request = SimpleNamespace(app=client.app)
+    n = 6
+    barrier = threading.Barrier(n)
+    errors = []
+
+    def view():
+        try:
+            with session_scope(client.app.state.engine) as s:
+                ev = s.get(m.Event, eid)
+                cid = s.scalar(select(m.Device.customer_id).where(m.Device.id == ev.device_pk))
+                who = s.get(m.Staff, staff.id)
+                barrier.wait(timeout=20)
+                events_routes._audit_view(s, request, who, ev, cid)
+        except Exception as e:  # pragma: no cover
+            errors.append(e)
+
+    threads = [threading.Thread(target=view) for _ in range(n)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+    assert not errors
+    with session_scope(client.app.state.engine) as s:
+        rows = s.scalars(select(m.AuditLog).where(m.AuditLog.action == "event_view")).all()
+    assert len(rows) == 1 and rows[0].ts == NOW  # the batching clock is also the audit row's clock
