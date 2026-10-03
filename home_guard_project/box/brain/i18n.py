@@ -91,6 +91,9 @@ TEMPLATES: Dict[str, Dict[str, str]] = {
     "verdict_expected": {"en": "expected activity", "he": "פעילות צפויה", "ar": "نشاط متوقع"},
     "verdict_missed_event": {"en": "an event the box missed", "he": "אירוע שהקופסה פספסה", "ar": "حدث فاته الجهاز"},
     # -- general ----------------------------------------------------------------
+    "nothing_done": {"en": "I did not do anything yet - please tell me again what you need.",
+                     "he": "עדיין לא עשיתי כלום - תכתוב לי שוב מה צריך.",
+                     "ar": "لم أقم بأي إجراء بعد - أخبرني مرة أخرى بما تحتاجه."},
     "unavailable": {"en": "I couldn't work on that right now, but your message was saved.",
                     "he": "לא הצלחתי לטפל בזה כרגע, אבל ההודעה שלך נשמרה.",
                     "ar": "لم أتمكن من معالجة ذلك الآن، لكن رسالتك حُفظت."},
