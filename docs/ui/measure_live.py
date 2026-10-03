@@ -278,7 +278,13 @@ def main():
                     index=min(range(len(capture_times)),key=lambda i:abs(capture_times[i]-second))
                     captures[index].save(shots/(name+args.screenshot_suffix+".png"))
                 if not args.screenshots_only:
-                    captures[0].save(Path(__file__).parent/"live_demo.gif", save_all=True, append_images=captures[1:], duration=100, loop=0)
+                    # Keep the repository proof small: 5 fps, 854 px, 48 colors.
+                    clip=[frame.resize((854,480),Image.Resampling.LANCZOS).quantize(colors=48)
+                          for frame in captures[::2]]
+                    destination=Path(__file__).parent/"live_demo_l3.gif"
+                    clip[0].save(destination,save_all=True,append_images=clip[1:],duration=200,loop=0,optimize=True)
+                    if destination.stat().st_size>2_000_000:
+                        raise RuntimeError('Demo clip exceeds the 2 MB repository limit')
 
 
 if __name__ == "__main__": main()
