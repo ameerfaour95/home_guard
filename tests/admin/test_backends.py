@@ -17,7 +17,7 @@ TOKEN = dict(access_token='access-1', refresh_token='refresh-1', expires_in=900,
 def test_every_fixture_parses_and_keeps_contract_fields(path):
     name = path.name
     model = (FleetResponse if name == 'fleet.json' else list[CustomerOut] if name == 'customers.json'
-             else CustomerOut if name.startswith('customer_') else EventPage if name == 'events.json' else EventDetail)
+             else DetectionsOut if name.startswith('detections_') else CustomerOut if name.startswith('customer_') else EventPage if name == 'events.json' else EventDetail)
     source = json.loads(path.read_text())
     parsed = decode(model, source)
     def shape(wire, actual):
@@ -43,7 +43,7 @@ def test_demo_routes_and_integrity():
     for event in backend.events().items:
         detail = backend.event(event.id)
         assert all(getattr(detail, f.name) == getattr(event, f.name) for f in fields(EventSummary))
-    assert backend.events(customer_id=2).items == []
+    assert backend.events(customer_id=99).items == []
     assert backend.login('', '', '').staff == backend.me()
 
 
@@ -53,7 +53,7 @@ def test_demo_labeler_redaction():
         with pytest.raises(ForbiddenError):
             operation()
     event = backend.event(101)
-    assert event.customer_name == 'Household 001'
+    assert event.customer_name == 'customer-000001'
     assert event.raw_meta == {} and event.dispatch is None
     assert 'Daniel' not in repr(event)
 

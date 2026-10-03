@@ -3,13 +3,14 @@ import time
 from PySide6.QtCore import Qt, Signal, QTimer, QEvent
 from PySide6.QtGui import QShortcut, QKeySequence
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QTableView, QHeaderView, QStackedWidget, QAbstractItemView
-from .backend import OfflineError, AuthError
+from .backend import OfflineError, AuthError, all_events
 from .demo_backend import DemoBackend
 from .formatting import utcnow
 from .fleet_model import FleetModel, FleetDelegate
 from .widgets.common import label, button, EmptyState, Skeleton
 from .widgets.device_detail import DeviceDetail
 from .workers import TaskRunner
+from .widgets.activity import DensityStrip
 
 
 class FleetScreen(QWidget):
@@ -41,6 +42,10 @@ class FleetScreen(QWidget):
         self.refresh_button = button('Refresh', self.refresh)
         heading.addWidget(self.refresh_button)
         layout.addLayout(heading)
+        self.activity = DensityStrip(theme, fleet=True)
+        layout.addWidget(self.activity)
+        self.activity_runner = TaskRunner(self)
+        self.activity_runner.finished.connect(self.activity_loaded)
         filters = QHBoxLayout()
         filters.setSpacing(8)
         self.chips = {}
@@ -177,6 +182,15 @@ class FleetScreen(QWidget):
         self.update_view()
         self.update_age()
         self.loaded.emit(snapshot, customers)
+        end = snapshot.generated_utc
+        self.activity_runner.start(lambda: (all_events(self.backend, from_utc=(end-timedelta(hours=24)).isoformat(), to_utc=end.isoformat()), end))
+
+    def activity_loaded(self, result, error):
+        if error:
+            self.activity.setToolTip('Activity could not be refreshed. Try Refresh.')
+            return
+        events, end = result
+        self.activity.set_events(events, end-timedelta(hours=24), end)
 
     def show_error(self, error):
         if isinstance(error, AuthError):
@@ -251,8 +265,12 @@ class FleetScreen(QWidget):
             # Preserve legible columns in compact layouts; the view scrolls
             # horizontally when the detail panel takes the remaining space.
             extra = max(0, self.table.viewport().width() - sum(self.column_widths))
+            reason_extra = min(extra, 312)
+            remainder = extra-reason_extra
             for col, base in enumerate(self.column_widths):
-                width = base + (int(extra * .3) if col == 0 else extra-int(extra*.3) if col == 1 else 0)
+                width = base + (reason_extra if col == 1 else remainder//7)
+                if col == 7:
+                    width += remainder % 7
                 if self.table.columnWidth(col) != width:
                     self.table.setColumnWidth(col, width)
         if watched is self.table and event.type() == QEvent.Type.KeyPress and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):

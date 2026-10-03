@@ -1,0 +1,5 @@
+{
+  "summary": "A person approached the entrance and left a parcel.",
+  "alert_command": "[send_message]",
+  "confidence": 0.93
+}

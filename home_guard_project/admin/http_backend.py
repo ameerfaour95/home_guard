@@ -5,7 +5,7 @@ import ssl
 import certifi
 import httpx
 from .backend import AuthError, ForbiddenError, OfflineError, ServerError, RateLimitError
-from .models import TokenPair, StaffOut, FleetResponse, CustomerOut, EventPage, EventDetail, decode
+from .models import TokenPair, StaffOut, FleetResponse, CustomerOut, EventPage, EventDetail, EventSummary, DetectionsOut, MediaAccess, decode
 
 
 def tls_context():
@@ -55,9 +55,9 @@ class HttpBackend:
                 email=email, password=password, totp=totp)), TokenPair)
             return self.tokens
 
-    def _get(self, path, model, **params):
+    def _response(self, method, path, **kwargs):
         token = self.tokens.access_token if self.tokens else ''
-        response = self._send('GET', path, params=params, headers={'Authorization': f'Bearer {token}'})
+        response = self._send(method, path, **kwargs, headers={'Authorization': f'Bearer {token}'})
         if response.status_code == 401 and self.tokens:
             # Concurrent requests share one refresh; each original request retries once.
             with self._auth_lock:
@@ -71,10 +71,16 @@ class HttpBackend:
                 if not self.tokens:
                     raise AuthError()
                 token = self.tokens.access_token
-            response = self._send('GET', path, params=params, headers={'Authorization': f'Bearer {token}'})
+            response = self._send(method, path, **kwargs, headers={'Authorization': f'Bearer {token}'})
         if response.status_code == 401:
             self.tokens = None
-        return self._parse(response, model)
+        return response
+
+    def _request(self, method, path, model, **kwargs):
+        return self._parse(self._response(method, path, **kwargs), model)
+
+    def _get(self, path, model, **params):
+        return self._request('GET', path, model, params=params)
 
     def me(self):
         return self._get('me', StaffOut)
@@ -93,3 +99,34 @@ class HttpBackend:
 
     def event(self, id):
         return self._get(f'events/{int(id)}', EventDetail)
+
+    def detections(self, id):
+        return self._get(f'events/{int(id)}/detections', DetectionsOut)
+
+    def review(self, id, **changes):
+        return self._request('PATCH', f'events/{int(id)}/review', EventSummary,
+                             json={k: v for k, v in changes.items() if k in ('reviewed', 'flagged')})
+
+    def artifact_access(self, id, purpose='review'):
+        return self._request('POST', f'artifacts/{int(id)}/access', MediaAccess, json={'purpose': purpose})
+
+    def media_bytes(self, url):
+        # Authenticated thumbnail endpoint may redirect to a presigned URL. Never
+        # forward Bearer to the artifact host; media itself uses URL credentials.
+        from urllib.parse import urljoin, urlsplit
+        absolute = urljoin(self.base_url+'/', url)
+        origin, api = urlsplit(absolute), urlsplit(self.base_url)
+        is_api = (origin.scheme, origin.netloc) == (api.scheme, api.netloc)
+        try:
+            response = self._response('GET', absolute) if is_api else self.client.get(absolute)
+            if response.status_code == 401:
+                raise AuthError()
+            for _ in range(4):
+                if response.status_code not in (301, 302, 303, 307, 308):
+                    break
+                response = self.client.get(urljoin(str(response.url), response.headers['location']))
+            if response.status_code != 200:
+                raise ServerError()
+            return response.content
+        except httpx.TransportError:
+            raise OfflineError() from None

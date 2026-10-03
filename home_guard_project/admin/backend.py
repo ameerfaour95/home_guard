@@ -1,6 +1,6 @@
 """Backend contract and safe, user-facing failures."""
 from typing import Protocol
-from .models import TokenPair, StaffOut, FleetResponse, CustomerOut, EventPage, EventDetail
+from .models import TokenPair, StaffOut, FleetResponse, CustomerOut, EventPage, EventDetail, EventSummary, DetectionsOut, MediaAccess
 
 
 class BackendError(Exception):
@@ -37,3 +37,21 @@ class AdminBackend(Protocol):
     def customer(self, id: int) -> CustomerOut: ...
     def events(self, **filters) -> EventPage: ...
     def event(self, id: int) -> EventDetail: ...
+    def detections(self, id: int) -> DetectionsOut: ...
+    def review(self, id: int, **changes) -> EventSummary: ...
+    def artifact_access(self, id: int, purpose: str) -> MediaAccess: ...
+    def media_bytes(self, url: str) -> bytes: ...
+
+
+def all_events(backend, **filters):
+    """Consume every cursor for complete density counts, always called in a worker."""
+    items, cursor, seen = [], None, set()
+    while True:
+        page = backend.events(**filters, cursor=cursor, limit=500)
+        items.extend(page.items)
+        cursor = page.next_cursor
+        if not cursor:
+            return items
+        if cursor in seen:
+            raise ServerError()
+        seen.add(cursor)

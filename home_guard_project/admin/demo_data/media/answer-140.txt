@@ -1,0 +1,5 @@
+{
+  "summary": "Camera paused by owner; footage retained for review.",
+  "alert_command": "[none]",
+  "confidence": 0.93
+}

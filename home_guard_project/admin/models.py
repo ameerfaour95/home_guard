@@ -155,6 +155,7 @@ class ArtifactOut:
     bytes: int | None
     available: bool
     provenance: str
+    detail: dict = field(default_factory=dict)  # optional filmstrip extension, Task 12
 
 
 @dataclass
@@ -176,6 +177,36 @@ class EventDetail(EventSummary):
     feedback: list[FeedbackOut]
     artifacts: list[ArtifactOut]
     raw_meta: dict
+
+
+@dataclass
+class Box:
+    cls: int
+    label: str
+    conf: float | None
+    xyxy: list[float]
+
+
+@dataclass
+class FrameBoxes:
+    frame_index: int
+    t_sec: float
+    status: Literal['ran', 'ran_empty', 'not_run']
+    boxes: list[Box]
+
+
+@dataclass
+class DetectionsOut:
+    provenance: BoxesStatus
+    model: str | None
+    frames: list[FrameBoxes]
+
+
+@dataclass
+class MediaAccess:
+    url: str
+    expires_utc: datetime
+    mime: str
 
 
 def decode(cls, value):

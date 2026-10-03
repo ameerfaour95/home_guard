@@ -1,0 +1,5 @@
+{
+  "summary": "Routine activity collected for training.",
+  "alert_command": "[none]",
+  "confidence": 0.93
+}

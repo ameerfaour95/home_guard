@@ -5,6 +5,7 @@ from PySide6.QtWidgets import QStyledItemDelegate, QStyle
 from .formatting import age, mode_name, site_name, local_time
 from .theme import PALETTES, verdict_color
 
+# Server order; stable sort preserves ties exactly as received.
 SEVERITY = {'offline': 0, 'critical': 1, 'warning': 2, 'unknown': 3, 'healthy': 4}
 HEADERS = ['Customer / site', 'Health / top reason', 'Last seen', 'Cameras¹', 'Newest clip', '24 h activity', '7 d false', 'Mode']
 
@@ -26,6 +27,8 @@ class FleetModel(QAbstractTableModel):
     def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
         if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole:
             return HEADERS[section]
+        if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.TextAlignmentRole:
+            return Qt.AlignmentFlag.AlignVCenter | (Qt.AlignmentFlag.AlignRight if section in (3, 5, 6) else Qt.AlignmentFlag.AlignLeft)
 
     def replace(self, devices):
         self.devices = devices
@@ -41,7 +44,7 @@ class FleetModel(QAbstractTableModel):
             (self.verdict == 'all' or d.verdict == self.verdict) and
             self.query in ' '.join([d.customer_name, d.site, site_name(d.site), d.device_id,
                                     *[r.message for r in d.reasons]]).casefold()],
-            key=lambda d: (SEVERITY[d.verdict], d.customer_name.casefold(), d.site, d.device_id))
+            key=lambda d: SEVERITY[d.verdict])
         self.endResetModel()
 
     def data(self, index, role=Qt.ItemDataRole.DisplayRole):
@@ -93,15 +96,25 @@ class FleetDelegate(QStyledItemDelegate):
             painter.drawEllipse(rect.x(), rect.y()+21, 6, 6)
             rect.adjust(14, 0, 0, 0)
             painter.setPen(QColor(color))
+            if rect.width() >= 420:
+                painter.drawText(rect, Qt.AlignmentFlag.AlignVCenter, lines[0])
+                painter.setFont(QFont('Segoe UI', 9))
+                painter.setPen(QColor(self.tokens['muted']))
+                reason_rect = rect.adjusted(82, 0, 0, 0)
+                painter.drawText(reason_rect, Qt.AlignmentFlag.AlignVCenter,
+                                 painter.fontMetrics().elidedText(lines[1], Qt.TextElideMode.ElideRight, reason_rect.width()))
+                painter.restore()
+                return
         text = painter.fontMetrics().elidedText(lines[0], Qt.TextElideMode.ElideRight, rect.width())
+        alignment = Qt.AlignmentFlag.AlignVCenter | (Qt.AlignmentFlag.AlignRight if index.column() in (3, 5, 6) else Qt.AlignmentFlag.AlignLeft)
         if len(lines) == 1:
-            painter.drawText(rect, Qt.AlignmentFlag.AlignVCenter, text)
+            painter.drawText(rect, alignment, text)
         else:
-            painter.drawText(rect.adjusted(0, 14, 0, -36), Qt.AlignmentFlag.AlignVCenter, text)
+            painter.drawText(rect.adjusted(0, 14, 0, -36), alignment, text)
             painter.setFont(QFont('Segoe UI', 9))
             painter.setPen(QColor(self.tokens['muted']))
             text = painter.fontMetrics().elidedText(lines[1], Qt.TextElideMode.ElideRight, rect.width())
-            painter.drawText(rect.adjusted(0, 36, 0, -12), Qt.AlignmentFlag.AlignVCenter, text)
+            painter.drawText(rect.adjusted(0, 36, 0, -12), alignment, text)
         if selected and index.column() == 0:
             painter.fillRect(option.rect.x(), option.rect.y(), 3, option.rect.height(), QColor(self.tokens['action']))
         painter.restore()
