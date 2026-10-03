@@ -15,7 +15,7 @@ import json
 import logging
 import math
 import os
-import string
+import unicodedata
 import time
 from collections import Counter
 from dataclasses import dataclass, field
@@ -24,7 +24,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 from ..alert_clips import PRE_SECONDS
 from ..archive import AlertRecord
-from ..feedback import MAX_MUTE_HOURS, VERDICTS, Feedback, feedback_from_fields, save_feedback
+from ..feedback import MAX_MUTE_HOURS, VERDICTS, Feedback, MuteState, feedback_from_fields, save_feedback
 from . import media
 from .events import (
     coverage,
@@ -333,13 +333,30 @@ _FILLER = frozenset({
     "this", "that", "one", "it", "here", "there", "the", "a", "yes", "no", "ok", "okay", "these", "those",
     "הזה", "הזאת", "זה", "זאת", "הזו", "זו", "הנה", "פה", "כאן", "כן", "לא", "אוקיי",
     "هذا", "هذه", "ذلك", "تلك", "هنا", "نعم", "لا",
+    "אחד", "האחד", "את", "גם", "ההוא", "ההיא", "שם", "אותו", "אותה", "ההם",
+    "هاد", "هيدا", "هاي", "هون", "هذي", "هيك",
+    "is", "it's", "that's", "what", "about", "and", "too", "also", "please", "him", "them", "so", "just", "me",
 })
+
+_ARABIC_MARKS = {c: None for c in list(range(0x064B, 0x0660)) + [0x0670]}
+
+
+def _edge_ok(ch: str) -> bool:
+    return unicodedata.category(ch)[0] in "LNM"
+
+
+def _clean_word(word: str) -> str:
+    start, end = 0, len(word)
+    while start < end and not _edge_ok(word[start]):
+        start += 1
+    while end > start and not _edge_ok(word[end - 1]):
+        end -= 1
+    return word[start:end]
 
 
 def _words(value: Any) -> List[str]:
-    out = [w.strip(string.punctuation + "־׳״،؟؛‘’“”…")
-           for w in str(value).casefold().split()]
-    return [w for w in out if w]
+    text = str(value).casefold().replace("’", "'").replace("‘", "'").translate(_ARABIC_MARKS)
+    return [w for w in (_clean_word(w) for w in text.split()) if w]
 
 
 def quoted_from(quote: str, text: str) -> bool:
@@ -395,7 +412,7 @@ def check_camera(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         return bad
     if not ctx.snapshot.camera(camera).enabled:
         return _result(_issue(ctx, "check_camera", FAILED, camera, {"camera": camera}, "camera_off"))
-    if _media_sent(ctx) >= 3:
+    if _media_sent(ctx) >= MAX_MEDIA_PER_TURN:
         return _result(_issue(ctx, "check_camera", FAILED, camera, {"camera": camera}, "too_many"))
     shot = ctx.services.grab_photo(camera) if ctx.services.grab_photo else {"error": "no live view"}
     if not isinstance(shot, dict):
@@ -520,6 +537,29 @@ def _alert_of(entry: Dict[str, Any]) -> Dict[str, Any]:
             "ts": entry.get("ts")}
 
 
+def _stored(ctx: ToolContext) -> Optional[MuteState]:
+    """The pause state as a restart would load it, or None when the mute service has no file."""
+    path = getattr(ctx.services.mute, "path", None)
+    return MuteState(path) if isinstance(path, str) else None
+
+
+def _pause_on_disk(ctx: ToolContext, now: float, camera: Optional[str], until: float) -> bool:
+    stored = _stored(ctx)
+    if stored is None:
+        return True
+    targets = [camera] if camera else list(ctx.snapshot.names)
+    return all((stored.muted_until(now, c) or 0.0) >= until for c in targets)
+
+
+def _resume_not_on_disk(ctx: ToolContext, now: float, camera: Optional[str]) -> bool:
+    stored = _stored(ctx)
+    if stored is None:
+        return False
+    targets = [camera] if camera else list(ctx.snapshot.names)
+    mute = ctx.services.mute
+    return any(stored.is_muted(now, c) and not mute.is_muted(now, c) for c in targets)
+
+
 @_safe_tool
 def pause_alerts(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     if not quoted_from(str(args.get("owner_words") or ""), ctx.text):
@@ -548,6 +588,8 @@ def pause_alerts(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
             if not held:
                 out.append(_issue(ctx, "pause_alerts", FAILED, camera or "all", detail, "error"))
                 continue
+            detail["saved"] = False
+        if "saved" not in detail and not _pause_on_disk(ctx, now, camera, fb.mute_until):
             detail["saved"] = False
         out.append(_issue(ctx, "pause_alerts", DONE, camera or "all", detail))
         alert = _alert_of(ctx.state.resolve(ctx.alert_handle) or {}) if ctx.alert_handle else None
@@ -581,6 +623,8 @@ def resume_alerts(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
             if any(ctx.services.mute.is_muted(now, c) for c in targets):
                 out.append(_issue(ctx, "resume_alerts", FAILED, camera or "all", detail, "error"))
                 continue
+            detail["saved"] = False
+        if "saved" not in detail and _resume_not_on_disk(ctx, now, camera):
             detail["saved"] = False
         out.append(_issue(ctx, "resume_alerts", DONE, camera or "all", detail))
     try:

@@ -362,6 +362,55 @@ class ActToolsTest(unittest.TestCase):
             out = pause_alerts(ctx, {"owner_words": "stop until six", "cameras": ["entrance"], "until": "06:00"})
         self.assertEqual((out["ok"], ctx.receipts[0].status, ctx.receipts[0].reason), (False, FAILED, "error"))
 
+    def test_resume_that_did_not_reach_the_disk_says_so(self) -> None:
+        self.mute.apply(Feedback(action="mute", mute_until=NOW + HOUR, camera="main_entrance"), NOW)
+        ctx = self.ctx(text="resume please")
+        with patch("home_guard_project.box.feedback._write_json", side_effect=OSError("disk full")):
+            resume_alerts(ctx, {"cameras": ["entrance"]})
+        self.assertEqual(ctx.receipts[0].status, DONE)
+        self.assertIs(ctx.receipts[0].detail.get("saved"), False)
+
+    def test_resume_that_reached_the_disk_has_no_saved_false(self) -> None:
+        self.mute.apply(Feedback(action="mute", mute_until=NOW + HOUR, camera="main_entrance"), NOW)
+        ctx = self.ctx(text="resume please")
+        resume_alerts(ctx, {"cameras": ["entrance"]})
+        self.assertIsNot(ctx.receipts[0].detail.get("saved"), False)
+        self.assertFalse(MuteState(self.mute.path).is_muted(NOW, "main_entrance"))
+
+    def test_pause_that_reached_the_disk_has_no_saved_false(self) -> None:
+        ctx = self.ctx(text="stop until six please")
+        pause_alerts(ctx, {"owner_words": "stop until six", "cameras": ["entrance"], "until": "06:00"})
+        self.assertIsNot(ctx.receipts[0].detail.get("saved"), False)
+
+    def test_pause_whose_write_was_swallowed_says_so(self) -> None:
+        ctx = self.ctx(text="stop until six please")
+        with patch("home_guard_project.box.feedback._write_json"):    # memory changes, disk does not
+            pause_alerts(ctx, {"owner_words": "stop until six", "cameras": ["entrance"], "until": "06:00"})
+        self.assertEqual(ctx.receipts[0].status, DONE)
+        self.assertIs(ctx.receipts[0].detail.get("saved"), False)
+
+    def test_pointer_only_quotes_are_never_verdicts(self) -> None:
+        for quote in ("האחד הזה", "את זה", "this one please", "what about this one", "هاد هون", "it's this one"):
+            ctx = self.ctx(text=quote)
+            ctx.alert_handle = ctx.state.add_handle("event", "main_entrance_1_alert", "main_entrance", NOW, "x")
+            out = record_verdict(ctx, {"verdict": "false_alarm", "owner_words": quote})
+            self.assertFalse(out["ok"], quote)
+            self.assertEqual(ctx.saved, 0, quote)
+
+    def test_real_judgements_still_count(self) -> None:
+        for quote in ("it's us", "that's us", "not us", "real alert", "false alarm", "זה אנחנו", "התראת שווא",
+                      "לא נכון", "זה בסדר", "إنذار كاذب", "مش حرامي"):
+            self.assertTrue(quoted_from(quote, "ok " + quote), quote)
+
+    def test_quote_matching_tolerates_emoji_apostrophes_and_diacritics(self) -> None:
+        self.assertTrue(quoted_from("false alarm", "false alarm😂"))
+        self.assertTrue(quoted_from("false alarm", "😂false alarm😂 thanks"))
+        self.assertTrue(quoted_from("it’s us", "it's us"))
+        self.assertTrue(quoted_from("it's us", "it’s us"))
+        self.assertTrue(quoted_from("إنذار كاذب", "إِنْذَار كَاذِب"))
+        self.assertTrue(quoted_from("إِنْذَار كَاذِب", "إنذار كاذب"))
+        self.assertFalse(quoted_from("false alarm", "false alarms"))
+
     def test_pointer_words_are_never_a_quote(self) -> None:
         self.assertFalse(quoted_from("this one", "this one"))
         self.assertFalse(quoted_from("הזה הזה", "הזה הזה"))
