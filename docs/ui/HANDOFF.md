@@ -13,6 +13,10 @@
 9. Fourteen synthetic screenshots at 1366×768 and 1920×1080 were opened and reviewed; see [SCREENSHOTS.md](SCREENSHOTS.md); RTL geometry is tested and copy remains in the existing English-only catalog.
 10. No real box, camera, SSH or Telegram was contacted; real restart/masking, remote latency and native desktop animation remain unverified; engine scripts/runtime were not edited after the merge.
 
+11. Round Z2: merged `origin/beelink-collector-box` (`a0afb2a`); thumbnails share the image crop transform, dim outside with 60% palette background, and show 13px status with a 6px dot (`53f4dab`).
+12. Round Z2: aligned the column to the stage, added animated polygon coverage and corner count, unified warning/error chips, and kept Undo/Clear legible at 32px (`8e10987`).
+13. Round Z2: dialog opens at 88% of the screen (minimum 1100x700), with a 360px column and 32px margins/gap; all 14 zone screenshots recaptured and reviewed at both sizes; 587 box tests pass; no push or real box/camera/Telegram contact.
+
 ## Earlier handoff
 
 Built on `box-app-ui`, without pushing or merging. The five protected engine files are unchanged: `setup_customer.ps1`, `setup_network.ps1`, `check_box.ps1`, `build_exe.ps1`, and `inference.py`.

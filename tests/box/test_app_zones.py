@@ -3,7 +3,7 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
 import unittest
 from unittest.mock import Mock
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPointF, QSize, Qt
 from PySide6.QtGui import QColor, QPixmap
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
@@ -64,6 +64,8 @@ class ZoneEditorTests(unittest.TestCase):
         for widget in (self.dialog.stage, self.dialog.save_button, self.dialog.cancel_button, self.dialog.clear_button, self.dialog.undo_button):
             self.assertFalse(widget.isEnabled())
         self.assertTrue(self.dialog.progress.isVisible())
+        self.assertEqual(self.dialog.progress.height(), 3)
+        self.assertTrue(self.dialog.save_button.rect().contains(self.dialog.progress.geometry()))
         self.dialog.future.result(timeout=3); self.dialog.poll()
         self.controls.set_zone.assert_called_once_with('yard', [[.1235, .2346], [.9, .2], [.5, .9]])
         QTest.qWait(motion.TOGGLE_MS + 30)
@@ -95,8 +97,8 @@ class ZoneEditorTests(unittest.TestCase):
         self.assertEqual(self.dialog.warning.text(), '')
 
     def test_coverage_and_footer_alignment_in_each_state(self):
-        for size in ((1100, 700), (1280, 800)):
-            self.dialog.resize(*size)
+        for screen in (QSize(1366, 768), QSize(1920, 1080)):
+            self.dialog.resize(self.dialog.opening_size(screen))
             for points in ([], [[.1, .1]], [[0, 0], [1, 0], [1, .46], [0, .46]]):
                 self.dialog.stage.set_points(points)
                 QTest.qWait(motion.PANE_MS + 30)
@@ -105,6 +107,15 @@ class ZoneEditorTests(unittest.TestCase):
                 bottom = self.dialog.save_button.mapTo(self.dialog, self.dialog.save_button.rect().bottomLeft())
                 self.assertEqual(top.y(), stage.top())
                 self.assertEqual(bottom.y(), stage.bottom())
+                self.assertEqual(self.dialog.eyebrow.parentWidget().width(), 360)
+                self.assertEqual(stage.width(), self.dialog.width()-360-32*3)
+                self.assertEqual(stage.top(), 32)
+                self.assertEqual(stage.bottom(), self.dialog.height()-33)
+                self.assertLessEqual(self.dialog.width(), screen.width())
+                self.assertLessEqual(self.dialog.height(), screen.height())
+                picture = self.dialog.stage.picture_rect()
+                self.assertTrue(self.dialog.stage.core_rect().contains(picture))
+                self.assertAlmostEqual(picture.width()/picture.height(), 4/3)
                 self.assertEqual(self.dialog.undo_button.height(), 32)
                 self.assertEqual(self.dialog.clear_button.height(), 32)
                 self.assertEqual(self.dialog.save_button.y() - self.dialog.undo_button.geometry().bottom() - 1, 12)
@@ -150,7 +161,8 @@ class ZoneEditorTests(unittest.TestCase):
         self.assertEqual(len(stage.points), 3)
         self.assertTrue(stage.closed)
         QTest.mousePress(stage, Qt.MouseButton.LeftButton, pos=first.toPoint())
-        QTest.mouseMove(stage, stage.picture_rect().bottomRight().toPoint())
+        # Cross the picture boundary rather than rounding a fractional edge inward.
+        QTest.mouseMove(stage, (stage.picture_rect().bottomRight() + QPointF(20, 20)).toPoint())
         QTest.mouseRelease(stage, Qt.MouseButton.LeftButton)
         self.assertEqual(stage.points[0], [1., 1.])
 

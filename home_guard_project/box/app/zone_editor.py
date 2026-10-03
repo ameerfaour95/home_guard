@@ -337,9 +337,12 @@ class ZoneStage(QWidget):
         p = QPainter(self); p.setRenderHints(QPainter.RenderHint.Antialiasing | QPainter.RenderHint.SmoothPixmapTransform)
         outer = QRectF(self.rect()).adjusted(.5, .5, -.5, -.5)
         p.setBrush(QColor(t['raised'])); p.setPen(QPen(alpha(t['text'], .08), 1)); p.drawRoundedRect(outer, 22, 22)
-        core = self.core_rect(); clip = QPainterPath(); clip.addRoundedRect(core, 16, 16); p.setClipPath(clip)
+        core = self.core_rect(); clip = QPainterPath(); clip.addRoundedRect(core, 13, 13); p.setClipPath(clip)
         if not self.pix.isNull():
-            p.drawPixmap(core, self.ambient, QRectF(self.ambient.rect()))
+            scale = max(core.width()/self.ambient.width(), core.height()/self.ambient.height())
+            w, h = self.ambient.width()*scale, self.ambient.height()*scale
+            ambient_rect = QRectF(core.center().x()-w/2, core.center().y()-h/2, w, h)
+            p.drawPixmap(ambient_rect, self.ambient, QRectF(self.ambient.rect()))
             p.fillRect(core, alpha(t['bg'], .65))
             rect = self.picture_rect(); p.drawPixmap(rect, self.pix, QRectF(self.pix.rect()))
             shape = polygon_path(self.points, rect)
@@ -365,11 +368,15 @@ class ZoneStage(QWidget):
             p.setOpacity(1.)
         else:
             p.setPen(QColor(t['muted'])); p.drawText(core, Qt.AlignmentFlag.AlignCenter, tr('camera_no_photo'))
-        p.setClipping(False); p.setBrush(Qt.BrushStyle.NoBrush); p.setPen(QPen(alpha(t['text'], .1), 1)); p.drawRoundedRect(core, 16, 16)
+        p.setClipping(False); p.setBrush(Qt.BrushStyle.NoBrush); p.setPen(QPen(alpha(t['text'], .1), 1)); p.drawRoundedRect(core, 13, 13)
 
 
 class ZoneEditorDialog(QDialog):
     zone_saved = Signal(list)
+
+    @staticmethod
+    def opening_size(available):
+        return QSize(max(1100, round(available.width()*.88)), max(700, round(available.height()*.88)))
 
     def __init__(self, controls, name, pixmap, points=(), parent=None):
         super().__init__(parent)
@@ -385,13 +392,13 @@ class ZoneEditorDialog(QDialog):
         t = colors(self)
         self.setStyleSheet(f'QDialog {{ background: {t["bg"]}; }} QLabel {{ background: transparent; color: {t["secondary"]}; border: none; font-size: 11.25pt; }}')
         available = self.screen().availableGeometry()
-        self.setMinimumSize(min(1100, available.width()-32), min(700, available.height()-48))
-        self.resize(min(1280, available.width()-32), min(800, available.height()-48))
-        root = QHBoxLayout(self); root.setContentsMargins(24, 24, 28, 24); root.setSpacing(28)
-        self.stage = ZoneStage(pixmap, points, self); root.addWidget(self.stage, 72)
-        column = QWidget(self); column.setMinimumWidth(282)
+        self.setMinimumSize(1100, 700)
+        self.resize(self.opening_size(available.size()))
+        root = QHBoxLayout(self); root.setContentsMargins(32, 32, 32, 32); root.setSpacing(32)
+        self.stage = ZoneStage(pixmap, points, self); root.addWidget(self.stage, 1)
+        column = QWidget(self); column.setFixedWidth(360)
         column.setStyleSheet('background: transparent;')
-        root.addWidget(column, 28)
+        root.addWidget(column)
         side = QVBoxLayout(column); side.setContentsMargins(0, 0, 0, 0); side.setSpacing(16)
         self.eyebrow = QLabel(tr('camera_zone_eyebrow', camera=name.replace('_', ' ').upper()).upper())
         self.eyebrow.setTextFormat(Qt.TextFormat.PlainText); self.eyebrow.setWordWrap(True)
@@ -438,7 +445,7 @@ class ZoneEditorDialog(QDialog):
         buttons = QHBoxLayout(); buttons.setSpacing(10); buttons.addWidget(self.save_button, 3); buttons.addWidget(self.cancel_button, 2)
         footer.addLayout(buttons); side.addLayout(footer)
         self.progress = QProgressBar(self.save_button); self.progress.setRange(0, 0); self.progress.setTextVisible(False); self.progress.setFixedHeight(3)
-        self.progress.setStyleSheet(f'QProgressBar {{ background: {t["raised"]}; border: none; border-radius: 1px; }} QProgressBar::chunk {{ background: {t["action"]}; }}')
+        self.progress.setStyleSheet(f'QProgressBar {{ background: {t["raised"]}; border: none; border-radius: 1px; height: 3px; min-height: 3px; max-height: 3px; }} QProgressBar::chunk {{ background: {t["action"]}; border-radius: 1px; }}')
         self.progress.hide()
         self.save_button.setProperty('busyIndicator', 'bar'); self.save_button._busy_bar = self.progress
         self.save_button.clicked.connect(self.save); self.cancel_button.clicked.connect(self.reject)

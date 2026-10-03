@@ -94,7 +94,7 @@ def capture_zones():
     sys.path.insert(0, str(ROOT))
     from types import SimpleNamespace
     from threading import Event
-    from PySide6.QtCore import Qt
+    from PySide6.QtCore import Qt, QSize
     from PySide6.QtGui import QColor, QFont, QFontDatabase, QPainter, QPixmap
     from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QApplication, QWidget
@@ -123,8 +123,7 @@ def capture_zones():
             dialog = ZoneEditorDialog(controls, 'front_door', picture(0, '4:3'), zone, host)
             # Qt's synthetic offscreen screen is 800x800. Set the actual review
             # screen bounds explicitly; production uses availableGeometry().
-            dialog.setMinimumSize(1100, 700)
-            dialog.resize(min(1280, width-48), min(800, height-64))
+            dialog.resize(dialog.opening_size(QSize(width, height)))
             dialog.show()
             QTest.qWait(motion.PANE_MS + 40)
             if state == 'error':
