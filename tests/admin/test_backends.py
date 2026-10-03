@@ -150,3 +150,13 @@ def test_malformed_models_rejected(mutation):
     wire = json.loads((DATA/'fleet.json').read_text())['devices'][0]
     with pytest.raises(ValueError):
         decode(DeviceSummary, dict(wire, **mutation))
+
+
+def test_tls_context_keeps_certificate_verification_without_debug_keylog():
+    import ssl
+    from home_guard_project.admin.http_backend import tls_context
+    context = tls_context()
+    assert context.check_hostname
+    assert context.verify_mode == ssl.CERT_REQUIRED
+    assert context.cert_store_stats()['x509_ca'] > 0
+    assert context.keylog_filename is None

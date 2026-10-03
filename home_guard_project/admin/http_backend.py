@@ -1,15 +1,31 @@
 """Synchronous Cloud client; UI callers always dispatch through workers.py."""
 from threading import RLock
+import os
+import ssl
+import certifi
 import httpx
 from .backend import AuthError, ForbiddenError, OfflineError, ServerError, RateLimitError
 from .models import TokenPair, StaffOut, FleetResponse, CustomerOut, EventPage, EventDetail, decode
+
+
+def tls_context():
+    """Verified TLS without implicit SSLKEYLOGFILE side effects.
+
+    Some uv Windows runtimes abort in create_default_context's keylog setup:
+    https://github.com/astral-sh/python-build-standalone/pull/1132
+    PROTOCOL_TLS_CLIENT retains certificate and hostname verification.
+    """
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.load_verify_locations(cafile=os.environ.get('SSL_CERT_FILE') or certifi.where(),
+                                  capath=os.environ.get('SSL_CERT_DIR'))
+    return context
 
 
 class HttpBackend:
     def __init__(self, base_url: str, *, transport=None):
         self.base_url = base_url.rstrip('/')
         self.client = httpx.Client(base_url=self.base_url + '/v1/', transport=transport,
-                                   timeout=15.0, follow_redirects=False)
+                                   timeout=15.0, follow_redirects=False, verify=tls_context())
         self.tokens = None
         self._auth_lock = RLock()
 
