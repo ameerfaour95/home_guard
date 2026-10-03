@@ -5,7 +5,7 @@ import os
 import subprocess
 import tempfile
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest import mock
 
@@ -16,6 +16,7 @@ from home_guard_project.box.brain.i18n import t
 
 CAM = "back_east"
 TS = datetime(2026, 10, 3, 12).timestamp()
+LABEL_CASES = (*inf.LABELS, "invalid", None)  # None means the field is missing.
 
 
 def note(**changes):
@@ -52,24 +53,25 @@ class DecisionTests(unittest.TestCase):
             self.assertEqual(self.decide(serious=value), ("suspicious", False, None))
 
     def test_both_effects_require_all_checks(self):
-        for effect, raw, label in (("lower", "suspicious", "normal"), ("raise", "normal", "suspicious")):
+        for effect, raw, label in (("lower", "suspicious", "normal"), ("raise", "normal", "normal")):
             for changes in ({"camera": "front"}, {"hours": ["17:00", "19:00"]},
                             {"expires_at": "2026-10-02T00:00:00"}, {"kind": "vehicles"}):
                 with self.subTest(effect=effect, changes=changes):
                     self.assertEqual(self.decide(raw, label, [note(effect=effect, **changes)]),
                                      (raw, False, None))
-            for facts, fact_id in (([], "F12"), ([note(effect=effect)], "F99"), ([note(effect=effect)], "")):
+            for facts, fact_id in (([note(effect=effect)], "F99"), ([note(effect=effect)], "")):
                 self.assertEqual(self.decide(raw, label, facts, fact_id), (raw, False, None))
 
     def test_raise_is_only_normal_to_suspicious(self):
         facts = [note(effect="raise")]
-        self.assertEqual(self.decide("normal", "suspicious", facts), ("suspicious", False, facts[0]))
+        self.assertEqual(self.decide("normal", "normal", facts), ("suspicious", False, facts[0]))
         for raw, label in (("normal", "escalation"), ("suspicious", "escalation"),
                            ("suspicious", "normal")):
-            self.assertEqual(self.decide(raw, label, facts), (raw, False, None))
+            base = max((raw, label), key=inf.LABELS.index)
+            self.assertEqual(self.decide(raw, label, facts), (base, False, None))
 
     def test_invalid_labels_are_empty_and_loud(self):
-        for raw, label in (("bad", "normal"), ("normal", "bad"), ("", "normal")):
+        for raw, label in (("bad", "bad"), ("", "bad"), ("", "")):
             self.assertEqual(self.decide(raw, label), ("", False, None))
             self.assertFalse(inf.is_silent(self.decide(raw, label)[0]))
 
@@ -84,9 +86,26 @@ class DecisionTests(unittest.TestCase):
             self.assertEqual(result[1], valid)
 
     def test_no_fact_cannot_change_label(self):
-        for raw in inf.LABELS:
-            for label in inf.LABELS:
-                self.assertEqual(self.decide(raw, label, []), (raw, False, None))
+        for raw in LABEL_CASES:
+            for label in LABEL_CASES:
+                with self.subTest(raw=raw, label=label):
+                    self.assertEqual(self.decide(raw, label, []),
+                                     (label if label in inf.LABELS else "", False, None))
+
+    def test_notes_label_matrix(self):
+        for raw in LABEL_CASES:
+            for label in LABEL_CASES:
+                valid = [value for value in (raw, label) if value in inf.LABELS]
+                base = max(valid, key=inf.LABELS.index) if valid else ""
+                for effect, fact_id, serious in (("lower", "F99", False), ("lower", "F12", False),
+                                                 ("lower", "F12", True), ("raise", "F12", False)):
+                    with self.subTest(raw=raw, label=label, effect=effect, fact_id=fact_id, serious=serious):
+                        fact = note(effect=effect)
+                        lower = base == "suspicious" and effect == "lower" and fact_id == "F12" and not serious
+                        raise_ = base == "normal" and effect == "raise"
+                        expected = "normal" if lower else "suspicious" if raise_ else base
+                        self.assertEqual(self.decide(raw, label, [fact], fact_id, serious),
+                                         (expected, lower, fact if lower or raise_ else None))
 
 
 class PromptTests(unittest.TestCase):
@@ -156,7 +175,7 @@ class WorkerTests(unittest.TestCase):
     def setUp(self):
         inf._SOFTENED_DAYS.clear()
 
-    def run_worker(self, parsed=None, facts=None, ts=TS, labels=None, delivery_ok=True):
+    def run_worker(self, parsed=None, facts=None, ts=TS, labels=None, delivery_ok=True, module_absent=False):
         parsed = answer() if parsed is None else parsed
         backend = mock.Mock()
         backend.model_name = "fake"
@@ -168,7 +187,13 @@ class WorkerTests(unittest.TestCase):
         job = inf.AlertJob(camera=CAM, stem=f"{CAM}_{int(ts)}_alert", ts=ts,
                            labels=["person"] if labels is None else labels)
         provider = mock.Mock(return_value=[note()] if facts is None else facts)
-        with mock.patch.object(inf, "FACTS_PROVIDER", provider), \
+        real_import = builtins.__import__
+        def local_import(name, *args, **kwargs):
+            if module_absent and name == "home_guard_project.box.brain.facts":
+                raise ImportError("not installed")
+            return real_import(name, *args, **kwargs)
+        with mock.patch.object(inf, "FACTS_PROVIDER", None if module_absent else provider), \
+                mock.patch("builtins.__import__", side_effect=local_import), \
                 mock.patch.object(inf, "owner_language", return_value="en"), \
                 mock.patch.object(inf, "_jpegs", return_value=[]):
             inf._worker(backend, {"alert_channel": "telegram"}, {}, inf.AlertSettings(), CAM, [], assistant, job)
@@ -197,8 +222,36 @@ class WorkerTests(unittest.TestCase):
         job, _, _, _ = self.run_worker(ts=TS + 1)
         self.assertFalse(job.alert["silent"])
 
+    def test_sound_cache_prunes_400_days_under_lock(self):
+        for day in range(400):
+            ts = (datetime.fromtimestamp(TS) + timedelta(days=day)).timestamp()
+            job, _, _, _ = self.run_worker(ts=ts)
+            self.assertFalse(job.alert["silent"])
+            self.assertEqual(set(inf._SOFTENED_DAYS), {("F12", datetime.fromtimestamp(ts).date().isoformat())})
+        tomorrow = TS + 400 * 86400
+        original_dispatch = inf.dispatch_alert
+        dispatch_states = []
+        def check_pruned(*args, **kwargs):
+            # Assert outside the worker: it catches delivery exceptions.
+            dispatch_states.append((inf._SOFTENED_LOCK.locked(), set(inf._SOFTENED_DAYS)))
+            return original_dispatch(*args, **kwargs)
+        with mock.patch.object(inf, "dispatch_alert", side_effect=check_pruned):
+            self.run_worker(ts=tomorrow, delivery_ok=False)
+        self.assertEqual(dispatch_states, [(True, set())])
+        self.assertFalse(inf._SOFTENED_DAYS)
+
+    def test_sound_cache_caps_500_entries_and_keeps_recent_repeats_silent(self):
+        for number in range(501):
+            fact_id = f"F{number}"
+            job, _, _, _ = self.run_worker(answer(applied_fact_id=fact_id), [note(id=fact_id)])
+            self.assertFalse(job.alert["silent"])
+            self.assertLessEqual(len(inf._SOFTENED_DAYS), 500)
+        self.assertEqual(len(inf._SOFTENED_DAYS), 500)
+        job, _, _, _ = self.run_worker(answer(applied_fact_id="F500"), [note(id="F500")])
+        self.assertTrue(job.alert["silent"])
+
     def test_raise_is_loud_and_names_note(self):
-        job, assistant, _, _ = self.run_worker(answer(raw_label="normal", label="suspicious"), [note(effect="raise")])
+        job, assistant, _, _ = self.run_worker(answer(raw_label="normal", label="normal"), [note(effect="raise")])
         self.assertEqual(job.alert["final_label"], "suspicious")
         self.assertFalse(job.alert["softened"])
         self.assertFalse(job.alert["silent"])
@@ -217,12 +270,72 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(job.alert["final_label"], "suspicious")
         self.assertEqual(len(backend.analyze.call_args.kwargs["facts"]), 10)
 
-    def test_missing_raw_with_facts_is_invalid(self):
+    def test_missing_raw_with_facts_uses_valid_label(self):
         parsed = answer()
         del parsed["raw_label"]
         job, _, _, _ = self.run_worker(parsed)
-        self.assertEqual(job.alert["final_label"], "")
-        self.assertFalse(job.alert["silent"])
+        self.assertEqual(job.alert["final_label"], "normal")
+        self.assertTrue(job.alert["silent"])
+
+    def test_review_case_no_facts_escalation_is_loud(self):
+        for absent in (False, True):
+            with self.subTest(module_absent=absent):
+                job, assistant, _, _ = self.run_worker(
+                    {"label": "escalation", "raw_label": "normal", "people": 1}, [], module_absent=absent)
+                self.assertEqual(job.alert["label"], "escalation")
+                self.assertEqual(job.alert["raw_label"], "normal")
+                self.assertFalse(job.alert["silent"])
+                self.assertEqual(job.alert["alert_command"], "[call_owner]")
+                assistant.send_alert.assert_called_once()
+
+    def test_no_notes_matrix_matches_e234841(self):
+        for absent in (False, True):
+            for raw in (*LABEL_CASES, {}, [], 42, True):
+                for label in LABEL_CASES:
+                    for people in (0, 1):
+                        with self.subTest(absent=absent, raw=raw, label=label, people=people):
+                            parsed = {"summary": "Scene", "people": people}
+                            if raw is not None:
+                                parsed["raw_label"] = raw
+                            if label is not None:
+                                parsed["label"] = label
+                            job, assistant, backend, _ = self.run_worker(parsed, [], module_absent=absent)
+                            expected = label if label in inf.LABELS else ""
+                            self.assertEqual(job.alert["label"], expected)
+                            self.assertEqual(job.alert["final_label"], expected)
+                            self.assertFalse(job.alert["softened"])
+                            self.assertEqual(job.false_positive, people == 0)
+                            self.assertEqual(assistant.send_alert.called, people > 0)
+                            self.assertNotIn("facts", backend.analyze.call_args.kwargs)
+                            if people:
+                                self.assertEqual(job.alert["silent"], expected == "normal")
+                                self.assertEqual(job.alert["alert_command"], inf.LABEL_COMMANDS.get(expected, "[send_message]"))
+
+    def test_notes_matrix_through_worker(self):
+        for raw in LABEL_CASES:
+            for label in LABEL_CASES:
+                valid = [value for value in (raw, label) if value in inf.LABELS]
+                base = max(valid, key=inf.LABELS.index) if valid else ""
+                for effect, fact_id, serious in (("lower", "F99", False), ("lower", "F12", False),
+                                                 ("lower", "F12", True), ("raise", "F12", False)):
+                    with self.subTest(raw=raw, label=label, effect=effect, fact_id=fact_id, serious=serious):
+                        inf._SOFTENED_DAYS.clear()
+                        parsed = answer(applied_fact_id=fact_id, serious_behaviour=serious)
+                        for key, value in (("raw_label", raw), ("label", label)):
+                            if value is None:
+                                del parsed[key]
+                            else:
+                                parsed[key] = value
+                        lower = base == "suspicious" and effect == "lower" and fact_id == "F12" and not serious
+                        raise_ = base == "normal" and effect == "raise"
+                        expected = "normal" if lower else "suspicious" if raise_ else base
+                        job, assistant, _, _ = self.run_worker(parsed, [note(effect=effect)])
+                        self.assertEqual(job.alert["final_label"], expected)
+                        self.assertEqual(job.alert["softened"], lower)
+                        self.assertEqual(job.alert["fact_effect"], effect if lower or raise_ else "")
+                        self.assertEqual(job.alert["silent"], expected == "normal" and not lower)
+                        self.assertEqual(job.alert["alert_command"], inf.LABEL_COMMANDS.get(expected, "[send_message]"))
+                        assistant.send_alert.assert_called_once()
 
     def test_no_facts_matches_baseline_admission_label_sound(self):
         # e234841: counts admit first; known labels are stored, only normal is silent.

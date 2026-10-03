@@ -160,7 +160,9 @@ def is_silent(label: str) -> bool:
 
 
 FACTS_PROVIDER: Optional[Callable] = None
-_SOFTENED_DAYS: Set[Tuple[str, str]] = set()
+# Insertion order lets capacity eviction forget the oldest successful delivery first.
+_SOFTENED_DAYS: Dict[Tuple[str, str], None] = {}
+_SOFTENED_DAYS_LIMIT = 500
 _SOFTENED_LOCK = threading.Lock()
 
 
@@ -244,19 +246,22 @@ def detected_fact_kinds(labels: Sequence[str]) -> Set[str]:
 def final_label(raw: str, label: str, applied_fact_id: str, serious: Any,
                 facts: Sequence[Dict[str, Any]], detected_kinds: Sequence[str], alert_ts: float,
                 camera: str) -> Tuple[str, bool, Optional[Dict[str, Any]]]:
-    """Adjudicate only the live prompt snapshot. A note can move a label by one permitted step."""
-    if raw == "escalation":
+    """Keep the higher AI judgement unless a checked note permits one step; never touch escalation."""
+    if not facts:
+        # No notes were shown: exactly the pre-facts decision, including invalid labels.
+        return label if label in LABELS else "", False, None
+    valid = [value for value in (raw, label) if value in LABELS]
+    base = max(valid, key=LABELS.index) if valid else ""
+    if base == "escalation":
         return "escalation", False, None
-    if raw not in LABELS or label not in LABELS:
-        return "", False, None
-    effect = ("lower" if raw == "suspicious" and label == "normal" and serious is False else
-              "raise" if raw == "normal" and label == "suspicious" else "")
+    effect = ("lower" if base == "suspicious" and serious is False else
+              "raise" if base == "normal" else "")
     if effect and applied_fact_id:
         for fact in facts:
             if (fact.get("id") == applied_fact_id and fact.get("effect") == effect
                     and fact.get("kind") in detected_kinds and _fact_live_here(fact, camera, alert_ts)):
-                return label, effect == "lower", fact
-    return raw, False, None
+                return "normal" if effect == "lower" else "suspicious", effect == "lower", fact
+    return base, False, None
 
 
 def _note_text(value: Any) -> str:
@@ -1387,6 +1392,12 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
         # Serialize softened deliveries so concurrent workers cannot both claim the first sound.
         with _SOFTENED_LOCK if softened else nullcontext():
             sound_key = (fact["id"], datetime.fromtimestamp(alert_ts).date().isoformat()) if softened else None
+            if sound_key:
+                # Prune before delivery, even if this alert fails. ISO dates sort chronologically;
+                # a delayed older alert must not discard the newer day's sound memory.
+                for key in list(_SOFTENED_DAYS):
+                    if key[1] < sound_key[1]:
+                        del _SOFTENED_DAYS[key]
             silent = is_silent(shown_label) and (not softened or sound_key in _SOFTENED_DAYS)
             if muted:
                 res: Dict[str, Any] = {"sent": False, "reason": "paused by the owner"}
@@ -1409,7 +1420,10 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                                      image=image or None, assistant=assistant, alert=alert_ref, graded=graded,
                                      silent=silent, lang=lang)
                 if softened and delivery(res)[0]:
-                    _SOFTENED_DAYS.add(sound_key)
+                    if sound_key not in _SOFTENED_DAYS:
+                        while len(_SOFTENED_DAYS) >= _SOFTENED_DAYS_LIMIT:
+                            del _SOFTENED_DAYS[next(iter(_SOFTENED_DAYS))]
+                        _SOFTENED_DAYS[sound_key] = None
                 log.info("[%s] alert dispatched: %s", camera_name, res)
                 if label == "escalation" and assistant is not None and alert_ref and delivery(res)[0]:
                     try:
