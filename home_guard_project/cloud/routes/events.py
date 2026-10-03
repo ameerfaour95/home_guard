@@ -21,9 +21,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Literal, Optional, get_args
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import (BigInteger, Float, Integer, and_, case, cast, false, func, literal, or_, select, text, true,
-                        tuple_, type_coerce)
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import BigInteger, Integer, and_, cast, false, func, literal, or_, select, text, true, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -32,6 +30,7 @@ from home_guard_project.fleet_contract.keys import parse_key
 from home_guard_project.fleet_contract.legacy import parse_heartbeat, parse_meta
 
 from .. import audit, pseudonym, redact
+from .. import studio as studio_logic
 from ..deps import SessionDep, current_staff
 from ..models import (AiRun, Artifact, AuditLog, Camera, CollectionItem, Customer, Device, Event, Feedback, RawRevision, ReviewState,
                       Staff)
@@ -127,31 +126,11 @@ def _camera_condition(session: Session, viewer: _Viewer, camera: str):
     return tuple_(Event.site, Event.camera).in_(pairs) if pairs else false()
 
 
-def _has_verdict(verdict: str):
-    return type_coerce(Event.owner_verdicts, JSONB).contains([verdict])
-
-
-def _max_class_conf():
-    conf = type_coerce(Event.class_max_conf, JSONB)
-    each = func.jsonb_each_text(conf).table_valued("key", "value")
-    best = select(func.max(cast(each.c.value, Float))).select_from(each).scalar_subquery()
-    return case((func.jsonb_typeof(conf) == "object", best), else_=None)
+_has_verdict = studio_logic.has_verdict
 
 
 _reviewed = func.coalesce(ReviewState.reviewed, false())
 _flagged = func.coalesce(ReviewState.flagged, false())
-
-# Built-in saved filters. Task 13 moves them into studio.BUILTIN_FILTERS with these same meanings.
-BUILTIN_FILTERS = {
-    "false_alarm": lambda: _has_verdict("false_alarm"),
-    "ai_dismissed_person": lambda: and_(Event.kind == "false_positive",
-                                        type_coerce(Event.detected, JSONB).contains(["person"])),
-    "ai_failed": lambda: Event.completeness["ai"].as_string().in_(["failed", "fallback"]),
-    "real_but_wrong": lambda: _has_verdict("real_but_wrong"),
-    "low_conf": lambda: _max_class_conf() < 0.45,
-    "paused": lambda: Event.kind == "paused",
-}
-
 
 # ---------------------------------------------------------------- cursor
 
@@ -265,7 +244,7 @@ def list_events(
     # what is stored. Labelers cannot search at all (any query text, whatever it says, is the same 400).
     if q and viewer.labeler:
         raise HTTPException(status_code=400, detail="Search is not available for this role")
-    if filter is not None and filter not in BUILTIN_FILTERS:
+    if filter is not None and studio_logic.builtin_condition(filter) is None:  # studio.BUILTIN_FILTERS
         raise HTTPException(status_code=400, detail=f"Unknown filter: {filter}")
     if cursor is not None:
         _decode_cursor(cursor)
@@ -293,7 +272,7 @@ def list_events(
     if flagged is not None:
         conds.append(_flagged.is_(flagged))
     if filter is not None:
-        conds.append(BUILTIN_FILTERS[filter]())
+        conds.append(studio_logic.builtin_condition(filter))
     if collection_id is not None:
         conds.append(_in_collection(collection_id))
     return event_page(session, viewer, conds, cursor, limit, with_total)

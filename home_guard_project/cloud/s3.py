@@ -1,6 +1,7 @@
 """Thin S3 wrapper around an injected boto3 client (tests inject a moto client)."""
 from __future__ import annotations
 
+import base64
 import json
 from dataclasses import dataclass
 from datetime import datetime
@@ -64,16 +65,42 @@ class S3:
         self.client.put_object(Bucket=self.bucket, Key=key, Body=json.dumps(body).encode("utf-8"),
                                ContentType="application/json")
 
-    def copy(self, source_key: str, dest_key: str, content_type: Optional[str] = None) -> None:
+    def copy(self, source_key: str, dest_key: str, content_type: Optional[str] = None,
+             sha256: bool = False) -> Optional[str]:
         """Server-side copy into a writable prefix. Metadata is replaced, not copied, so no stored
-        Content-Disposition, filename or user metadata of the source travels with the copy."""
+        Content-Disposition, filename or user metadata of the source travels with the copy.
+
+        With `sha256`, S3 computes the copy's SHA-256 and its hex digest is returned (None if S3 gave none);
+        the object's bytes never pass through this process."""
         if not dest_key.startswith(WRITABLE_PREFIXES):
             raise ValueError(f"refusing to write outside {WRITABLE_PREFIXES}: {dest_key}")
         params = dict(Bucket=self.bucket, Key=dest_key, CopySource={"Bucket": self.bucket, "Key": source_key},
                       MetadataDirective="REPLACE")
         if content_type:
             params["ContentType"] = content_type
-        self.client.copy_object(**params)
+        if sha256:
+            params["ChecksumAlgorithm"] = "SHA256"
+        resp = self.client.copy_object(**params)
+        checksum = (resp.get("CopyObjectResult") or {}).get("ChecksumSHA256")
+        if not sha256 or not checksum or "-" in checksum:  # "-N": a per-part checksum, not the object's
+            return None
+        return base64.b64decode(checksum).hex()
+
+    def put_bytes(self, key: str, body: bytes, content_type: str) -> None:
+        if not key.startswith(WRITABLE_PREFIXES):
+            raise ValueError(f"refusing to write outside {WRITABLE_PREFIXES}: {key}")
+        self.client.put_object(Bucket=self.bucket, Key=key, Body=body, ContentType=content_type)
+
+    def list_dirs(self, prefix: str) -> list[str]:
+        """The immediate "sub-directories" (common prefixes) under `prefix`."""
+        out: list[str] = []
+        paginator = self.client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix, Delimiter="/"):
+            out += [p["Prefix"] for p in page.get("CommonPrefixes", [])]
+        return out
+
+    def any_under(self, prefix: str) -> bool:
+        return bool(self.client.list_objects_v2(Bucket=self.bucket, Prefix=prefix, MaxKeys=1).get("Contents"))
 
     def presign(self, key: str, ttl: int = 300) -> str:
         return self.client.generate_presigned_url(
