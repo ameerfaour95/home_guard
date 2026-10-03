@@ -390,7 +390,11 @@ try {
     Copy-ToBox $regLocal $regRemote
     $regOut = (Invoke-Box "cd /d $InstallDir && $Python -m home_guard_project.box register --from-json $regRemote" | Out-String)
     # Older boxes echo the owner's name. Never copy their raw response into setup logs.
-    if ($regOut -match 'registration not published yet') { Step-Warn 'register' 'saved on the box; will retry adding to Home Guard with the next upload' }
+    if ($regOut -match "invalid choice: 'register'") {
+        Bad 'This box has older software that cannot register customers yet. Let setup update the box, then run setup again.'
+        Step-Warn 'register' 'box software too old to register; update the box and run setup again'
+    }
+    elseif ($regOut -match 'registration not published yet') { Step-Warn 'register' 'saved on the box; will retry adding to Home Guard with the next upload' }
     elseif ($DryRun -or ($LASTEXITCODE -eq 0 -and $regOut -match 'registered ')) { Ok 'Customer registered.'; Step-Ok 'register' 'registered' }
     else { Bad 'The customer could not be registered. Setup goes on; register again later.'; Step-Warn 'register' 'not registered; run setup again to retry' }
 } catch {
