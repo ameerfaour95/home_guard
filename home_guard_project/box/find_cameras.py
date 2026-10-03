@@ -48,23 +48,32 @@ RTSP_PORTS = (554, 8554)
 Found = Dict[str, List[Dict[str, Any]]]
 
 
-_STREAM_RE = re.compile(r"^rtsp://(?:.*@)?([^@/]+)(/.*)?$", re.IGNORECASE)
 
 
 def stream_key(url: str) -> str:
-    """Which stream an RTSP URL is: its host, port and path, without the login.
+    """Which stream an RTSP URL is: its host, port, path and query, without the login.
 
     The same camera keeps this when its password changes or a search runs under
     another site name, so it is how a stream the box already knows is recognised.
+    Only the address part before the path can hold a login, so an "@" inside the
+    path (``/channel/1@live``) stays part of the identity. A URL that cannot be
+    read gets a hashed key: never its raw text, which may hold a password.
     """
+    import hashlib  # noqa: PLC0415
+    from urllib.parse import urlsplit  # noqa: PLC0415
+
     text = str(url).strip()
-    match = _STREAM_RE.match(text)
-    if not match:
-        return text
-    hostport, path = match.group(1).lower(), match.group(2) or "/"
+    try:
+        parts = urlsplit(text)
+    except ValueError:
+        parts = None
+    if parts is None or parts.scheme.lower() != "rtsp" or not parts.netloc:
+        return "unparsed:" + hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()[:16]
+    hostport = parts.netloc.rpartition("@")[2].lower()
     if ":" not in hostport.rsplit("]", 1)[-1]:
         hostport += ":554"
-    return hostport + path
+    key = hostport + (parts.path or "/")
+    return key + ("?" + parts.query if parts.query else "")
 
 
 def _named(found: Found, prefix: str,
