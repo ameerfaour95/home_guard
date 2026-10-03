@@ -33,11 +33,13 @@ def sweep_exports(app: FastAPI) -> int:
     """Startup: exports whose worker is gone (no heartbeat for 5 minutes, or queued for 30) are marked failed;
     the periodic exports loop keeps doing this while the API runs."""
     from .studio import sweep_stale_exports
+    from .tagging import sweep_stale_publishes
 
     try:
         session = app.state.sessionmaker()
         try:
             n = sweep_stale_exports(session, app.state.clock())
+            sweep_stale_publishes(session, app.state.clock())  # tagging publishes run in the same worker pool
             session.commit()
             return n
         finally:

@@ -6,18 +6,19 @@ append-only versions guarded by `base_version` (409 when someone saved since). E
 """
 from __future__ import annotations
 
+import functools
 from typing import get_args
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from .. import audit, labeling
+from .. import audit, labeling, tagging
 from ..deps import NOTES_MAX, SessionDep, check_length, current_staff, require_id, require_role
-from ..models import Annotation, AnnotationHead, AnnotationReview, Event, Staff
-from ..schemas import (AiStatus, AnnotationIn, AnnotationOut, AnnotationVersion, PublishOut, PublishRequest,
-                       ReviewDecision)
+from ..models import Annotation, AnnotationHead, AnnotationReview, Event, Staff, TaggingPublish
+from ..schemas import (AiStatus, AnnotationIn, AnnotationOut, AnnotationVersion, PublishMissing, PublishOut,
+                       PublishRequest, ReviewDecision)
 from .events import _device_id, _load_one, _now, _Viewer
 
 router = APIRouter(tags=["annotations"], dependencies=[Depends(current_staff)])
@@ -28,7 +29,6 @@ _AI_STATUSES = set(get_args(AiStatus))
 NOT_FOUND = "Event not found"
 CONFLICT = "Someone saved this clip since you opened it (now version {v}). Reload it, then save again."
 NOTHING_TO_REVIEW = "This clip has no saved annotation to review"
-_NOT_BUILT = "Not implemented yet"
 
 
 def _lock(session: Session, event_id: int) -> None:
@@ -175,12 +175,44 @@ def annotation_history(event_id: int, request: Request, staff: Staff = Depends(c
     return list(reversed(out))
 
 
+# ---------------------------------------------------------------- publish as a tagging batch (tagging.py)
+
+def _publish_out(session: Session, pub: TaggingPublish) -> PublishOut:
+    creator = session.scalar(select(Staff.name).where(Staff.id == pub.created_by)) or ""
+    missing = [PublishMissing(event_id=e["event_id"], reason=str(e.get("reason", "")))
+               for e in (pub.missing or []) if isinstance(e, dict) and isinstance(e.get("event_id"), int)]
+    return PublishOut(batch_name=pub.batch_name, s3_prefix=pub.s3_prefix, state=pub.state, tasks=pub.tasks,
+                      yolo_frames=pub.yolo_frames, vlm_lines=pub.vlm_lines, missing=missing,
+                      created_utc=pub.created_at, created_by=creator)
+
+
 @router.post("/studio/collections/{collection_id}/publish", response_model=PublishOut,
              dependencies=[Depends(require_role("admin"))])
-def publish_collection(collection_id: int, body: PublishRequest):
-    raise HTTPException(status_code=501, detail=_NOT_BUILT)
+def publish_collection(collection_id: int, body: PublishRequest, request: Request,
+                       staff: Staff = Depends(current_staff), session: Session = SessionDep):
+    # runs in the training-export worker pool; 409 for a read-only batch, a folder not made here, or a run in flight
+    check_length("batch_name", body.batch_name, 64)
+    from .studio import _load_collection, _run_job
+
+    col = _load_collection(session, collection_id, staff)
+    s3 = request.app.state.s3
+    if s3 is None:
+        raise HTTPException(status_code=503, detail="Storage is not configured")
+    now = _now(request)
+    try:
+        pub = tagging.create_publish(session, s3, col, body.batch_name, staff, now)
+    except tagging.PublishRefused as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    audit.record(session, staff.id, "tagging_publish", target=f"tagging/{body.batch_name}", ts=now,
+                 detail={"collection_id": col.id, "publish_id": pub.id,
+                         "events": len((pub.snapshot or {}).get("events", []))})
+    session.commit()  # the job reads the row from its own session
+    _run_job(request, functools.partial(tagging.run_publish_job, request.app.state.sessionmaker, s3, pub.id))
+    session.refresh(pub)
+    return _publish_out(session, pub)
 
 
 @router.get("/studio/publishes", response_model=list[PublishOut], dependencies=[Depends(require_role("admin"))])
-def list_publishes():
-    raise HTTPException(status_code=501, detail=_NOT_BUILT)
+def list_publishes(session: Session = SessionDep):
+    rows = session.scalars(select(TaggingPublish).order_by(TaggingPublish.id.desc()).limit(500)).all()
+    return [_publish_out(session, p) for p in rows]

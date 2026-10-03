@@ -140,9 +140,10 @@ def _notices_job(session, s3):
 
 
 def _exports_job(session, s3):
-    from . import studio
+    from . import studio, tagging
 
     studio.sweep_stale_exports(session, datetime.now(timezone.utc))
+    tagging.sweep_stale_publishes(session, datetime.now(timezone.utc))
 
 
 def _discovery_job(session, s3):

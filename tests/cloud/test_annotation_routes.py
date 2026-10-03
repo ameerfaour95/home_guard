@@ -8,7 +8,7 @@ from home_guard_project.cloud import models as m
 from home_guard_project.cloud.db import session_scope
 
 from . import builders as b
-from .test_event_routes import NOW, _event_id, s3client  # noqa: F401
+from .test_event_routes import _event_id, s3client  # noqa: F401
 from .test_studio import _seed
 
 
