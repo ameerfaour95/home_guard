@@ -35,7 +35,7 @@ from ..deps import SessionDep, current_staff
 from ..models import (AiRun, Artifact, AuditLog, Camera, CollectionItem, Customer, Device, Event, Feedback, RawRevision, ReviewState,
                       Staff)
 from ..schemas import (AiRunOut, ArtifactOut, Box, DensityOut, DensityRow, DetectionsOut, DispatchOut, EventDetail,
-                       EventKind, EventPage, EventSummary, FeedbackOut, FrameBoxes, ReviewCount, ReviewUpdate)
+                       AiStatus, EventKind, EventPage, EventSummary, FeedbackOut, FrameBoxes, ReviewCount, ReviewUpdate)
 
 router = APIRouter(tags=["events"], dependencies=[Depends(current_staff)])
 
@@ -128,6 +128,16 @@ def _camera_condition(session: Session, viewer: _Viewer, camera: str):
 
 _has_verdict = studio_logic.has_verdict
 
+# The only values `kind`, `ai` and `verdict` can take; anything else is a 400 for every role before any query.
+_AI_STATUSES = frozenset(get_args(AiStatus))
+
+
+def _check_vocabulary(kind: Optional[str] = None, ai: Optional[str] = None, verdict: Optional[str] = None) -> None:
+    for name, value, allowed in (("kind", kind, _KINDS), ("ai", ai, _AI_STATUSES),
+                                 ("verdict", verdict, redact.VERDICTS | {redact.UNKNOWN_VERDICT})):
+        if value is not None and value not in allowed:
+            raise HTTPException(status_code=400, detail=f"Unknown {name}")
+
 
 _reviewed = func.coalesce(ReviewState.reviewed, false())
 _flagged = func.coalesce(ReviewState.flagged, false())
@@ -181,7 +191,8 @@ def _summary_fields(session: Session, viewer: _Viewer, ev: Event, customer_id: i
         label=redact.label(ev.label) if viewer.labeler else ev.label,
         alert_command=redact.alert_command(ev.alert_command) if viewer.labeler else ev.alert_command,
         detected=[shown(d) for d in (ev.detected or []) if isinstance(d, str)],
-        owner_verdicts=[shown(v) for v in (ev.owner_verdicts or []) if isinstance(v, str)],
+        owner_verdicts=[(redact.verdict(v) if viewer.labeler else shown(v))
+                        for v in (ev.owner_verdicts or []) if isinstance(v, str)],
         completeness=completeness, reviewed=bool(reviewed), flagged=bool(flagged),
         thumbnail_url=f"/v1/events/{ev.id}/thumbnail" if has_thumbnail else None,
         timezone=tz or "UTC",
@@ -248,6 +259,7 @@ def list_events(
         raise HTTPException(status_code=400, detail=f"Unknown filter: {filter}")
     if cursor is not None:
         _decode_cursor(cursor)
+    _check_vocabulary(kind=kind, ai=ai, verdict=verdict)
     conds = [viewer.visible()]
     if site is not None:
         conds.append(_site_condition(session, viewer, site))
@@ -351,9 +363,10 @@ def events_density(
     # Counts per camera per hour/day bucket covering [from_utc, to_utc). Buckets are aligned to the hour/day in
     # UTC (not the customer's timezone); `timezone` is the customer's when exactly one customer is in scope, else
     # "UTC". Every known camera of the devices in scope gets a row (Camera rows, cameras seen in events, heartbeat
-    # cameras), even with zero counts. With more than one device in scope an admin/support row is named
+    # cameras), even with zero counts -- except for labelers, who get only cameras with events in the interval. With more than one device in scope an admin/support row is named
     # `<site>/<camera>`; a labeler's row is the camera pseudonym. (Comments, not a docstring: the OpenAPI is frozen.)
     viewer = _Viewer(staff, request)
+    _check_vocabulary(kind=kind)
     step = 3600 if bucket == "hour" else 86400
     begin, finish = _utc(from_utc), _utc(to_utc)  # naive endpoints are UTC
     if finish <= begin:  # the requested interval, before any rounding to buckets
@@ -401,6 +414,8 @@ def events_density(
     counts = _bucket_counts(session, start, step, n, conds, by=(Event.device_pk, Event.camera))
     rows = []
     for pk, cam in known:
+        if viewer.labeler and (pk, cam) not in counts:
+            continue  # a labeler sees only cameras with events here: the row list is not the camera inventory
         events, alerts, false_alarms = counts.get((pk, cam), [[0] * n, [0] * n, [0] * n])
         rows.append(DensityRow(camera=label(pk, cam), events=events, alerts=alerts, false_alarms=false_alarms))
     rows.sort(key=lambda r: r.camera)
@@ -546,7 +561,7 @@ def get_event(event_id: int, request: Request, staff: Staff = Depends(current_st
                             prompt_version=optional(r.prompt_version), prompt=None,  # never prompt text
                             parsed=ident.json(parsed(r)), raw_text_artifact_id=r.raw_artifact_id,
                             input_frame_artifact_ids=frame_ids(r)) for r in runs]
-        feedback_out = [FeedbackOut(id=f.id, verdict=ident.text(f.verdict), action=ident.text(f.action), note="",
+        feedback_out = [FeedbackOut(id=f.id, verdict=redact.verdict(f.verdict) if f.verdict else "", action=ident.text(f.action), note="",
                                     raw_text="", source=ident.text(f.source),
                                     received_utc=f.received_at or fields["start_utc"]) for f in feedback]
         artifacts = [ArtifactOut(id=a.id, role=a.role, s3_key=labeler_artifact_ref(a.id), bytes=a.bytes,

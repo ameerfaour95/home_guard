@@ -392,9 +392,8 @@ def test_hidden_artifacts_are_indistinguishable_from_missing_ones(client, staff_
         denied = s.scalars(select(m.AuditLog).where(m.AuditLog.action == "media_denied")).all()
         targets = {row.target for row in denied}
         assert all(row.detail["reason"] for row in denied)
-        hidden_keys = set(s.scalars(select(m.Artifact.s3_key).where(m.Artifact.id.in_(
-            [hidden["available_artifact"], hidden["unavailable_artifact"]]))))
-        assert hidden_keys <= targets  # audited server-side with the real reason, never shown to the labeler
+        # labeler denials are audited the same way whether the artifact is hidden or missing (round 3, finding D)
+        assert {f"artifact/{hidden['available_artifact']}", "artifact/99999999"} <= targets
     for eid in hidden["event_ids"]:
         for url in (f"/v1/events/{eid}", f"/v1/events/{eid}/detections", f"/v1/events/{eid}/thumbnail"):
             r = client.get(url, headers=lab, follow_redirects=False)
@@ -487,3 +486,124 @@ def test_assign_splits_is_keyed_and_group_aware():
     assert a == studio.assign_splits(list(reversed(items)), "v1", split, secret="secret-a")
     assert a != studio.assign_splits(items, "v1", split, secret="secret-b")
     assert all(a[g * 10] == a[g * 10 + 1] for g in range(64))
+
+
+# ---------------------------------------------------------------- fix round 3 (Codex pass 3)
+
+def test_acronym_sources_are_split_at_every_case_boundary():
+    from home_guard_project.cloud import redact
+
+    terms = redact.variants("OAKRIDGEHome")
+    for want in ("OAKRIDGE Home", "OAKRIDGE_Home", "OAKRIDGE-Home", "OAKRIDGEHome", "OAKRIDGE"):
+        assert want in terms, (want, terms)
+    mapping = {t.lower(): "cam-aaaaaa" for t in terms}
+    for text in ("Person approaching Oakridge Home", "oakridgehome", "OAKRIDGE_Home", "Oakridge-Home"):
+        assert "oakridge" not in redact.redact_text(text, terms, mapping).lower(), text
+    assert {"BIAN 2", "BIAN_2"} & set(redact.variants("BIAN2"))
+
+
+def test_acronym_display_name_never_reaches_a_labeler(client, staff_factory, household):
+    """Finding A: display_name OAKRIDGEHome, the AI wrote "Oakridge Home"; every labeler surface must be clean."""
+    from home_guard_project.cloud import redact
+
+    _, _, _, lab = staff_factory("labeler")
+    spaced = "Person approaching Oakridge Home"
+    with session_scope(client.app.state.engine) as s:
+        dev = s.get(m.Device, household["device_pk"])
+        cam = s.scalar(select(m.Camera).where(m.Camera.device_pk == dev.id, m.Camera.name == CAMERA))
+        cam.display_name = "OAKRIDGEHome"
+        for ev in s.scalars(select(m.Event).where(m.Event.device_pk == dev.id)):
+            ev.summary, ev.alert_reason = spaced, spaced
+        for run in s.scalars(select(m.AiRun)):
+            run.parsed = {"summary": spaced, "alert_reason": spaced}
+        for rev in s.scalars(select(m.RawRevision)):
+            if isinstance(rev.body, dict) and isinstance(rev.body.get("model_response"), dict):
+                rev.body = {**rev.body, "model_response": {**rev.body["model_response"], "summary": spaced}}
+        redact.backfill(s, dev, everything=True)
+    texts = []
+    for i in household["ids"]:
+        r = client.get(f"/v1/events/{i}", headers=lab)
+        assert r.status_code == 200
+        texts.append(r.text)
+    texts.append(client.get("/v1/events", params={"limit": 500}, headers=lab).text)
+    assert any("walking" in t or "approaching" in t for t in texts)
+    for text in texts:
+        assert "oakridge" not in text.lower(), text[:300]
+
+
+def _verdict_meta_objects(verdict: str) -> dict[str, bytes]:
+    out = _bian_objects()
+    for key, body in list(out.items()):
+        if key.endswith(".meta.json") and CAMERA in key:
+            meta = json.loads(body)
+            meta["owner_feedback"] = [{"time_utc": "2026-10-03T10:00:00Z", "verdict": verdict}]
+            out[key] = json.dumps(meta).encode()
+    return out
+
+
+def test_out_of_vocabulary_verdicts_are_not_stored_and_become_a_problem(client, s3client):  # noqa: F811
+    from home_guard_project.cloud.s3 import S3
+
+    s3client.create_bucket(Bucket=b.BUCKET)
+    for key, body in _verdict_meta_objects("Daniel Levi").items():
+        b.put(s3client, key, body)
+    with session_scope(client.app.state.engine) as s:
+        b.index_fixture_bucket(s, S3(s3client, b.BUCKET), site=SITE, customer_name=CUSTOMER, consent_training=True,
+                               now=NOW)
+        verdicts = [v for vs in s.scalars(select(m.Event.owner_verdicts)) for v in (vs or [])]
+        reasons = [p.reason for p in s.scalars(select(m.IndexProblem))]
+    assert "Daniel Levi" not in verdicts and "unknown" in verdicts
+    assert any("invalid verdict" in r for r in reasons), reasons
+
+
+def test_valid_verdicts_are_stored_as_given(client, s3client):  # noqa: F811
+    from home_guard_project.cloud.s3 import S3
+
+    s3client.create_bucket(Bucket=b.BUCKET)
+    for key, body in _verdict_meta_objects("false_alarm").items():
+        b.put(s3client, key, body)
+    with session_scope(client.app.state.engine) as s:
+        b.index_fixture_bucket(s, S3(s3client, b.BUCKET), site=SITE, customer_name=CUSTOMER, consent_training=True,
+                               now=NOW)
+        verdicts = {v for vs in s.scalars(select(m.Event.owner_verdicts)) for v in (vs or [])}
+        reasons = [p.reason for p in s.scalars(select(m.IndexProblem))]
+    assert "false_alarm" in verdicts and not any("invalid verdict" in r for r in reasons)
+
+
+def test_verdict_kind_ai_filters_are_validated_for_every_role(client, staff_factory, household):
+    _, _, _, lab = staff_factory("labeler")
+    _, _, _, admin = staff_factory("admin")
+    for headers in (lab, admin):
+        for params in ({"verdict": "Daniel Levi"}, {"verdict": "customer-f80ef3"}, {"kind": "Daniel Levi"},
+                       {"ai": "Daniel Levi"}, {"verdict": "Daniel Levi", "with_total": True}):
+            with _Statements(client.app.state.engine) as st:
+                r = client.get("/v1/events", params=params, headers=headers)
+            assert r.status_code == 400, (params, r.text)
+            assert st.touched("events", "customers", "devices", "cameras") == [], params
+        for params in ({"verdict": "unknown"}, {"verdict": "true_alert"}, {"kind": "alert"}, {"ai": "real"},
+                       {"kind": "unknown"}):
+            assert client.get("/v1/events", params=params, headers=headers).status_code == 200, params
+    bad = client.get("/v1/events/density", params={"from_utc": "2026-10-02T00:00:00Z",
+                                                   "to_utc": "2026-10-04T00:00:00Z", "kind": "x y"}, headers=lab)
+    assert bad.status_code in (400, 422)
+
+
+def test_hidden_and_missing_artifacts_do_the_same_work(client, staff_factory, hidden):
+    """Finding D: 7 SQL statements for a hidden artifact vs 4 for a missing one."""
+    _, _, _, lab = staff_factory("labeler")
+    with session_scope(client.app.state.engine) as s:
+        opaque = m.Artifact(role="opaque_copy", s3_key="admin_cache/opaque/y.mp4", provenance="cloud",
+                            available=True, detail={})
+        s.add(opaque)
+        s.flush()
+        opaque_id = opaque.id
+    shapes = []
+    for aid in (99999999, hidden["available_artifact"], hidden["unavailable_artifact"], opaque_id):
+        with _Statements(client.app.state.engine) as st:
+            r = client.post(f"/v1/artifacts/{aid}/access", json={"purpose": "training"}, headers=lab)
+        assert r.status_code == 404
+        shapes.append(len([x for x in st.seen if not x.lstrip().startswith(("begin", "commit", "rollback"))]))
+    assert len(set(shapes)) == 1, shapes
+    with session_scope(client.app.state.engine) as s:
+        denied = s.scalars(select(m.AuditLog).where(m.AuditLog.action == "media_denied")).all()
+        assert len(denied) == 4 and {d.detail["reason"] for d in denied} == {"not_visible"}

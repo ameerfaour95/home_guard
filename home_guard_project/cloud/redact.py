@@ -44,6 +44,14 @@ MIN_PART = 4
 # The only values these fields may take; anything else is shown (and stored) as null.
 ALERT_COMMANDS = frozenset({"[none]", "[send_message]", "[call_owner]"})
 LABELS = frozenset({"normal", "suspicious", "escalation"})
+# Owner verdicts: stored values outside this set become "unknown" at ingestion (and are never matched by filters).
+VERDICTS = frozenset({"true_alert", "false_alarm", "real_but_wrong", "expected", "missed_event", "none"})
+UNKNOWN_VERDICT = "unknown"
+
+
+def verdict(value: Any) -> str:
+    """`value` when it is one of the owner verdicts, else "unknown"."""
+    return value if isinstance(value, str) and value in VERDICTS else UNKNOWN_VERDICT
 # The box writes "YYYY-MM-DD HH:MM:SS" (optionally ISO with T, fraction, offset); imports write "<seconds>s".
 _CLIP_START_LOCAL = re.compile(
     r"\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?(?:Z|[+-]\d{2}:?\d{2})?|\d{1,7}(?:\.\d{1,3})?s")
@@ -68,7 +76,10 @@ NEUTRAL_CUSTOMER = "customer-redacted"
 NEUTRAL_CAMERA = "cam-redacted"
 
 _SEPARATORS = re.compile(r"[\s_.\-]+")
-_CAMEL = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+# Source tokenizer: every case or digit boundary of a name splits it ("OAKRIDGEHome" -> OAKRIDGE|Home,
+# "BIAN2" -> BIAN|2, "myBian" -> my|Bian). An all-caps run followed by lower case with no capital ("BIANhome")
+# has no unambiguous split; the matcher's `_INNER` boundaries still catch it inside text.
+_CAMEL = re.compile(r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|(?<=[A-Za-z])(?=[0-9])|(?<=[0-9])(?=[A-Za-z])")
 # Word boundaries inside an alphanumeric run: lower -> Upper ("myBian"), an acronym ending where a capitalised word
 # starts ("BIAN|Home"), an upper-case run of two or more ending in lower case ("BIAN|home") and letter <-> digit
 # ("BIAN|2"). A boundary only lets a term match there; it never removes a character.

@@ -136,3 +136,12 @@ Notes:
   export agree.
 - `summary_redacted`/`search_redacted` are still filled by the indexer but unused for labelers; the stale-copy
   finding no longer reaches a labeler. `redact.Identity.mentions` is kept (tested) but no longer used by routes.
+
+
+## Fix round 3 (privacy-pass3.md, fix-10c.md)
+
+- A: `redact._CAMEL` splits identity sources at every case/digit boundary (lower->Upper, UPPER->Upper+lower, letter<->digit), so `OAKRIDGEHome` yields `OAKRIDGE Home`, `OAKRIDGE_Home`, `oakridgehome`, `OAKRIDGE`. Same tokenizer for all sources. Tests: unit variants + ingestion-to-response regression (`test_acronym_display_name_never_reaches_a_labeler`). An all-caps run followed by lower case with no capital (`BIANhome`) has no unambiguous source split; the matcher's boundaries still catch it in text.
+- B: `redact.VERDICTS` / `verdict()`. Indexer: owner_feedback verdicts (meta) and Feedback.verdict outside the set are stored as "unknown" with IndexProblem "invalid verdict"; labelers also see out-of-vocabulary stored values as "unknown" (old rows, no migration). `verdict`, `kind`, `ai` filters (and density `kind`) are validated for every role: 400 before any query.
+- C: density omits cameras without events in the interval for labelers (admin/support keep the zero rows).
+- D: `media._labeler_lookup` is one SELECT (artifact joined to event/device/customer, consent + role predicates in WHERE). Hidden/missing/unavailable/opaque artifacts run the same statements; audit `media_denied` with reason `not_visible`, target `artifact/<id>`. Behavior change: event-less artifacts are no longer reachable by labelers.
+- RED recorded first: 9 new tests failed (acronym x2, verdict ingest, filters, hidden-vs-missing work, density, 3 loop/pool tests); after the changes all pass. Existing hidden-artifact test updated for the uniform audit target.

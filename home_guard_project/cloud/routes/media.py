@@ -115,31 +115,34 @@ def _deny(session: Session, staff: Staff, target: str, customer: Optional[Custom
     raise HTTPException(status_code=status, detail=shown or reason)
 
 
-def _labeler_hidden_reason(art: Optional[Artifact], customer: Optional[Customer]) -> Optional[str]:
-    """Why a labeler may not see this artifact at all, or None when it is visible to them."""
-    if art is None:
-        return "Artifact not found"
-    if customer is None:
-        return "Artifact belongs to no known household"
-    if not customer.consent_training:
-        return "This customer has not agreed to training use"
-    if art.role in LABELER_HIDDEN_ROLES:
-        return "Your role cannot open this file"
-    return None
+def _labeler_lookup(session: Session, artifact_id: int):
+    """(artifact, event, device, customer) when a labeler may see the artifact, else None: one SELECT with the
+    visibility predicates (event, device, training consent, openable role) in its WHERE, so a hidden artifact and a
+    missing one cost exactly the same."""
+    row = session.execute(
+        select(Artifact, Event, Device, Customer)
+        .join(Event, Event.id == Artifact.event_id)
+        .join(Device, Device.id == Event.device_pk)
+        .join(Customer, Customer.id == Device.customer_id)
+        .where(Artifact.id == artifact_id, Customer.consent_training.is_(True),
+               Artifact.role.not_in(sorted(LABELER_HIDDEN_ROLES)))).first()
+    return tuple(row) if row is not None else None
 
 
 @router.post("/artifacts/{artifact_id}/access", response_model=MediaAccess)
 def artifact_access(artifact_id: int, body: MediaAccessRequest, request: Request,
                     staff: Staff = Depends(current_staff), session: Session = SessionDep):
-    art = session.get(Artifact, artifact_id)
-    ev = session.get(Event, art.event_id) if art is not None and art.event_id is not None else None
-    device = _device_of(session, art, ev) if art is not None else None
-    customer = session.get(Customer, device.customer_id) if device is not None else None
-    if staff.role == "labeler":  # visibility first: hidden and missing artifacts get the same 404
-        hidden = _labeler_hidden_reason(art, customer)
-        if hidden is not None:
-            target = art.s3_key if art is not None else f"artifact/{artifact_id}"
-            _deny(session, staff, target, customer, device, body.purpose, hidden, status=404, shown=_NOT_FOUND)
+    if staff.role == "labeler":  # visibility first: hidden and missing artifacts get the same 404, the same work
+        found = _labeler_lookup(session, artifact_id)
+        if found is None:
+            _deny(session, staff, f"artifact/{artifact_id}", None, None, body.purpose, "not_visible", status=404,
+                  shown=_NOT_FOUND)
+        art, ev, device, customer = found
+    else:
+        art = session.get(Artifact, artifact_id)
+        ev = session.get(Event, art.event_id) if art is not None and art.event_id is not None else None
+        device = _device_of(session, art, ev) if art is not None else None
+        customer = session.get(Customer, device.customer_id) if device is not None else None
     if art is None or customer is None:
         raise HTTPException(status_code=404, detail=_NOT_FOUND)
     if not art.available:

@@ -554,3 +554,15 @@ def test_event_view_audit_is_race_free(client, staff_factory, indexed, monkeypat
     with session_scope(client.app.state.engine) as s:
         rows = s.scalars(select(m.AuditLog).where(m.AuditLog.action == "event_view")).all()
     assert len(rows) == 1 and rows[0].ts == NOW  # the batching clock is also the audit row's clock
+
+
+def test_density_for_labelers_omits_all_zero_cameras(client, staff_factory, indexed_consent):
+    """Privacy pass 3 C: the row count was the household's camera inventory, events or not."""
+    _, _, _, lab = staff_factory("labeler")
+    _, _, _, adm = staff_factory("admin")
+    quiet = {"from_utc": "2001-01-01T00:00:00Z", "to_utc": "2001-01-01T01:00:00Z"}
+    assert client.get("/v1/events/density", params=quiet, headers=lab).json()["rows"] == []
+    assert client.get("/v1/events/density", params=quiet, headers=adm).json()["rows"]  # silent cameras stay visible
+    busy = client.get("/v1/events/density", params={"from_utc": "2026-10-03T00:00:00Z",
+                                                    "to_utc": "2026-10-03T12:00:00Z"}, headers=lab).json()
+    assert busy["rows"] and all(any(row["events"]) for row in busy["rows"])

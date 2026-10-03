@@ -379,6 +379,8 @@ class _Run:
             return cached
         rec = parse_meta(key, body)
         problems = list(rec.problems)
+        if _sanitise_verdicts(rec.owner_feedback):
+            problems.append("invalid verdict")
         bad = [name for name, ts in (("clip_start_ts", rec.start_ts), ("clip_end_ts", rec.end_ts),
                                      ("stem trigger time", rec.trigger_ts)) if ts is not None and not _in_range(ts)]
         no_start = rec.start_ts is None and rec.trigger_ts is None
@@ -444,7 +446,8 @@ class _Run:
                 self.dirty_ids.add(fb.event_id)  # the event it was linked to recomputes its verdicts
             alert_stem = rec.alert_id if rec.alert_id and len(rec.alert_id) <= 255 else None
             fb.alert_stem = alert_stem
-            fb.verdict, fb.action = _cut(rec.verdict, 64), _cut(rec.action, 64)
+            invalid = bool(rec.verdict) and rec.verdict not in redact.VERDICTS
+            fb.verdict, fb.action = redact.verdict(rec.verdict) if rec.verdict else "", _cut(rec.action, 64)
             fb.note, fb.raw_text, fb.source = rec.note, rec.raw_text, _cut(rec.source, 64)
             fb.scope_camera = _cut(rec.scope_camera, 128)
             fb.received_at = rec.time_utc
@@ -453,7 +456,7 @@ class _Run:
             art.event_id = fb.event_id  # the feedback artifact follows its row, including to no event
             if ev is not None:
                 self.dirty_ids.add(ev.id)
-            self.applied(art, etag)
+            self.applied(art, etag, ["invalid verdict"] if invalid else ())
             self.stats.feedback += 1
 
     # ------------------------------------------------------------ events
@@ -661,6 +664,16 @@ class _Run:
         redact.backfill(self.session, self.device)  # labelers' search text for new, changed and old events
         self.session.commit()
         return self.stats
+
+
+def _sanitise_verdicts(entries: list[dict]) -> bool:
+    """Replace verdicts outside the vocabulary by "unknown" in place; True when any entry was changed."""
+    changed = False
+    for entry in entries:
+        if entry.get("verdict") not in (None, "") and redact.verdict(entry.get("verdict")) != entry.get("verdict"):
+            entry["verdict"] = redact.UNKNOWN_VERDICT
+            changed = True
+    return changed
 
 
 def _union_owner_feedback(records: Iterable[ClipRecord]) -> list[dict]:
