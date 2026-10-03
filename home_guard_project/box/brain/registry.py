@@ -12,6 +12,7 @@ a camera address or password.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import time
@@ -24,6 +25,7 @@ from ..ai_status import read_status
 from .aliases import ALIASES_PATH, load_aliases, normalize
 from .mode import GUARD, hhmm, mode_ends_at, mode_started_at, resolve_mode
 
+_log = logging.getLogger(__name__)
 _BOX = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CAMERAS_PATH = os.path.normpath(os.path.join(_BOX, "..", "data_collection", "cameras.yaml"))
 STATUS_PATH = os.path.normpath(os.path.join(_BOX, "..", "..", "logs", "ai_status.json"))
@@ -171,9 +173,10 @@ def hours_from_box_yaml(path: Optional[str] = None) -> Callable[[], Tuple[int, i
 
         try:
             settings = load_box_settings(path or BOX_YAML)
-        except Exception:  # noqa: BLE001 - unreadable: guard all day, the safe side
+            start, end = int(settings.get("alert_start_hour", 0)), int(settings.get("alert_end_hour", 0))
+        except Exception:  # noqa: BLE001 - unreadable or malformed: guard all day, the safe side
             return (0, 0)
-        return (int(settings.get("alert_start_hour", 0)), int(settings.get("alert_end_hour", 0)))
+        return (start, end) if 0 <= start <= 23 and 0 <= end <= 23 else (0, 0)
     return hours
 
 
@@ -184,6 +187,18 @@ def _read_json(path: str) -> Dict[str, Any]:
         return data if isinstance(data, dict) else {}
     except (OSError, ValueError):
         return {}
+
+
+def _num(value: Any) -> Optional[float]:
+    """A number read from a hand-editable file, or None when it is not one."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _dict(value: Any) -> Dict[Any, Any]:
+    return value if isinstance(value, dict) else {}
 
 
 class HouseRegistry:
@@ -207,6 +222,17 @@ class HouseRegistry:
 
     def snapshot(self) -> HouseSnapshot:
         now = self.now()
+        try:
+            return self._build(now)
+        except Exception:  # noqa: BLE001 - last line of defence: guard all day, no cameras
+            _log.warning("house snapshot failed; falling back to an empty picture", exc_info=True)
+            return HouseSnapshot(
+                now=now, mode=resolve_mode(now, 0, 0), mode_ends=mode_ends_at(now, 0, 0),
+                mode_started=mode_started_at(now, 0, 0), start_hour=0, end_hour=0, cameras=(),
+                retention_days=self.retention_days, state_known=False,
+            )
+
+    def _build(self, now: float) -> HouseSnapshot:
         known = True
         try:
             with open(self.cameras_path, encoding="utf-8") as f:
@@ -215,11 +241,11 @@ class HouseRegistry:
                 raise ValueError("not a mapping")
         except (OSError, yaml.YAMLError, ValueError):
             raw, known = {}, False
-        active = list(dict(raw.get("cameras") or {}))
-        disabled = [n for n in dict(raw.get("disabled") or {}) if n not in active]
+        active = list(_dict(raw.get("cameras")))
+        disabled = [n for n in _dict(raw.get("disabled")) if n not in active]
         aliases = load_aliases(self.aliases_path)
-        status_cams = read_status(self.status_path).get("cameras") or {}
-        sees = (_read_json(self.sees_path).get("cameras") or {}) if self.sees_path else {}
+        status_cams = _dict(_dict(read_status(self.status_path)).get("cameras"))
+        sees = _dict(_read_json(self.sees_path).get("cameras")) if self.sees_path else {}
         try:
             from ...data_collection.zones import ZONES_PATH, load_zones  # noqa: PLC0415
 
@@ -229,21 +255,21 @@ class HouseRegistry:
         start, end = self.hours()
         cams = []
         for name in active + disabled:
-            checked = (status_cams.get(name) or {}).get("checked_ts") if isinstance(status_cams, dict) else None
+            checked = _num(_dict(status_cams.get(name)).get("checked_ts"))
             if name not in active:
                 live: Optional[bool] = False
             elif not status_cams:
                 live = None
             else:
-                live = bool(checked) and now - float(checked) <= self.offline_after
+                live = bool(checked) and now - checked <= self.offline_after
             try:
                 muted = self.mute.muted_until(now, name)
             except Exception:  # noqa: BLE001
                 muted = None
             cams.append(CameraState(
                 name=name, enabled=name in active, aliases=tuple(aliases.get(name, [])), live=live,
-                last_seen=float(checked) if checked else None, muted_until=muted,
-                sees=str((sees.get(name) or {}).get("text") or ""), zone=bool(zones.get(name)),
+                last_seen=checked if checked else None, muted_until=muted,
+                sees=str(_dict(sees.get(name)).get("text") or ""), zone=bool(zones.get(name)),
             ))
         try:
             logging_on = bool(self.quiet_log())
@@ -254,5 +280,5 @@ class HouseRegistry:
             now=now, mode=resolve_mode(now, start, end), mode_ends=mode_ends_at(now, start, end),
             mode_started=mode_started_at(now, start, end), start_hour=start, end_hour=end,
             cameras=tuple(cams), retention_days=self.retention_days, state_known=known,
-            quiet_log=logging_on, quiet_since=float(since) if since else None,
+            quiet_log=logging_on, quiet_since=_num(since) or None,
         )

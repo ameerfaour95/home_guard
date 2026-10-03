@@ -134,6 +134,59 @@ class RegistryTest(unittest.TestCase):
         self.assertFalse(s.state_known)
         self.assertIn("camera state unknown", render_block(s))
 
+    def _write(self, path: str, text: str) -> None:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+
+    def test_cameras_section_as_a_list_does_not_raise(self) -> None:
+        self._write(self.cameras, "cameras: [a, b]\ndisabled: {back_door: rtsp://c}\n")
+        s = self._registry().snapshot()
+        self.assertTrue(set(s.names) <= {"back_door"})
+
+    def test_disabled_scalar_does_not_raise(self) -> None:
+        self._write(self.cameras, "cameras: {main_entrance: rtsp://a}\ndisabled: 5\n")
+        self.assertEqual(self._registry().snapshot().names, ["main_entrance"])
+
+    def test_bad_box_hours_guard_all_day(self) -> None:
+        from home_guard_project.box.brain.registry import hours_from_box_yaml
+
+        d = tempfile.mkdtemp()
+        for text in ('alert_start_hour: "x"\nalert_end_hour: 6\n', "alert_start_hour: 25\nalert_end_hour: 6\n"):
+            path = os.path.join(d, "box.yaml")
+            self._write(path, text)
+            self.assertEqual(hours_from_box_yaml(path)(), (0, 0))
+
+    def test_bad_hours_callable_does_not_raise(self) -> None:
+        reg = HouseRegistry(self.mute, hours=lambda: (_ for _ in ()).throw(ValueError("x")),
+                            cameras_path=self.cameras, aliases_path=self.aliases, status_path=self.status,
+                            now=lambda: NOW, zones_path=self.zones)
+        s = reg.snapshot()
+        self.assertEqual((s.start_hour, s.end_hour, s.mode), (0, 0, "guard"))
+        self.assertFalse(s.state_known)
+        self.assertEqual(s.cameras, ())
+
+    def test_non_numeric_checked_ts_means_no_timestamp(self) -> None:
+        self._write(self.status, json.dumps({"cameras": {"main_entrance": {"checked_ts": "soon"},
+                                                         "front_side": "junk"}}))
+        s = self._registry().snapshot()
+        main = s.camera("main_entrance")
+        self.assertIsNone(main.last_seen)
+        self.assertFalse(main.live)
+
+    def test_sees_file_holding_a_list_is_ignored(self) -> None:
+        self._write(self.sees, '["x"]')
+        s = self._registry().snapshot()
+        self.assertEqual([c.sees for c in s.cameras], ["", "", ""])
+        self._write(self.sees, json.dumps({"cameras": {"main_entrance": "text"}}))
+        self.assertEqual(self._registry().snapshot().camera("main_entrance").sees, "")
+
+    def test_bad_quiet_since_is_none(self) -> None:
+        path = os.path.join(os.path.dirname(self.cameras), "quiet.json")
+        self._write(path, '{"since": "later"}')
+        s = self._registry(quiet_log=lambda: True, quiet_since_path=path).snapshot()
+        self.assertTrue(s.quiet_log)
+        self.assertIsNone(s.quiet_since)
+
 
 if __name__ == "__main__":
     unittest.main()
