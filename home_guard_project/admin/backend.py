@@ -1,6 +1,6 @@
 """Backend contract and safe, user-facing failures."""
 from typing import Protocol
-from .models import SavedFilter, CollectionOut, ExportOut, AuditPage, DensityOut, ReviewCount
+from .models import SavedFilter, CollectionOut, ExportOut, ExportPreview, AuditPage, DensityOut, ReviewCount
 from .models import TokenPair, StaffOut, FleetResponse, CustomerOut, EventPage, EventDetail, EventSummary, DetectionsOut, MediaAccess
 
 
@@ -51,6 +51,10 @@ class ServerError(BackendError):
     message = 'Home Guard Cloud could not complete this request. Please try again.'
 
 
+class InternalError(BackendError):
+    message = 'This view could not be loaded. Please try again. Details were saved to the local admin log.'
+
+
 class RateLimitError(BackendError):
     message = 'Too many requests. Please wait and try again.'
 
@@ -73,7 +77,7 @@ class AdminBackend(Protocol):
     def saved_filters(self) -> list[SavedFilter]: ...
     def collections(self) -> list[CollectionOut]: ...
     def collection_events(self, id, *, cursor=None, limit=100) -> EventPage: ...
-    def export_preview(self, **request): ...
+    def export_preview(self, **request) -> ExportPreview: ...
     def create_collection(self, name, description='') -> CollectionOut: ...
     def add_collection_items(self, id, event_ids) -> CollectionOut: ...
     def remove_collection_items(self, id, event_ids) -> CollectionOut: ...

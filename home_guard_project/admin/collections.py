@@ -2,7 +2,7 @@ from PySide6.QtCore import Qt, Signal, QSize, QRectF
 from PySide6.QtGui import QColor, QFont, QPixmap
 from PySide6.QtWidgets import (QDialog, QWidget, QVBoxLayout, QHBoxLayout, QComboBox,
     QListView, QStyledItemDelegate, QAbstractItemView, QLineEdit, QStyle)
-from .workers import TaskRunner
+from .workers import TaskRunner, closing
 from .backend import BackendError, AuthError
 from .widgets.common import label, button
 from .widgets.data_table import RowsModel
@@ -138,8 +138,14 @@ class CollectionGrid(QWidget):
         self.runner, self.writer = TaskRunner(self), TaskRunner(self)
         self.runner.finished.connect(self.loaded); self.writer.finished.connect(self.removed)
         self.generation = 0
+        from .thumbnails import VisibleThumbnails
+        self.thumbnail_cache = {}
+        self.thumbnails = VisibleThumbnails(self.grid, backend, self.thumbnail_cache)
+        self.thumbnails.loaded.connect(self.thumbnails_loaded)
+        self.thumbnails.session_expired.connect(self.session_expired)
 
     def open(self, collection):
+        self.thumbnails.schedule()
         self.collection = collection; self.generation += 1
         self.title.setText(collection.name); self.message.setText('Loading collection…'); self.model.replace([])
         self.request()
@@ -151,6 +157,7 @@ class CollectionGrid(QWidget):
         def fetch():
             events, cursor = [], None
             while True:
+                if closing.is_set(): return [], {}
                 page = self.backend.collection_events(cid, cursor=cursor)
                 events.extend(page.items)
                 cursor = page.next_cursor
@@ -170,7 +177,13 @@ class CollectionGrid(QWidget):
         for url, data in images.items():
             pix = QPixmap(); pix.loadFromData(data); self.images[url] = pix
         self.model.replace(events)
+        self.thumbnails.schedule()
         self.message.setText(f'{len(events)} events · {self.collection.description}' if events else 'This collection is empty. Add events from Review with c.')
+
+    def thumbnails_loaded(self, images):
+        for url, data in images.items():
+            pix = QPixmap(); pix.loadFromData(data); self.images[url] = pix
+        self.grid.viewport().update()
 
     def remove_selected(self):
         ids = [i.data(Qt.ItemDataRole.UserRole).id for i in self.grid.selectedIndexes()]

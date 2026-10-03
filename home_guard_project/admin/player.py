@@ -35,7 +35,7 @@ class BoxOverlay(QWidget):
         frame = nearest_frame(self.frames, self.position_ms, self.offset_ms, self.times)
         if self.enabled and frame and frame.status == 'not_run':
             text += ' · Detector did not run on this frame'
-        if self.enabled and frame and frame.status == 'ran':
+        if self.enabled and frame and frame.status == 'ran' and not self.canvas.image.isNull():
             for box in frame.boxes:
                 token = 'action' if box.cls == 0 else 'warning' if box.cls in (1, 2, 3, 5, 7) else 'ok'
                 color = QColor(self.t[token])

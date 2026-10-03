@@ -30,8 +30,6 @@ class TimelineScreen(QWidget):
         self.runner.finished.connect(self.completed)
         self.density_runner.finished.connect(self.density_loaded)
         self.review_runner.finished.connect(self.review_done)
-        self.thumbnail_runner = TaskRunner(self)
-        self.thumbnail_runner.finished.connect(self.thumbnails_loaded)
         self.thumbnail_cache = {}
         layout = QVBoxLayout(self); layout.setContentsMargins(0, 0, 0, 0); layout.setSpacing(8)
         ranges = QHBoxLayout(); ranges.setSpacing(8)
@@ -134,6 +132,7 @@ class TimelineScreen(QWidget):
         return dict(filters, filter=self.saved_filter, customer_id=self.customer_id, from_utc=start.isoformat(), to_utc=end.isoformat(), q=self.search.text().strip() or None)
 
     def reload(self, *_):
+        if hasattr(self, 'thumbnails'): self.thumbnails.schedule()
         self.generation += 1
         self.cursor = None
         self.request_page(False)
@@ -171,18 +170,13 @@ class TimelineScreen(QWidget):
         self.load_thumbnails()
 
     def load_thumbnails(self):
-        urls = {e.thumbnail_url for e in self.model.rows if e.thumbnail_url} - self.thumbnail_cache.keys()
-        if not urls or self.thumbnail_runner.busy:
-            return
-        def fetch():
-            images = {}
-            for url in urls:
-                try:
-                    images[url] = self.backend.media_bytes(url)
-                except BackendError:
-                    images[url] = b''  # Keep the recording tile on failure.
-            return images
-        self.thumbnail_runner.start(fetch)
+        if not hasattr(self, 'thumbnails'):
+            from .thumbnails import VisibleThumbnails
+            self.thumbnails = VisibleThumbnails(self.table, self.backend, self.thumbnail_cache)
+            self.thumbnail_runner = self.thumbnails.runner
+            self.thumbnails.loaded.connect(lambda images: self.thumbnails_loaded(images, None))
+            self.thumbnails.session_expired.connect(self.session_expired)
+        self.thumbnails.schedule()
 
     def thumbnails_loaded(self, images, error):
         if error:
@@ -194,8 +188,8 @@ class TimelineScreen(QWidget):
             pix = QPixmap(); pix.loadFromData(images[url]); self.model.images[url] = pix
         self.table.viewport().update()
         if len(self.thumbnail_cache) > 256:
-            self.thumbnail_cache = {url: data for url, data in self.thumbnail_cache.items() if url in current}
-        self.load_thumbnails()
+            for url in list(self.thumbnail_cache):
+                if url not in current: self.thumbnail_cache.pop(url)
 
     def load_density(self):
         if self.density_runner.busy:

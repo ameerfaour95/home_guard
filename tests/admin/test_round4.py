@@ -285,3 +285,142 @@ def test_contract_preview_uses_protocol_and_enables_create(app, wait, widgets):
     assert wizard.next.isEnabled()
     assert 'Small dataset' in wizard.summary.text()
     assert 'train: 2' in wizard.summary.text()
+
+
+def test_thumbnails_only_request_visible_rows(app, wait, widgets):
+    from home_guard_project.admin.timeline import TimelineScreen
+    backend = DemoBackend()
+    accesses = []
+    backend.media_bytes = lambda url: accesses.append(url) or b''
+    screen = TimelineScreen(backend); widgets.append(screen)
+    screen.resize(1200, 420); screen.show()
+    rows = backend.events(limit=25).items
+    # Unique URLs distinguish offscreen rows even when fixtures reuse clips.
+    rows = [replace(e, thumbnail_url=f'row-{e.id}') for e in rows]
+    screen.pending = screen.generation, False
+    screen.completed(models.EventPage(rows, None), None)
+    wait(lambda: bool(accesses))
+    visible = {e.thumbnail_url for i, e in enumerate(rows) if screen.table.visualRect(screen.model.index(i, 0)).intersects(screen.table.viewport().rect())}
+    assert set(accesses) <= visible
+    assert len(accesses) < len(rows)
+
+
+def test_log_redacts_quoted_secrets_and_arbitrary_exception_messages(tmp_path):
+    import logging
+    from home_guard_project.admin.logging_setup import RedactionFilter
+    try:
+        raise RuntimeError('arbitrary-sensitive-value')
+    except RuntimeError:
+        record = logging.LogRecord('test', 40, __file__, 1, 'password="two secret words" code=123456', (), sys.exc_info())
+    RedactionFilter().filter(record)
+    assert 'secret words' not in record.getMessage()
+    assert 'arbitrary-sensitive-value' not in record.getMessage()
+    assert 'test_log_redacts' in record.getMessage()
+
+
+def test_m6_toast_restarts_timer_and_repolishes(app, widgets):
+    from home_guard_project.admin.review import ReviewScreen
+    from PySide6.QtTest import QTest
+    screen = ReviewScreen(DemoBackend()); widgets.append(screen)
+    screen.notify('first')
+    screen.toast_timer.setInterval(200)
+    screen.toast_timer.start()
+    QTest.qWait(100)
+    screen.notify('new error', True)
+    assert screen.toast.objectName() == 'error'
+    assert screen.toast_timer.remainingTime() > 150
+
+
+def test_unknown_saved_filter_count_is_not_a_one_plus_estimate(app, wait, widgets):
+    from home_guard_project.admin.studio import StudioScreen
+    class Backend(DemoBackend):
+        def events(self, **query):
+            assert query.get('with_total') is True
+            return models.EventPage([], None, 10000, True)
+    view = StudioScreen(Backend()); widgets.append(view)
+    view.count_requested = 'saved'
+    view.request_count()
+    wait(lambda: not view.count_runner.busy)
+    assert view.counts['saved'] == '10,000+'
+
+
+def test_worker_exception_is_logged_and_designed(app, wait, tmp_path, monkeypatch):
+    import logging
+    from home_guard_project.admin.workers import TaskRunner
+    logger = logging.getLogger('homeguard.admin')
+    for handler in logger.handlers[:]:
+        handler.close(); logger.removeHandler(handler)
+    monkeypatch.setenv('LOCALAPPDATA', str(tmp_path))
+    runner, results = TaskRunner(), []
+    runner.finished.connect(lambda result, error: results.append(error))
+    def broken(): raise KeyError('do-not-log-arbitrary-payload')
+    runner.start(broken)
+    wait(lambda: bool(results))
+    text = (tmp_path/'HomeGuardAdmin/logs/admin.log').read_text()
+    assert 'KeyError' in text and 'broken' in text
+    assert 'do-not-log-arbitrary-payload' not in text
+    assert 'local admin log' in str(results[0])
+    for handler in logger.handlers[:]:
+        handler.close(); logger.removeHandler(handler)
+
+
+def test_media_error_requests_access_only_once(app, wait, widgets):
+    from home_guard_project.admin.event_view import EventView
+    backend = DemoBackend()
+    calls = []
+    access = backend.artifact_access
+    backend.artifact_access = lambda aid, purpose: (calls.append(aid), access(aid, purpose))[1]
+    view = EventView(backend); widgets.append(view); view.show()
+    view.recording = backend.event(101)
+    view.refresh_media(); view.refresh_media()
+    wait(lambda: not view.media_runner.busy)
+    assert calls == [1010]
+
+
+def test_application_shutdown_with_stalled_worker_is_bounded(tmp_path):
+    import subprocess
+    script = '''
+import sys, threading, time
+from pathlib import Path
+from PySide6.QtCore import QTimer
+from PySide6.QtWidgets import QApplication
+from home_guard_project.admin.shell import AdminWindow
+from home_guard_project.admin.workers import TaskRunner
+from home_guard_project.admin.__main__ import main
+show = AdminWindow.show
+def stalled(self):
+    show(self)
+    self.stall = TaskRunner(self)
+    self.stall.start(lambda: threading.Event().wait(30))
+    def quit():
+        Path(marker).write_text(str(time.monotonic()))
+        QApplication.instance().quit()
+    QTimer.singleShot(100, quit)
+AdminWindow.show = stalled
+marker = sys.argv[1]
+sys.argv = [sys.argv[0], '--demo']
+main()
+'''
+    marker = tmp_path/'quit-time'
+    result = subprocess.run([sys.executable, '-c', script, str(marker)], timeout=8, capture_output=True)
+    import time
+    assert result.returncode == 0, result.stderr.decode(errors='replace')
+    assert time.monotonic()-float(marker.read_text()) < 2.8
+
+
+def test_audit_detail_survives_wire_decode_and_drawer(app, widgets):
+    from home_guard_project.admin.audit import AuditScreen
+    wire = json.loads((DATA/'audit.json').read_text())['items'][0]
+    wire['detail'] = {'event_id': 101, 'purpose': 'review'}
+    entry = models.decode(models.AuditEntry, wire)
+    screen = AuditScreen(DemoBackend()); widgets.append(screen)
+    screen.model.replace([entry])
+    screen.select(screen.model.index(0, 0), None)
+    assert json.loads(screen.json.toPlainText())['detail'] == wire['detail']
+
+
+def test_thumbnail_501_is_typed_unsupported():
+    from home_guard_project.admin.backend import UnsupportedError
+    backend = client(lambda request: httpx.Response(501))
+    with pytest.raises(UnsupportedError):
+        backend.media_bytes('/v1/events/101/thumbnail')

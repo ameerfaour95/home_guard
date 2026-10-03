@@ -3,7 +3,7 @@ from PySide6.QtCore import Qt, Signal, QTimer
 from threading import Event
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QSplitter, QTabWidget
-from .backend import AuthError, BackendError
+from .backend import AuthError, BackendError, UnsupportedError
 from .workers import TaskRunner, closing
 from .review_controller import ReviewController
 from .event_logic import KINDS
@@ -129,7 +129,7 @@ class EventView(QWidget):
         self.evidence_pending = self.generation
         cancel = self.cancelled
         def fetch():
-            result = dict(detections=None, video=None, images={}, answers={}, filmstrip=None, errors=[], auth=False)
+            result = dict(detections=None, video=None, images={}, answers={}, filmstrip=None, errors=[], auth=False, unsupported=False)
             def attempt(operation, default=None):
                 if cancel.is_set() or closing.is_set():
                     return default
@@ -137,6 +137,7 @@ class EventView(QWidget):
                     return operation()
                 except BackendError as exc:
                     result['errors'].append(str(exc)); result['auth'] |= isinstance(exc, AuthError)
+                    result['unsupported'] |= isinstance(exc, UnsupportedError)
                     return default
             result['detections'] = attempt(lambda: self.backend.detections(event.id))
             available = [a for a in event.artifacts if a.available]
@@ -174,12 +175,15 @@ class EventView(QWidget):
                 self.player.audio.setMuted(True); self.player.speed.setCurrentIndex(1)
                 self.player.player.setPlaybackRate(1.0); self.player.player.play()
         else:
-            self.player.media_failed('Recording expired or unavailable.' if self.recording.completeness.expired else 'No recording is available for this event.')
+            self.player.media_failed('Recording access is not available yet on this server.' if result['unsupported'] else 'Recording expired or unavailable.' if self.recording.completeness.expired else 'No recording is available for this event.')
         if result['filmstrip']:
             self.player.scrubber.set_filmstrip(*result['filmstrip'])
         self.load_assets()
         if result['errors']:
             self.banner.setText('Some saved evidence is unavailable. '+result['errors'][0]); self.banner.show(); self.retry.show()
+            if result['unsupported']:
+                self.banner.setText('Not available yet: recording access on this server. Saved AI and detections are shown below.')
+                self.retry.hide()
 
     def toggle_review(self, key):
         if self.review_handler:
@@ -237,6 +241,7 @@ class EventView(QWidget):
             return
         if error:
             self.banner.setText(str(error)); self.banner.show()
+            self.record.set_assets({aid: b'' for aid in self.record.frames}, {aid: str(error) for aid in self.record.raw_answers})
             if isinstance(error, AuthError): self.session_expired.emit()
         else:
             self.record.set_assets(*result)

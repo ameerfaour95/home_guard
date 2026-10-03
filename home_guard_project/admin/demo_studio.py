@@ -105,7 +105,7 @@ class DemoStudio:
         return next(e for e in self.exports() if e.id == id)
 
     def create_export(self, **request):
-        from .export_logic import validate_export, consent_summary
+        from .export_logic import validate_export
         if validate_export(request['name'], request['formats'], request['split']):
             raise ServerError()
         with self._lock:

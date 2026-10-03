@@ -76,6 +76,9 @@ class HttpBackend:
             raise ServerError() from None
 
     def login(self, email, password, totp):
+        if os.environ.get('HG_ADMIN_IT') == '1':
+            from .logging_setup import setup_logging
+            setup_logging().info('Integration sign-in submitted pid=%s', os.getpid())
         with self._auth_lock:
             self._epoch += 1
             self.tokens = None
@@ -164,6 +167,8 @@ class HttpBackend:
                 if response.status_code not in (301, 302, 303, 307, 308):
                     break
                 response = self.client.get(urljoin(str(response.url), response.headers['location']))
+            if response.status_code == 501:
+                raise UnsupportedError()
             if response.status_code != 200:
                 raise ServerError()
             return response.content

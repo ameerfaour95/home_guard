@@ -14,11 +14,12 @@ class RedactionFilter(logging.Filter):
         if record.exc_info:
             # Stack locations are useful; exception messages can contain arbitrary
             # request bodies, credentials and signed URLs. Never persist them.
-            message += '\n' + ''.join(traceback.format_list(traceback.extract_tb(record.exc_info[2])))
+            message += '\n' + ''.join(f'{frame.filename}:{frame.lineno} in {frame.name}\n'
+                                      for frame in traceback.extract_tb(record.exc_info[2]))
             message += type(record.exc_info[1]).__name__
         message = re.sub(r'https?://\S+', '[URL REDACTED]', message)
         message = re.sub(r'(?i)Bearer\s+\S+', 'Bearer [REDACTED]', message)
-        message = re.sub(r'''(?ix)(["']?(?:password|totp|code|access_token|refresh_token|token)["']?\s*[:=]\s*)["']?[^\s,}"']+''', r'\1[REDACTED]', message)
+        message = re.sub(r'''(?ix)(["']?(?:password|totp|code|access_token|refresh_token|token)["']?\s*[:=]\s*)(?:"[^"\n]*"|'[^'\n]*'|[^\s,}]+)''', r'\1[REDACTED]', message)
         record.msg, record.args, record.exc_info, record.exc_text = message, (), None, None
         return True
 
@@ -28,7 +29,8 @@ def setup_logging():
     if not logger.handlers:
         path = Path(os.environ.get('LOCALAPPDATA', Path.home()))/'HomeGuardAdmin'/'logs'
         path.mkdir(parents=True, exist_ok=True)
-        handler = RotatingFileHandler(path/'admin.log', maxBytes=1024*1024, backupCount=5, encoding='utf-8')
+        # Active file plus four backups: at most five 1 MiB files.
+        handler = RotatingFileHandler(path/'admin.log', maxBytes=1024*1024, backupCount=4, encoding='utf-8')
         handler.addFilter(RedactionFilter())
         handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(message)s'))
         logger.addHandler(handler)
