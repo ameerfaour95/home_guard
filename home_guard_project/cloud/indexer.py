@@ -198,6 +198,7 @@ class _Run:
         self.new_arts: dict[str, Artifact] = {}  # listed keys with no row yet (transient until inserted)
         self.legacy: set[str] = set()  # persisted artifact keys parse_key now rejects (quarantined)
         self.problems: dict[str, IndexProblem] = {}
+        self.body_names: set[tuple[str, str]] = set()  # names in the JSON bodies applied this pass (redact)
         self.cursors: dict[str, S3Cursor] = {}
         self.feedback: Optional[dict[str, Feedback]] = None
         self.events: dict[tuple[str, str], Event] = {}
@@ -443,6 +444,7 @@ class _Run:
             if (key, etag) not in bodies:
                 continue  # not fetched this pass: the previous applied state and its problem stay
             body = bodies[(key, etag)]
+            self.body_names |= redact.body_names(body)
             if _is_invalid(body):
                 self.problem(key, "invalid json", etag)
             elif role == "meta":
@@ -745,9 +747,10 @@ class _Run:
         self.apply_feedback(feedback)
         self.rebuild_all()
         refresh_expiry(self.session, self.device, self.now)
-        # the names this pass saw (cameras, display names, heartbeat host) join the identity history; a new name
-        # means every stored labeler search text is recomputed, else only the missing ones are filled
-        new_names = redact.remember(self.session, self.device, now=self.now)
+        # the names this pass saw (cameras, display names, heartbeat host, names in the JSON bodies) join the
+        # identity history; a new name means every stored labeler search text is recomputed, else only the
+        # missing ones are filled
+        new_names = redact.remember(self.session, self.device, extra=self.body_names, now=self.now)
         redact.backfill(self.session, self.device, everything=bool(new_names))
         self.session.commit()
         return self.stats

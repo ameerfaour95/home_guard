@@ -204,6 +204,10 @@ class Collection(Base):
     description: Mapped[str] = mapped_column(Text, default="", server_default="")
     created_by: Mapped[Optional[int]] = mapped_column(ForeignKey("staff.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[Optional[datetime]] = mapped_column(TS, nullable=True)
+    # migration 0008: set at creation when a labeler made it (their id), never changed afterwards. A private
+    # collection is seen only by that staff member and by non-labelers, whatever roles change later. No FK: it
+    # must stay private even if the staff row goes.
+    private_to_staff_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
 
 class CollectionItem(Base):
@@ -274,7 +278,7 @@ class IdentityAlias(Base):
     __table_args__ = (UniqueConstraint("device_pk", "kind", "value"),)
     id: Mapped[int] = mapped_column(primary_key=True)
     device_pk: Mapped[int] = mapped_column(ForeignKey("devices.id", ondelete="CASCADE"), index=True)
-    kind: Mapped[str] = mapped_column(String(16))  # customer|site|camera|display_name|host
+    kind: Mapped[str] = mapped_column(String(16))  # customer|site|camera|display_name|host (|_scanned: marker)
     value: Mapped[str] = mapped_column(Text)
     first_seen: Mapped[datetime] = mapped_column(TS)
 

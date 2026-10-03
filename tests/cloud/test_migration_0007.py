@@ -67,8 +67,6 @@ def test_0007_upgrade_downgrade_on_a_populated_database(fresh_url):
                     ("display_name", "Oak Porch")} <= aliases
             assert conn.execute(text("SELECT attempts FROM index_problems")).scalar() == 0
             assert _counts(conn) == before
-            diff = compare_metadata(MigrationContext.configure(conn), Base.metadata)
-            assert diff == [], diff
         command.downgrade(cfg, "0006")
         with engine.connect() as conn:
             assert "identity_aliases" not in inspect(conn).get_table_names()
@@ -78,5 +76,7 @@ def test_0007_upgrade_downgrade_on_a_populated_database(fresh_url):
         with engine.connect() as conn:
             assert conn.execute(text("SELECT count(*) FROM identity_aliases")).scalar() >= 8
             assert _counts(conn) == before
+            diff = compare_metadata(MigrationContext.configure(conn), Base.metadata)  # head (0008) = the models
+            assert diff == [], diff
     finally:
         engine.dispose()

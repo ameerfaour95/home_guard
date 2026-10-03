@@ -586,7 +586,8 @@ def seed_review_and_collections(engine, ids: dict, rng: random.Random) -> dict:
                  ("Deliveries and couriers", "Couriers and parcel drop-offs, plus a few ordinary arrivals as negatives.",
                   labeler, NOW - timedelta(days=1, hours=5), couriers[:10] + quiet)]
         for name, desc, by, when, members in specs:
-            col = Collection(name=name, description=desc, created_by=by, created_at=when)
+            col = Collection(name=name, description=desc, created_by=by, created_at=when,
+                             private_to_staff_id=by if by == labeler else None)
             s.add(col)
             s.flush()
             out[name] = col.id

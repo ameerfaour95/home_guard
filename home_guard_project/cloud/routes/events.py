@@ -37,7 +37,7 @@ from .. import audit, pseudonym, redact
 from .. import studio as studio_logic
 from ..access import may_see_thumbnail
 from ..deps import TEXT_MAX, SessionDep, check_length, current_staff, id_in_range, require_id
-from ..models import (AiRun, Artifact, AuditLog, Camera, CollectionItem, Customer, Device, Event, Feedback,
+from ..models import (AiRun, Artifact, AuditLog, Camera, Collection, CollectionItem, Customer, Device, Event, Feedback,
                       IndexProblem, RawRevision, ReviewState, Staff)
 from ..s3 import ETagMismatch
 from ..schemas import (AiRunOut, ArtifactOut, Box, DensityOut, DensityRow, DetectionsOut, DispatchOut, EventDetail,
@@ -312,18 +312,35 @@ def list_events(
         conds.append(_flagged.is_(flagged))
     if filter is not None:
         conds.append(studio_logic.builtin_condition(filter))
-    if collection_id is not None:
-        conds.append(_in_collection(collection_id))
+    if collection_id is not None:  # a collection this viewer may not see filters like one that does not exist
+        conds.append(_in_collection(collection_id, staff))
     return event_page(session, viewer, conds, cursor, limit, with_total)
 
 
 TOTAL_CAP = 10_000
 
 
-def _in_collection(collection_id: int):
+def visible_collections(staff: Staff):
+    """Condition over Collection: the collections `staff` may see. Non-labelers see all; a labeler sees the
+    public ones and the ones private to them. Privacy is fixed at creation (`private_to_staff_id`), so a later
+    role change never exposes a collection. Every route that takes a collection id applies this rule."""
+    if staff.role != "labeler":
+        return true()
+    return or_(Collection.private_to_staff_id.is_(None), Collection.private_to_staff_id == staff.id)
+
+
+def collection_visible(staff: Staff, col: Collection) -> bool:
+    """`visible_collections` for one loaded collection."""
+    return staff.role != "labeler" or col.private_to_staff_id is None or col.private_to_staff_id == staff.id
+
+
+def _in_collection(collection_id: int, staff: Staff):
+    """Condition over Event: in that collection, when `staff` may see it (else nothing, as for no collection)."""
     if not id_in_range(collection_id):
         return false()
-    return Event.id.in_(select(CollectionItem.event_id).where(CollectionItem.collection_id == collection_id))
+    return Event.id.in_(select(CollectionItem.event_id)
+                        .join(Collection, Collection.id == CollectionItem.collection_id)
+                        .where(CollectionItem.collection_id == collection_id, visible_collections(staff)))
 
 
 def event_page(session: Session, viewer: _Viewer, conds: list, cursor: Optional[str], limit: int,

@@ -122,7 +122,7 @@ def test_corrupt_clip_is_permanent_until_an_operator_retry(sm, s3client, s3, db_
     with sm() as s:
         assert _problem(s, eid) is None
         assert media._pending_ids(s, 50, now=T0) == [eid]
-    assert "1 media problem" in capsys.readouterr().out
+    assert "2 media problem" in capsys.readouterr().out  # the thumbnail's and the filmstrip's (one per stage)
 
 
 # ---------------------------------------------------------------- M2: resource caps

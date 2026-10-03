@@ -161,16 +161,25 @@ class S3:
                 "Objects": [{"Key": k} for k in keys[start:start + 1000]], "Quiet": True})
         return len(keys)
 
-    def delete_keys(self, keys) -> int:
-        """Delete these objects (each under a writable prefix); returns how many were asked for."""
+    def delete_keys(self, keys) -> dict[str, str]:
+        """Delete these objects (each under a writable prefix). DeleteObjects answers HTTP 200 even when single
+        keys fail, so its per-key `Errors` are read: returns {key: error code} for every key that was not
+        deleted (empty when all were). A request that fails as a whole raises."""
         keys = sorted(set(keys))
         for key in keys:
             if not key.startswith(WRITABLE_PREFIXES) or key in WRITABLE_PREFIXES:
                 raise ValueError(f"refusing to delete outside {WRITABLE_PREFIXES}: {key}")
+        failed: dict[str, str] = {}
         for start in range(0, len(keys), 1000):
-            self.client.delete_objects(Bucket=self.bucket, Delete={
-                "Objects": [{"Key": k} for k in keys[start:start + 1000]], "Quiet": True})
-        return len(keys)
+            batch = keys[start:start + 1000]
+            resp = self.client.delete_objects(Bucket=self.bucket, Delete={
+                "Objects": [{"Key": k} for k in batch], "Quiet": True})
+            asked = set(batch)
+            for err in (resp or {}).get("Errors") or []:
+                key = err.get("Key")
+                if key in asked:
+                    failed[key] = str(err.get("Code") or "Error")
+        return failed
 
     def exists(self, key: str) -> bool:
         from botocore.exceptions import ClientError

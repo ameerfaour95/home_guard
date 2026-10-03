@@ -233,8 +233,7 @@ def validate_export_request(session: Session, body: ExportRequest, labeler: bool
     and to admins, and a check that refuses names of households they cannot see would reveal those households."""
     if not body.formats:
         raise RequestError("Choose at least one format")
-    if len(body.name) > 100:
-        raise RequestError("The export name is too long (at most 100 characters)")
+    # the name's length (at most deps.NAME_MAX, else 422) is checked by the routes, like collection names
     if not labeler and identifies_household(session, body.name):
         raise RequestError(NAME_IDENTIFIES)
     split = body.split or {}

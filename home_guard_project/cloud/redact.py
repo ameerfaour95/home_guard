@@ -9,7 +9,9 @@ their free-text values go through here.
 Identity terms of a device: its site, every camera name (Camera rows, cameras seen in events, heartbeat
 cameras), the owner's camera display names, the customer name, the Tailscale host and the heartbeat host -- now
 and in the past: every such name is also kept in `identity_aliases` (recorded at enrolment, on a customer rename,
-and by every index pass), and the union is used, so a rename never brings an old name back; plus spelling variants
+and by every index pass), and the union is used, so a rename never brings an old name back. History older than that table (audit log
+renames, raw JSON revisions, enrolment sites; `legacy_names`) is read into it by migration 0008, and lazily, once
+per device, by `ensure_history` as a safety net; plus spelling variants
 (`_`, space, `-` or nothing between the parts, so "bian_house" also catches "BianHouse") and each distinctive
 part of at least 4 characters that is not a common word ("bian" of "bian_ch2", "Levi" of "Daniel Levi").
 Matching is case-insensitive and whole-word-ish: a term must not continue an alphanumeric run, except at a
@@ -27,7 +29,7 @@ from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Any, Iterable, Optional
 
-from sqlalchemy import select
+from sqlalchemy import column, select, table, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -131,6 +133,135 @@ def _current(session: Session, device: Device) -> tuple[set[tuple[str, str]], li
     return {(k, v) for k, v in names if v}, shown
 
 
+# ---------------------------------------------------------------- names in older history
+
+# The marker row (kind, value) saying a device's older history has been read into identity_aliases.
+SCANNED = ("_scanned", "legacy")
+MAX_ALIAS = 200  # longer strings are not names
+# Fields of the box's JSON bodies (meta, feedback, heartbeat) that name the household or a camera.
+BODY_FIELDS = (("camera_name", "camera"), ("site", "site"), ("prompt_camera_name", "display_name"),
+               ("host", "host"), ("camera", "camera"))
+
+
+def _name(value: Any) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    return value if 0 < len(value) <= MAX_ALIAS else None
+
+
+def body_names(body: Any) -> set[tuple[str, str]]:
+    """The (kind, name) pairs a box JSON body carries: camera_name, site, prompt_camera_name, host, a feedback's
+    camera and alert camera, a heartbeat's camera names."""
+    out: set[tuple[str, str]] = set()
+    if not isinstance(body, dict):
+        return out
+    pairs = [(kind, body.get(field)) for field, kind in BODY_FIELDS]
+    if isinstance(body.get("alert"), dict):
+        pairs.append(("camera", body["alert"].get("camera")))
+    if isinstance(body.get("cameras"), dict):
+        pairs += [("camera", k) for k in body["cameras"]]
+    for kind, value in pairs:
+        name = _name(value)
+        if name:
+            out.add((kind, name))
+    return out
+
+
+def _like_prefix(prefix: str) -> str:
+    """A LIKE pattern (escape character `!`) for keys starting with `prefix`."""
+    return prefix.replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%"
+
+
+# (kind, SQL of the JSON value, SQL of its text) for each name-bearing field of raw_revisions.body
+_RAW_FIELDS = [(kind, f"r.body->'{field}'", f"r.body->>'{field}'") for field, kind in BODY_FIELDS] + [
+    ("camera", "r.body->'alert'->'camera'", "r.body->'alert'->>'camera'")]
+_UNDER = "(r.s3_key LIKE :p1 ESCAPE '!' OR r.s3_key LIKE :p2 ESCAPE '!')"
+# the table as plain columns (not the model): a migration writes it too
+_ALIASES = table("identity_aliases", column("device_pk"), column("kind"), column("value"), column("first_seen"))
+
+
+def legacy_names(conn, device_pk: int) -> set[tuple[str, str]]:
+    """Every (kind, name) the device's older history holds, read with plain SQL (`conn` is a Connection or a
+    Session, so a migration can use it): the customer's names in the audit log (customer_create and
+    customer_update targets, and the old and new names of a logged rename), the site of its enrolment, the raw
+    JSON revisions under its prefixes (camera_name, site, prompt_camera_name, host, feedback cameras, heartbeat
+    camera names), the camera of every indexed object, and a `camera_aliases` table when one exists."""
+    dev = conn.execute(text("SELECT site, device_id, customer_id FROM devices WHERE id = :pk"),
+                       {"pk": device_pk}).first()
+    if dev is None:
+        return set()
+    site, device_id, customer_id = dev
+    out: set[tuple[str, str]] = set()
+
+    def add(kind: str, value: Any) -> None:
+        name = _name(value)
+        if name:
+            out.add((kind, name))
+
+    for action, target, detail in conn.execute(text(
+            "SELECT action, target, detail FROM audit_log "
+            "WHERE (customer_id = :c AND action IN ('customer_create', 'customer_update')) "
+            "OR (device_id = :d AND action = 'device_enroll')"), {"c": customer_id, "d": device_id}):
+        if action == "device_enroll":
+            add("site", target)
+            continue
+        add("customer", target)
+        changed = detail.get("changed") if isinstance(detail, dict) else None
+        if isinstance(changed, dict) and isinstance(changed.get("name"), (list, tuple)):
+            for value in changed["name"]:
+                add("customer", value)
+    prefixes = {"p1": _like_prefix(f"production_{site}/"), "p2": _like_prefix(f"dataset_{site}/")}
+    columns = ", ".join(f"CASE WHEN jsonb_typeof({js}) = 'string' THEN {tx} END" for _, js, tx in _RAW_FIELDS)
+    for row in conn.execute(text(f"SELECT DISTINCT {columns} FROM raw_revisions r WHERE {_UNDER}"), prefixes):
+        for (kind, _, _), value in zip(_RAW_FIELDS, row):
+            add(kind, value)
+    for (name,) in conn.execute(text(
+            "SELECT DISTINCT k FROM raw_revisions r, LATERAL jsonb_object_keys(CASE WHEN "
+            "jsonb_typeof(r.body->'cameras') = 'object' THEN r.body->'cameras' ELSE '{}'::jsonb END) AS k "
+            f"WHERE {_UNDER}"), prefixes):
+        add("camera", name)
+    for (name,) in conn.execute(text(f"SELECT DISTINCT r.camera FROM artifacts r WHERE {_UNDER}"), prefixes):
+        add("camera", name)
+    if conn.execute(text("SELECT to_regclass('camera_aliases')")).scalar() is not None:
+        columns = dict(conn.execute(text(
+            "SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'camera_aliases'")
+        ).all())
+        texts = [c for c, kind in columns.items() if kind in ("text", "character varying")]
+        if "device_pk" in columns and texts:
+            cols = ", ".join('"' + c.replace('"', '""') + '"' for c in texts)
+            for row in conn.execute(text(f"SELECT {cols} FROM camera_aliases WHERE device_pk = :pk"),
+                                    {"pk": device_pk}):
+                for value in row:
+                    add("camera", value)
+    return out
+
+
+def scan_legacy(conn, device_pk: int, now: Optional[datetime] = None) -> int:
+    """Read the device's older history (`legacy_names`) into identity_aliases and mark it read; returns how many
+    names were new. When there are any, the stored labeler search text of its events is cleared, so the next
+    index pass recomputes it with the whole history."""
+    when = now or datetime.now(timezone.utc)
+    rows = [{"device_pk": device_pk, "kind": k, "value": v, "first_seen": when}
+            for k, v in sorted(legacy_names(conn, device_pk) | {SCANNED})]
+    stmt = pg_insert(_ALIASES).values(rows).on_conflict_do_nothing().returning(_ALIASES.c.kind)
+    new = sum(1 for (kind,) in conn.execute(stmt).all() if kind != SCANNED[0])
+    if new:
+        conn.execute(text("UPDATE events SET summary_redacted = NULL WHERE device_pk = :d"), {"d": device_pk})
+    return new
+
+
+def ensure_history(session: Session, device: Device) -> None:
+    """The safety net behind migration 0008: a device whose older history was never read (no marker row) has it
+    read now, once."""
+    if device is None or device.id is None:
+        return
+    marked = session.scalar(select(IdentityAlias.id).where(
+        IdentityAlias.device_pk == device.id, IdentityAlias.kind == SCANNED[0]).limit(1))
+    if marked is None:
+        scan_legacy(session, device.id)
+
+
 def _history(session: Session, device: Device) -> list[tuple[str, str]]:
     """Every (kind, name) recorded for the device, plus the customer names recorded for the customer's other
     devices."""
@@ -158,7 +289,9 @@ def remember(session: Session, device: Device, extra: Iterable[tuple[str, str]] 
 
 
 def _sources(session: Session, device: Device) -> tuple[list[str], list[tuple[str, Optional[str]]]]:
-    """(customer-level names, [(camera-level name, camera it stands for)]), current names first, then history."""
+    """(customer-level names, [(camera-level name, camera it stands for)]), current names first, then history
+    (the device's older history is read into identity_aliases first if it never was)."""
+    ensure_history(session, device)
     names, shown = _current(session, device)
     history = _history(session, device)
     whole_kinds = ("site", "customer", "host")

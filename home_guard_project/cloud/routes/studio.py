@@ -21,7 +21,7 @@ from ..schemas import (
     ExportRequest,
     SavedFilter,
 )
-from .events import _decode_cursor, _Viewer, _in_collection, event_page
+from .events import _decode_cursor, _Viewer, _in_collection, collection_visible, event_page, visible_collections
 
 router = APIRouter(prefix="/studio", tags=["studio"], dependencies=[Depends(current_staff)])
 
@@ -32,6 +32,8 @@ _studio_staff = require_role("admin", "labeler")
 #
 # Collections and exports a labeler creates are visible only to that labeler and to admins, and their names are
 # not checked against household identities (that check answered differently for hidden households, an oracle).
+# A collection's privacy is fixed when it is made (`private_to_staff_id`), never derived from anyone's current
+# role, and every route that takes a collection id (events list, items, preview, export) applies it.
 # Names chosen by admins, which every labeler may see, keep the identity check.
 
 
@@ -74,21 +76,11 @@ def _collection_out(session: Session, staff: Staff, col: Collection, count: Opti
                          created_utc=col.created_at or datetime.fromtimestamp(0, timezone.utc))
 
 
-def _labeler_ids(session: Session) -> set[int]:
-    return set(session.scalars(select(Staff.id).where(Staff.role == "labeler")))
-
-
-def _collection_visible(staff: Staff, col: Collection, labelers: set[int]) -> bool:
-    """Admins see every collection; a labeler sees their own and those made by non-labelers (admins)."""
-    if staff.role != "labeler":
-        return True
-    return col.created_by == staff.id or col.created_by not in labelers
-
-
 def _load_collection(session: Session, collection_id: int, staff: Staff) -> Collection:
-    """The collection when it exists and `staff` may see it; otherwise one 404, the same for hidden and absent."""
+    """The collection when it exists and `staff` may see it (events.visible_collections); otherwise one 404, the
+    same for hidden and absent."""
     col = session.get(Collection, collection_id) if 1 <= collection_id <= MAX_DB_ID else None
-    if col is None or not _collection_visible(staff, col, _labeler_ids(session)):
+    if col is None or not collection_visible(staff, col):
         raise HTTPException(status_code=404, detail=_COLLECTION_NOT_FOUND)
     return col
 
@@ -114,9 +106,8 @@ def _visible_events(session: Session, staff: Staff, event_ids: list[int]) -> lis
 
 @router.get("/collections", response_model=list[CollectionOut], dependencies=[Depends(_studio_staff)])
 def list_collections(staff: Staff = Depends(current_staff), session: Session = SessionDep):
-    labelers = _labeler_ids(session)
-    cols = [c for c in session.scalars(select(Collection).order_by(Collection.id.desc())).all()
-            if _collection_visible(staff, c, labelers)]
+    cols = session.scalars(select(Collection).where(visible_collections(staff))
+                           .order_by(Collection.id.desc())).all()
     counts = _event_counts(session, staff.role == "labeler", [c.id for c in cols])
     return [_collection_out(session, staff, c, counts.get(c.id, 0)) for c in cols]
 
@@ -132,7 +123,8 @@ def create_collection(body: CollectionIn, request: Request, staff: Staff = Depen
     if staff.role != "labeler":  # a labeler's collection is private to them: no identity check, no oracle
         _checked(studio_logic.validate_collection_text, session, name, body.description)
     now = request.app.state.clock()
-    col = Collection(name=name, description=body.description or "", created_by=staff.id, created_at=now)
+    col = Collection(name=name, description=body.description or "", created_by=staff.id, created_at=now,
+                     private_to_staff_id=staff.id if staff.role == "labeler" else None)
     session.add(col)
     session.flush()
     audit.record(session, staff.id, "collection_create", target=f"collection/{col.id}", detail={"name": name},
@@ -219,6 +211,7 @@ def list_exports(request: Request, staff: Staff = Depends(current_staff), sessio
 @router.post("/exports", response_model=ExportOut, dependencies=[Depends(_studio_staff)])
 def create_export(body: ExportRequest, request: Request, staff: Staff = Depends(current_staff),
                   session: Session = SessionDep):
+    check_length("name", body.name, NAME_MAX)  # 422, like collection names
     labeler = staff.role == "labeler"
     _checked(studio_logic.validate_export_request, session, body, labeler)
     _load_collection(session, body.collection_id, staff)
@@ -261,7 +254,7 @@ def list_collection_items(
         _decode_cursor(cursor)  # a bad cursor is a 400 before any query
     _load_collection(session, collection_id, staff)
     viewer = _Viewer(staff, request)
-    return event_page(session, viewer, [viewer.visible(), _in_collection(collection_id)], cursor, limit)
+    return event_page(session, viewer, [viewer.visible(), _in_collection(collection_id, staff)], cursor, limit)
 
 
 @router.post("/exports/preview", response_model=ExportPreview, dependencies=[Depends(_studio_staff)])
@@ -275,6 +268,7 @@ def preview_export(body: ExportRequest, request: Request, staff: Staff = Depends
     """
     # For a labeler, who may not know those events exist, they are silently left out instead (no exclusion
     # entry, no count). (A comment, not part of the docstring: the docstring is in the frozen OpenAPI.)
+    check_length("name", body.name, NAME_MAX)
     labeler = staff.role == "labeler"
     warnings = list(_checked(studio_logic.validate_export_request, session, body, labeler))
     _load_collection(session, body.collection_id, staff)
