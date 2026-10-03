@@ -6,6 +6,7 @@ import json
 import math
 import os
 import time
+import threading
 
 
 def camera_key(name):
@@ -31,6 +32,33 @@ class PreviewWriter:
         self.sources = {}
         self.camera_names = []
         self.manifest_pending = False
+        self.preference = {}
+        self._pending = {}
+        self._pending_lock = threading.Lock()
+        self._stop = threading.Event()
+        self._worker = None
+
+    def offer(self, camera, frame):
+        """Latest masked capture only; never encode or wait for disk on detection."""
+        if not self.enabled:
+            return
+        with self._pending_lock:
+            self._pending[camera] = frame
+            if self._worker is None:
+                self._worker = threading.Thread(target=self._drain, name="preview-publisher", daemon=True)
+                self._worker.start()
+
+    def _drain(self):
+        while not self._stop.wait(.008):
+            with self._pending_lock:
+                frames = dict(self._pending)
+            for camera, frame in frames.items():
+                self.publish(camera, frame, source=frame)
+
+    def close(self):
+        self._stop.set()
+        if self._worker is not None:
+            self._worker.join(timeout=2)
 
     def set_cameras(self, names):
         self.camera_names = list(names)
@@ -64,11 +92,15 @@ class PreviewWriter:
                 self.viewer_checked=now
                 try:
                     preference=json.loads((self.directory / "viewer.alive").read_text(encoding="utf-8"))
+                    self.preference=preference if isinstance(preference,dict) else {}
                     self.hero=preference.get("hero") if isinstance(preference,dict) else None
-                except (OSError,ValueError): self.hero=None
-            interval=1/6 if camera==self.hero else self.interval
+                except (OSError,ValueError): self.hero=None;self.preference={}
+            live = self.preference.get("version") == 2
+            if live and (not self.preference.get("visible") or camera not in self.preference.get("cameras", [])):
+                return False
+            interval=(1/18 if camera==self.hero else 1/6) if live else (1/6 if camera==self.hero else self.interval)
             return (
-                _fresh_timestamp(timestamp, now, 15)
+                _fresh_timestamp(timestamp, now, 3 if live else 15)
                 and now - self.last.get(camera, float("-inf")) >= interval
             )
         except OSError:
@@ -89,7 +121,8 @@ class PreviewWriter:
             if max(frame.shape[:2])>1280:
                 scale=1280/max(frame.shape[:2])
                 frame=cv2.resize(frame,None,fx=scale,fy=scale,interpolation=cv2.INTER_AREA)
-            ok, encoded = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 88])
+            quality = 75 if self.preference.get("version") == 2 else 88
+            ok, encoded = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
             if not ok:
                 return False
             temp.write_bytes(encoded.tobytes())
@@ -125,18 +158,21 @@ class PreviewReader:
         except (OSError, ValueError):
             return []
 
-    def touch(self, hero=None):
+    def touch(self, hero=None, *, visible=None, cameras=()):
         self.directory.mkdir(parents=True, exist_ok=True)
         marker=self.directory / "viewer.alive"
-        if hero is None:
+        if hero is None and visible is None:
             marker.touch()
         else:
             temporary=self.directory / ("viewer."+str(os.getpid())+".tmp")
             try:
-                temporary.write_text(json.dumps({"hero":hero}),encoding="utf-8")
+                demand={"hero":hero}
+                if visible is not None:
+                    demand.update(version=2,visible=bool(visible),cameras=list(cameras))
+                temporary.write_text(json.dumps(demand),encoding="utf-8")
                 os.replace(temporary,marker)
             except OSError:
-                marker.touch()
+                if visible is None: marker.touch()
             finally:
                 temporary.unlink(missing_ok=True)
 

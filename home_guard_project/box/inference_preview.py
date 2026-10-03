@@ -38,6 +38,10 @@ def adapt_stream(stream_class, writer):
 
         def read(self):
             frame = super().read()
+            # Real capture uses _ingest below, independently of YOLO's loop.
+            # Keep the original adapter contract for older stream interfaces.
+            if hasattr(self, "_running"):
+                return frame
             if frame is None or not writer.enabled:
                 return frame
             # The underlying frame object changes only when capture succeeds.
@@ -55,6 +59,12 @@ def adapt_stream(stream_class, writer):
                 writer.publish(self.name, disp, source=source)
             return frame
 
+        def _ingest(self, frame, now):
+            super()._ingest(frame, now)
+            # _frame is already zone-masked and replaced, never mutated, by capture.
+            # One bounded latest-frame slot per camera; encoding is on one worker.
+            writer.offer(self.name, self._frame)
+
     return PreviewStream
 
 
@@ -64,7 +74,10 @@ def main():
     writer = PreviewWriter(Path(LOG_DIR) / "preview", enabled=preview_enabled())
     if writer.enabled:
         inference._Stream = adapt_stream(inference._Stream, writer)
-    inference.main()
+    try:
+        inference.main()
+    finally:
+        writer.close()
 
 
 if __name__ == "__main__":

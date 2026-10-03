@@ -30,3 +30,31 @@ will be contacted. Remote throughput likewise requires an actual transport and
 network validation; existing one-shot snapshots cannot satisfy 8 fps.
 
 Measured baseline: hero 5.81 fps; each thumbnail 2.09 fps. File-to-paint 134.69 ms median / 186.20 ms p95 (519.61 ms max). AI write-to-paint 443.79 ms median / 834.48 ms max. UI scheduling lateness 28.45 ms p95 / 53.72 ms max. Publisher 4.16% of one workstation core.
+
+## Part 2: frames
+
+Retain the existing atomic JPEG transport: it works across the engine and app's
+separate processes on Windows without new dependencies or shared-memory ownership.
+The app sends a versioned three-second visibility lease listing cameras and hero.
+Visible demand requests 18/6 fps (headroom for capture/scheduling); hidden,
+minimised, other-page and closed windows request no frames. Old viewers retain
+their 6/2 fps behaviour. JPEG quality is 75 for the new viewer; sub-stream geometry
+is retained up to the existing 1280-pixel limit.
+
+Inference capture hands its already-masked immutable frame to one bounded slot
+per camera. A single encoding worker consumes the latest slot independently of
+YOLO. No extra capture, inference or frame copy is added to detector `read()`.
+The legacy collector still publishes at its existing loop cadence: that producer
+cannot be decoupled from detection within this round's allowed files.
+
+Qt watches the preview directory in a worker thread, reads and decodes changed
+files to QImage, then signals the GUI to paint. One delivery is in flight, so a
+busy GUI cannot accumulate a video backlog. A 250 ms recovery scan covers missed
+directory notifications. Fullscreen mirrors frame arrivals instead of polling.
+The decorative blurred backing is cached for one second rather than rebuilt on
+every paint.
+
+Intermediate replay: [live_frames.json](live_frames.json): 16.14 hero fps,
+5.43–5.57 thumbnail fps, 7.23 ms median / 17.12 ms p95 file-to-paint,
+23.46 ms maximum scheduling lateness. Publisher CPU 11.72% of one workstation
+core, versus baseline 4.16%: **+7.56 percentage points**. This is not an N150 claim.

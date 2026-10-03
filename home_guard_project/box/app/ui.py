@@ -4,7 +4,7 @@ import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from PySide6.QtCore import Qt, QTimer, QSize, Signal, QRectF
+from PySide6.QtCore import Qt, QTimer, QSize, Signal, QRectF, QEvent
 from PySide6.QtGui import QColor, QPainter, QPen, QPixmap, QFont, QLinearGradient, QIcon, QShortcut, QKeySequence
 from PySide6.QtWidgets import (
     QMainWindow,
@@ -69,6 +69,7 @@ def demo_picture(number):
 class CameraTile(QFrame):
     clicked = Signal()
     double_clicked = Signal()
+    frame_changed = Signal()
     def __init__(self, name):
         super().__init__()
         self.setObjectName("card")
@@ -116,15 +117,17 @@ class CameraTile(QFrame):
     def mouseDoubleClickEvent(self,event):
         self.double_clicked.emit()
 
-    def update_picture(self, pix):
+    def update_picture(self, pix, stamp=None):
+        if stamp is not None:
+            self.frame_stamp = stamp
         self.picture = pix if pix and not pix.isNull() else None
         if self.picture or self.stopped or self.off: self.skeleton_timer.stop()
         elif not self.skeleton_timer.isActive(): self.skeleton_timer.start()
-        self._ambient_key=None
         self.status.setText("Off" if self.off else tr("stopped") if self.stopped else tr("premium_live") if self.picture else tr("offline"))
         self.status.setObjectName("ok" if self.picture else "muted")
         self.status.setStyleSheet("")
         self.update()
+        self.frame_changed.emit()
 
     def paintEvent(self, event):
         super().paintEvent(event)
@@ -139,7 +142,7 @@ class CameraTile(QFrame):
             clip=QPainterPath();clip.addRoundedRect(QRectF(area),16,16);p.setClipPath(clip)
             if self.hero:
                 from .camera_presentation import ambient_picture
-                key=(self.picture.cacheKey(),area.width(),area.height())
+                key=(int(time.monotonic()),area.width(),area.height())
                 if key!=getattr(self,'_ambient_key',None):
                     self._ambient=ambient_picture(self.picture);self._ambient_key=key
                 p.drawPixmap(QRectF(area),self._ambient,QRectF(self._ambient.rect()))
@@ -423,7 +426,7 @@ class Window(QMainWindow):
         self.last_poll = 0
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.tick)
-        self.timer.start(166)
+        self.timer.start(1000)
         self.camera_stack.setCurrentIndex(1)
         self.current_state = None
         from .camera_controls import CameraControls
@@ -524,28 +527,41 @@ class Window(QMainWindow):
             self.apply_state(self.current_state, self.current_show, self.events)
         if self.current_state and self.box_controls.is_stopped() and self.current_state.collecting:
             self.apply_state(self.current_state, self.current_show, self.events)
-        # Re-read permission at each viewer tick. Never touch the marker when hidden.
-        try:
-            allowed = bool(bc.get_option("show_cameras"))
-        except Exception:
-            allowed = False
-        if self.current_state is not None and allowed != self.current_show:
-            self.apply_state(self.current_state, allowed, self.events)
-        if allowed and not self.box_controls.is_stopped():
-            try:
-                self.reader.touch(self.expanded_tile.name if self.expanded_tile else (self.tiles[0].name if self.tiles else None))
-                for tile in self.tiles:
-                    if tile.off: continue
-                    data = self.reader.read(tile.name)
-                    pix = QPixmap()
-                    if data:
-                        pix.loadFromData(data)
-                    tile.update_picture(pix)
-            except OSError:
-                for tile in self.tiles:
-                    tile.update_picture(None)
-
+        if not hasattr(self, "live_transport"):
+            from .live_transport import LiveTransport
+            self.live_transport = LiveTransport(self.reader.directory, self)
+            self.live_transport.frames.connect(self.receive_frames)
+            self.content_stack.currentChanged.connect(lambda _: self.update_demand())
+        self.update_demand()
         self.update_detector()
+
+    def update_demand(self):
+        if not hasattr(self, "live_transport"): return
+        visible = (self.isVisible() and not self.isMinimized()
+                   and self.content_stack.currentIndex() == 0
+                   and getattr(self, "current_show", False)
+                   and not self.box_controls.is_stopped())
+        hero = getattr(self, "expanded_tile", None)
+        self.live_transport.demand([t.name for t in self.tiles if not t.off],
+                                   hero.name if hero else None, visible)
+
+    def receive_frames(self, frames):
+        for tile in self.tiles:
+            if tile.name in frames and not tile.off:
+                image, stamp = frames[tile.name]
+                tile.update_picture(QPixmap.fromImage(image), stamp)
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.WindowStateChange: self.update_demand()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.update_demand()
+
+    def hideEvent(self, event):
+        self.update_demand()
+        super().hideEvent(event)
 
     def update_detector(self):
         from .detector_view import camera_view
@@ -842,11 +858,13 @@ class Window(QMainWindow):
         clone=CameraTile(tile.name);clone.hero=True;clone.picture=tile.picture;clone.detections=tile.detections;clone.box_opacity=tile.box_opacity;clone.show_detections=tile.show_detections;clone.detection_labels=tile.detection_labels
         clone.caption.setText(tile.caption.text());clone.detector_enabled=tile.detector_enabled;clone.detector_note.setText(tile.detector_note.text());clone.detector_note.setVisible(tile.detector_enabled)
         lay.addWidget(clone);clone.clicked.connect(dialog.close)
-        timer=QTimer(dialog)
         def refresh():
-            clone.stopped=tile.stopped;clone.detections=tile.detections;clone.box_opacity=tile.box_opacity;clone.show_detections=tile.show_detections;clone.detection_labels=tile.detection_labels;clone.detector_note.setText(tile.detector_note.text());clone.update_picture(tile.picture)
-        timer.timeout.connect(refresh);timer.start(166)
+            clone.stopped=tile.stopped;clone.detections=tile.detections;clone.box_opacity=tile.box_opacity;clone.show_detections=tile.show_detections;clone.detection_labels=tile.detection_labels;clone.detector_note.setText(tile.detector_note.text());clone.update_picture(tile.picture,getattr(tile,"frame_stamp",None))
+        tile.frame_changed.connect(refresh)
+        refresh()
         dialog.showFullScreen();dialog.exec()
+        tile.frame_changed.disconnect(refresh)
+        dialog.deleteLater()
 
     def keyPressEvent(self, event):
         if event.key()==Qt.Key.Key_F11:
@@ -882,6 +900,7 @@ class Window(QMainWindow):
             self.thumbnail_scroll.setWidget(holder);self.grid.addWidget(self.thumbnail_scroll,1,0)
         else: self.thumbnail_scroll=None
         for tile in self.tiles: tile.show();tile.update()
+        self.update_demand()
         if before is not None:
             self.grid.activate()
             from .motion import Transition
@@ -905,6 +924,7 @@ class Window(QMainWindow):
         self.activity_layout.addStretch()
 
     def closeEvent(self, event):
+        if hasattr(self, "live_transport"): self.live_transport.close()
         if hasattr(self, "demo_media_dir"): self.demo_media_dir.cleanup()
         if hasattr(self, "camera_retry"): self.camera_retry.clear()
         if hasattr(self,"saved_run_answers"):
