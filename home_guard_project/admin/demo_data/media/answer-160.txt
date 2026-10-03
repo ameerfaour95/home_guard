@@ -1,5 +1,5 @@
 {
-  "summary": "Routine activity collected for training.",
+  "summary": "A dog walked across the garden toward the trees.",
   "alert_command": "[none]",
   "confidence": 0.93
 }

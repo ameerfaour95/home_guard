@@ -107,7 +107,7 @@ class CustomerScreen(QWidget):
                 self.event_view.next.setEnabled(i < len(rows)-1 or bool(self.timeline.cursor))
                 if self.review_mode and self.role == 'labeler':
                     self.name.setText(event.customer_name)
-                    self.health.setText(f'{event.site}  ·  {event.camera}  ·  Times shown in UTC')
+                    self.health.setText(f'{event.site}  ·  {event.camera}  ·  Times shown in {event.timezone}')
                 break
         self.tabs.setTabEnabled(1, True); self.tabs.setCurrentIndex(1)
         self.event_view.open(event_id, self.zone)

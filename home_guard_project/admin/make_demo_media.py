@@ -79,12 +79,12 @@ def main():
         status = ('real', 'failed', 'fallback', 'real', 'none', 'real')[i % 6]
         obj = ('person', 'car', 'dog')[i % 3]
         boxes = ('sampled', 'captured', 'recomputed', 'none')[i % 4]
-        summary = ('A person approached the entrance and left a parcel.', 'Vehicle movement at the driveway. AI request timed out.',
-                   'An animal crossed the garden. Collection fallback saved.', 'Camera paused by owner; footage retained for review.',
-                   'Owner marked the driveway alert as a false alarm.', 'Routine activity collected for training.')[i % 6]
+        summary = ('A person approached the entrance and left a parcel.', 'A vehicle pulled into the driveway.',
+                   'An animal crossed the garden.', 'A visitor walked past the front door without stopping.',
+                   'A car passed the driveway and continued along the road.', 'A dog walked across the garden toward the trees.')[i % 6]
         verdicts = ['false_alarm'] if i % 5 == 4 else ['real'] if i % 7 == 0 else []
         base = dict(id=eid, site=customer['devices'][0]['site'], customer_id=customer['id'], customer_name=customer['name'],
-                    camera=('Front door', 'Driveway', 'Garden')[i % 3], kind=kind,
+                    camera=('Front door', 'Driveway', 'Garden')[i % 3], kind=kind, timezone=customer['timezone'],
                     start_utc=start.isoformat(), end_utc=(start+timedelta(seconds=SECONDS)).isoformat(),
                     summary=summary, label=obj, alert_command='[send_message]' if kind == 'alert' else '[none]',
                     detected=[obj], owner_verdicts=verdicts,

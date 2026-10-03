@@ -3,7 +3,7 @@ import time
 from PySide6.QtCore import Qt, Signal, QTimer, QEvent
 from PySide6.QtGui import QShortcut, QKeySequence
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QTableView, QHeaderView, QStackedWidget, QAbstractItemView
-from .backend import OfflineError, AuthError, all_events
+from .backend import OfflineError, AuthError
 from .demo_backend import DemoBackend
 from .formatting import utcnow
 from .fleet_model import FleetModel, FleetDelegate
@@ -183,14 +183,14 @@ class FleetScreen(QWidget):
         self.update_age()
         self.loaded.emit(snapshot, customers)
         end = snapshot.generated_utc
-        self.activity_runner.start(lambda: (all_events(self.backend, from_utc=(end-timedelta(hours=24)).isoformat(), to_utc=end.isoformat()), end))
+        self.activity_runner.start(lambda: self.backend.activity(hours=24))
 
     def activity_loaded(self, result, error):
         if error:
             self.activity.setToolTip('Activity could not be refreshed. Try Refresh.')
+            if not self.activity.hours: self.activity.set_error()
             return
-        events, end = result
-        self.activity.set_events(events, end-timedelta(hours=24), end)
+        self.activity.set_density(result)
 
     def show_error(self, error):
         if isinstance(error, AuthError):

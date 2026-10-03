@@ -13,12 +13,15 @@ TOKEN = dict(access_token='access-1', refresh_token='refresh-1', expires_in=900,
              staff=dict(id=1, email='staff@example.com', name='Test Staff', role='admin'))
 
 
-@pytest.mark.parametrize('path', sorted(DATA.glob('*.json')), ids=lambda p: p.name)
+@pytest.mark.parametrize('path', sorted(p for p in DATA.glob('*.json') if p.name not in ('camera_catalog.json','studio_members.json')), ids=lambda p: p.name)
 def test_every_fixture_parses_and_keeps_contract_fields(path):
     name = path.name
     model = (FleetResponse if name == 'fleet.json' else list[CustomerOut] if name == 'customers.json'
              else DetectionsOut if name.startswith('detections_') else CustomerOut if name.startswith('customer_') else EventPage if name == 'events.json' else EventDetail)
-    source = json.loads(path.read_text())
+    model = {'audit.json': AuditPage, 'fleet_activity.json': DensityOut, 'studio_collections.json': list[CollectionOut],
+             'studio_filters.json': list[SavedFilter], 'studio_exports.json': list[ExportOut],
+             'review_count.json': ReviewCount, 'events_density.json': DensityOut}.get(name,model)
+    source = json.loads(path.read_text(encoding='utf-8'))
     parsed = decode(model, source)
     def shape(wire, actual):
         if isinstance(wire, list):

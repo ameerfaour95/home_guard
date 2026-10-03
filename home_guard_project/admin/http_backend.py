@@ -5,6 +5,7 @@ import ssl
 import certifi
 import httpx
 from .backend import AuthError, ForbiddenError, OfflineError, ServerError, RateLimitError
+from .models import SavedFilter, CollectionOut, ExportOut, AuditPage, DensityOut, ReviewCount
 from .models import TokenPair, StaffOut, FleetResponse, CustomerOut, EventPage, EventDetail, EventSummary, DetectionsOut, MediaAccess, decode
 
 
@@ -130,3 +131,39 @@ class HttpBackend:
             return response.content
         except httpx.TransportError:
             raise OfflineError() from None
+
+    def density(self, **filters):
+        return self._get('events/density', DensityOut, **{k: v for k, v in filters.items() if v is not None})
+
+    def review_count(self):
+        return self._get('events/review-count', ReviewCount)
+
+    def activity(self, hours=24):
+        return self._get('fleet/activity', DensityOut, hours=hours)
+
+    def saved_filters(self):
+        return self._get('studio/filters', list[SavedFilter])
+
+    def collections(self):
+        return self._get('studio/collections', list[CollectionOut])
+
+    def create_collection(self, name, description=''):
+        return self._request('POST', 'studio/collections', CollectionOut, json=dict(name=name, description=description))
+
+    def add_collection_items(self, id, event_ids):
+        return self._request('POST', f'studio/collections/{int(id)}/items', CollectionOut, json=dict(event_ids=event_ids))
+
+    def remove_collection_items(self, id, event_ids):
+        return self._request('DELETE', f'studio/collections/{int(id)}/items', CollectionOut, json=dict(event_ids=event_ids))
+
+    def exports(self):
+        return self._get('studio/exports', list[ExportOut])
+
+    def export(self, id):
+        return self._get(f'studio/exports/{int(id)}', ExportOut)
+
+    def create_export(self, **request):
+        return self._request('POST', 'studio/exports', ExportOut, json=request)
+
+    def audit(self, **filters):
+        return self._get('audit', AuditPage, **{k: v for k, v in filters.items() if v is not None})

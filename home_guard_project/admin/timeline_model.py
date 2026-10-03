@@ -44,6 +44,11 @@ class TimelineModel(QAbstractTableModel):
                 self.rows[i] = event
                 self.dataChanged.emit(self.index(i, 0), self.index(i, 6))
 
+    def remove_event(self, event_id):
+        for i,row in enumerate(self.rows):
+            if row.id == event_id:
+                self.beginRemoveRows(QModelIndex(),i,i); self.rows.pop(i); self.endRemoveRows(); return
+
     def data(self, index, role=Qt.ItemDataRole.DisplayRole):
         if not index.isValid():
             return None
@@ -57,9 +62,9 @@ class TimelineModel(QAbstractTableModel):
                 c = e.completeness
                 return '\n'.join(['Video saved' if c.video else 'No video saved', provenance(c.boxes), ai_status(c.ai),
                                    'Expired' if c.expired else 'Not expired'])
-            return f'{local_time(e.start_utc, self.zone)}\n{e.summary}'
+            return f'{local_time(e.start_utc, e.timezone)}\n{e.summary}'
         if role == Qt.ItemDataRole.DisplayRole:
-            return ['', local_time(e.start_utc, self.zone)[13:18]+'  ·  '+age(e.start_utc, self.now())+'\n'+e.camera+'  ·  '+e.summary,
+            return ['', local_time(e.start_utc, e.timezone)[13:18]+'  ·  '+age(e.start_utc, self.now())+'\n'+e.camera+'  ·  '+e.summary,
                     KINDS[e.kind], decision(e.alert_command), ', '.join(VERDICTS.get(v, v.replace('_', ' ')) for v in e.owner_verdicts) or 'No feedback',
                     '', ''][col]
 

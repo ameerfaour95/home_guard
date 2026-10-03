@@ -43,12 +43,15 @@ class EventView(QWidget):
             self.raw = TextDisclosure('Raw event metadata')
             self.raw.toggle.setChecked(True)
             self.tabs.addTab(self.raw, 'Raw')
+        self.shortcuts = {}
+        self.review_handler = None
+        self.autoplay = False
         for key, callback in [('J', lambda: self.navigate.emit(1)), ('K', lambda: self.navigate.emit(-1)),
                               ('Left', lambda: self.navigate.emit(-1)), ('Right', lambda: self.navigate.emit(1)),
                               ('R', lambda: self.toggle_review('reviewed')), ('F', lambda: self.toggle_review('flagged')),
                               ('Space', self.player.toggle_play), ('D', self.player.toggle_boxes),
                               (',', lambda: self.player.step(-1)), ('.', lambda: self.player.step(1))]:
-            shortcut = QShortcut(QKeySequence(key), self); shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut); shortcut.activated.connect(callback)
+            shortcut = QShortcut(QKeySequence(key), self); shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut); shortcut.activated.connect(callback); self.shortcuts[key] = shortcut
 
     def open(self, event_id, zone='UTC'):
         self.event_id, self.zone = event_id, zone
@@ -74,6 +77,7 @@ class EventView(QWidget):
                 self.session_expired.emit()
             return
         self.recording = event
+        self.zone = event.timezone
         self.title.setText(f'{event.camera}  ·  {KINDS[event.kind]}  ·  {local_time(event.start_utc, self.zone)}')
         self.title.setToolTip(self.title.text())
         self.review.setEnabled(True); self.flag.setEnabled(True)
@@ -135,6 +139,9 @@ class EventView(QWidget):
             self.player.canvas.overlay.update()
         if result['video']:
             self.player.open_url(result['video'])
+            if self.autoplay and self.isVisible():
+                self.player.audio.setMuted(True); self.player.speed.setCurrentIndex(1)
+                self.player.player.setPlaybackRate(1.0); self.player.player.play()
         else:
             self.player.media_failed('Recording expired or unavailable.' if self.recording.completeness.expired else 'No recording is available for this event.')
         if result['filmstrip']:
@@ -144,6 +151,8 @@ class EventView(QWidget):
             self.banner.setText('Some saved evidence is unavailable. '+result['errors'][0]); self.banner.show(); self.retry.show()
 
     def toggle_review(self, key):
+        if self.review_handler:
+            self.review_handler(key); return
         if self.recording and not self.review_runner.busy:
             eid, value = self.recording.id, not getattr(self.recording, key)
             self.review_runner.start(lambda: self.backend.review(eid, **{key: value}))

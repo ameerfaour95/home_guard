@@ -2,7 +2,7 @@ from datetime import timedelta, timezone
 from PySide6.QtCore import Qt, Signal, QTimer, QEvent, QDateTime
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QComboBox, QTableView,
     QHeaderView, QAbstractItemView, QStackedWidget, QDialog, QDateTimeEdit, QDialogButtonBox, QSizePolicy)
-from .backend import all_events, AuthError, BackendError
+from .backend import AuthError, BackendError
 from PySide6.QtGui import QPixmap
 from .formatting import utcnow, local_time
 from .event_logic import KINDS
@@ -22,6 +22,7 @@ class TimelineScreen(QWidget):
         self.customer_id, self.zone, self.cursor = None, 'UTC', None
         self.start, self.end = self.now()-timedelta(hours=24), self.now()
         self.cell = None
+        self.saved_filter = None
         self.generation = 0
         self.runner, self.density_runner, self.review_runner = [TaskRunner(self) for _ in range(3)]
         self.runner.finished.connect(self.completed)
@@ -39,7 +40,7 @@ class TimelineScreen(QWidget):
             ranges.addWidget(chip); self.range_chips[title] = chip
         self.range_text = label('', 'muted'); ranges.addWidget(self.range_text); ranges.addStretch()
         self.clear_cell = button('Clear hour filter', self.reset_cell, 'link'); self.clear_cell.hide(); ranges.addWidget(self.clear_cell)
-        layout.addLayout(ranges)
+        self.range_bar = QWidget(); self.range_bar.setLayout(ranges); layout.addWidget(self.range_bar)
         self.density = DensityStrip(theme); self.density.selected.connect(self.filter_cell); layout.addWidget(self.density)
         filters = QHBoxLayout(); filters.setSpacing(8)
         self.filters = {}
@@ -58,7 +59,7 @@ class TimelineScreen(QWidget):
         self.search = QLineEdit(); self.search.setPlaceholderText('Search events…'); self.search.setMinimumWidth(120)
         self.debounce = QTimer(self); self.debounce.setSingleShot(True); self.debounce.setInterval(250); self.debounce.timeout.connect(self.reload)
         self.search.textChanged.connect(lambda: self.debounce.start())
-        filters.addWidget(self.search, 1); layout.addLayout(filters)
+        filters.addWidget(self.search, 1); self.filter_bar = QWidget(); self.filter_bar.setLayout(filters); layout.addWidget(self.filter_bar)
         self.banner = label('', 'error', True); self.banner.hide(); layout.addWidget(self.banner)
         self.stack = QStackedWidget(); layout.addWidget(self.stack, 1)
         self.stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
@@ -83,7 +84,7 @@ class TimelineScreen(QWidget):
         self.failure = EmptyState('Timeline could not be loaded', 'Check your connection and try again. Your filters are saved.', eyebrow='UNAVAILABLE')
         self.failure.action.show(); self.failure.action.clicked.connect(self.reload); self.stack.addWidget(self.failure)
         footer = QHBoxLayout(); self.count = label('Loading events…', 'muted'); footer.addWidget(self.count)
-        footer.addStretch(); footer.addWidget(label('j / k Select   ·   Enter Open   ·   r Review   ·   f Flag', 'muted'))
+        footer.addStretch(); self.key_hint = label('j / k Select   ·   Enter Open   ·   r Review   ·   f Flag', 'muted'); footer.addWidget(self.key_hint)
         self.older = button('Load older', self.load_older); footer.addWidget(self.older); layout.addLayout(footer)
 
     def now(self):
@@ -128,7 +129,7 @@ class TimelineScreen(QWidget):
         if self.cell:
             camera, hour = self.cell
             filters['camera'] = camera; start, end = max(start, hour), min(end, hour+timedelta(hours=1))
-        return dict(filters, customer_id=self.customer_id, from_utc=start.isoformat(), to_utc=end.isoformat(), q=self.search.text().strip() or None)
+        return dict(filters, filter=self.saved_filter, customer_id=self.customer_id, from_utc=start.isoformat(), to_utc=end.isoformat(), q=self.search.text().strip() or None)
 
     def reload(self, *_):
         self.generation += 1
@@ -199,18 +200,18 @@ class TimelineScreen(QWidget):
             return
         key = self.customer_id, self.start, self.end
         self.density_pending = key
-        self.density_runner.start(lambda: all_events(self.backend, customer_id=key[0], from_utc=key[1].isoformat(), to_utc=key[2].isoformat()))
+        self.density_runner.start(lambda: self.backend.density(customer_id=key[0], from_utc=key[1].isoformat(), to_utc=key[2].isoformat()))
 
     def density_loaded(self, events, error):
         if self.density_pending != (self.customer_id, self.start, self.end):
             self.load_density(); return
         if error:
-            self.density.hours, self.density.rows = [], {}
+            self.density.set_error()
             self.density.setToolTip('Activity could not be loaded. Change range to retry.'); self.density.update(); return
-        self.density.set_events(events, self.start, self.end, self.zone)
+        self.density.set_density(events)
         combo = self.filters['camera']; selected = combo.currentData(); combo.blockSignals(True)
         combo.clear(); combo.addItem('All cameras', None)
-        for camera in sorted({e.camera for e in events}):
+        for camera in sorted({e.camera for e in events.rows}):
             combo.addItem(camera, camera)
         combo.setCurrentIndex(max(0, combo.findData(selected))); combo.blockSignals(False)
 

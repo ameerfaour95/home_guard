@@ -10,11 +10,15 @@ from .backend import ForbiddenError, ServerError
 from .models import decode, TokenPair, StaffOut, FleetResponse, CustomerOut, EventPage, EventDetail, EventSummary, DetectionsOut, MediaAccess
 
 
-class DemoBackend:
+from .demo_studio import DemoStudio
+
+
+class DemoBackend(DemoStudio):
     def __init__(self, data_dir=None, role='admin'):
         self.data_dir = Path(data_dir) if data_dir else Path(__file__).parent / 'demo_data'
         self.role = role
         self._reviews, self._lock = {}, RLock()
+        self._collections, self._members, self._exports = None, {}, None
         self.now = datetime(2026, 10, 3, 12, tzinfo=timezone.utc)
 
     def _load(self, filename, model):
@@ -46,6 +50,10 @@ class DemoBackend:
         return self._load(f'customer_{int(id)}.json', CustomerOut)
 
     def events(self, **filters):
+        if filters.get('filter'):
+            saved = next((f for f in self.saved_filters() if f.key == filters['filter']), None)
+            if saved:
+                filters = {**saved.query, **{k: v for k, v in filters.items() if v is not None}}
         page = self._load('events.json', EventPage)
         items = page.items
         for event in items:

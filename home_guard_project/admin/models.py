@@ -115,6 +115,7 @@ class EventSummary:
     reviewed: bool
     flagged: bool
     thumbnail_url: str | None
+    timezone: str = field(default='UTC', kw_only=True)
 
 
 @dataclass
@@ -155,7 +156,7 @@ class ArtifactOut:
     bytes: int | None
     available: bool
     provenance: str
-    detail: dict = field(default_factory=dict)  # optional filmstrip extension, Task 12
+    detail: dict | None = None
 
 
 @dataclass
@@ -207,6 +208,79 @@ class MediaAccess:
     url: str
     expires_utc: datetime
     mime: str
+
+
+@dataclass
+class SavedFilter:
+    key: str
+    title: str
+    description: str
+    builtin: bool
+    query: dict
+
+
+@dataclass
+class CollectionOut:
+    name: str
+    id: int
+    event_count: int
+    created_by: str
+    created_utc: datetime
+    description: str = ''
+
+
+@dataclass
+class ExportOut:
+    id: int
+    name: str
+    version: int
+    state: Literal['queued', 'running', 'ready', 'failed', 'partial']
+    item_count: int
+    s3_prefix: str
+    manifest_url: str | None
+    error: str | None
+    created_utc: datetime
+    created_by: str
+
+
+@dataclass
+class AuditEntry:
+    id: int
+    ts: datetime
+    staff: str
+    action: str
+    customer_id: int | None
+    device_id: str | None
+    target: str
+    reason: str
+
+
+@dataclass
+class AuditPage:
+    items: list[AuditEntry]
+    next_cursor: str | None
+
+
+@dataclass
+class DensityRow:
+    camera: str
+    events: list[int]
+    alerts: list[int]
+    false_alarms: list[int]
+
+
+@dataclass
+class DensityOut:
+    bucket: Literal['hour', 'day']
+    starts_utc: list[datetime]
+    timezone: str
+    rows: list[DensityRow]
+
+
+@dataclass
+class ReviewCount:
+    unreviewed_24h: int
+    flagged_open: int
 
 
 def decode(cls, value):

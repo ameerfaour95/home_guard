@@ -5,6 +5,20 @@ from PySide6.QtWidgets import QWidget, QToolTip
 from ..event_logic import density
 from ..formatting import local_time
 from ..theme import PALETTES
+from datetime import timedelta
+from zoneinfo import ZoneInfo
+
+
+def bar_metrics(events, alerts, peak, height=28):
+    total = height * max(0, events) / max(1, peak)
+    return total, total * min(max(0, alerts), events) / max(1, events)
+
+
+def activity_tooltip(hour, counts, zone):
+    start = hour.astimezone(ZoneInfo(zone)).strftime('%H:%M')
+    end = (hour+timedelta(hours=1)).astimezone(ZoneInfo(zone)).strftime('%H:%M')
+    events, alerts, false = counts
+    return f'{start}–{end} · {events} events · {alerts} alerts · {false} false alarm' + ('' if false == 1 else 's')
 
 
 class DensityStrip(QWidget):
@@ -14,8 +28,23 @@ class DensityStrip(QWidget):
         super().__init__()
         self.tokens, self.fleet = PALETTES[theme], fleet
         self.hours, self.rows, self.zone = [], {}, 'UTC'
+        self.message = 'Loading activity…'
         self.setMouseTracking(True)
         self.setMinimumHeight(66)
+
+    def set_density(self, result):
+        self.zone, self.hours = result.timezone, result.starts_utc
+        self.rows = {row.camera: list(zip(row.events, row.alerts, row.false_alarms)) for row in result.rows}
+        if self.fleet:
+            self.rows = {'Fleet activity': [tuple(sum(row[i][j] for row in self.rows.values()) for j in range(3))
+                                           for i in range(len(self.hours))]}
+        self.setFixedHeight(78 if self.fleet else 24+22*max(1, len(self.rows)))
+        self.update()
+
+    def set_error(self):
+        self.hours,self.rows = [],{}
+        self.message = 'Activity unavailable · Refresh to retry'
+        self.update()
 
     def set_events(self, events, start, end, zone='UTC'):
         self.zone = zone
@@ -28,6 +57,8 @@ class DensityStrip(QWidget):
 
     def cell_rect(self, row, col):
         width = (self.width()-150)/max(1, len(self.hours))
+        if self.fleet:
+            return QRectF(150+col*width, 8, max(1, width-3), 34)
         return QRectF(150+col*width, row*22+22, max(1, width-3), 18)
 
     def paintEvent(self, event):
@@ -36,7 +67,27 @@ class DensityStrip(QWidget):
         p.setPen(QColor(t['muted']))
         p.drawText(0, 14, '24 h activity' if self.fleet else 'CAMERA / HOUR')
         if not self.hours:
-            p.drawText(150, 36, 'Loading activity…')
+            p.drawText(150, 36, self.message)
+            return
+        if self.fleet:
+            p.drawText(0, 36, 'Events / alerts')
+            p.setPen(QColor(t['border'])); p.drawLine(150, 42, self.width(), 42)
+            cells = self.rows.get('Fleet activity', [])
+            peak = max(5, max((v[0] for v in cells), default=0))
+            for i, (count, alerts, false) in enumerate(cells):
+                cell = self.cell_rect(0, i)
+                height, segment = bar_metrics(count, alerts, peak)
+                width = min(14, cell.width()*.45)
+                rect = QRectF(cell.center().x()-width/2, 42-height, width, height)
+                p.fillRect(rect, QColor(t['action']))
+                p.fillRect(QRectF(rect.x(), rect.y(), width, segment), QColor(t['error']))
+                if false:
+                    p.setPen(QPen(QColor(t['warning']), 2))
+                    p.drawLine(int(rect.center().x()-2), 47, int(rect.center().x()+2), 47)
+                if i % 3 == 0:
+                    p.setPen(QColor(t['muted']))
+                    p.drawText(QRectF(cell.center().x()-30, 52, 60, 20), Qt.AlignmentFlag.AlignCenter,
+                               self.hours[i].astimezone(ZoneInfo(self.zone)).strftime('%H:%M'))
             return
         for i in range(0, len(self.hours), max(1, len(self.hours)//8)):
             p.drawText(int(self.cell_rect(0, i).x()), 14, local_time(self.hours[i], self.zone)[13:18])
@@ -72,6 +123,7 @@ class DensityStrip(QWidget):
         if hit:
             camera, hour, (count, alerts, false) = hit
             QToolTip.showText(event.globalPosition().toPoint(),
+                activity_tooltip(hour, (count, alerts, false), self.zone) if self.fleet else
                 f'{camera} · {local_time(hour, self.zone)}\n{count} events · {alerts} alerts · {false} false alarms', self)
 
     def mousePressEvent(self, event):
