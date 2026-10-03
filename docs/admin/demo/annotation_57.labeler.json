@@ -4,7 +4,7 @@
   "status": "rejected",
   "tracks": [
     {
-      "track_id": "s1",
+      "track_id": "t-1",
       "label": "person",
       "keyframes": [
         {
@@ -40,7 +40,7 @@
   "ai_prompt_version": "2026-10-03.tagged-rules-label",
   "drop_clip": false,
   "needs_review": false,
-  "author": "Eden Peretz",
+  "author": "labeler-67c4ed",
   "updated_utc": "2026-10-03T10:00:00Z",
   "review_note": "The second person is missing from frame 5 on.",
   "review_frame": 5,

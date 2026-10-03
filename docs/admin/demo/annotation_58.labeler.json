@@ -4,7 +4,7 @@
   "status": "submitted",
   "tracks": [
     {
-      "track_id": "s1",
+      "track_id": "t-1",
       "label": "car",
       "keyframes": [
         {
@@ -40,7 +40,7 @@
   "ai_prompt_version": "2026-10-03.tagged-rules-label",
   "drop_clip": false,
   "needs_review": true,
-  "author": "Eden Peretz",
+  "author": "labeler-67c4ed",
   "updated_utc": "2026-10-03T09:30:00Z",
   "review_note": "",
   "review_frame": null,
