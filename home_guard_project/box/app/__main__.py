@@ -46,7 +46,7 @@ def main():
         "--state",
         choices=(
             "mixed",
-            "live",
+            "live", "live-detections", "off-camera",
             "offline",
             "stopped",
             "hidden",

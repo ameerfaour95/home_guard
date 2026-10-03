@@ -1,0 +1,13 @@
+{
+  "updated": 1791043200,
+  "cameras": {"front_door": {"checked_ts": 1791043200, "ts": 1791043200,
+    "objects": [{"label": "person", "conf": 0.71, "box": [0.10, 0.30, 0.18, 0.75]},
+                {"label": "car", "conf": 0.92, "box": [0.41, 0.42, 0.61, 0.62]}]}},
+  "settings": {"conf": 0.4, "alert_start_hour": 0, "alert_end_hour": 0, "cooldown_sec": 120.0},
+  "thinking": {"camera": "front_door", "labels": ["person"], "ts": 1791043200},
+  "decisions": [
+    {"ts": 1791043080, "camera": "front_door", "labels": ["person"], "summary": "A person is walking in the driveway.", "label": "normal", "command": "[none]", "sent": false, "false_positive": true, "muted": false, "error": ""},
+    {"ts": 1791043140, "camera": "front_door", "labels": ["person"], "summary": "A person is lingering near the entrance.", "label": "suspicious", "command": "[send_message]", "sent": true, "false_positive": false, "muted": false, "error": ""},
+    {"ts": 1791043185, "camera": "front_door", "labels": ["person"], "summary": "Repeated attempts to open the entrance.", "label": "escalation", "command": "[call_owner]", "sent": true, "false_positive": false, "muted": false, "error": ""}
+  ]
+}

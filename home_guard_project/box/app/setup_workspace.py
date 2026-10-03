@@ -1,6 +1,6 @@
 """Stable setup rows and a responsive, scrollable two-pane workspace."""
 from PySide6.QtCore import Qt,Signal
-from PySide6.QtWidgets import QWidget,QFrame,QLabel,QPushButton,QVBoxLayout,QHBoxLayout,QBoxLayout,QScrollArea
+from PySide6.QtWidgets import QWidget,QFrame,QLabel,QPushButton,QVBoxLayout,QHBoxLayout,QBoxLayout,QScrollArea,QProgressBar
 from .engine_backend import ENGINE_STEPS
 from .strings import tr
 from .theme import OK,WARNING,ERROR,MUTED,ACTION
@@ -13,6 +13,9 @@ class StepRow(QFrame):
         top=QHBoxLayout();top.setSpacing(8)
         self.symbol=QLabel();self.symbol.setFixedWidth(18);top.addWidget(self.symbol)
         self.title=QLabel(tr('step_'+step));self.title.setObjectName('muted');top.addWidget(self.title,1)
+        self.indicator=QProgressBar();self.indicator.setRange(0,0);self.indicator.setTextVisible(False);self.indicator.setFixedSize(24,3)
+        self.indicator.setStyleSheet('QProgressBar {border:0;background:transparent} QProgressBar::chunk {background:'+ACTION+';}')
+        policy=self.indicator.sizePolicy();policy.setRetainSizeWhenHidden(True);self.indicator.setSizePolicy(policy);self.indicator.hide();top.addWidget(self.indicator)
         self.status=QLabel(tr('pending'));self.status.setObjectName('muted');top.addWidget(self.status)
         box.addLayout(top)
         self.note=QLabel();self.note.setObjectName('muted');box.addWidget(self.note)
@@ -28,7 +31,8 @@ class StepRow(QFrame):
         colour={'ok':OK,'warn':WARNING,'fail':ERROR,'start':ACTION}.get(status,MUTED)
         self.status.setStyleSheet('color: '+colour)
         self.note.setStyleSheet('color: '+MUTED)
-        self.symbol.setPixmap(icon({'ok':'check','warn':'warning','fail':'cross','start':'spinner','skip':'dash'}.get(status,'dash')).pixmap(16,16))
+        self.symbol.setPixmap(icon({'ok':'check','warn':'warning','fail':'cross','skip':'dash'}.get(status,'dash')).pixmap(16,16))
+        self.indicator.setVisible(status=='start')
         self.note.setText('')
         self.note.setVisible(status=='start')
         if status=='start' and group.messages:
@@ -54,7 +58,8 @@ class SetupWorkspace(QScrollArea):
         for step in ENGINE_STEPS:
             row=StepRow(step);row.clicked.connect(self.select);layout.addWidget(row);self.rows.append(row)
         self.step_list.setFixedHeight(398)
-        self.panes.addWidget(self.step_list,0,Qt.AlignmentFlag.AlignTop)
+        self.panes.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.panes.addWidget(self.step_list,0,Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         self.panes.addWidget(details,1);details.hide()
         if hasattr(details,'selection_changed'): details.selection_changed.connect(self.refresh)
     def select(self,step):
@@ -65,7 +70,8 @@ class SetupWorkspace(QScrollArea):
         from .ai_activity_ui import icon
         self.toggle.setText(tr('hide_details' if opened else 'show_readable_details'))
         self.toggle.setIcon(icon('chevron-up' if opened else 'chevron-down'))
-        self.details.setVisible(opened)
+        from .motion import reveal
+        reveal(self.details,opened)
         if self.fallback: self.fallback.setVisible(not opened)
         self.adapt()
     def adapt(self):

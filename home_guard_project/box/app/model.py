@@ -16,6 +16,7 @@ class State:
     upload: str = ""
     cameras: list = field(default_factory=list)
     error: bool = False
+    disabled: list = field(default_factory=list)
 
     @classmethod
     def from_heartbeat(cls, payload, **extra):

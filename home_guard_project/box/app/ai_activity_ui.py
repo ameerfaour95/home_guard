@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QWidget,QHBoxLayout,QScrollArea,QGraphicsOpacityEf
 from .ai_view import status_note
 from .timeline import merge_timeline,thinking_camera,image_path,group_quiet,QuietGroup,text_direction
 from .strings import tr
+from .theme import WARNING, ERROR
 
 def icon(name): return QIcon(str(Path(__file__).parent/'assets'/'icons'/(name+'.svg')))
 
@@ -13,7 +14,7 @@ class AlertPicture(QWidget):
     def __init__(self,path):
         super().__init__();self.pix=QPixmap(str(path)) if path else QPixmap();self.setMinimumHeight(120)
     def resizeEvent(self,event):
-        height=max(120,round(self.width()*9/16))
+        height=min(getattr(self,"height_limit",16777215),max(120,round(self.width()*9/16)))
         if self.height()!=height: self.setFixedHeight(height)
         super().resizeEvent(event)
     def paintEvent(self,event):
@@ -122,6 +123,9 @@ class AiActivity(QWidget):
                 name=record.name if record.who=='owner' else tr('ai_assistant') if record.who=='assistant' else record.camera.replace('_',' ').title()
                 meta.addWidget(label(name,'muted'),1)
             else: meta.addStretch()
+            if record.label in ('suspicious','escalation'):
+                from .motion import DecisionChip
+                meta.addWidget(DecisionChip(record.label.capitalize(),WARNING if record.label=='suspicious' else ERROR))
             meta.addWidget(label(stamp,'muted'));row.addLayout(meta)
             if record.who=='box' and record.image:
                 path=image_path(image_dir,record.image) if image_dir else None

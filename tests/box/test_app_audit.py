@@ -35,7 +35,8 @@ class TruthTests(unittest.TestCase):
     def test_fetch_uses_command_line_folder_choice(self):
         from home_guard_project.box.app.ui import Window
         from home_guard_project.box import boxconfig as bc
-        fake=SimpleNamespace(activity_feed=Mock(),reader=Mock())
+        fake=SimpleNamespace(activity_feed=Mock(),reader=Mock(),camera_controls=Mock())
+        fake.camera_controls.load.return_value=[]
         fake.activity_feed.read.return_value=([],'')
         fake.reader.names.return_value=[]
         for mode, dirs in [('inference',(bc.PRODUCTION_LIVE_DIR,bc.PRODUCTION_ARCHIVE_DIR)),('data_collection',(bc.LIVE_DIR,bc.OUTBOX_DIR))]:
