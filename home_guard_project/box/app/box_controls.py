@@ -26,7 +26,9 @@ class Settings:
         object.__setattr__(self, "alert_on", ",".join(ordered_types(self.alert_on)))
         if self.mode not in boxconfig.MODES or type(self.show_cameras) is not bool:
             raise ValueError("Invalid settings")
-        for key, limits in boxconfig.NUMBER_OPTIONS.items():
+        # This view exposes only the alert timing numbers, not every box.yaml option (e.g. quiet_max_gb).
+        for key in ("alert_start_hour", "alert_end_hour", "alert_cooldown_sec"):
+            limits = boxconfig.NUMBER_OPTIONS[key]
             value = getattr(self, key)
             if type(value) is not int or not limits[0] <= value <= limits[1]:
                 raise ValueError("Invalid settings")

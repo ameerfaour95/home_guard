@@ -125,8 +125,11 @@ def _receipt_line(receipt: Receipt, lang: str, retention_days: float) -> str:
         for key in ("setting", "old", "new"):
             if key in d and not isinstance(d[key], str):
                 raise ValueError("Invalid setting receipt text")
-        return t("setting_changed", lang, setting=t(f"setting_{d.get('setting')}", lang), old=d.get("old", ""),
-                 new=d.get("new", ""))
+        old, new = d.get("old", ""), d.get("new", "")
+        if d.get("setting") == "quiet_log":
+            old = t(f"setting_{old}", lang) if old in ("on", "off") else old
+            new = t(f"setting_{new}", lang) if new in ("on", "off") else new
+        return t("setting_changed", lang, setting=t(f"setting_{d.get('setting')}", lang), old=old, new=new)
     if receipt.tool in ("set_alert_types", "set_sensitivity"):
         house = not d.get("camera")
         where = t("the_house", lang) if house else d["camera"]

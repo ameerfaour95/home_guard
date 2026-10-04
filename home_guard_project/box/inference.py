@@ -28,9 +28,10 @@ import os
 import sys
 import threading
 import time
+from collections import Counter, deque
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 log = logging.getLogger("box.inference")
 
@@ -285,6 +286,7 @@ class AlertSettings:
     vlm_model: str = "gpt-4o"
     alert_channel: str = "telegram"  # telegram | twilio | both
     dry_run: bool = False
+    quiet_log: bool = False         # opt-in recording outside the owner's alert hours
     alert_on: Tuple[str, ...] = DEFAULT_ALERT_ON   # what reaches the owner: people, vehicles or both
     # The detector's certainty per type; None -> conf (the single house threshold).
     conf_person: Optional[float] = None
@@ -300,7 +302,7 @@ class AlertSettings:
         """The values the window shows and the owner can change while the program runs."""
         return {"conf": self.conf, "alert_start_hour": self.alert_start_hour,
                 "alert_end_hour": self.alert_end_hour, "cooldown_sec": self.cooldown_sec,
-                "alert_on": list(self.alert_on), "sensitivity": self.thresholds()}
+                "alert_on": list(self.alert_on), "sensitivity": self.thresholds(), "quiet_log": self.quiet_log}
 
     @classmethod
     def from_box_settings(cls, s: Dict[str, Any]) -> "AlertSettings":
@@ -316,6 +318,7 @@ class AlertSettings:
             vlm_model=str(g("vlm_model", "gpt-4o")),
             alert_channel=str(g("alert_channel", "telegram")),
             dry_run=bool(g("notify_dry_run", False)),
+            quiet_log=bool(g("quiet_log", False)),
             alert_on=parse_alert_on(g("alert_on", ",".join(DEFAULT_ALERT_ON))),
             conf_person=_optional_float(g("conf_person")),
             conf_vehicle=_optional_float(g("conf_vehicle")),
@@ -623,6 +626,12 @@ class VehicleMemory:
         self._changed_since: Optional[float] = None   # first look of the current change
         self._changed_looks = 0
 
+    def prime(self, boxes: Sequence[Box]) -> bool:
+        """Reset after a gap in looking; the first picture is a reference, not movement."""
+        self._reference = list(boxes)
+        self._changed_since, self._changed_looks = None, 0
+        return False
+
     def look(self, boxes: Sequence[Box], now: Optional[float] = None) -> bool:
         """Record one look; True if the vehicles moved since the reference."""
         if self._reference is None:   # the first look: whatever is there counts as arrived
@@ -666,6 +675,157 @@ def should_escalate(person: bool, vehicle: bool, vehicles_moved: bool,
             or ("animal" in alert_on and animal))
 
 
+QUIET_GAP_SEC = 10.0
+QUIET_MAX_SEC = 60.0
+
+
+@dataclass
+class QuietEvent:
+    camera: str
+    start: float
+    last_seen: float
+    labels: Set[str] = field(default_factory=set)
+    people: int = 0
+    class_counts: Dict[str, int] = field(default_factory=dict)
+
+
+class QuietTracker:
+    """Merge detector looks into visits, retaining peak simultaneous counts."""
+
+    def __init__(self, camera: str, gap: float = QUIET_GAP_SEC, max_len: float = QUIET_MAX_SEC) -> None:
+        self.camera, self.gap, self.max_len = camera, gap, max_len
+        self._open: Optional[QuietEvent] = None
+
+    def look(self, now: float, trigger: bool, labels: Sequence[str], people: int) -> Optional[QuietEvent]:
+        closed = None
+        ev = self._open
+        if ev is not None and (now - ev.last_seen > self.gap or now - ev.start >= self.max_len):
+            closed, self._open = ev, None
+        if trigger:
+            if self._open is None:
+                self._open = QuietEvent(self.camera, now, now)
+            ev = self._open
+            ev.last_seen = now
+            ev.labels.update(labels)
+            ev.people = max(ev.people, people)
+            counts = Counter(labels)
+            if people:
+                counts["person"] = people
+            for label, count in counts.items():
+                ev.class_counts[label] = max(ev.class_counts.get(label, 0), count)
+        return closed
+
+    def flush(self) -> Optional[QuietEvent]:
+        ev, self._open = self._open, None
+        return ev
+
+
+def _detector_labels(result: Any) -> List[str]:
+    boxes = getattr(result, "boxes", None)
+    names = getattr(result, "names", {})
+    return [] if boxes is None else [names.get(int(b.cls[0]), "") for b in boxes
+                                     if names.get(int(b.cls[0]), "") in TRIGGER_CLASSES]
+
+
+def count_people(result: Any) -> int:
+    return sum(label in PERSON_CLASSES for label in _detector_labels(result))
+
+
+class QuietSaver:
+    """One writer, bounded pending JPEG snapshots; overload drops the oldest pending event."""
+
+    def __init__(self, save: Callable, max_pending: int = 2) -> None:
+        self._save = save
+        self._max_pending = max(1, max_pending)
+        self._pending: Any = deque()
+        self._marker: Optional[Tuple[str, Optional[float]]] = None
+        self._condition = threading.Condition()
+        self._stopping = False
+        self._thread = threading.Thread(target=self._run, name="quiet-saver", daemon=True)
+        self._thread.start()
+
+    def submit(self, event: Any, frames: List[Any]) -> bool:
+        with self._condition:
+            if self._stopping:
+                return False
+            kept_all = len(self._pending) < self._max_pending
+            if not kept_all:
+                dropped, _ = self._pending.popleft()
+                log.warning("Quiet log is behind; dropped the clip of %s", getattr(dropped, "camera", "?"))
+            self._pending.append((event, frames))
+            self._condition.notify()
+            return kept_all
+
+    def marker(self, path: str, since: Optional[float]) -> None:
+        """Coalesce state changes into one pending write, independent of the clip queue."""
+        with self._condition:
+            if not self._stopping:
+                self._marker = (path, since)
+                self._condition.notify()
+
+    def _run(self) -> None:
+        while True:
+            with self._condition:
+                self._condition.wait_for(lambda: self._marker is not None or self._pending or self._stopping)
+                marker, self._marker = self._marker, None
+                if marker is None and not self._pending:
+                    return
+                item = self._pending.popleft() if marker is None else None
+            try:
+                if marker is not None:
+                    path, since = marker
+                    if since is not None:
+                        os.makedirs(os.path.dirname(path), exist_ok=True)
+                        with open(path, "w", encoding="utf-8") as f:
+                            json.dump({"since": since}, f)
+                    else:
+                        try:
+                            os.remove(path)
+                        except FileNotFoundError:
+                            pass
+                else:
+                    self._save(*item)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Quiet %s not saved: %s", "marker" if marker is not None else "clip", exc)
+
+    def stop(self, timeout: float = 10.0) -> None:
+        with self._condition:
+            self._stopping = True
+            self._condition.notify_all()
+        self._thread.join(timeout)
+
+
+def _quiet_frames(event: QuietEvent, sub_cap: Any, now: float) -> List[Any]:
+    """Freeze the alert video's source without decoding JPEGs on the detection loop.
+
+    The collector readers already apply the watch zone. Main frames serve VLM crops;
+    quiet events need only the same whole sub-stream video as the owner's alert clip.
+    """
+    from .alert_clips import PRE_SECONDS, POST_SECONDS
+
+    start, end = event.start - PRE_SECONDS, min(event.last_seen + POST_SECONDS, now)
+    with sub_cap.buf_lock:
+        return [(ts, data) for ts, data in sub_cap.buf if start <= ts <= end]
+
+
+def _save_quiet(event: QuietEvent, frames: List[Any], production_dir: str) -> None:
+    """Save a detector-only event; never call the VLM or delivery code, and never raise."""
+    try:
+        from .alert_clips import quiet_stem, write_alert_clip
+
+        counts = event.class_counts or {label: event.people if label == "person" else 1 for label in event.labels}
+        alert = {"summary": "", "alert_command": "[none]", "alert_reason": "", "labels": sorted(event.labels),
+                 "people": event.people}
+        meta = write_alert_clip(production_dir, event.camera, quiet_stem(event.camera, event.start), frames,
+                                alert, kind="quiet", extra={"mode": "assistant", "trigger_ts": event.start,
+                                "described": False, "yolo": {"class_counts": counts,
+                                "trigger_classes": sorted(event.labels), "trigger_detected": True}})
+        if meta:
+            log.info("[%s] quiet event saved: %s (%d frames)", event.camera, os.path.basename(meta), len(frames))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("[%s] quiet clip not saved: %s", event.camera, exc)
+
+
 # ----------------------------------------------------------------------------
 # Runtime
 # ----------------------------------------------------------------------------
@@ -678,7 +838,7 @@ def apply_live_settings(settings: AlertSettings, box_settings: Dict[str, Any]) -
     fresh = AlertSettings.from_box_settings(box_settings)
     changed = []
     for name in ("alert_start_hour", "alert_end_hour", "cooldown_sec", "conf", "alert_on",
-                 "conf_person", "conf_vehicle", "conf_animal"):
+                 "conf_person", "conf_vehicle", "conf_animal", "quiet_log"):
         if getattr(settings, name) != getattr(fresh, name):
             # The settings object is frozen and shared with the worker threads: the same
             # instance must carry the new value, so the one write goes around the freeze.
@@ -1036,6 +1196,7 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
         people = _int_or_none(parsed.get("people")) if parsed else None
         raw_label = str((parsed or {}).get("label") or "").strip().lower()
         shown_label = raw_label if raw_label in LABELS else ""    # no valid label: "activity", loud
+        label = shown_label       # preserve the fallback command, but never store a guessed label
         if vlm_confirms(parsed, alert_on) is False:
             # The detector fired, the VLM looked and saw nothing the owner alerts on (no
             # person, nothing moving, or only a car when the owner wants people): no
@@ -1261,6 +1422,63 @@ def run() -> int:
     last_look_ts: Dict[str, float] = {name: 0.0 for name in cameras}
     vehicles: Dict[str, VehicleMemory] = {name: VehicleMemory() for name in cameras}
     parked: Dict[str, bool] = {name: False for name in cameras}  # "have not moved" already logged
+    # The default guard path allocates and maintains no quiet state.
+    last_vehicle_look: Optional[Dict[str, float]] = None
+    quiet_look_ts: Optional[Dict[str, float]] = None
+    quiet_vehicles: Optional[Dict[str, VehicleMemory]] = None
+    quiet: Optional[Dict[str, QuietTracker]] = None
+    saver: Optional[QuietSaver] = None
+    quiet_since_path = os.path.join(PRODUCTION_LIVE_DIR, ".registry", "quiet_since.json")
+    quiet_retention = PRE_SECONDS + QUIET_MAX_SEC + max(QUIET_GAP_SEC, POST_SECONDS) + 5
+    default_retention: Optional[Dict[str, float]] = None
+    last_memory_log = 0.0
+
+    def close_quiet(event: Optional[QuietEvent], now_value: float) -> None:
+        nonlocal saver
+        if event is None:
+            return
+        try:
+            frames = _quiet_frames(event, streams[event.camera].sub_cap, now_value)
+            if saver is None:
+                saver = QuietSaver(lambda ev, frames: _save_quiet(ev, frames, PRODUCTION_LIVE_DIR))
+            saver.submit(event, frames)
+        except Exception as exc:  # noqa: BLE001 - a failed snapshot or writer must not stop detection
+            log.warning("[%s] quiet event not queued: %s", event.camera, exc)
+
+    def update_quiet(on: bool, now_value: float) -> None:
+        nonlocal quiet, quiet_vehicles, quiet_look_ts, last_vehicle_look, default_retention, saver
+        if quiet is None:
+            if not on:
+                return
+            quiet = {name: QuietTracker(name) for name in cameras}
+            quiet_vehicles = {name: VehicleMemory() for name in cameras}
+            last_vehicle_look = {}
+            quiet_look_ts = {}
+            default_retention = {name: getattr(stream.sub_cap, "keep_seconds", 0)
+                                 for name, stream in streams.items()}
+            for cam_name, stream in streams.items():
+                stream.sub_cap.keep_seconds = max(default_retention[cam_name], quiet_retention)
+            try:
+                if saver is None:
+                    saver = QuietSaver(lambda ev, frames: _save_quiet(ev, frames, PRODUCTION_LIVE_DIR))
+                saver.marker(quiet_since_path, now_value)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Quiet-log state not queued: %s", exc)
+        for cam_name, tracker in quiet.items():
+            try:
+                # Tick even when a camera is offline. Freeze closing visits before shortening buffers.
+                event = tracker.look(now_value, False, [], 0) if on else tracker.flush()
+                close_quiet(event, now_value)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("[%s] quiet event not closed: %s", cam_name, exc)
+        if not on:
+            for cam_name, stream in streams.items():
+                stream.sub_cap.keep_seconds = default_retention[cam_name]
+            quiet, quiet_vehicles, last_vehicle_look, default_retention = None, None, None, None
+            quiet_look_ts = None
+            if saver is not None:
+                saver.marker(quiet_since_path, None)
+
     status = AiStatus(os.path.join(LOG_DIR, "ai_status.json"))  # what the box's window shows
     live = LiveSettings(settings, now=time.time())
     from .camera_alerts import LiveCameraAlerts  # noqa: PLC0415
@@ -1288,89 +1506,157 @@ def run() -> int:
 
     log.info("Watching %d camera(s): %s", len(cameras), ", ".join(cameras))
     started = time.time()   # no camera counts as offline before it had a minute to deliver its first picture
-    while True:
-        now_ts = time.time()
-        settings_changed = bool(live.check(now_ts))
-        if camera_alerts.check(now_ts) or settings_changed:
-            status.settings(reported_settings())
-        if mode_watch.due(now_ts):
-            try:
-                start, end = settings.alert_start_hour, settings.alert_end_hour
-                switched = mode_watch.update(now_ts, start, end)
-                for cam_name, stream in streams.items():
-                    if stream.last_ts:
-                        status.frame_seen(cam_name, stream.last_ts)
-                offline = status.offline(now_ts, cameras=list(cameras), since=started)
-                mute = getattr(assistant, "mute", None)
-                paused = [(c, mute.muted_until(now_ts, c)) for c in cameras if mute and mute.muted_until(now_ts, c)]
-                logging_on = bool(getattr(settings, "quiet_log", False))      # the setting arrives in Task 19
-                status.mode(mode_watch.mode, status_line(mode_watch.mode, now_ts, start, end, paused, offline,
-                                                         logging_on), now=now_ts)
-                if switched and assistant is not None:
-                    assistant.announce(switch_announcement(switched, now_ts, start, end, len(cameras) - len(offline),
-                                                           len(cameras), owner_language(), logging_on))
-            except Exception as exc:  # noqa: BLE001 - the status line must never stop the alerts
-                log.warning("Mode status not updated: %s", exc)
-        due_worker = _start_due_alerts(pending, now_ts, cam_cfg, model, streams, main_caps, predict_args,
-                                       backend, box_settings, env, settings, assistant, status,
-                                       PRODUCTION_LIVE_DIR, LIVE_DIR)
-        if due_worker is not None:
-            worker["t"] = due_worker
-        for name in cameras:
-            frame = streams[name].read()
-            if frame is None:
-                continue
-            if time.time() - streams[name].last_ts > 5:   # a frozen camera: its last picture is not seen again
-                continue
-            now = datetime.now()
-            if not in_alert_window(now.hour, settings.alert_start_hour, settings.alert_end_hour):
-                continue
-            # No new alert for this camera during its cooldown, or while a VLM call is
-            # running. The detector still looks about once a second then, only so the
-            # window can show what it sees.
-            waiting = (now_ts - last_alert_ts[name] < settings.cooldown_sec
-                       or bool(pending) or (worker["t"] is not None and worker["t"].is_alive()))
-            if waiting and now_ts - last_look_ts[name] < STATUS_LOOK_SEC:
-                continue
-            last_look_ts[name] = now_ts
+    try:
+        while True:
+            now_ts = time.time()
+            settings_changed = bool(live.check(now_ts))
+            if settings.quiet_log or quiet is not None:
+                quiet_on = settings.quiet_log and not in_alert_window(
+                    datetime.now().hour, settings.alert_start_hour, settings.alert_end_hour)
+                if quiet_on or quiet is not None:
+                    update_quiet(quiet_on, now_ts)
+            if camera_alerts.check(now_ts) or settings_changed:
+                status.settings(reported_settings())
+            if mode_watch.due(now_ts):
+                try:
+                    start, end = settings.alert_start_hour, settings.alert_end_hour
+                    switched = mode_watch.update(now_ts, start, end)
+                    for cam_name, stream in streams.items():
+                        if stream.last_ts:
+                            status.frame_seen(cam_name, stream.last_ts)
+                    offline = status.offline(now_ts, cameras=list(cameras), since=started)
+                    mute = getattr(assistant, "mute", None)
+                    paused = [(c, mute.muted_until(now_ts, c)) for c in cameras if mute and mute.muted_until(now_ts, c)]
+                    logging_on = settings.quiet_log
+                    status.mode(mode_watch.mode, status_line(mode_watch.mode, now_ts, start, end, paused, offline,
+                                                             logging_on), now=now_ts)
+                    if switched and assistant is not None:
+                        assistant.announce(switch_announcement(switched, now_ts, start, end, len(cameras) - len(offline),
+                                                               len(cameras), owner_language(), logging_on))
+                except Exception as exc:  # noqa: BLE001 - the status line must never stop the alerts
+                    log.warning("Mode status not updated: %s", exc)
+                if quiet is not None and now_ts - last_memory_log >= 60:
+                    try:
+                        memory_bytes = 0
+                        for cap in [s.sub_cap for s in streams.values()] + list(main_caps.values()):
+                            if cap is not None:
+                                with cap.buf_lock:
+                                    memory_bytes += sum(len(data) for _, data in cap.buf)
+                        log.info("clip memory: %.1f MB", memory_bytes / 1e6)
+                        last_memory_log = now_ts
+                    except Exception as exc:  # noqa: BLE001
+                        log.warning("Clip memory not measured: %s", exc)
+            due_worker = _start_due_alerts(pending, now_ts, cam_cfg, model, streams, main_caps, predict_args,
+                                           backend, box_settings, env, settings, assistant, status,
+                                           PRODUCTION_LIVE_DIR, LIVE_DIR)
+            if due_worker is not None:
+                worker["t"] = due_worker
+            for name in cameras:
+                frame = streams[name].read()
+                if frame is None:
+                    continue
+                if time.time() - streams[name].last_ts > 5:   # a frozen camera: its last picture is not seen again
+                    continue
+                # As in the original guard loop, check at this camera's look,
+                # after reading its frame. Earlier inference may cross an hour.
+                now = datetime.now()
+                in_window = in_alert_window(now.hour, settings.alert_start_hour, settings.alert_end_hour)
+                quiet_on = settings.quiet_log and not in_window
+                if quiet_on != (quiet is not None):
+                    update_quiet(quiet_on, time.time())
+                if not in_window and not quiet_on:
+                    continue
+                # No new alert for this camera during its cooldown, or while a VLM call is
+                # running. The detector still looks about once a second then, only so the
+                # window can show what it sees.
+                waiting = (now_ts - last_alert_ts[name] < settings.cooldown_sec
+                           or bool(pending) or (worker["t"] is not None and worker["t"].is_alive()))
+                if quiet_on:
+                    if now_ts - quiet_look_ts.get(name, 0) < STATUS_LOOK_SEC:
+                        continue
+                    quiet_look_ts[name] = now_ts
+                else:
+                    if waiting and now_ts - last_look_ts[name] < STATUS_LOOK_SEC:
+                        continue
+                    last_look_ts[name] = now_ts
 
-            # Each type is held to its own certainty (house value, or the camera's own);
-            # the detector runs at the lowest of them and the rest are filtered here.
-            thresholds = camera_alerts.thresholds_for(name, settings.thresholds())
-            raw = model.predict(frame, conf=detector_floor(thresholds, settings.conf), verbose=False,
-                                **predict_args)
-            results = [filter_by_thresholds(raw[0], thresholds, settings.conf)] if raw else []
-            seen_ts = time.time()   # when the picture was looked at, not when this round over the cameras began
-            try:
-                status.detection(name, objects_from_result(results[0]) if results else [], now=seen_ts)
-            except Exception as exc:  # noqa: BLE001 - what the window shows must never stop the alerts
-                log.debug("[%s] status not updated: %s", name, exc)
-            # Every look feeds the camera's vehicle memory - the once-a-second looks of the
-            # cooldown too - so a car that arrives and parks during the cooldown is compared
-            # with its own parked position afterwards, and stays quiet.
-            moved = vehicles[name].look(vehicle_boxes(results[0]) if results else [], now=seen_ts)
-            if waiting:
-                continue
-            person, vehicle, labels = detect_trigger(results[0]) if results else (False, False, [])
-            animal = has_animal(labels)
-            if not (person or vehicle or animal):
+                # Each type is held to its own certainty (house value, or the camera's own);
+                # the detector runs at the lowest of them and the rest are filtered here.
+                try:
+                    thresholds = camera_alerts.thresholds_for(name, settings.thresholds())
+                    raw = model.predict(frame, conf=detector_floor(thresholds, settings.conf), verbose=False,
+                                        **predict_args)
+                    results = [filter_by_thresholds(raw[0], thresholds, settings.conf)] if raw else []
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("[%s] detector look failed: %s", name, exc)
+                    continue
+                seen_ts = time.time()   # when the picture was looked at, not when this round over the cameras began
+                try:
+                    status.detection(name, objects_from_result(results[0]) if results else [], now=seen_ts)
+                except Exception as exc:  # noqa: BLE001 - what the window shows must never stop the alerts
+                    log.debug("[%s] status not updated: %s", name, exc)
+                # Every look feeds the camera's vehicle memory - the once-a-second looks of the
+                # cooldown too - so a car that arrives and parks during the cooldown is compared
+                # with its own parked position afterwards, and stays quiet.
+                try:
+                    boxes = vehicle_boxes(results[0]) if results else []
+                    if quiet_on:
+                        previous = last_vehicle_look.get(name)
+                        stale = previous is not None and seen_ts - previous > 60
+                        # Quiet looks must never consume an arrival or change the
+                        # parked reference used by the original guard path.
+                        memory = quiet_vehicles[name]
+                        moved = memory.prime(boxes) if stale else memory.look(boxes, now=seen_ts)
+                        last_vehicle_look[name] = seen_ts
+                    else:
+                        moved = vehicles[name].look(boxes, now=seen_ts)
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("[%s] vehicle reference not updated: %s", name, exc)
+                    continue
+                if quiet_on:
+                    try:
+                        result = results[0] if results else None
+                        person, vehicle, labels = detect_trigger(result) if result is not None else (False, False, [])
+                        alert_on = camera_alerts.for_camera(name, settings.alert_on)
+                        trigger = should_escalate(person, vehicle, moved, alert_on)
+                        close_quiet(quiet[name].look(seen_ts, trigger, _detector_labels(result), count_people(result)), seen_ts)
+                    except Exception as exc:  # noqa: BLE001
+                        log.warning("[%s] quiet look failed: %s", name, exc)
+                    continue
+                if waiting:
+                    continue
+                person, vehicle, labels = detect_trigger(results[0]) if results else (False, False, [])
+                animal = has_animal(labels)
+                if not (person or vehicle or animal):
+                    parked[name] = False
+                    continue
+                alert_on = camera_alerts.for_camera(name, settings.alert_on)
+                if not should_escalate(person, vehicle, moved, alert_on, animal=animal):
+                    if not parked[name]:  # one line per quiet spell, not one per look
+                        log.info("[%s] %s; no alert", name, quiet_reason(vehicle, moved, alert_on))
+                        parked[name] = True
+                    continue
                 parked[name] = False
-                continue
-            alert_on = camera_alerts.for_camera(name, settings.alert_on)
-            if not should_escalate(person, vehicle, moved, alert_on, animal=animal):
-                if not parked[name]:  # one line per quiet spell, not one per look
-                    log.info("[%s] %s; no alert", name, quiet_reason(vehicle, moved, alert_on))
-                    parked[name] = True
-                continue
-            parked[name] = False
-            trigger_ts = time.time()
-            last_alert_ts[name] = trigger_ts
-            log.info("[%s] escalating (labels=%s), waiting for the complete crop window", name, labels)
-            status.thinking(name, labels, now=trigger_ts)
-            job = AlertJob(camera=name, stem=alert_stem(name, trigger_ts), ts=trigger_ts, labels=labels,
-                           snapshot=frame, alert_on=tuple(alert_on))
-            pending.append(job)   # reserves the single VLM slot throughout post-roll
-        time.sleep(0.05)
+                trigger_ts = time.time()
+                last_alert_ts[name] = trigger_ts
+                log.info("[%s] escalating (labels=%s), waiting for the complete crop window", name, labels)
+                status.thinking(name, labels, now=trigger_ts)
+                job = AlertJob(camera=name, stem=alert_stem(name, trigger_ts), ts=trigger_ts, labels=labels,
+                               snapshot=frame, alert_on=tuple(alert_on))
+                pending.append(job)   # reserves the single VLM slot throughout post-roll
+            time.sleep(0.05)
+    finally:
+        for tracker in quiet.values() if quiet is not None else ():
+            try:
+                close_quiet(tracker.flush(), time.time())
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Quiet event not flushed: %s", exc)
+        if saver is not None:
+            try:
+                saver.stop()
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Quiet saver not stopped: %s", exc)
+
 
 
 def main() -> None:

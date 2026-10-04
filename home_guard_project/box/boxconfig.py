@@ -111,9 +111,12 @@ def set_site(site: str, path: str = BOX_YAML) -> None:
 #   alert_on:          the house default of what the owner is alerted about: person, vehicle,
 #                      animal - one or more (person,vehicle). A camera can have its own choice
 #                      (camera_alerts.yaml, find_cameras set-camera-alerts).
-BOOLEAN_OPTIONS = ("show_cameras", "notify_dry_run")
+#   quiet_log: outside the alert hours, keep a quiet log of people and moving vehicles (no alerts). Off by default.
+#   quiet_max_gb: the most disk the quiet log may use; the oldest quiet clips go first.
+BOOLEAN_OPTIONS = ("show_cameras", "notify_dry_run", "quiet_log")
 # Whole numbers, each with the smallest and largest value it may take.
-NUMBER_OPTIONS = {"alert_start_hour": (0, 23), "alert_end_hour": (0, 23), "alert_cooldown_sec": (10, 86400)}
+NUMBER_OPTIONS = {"alert_start_hour": (0, 23), "alert_end_hour": (0, 23), "alert_cooldown_sec": (10, 86400),
+                  "quiet_max_gb": (1, 500)}
 # Decimal numbers, each with its range.
 #   inference_conf:    how sure the detector must be before a person or vehicle counts
 #                      (0.05 reacts to almost anything, 0.95 only to what it is certain of).
@@ -134,7 +137,7 @@ OPTIONS = (BOOLEAN_OPTIONS + tuple(NUMBER_OPTIONS) + tuple(DECIMAL_OPTIONS) + tu
 # Options the running program re-reads while it runs (inference.LiveSettings): a change applies
 # within seconds, without a restart.
 LIVE_OPTIONS = ("alert_start_hour", "alert_end_hour", "alert_cooldown_sec", "inference_conf", "alert_on",
-                "conf_person", "conf_vehicle", "conf_animal", "owner_language")
+                "conf_person", "conf_vehicle", "conf_animal", "owner_language", "quiet_log")
 # Options the running program reads only when it starts. show_cameras is read by the screen, not by it.
 RESTART_OPTIONS = tuple(key for key in OPTIONS if key != "show_cameras" and key not in LIVE_OPTIONS)
 

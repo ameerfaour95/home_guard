@@ -343,6 +343,22 @@ def main() -> None:
         print(json.dumps(_status(cfg), indent=2))
         return
 
+    if args.command == "upload":
+        # Local retention comes before any upload/configuration failure can interrupt it.
+        from .alert_clips import trim_quiet
+        from .boxconfig import load_box_settings
+
+        expired = expire_old_files(PRODUCTION_ARCHIVE_DIR, PRODUCTION_RETENTION_DAYS)
+        if expired:
+            log.info("Deleted %d production file(s) older than %d days from this box.",
+                     expired, PRODUCTION_RETENTION_DAYS)
+        sites = [os.path.join(PRODUCTION_ARCHIVE_DIR, site) for site in os.listdir(PRODUCTION_ARCHIVE_DIR)] \
+            if os.path.isdir(PRODUCTION_ARCHIVE_DIR) else []
+        cap = int(float(load_box_settings().get("quiet_max_gb", 20) or 20) * 1e9)
+        trimmed = trim_quiet([PRODUCTION_LIVE_DIR] + sites, cap)
+        if trimmed:
+            log.info("Deleted %d old quiet clip(s) to stay under %d GB.", trimmed, cap // 10**9)
+
     from home_guard_project.s3_upload.config import load_config as load_s3_config
 
     s3_cfg = load_s3_config()
@@ -357,10 +373,6 @@ def main() -> None:
             cfg, PRODUCTION_LIVE_DIR, PRODUCTION_ARCHIVE_DIR, s3_cfg.bucket, s3_cfg.workers,
             uploader=s3_run, prefix_for=production_prefix, keep_local=True,
         )
-        expired = expire_old_files(PRODUCTION_ARCHIVE_DIR, PRODUCTION_RETENTION_DAYS)
-        if expired:
-            log.info("Deleted %d production file(s) older than %d days from this box.",
-                     expired, PRODUCTION_RETENTION_DAYS)
 
     key = put_heartbeat(_status(cfg), s3_cfg.bucket, s3_prefix(cfg.site))
     log.info("Heartbeat written to s3://%s/%s", s3_cfg.bucket, key)

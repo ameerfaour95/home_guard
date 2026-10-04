@@ -273,6 +273,40 @@ class UndoRaceTest(UndoTest):
         agent = self.agent(Scripted(list(calls) + [reply("")]))
         return agent, agent.handle(text, "-5", {"user_id": 1})
 
+    def quiet_turn(self, value):
+        words = "turn quiet logging " + value
+        agent = self.agent(Scripted([call("change_setting", setting="quiet_log", value=value,
+                                         owner_words=words), reply("")]))
+        # boxconfig stores real booleans, including when Undo sends "false".
+        agent.services.set_option = lambda k, v: self.store.__setitem__(k, str(v).lower() == "true")
+        return agent, agent.handle(words, "-5", {"user_id": 1})
+
+    def test_chat_quiet_log_undo_restores_default_off(self):
+        agent, out = self.quiet_turn("on")
+        self.assertIs(self.store["quiet_log"], True)
+        self.assertTrue(out.undo_token)
+        self.assertEqual(out.receipts[0].detail["restore"], {"quiet_log": False})
+        undone = agent.undo_turn("-5", out.undo_token, {})
+        self.assertIs(self.store["quiet_log"], False)
+        self.assertEqual(undone.receipts[0].detail["undo_of"], "change_setting")
+
+    def test_quiet_log_undo_preserves_later_owner_change_even_back_to_on(self):
+        agent, first = self.quiet_turn("on")
+        self.tick(10)
+        self.quiet_turn("off")
+        self.tick(20)
+        self.quiet_turn("on")
+        undone = agent.undo_turn("-5", first.undo_token, {})
+        self.assertIs(self.store["quiet_log"], True)
+        self.assertIn("Changed since", undone.text)
+
+    def test_quiet_log_undo_preserves_direct_setting_change(self):
+        agent, first = self.quiet_turn("on")
+        self.store["quiet_log"] = False
+        undone = agent.undo_turn("-5", first.undo_token, {})
+        self.assertIs(self.store["quiet_log"], False)
+        self.assertIn("Changed since", undone.text)
+
     def test_undo_of_an_older_pause_keeps_a_newer_resume(self) -> None:
         from home_guard_project.box.feedback import Feedback  # noqa: PLC0415
 

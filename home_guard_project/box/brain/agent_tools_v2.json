@@ -88,9 +88,9 @@
       "alias": {"type": "string", "description": "The new name, as the owner wrote it."}
     }, "required": ["camera", "alias"]}}},
   {"type": "function", "function": {"name": "change_setting",
-    "description": "Change one setting. alert_hours: \"22-06\" (whole hours) or \"all day\"; cooldown_minutes: minutes between two alerts from one camera; sensitivity: \"low\", \"medium\", \"high\" or a detector threshold 0.05-0.95; language: \"en\" or \"he\" (the language of alerts and announcements). Only when this message asks for it.",
+    "description": "Change one setting. alert_hours: \"22-06\" (whole hours) or \"all day\"; cooldown_minutes: minutes between two alerts from one camera; sensitivity: \"low\", \"medium\", \"high\" or a detector threshold 0.05-0.95; language: \"en\" or \"he\" (the language of alerts and announcements); quiet_log: \"on\" or \"off\", save quiet clips outside the alert hours without AI or messages (off by default). Only when this message asks for it.",
     "parameters": {"type": "object", "properties": {
-      "setting": {"type": "string", "enum": ["alert_hours", "cooldown_minutes", "sensitivity", "language"]},
+      "setting": {"type": "string", "enum": ["alert_hours", "cooldown_minutes", "sensitivity", "language", "quiet_log"]},
       "value": {"type": "string", "description": "The new value, as described above."},
       "owner_words": {"type": "string", "description": "The owner's words asking for the change, copied exactly from this message (two words or more)."}
     }, "required": ["setting", "value", "owner_words"]}}},

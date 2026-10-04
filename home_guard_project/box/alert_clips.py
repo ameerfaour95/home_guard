@@ -17,7 +17,7 @@ import logging
 import os
 import threading
 from collections import deque
-from typing import Any, Deque, Dict, List, Optional, Tuple
+from typing import Any, Deque, Dict, List, Optional, Sequence, Tuple
 
 log = logging.getLogger("box.alert_clips")
 
@@ -66,6 +66,55 @@ def alert_stem(camera: str, ts: float) -> str:
 def false_positive_stem(camera: str, ts: float) -> str:
     """The file stem of a clip the VLM dismissed: the detector fired, nobody and nothing moving was there."""
     return f"{camera}_{int(ts)}_fp"
+
+
+def quiet_stem(camera: str, ts: float) -> str:
+    """Quiet events are saved outside the alert hours and never sent."""
+    return f"{camera}_{int(ts)}_quiet"
+
+
+def trim_quiet(roots: Sequence[str], max_bytes: int) -> int:
+    """Delete oldest quiet videos and their metas across roots; never count failed deletions."""
+    clips = []
+    seen = set()
+    for root in roots:
+        for dirpath, _, names in os.walk(os.path.join(root, "clips")):
+            for name in names:
+                if not name.endswith("_quiet.mp4"):
+                    continue
+                path = os.path.join(dirpath, name)
+                key = os.path.normcase(os.path.abspath(path))
+                if key in seen:
+                    continue
+                seen.add(key)
+                try:
+                    stat = os.stat(path)
+                    clips.append((stat.st_mtime, stat.st_size, root, path))
+                except OSError:
+                    continue
+    total, deleted = sum(size for _, size, _, _ in clips), 0
+    for _, size, root, path in sorted(clips):
+        if total <= max_bytes:
+            break
+        rel = os.path.relpath(path, os.path.join(root, "clips"))
+        meta = os.path.join(root, "meta", rel[:-len(".mp4")] + ".meta.json")
+        try:
+            try:
+                os.remove(meta)   # no meta means it is no longer a complete clip for the uploader
+            except FileNotFoundError:
+                pass
+            try:
+                os.remove(path)
+            except FileNotFoundError:
+                # It disappeared after the scan; its bytes are already freed.
+                total -= size
+                continue
+        except OSError as exc:
+            log.warning("Quiet clip not deleted: %s: %s", path, exc)
+            continue
+        total -= size
+        deleted += 1
+    return deleted
 
 
 def _to_h264(path: str) -> bool:

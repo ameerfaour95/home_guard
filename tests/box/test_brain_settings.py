@@ -24,6 +24,9 @@ class SettingsTest(unittest.TestCase):
                       "inference_conf": 0.4, "owner_language": "en"}
 
     def set_option(self, key, value):
+        if key == "quiet_log":
+            self.store[key] = str(value).lower() in ("true", "yes", "on", "1")
+            return
         if key == "inference_conf" and not 0.05 <= float(value) <= 0.95:
             raise ValueError("inference_conf must be a number from 0.05 to 0.95")
         text = str(value)
@@ -44,7 +47,28 @@ class SettingsTest(unittest.TestCase):
     def test_settings_line(self) -> None:
         self.assertEqual(settings_line(self.store),
                          "SETTINGS: alert hours 22:00–06:00 · time between alerts per camera 2 min · "
-                         "detector sensitivity medium (0.40) · box language English (alerts and announcements)")
+                         "detector sensitivity medium (0.40) · box language English (alerts and announcements)"
+                         " · quiet log outside the hours off")
+
+    def test_quiet_log_receipt(self) -> None:
+        ctx = self.ctx("turn on quiet logging")
+        out = change_setting(ctx, {"setting": "quiet_log", "value": "on", "owner_words": "turn on quiet logging"})
+        self.assertEqual(out["status"], DONE)
+        self.assertIs(self.store["quiet_log"], True)
+        self.assertEqual(receipt_line(ctx.receipts[0], "en"), "✓ Quiet log outside the alert hours: off → on")
+
+    def test_quiet_log_owner_view_and_receipt_in_english_and_hebrew(self) -> None:
+        from home_guard_project.box.brain.i18n import t
+        ctx = self.ctx("turn on quiet logging")
+        change_setting(ctx, {"setting": "quiet_log", "value": "on", "owner_words": "turn on quiet logging"})
+        for lang, on, off in (("en", "on", "off"), ("he", "פעיל", "כבוי")):
+            with self.subTest(lang=lang):
+                self.assertEqual(settings_view(self.store, lang=lang)["quiet_log"], on)
+                self.assertIn(on, settings_line(self.store, lang=lang))
+                self.assertIn(t("setting_quiet_log", lang), receipt_line(ctx.receipts[0], lang))
+                self.assertIn(on, receipt_line(ctx.receipts[0], lang))
+                self.assertIn(off, receipt_line(ctx.receipts[0], lang))
+                self.assertIn(off, settings_line({"quiet_log": False}, lang=lang))
 
     def test_alert_hours_need_the_owners_words(self) -> None:
         ctx = self.ctx("from now on watch from 23 to 7")
