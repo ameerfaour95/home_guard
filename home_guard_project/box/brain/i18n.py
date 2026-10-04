@@ -16,6 +16,14 @@ SUPPORTED_LANGS = ("en", "he")   # what the assistant speaks today; the Arabic s
 LANGUAGE_NAMES = {"en": "English", "he": "Hebrew", "ar": "Arabic"}
 
 TEMPLATES: Dict[str, Dict[str, str]] = {
+    "house_fact_normal": {"en": "Normal: {text} (your note, {hours})",
+                          "he": "רגיל: {text} (ההערה שלך, {hours})",
+                          "ar": "عادي: {text} (ملاحظتك، {hours})"},
+    "house_fact_suspicious": {"en": "Suspicious: {text} (your note, {hours})",
+                              "he": "חשוד: {text} (ההערה שלך, {hours})",
+                              "ar": "مريب: {text} (ملاحظتك، {hours})"},
+    "house_fact_all_day": {"en": "all day", "he": "כל היום", "ar": "طوال اليوم"},
+    "house_fact_not_them": {"en": "Not them", "he": "זה לא הם", "ar": "ليسوا هم"},
     "alert_types_changed": {"en": "✓ {camera} alerts on: {old} → {new}", "he": "✓ {camera} מתריעה על: {old} ← {new}",
                             "ar": "✓ {camera} تنبه على: {old} ← {new}"},
     "alert_types_changed_house": {"en": "✓ The house alerts on: {old} → {new}", "he": "✓ הבית מתריע על: {old} ← {new}",

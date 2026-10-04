@@ -296,6 +296,15 @@ def owner_reacted(feedback_dir: str, alert_id: str) -> bool:
     return any(os.path.basename(p)[len(prefix):-len(suffix)].isdigit() for p in glob.glob(pattern))
 
 
+def not_them_button(alert: Dict[str, Any], lang: str = "en") -> Optional[Dict[str, str]]:
+    """The note owner's callback, only for a softened alert and within Telegram's byte limit."""
+    if alert.get("softened") is True and alert.get("applied_fact_id") and alert.get("alert_id"):
+        callback = f"nt:{alert['applied_fact_id']}:{alert['alert_id']}"
+        if len(callback.encode("utf-8")) <= 64:
+            return {"text": tr("house_fact_not_them", lang), "callback_data": callback}
+    return None
+
+
 def send_alert(
     cfg: TelegramConfig,
     index: AlertIndex,
@@ -322,6 +331,11 @@ def send_alert(
         return {"sent": False, "reason": reason}
     body = f"{text}\n\n{tr('feedback_question', lang)}"
     keyboard = feedback_keyboard(lang, ai_label=str((alert.get("label") if isinstance(alert, dict) else "") or ""))
+    button = not_them_button(alert, lang)
+    if button:
+        markup = json.loads(keyboard)
+        markup["inline_keyboard"].append([button])
+        keyboard = json.dumps(markup)
     quiet = {"disable_notification": "true"} if silent else {}
     results = []
     for chat_id in cfg.chat_ids:

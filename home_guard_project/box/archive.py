@@ -46,6 +46,8 @@ class AlertRecord:
     described: bool = False                  # True when some AI description exists
     clip_start_ts: Optional[float] = None
     trigger_ts: Optional[float] = None       # when the detector fired (inside the clip)
+    softened: bool = False                  # a house note changed suspicious to normal
+    applied_fact_id: str = ""
 
 
 def _load_json(path: str) -> Optional[Dict[str, Any]]:
@@ -148,6 +150,8 @@ def load_records(roots: Sequence[str]) -> List[AlertRecord]:
                         verdicts=tuple(v for _, v in sorted(verdicts.get(alert_id, []))),
                         kind=_text(meta.get("kind"), "alert"),
                         label=_text(alert.get("label"), ""),
+                        softened=alert.get("softened") is True,
+                        applied_fact_id=_text(alert.get("applied_fact_id"), ""),
                         people=_people(people),
                         mode=_text(meta.get("mode"), ""),
                         detector_labels=tuple(str(x) for x in detector_labels),
