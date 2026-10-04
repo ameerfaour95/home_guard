@@ -27,7 +27,7 @@ import logging
 import os
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from .archive import AlertRecord, load_records, record_doc, search, window
@@ -49,6 +49,7 @@ MAX_CLIPS_PER_REPLY = 3
 MAX_FOUND = 8
 SUMMARY_MAX_EVENTS = 60       # events detailed to the model for a period summary (counts still cover all)
 MAX_TOOL_ROUNDS = 5           # how many model <-> tool round-trips one message may take
+MAX_EARLIER_CAMERAS = 12      # earlier camera names (from saved alerts) named in the context line
 EMBED_CACHE_NAME = ".alert_embeddings.json"
 CONVERSATIONS_DIR_NAME = ".conversations"
 LIVE_DIR_NAME = ".live"
@@ -176,6 +177,7 @@ class _Turn:
     turned_off: List[str] = field(default_factory=list)  # cameras set_camera_active turned off this turn
     saved: int = 0
     notes: List[str] = field(default_factory=list)   # confirmation lines from tools that acted this turn
+    records: Optional[List[AlertRecord]] = None      # the saved alerts, read once per message
 
 
 def load_tool_schemas(path: str = TOOLS_PATH) -> List[Dict[str, Any]]:
@@ -301,9 +303,41 @@ class OwnerAgent:
         save_feedback(self.ctx.feedback_dir, turn.alert, feedback, turn.text, turn.who, turn.chat_id, self.ctx.now())
         turn.saved += 1
 
-    def _checked(self, fields: Dict[str, Any]) -> Feedback:
-        return feedback_from_fields(fields, self.ctx.now(), self.ctx.camera_names,
+    def _checked(self, fields: Dict[str, Any], camera_names: Optional[Sequence[str]] = None) -> Feedback:
+        return feedback_from_fields(fields, self.ctx.now(),
+                                    self.ctx.camera_names if camera_names is None else camera_names,
                                     self.ctx.max_mute_hours, self.ctx.retention_days)
+
+    # -- the saved alerts, and the camera names they were saved under ---------
+    def _records(self) -> List[AlertRecord]:
+        """The saved alerts, read from disk at most once per message."""
+        turn = self._turn
+        if turn is None:
+            return load_records(self.ctx.roots())
+        if turn.records is None:
+            turn.records = load_records(self.ctx.roots())
+        return turn.records
+
+    def _earlier_cameras(self) -> List[str]:
+        """Camera names that kept alerts carry but the current cameras do not, sorted.
+
+        A camera renamed (or re-found by a new setup under a new name) keeps its old name on
+        every alert saved before - 2026-10-03, "main_entrance" became "ameer_test_ch2" and the
+        owner's video could no longer be found by camera.
+        """
+        oldest = self.ctx.now() - self.ctx.retention_days * 86400
+        current = {c.casefold() for c in self.ctx.camera_names}
+        return sorted({r.camera for r in self._records()
+                       if r.camera and r.ts >= oldest and r.camera.casefold() not in current})
+
+    def _searchable_cameras(self) -> List[str]:
+        """The names a look-up in the saved alerts may filter on: the current cameras, then the earlier ones."""
+        return [*self.ctx.camera_names, *self._earlier_cameras()]
+
+    @staticmethod
+    def _camera_note(camera: str) -> Dict[str, Any]:
+        return {"camera_note": f"nothing was saved on {camera} in that time; these were saved on other cameras",
+                "searched_camera": camera}
 
     # -- tools (each returns a JSON-serialisable dict) -----------------------
     def _record_verdict(self, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -314,15 +348,18 @@ class OwnerAgent:
         self._save(feedback)
         return {"ok": True, "message": confirmation_text(feedback)}
 
-    def _unknown_camera(self, requested: Any, resolved: Optional[str]) -> Optional[Dict[str, Any]]:
+    def _unknown_camera(self, requested: Any, resolved: Optional[str],
+                        names: Optional[Sequence[str]] = None) -> Optional[Dict[str, Any]]:
         """An error dict when a camera was named but did not match one, else None.
 
         Without this a mis-named camera resolves to None and silently widens to ALL cameras - a
         pause would then leave the whole house unwatched. Make the model retry or ask instead.
+        *names* lists the cameras the name could have been (default: the current cameras).
         """
         if str(requested or "").strip() and resolved is None:
+            names = self.ctx.camera_names if names is None else names
             return {"ok": False, "error": f"unknown camera {str(requested).strip()!r}; "
-                                          f"the cameras are: {', '.join(self.ctx.camera_names) or 'none'}"}
+                                          f"the cameras are: {', '.join(names) or 'none'}"}
         return None
 
     def _pause_alerts(self, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -350,35 +387,52 @@ class OwnerAgent:
         return {"ok": True, "message": confirmation_text(feedback)}
 
     def _find_alerts(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        cameras = self._searchable_cameras()
         feedback = self._checked({"action": "find", "find": {
             "day": args.get("day"), "from": args.get("time_from"), "to": args.get("time_to"),
             "last_hours": args.get("last_hours"), "latest": bool(args.get("latest")),
             "camera": args.get("camera"), "what": args.get("what", ""), "want": args.get("want", "video"),
-        }})
-        bad = self._unknown_camera(args.get("camera"), feedback.query.camera)
+        }}, cameras)
+        bad = self._unknown_camera(args.get("camera"), feedback.query.camera, cameras)
         if bad:
             return bad
-        records = search(load_records(self.ctx.roots()), feedback.query, limit=MAX_FOUND, embedder=self._embedder)
+        query = feedback.query
+        records = search(self._records(), query, limit=MAX_FOUND, embedder=self._embedder)
+        note: Dict[str, Any] = {}
+        if not records and query.camera is not None:
+            # Nothing on that camera: the event may be saved under another (or an older) camera
+            # name. Say so, rather than "no such video" when it is on the box.
+            records = search(self._records(), replace(query, camera=None), limit=MAX_FOUND, embedder=self._embedder)
+            if records:
+                note = self._camera_note(query.camera)
         self._turn.found.update({r.alert_id: r for r in records})
-        log.info("find_alerts(day=%s from=%s to=%s last_hours=%s latest=%s camera=%s what=%r) -> %d",
+        log.info("find_alerts(day=%s from=%s to=%s last_hours=%s latest=%s camera=%s what=%r) -> %d%s",
                  args.get("day"), args.get("time_from"), args.get("time_to"), args.get("last_hours"),
-                 args.get("latest"), args.get("camera"), args.get("what", ""), len(records))
+                 args.get("latest"), args.get("camera"), args.get("what", ""), len(records),
+                 " (on other cameras)" if note else "")
         return {
-            "searched": {"from": _local(feedback.query.start_ts), "to": _local(feedback.query.end_ts),
-                         "camera": feedback.query.camera, "what": feedback.query.what},
+            "searched": {"from": _local(query.start_ts), "to": _local(query.end_ts),
+                         "camera": query.camera, "what": query.what},
             "count": len(records),
+            **note,
             "alerts": [record_doc(r) for r in records],
         }
 
     def _summarize_activity(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        cameras = self._searchable_cameras()
         feedback = self._checked({"action": "find", "find": {
             "day": args.get("day"), "last_hours": args.get("last_hours"),
             "camera": args.get("camera"), "what": "", "latest": False,
-        }})
-        bad = self._unknown_camera(args.get("camera"), feedback.query.camera)
+        }}, cameras)
+        bad = self._unknown_camera(args.get("camera"), feedback.query.camera, cameras)
         if bad:
             return bad
-        records = window(load_records(self.ctx.roots()), feedback.query)
+        records = window(self._records(), feedback.query)
+        note: Dict[str, Any] = {}
+        if not records and feedback.query.camera is not None:
+            records = window(self._records(), replace(feedback.query, camera=None))
+            if records:
+                note = self._camera_note(feedback.query.camera)
         by_camera: Dict[str, int] = {}
         for r in records:
             by_camera[r.camera] = by_camera.get(r.camera, 0) + 1
@@ -387,6 +441,7 @@ class OwnerAgent:
         return {
             "period": {"from": _local(feedback.query.start_ts), "to": _local(feedback.query.end_ts)},
             "total": len(records),
+            **note,
             "by_camera": by_camera,
             "truncated": len(records) > SUMMARY_MAX_EVENTS,
             "events": [
@@ -501,7 +556,7 @@ class OwnerAgent:
         alert_id = str(args.get("alert_id") or "")
         record = self._turn.found.get(alert_id)
         if record is None:
-            record = next((r for r in load_records(self.ctx.roots()) if r.alert_id == alert_id), None)
+            record = next((r for r in self._records() if r.alert_id == alert_id), None)
         if record is None or not record.clip_path:
             return {"ok": False, "error": "That video is not on the box."}
         if record.clip_path in self._turn.clips:
@@ -519,7 +574,15 @@ class OwnerAgent:
         if turn.alert:
             alert = (f"{turn.alert.get('camera')}, {_local(float(turn.alert.get('ts') or 0))}: "
                      f"{turn.alert.get('summary') or 'no description'}")
-        return (f"[Local time: {now}. Cameras: {', '.join(self.ctx.camera_names) or 'none'}. "
+        earlier = ""
+        try:
+            names = self._earlier_cameras()
+        except Exception as exc:  # noqa: BLE001 - the saved alerts are a hint here; never block the reply
+            log.warning("Could not list earlier camera names: %s", exc)
+            names = []
+        if names:
+            earlier = f" Earlier camera names in saved alerts: {', '.join(names[:MAX_EARLIER_CAMERAS])}."
+        return (f"[Local time: {now}. Cameras: {', '.join(self.ctx.camera_names) or 'none'}.{earlier} "
                 f"The alert this message answers: {alert}. Answer in: {_reply_language(turn.text)}.]")
 
     def _dispatch(self, call: ToolCall) -> Dict[str, Any]:

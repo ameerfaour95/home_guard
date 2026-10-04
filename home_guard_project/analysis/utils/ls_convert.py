@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 
 def ls_rect_to_yolo(x: float, y: float, w: float, h: float) -> Tuple[float, float, float, float]:
@@ -28,70 +28,75 @@ def _lerp(a: float, b: float, t: float) -> float:
     return a + (b - a) * t
 
 
+_TIME_EPS = 1e-6
+_KEYS = ("x", "y", "width", "height")
+
+
+def _box(kf: Dict[str, Any]) -> Dict[str, float]:
+    return {k: kf[k] for k in _KEYS}
+
+
+def _has_times(seq: List[Dict[str, Any]]) -> bool:
+    return all(kf.get("time") is not None for kf in seq)
+
+
+def box_at(
+    sequence: List[Dict[str, Any]],
+    frame: int,
+    fps: Optional[float] = None,
+) -> Optional[Dict[str, float]]:
+    """
+    Box visible at LS ``frame`` (1-based), or None.  Same semantics as the Admin
+    Center's ``fleet_contract.tracks.box_at``:
+
+    * linear interpolation by TIME when every keyframe carries ``time`` (and
+      ``fps`` is known; the query time is ``(frame - 1) / fps``), else by frame;
+    * a segment starting at an enabled keyframe moves to the next keyframe's
+      position even when that next keyframe is disabled;
+    * a disabled keyframe hides the box until the next keyframe;
+    * hidden before the first keyframe; held after the last one if enabled.
+    """
+    if not sequence:
+        return None
+    by_time = bool(fps) and _has_times(sequence)
+    if by_time:
+        kfs = sorted(sequence, key=lambda kf: float(kf["time"]))
+        q = (frame - 1) / float(fps)
+        pos = lambda kf: float(kf["time"])
+        eps = _TIME_EPS
+    else:
+        kfs = sorted(sequence, key=lambda kf: kf.get("frame", 0))
+        q = float(frame)
+        pos = lambda kf: float(kf.get("frame", 0))
+        eps = 0.0
+    if q < pos(kfs[0]) - eps:
+        return None
+    prev = kfs[0]
+    for nxt in kfs[1:]:
+        if q < pos(nxt) - eps:
+            if not prev.get("enabled", True):
+                return None
+            span = pos(nxt) - pos(prev)
+            w = (q - pos(prev)) / span if span > 0 else 0.0
+            w = max(0.0, min(1.0, w))
+            return {k: _lerp(prev[k], nxt[k], w) for k in _KEYS}
+        prev = nxt
+    return _box(prev) if prev.get("enabled", True) else None
+
+
 def interpolate_keyframes(
     sequence: List[Dict[str, Any]],
     frames_count: int,
+    fps: Optional[float] = None,
 ) -> Dict[int, Dict[str, float]]:
     """
-    Interpolate LS videorectangle keyframes to produce a box for every frame.
-
-    Returns ``{frame_number: {"x": ..., "y": ..., "width": ..., "height": ...}}``
-    in LS percentage coords.  Frames where `enabled=False` are omitted.
+    Box for every visible LS frame ``1..frames_count`` as
+    ``{frame_number: {"x","y","width","height"}}`` in LS percentage coords.
+    Hidden frames are omitted.  See :func:`box_at` for the semantics.
     """
-    if not sequence:
-        return {}
-
-    sorted_kfs = sorted(sequence, key=lambda kf: kf.get("frame", 0))
-
     result: Dict[int, Dict[str, float]] = {}
-
-    for i, kf in enumerate(sorted_kfs):
-        if not kf.get("enabled", True):
-            continue
-
-        frame = int(kf["frame"])
-
-        if i + 1 < len(sorted_kfs):
-            nxt = sorted_kfs[i + 1]
-            end_frame = int(nxt["frame"])
-        else:
-            end_frame = frames_count
-
-        for f in range(frame, end_frame + 1):
-            if f > frames_count:
-                break
-
-            if frame == end_frame:
-                t = 0.0
-            else:
-                t = (f - frame) / (end_frame - frame)
-
-            if i + 1 < len(sorted_kfs):
-                nxt = sorted_kfs[i + 1]
-                if not nxt.get("enabled", True):
-                    if f >= end_frame:
-                        break
-                    box = {
-                        "x": kf["x"],
-                        "y": kf["y"],
-                        "width": kf["width"],
-                        "height": kf["height"],
-                    }
-                else:
-                    box = {
-                        "x": _lerp(kf["x"], nxt["x"], t),
-                        "y": _lerp(kf["y"], nxt["y"], t),
-                        "width": _lerp(kf["width"], nxt["width"], t),
-                        "height": _lerp(kf["height"], nxt["height"], t),
-                    }
-            else:
-                box = {
-                    "x": kf["x"],
-                    "y": kf["y"],
-                    "width": kf["width"],
-                    "height": kf["height"],
-                }
-
-            result[f] = box
-
+    for f in range(1, int(frames_count) + 1):
+        b = box_at(sequence, f, fps)
+        if b is not None:
+            result[f] = b
     return result

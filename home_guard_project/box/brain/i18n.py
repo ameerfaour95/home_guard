@@ -192,9 +192,17 @@ TEMPLATES: Dict[str, Dict[str, str]] = {
     "tag_saved_text": {"en": "✓ Saved as: \"{text}\"", "he": "✓ נשמר בתור: \"{text}\"",
                        "ar": "✓ تم الحفظ كـ: \"{text}\""},
     "tag_undone": {"en": "Tag removed.", "he": "התיוג הוסר.", "ar": "تمت إزالة الوسم."},
+    "tag_undo_partial": {"en": "Part of the undo failed; tap Undo again.",
+                         "he": "חלק מהביטול נכשל; לחצו שוב על ביטול.",
+                         "ar": "فشل جزء من التراجع؛ اضغط على تراجع مرة أخرى."},
+    "tag_need_text": {"en": "Please write the tag as text.", "he": "נא לכתוב את התיוג כטקסט.",
+                      "ar": "يرجى كتابة الوسم كنص."},
     "tag_expired": {"en": "That tag request expired; tap Other… again.",
                     "he": "בקשת התיוג פגה; לחצו שוב על אחר…",
                     "ar": "انتهت صلاحية طلب الوسم؛ اضغط على غير ذلك… مرة أخرى."},
+    "tag_ask_failed": {"en": "Could not ask for the tag right now; tap Other… again.",
+                       "he": "לא הצלחתי לבקש את התיוג כרגע; לחצו שוב על אחר…",
+                       "ar": "تعذّر طلب الوسم الآن؛ اضغط على غير ذلك… مرة أخرى."},
 }
 
 

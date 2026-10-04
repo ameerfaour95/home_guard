@@ -67,7 +67,8 @@ class AliasesTest(unittest.TestCase):
         apply_changes({"cameras": [{"name": "test_ch6", "new_name": "main_entrance", "enabled": True}]},
                       cameras, zones_path=os.path.join(self.dir, "zones.yaml"), restart=False,
                       aliases_path=self.path)
-        self.assertEqual(load_aliases(self.path), {"main_entrance": ["entrance"]})
+        # The aliases follow the camera, and its old name becomes one of them.
+        self.assertEqual(load_aliases(self.path), {"main_entrance": ["entrance", "test_ch6"]})
 
 
 if __name__ == "__main__":

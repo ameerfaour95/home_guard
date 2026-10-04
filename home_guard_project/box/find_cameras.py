@@ -34,7 +34,7 @@ import re
 import socket
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 from urllib.parse import quote as urlquote
 
 import yaml
@@ -48,28 +48,74 @@ RTSP_PORTS = (554, 8554)
 Found = Dict[str, List[Dict[str, Any]]]
 
 
-def _named(found: Found, prefix: str) -> List[tuple[str, str, Dict[str, Any]]]:
-    """(name, host, stream) for every stream. Names carry the site so they never collide between houses."""
+
+
+def stream_key(url: str) -> str:
+    """Which stream an RTSP URL is: its host, port, path and query, without the login.
+
+    The same camera keeps this when its password changes or a search runs under
+    another site name, so it is how a stream the box already knows is recognised.
+    Only the address part before the path can hold a login, so an "@" inside the
+    path (``/channel/1@live``) stays part of the identity. A URL that cannot be
+    read gets a hashed key: never its raw text, which may hold a password.
+    """
+    import hashlib  # noqa: PLC0415
+    from urllib.parse import urlsplit  # noqa: PLC0415
+
+    text = str(url).strip()
+    try:
+        parts = urlsplit(text)
+    except ValueError:
+        parts = None
+    if parts is None or parts.scheme.lower() != "rtsp" or not parts.netloc:
+        return "unparsed:" + hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()[:16]
+    hostport = parts.netloc.rpartition("@")[2].lower()
+    if ":" not in hostport.rsplit("]", 1)[-1]:
+        hostport += ":554"
+    key = hostport + (parts.path or "/")
+    return key + ("?" + parts.query if parts.query else "")
+
+
+def _named(found: Found, prefix: str,
+           known: Optional[Dict[str, str]] = None) -> List[tuple[str, str, Dict[str, Any]]]:
+    """(name, host, stream) for every stream. Names carry the site so they never collide between houses.
+
+    *known* maps :func:`stream_key` -> the name cameras.yaml already gives that
+    stream: such a stream keeps its name (the owner's names must survive a new
+    search, 2026-10-03). A new stream never takes a name a known one keeps.
+    """
+    known = known or {}
     hosts = [h for h in sorted(found) if found[h]]
-    rows = []
+    planned = []
     for host in hosts:
         # With several devices, channel numbers repeat: add the last number of the address.
         tag = f"_{host.rsplit('.', 1)[-1]}" if len(hosts) > 1 else ""
         for stream in found[host]:
-            rows.append((f"{prefix}{tag}_ch{stream['channel']}", host, stream))
+            planned.append((known.get(stream_key(stream["url"])), f"{prefix}{tag}_ch{stream['channel']}",
+                            host, stream))
+    taken = {kept for kept, _, _, _ in planned if kept}
+    rows = []
+    for kept, fresh, host, stream in planned:
+        name = kept
+        if not name:
+            name, n = fresh, 2
+            while name in taken:
+                name, n = f"{fresh}_{n}", n + 1
+            taken.add(name)
+        rows.append((name, host, stream))
     return rows
 
 
-def camera_names(found: Found, prefix: str) -> Dict[str, str]:
+def camera_names(found: Found, prefix: str, known: Optional[Dict[str, str]] = None) -> Dict[str, str]:
     """Camera name -> RTSP URL, the mapping cameras.yaml holds."""
-    return {name: stream["url"] for name, _, stream in _named(found, prefix)}
+    return {name: stream["url"] for name, _, stream in _named(found, prefix, known)}
 
 
-def describe(found: Found, prefix: str) -> List[Dict[str, Any]]:
+def describe(found: Found, prefix: str, known: Optional[Dict[str, str]] = None) -> List[Dict[str, Any]]:
     """What was found, without URLs or credentials — safe to print or send to a setup program."""
     return [
         {"name": name, "host": host, "channel": s["channel"], "width": s["w"], "height": s["h"]}
-        for name, host, s in _named(found, prefix)
+        for name, host, s in _named(found, prefix, known)
     ]
 
 
@@ -106,6 +152,87 @@ def _write_cameras(active: Dict[str, str], disabled: Dict[str, str], path: str =
         f.write(_YAML_HEADER)
         yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
     os.replace(tmp, path)
+
+
+def _known_streams(path: str) -> Tuple[Dict[str, str], Set[str]]:
+    """(stream key -> its name, keys of the disabled streams) from the cameras file at *path*."""
+    try:
+        raw = _read_cameras_raw(path)
+        active = dict(raw.get("cameras") or {})
+        disabled = dict(raw.get("disabled") or {})
+    except (OSError, ValueError, TypeError, yaml.YAMLError) as exc:
+        log.warning("Could not read the camera names in %s, naming every camera afresh: %s", path, exc)
+        return {}, set()
+    known = {stream_key(str(url)): str(name) for name, url in disabled.items()}
+    off = set(known)
+    for name, url in active.items():  # a stream listed in both stays on, under its active name
+        key = stream_key(str(url))
+        known[key] = str(name)
+        off.discard(key)
+    return known, off
+
+
+def _aliases_beside(cameras_path: str) -> str:
+    """The camera alias file that belongs with *cameras_path* (on the box: brain.aliases.ALIASES_PATH)."""
+    return os.path.join(os.path.dirname(os.path.abspath(cameras_path)), "camera_aliases.yaml")
+
+
+def alias_old_names(renames: Dict[str, str], cameras: Sequence[str], aliases_path: str) -> None:
+    """Keep each renamed camera's old name as an alias of its new name ({old: new}).
+
+    The assistant can then map an old name - still on every alert saved before
+    the rename - to the camera it now is. An old name that is another camera's
+    name now (a swap) is refused by add_alias and only logged: a name file must
+    never block a camera change.
+    """
+    if not renames:
+        return
+    try:
+        from .brain.aliases import add_alias  # noqa: PLC0415
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Old camera names not kept as aliases: %s", exc)
+        return
+    for old, new in renames.items():
+        try:
+            add_alias(new, old, list(cameras), aliases_path)
+        except ValueError as exc:
+            log.warning("Old name %s not kept as an alias of %s: %s", old, new, exc)
+        except Exception as exc:  # noqa: BLE001 - an unwritable alias file must not block the change
+            log.warning("Old name %s not kept as an alias of %s: %s", old, new, exc)
+
+
+def write_found(found: Found, prefix: str, path: Optional[str] = None,
+                aliases_path: Optional[str] = None) -> Dict[str, Any]:
+    """Save a search's streams to cameras.yaml, keeping the name and on/off state of every stream it knows.
+
+    A stream is known by :func:`stream_key` (its address without the login), so
+    a new password or a new site name never renames a camera. New streams get a
+    new name; streams no longer found are dropped, as before. Returns the new
+    {"active", "disabled"} name lists.
+    """
+    path = path or CAMERAS_PATH
+    known, off = _known_streams(path)
+    old_names: Dict[str, List[str]] = {}   # stream key -> every name the file gave it
+    try:
+        raw = _read_cameras_raw(path)
+        for section in ("cameras", "disabled"):
+            for name, url in dict(raw.get(section) or {}).items():
+                old_names.setdefault(stream_key(str(url)), []).append(str(name))
+    except (OSError, ValueError, TypeError, yaml.YAMLError):
+        pass  # _known_streams already logged it
+    active: Dict[str, str] = {}
+    disabled: Dict[str, str] = {}
+    renames: Dict[str, str] = {}
+    for name, _, stream in _named(found, prefix, known):
+        key = stream_key(stream["url"])
+        (disabled if key in off else active)[name] = stream["url"]
+        renames.update({old: name for old in old_names.get(key, []) if old != name})
+    _write_cameras(active, disabled, path)
+    log.info("Wrote %d cameras (%d off) to %s", len(active) + len(disabled), len(disabled), path)
+    final = [*active, *disabled]
+    alias_old_names({old: new for old, new in renames.items() if old not in final}, final,
+                    aliases_path or _aliases_beside(path))
+    return {"active": sorted(active), "disabled": sorted(disabled)}
 
 
 def apply_changes(changes: Dict[str, Any], path: str = CAMERAS_PATH, zones_path: str = ZONES_PATH,
@@ -174,11 +301,12 @@ def apply_changes(changes: Dict[str, Any], path: str = CAMERAS_PATH, zones_path:
         _write_cameras(new_active, new_disabled, path)
     if renames:
         try:
-            from .brain.aliases import ALIASES_PATH, remap_aliases  # noqa: PLC0415
+            from .brain.aliases import remap_aliases  # noqa: PLC0415
 
-            remap_aliases(renames, aliases_path or ALIASES_PATH)
+            remap_aliases(renames, aliases_path or _aliases_beside(path))
         except Exception as exc:  # noqa: BLE001 - a name file must never block a camera change
             log.warning("Camera aliases not carried over the rename: %s", exc)
+        alias_old_names(renames, [*new_active, *new_disabled], aliases_path or _aliases_beside(path))
     if restart:
         _restart_running_mode()
     return {"active": sorted(new_active), "disabled": sorted(new_disabled)}
@@ -560,14 +688,13 @@ def _password(args: argparse.Namespace) -> str:
 def _finish(found: Found, args: argparse.Namespace, extra: Dict[str, Any]) -> None:
     """Save and report the cameras in *found*. Exit code 1 when none were found."""
     cameras = camera_names(found, args.prefix)
+    known, _ = _known_streams(CAMERAS_PATH)  # read before writing: the names the owner already uses
     saved = False
     if cameras and args.write:
-        from home_guard_project.data_collection import discover
-
-        discover.write_cameras_yaml(cameras)
+        write_found(found, args.prefix, CAMERAS_PATH)
         saved = True
 
-    rows = describe(found, args.prefix)
+    rows = describe(found, args.prefix, known)
     if args.json:
         print(json.dumps({**extra, "cameras": rows, "saved": saved}, indent=2))
     elif not rows:
