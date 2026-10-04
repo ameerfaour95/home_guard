@@ -19,6 +19,7 @@ import os
 import ssl
 import time
 import uuid
+from collections.abc import Mapping
 from typing import Any, Callable, Dict, Optional, Tuple
 
 log = logging.getLogger("box.live_view")
@@ -204,7 +205,7 @@ def look_now(camera: str, cameras_path: str, env: Dict[str, str], out_dir: str,
 def make_look_now(cameras_path: str, env: Optional[Dict[str, str]] = None,
                   out_dir: str = "") -> Optional[Callable[[str], Dict[str, Any]]]:
     """A ``look_now(camera)`` callable for the agent, or None when it can't run (no key / no dir)."""
-    if env is not None and not isinstance(env, dict):
+    if env is not None and not isinstance(env, Mapping):  # os.environ is a Mapping, not a dict
         log.warning("Live-view environment must be a mapping")
         return None
     env = dict(os.environ if env is None else env)

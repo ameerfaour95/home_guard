@@ -18,6 +18,7 @@ import logging
 import os
 import threading
 import time
+from collections.abc import Mapping
 from typing import Any, Callable, Dict, List, Optional
 
 from ..inference import LABEL_RULES, LABELS, label_of, parse_vlm_json
@@ -188,7 +189,7 @@ class BudgetedVision:
 
 def make_vision(env: Dict[str, str], model: str = "gpt-4o") -> Optional[Vision]:
     """The OpenAI-backed Vision, or None without a key. Uses the OS trust store (TLS interception)."""
-    if not isinstance(env, dict):
+    if not isinstance(env, Mapping):  # os.environ is a Mapping, not a dict
         log.warning("Vision environment must be a mapping")
         return None
     key = env.get("OPENAI_API_KEY", "")
