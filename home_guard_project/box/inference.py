@@ -32,7 +32,9 @@ from collections import Counter, deque
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Set, Tuple
+
+from . import providers
 
 log = logging.getLogger("box.inference")
 
@@ -425,6 +427,9 @@ class AlertSettings:
     conf: float = 0.4
     vlm_backend: str = "gpt"
     vlm_model: str = "gpt-4o"
+    vlm_provider: str = "openai"        # providers.PROVIDERS: openai | openrouter | ollama | vllm | dashscope-intl
+    vlm_fallback_provider: str = ""     # asked once when the main model fails (the other 4B Qwen)
+    vlm_fallback_model: str = ""        # empty: no fallback
     alert_channel: str = "telegram"  # telegram | twilio | both
     dry_run: bool = False
     quiet_log: bool = False         # opt-in recording outside the owner's alert hours
@@ -457,6 +462,9 @@ class AlertSettings:
             conf=float(g("inference_conf", 0.4)),
             vlm_backend=str(g("vlm_backend", "gpt")),
             vlm_model=str(g("vlm_model", "gpt-4o")),
+            vlm_provider=str(g("vlm_provider", "openai") or "openai").strip().lower(),
+            vlm_fallback_provider=str(g("vlm_fallback_provider", "") or "").strip().lower(),
+            vlm_fallback_model=str(g("vlm_fallback_model", "") or "").strip(),
             alert_channel=str(g("alert_channel", "telegram")),
             dry_run=bool(g("notify_dry_run", False)),
             quiet_log=bool(g("quiet_log", False)),
@@ -507,10 +515,18 @@ class NullBackend:
         return json.dumps(parsed), parsed
 
 
-class GptBackend:
-    """GPT-4V backend. Imports the OpenAI client lazily."""
+def usage_of(resp: Any) -> Dict[str, int]:
+    """Tokens the provider billed for one call; zeros when it did not say."""
+    u = getattr(resp, "usage", None)
+    return {"prompt_tokens": int(getattr(u, "prompt_tokens", 0) or 0),
+            "completion_tokens": int(getattr(u, "completion_tokens", 0) or 0)}
 
-    def __init__(self, api_key: str, model: str = "gpt-4o") -> None:
+
+class GptBackend:
+    """Any OpenAI-compatible vision model (OpenAI, OpenRouter, Ollama, vLLM). Imports the client lazily."""
+
+    def __init__(self, api_key: str, model: str = "gpt-4o", base_url: Optional[str] = None,
+                 extra_body: Optional[Dict[str, Any]] = None, timeout: float = 30.0) -> None:
         from openai import OpenAI  # noqa: PLC0415
 
         # Use the OS trust store so the call still works where TLS is
@@ -524,9 +540,16 @@ class GptBackend:
             http_client = httpx.Client(verify=ssl.create_default_context())
         except Exception:  # noqa: BLE001
             http_client = None
-        self._client = OpenAI(api_key=api_key, http_client=http_client) if http_client else OpenAI(api_key=api_key)
+        kwargs: Dict[str, Any] = {"api_key": api_key, "timeout": timeout}
+        if base_url:
+            kwargs["base_url"] = base_url
+        if http_client:
+            kwargs["http_client"] = http_client
+        self._client = OpenAI(**kwargs)
         self._model = model
         self.model_name = model
+        self._extra_body = dict(extra_body) if extra_body else None
+        self.last_usage = {"prompt_tokens": 0, "completion_tokens": 0}
         self.last_prompt = ""           # what the last call asked, kept for the training record
         self._response_format: Dict[str, Any] = VLM_RESPONSE_FORMAT
 
@@ -556,34 +579,94 @@ class GptBackend:
             else:
                 raise
         raw = resp.choices[0].message.content or ""
+        self.last_usage = usage_of(resp)
         return raw, parse_vlm_json(raw)
 
     def _complete(self, content: List[Dict[str, Any]], response_format: Dict[str, Any]) -> Any:
-        return self._client.chat.completions.create(
-            model=self._model,
-            messages=[{"role": "user", "content": content}],
-            temperature=0,
-            response_format=response_format,
-        )
+        kwargs: Dict[str, Any] = dict(model=self._model, messages=[{"role": "user", "content": content}],
+                                      temperature=0, response_format=response_format)
+        extra = getattr(self, "_extra_body", None)
+        if extra:
+            kwargs["extra_body"] = extra
+        return self._client.chat.completions.create(**kwargs)
+
+
+class FallbackBackend:
+    """Asks *primary*; on an error or an answer that is not a JSON object, asks *fallback*
+    once with the same frames. Exposes the answering backend's record fields."""
+
+    def __init__(self, primary: Any, fallback: Any) -> None:
+        self.primary, self.fallback = primary, fallback
+        self._last = primary
+
+    @property
+    def model_name(self) -> str:
+        return str(getattr(self._last, "model_name", ""))
+
+    @property
+    def last_prompt(self) -> str:
+        return str(getattr(self._last, "last_prompt", ""))
+
+    @property
+    def last_frame_jpegs(self) -> List[bytes]:
+        return list(getattr(self._last, "last_frame_jpegs", None) or [])
+
+    @property
+    def last_usage(self) -> Dict[str, int]:
+        return dict(getattr(self._last, "last_usage", None) or {"prompt_tokens": 0, "completion_tokens": 0})
+
+    def analyze(self, frames_bgr: List[Any], camera_name: str, t_sec: int, start_hour: int, end_hour: int,
+                **kwargs: Any) -> Tuple[str, Optional[Dict[str, Any]]]:
+        self._last = self.primary
+        try:
+            raw, parsed = self.primary.analyze(frames_bgr, camera_name, t_sec, start_hour, end_hour, **kwargs)
+            if isinstance(parsed, dict):
+                return raw, parsed
+            reason = "the answer was not a JSON object"
+        except Exception as exc:  # noqa: BLE001 - any failure goes to the fallback
+            reason = f"{type(exc).__name__}: {exc}"
+        log.warning("[%s] VLM fallback to %s: %s", camera_name, getattr(self.fallback, "model_name", "?"), reason)
+        self._last = self.fallback
+        return self.fallback.analyze(frames_bgr, camera_name, t_sec, start_hour, end_hour, **kwargs)
+
+
+def build_gpt(provider: str, model: str, env: Mapping[str, str], timeout: float = 30.0) -> GptBackend:
+    key, base_url, extra_body = providers.resolve(provider, env)
+    return GptBackend(key, model, base_url=base_url, extra_body=extra_body, timeout=timeout)
 
 
 def make_backend(settings: AlertSettings, env: Dict[str, str]):
-    """Pick a VLM backend from settings; fall back to NullBackend when a real
-    one cannot be built (missing key, dry-run, or unknown name)."""
+    """The vision model from settings: the main model, wrapped with the fallback when one is set
+    and differs; the fallback alone if the main one cannot be built; NullBackend when neither can
+    (missing keys, dry-run, unknown backend name)."""
     if settings.dry_run:
         log.info("dry_run on: using NullBackend (no VLM calls).")
         return NullBackend()
-    if settings.vlm_backend == "gpt":
-        key = env.get("OPENAI_API_KEY", "")
-        if not key:
-            log.warning("vlm_backend=gpt but OPENAI_API_KEY is missing; using NullBackend.")
-            return NullBackend()
+    if settings.vlm_backend != "gpt":
+        log.warning("Unknown vlm_backend '%s'; using NullBackend.", settings.vlm_backend)
+        return NullBackend()
+    primary = fallback = None
+    try:
+        primary = build_gpt(settings.vlm_provider, settings.vlm_model, env)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Vision model %s (%s) cannot be used: %s", settings.vlm_model, settings.vlm_provider, exc)
+    wants_fallback = bool(settings.vlm_fallback_model) and (
+        (settings.vlm_fallback_provider, settings.vlm_fallback_model) != (settings.vlm_provider, settings.vlm_model))
+    if wants_fallback:
         try:
-            return GptBackend(key, settings.vlm_model)
+            fallback = build_gpt(settings.vlm_fallback_provider or settings.vlm_provider,
+                                 settings.vlm_fallback_model, env)
         except Exception as exc:  # noqa: BLE001
-            log.warning("Could not create GptBackend (%s); using NullBackend.", exc)
-            return NullBackend()
-    log.warning("Unknown vlm_backend '%s'; using NullBackend.", settings.vlm_backend)
+            log.warning("Fallback vision model %s (%s) cannot be used: %s",
+                        settings.vlm_fallback_model, settings.vlm_fallback_provider, exc)
+    if primary is not None and fallback is not None:
+        return FallbackBackend(primary, fallback)
+    if primary is not None:
+        return primary
+    if fallback is not None:
+        log.warning("Using the fallback %s alone.", settings.vlm_fallback_model)
+        return fallback
+    log.warning("No vision model could be built; using NullBackend.")
     return NullBackend()
 
 
@@ -1343,7 +1426,8 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                 "model": getattr(backend, "model_name", settings.vlm_model),
                 "prompt_version": PROMPT_VERSION,
                 "prompt": getattr(backend, "last_prompt", ""),
-                "frames": list(backend.last_frame_jpegs) if isinstance(backend, GptBackend) else _jpegs(frames),
+                "frames": (list(backend.last_frame_jpegs) if isinstance(backend, (GptBackend, FallbackBackend))
+                           else _jpegs(frames)),
                 "raw": raw,
                 "parsed": dict(parsed, label=decision["raw_label"]) if parsed else parsed,
             }
@@ -1574,7 +1658,8 @@ def run() -> int:
 
     log.info("Inference mode starting. window=%02d:00-%02d:00 channel=%s backend=%s dry_run=%s",
              settings.alert_start_hour, settings.alert_end_hour, settings.alert_channel,
-             settings.vlm_backend, settings.dry_run)
+             f"{settings.vlm_provider}:{settings.vlm_model}"
+             + (f" -> {settings.vlm_fallback_model}" if settings.vlm_fallback_model else ""), settings.dry_run)
 
     backend = make_backend(settings, env)
     model, device = load_detector(settings.model, settings.device)
