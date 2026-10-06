@@ -13,7 +13,7 @@ import json
 import logging
 import os
 import re
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Sequence
 
 log = logging.getLogger("box.brain.profiles")
 
@@ -23,11 +23,12 @@ PROMPTS_DIR = os.path.join(_DIR, "prompts")
 
 COMMON_TOOLS = ("find_events", "summarize_period", "ask_vision", "check_camera", "record_clip", "send_media",
                 "pause_alerts", "resume_alerts", "set_camera_active", "set_alias", "change_setting", "record_verdict",
-                "ask_clarification", "get_alert_settings", "set_alert_types", "set_sensitivity", "reply")
+                "ask_clarification", "get_alert_settings", "set_alert_types", "set_sensitivity", "house_status",
+                "house_state", "house_expect", "house_cancel", "reply")
 GUARD_TOOLS = COMMON_TOOLS[:2] + ("assess_event",) + COMMON_TOOLS[2:]
 ASSISTANT_TOOLS = COMMON_TOOLS[:2] + ("describe_event",) + COMMON_TOOLS[2:]
 STATE_TOOLS = ("pause_alerts", "resume_alerts", "set_camera_active", "set_alias", "change_setting", "record_verdict",
-               "set_alert_types", "set_sensitivity")
+               "set_alert_types", "set_sensitivity", "house_state", "house_expect", "house_cancel")
 PROMPT_VERSIONS = {"guard": "2026-10-03.guard.v1", "assistant": "2026-10-03.assistant.v1"}
 
 # Messages that go straight to the big model, decided in code (the fast model would have to judge its own
@@ -40,6 +41,8 @@ _BIG_WORDS_EN = re.compile(
     r"that" + _APOS + r"?s me|(?:that |it )?was (?:me|us)|nobody|why|"
     r"angry|annoying|useless|stupid|broken|doesn" + _APOS + r"?t work|language|hebrew|english|suspicious|"
     r"alert me about|alerts for|cars too|also vehicles|animals|sensitivity|sensitive|remember|"
+    r"vacation|holiday|asleep|going to (?:bed|sleep)|we left|we" + _APOS + r"?(?:re| are) (?:back|up|home|leaving|away)|"
+    r"expecting|"
     r"(?:less|fewer|more) alerts)\b",
     re.IGNORECASE)
 _BIG_WORDS_HE = ("תכבה", "תדליק", "תשתיק", "תפסיק", "עצור", "תמשיך", "תחזיר", "תשנה", "שנה", "תקרא", "טעות",
@@ -48,11 +51,21 @@ _BIG_WORDS_HE = ("תכבה", "תדליק", "תשתיק", "תפסיק", "עצור
                  "תפעיל", "הפעל", "תכבי", "כבה", "תדליקי", "הדלק", "השתק", "תשתיקי", "הפסק", "תפסיקי",
                  "תגדיר", "הגדר", "תחזירי", "תמשיכי",
                  "התראות על", "גם על רכבים", "רגישות", "פחות התראות", "יותר התראות",
-                 "תזכור", "תזכרי", "זכור", "תרשום", "תרשמי", "תקראי")
-# Whole words only (2026-10-05: "למה" matched inside "מצלמה", so every camera message skipped the fast model),
-# each with up to two Hebrew prefix letters (ולמה, שתכבה) and a plural or feminine ending on the last word (תפסיקו).
-_BIG_HE = re.compile("|".join(
-    r"(?<!\w)[ושהבלמכ]{0,2}" + r"\s+".join(map(re.escape, words.split())) + r"[וי]?(?!\w)" for words in _BIG_WORDS_HE))
+                 "תזכור", "תזכרי", "זכור", "תרשום", "תרשמי", "תקראי",
+                 # house state the code did not parse ("we're off to Eilat till the weekend"): only the big model
+                 # may change it
+                 "לישון", "ישנים", "יצאנו", "יוצאים", "חזרנו", "קמנו", "חופשה", "מצפים", "מחכים")
+
+
+def hebrew_words(phrases: Sequence[str]) -> "re.Pattern[str]":
+    """Hebrew phrases as whole words (2026-10-05: "למה" matched inside "מצלמה", so every camera message skipped
+    the fast model), each with up to two prefix letters (ולמה, שתכבה) and a plural or feminine ending on the last
+    word (תפסיקו)."""
+    return re.compile("|".join(r"(?<!\w)[ושהבלמכ]{0,2}" + r"\s+".join(map(re.escape, words.split())) + r"[וי]?(?!\w)"
+                               for words in phrases))
+
+
+_BIG_HE = hebrew_words(_BIG_WORDS_HE)
 
 
 # "בטל" as a word, with up to two prefix letters (לבטל, ולבטל, תבטל) and one suffix (בטלו, תבטלי) - never inside

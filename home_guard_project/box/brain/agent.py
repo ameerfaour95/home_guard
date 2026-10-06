@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from ..feedback import Feedback, save_feedback
+from . import house
 from .claims import unbacked_claims
 from .grounding import evidence_text, ungrounded_details
 from .i18n import LANGUAGE_NAMES, t
@@ -42,7 +43,8 @@ from .tools import _alert_state, _alert_target, _alert_types, _alert_values
 log = logging.getLogger("box.brain.agent")
 
 FAST, BIG = "fast", "big"
-UNDOABLE = ("pause_alerts", "set_camera_active", "change_setting", "set_alert_types", "set_sensitivity", "set_alias")
+UNDOABLE = ("pause_alerts", "set_camera_active", "change_setting", "set_alert_types", "set_sensitivity", "set_alias",
+            "house_state", "house_expect", "house_cancel")
 
 
 def _finite(value: Any) -> float:
@@ -111,6 +113,7 @@ class AgentReply:
     undo_token: str = ""
     clips: Tuple[str, ...] = ()
     photos: Tuple[str, ...] = ()
+    rows: Tuple[Tuple[Tuple[str, str], ...], ...] = ()   # extra button rows ((label, callback), ...): approve / deny
 
 
 class _HandOff(Exception):
@@ -495,14 +498,78 @@ class OwnerAgentV2:
             return None
 
     def undo_turn(self, chat_id: Any, token: str, who: Optional[Dict[str, Any]] = None) -> AgentReply:
-        """The Undo button: put back what one turn changed (pause, camera on/off, settings). Never raises."""
+        """The Undo button: put back what one turn changed (pause, camera on/off, settings, the house state).
+        Never raises."""
+        with self._lock:
+            return self._undo(chat_id, token, who)
+
+    def _undo(self, chat_id: Any, token: str, who: Optional[Dict[str, Any]] = None) -> AgentReply:
+        """undo_turn under the lock (a bare "cancel" right after a house command runs it inside its own turn)."""
+        ctx = None
+        lang = "en"
+        try:
+            chat_id, who = str(chat_id), _object(who)
+            if not isinstance(token, str) or not token.isascii() or not token.isdigit():
+                raise ValueError("invalid undo token")
+            now = _finite(self._now())
+            state = self.memory.load(chat_id)
+            try:
+                settings = _object(self.services.read_settings()) if self.services.read_settings else {}
+            except Exception:  # noqa: BLE001
+                settings = {}
+            speaker = str(who.get("user_id") or "")
+            lang = state.language_for(speaker, "", default=str(settings.get("owner_language") or "en"))
+            try:
+                snapshot = self.registry.snapshot()
+            except Exception:  # noqa: BLE001
+                return AgentReply(text=t("unavailable", lang), lang=lang)
+            ctx = ToolContext(turn_id=f"{chat_id}:{token}:undo", chat_id=chat_id, speaker=who, text="", lang=lang,
+                              mode=snapshot.mode, snapshot=snapshot, state=state, services=self.services,
+                              book=self.book)
+            processed = 0
+            lines: List[str] = []
+            for r in reversed(self.book.turn_receipts(f"{chat_id}:{token}")):     # newest first
+                if (r.tool not in UNDOABLE or r.status not in (DONE, REQUESTED)
+                        or r.detail.get("already") or r.detail.get("undo_of")):
+                    continue
+                processed += 1
+                first = len(ctx.receipts)
+                try:
+                    self._undo_one(ctx, r, snapshot, now)
+                except _ChangedSince:
+                    # Left as it is, not marked undone; the line says why nothing happened.
+                    lines.append(t("undo_changed_since", lang, what=undo_what(r.tool, r.detail, r.target, lang)))
+                    continue
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("Undo of %s failed: %s", r.summary(), exc)
+                    _issue(ctx, r.tool, FAILED, r.target,
+                           {"undo_of": r.tool, "camera": str(r.detail.get("camera") or ""),
+                            "setting": str(r.detail.get("setting") or "")}, "error")
+                    lines += [receipt_line(x, lang, self.retention_days) for x in ctx.receipts[first:]]
+                    continue                                   # not undone: it stays undoable
+                self.book.update(r, UNDONE)
+                lines += [receipt_line(x, lang, self.retention_days) for x in ctx.receipts[first:]]
+            if processed:
+                text_out = "\n".join(line for line in lines if line) or t("unavailable", lang)
+            else:
+                text_out = t("nothing_to_undo", lang)
+            state.add_turn(speaker, "↩", text_out, [], [r.summary() for r in ctx.receipts], now)
+            if state.house_last.get("token") == token:
+                state.house_last = {}          # a second bare "cancel" must not undo the undo
+            self.memory.save(chat_id, state)
+            return AgentReply(text=text_out, after=tuple(ctx.after_reply), lang=lang, receipts=tuple(ctx.receipts))
+        except Exception as exc:
+            log.warning("Undo failed at the poll boundary: %s", exc)
+            return _fallback_reply(ctx, lang)
+
+    def answer_proposal(self, chat_id: Any, proposal_id: str, approve: bool,
+                        who: Optional[Dict[str, Any]] = None) -> AgentReply:
+        """A tapped yes or no (``hs:<id>:y|n``) on a house change that did not come from the owner. Never raises."""
         with self._lock:
             ctx = None
             lang = "en"
             try:
                 chat_id, who = str(chat_id), _object(who)
-                if not isinstance(token, str) or not token.isascii() or not token.isdigit():
-                    raise ValueError("invalid undo token")
                 now = _finite(self._now())
                 state = self.memory.load(chat_id)
                 try:
@@ -511,45 +578,23 @@ class OwnerAgentV2:
                     settings = {}
                 speaker = str(who.get("user_id") or "")
                 lang = state.language_for(speaker, "", default=str(settings.get("owner_language") or "en"))
+                if self.services.house is None:
+                    return AgentReply(text=t("unavailable", lang), lang=lang)
                 try:
                     snapshot = self.registry.snapshot()
                 except Exception:  # noqa: BLE001
-                    return AgentReply(text=t("unavailable", lang), lang=lang)
-                ctx = ToolContext(turn_id=f"{chat_id}:{token}:undo", chat_id=chat_id, speaker=who, text="", lang=lang,
-                                  mode=snapshot.mode, snapshot=snapshot, state=state, services=self.services,
-                                  book=self.book)
-                processed = 0
-                lines: List[str] = []
-                for r in reversed(self.book.turn_receipts(f"{chat_id}:{token}")):     # newest first
-                    if (r.tool not in UNDOABLE or r.status not in (DONE, REQUESTED)
-                            or r.detail.get("already") or r.detail.get("undo_of")):
-                        continue
-                    processed += 1
-                    first = len(ctx.receipts)
-                    try:
-                        self._undo_one(ctx, r, snapshot, now)
-                    except _ChangedSince:
-                        # Left as it is, not marked undone; the line says why nothing happened.
-                        lines.append(t("undo_changed_since", lang, what=undo_what(r.tool, r.detail, r.target, lang)))
-                        continue
-                    except Exception as exc:  # noqa: BLE001
-                        log.warning("Undo of %s failed: %s", r.summary(), exc)
-                        _issue(ctx, r.tool, FAILED, r.target,
-                               {"undo_of": r.tool, "camera": str(r.detail.get("camera") or ""),
-                                "setting": str(r.detail.get("setting") or "")}, "error")
-                        lines += [receipt_line(x, lang, self.retention_days) for x in ctx.receipts[first:]]
-                        continue                                   # not undone: it stays undoable
-                    self.book.update(r, UNDONE)
-                    lines += [receipt_line(x, lang, self.retention_days) for x in ctx.receipts[first:]]
-                if processed:
-                    text_out = "\n".join(line for line in lines if line) or t("unavailable", lang)
-                else:
-                    text_out = t("nothing_to_undo", lang)
-                state.add_turn(speaker, "↩", text_out, [], [r.summary() for r in ctx.receipts], now)
+                    snapshot = None
+                ctx = ToolContext(turn_id=f"{chat_id}:{int(now * 1000)}", chat_id=chat_id, speaker=who, text="",
+                                  lang=lang, mode=getattr(snapshot, "mode", "guard"), snapshot=snapshot, state=state,
+                                  services=self.services, book=self.book)
+                house.answer_proposal(ctx, str(proposal_id), bool(approve))
+                text_out = render_reply("", ctx.receipts, lang, self.retention_days) or t("unavailable", lang)
+                state.add_turn(speaker, "\u2713" if approve else "\u2717", text_out, [],
+                               [r.summary() for r in ctx.receipts], now)
                 self.memory.save(chat_id, state)
-                return AgentReply(text=text_out, after=tuple(ctx.after_reply), lang=lang, receipts=tuple(ctx.receipts))
+                return AgentReply(text=text_out, lang=lang, receipts=tuple(ctx.receipts))
             except Exception as exc:
-                log.warning("Undo failed at the poll boundary: %s", exc)
+                log.warning("Proposal answer failed at the poll boundary: %s", exc)
                 return _fallback_reply(ctx, lang)
 
     def _undo_one(self, ctx: ToolContext, r: Receipt, snapshot: Any, now: float) -> None:
@@ -680,6 +725,11 @@ class OwnerAgentV2:
                 raise ValueError("aliases cannot be removed on this box")
             self.services.remove_alias(camera, alias)
             _issue(ctx, "set_alias", DONE, camera, {"camera": camera, "alias": alias, "undo_of": "set_alias"})
+        elif r.tool in ("house_state", "house_expect", "house_cancel"):
+            try:
+                house.undo(ctx, r, now)
+            except house.ChangedSince:
+                raise _ChangedSince() from None
         elif r.tool == "change_setting":
             setting = d.get("setting")
             restore, wrote = d.get("restore"), d.get("wrote")
@@ -745,19 +795,40 @@ class OwnerAgentV2:
         answer, tier, escalated, guard_hits = "", BIG, False, 0
         usage: Dict[str, List[int]] = {}
         called: List[str] = []
+        # "Going to sleep", "we left", "status": read and carried out in code, in any mode, with no model; the
+        # writer confirms before a receipt says so. Only what the parser does not take reaches the models.
+        house_out = house.NOT_OURS
+        if choice is None and snapshot is not None and self.services.house is not None:
+            try:
+                schedule = house.schedule_of(self.services.house, now) or house.DEFAULT_SCHEDULE
+                house_out = house.run_command(ctx, house.parse_command(text, now, schedule))
+            except Exception as exc:  # noqa: BLE001 - the model still gets the message
+                log.warning("House command failed: %s", exc)
+                house_out = house.NOT_OURS
+            if house_out.undo:
+                return self._undo(chat_id, house_out.undo, who)
+            called += [r.tool for r in ctx.receipts]
+        code_only = house_out.handled and not house_out.rest
+        if code_only:
+            answer, tier = house_out.text, "code"
         try:
             if snapshot is None:
                 raise RuntimeError("no house snapshot")
             settings_text = settings_line(settings, lang) if settings else ""
             focus = focus_lines(state, snapshot, text, now, ctx.alert_handle, alert)
+            if self.services.house is not None:
+                try:
+                    focus.append(house.context_line(self.services.house, now))
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("House state not read for the context: %s", exc)
             block = context_block(snapshot, settings_text, now, lang, ctx.alert_handle, alert,
                                   (pending, text) if pending else None, text, box_lang, focus)
             history = state.history_messages(now)
             skip_fast = self.fast_model is None or needs_big(text, threaded or bool(alert)) or pending is not None
             tiers = [(BIG, self.model)] if skip_fast else [(FAST, self.fast_model), (BIG, self.model)]
-            for tier, model in tiers:
+            for tier, model in ([] if code_only else tiers):
                 note = ""
-                if tier == BIG and ctx.receipts:
+                if ctx.receipts and (tier == BIG or house_out.handled):
                     note = "\n[ALREADY DONE THIS TURN] " + "; ".join(r.summary() for r in ctx.receipts)
                 messages = [{"role": "system", "content": system_prompt(ctx.mode, self.retention_days, tier)},
                             *history, {"role": "user", "content": block + note}]
@@ -805,7 +876,7 @@ class OwnerAgentV2:
                         # Never "I'll remember" without a save receipt: say plainly that nothing was saved.
                         answer = t("not_saved_yet", lang) if "save" in still else ""
                 break
-            if ctx.clarification is None and answer:
+            if ctx.clarification is None and answer and not code_only:
                 # The observation is partial: a visual detail it does not give was never checked (§10).
                 evidence = evidence_text([render_block(snapshot), str((alert or {}).get("summary") or ""),
                                           str((alert or {}).get("observation") or ""), *focus, *ctx.results,
@@ -840,6 +911,9 @@ class OwnerAgentV2:
                                           ctx.receipts, lang, self.retention_days)
                 if not reply_text:
                     reply_text = t("unavailable" if failed else "nothing_done", lang)
+            token = _undo_token(ctx)
+            if house_out.handled and token:
+                state.house_last = {"token": token, "ts": now}      # a bare "cancel" next undoes this
             try:
                 state.add_turn(speaker, text, reply_text, ctx.shown, [r.summary() for r in ctx.receipts], now,
                                notes=ctx.vision_notes)
@@ -851,7 +925,7 @@ class OwnerAgentV2:
                               after=tuple(ctx.after_reply), lang=lang,
                               receipts=tuple(ctx.receipts), tier=tier, escalated=escalated, guard_hits=guard_hits,
                               usage={k: (v[0], v[1]) for k, v in usage.items()}, tools_called=tuple(called),
-                              answer=answer, undo_token=_undo_token(ctx))
+                              answer=answer, undo_token=token, rows=house_out.rows)
         except Exception as exc:
             log.warning("Could not finish owner reply: %s", exc)
             return _fallback_reply(ctx, lang)
@@ -901,6 +975,17 @@ def follow_up_camera_receipts(book: ReceiptBook, registry: Any, deliverer: Any, 
                 log.warning("Could not complete camera follow-up: %s", exc)
                 warned = True
     return sent
+
+
+def _house_store(live_dir: str, mute: Any) -> Any:
+    """The house state's one writer, on the box's own log (next to the brain's other registry files)."""
+    try:
+        from ..house_state import FILE_NAME, HouseStateStore  # noqa: PLC0415
+
+        return HouseStateStore(os.path.join(live_dir, ".registry", FILE_NAME), mute_path=getattr(mute, "path", None))
+    except Exception as exc:  # noqa: BLE001 - the assistant works without it
+        log.warning("House state not available to the assistant: %s", exc)
+        return None
 
 
 def _budgeted(vision: Any, limit: int, path: str, wrapper: Any) -> Any:
@@ -956,7 +1041,7 @@ def build_owner_agent(box_settings: Dict[str, Any], env: Dict[str, str], mute: A
         request_restart=_restart_running_mode,
         embedder=make_embedder(env, os.path.join(live_dir, ".alert_embeddings.json")),
         retention_days=retention, set_option=boxconfig.set_option, read_settings=boxconfig.load_box_settings,
-        alert_settings=alert_settings,
+        alert_settings=alert_settings, house=_house_store(live_dir, mute),
     )
     def quiet_log_on() -> bool:
         return bool(boxconfig.load_box_settings().get("quiet_log", False))

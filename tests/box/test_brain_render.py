@@ -80,6 +80,18 @@ class ClaimsTest(unittest.TestCase):
         self.assertEqual(unbacked_claims("Two events tonight, both at the entrance.", []), [])
         self.assertEqual(unbacked_claims("היו שני אירועים היום במצלמה test_ch6.", []), [])
 
+    def test_house_state_claims_need_a_house_receipt(self) -> None:
+        for text in ("I've set the house to vacation mode.", "I set you to asleep.", "You're now marked as away.",
+                     "The house is now in night mode.", "סימנתי שאתם ישנים.", "העברתי את הבית למצב חופשה",
+                     "הבית עכשיו במצב לילה", "I've noted that you're expecting a package."):
+            with self.subTest(text=text):
+                self.assertIn("house", unbacked_claims(text, []))
+                self.assertEqual(unbacked_claims(text, [r("house_state", DONE)]), [])
+        for text in ("The house is asleep until 06:00 by the night schedule.", "You are away since 08:30.",
+                     "I did not set the house to away.", "הבית במצב רגיל"):
+            with self.subTest(text=text):
+                self.assertEqual(unbacked_claims(text, []), [])
+
     def test_remember_promises_need_a_save_receipt(self) -> None:
         # The pergola bug (2026-10-05): "I'll remember" passed although set_alias never ran.
         for text in ("אזכור שהפרגולה זה מצלמה 3.", "בסדר, אני זוכר: פרגולה = מצלמה 3", "אני אזכור את זה",
