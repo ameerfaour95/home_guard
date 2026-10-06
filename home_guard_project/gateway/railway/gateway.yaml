@@ -1,0 +1,31 @@
+# Home Guard API gateway on Railway. Keys come from Railway variables, never from this file.
+listen:
+  host: 0.0.0.0
+  port: 8080
+db_path: /data/gateway.sqlite3
+admin_token_sha256: ""          # HOMEGUARD_ADMIN_TOKEN_SHA256 (Railway variable) wins
+caps:
+  box_daily_usd: 1.00
+  fleet_daily_usd: 50.00
+box_rpm: 60
+max_body_bytes: 8000000
+upstream_timeout_sec: 20
+deadline_sec: 27
+max_concurrent: 256
+aliases:
+  # The camera reports. Same order as the box today: Qwen3.5-9B, then Qwen3-VL-8B, then gpt-4o as a last resort.
+  eye:
+    kind: chat
+    upstreams:
+      - {provider: openrouter, model: qwen/qwen3.5-9b}
+      - {provider: openrouter, model: qwen/qwen3-vl-8b-instruct}
+      - {provider: openai, model: gpt-4o}
+  gpt-4o:
+    - {provider: openai, model: gpt-4o}
+    - {provider: openrouter, model: openai/gpt-4o}
+  gpt-4o-mini:
+    - {provider: openai, model: gpt-4o-mini}
+  text-embedding-3-small:
+    kind: embeddings
+    upstreams:
+      - {provider: openai, model: text-embedding-3-small}
