@@ -3,7 +3,7 @@
 Build the set on the laptop, run it wherever the model is reachable:
 
     # Laptop: 5 frames from every reviewed clip of home_guard_dataset (a folder, or s3://bucket/prefix).
-    python -m home_guard_project.box.eval_prompt prepare --out eval_set --dataset <home_guard_dataset>
+    python -m home_guard_project.box.eval_prompt prepare --out eval_set   # dataset: --dataset, else $HOMEGUARD_DATASET_DIR, else home_guard_data/dataset
     # Laptop: clips from outside the dataset, framed inside their annotated segment (picks.jsonl).
     python -m home_guard_project.box.eval_prompt add --dir eval_set --picks picks.jsonl
     # Freeze it: FROZEN.json holds the sha256 of the manifest and of every frame.
@@ -81,7 +81,10 @@ log = logging.getLogger("box.eval_prompt")
 
 BUCKET = "security-camera-project-v1"
 HOME_BATCH_PREFIX = "ameer_house"
-DATASET_ENV = "HOME_GUARD_DATASET"        # default --dataset: a folder or s3://bucket/prefix
+# Where home_guard_dataset is: --dataset, else $HOMEGUARD_DATASET_DIR, else DEFAULT_DATASET (the laptop's data root).
+# A folder, or s3://bucket/prefix with the same relative paths.
+DATASET_ENV = "HOMEGUARD_DATASET_DIR"
+DEFAULT_DATASET = r"C:\Users\ameer\Ameer\home_guard_data\dataset"
 ANNOTATIONS = "annotations/clips.jsonl"   # inside the dataset
 TRUTH_LABELS = ("alert", "normal", "empty")
 # The eval's own truth on a clip, on top of the dataset's; prepare keeps it per clip_id.
@@ -568,6 +571,11 @@ def dataset_row(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             "ours_text": text, "ours_label": label}
 
 
+def dataset_root(flag: Optional[str] = None) -> str:
+    """The dataset to read: the --dataset flag, else $HOMEGUARD_DATASET_DIR, else DEFAULT_DATASET."""
+    return flag or os.environ.get(DATASET_ENV) or DEFAULT_DATASET
+
+
 class Dataset:
     """home_guard_dataset in a local folder, or under ``s3://<bucket>/<prefix>`` with the same relative
     paths (read only)."""
@@ -591,7 +599,11 @@ class Dataset:
 
     def rows(self) -> List[Dict[str, Any]]:
         if not self.on_s3:
-            return read_jsonl(os.path.join(self.root, ANNOTATIONS))
+            path = os.path.join(self.root, ANNOTATIONS)
+            if not os.path.isfile(path):
+                raise FileNotFoundError(f"no {ANNOTATIONS} in {self.root}; name the dataset with --dataset or "
+                                        f"${DATASET_ENV}")
+            return read_jsonl(path)
         with _s3_temp(self.client, self.bucket, self._key(ANNOTATIONS), ".jsonl") as path:
             return read_jsonl(path)
 
@@ -1645,8 +1657,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                           description="Reads home_guard_dataset (annotations/clips.jsonl and clips/), from a local "
                                       "folder or s3://bucket/prefix. For S3: " + S3_HELP)
     prep.add_argument("--out", required=True, help="Folder to write frames/ and manifest.jsonl into.")
-    prep.add_argument("--dataset", default=os.environ.get(DATASET_ENV),
-                      help=f"home_guard_dataset: a folder or s3://bucket/prefix (default: ${DATASET_ENV}).")
+    prep.add_argument("--dataset", default=None,
+                      help=f"home_guard_dataset: a folder or s3://bucket/prefix (default: ${DATASET_ENV}, "
+                           f"else {DEFAULT_DATASET}).")
     prep.add_argument("--sources", nargs="+", default=None,
                       help="Only these sources (house, external, uca, smarthome; default: all).")
     prep.add_argument("--batches", nargs="+", default=None, help="Only these batches (default: all).")
@@ -1660,8 +1673,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     addp.add_argument("--dir", required=True)
     addp.add_argument("--picks", required=True, help="A jsonl file of picks.")
     addp.add_argument("--bucket", default=BUCKET)
-    addp.add_argument("--dataset", default=os.environ.get(DATASET_ENV),
-                      help="For picks that name a dataset clip instead of an s3_key.")
+    addp.add_argument("--dataset", default=None,
+                      help=f"For picks that name a dataset clip instead of an s3_key (default: ${DATASET_ENV}, "
+                           f"else {DEFAULT_DATASET}).")
 
     frz = sub.add_parser("freeze", help="Write FROZEN.json: sha256 of the manifest and every frame, and the "
                                         "set's make-up. run then warns if the set changes.")
@@ -1715,10 +1729,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if args.command in ("prepare", "add"):
         try:
-            if args.command == "prepare" and not args.dataset:
-                raise ValueError(f"name the dataset with --dataset or ${DATASET_ENV}")
-            dataset = Dataset(args.dataset, client=_s3_client() if args.dataset.startswith("s3://") else None) \
-                if args.dataset else None
+            root = dataset_root(args.dataset)
+            dataset = Dataset(root, client=_s3_client() if root.startswith("s3://") else None)
             if args.command == "prepare":
                 print(format_prepare_counts(prepare(args.out, dataset, sources=args.sources, batches=args.batches,
                                                     limit=args.limit)))

@@ -348,11 +348,30 @@ class PrepareTest(PreparedDirMixin, unittest.TestCase):
         self.assertIn("cam_a_missing", text)
         self.assertIn("chosen", text)
 
-    def test_main_prepare_needs_a_dataset(self) -> None:
+    def test_dataset_root_flag_then_env_then_default(self) -> None:
+        self.assertEqual(ev.DATASET_ENV, "HOMEGUARD_DATASET_DIR")
+        with mock.patch.dict(os.environ, {ev.DATASET_ENV: "D:/env_root"}):
+            self.assertEqual(ev.dataset_root("D:/flag_root"), "D:/flag_root")
+            self.assertEqual(ev.dataset_root(None), "D:/env_root")
         with mock.patch.dict(os.environ, {ev.DATASET_ENV: ""}):
-            self.assertEqual(ev.main(["prepare", "--out", self.out, "--dataset", ""]), 1)
-        self.assertEqual(ev.main(["prepare", "--out", self.out, "--dataset", self.src, "--sources", "house"]), 0)
+            self.assertEqual(ev.dataset_root(None), ev.DEFAULT_DATASET)
+        self.assertTrue(ev.DEFAULT_DATASET.replace("\\", "/").endswith("home_guard_data/dataset"))
+
+    def test_main_prepare_takes_the_dataset_from_flag_or_env(self) -> None:
+        missing = os.path.join(self.src, "nowhere")
+        with mock.patch.dict(os.environ, {ev.DATASET_ENV: missing}):
+            self.assertEqual(ev.main(["prepare", "--out", self.out]), 1)                      # env root has no data
+            self.assertEqual(ev.main(["prepare", "--out", self.out, "--dataset", self.src, "--sources", "house"]), 0)
         self.assertEqual(len(read_jsonl(os.path.join(self.out, "manifest.jsonl"))), 3)
+        with mock.patch.dict(os.environ, {ev.DATASET_ENV: self.src}):
+            self.assertEqual(ev.main(["prepare", "--out", self.out, "--sources", "uca"]), 0)
+        self.assertEqual([r["clip_id"] for r in read_jsonl(os.path.join(self.out, "manifest.jsonl"))],
+                         ["Burglary001"])
+
+    def test_missing_dataset_names_the_flag_and_env(self) -> None:
+        with self.assertRaises(FileNotFoundError) as cm:
+            ev.Dataset(os.path.join(self.src, "nowhere")).rows()
+        self.assertIn(ev.DATASET_ENV, str(cm.exception))
 
 
 class AddTest(PreparedDirMixin, unittest.TestCase):
