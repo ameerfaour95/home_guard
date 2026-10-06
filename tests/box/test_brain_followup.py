@@ -80,6 +80,23 @@ class FollowUpTest(unittest.TestCase):
         self.assertIn('asked "what was in his hand?": A phone.', history)
         self.assertEqual(len(self.vision.asked), 1)
 
+    def test_a_live_look_ends_the_talk_about_the_alert_and_its_description_counts(self) -> None:
+        shot = os.path.join(self.root, "live.jpg")
+        with open(shot, "wb") as f:
+            f.write(b"jpg")
+        big = Scripted([call("check_camera", camera="entrance"), reply("A man in a red shirt is at the door."),
+                        reply("His shirt is red.")])
+        agent = self.agent(big, "A car parks at the gate.")
+        agent.services.grab_photo = lambda camera: {"camera": camera, "image": shot}
+        agent.services.deliver = type("D", (), {"photo": lambda self, chat, path, caption="": {"ok": True}})()
+        self.vision.result = {"ok": True, "description": "A man in a red shirt stands at the door.",
+                              "quality": "clear", "people": 1, "label": "normal", "why": ""}
+        first = agent.handle("who is at the door now?", "-5", {"user_id": 1})
+        self.assertNotIn("ask_vision", first.tools_called)                  # the live description backs it
+        self.assertIsNone(agent.memory.load("-5").topic_event(NOW))
+        second = agent.handle("what colour is his shirt?", "-5", {"user_id": 1})
+        self.assertEqual((second.text, self.vision.asked), ("His shirt is red.", []))
+
     def test_the_same_alert_twice_is_one_history_entry(self) -> None:
         big = Scripted([reply("ok")])
         agent = self.agent(big, "A man walks to the door.")

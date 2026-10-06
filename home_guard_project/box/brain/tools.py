@@ -297,6 +297,17 @@ def _look_clip(ctx: ToolContext, record: AlertRecord, guard: bool, question: str
     return dict(value, ok=True)
 
 
+def _keep_description(ctx: ToolContext, handle: str, question: str, text: str) -> None:
+    """What a look at a clip found stays with the event in the chat, so a later answer can rely on it."""
+    entry = ctx.state.resolve(handle) or {}
+    if question.strip():
+        ctx.state.add_answer(handle, question, text)
+    elif not entry.get("observation"):
+        ctx.state.note_observation(handle, text, str(entry.get("visibility") or ""), str(entry.get("label") or ""))
+    else:
+        ctx.state.add_answer(handle, "what happened?", text)
+
+
 @_safe_tool
 def describe_event(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     handle = str(args.get("handle") or "").strip().upper()
@@ -307,8 +318,7 @@ def describe_event(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     out = _look_clip(ctx, record, guard=False, question=question)
     if not out.get("ok"):
         return out
-    if question.strip():                   # the answer is kept with the event, like an ask_vision answer
-        ctx.state.add_answer(handle, question, out["text"])
+    _keep_description(ctx, handle, question, out["text"])
     return {"ok": True, "handle": handle, "camera": record.camera, "time": local(record.ts),
             "description": out["text"], "quality": out["quality"], "people": out["people"]}
 
@@ -382,6 +392,7 @@ def assess_event(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
                     "reason": "refused" if out.get("refused") else "failed",
                     "note": "Say: activity detected; assessment unavailable. This never means normal."}
         return out
+    _keep_description(ctx, handle, "", out["text"])
     return {"ok": True, "handle": handle, "camera": record.camera, "time": local(record.ts),
             "label": out.get("label", ""), "why": out.get("why", ""), "description": out["text"],
             "quality": out["quality"]}
@@ -542,6 +553,7 @@ def check_camera(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
                      "" if sent.get("ok") else "telegram")
     handle = ctx.state.add_handle("photo", shot["image"], camera, ctx.services.now())
     ctx.shown.append(handle)
+    ctx.state.topic_event_ref = {}        # the talk is about the live picture now, not an earlier alert's clip
     out = _result(receipt, camera=camera, handle=handle)
     if implied:
         out["used_camera_being_discussed"] = True
@@ -564,6 +576,7 @@ def check_camera(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
             log.warning("Live-photo vision returned a malformed description")
             return dict(out, description_error="the picture could not be described")
         out.update(description=look["description"], quality=look["quality"], people=look["people"])
+        ctx.state.note_observation(handle, look["description"])
         if ctx.mode == GUARD:
             out.update(label=look.get("label", ""), why=look.get("why", ""))
     else:
@@ -598,6 +611,7 @@ def record_clip(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
                      "" if sent.get("ok") else "telegram")
     handle = ctx.state.add_handle("clip", rec["path"], camera, rec["start"])
     ctx.shown.append(handle)
+    ctx.state.topic_event_ref = {}
     return _result(receipt, handle=handle, bounds=bounds)
 
 

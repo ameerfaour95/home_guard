@@ -810,7 +810,7 @@ class OwnerAgentV2:
                 evidence = evidence_text([render_block(snapshot), str((alert or {}).get("summary") or ""),
                                           str((alert or {}).get("observation") or ""), *focus, *ctx.results,
                                           *(state.event_text(h) for h, e in state.handles.items()
-                                            if isinstance(e, dict) and e.get("kind") == "event")])
+                                            if isinstance(e, dict) and e.get("kind") in ("event", "photo"))])
                 missing = ungrounded_details(answer, evidence)
                 if missing:
                     guard_hits += 1
