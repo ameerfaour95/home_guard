@@ -68,7 +68,7 @@ def test_bulk_insert_uses_server_defaults(db_engine):
         s.execute(insert(m.OwnerNotice).values(device_pk=dev.id, kind="k"))
         s.flush()
         c = s.scalars(select(m.Customer).where(m.Customer.name == "Bulk")).one()
-        assert c.timezone == "Asia/Jerusalem" and c.consent_live is False and c.notes == ""
+        assert c.timezone == "Asia/Jerusalem" and c.consent_live is True and c.consent_source == "contract" and c.notes == ""
         assert s.scalars(select(m.Staff).where(m.Staff.email == "b@x.io")).one().disabled is False
         a = s.scalars(select(m.Artifact)).one()
         assert a.available is True and a.provenance == "box"

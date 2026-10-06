@@ -28,7 +28,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from .. import audit
-from ..access import media_refusal, may_see_thumbnail
+from ..access import NO_RECORDINGS_CONSENT, media_refusal, may_see_thumbnail
 from ..deps import SessionDep, current_staff, require_id
 from ..models import Artifact, AuditLog, Customer, Device, Event, Staff
 from ..schemas import MediaAccess, MediaAccessRequest
@@ -183,7 +183,7 @@ def event_thumbnail(event_id: int, request: Request, staff: Staff = Depends(curr
     if not may_see_thumbnail(staff.role, customer.consent_recordings, customer.consent_training):
         # labelers never get here (no training consent = not visible = 404 above); a thumbnail is a frame of the
         # recording, so staff need the same consent as for the recording itself
-        raise HTTPException(status_code=403, detail="This customer has not agreed to recordings access")
+        raise HTTPException(status_code=403, detail=NO_RECORDINGS_CONSENT)
     art = session.scalar(select(Artifact).where(Artifact.event_id == ev.id, Artifact.role == "thumbnail",
                                                 Artifact.available.is_(True)).order_by(Artifact.id).limit(1))
     if art is None:

@@ -45,7 +45,7 @@ class TimelineScreen(QWidget):
         # A house with many cameras would push the event list off a 768-pixel screen: show 8 rows, scroll the rest.
         self.density_scroll = QScrollArea(); self.density_scroll.setWidget(self.density); self.density_scroll.setWidgetResizable(True)
         self.density_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.density_scroll.setMaximumHeight(24+22*8+4); self.density_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self.density_scroll.setFixedHeight(min(self.density.minimumHeight(), 24+22*8) + 4); self.density_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         layout.addWidget(self.density_scroll)
         filters = QHBoxLayout(); filters.setSpacing(8)
         self.filters = {}
@@ -217,6 +217,8 @@ class TimelineScreen(QWidget):
             self.density.set_error()
             self.density.setToolTip('Activity could not be loaded. Change range to retry.'); self.density.update(); return
         self.density.set_density(events)
+        # the grid's own height up to 8 camera rows; more scroll
+        self.density_scroll.setFixedHeight(min(self.density.minimumHeight(), 24+22*8) + 4)
         combo = self.filters['camera']; selected = combo.currentData(); combo.blockSignals(True)
         combo.clear(); combo.addItem('All cameras', None)
         for camera in sorted({e.camera for e in events.rows}):

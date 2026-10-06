@@ -88,32 +88,29 @@ def test_teacher_suggestion_and_evidence(widgets, wait):
 def test_consent_refusal_shows_how_to_fix_it(widgets, wait):
     class Refusing(DemoBackend):
         def tagging_media(self, key, kind):
-            raise ConsentError("This customer has not agreed to training use. An admin confirms consent on the customer's page.")
+            raise ConsentError("This customer withdrew consent for training use. If the customer agrees again, an admin "
+                               "switches it back on on the customer's page.")
     v, _ = tag_view(widgets, wait, Refusing())
     wait(lambda: not v.media_runner.busy and v.banner.isVisible(), 5)
-    assert 'not agreed' in v.canvas.message and 'customer page' in v.banner_text.text()
+    assert 'withdrew consent' in v.canvas.message and "customer's page" in v.banner_text.text()
 
 
 def test_http_backend_reports_consent_and_validation_details():
     def handler(request):
         if request.url.path.endswith('/tagging/media'):
-            return httpx.Response(403, json={'detail': 'This customer has not agreed to training use'})
+            return httpx.Response(403, json={'detail': 'This customer withdrew consent for training use'})
         if request.url.path.endswith('/tagging/tag'):
             return httpx.Response(422, json={'detail': "category: 'Q1' is not one of N1, ..."})
-        if request.url.path.endswith('/customers/7/consent/confirm'):
-            return httpx.Response(409, json={'detail': "No consent was recorded at this customer's setup: consent can only come from the customer"})
         if request.url.path.endswith('/artifacts/5/access'):
-            return httpx.Response(403, json={'detail': 'This customer has not agreed to recordings access'})
+            return httpx.Response(403, json={'detail': 'This customer withdrew consent for recordings access'})
         return httpx.Response(200, json={'items': [], 'count': 0})
     backend = HttpBackend('http://127.0.0.1:8610', transport=httpx.MockTransport(handler))
-    with pytest.raises(ConsentError, match='not agreed to training use'):
+    with pytest.raises(ConsentError, match='withdrew consent for training use'):
         backend.tagging_media('ev:1', 'clip')
     with pytest.raises(ValidationError, match='category'):
         backend.tagging_save('ev:1', {'category': 'Q1'})
     with pytest.raises(ForbiddenError, match="customer's page"):
         backend.artifact_access(5)
-    with pytest.raises(ValidationError, match='can only come from the customer'):
-        backend.confirm_consent(7, '2026-10-02T10:00:00Z')
     assert backend.tagging_queue()['count'] == 0
 
 
@@ -124,41 +121,38 @@ def test_shell_has_a_tag_screen_and_studio_links_to_it(widgets, wait):
     assert shell.navigation['Tag'].isChecked()
 
 
-def test_consent_can_only_confirm_what_the_box_recorded(widgets, wait):
+def test_consent_comes_from_the_contract_and_an_admin_records_a_withdrawal(widgets, wait):
+    b = DemoBackend()
+    screen = CustomerScreen(b, 'dark', 'admin'); widgets.append(screen); screen.resize(1366, 768); screen.show()
+    screen.open(1); wait(lambda: screen.customer is not None and not screen.runner.busy, 5)
+    assert screen.consent_button.isVisible() and screen.consent_button.text() == 'Consent…'
+    assert not screen.consent_note.isVisible()                       # all on: nothing to warn about
+    dialog = screen.review_consent()
+    boxes = {box.text().split(':')[0]: box for box in dialog.findChildren(QCheckBox)}
+    assert all(box.isEnabled() and box.isChecked() for box in boxes.values())
+    assert any('sales contract' in w.text() for w in dialog.findChildren(QLabel))
+    boxes['Training'].setChecked(False)                              # the customer withdrew training use
+    dialog.accept()
+    wait(lambda: not screen.consent_runner.busy and not screen.runner.busy and screen.customer is not None
+         and not screen.customer.consent_training, 5)
+    after = b.customer(1)
+    assert (after.consent_live, after.consent_recordings, after.consent_training) == (True, True, False)
+    assert after.consent_source == 'withdrawn'
+    assert screen.consent_note.isVisible() and 'withdrew consent for training' in screen.consent_note.text()
+    dialog = screen.review_consent()
+    next(box for box in dialog.findChildren(QCheckBox) if box.text().startswith('Training')).setChecked(True)
+    dialog.accept()
+    wait(lambda: not screen.consent_runner.busy and not screen.runner.busy and screen.customer.consent_training, 5)
+    assert b.customer(1).consent_source == 'contract' and not screen.consent_note.isVisible()
+
+
+def test_the_setup_answer_is_shown_as_information_only(widgets, wait):
     b = DemoBackend()
     screen = CustomerScreen(b, 'dark', 'admin'); widgets.append(screen); screen.resize(1366, 768); screen.show()
     screen.open(3); wait(lambda: screen.customer is not None and not screen.runner.busy, 5)
-    assert screen.consent_button.isVisible() and screen.consent_button.text() == 'Confirm consent given at setup…'
-    assert screen.consent_note.isVisible() and 'nobody has confirmed it yet' in screen.consent_note.text()
     dialog = screen.review_consent()
-    texts = [w.text() for w in dialog.findChildren(QLabel)]
-    assert any('2026-10-02 09:30' in t and 'Maya' in t for t in texts)
-    boxes = {box.text().split(':')[0]: box for box in dialog.findChildren(QCheckBox)}
-    live = boxes['Live view']
-    assert not live.isEnabled() and not live.isChecked() and 'not agreed at setup' in live.text()
-    assert boxes['Recordings'].isEnabled() and boxes['Training'].isChecked()
-    boxes['Recordings'].setChecked(False)                      # confirm only part of what was agreed
-    dialog.accept()
-    wait(lambda: not screen.consent_runner.busy and not screen.runner.busy and screen.customer is not None
-         and screen.customer.consent_training, 5)
-    after = b.customer(3)
-    assert (after.consent_live, after.consent_recordings, after.consent_training) == (False, True, True)
-    assert after.consent_proposed is None and not screen.consent_note.isVisible()
-    with pytest.raises(ValidationError, match='can only come from the customer'):
-        b.confirm_consent(3, '2026-10-02T09:30:00Z')            # nothing left to confirm
-
-
-def test_no_proposal_means_nothing_to_confirm(widgets, wait):
-    b = DemoBackend()
-    screen = CustomerScreen(b, 'dark', 'admin'); widgets.append(screen); screen.resize(1366, 768); screen.show()
-    screen.open(2); wait(lambda: screen.customer is not None and not screen.runner.busy, 5)
-    assert screen.consent_button.text() == 'Consent…'
-    dialog = screen.review_consent()
-    assert any('nothing to confirm' in w.text() for w in dialog.findChildren(QLabel))
-    assert [x.text() for x in dialog.findChildren(QPushButton)] == ['Close']
-    from dataclasses import replace
-    with pytest.raises(ValidationError, match='gave at setup'):
-        b.update_customer(replace(b.customer(2), consent_live=True))
+    assert any('For information' in w.text() and 'live no' in w.text() for w in dialog.findChildren(QLabel))
+    assert [x.text() for x in dialog.findChildren(QPushButton)] == ['Cancel', 'Save']
 
 
 def test_missing_video_explains_why_and_the_clip_can_still_be_tagged(widgets, wait):

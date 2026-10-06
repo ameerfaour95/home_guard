@@ -118,7 +118,7 @@ def test_media_follows_consent_and_is_served_with_range(client, staff_factory, s
     _, ids = studio
     _, _, _, h = staff_factory("admin")
     r = client.post("/v1/tagging/media", headers=h, json={"key": f"ev:{ids['refusing']}", "kind": "clip"})
-    assert r.status_code == 403 and r.json()["detail"] == "This customer has not agreed to training use"
+    assert r.status_code == 403 and r.json()["detail"] == "This customer withdrew consent for training use"
     r = client.post("/v1/tagging/media", headers=h, json={"key": f"ev:{ids['consenting']}", "kind": "clip"})
     assert r.status_code == 200, r.text      # the local copy, so no storage is needed
     url = r.json()["url"]

@@ -74,11 +74,7 @@ Unsaved edits are kept when you move to another clip.
 | Old tags | The unified dataset: `home_guard_data/dataset` next to the app folder | `HOMEGUARD_DATASET_DIR` |
 | Teacher suggestions | The eval results in `eval_set/results` and `eval_set_v2/results` of `home_guard_data/eval` (else `home_guard_eval`) | `HOMEGUARD_EVAL_DIR` |
 
-A clip from a household that has not given training consent stays in the queue, but its video does not open.
-
-Consent comes from the customer, through the box's setup. When a box recorded the customer's answers, the customer's page shows **Confirm consent given at setup…**. It lists what the customer answered and when, and confirming applies exactly those answers. The confirmation goes into the audit log with your name and the proposal.
-
-An admin cannot add consent the customer did not give. A customer with no setup answers has nothing to confirm and stays blocked. Withdrawing consent is always possible.
+Consent comes from the sales contract: every customer agreed to live view, recordings and training, so the app does not ask again. If a customer withdraws a consent, an admin unticks it under **Consent…** on the customer's page. Staff then cannot open what it covers: a clip stays in the tagging queue, but its video does not open. Tick it again if the customer agrees again. Both changes are recorded in the audit log. What the box recorded at setup is shown there for information only.
 
 ### Exports
 

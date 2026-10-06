@@ -14,8 +14,8 @@ from typing import Optional
 
 ROLE_CANNOT_TRAIN = "Your role cannot open training data"
 ROLE_CANNOT = "Your role cannot do this"
-NO_TRAINING_CONSENT = "This customer has not agreed to training use"
-NO_RECORDINGS_CONSENT = "This customer has not agreed to recordings access"
+NO_TRAINING_CONSENT = "This customer withdrew consent for training use"
+NO_RECORDINGS_CONSENT = "This customer withdrew consent for recordings access"
 
 
 def media_refusal(role: str, purpose: str, consent_recordings: bool, consent_training: bool) -> Optional[str]:

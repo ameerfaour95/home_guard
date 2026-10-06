@@ -74,8 +74,9 @@ def test_registration_creates_customer_and_device(session, s3, s3client):
     dev = device_of(session, "dana_house")
     cust = session.get(m.Customer, dev.customer_id)
     assert (cust.name, cust.name_source, cust.owner_phone) == ("Dana Cohen", "setup", PHONE)
-    # the box's consent is only a proposal: the customer's real consents stay false until an admin confirms
-    assert (cust.consent_live, cust.consent_recordings, cust.consent_training) == (False, False, False)
+    # consent comes from the sales contract: on; what the box recorded at setup is kept as information only
+    assert (cust.consent_live, cust.consent_recordings, cust.consent_training) == (True, True, True)
+    assert cust.consent_source == "contract"
     assert cust.consent_proposed == {"live": True, "recordings": True, "training": False,
                                      "recorded_utc": "2026-10-02T10:00:00Z", "installer": "Ameer"}
     assert cust.notes == ""
@@ -84,9 +85,8 @@ def test_registration_creates_customer_and_device(session, s3, s3client):
     row = session.scalar(select(m.AuditLog).where(m.AuditLog.action == "auto_enroll"))
     assert row.staff_id is None and row.staff_name == "system:setup" and row.device_id == dev.device_id
     assert PHONE not in json.dumps(row.detail) and "Dana" not in json.dumps(row.detail)
-    prop = session.scalar(select(m.AuditLog).where(m.AuditLog.action == "consent_proposed"))
-    assert prop.staff_name == "system:setup" and sorted(prop.detail["fields"]) == [
-        "consent_live", "consent_recordings", "consent_training"]
+    prop = session.scalar(select(m.AuditLog).where(m.AuditLog.action == "consent_recorded_at_setup"))
+    assert prop.staff_name == "system:setup" and prop.detail == {"live": True, "recordings": True, "training": False}
 
 
 def test_heartbeat_only_needs_details(session, s3, s3client):
@@ -95,7 +95,7 @@ def test_heartbeat_only_needs_details(session, s3, s3client):
     dev = device_of(session, "new_site-2")
     cust = session.get(m.Customer, dev.customer_id)
     assert cust.name == "New Site 2" and cust.name_source == "discovered"
-    assert not (cust.consent_live or cust.consent_recordings or cust.consent_training)
+    assert cust.consent_live and cust.consent_recordings and cust.consent_training   # the sales contract
     assert dev.enrolled_by == "discovered"
     row = session.scalar(select(m.AuditLog).where(m.AuditLog.action == "auto_discover"))
     assert row is not None and row.staff_name == "system:discovery"
@@ -122,52 +122,26 @@ def _cust(session, site="dana_house"):
     return dev, cust
 
 
-def _confirm(session, site="dana_house"):
-    """What an admin PATCH does to the stored consents (the route is tested separately)."""
-    _, cust = _cust(session, site)
-    cust.consent_live, cust.consent_recordings, cust.consent_training = True, True, False
-    cust.consent_proposed = None
-    cust.consent_recorded_utc = NOW
-    session.commit()
-
-
-def test_grants_are_proposals_revocations_apply(session, s3, s3client):
+def test_box_answers_are_information_and_never_change_consent(session, s3, s3client):
     put_reg(s3client, "dana_house", registration(training=False, recorded="2026-10-02T10:00:00Z"))
     run(session, s3)
-    _confirm(session)
-    # a newer registration (after the admin's confirmation) grants training and revokes live
+    # a newer registration says no to live view: stored, consent unchanged (only an admin switches consent)
     put_reg(s3client, "dana_house", registration(training=True, live=False, recorded="2026-10-03T12:01:00Z",
                                                 host="new-host", version="1.5.0"))
     discovery.discover(session, s3, now=datetime(2026, 10, 3, 12, 2, tzinfo=timezone.utc))
     session.commit()
     dev, cust = _cust(session)
-    assert (cust.consent_live, cust.consent_training) == (False, False)  # revoked now, grant only proposed
-    assert cust.consent_proposed["training"] is True and cust.consent_proposed["live"] is False
+    assert (cust.consent_live, cust.consent_recordings, cust.consent_training) == (True, True, True)
+    assert cust.consent_proposed["live"] is False and cust.consent_proposed["training"] is True
     assert (dev.tailscale_host, dev.app_version) == ("new-host", "1.5.0")
-    rev = session.scalar(select(m.AuditLog).where(m.AuditLog.action == "consent_revoked_by_owner"))
-    assert rev.detail["fields"] == ["consent_live"] and rev.staff_name == "system:discovery"
-    prop = list(session.scalars(select(m.AuditLog).where(m.AuditLog.action == "consent_proposed")
-                                .order_by(m.AuditLog.id)))[-1]
-    assert prop.detail["fields"] == ["consent_training"]
-    # an older answer changes the host but never consents or the proposal
+    assert session.scalar(select(m.AuditLog).where(m.AuditLog.action == "consent_revoked_by_owner")) is None
+    # an older answer changes the host but not the stored answer
     put_reg(s3client, "dana_house", registration(training=False, live=True, recorded="2026-10-01T00:00:00Z",
                                                 host="third"))
     discovery.discover(session, s3, now=datetime(2026, 10, 3, 12, 3, tzinfo=timezone.utc))
     session.commit()
     dev, cust = _cust(session)
-    assert (cust.consent_live, cust.consent_training) == (False, False)
-    assert cust.consent_proposed["training"] is True and dev.tailscale_host == "third"
-
-
-def test_pure_revocation_has_no_proposal(session, s3, s3client):
-    put_reg(s3client, "dana_house", registration(recorded="2026-10-02T10:00:00Z"))
-    run(session, s3)
-    _confirm(session)
-    put_reg(s3client, "dana_house", registration(recordings=False, recorded="2026-10-03T12:01:00Z"))
-    discovery.discover(session, s3, now=datetime(2026, 10, 3, 12, 2, tzinfo=timezone.utc))
-    session.commit()
-    _, cust = _cust(session)
-    assert (cust.consent_live, cust.consent_recordings) == (True, False) and cust.consent_proposed is None
+    assert cust.consent_proposed["live"] is False and dev.tailscale_host == "third"
 
 
 def test_future_registration_is_rejected(session, s3, s3client):
@@ -240,7 +214,7 @@ def test_registration_upgrades_a_discovered_site(session, s3, s3client):
     dev = device_of(session, "dana_house")
     cust = session.get(m.Customer, dev.customer_id)
     assert (dev.enrolled_by, cust.name, cust.name_source) == ("setup", "Dana Cohen", "setup")
-    assert cust.consent_live is False and cust.consent_proposed["live"] is True
+    assert cust.consent_live is True and cust.consent_proposed["live"] is True
 
 
 def test_admin_enrolled_site_keeps_its_customer(session, s3, s3client):
@@ -252,24 +226,9 @@ def test_admin_enrolled_site_keeps_its_customer(session, s3, s3client):
     cust = session.get(m.Customer, dev.customer_id)
     assert cust.name == "Admin Chosen" and dev.enrolled_by == "admin" and dev.app_version == "1.4.0"
     assert session.scalar(select(func.count()).select_from(m.Customer)) == 1
-    # consents never change from a registration; a differing one is only proposed
-    assert (cust.consent_live, cust.consent_recordings, cust.consent_training) == (False, False, False)
+    # consents never change from a registration; its answers are stored as information
+    assert (cust.consent_live, cust.consent_recordings, cust.consent_training) == (True, True, True)
     assert cust.consent_proposed["live"] is True
-
-
-def test_admin_enrolled_site_matching_consents_makes_no_proposal(session, s3, s3client):
-    dev = b.enroll(session, "dana_house", "Admin Chosen")
-    cust = session.get(m.Customer, dev.customer_id)
-    cust.consent_live, cust.consent_recordings, cust.consent_training = True, True, False
-    session.commit()
-    put_reg(s3client, "dana_house", registration())
-    run(session, s3)
-    session.refresh(cust)
-    assert cust.consent_proposed is None and cust.consent_live is True
-    put_reg(s3client, "dana_house", registration(live=False, recorded="2026-10-03T00:00:00Z"))
-    run(session, s3)
-    session.refresh(cust)
-    assert cust.consent_live is True and cust.consent_proposed["live"] is False  # no auto-revocation either
 
 
 def test_ignore_list_and_excluded_pools(session, s3, s3client, monkeypatch):
@@ -301,7 +260,7 @@ def test_owner_name_becomes_an_identity_term_and_phone_stays_private(client, sta
     _, _, _, admin = staff_factory("admin")
     _, _, _, lab = staff_factory("labeler")
     fleet = client.get("/v1/fleet", headers=admin).json()["devices"][0]
-    assert (fleet["enrolled_by"], fleet["needs_details"], fleet["app_version"]) == ("setup", True, "1.4.0")  # proposal pending
+    assert (fleet["enrolled_by"], fleet["needs_details"], fleet["app_version"]) == ("setup", False, "1.4.0")
     assert PHONE not in client.get("/v1/audit", headers=admin).text
     assert PHONE not in client.get("/v1/customers", headers=admin).text
     assert client.get("/v1/fleet", headers=lab).status_code == 403
@@ -339,33 +298,6 @@ def test_manage_discover_once_parser():
     assert manage.build_parser().parse_args(["discover-once"]).fn is manage.cmd_discover_once
 
 
-def test_admin_patch_of_consents_confirms_the_proposal(client, staff_factory, s3):
-    from home_guard_project.cloud.db import session_scope
-
-    s3.client.put_object(Bucket=b.BUCKET, Key="dataset_dana_house/_status/registration.json",
-                         Body=json.dumps(registration()).encode())
-    with session_scope(client.app.state.engine) as s:
-        discovery.discover(s, s3, now=NOW)
-    _, _, _, admin = staff_factory("admin")
-    _, _, _, support = staff_factory("support")
-    cust = client.get("/v1/customers", headers=support).json()[0]
-    assert cust["consent_proposed"]["live"] is True and cust["consent_proposed"]["installer"] == "Ameer"
-    assert cust["consent_proposed"]["recorded_utc"].startswith("2026-10-02T10:00:00")
-    assert (cust["consent_live"], cust["consent_training"]) == (False, False)
-    dev = client.get("/v1/fleet", headers=admin).json()["devices"][0]
-    assert dev["needs_details"] is True  # a proposal is pending even though the box named the owner
-    r = client.patch(f"/v1/customers/{cust['id']}", json={"name": cust["name"], "consent_live": True, "consent_recordings": True},
-                     headers=admin)
-    assert r.status_code == 200 and r.json()["consent_proposed"] is None and r.json()["consent_live"] is True
-    assert client.get("/v1/fleet", headers=admin).json()["devices"][0]["needs_details"] is False
-    audit_rows = client.get("/v1/audit", headers=admin).json()["items"]
-    conf = next(a for a in audit_rows if a["action"] == "consent_confirmed")
-    assert conf["detail"]["fields"] == ["consent_live", "consent_recordings"]
-    assert conf["detail"]["proposal_recorded_utc"].startswith("2026-10-02T10:00:00")
-    with session_scope(client.app.state.engine) as s:
-        assert s.get(m.Customer, cust["id"]).consent_recorded_utc is not None
-
-
 def test_renamed_owner_keeps_the_old_name_as_an_identity_term(client, staff_factory, s3):
     from home_guard_project.cloud.db import session_scope
 
@@ -390,72 +322,24 @@ def test_staff_names_cannot_impersonate_system_actors(capsys):
     assert "system:" in capsys.readouterr().err
 
 
-def _discovered(client, s3):
+def test_admin_switches_consent_off_and_on_and_it_is_audited(client, staff_factory, s3):
     from home_guard_project.cloud.db import session_scope
 
     s3.client.put_object(Bucket=b.BUCKET, Key="dataset_dana_house/_status/registration.json",
                          Body=json.dumps(registration()).encode())
     with session_scope(client.app.state.engine) as s:
         discovery.discover(s, s3, now=NOW)
-
-
-def test_confirm_settles_exactly_the_consent_the_customer_gave_at_setup(client, staff_factory, s3):
-    from home_guard_project.cloud.db import session_scope
-
-    _discovered(client, s3)
     staff, _, _, admin = staff_factory("admin")
     cust = client.get("/v1/customers", headers=admin).json()[0]
-    url = f"/v1/customers/{cust['id']}/consent/confirm"
-    # a grant beyond the proposal (training was not given) is refused, in PATCH as well
-    r = client.patch(f"/v1/customers/{cust['id']}", headers=admin, json={"name": cust["name"], "consent_training": True})
-    assert r.status_code == 422
-    assert client.post(url, headers=admin, json={"recorded_utc": "2026-10-01T10:00:00Z"}).status_code == 409  # stale
-    r = client.post(url, headers=admin, json={"recorded_utc": cust["consent_proposed"]["recorded_utc"]})
-    assert r.status_code == 200, r.text
-    got = r.json()
-    assert (got["consent_live"], got["consent_recordings"], got["consent_training"]) == (True, True, False)
-    assert got["consent_proposed"] is None
-    conf = next(a for a in client.get("/v1/audit", headers=admin).json()["items"] if a["action"] == "consent_confirmed")
-    assert conf["staff"] == staff.name and conf["ts"] and conf["detail"]["fields"] == ["consent_live", "consent_recordings"]
-    assert conf["detail"]["proposal"]["installer"] == "Ameer"
-    assert conf["detail"]["proposal_recorded_utc"].startswith("2026-10-02T10:00:00")
-    with session_scope(client.app.state.engine) as s:
-        assert s.get(m.Customer, cust["id"]).consent_recorded_utc == datetime(2026, 10, 2, 10, tzinfo=timezone.utc)
-    # nothing left to confirm: blocked with a clear message
-    r = client.post(url, headers=admin, json={"recorded_utc": "2026-10-02T10:00:00Z"})
-    assert r.status_code == 409 and "can only come from the customer" in r.json()["detail"]
-    # withdrawing is always allowed
-    r = client.patch(f"/v1/customers/{cust['id']}", headers=admin, json={"name": cust["name"], "consent_live": False})
-    assert r.status_code == 200 and r.json()["consent_live"] is False
-
-
-@pytest.mark.parametrize("role", ["support", "labeler"])
-def test_only_admins_confirm_consent(client, staff_factory, s3, role):
-    _discovered(client, s3)
-    _, _, _, admin = staff_factory("admin")
-    _, _, _, other = staff_factory(role)
-    cust = client.get("/v1/customers", headers=admin).json()[0]
-    r = client.post(f"/v1/customers/{cust['id']}/consent/confirm", headers=other,
-                    json={"recorded_utc": cust["consent_proposed"]["recorded_utc"]})
-    assert r.status_code == 403
-
-
-def test_confirm_only_some_of_the_yes_answers_and_never_a_no(client, staff_factory, s3):
-    _discovered(client, s3)
-    _, _, _, admin = staff_factory("admin")
-    cust = client.get("/v1/customers", headers=admin).json()[0]
-    url = f"/v1/customers/{cust['id']}/consent/confirm"
-    when = cust["consent_proposed"]["recorded_utc"]
-    r = client.post(url, headers=admin, json={"recorded_utc": when, "fields": ["live", "training"]})
-    assert r.status_code == 422 and "did not agree to training" in r.json()["detail"]
-    r = client.post(url, headers=admin, json={"recorded_utc": when, "fields": ["recordings"]})
-    assert r.status_code == 200, r.text
-    got = r.json()
-    assert (got["consent_live"], got["consent_recordings"], got["consent_training"]) == (False, True, False)
-    assert got["consent_proposed"] is None
-    # with the proposal settled, nothing more can be turned on
-    r = client.patch(f"/v1/customers/{cust['id']}", headers=admin, json={"name": cust["name"], "consent_live": True})
-    assert r.status_code == 422
-    # what is already on may be sent again unchanged
-    r = client.patch(f"/v1/customers/{cust['id']}", headers=admin, json={"name": cust["name"], "consent_recordings": True})
-    assert r.status_code == 200
+    assert (cust["consent_live"], cust["consent_training"], cust["consent_source"]) == (True, True, "contract")
+    url = f"/v1/customers/{cust['id']}"
+    r = client.patch(url, headers=admin, json={"name": cust["name"], "consent_recordings": False})
+    assert r.status_code == 200 and r.json()["consent_recordings"] is False and r.json()["consent_source"] == "withdrawn"
+    r = client.patch(url, headers=admin, json={"name": cust["name"], "consent_recordings": True})
+    assert r.status_code == 200 and r.json()["consent_recordings"] is True and r.json()["consent_source"] == "contract"
+    rows = [a for a in client.get("/v1/audit", headers=admin).json()["items"] if a["action"] == "consent_switched"]
+    assert [(a["detail"]["off"], a["detail"]["on"]) for a in sorted(rows, key=lambda a: a["id"])] == [
+        (["consent_recordings"], []), ([], ["consent_recordings"])]
+    assert all(a["staff"] == staff.name for a in rows)
+    _, _, _, support = staff_factory("support")
+    assert client.patch(url, headers=support, json={"name": cust["name"], "consent_live": False}).status_code == 403

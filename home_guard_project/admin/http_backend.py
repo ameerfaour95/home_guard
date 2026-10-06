@@ -17,7 +17,7 @@ from .models import SavedFilter, CollectionOut, ExportOut, AuditPage, DensityOut
 from .models import TokenPair, StaffOut, FleetResponse, CustomerOut, EventPage, EventDetail, EventSummary, DetectionsOut, MediaAccess, decode
 from .tagging_client import HttpTagging, ConsentError
 
-CONSENT_REFUSALS = ('This customer has not agreed to training use', 'This customer has not agreed to recordings access')
+CONSENT_REFUSALS = ('This customer withdrew consent for training use', 'This customer withdrew consent for recordings access')
 
 
 def tls_context():
@@ -92,7 +92,8 @@ class HttpBackend(HttpTagging):
             except (ValueError, AttributeError):
                 detail = None
             if detail in CONSENT_REFUSALS:   # the household's consent, not the staff member's role, is missing
-                raise ConsentError(f"{detail}. An admin confirms consent on the customer's page.")
+                raise ConsentError(f"{detail}. If the customer agrees again, an admin switches it back on on the "
+                                   "customer's page.")
         if response.status_code >= 300:
             error = {401: AuthError, 403: ForbiddenError, 429: RateLimitError, 501: UnsupportedError}.get(response.status_code, ServerError)
             raise error()

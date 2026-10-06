@@ -697,39 +697,6 @@
         "title": "Completeness",
         "type": "object"
       },
-      "ConsentConfirm": {
-        "properties": {
-          "fields": {
-            "anyOf": [
-              {
-                "items": {
-                  "enum": [
-                    "live",
-                    "recordings",
-                    "training"
-                  ],
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Fields"
-          },
-          "recorded_utc": {
-            "format": "date-time",
-            "title": "Recorded Utc",
-            "type": "string"
-          }
-        },
-        "required": [
-          "recorded_utc"
-        ],
-        "title": "ConsentConfirm",
-        "type": "object"
-      },
       "ConsentProposal": {
         "properties": {
           "installer": {
@@ -767,17 +734,17 @@
       "CustomerIn": {
         "properties": {
           "consent_live": {
-            "default": false,
+            "default": true,
             "title": "Consent Live",
             "type": "boolean"
           },
           "consent_recordings": {
-            "default": false,
+            "default": true,
             "title": "Consent Recordings",
             "type": "boolean"
           },
           "consent_training": {
-            "default": false,
+            "default": true,
             "title": "Consent Training",
             "type": "boolean"
           },
@@ -805,7 +772,7 @@
       "CustomerOut": {
         "properties": {
           "consent_live": {
-            "default": false,
+            "default": true,
             "title": "Consent Live",
             "type": "boolean"
           },
@@ -820,12 +787,21 @@
             ]
           },
           "consent_recordings": {
-            "default": false,
+            "default": true,
             "title": "Consent Recordings",
             "type": "boolean"
           },
+          "consent_source": {
+            "default": "contract",
+            "enum": [
+              "contract",
+              "withdrawn"
+            ],
+            "title": "Consent Source",
+            "type": "string"
+          },
           "consent_training": {
-            "default": false,
+            "default": true,
             "title": "Consent Training",
             "type": "boolean"
           },
@@ -3402,63 +3378,6 @@
           }
         ],
         "summary": "Update Customer",
-        "tags": [
-          "customers"
-        ]
-      }
-    },
-    "/v1/customers/{customer_id}/consent/confirm": {
-      "post": {
-        "operationId": "confirm_consent_v1_customers__customer_id__consent_confirm_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "customer_id",
-            "required": true,
-            "schema": {
-              "title": "Customer Id",
-              "type": "integer"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ConsentConfirm"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CustomerOut"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Confirm Consent",
         "tags": [
           "customers"
         ]

@@ -17,7 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-TAXONOMY_VERSION = "2026-10-06.v1"
+TAXONOMY_VERSION = "2026-10-06.v2"
 
 LABELS = ("normal", "suspicious", "escalation")      # same order and words as inference.LABELS
 GROUP_LABEL = {"N": "normal", "S": "suspicious", "E": "escalation"}
@@ -49,12 +49,14 @@ CATEGORIES: Tuple[Category, ...] = (
     Category("N5", "work", "a gardener, cleaner, technician or builder working", "עבודה: גנן, ניקיון, טכנאי"),
     Category("N6", "household life", "family life: playing, talking, sitting, cleaning, carrying bags, smoking",
              "חיי הבית"),
-    Category("N7", "vehicle routine", "a car parks, leaves, or someone gets in or out of it", "שגרת רכב"),
+    Category("N7", "vehicle routine", "someone uses their own car the normal way: parks, unlocks it and gets in, "
+             "unloads it, drives off", "שגרת רכב"),
     Category("N8", "animals", "only animals move (cats, dogs, birds)", "בעלי חיים"),
     Category("N9", "soldier or guard", "a soldier or security guard with a weapon slung on the body, not in hand",
              "חייל או מאבטח עם נשק תלוי"),
     Category("N10", "nothing", "nobody is there and nothing moves (light changes, plants, parked cars)", "שום דבר"),
-    Category("S1", "testing access", "tries door handles, windows, gates or car doors", "בודק גישה: ידיות, חלונות"),
+    Category("S1", "testing access", "tries door handles, windows, gates or car doors without simply opening "
+             "and using them, or tries more than one", "בודק גישה: ידיות, חלונות"),
     Category("S2", "looking in", "peers into windows or cars", "מציץ פנימה"),
     Category("S3", "surveying", "moves between entry points or walks along the fence, studying the property",
              "סוקר את הבית"),
@@ -266,10 +268,11 @@ def expectation_lines(ctx: Context, categories: Iterable[str] = ()) -> List[str]
             for cid, now, usual in expectation_changes(ctx, categories)]
 
 
-def prompt_list() -> str:
-    """The taxonomy as prompt text, one category per line."""
+def prompt_list(order: Sequence[str] = ("N", "S", "E")) -> str:
+    """The taxonomy as prompt text, one category per line, groups in *order*."""
+    titles = {"N": "Normal", "S": "Suspicious", "E": "Escalation"}
     out = []
-    for group, title in (("N", "Normal"), ("S", "Suspicious"), ("E", "Escalation")):
+    for group, title in ((g, titles[g]) for g in order):
         out.append(f"{title}:")
         out.extend(f"- {c.id} {c.name}: {c.definition}" for c in CATEGORIES if c.group == group)
     out.append(f"- {OTHER}: none of the above; describe it in other_text")

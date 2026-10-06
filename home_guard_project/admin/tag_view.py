@@ -409,8 +409,8 @@ class TagView(QWidget):
             message = str(error)
             self.show_video_message(message)
             customer = (self.detail or {}).get('item', {}).get('info', {}).get('customer_id')
-            if 'consent' in message.lower() or 'agreed' in message.lower():
-                self.show_banner(f'{message}. An admin confirms consent on the customer page.',
+            if 'consent' in message.lower():
+                self.show_banner(message,
                                  'Open customer', (lambda: self.customer_requested.emit(customer)) if customer else None)
             return
         (key, kind), access = result

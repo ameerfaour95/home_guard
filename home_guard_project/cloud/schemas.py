@@ -82,9 +82,9 @@ class FleetResponse(BaseModel):
 class CustomerIn(BaseModel):
     name: str
     timezone: str = "Asia/Jerusalem"
-    consent_live: bool = False
-    consent_recordings: bool = False
-    consent_training: bool = False
+    consent_live: bool = True       # from the sales contract; an admin switches one off when the customer withdraws it
+    consent_recordings: bool = True
+    consent_training: bool = True
     notes: str = ""
 
 
@@ -96,15 +96,10 @@ class ConsentProposal(BaseModel):
     installer: str
 
 
-class ConsentConfirm(BaseModel):
-    recorded_utc: datetime  # the proposal the admin was shown: a newer one must be read before it is confirmed
-    # which of the proposal's yes answers to turn on (default: all of them); a "no" answer can never be listed
-    fields: Optional[list[Literal["live", "recordings", "training"]]] = None
-
-
 class CustomerOut(CustomerIn):
     id: int
-    consent_proposed: Optional[ConsentProposal] = None  # admin/support only: what the box recorded, unconfirmed
+    consent_proposed: Optional[ConsentProposal] = None  # admin/support only: what the box's setup recorded (information)
+    consent_source: Literal["contract", "withdrawn"] = "contract"
     devices: list[DeviceSummary] = []
 
 

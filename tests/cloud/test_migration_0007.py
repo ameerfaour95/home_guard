@@ -75,7 +75,8 @@ def test_0007_upgrade_downgrade_on_a_populated_database(fresh_url):
         command.upgrade(cfg, "head")
         with engine.connect() as conn:
             assert conn.execute(text("SELECT count(*) FROM identity_aliases")).scalar() >= 8
-            assert _counts(conn) == before
+            # 0015 writes one "consent from the sales contract" audit row per customer
+            assert _counts(conn) == {**before, "audit_log": before["audit_log"] + before["customers"]}
             diff = compare_metadata(MigrationContext.configure(conn), Base.metadata)  # head (0008) = the models
             assert diff == [], diff
     finally:

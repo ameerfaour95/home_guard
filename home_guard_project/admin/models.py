@@ -91,7 +91,8 @@ class CustomerOut:
     consent_training: bool = False
     notes: str = ''
     devices: list[DeviceSummary] = field(default_factory=list)
-    consent_proposed: dict | None = None  # what the box's setup recorded, waiting for an admin to confirm
+    consent_proposed: dict | None = None  # what the box's setup recorded (information only)
+    consent_source: str = 'contract'      # 'contract', or 'withdrawn' once an admin switched a consent off
 
 
 @dataclass

@@ -47,15 +47,18 @@ class Customer(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(255))
     timezone: Mapped[str] = mapped_column(String(64), default="Asia/Jerusalem", server_default="Asia/Jerusalem")
-    consent_live: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
-    consent_recordings: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
-    consent_training: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
+    # Consent comes from the sales contract (live view, recordings, training): on for every customer. An admin
+    # switches one off when the customer withdraws it (consent_source "withdrawn"), and back on when they agree again.
+    consent_live: Mapped[bool] = mapped_column(Boolean, default=True, server_default=sa_true())
+    consent_recordings: Mapped[bool] = mapped_column(Boolean, default=True, server_default=sa_true())
+    consent_training: Mapped[bool] = mapped_column(Boolean, default=True, server_default=sa_true())
+    consent_source: Mapped[str] = mapped_column(String(16), default="contract", server_default="contract")
     notes: Mapped[str] = mapped_column(Text, default="", server_default="")
     # "admin" (a person named it) | "setup" (the box's registration) | "discovered" (guessed from the site)
     name_source: Mapped[str] = mapped_column(String(16), default="admin", server_default="admin")
     owner_phone: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)  # admin/support only, never exposed
     consent_recorded_utc: Mapped[Optional[datetime]] = mapped_column(TS, nullable=True)  # newest owner answer applied
-    # the box's consent answer waiting for an admin: {live, recordings, training, recorded_utc, installer}
+    # what the box's setup recorded, kept as information only: {live, recordings, training, recorded_utc, installer}
     consent_proposed: Mapped[Optional[Any]] = mapped_column(JSONType, nullable=True)
 
 

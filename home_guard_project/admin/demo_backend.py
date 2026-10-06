@@ -55,33 +55,12 @@ class DemoBackend(DemoTagging, DemoAnnotations, DemoStudio):
             setattr(customer, key, value)
         return customer
 
-    def confirm_consent(self, customer_id, recorded_utc, fields=None):
-        customer = self.customer(customer_id)
-        proposed = customer.consent_proposed
-        if not proposed:
-            raise ValidationError("No consent was recorded at this customer's setup: consent can only come from the customer")
-        if proposed.get('recorded_utc') != recorded_utc:
-            raise ValidationError('The box recorded a newer answer from this customer: reload and check it again')
-        for key in fields or ():
-            if not proposed.get(key):
-                raise ValidationError(f'The customer did not agree to {key} at setup: it cannot be turned on')
-        def value(key):
-            return bool(proposed.get(key)) and (fields is None or key in fields)
-        changes = {f'consent_{k}': value(k) for k in ('live', 'recordings', 'training')
-                   if not proposed.get(k) or value(k)}
-        self.__dict__.setdefault('_customer_changes', {}).setdefault(int(customer_id), {}).update(
-            **changes, consent_proposed=None)
-        return self.customer(customer_id)
-
     def update_customer(self, customer):
         self._identity_access()
         changes = {k: getattr(customer, k) for k in ('name', 'timezone', 'consent_live', 'consent_recordings',
                                                        'consent_training', 'notes')}
-        current = self.customer(customer.id)
-        proposed = current.consent_proposed or {}
-        for key in ('live', 'recordings', 'training'):
-            if changes[f'consent_{key}'] and not getattr(current, f'consent_{key}') and not proposed.get(key):
-                raise ValidationError('Consent comes from the customer: confirm the consent this customer gave at setup')
+        changes['consent_source'] = 'contract' if all(changes[f'consent_{k}'] for k in ('live', 'recordings', 'training')) \
+            else 'withdrawn'
         self.__dict__.setdefault('_customer_changes', {})[int(customer.id)] = changes
         return self.customer(customer.id)
 

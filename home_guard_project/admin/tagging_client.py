@@ -46,16 +46,6 @@ class HttpTagging:
             raise ValidationError(detail)
         raise ServerError()
 
-    def confirm_consent(self, customer_id, recorded_utc, fields=None):
-        """Settle the consent the box recorded at setup: its "yes" answers in *fields* (default all) turn on."""
-        from .models import CustomerOut, decode
-        body = dict(recorded_utc=recorded_utc) if fields is None else dict(recorded_utc=recorded_utc, fields=list(fields))
-        data = self._tag_json('POST', f'customers/{int(customer_id)}/consent/confirm', json=body)
-        try:
-            return decode(CustomerOut, data)
-        except (ValueError, TypeError, KeyError, AttributeError):
-            raise ServerError() from None
-
     def tagging_state(self):
         return self._tag_json('GET', 'tagging/state')
 

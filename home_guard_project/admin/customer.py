@@ -88,15 +88,12 @@ class CustomerScreen(QWidget):
             return
         self.zone, self.customer = customer.timezone, customer
         self.name.setText(customer.name)
-        proposed = getattr(customer, 'consent_proposed', None)
-        missing = not (customer.consent_recordings and customer.consent_training)
+        withdrawn = [text for key, text in (('live', 'live view'), ('recordings', 'recordings'), ('training', 'training'))
+                     if not getattr(customer, f'consent_{key}')]
         self.consent_button.setVisible(self.role == 'admin' and not self.review_mode)
-        self.consent_button.setText('Confirm consent given at setup…' if proposed else 'Consent…')
-        self.consent_button.setObjectName('primary' if proposed else 'compact')
-        self.consent_button.style().unpolish(self.consent_button); self.consent_button.style().polish(self.consent_button)
-        if proposed and missing and self.role == 'admin':
-            self.consent_note.setText('The box’s setup recorded the owner’s consent, but nobody has confirmed it yet: '
-                                      'until then this household’s recordings cannot be opened or used for training.')
+        if withdrawn:
+            self.consent_note.setText(f'The customer withdrew consent for {", ".join(withdrawn)}: staff cannot open '
+                                      'what that covers. Switch it back on only if the customer agrees again.')
             self.consent_note.show()
         else:
             self.consent_note.hide()
@@ -117,51 +114,42 @@ class CustomerScreen(QWidget):
         self.stack.setCurrentWidget(self.body)
 
     def review_consent(self):
-        """Show what the box recorded at setup. An admin can only confirm that, never grant consent of their own."""
+        """Consent comes from the sales contract. An admin switches one off when the customer withdraws it."""
         customer = self.customer
         if customer is None:
             return None
-        proposed = getattr(customer, 'consent_proposed', None) or {}
         dialog = QDialog(self); dialog.setWindowTitle('Customer consent'); dialog.setObjectName('commandPalette')
         layout = QVBoxLayout(dialog); layout.setContentsMargins(24, 20, 24, 20); layout.setSpacing(12)
         layout.addWidget(label(f'Consent for {customer.name}', 'section'))
-        row = QHBoxLayout(); row.addStretch()
+        layout.addWidget(label('The customer agreed to these in the sales contract. Untick one only when the customer '
+                               'withdraws it; tick it again if they agree again. Every change is recorded in the audit '
+                               'log with your name.', 'muted', True))
+        boxes = {}
+        for key, text in (('live', 'Live view: staff may watch the cameras live'),
+                          ('recordings', 'Recordings: staff may open saved clips'),
+                          ('training', 'Training: clips may be tagged and used to train the AI')):
+            box = QCheckBox(text); box.setChecked(bool(getattr(customer, f'consent_{key}')))
+            layout.addWidget(box); boxes[key] = box
+        proposed = getattr(customer, 'consent_proposed', None) or {}
         if proposed:
-            when = str(proposed.get('recorded_utc') or '')[:16].replace('T', ' ')
-            by = proposed.get('installer') or 'the installer'
-            layout.addWidget(label(f'At setup on {when} UTC ({by} installed the box), the customer answered:', 'muted', True))
-            boxes = {}
-            for key, text in (('live', 'Live view: staff may watch the cameras live'),
-                              ('recordings', 'Recordings: staff may open saved clips'),
-                              ('training', 'Training: clips may be tagged and used to train the AI')):
-                agreed = bool(proposed.get(key))
-                box = QCheckBox(text if agreed else f'{text}  ·  not agreed at setup')
-                box.setChecked(agreed); box.setEnabled(agreed)
-                layout.addWidget(box); boxes[key] = box
-            layout.addWidget(label('Only what the customer agreed to can be confirmed; untick one to leave it as it is now. '
-                                   'The confirmation is recorded in the audit log with your name and the setup time.',
-                                   'muted', True))
-            row.addWidget(button('Cancel', dialog.reject))
-            row.addWidget(button('Confirm the consent this customer gave at setup', dialog.accept, 'primary'))
-            dialog.accepted.connect(lambda: self.confirm_consent(
-                proposed.get('recorded_utc'), [k for k, b in boxes.items() if b.isEnabled() and b.isChecked()]))
-        else:
-            current = '  ·  '.join(f'{text}: {"yes" if getattr(customer, f"consent_{key}") else "no"}'
-                                   for key, text in (('live', 'live view'), ('recordings', 'recordings'), ('training', 'training')))
-            layout.addWidget(label(f'Now: {current}', 'muted', True))
-            layout.addWidget(label("No consent was recorded at this customer's setup, so there is nothing to confirm. "
-                                   "Consent can only come from the customer: they answer during the box's setup.", '', True))
-            row.addWidget(button('Close', dialog.reject, 'primary'))
-        layout.addLayout(row)
+            answers = ', '.join(f'{k} {"yes" if proposed.get(k) else "no"}' for k in ('live', 'recordings', 'training'))
+            layout.addWidget(label(f'For information: at setup on {str(proposed.get("recorded_utc") or "")[:16].replace("T", " ")} '
+                                   f'UTC the box recorded {answers}.', 'muted', True))
+        row = QHBoxLayout(); row.addStretch()
+        row.addWidget(button('Cancel', dialog.reject))
+        row.addWidget(button('Save', dialog.accept, 'primary')); layout.addLayout(row)
+        dialog.accepted.connect(lambda: self.save_consent({k: b.isChecked() for k, b in boxes.items()}))
         dialog.setMinimumWidth(520)
         dialog.show()
         self.consent_dialog = dialog
         return dialog
 
-    def confirm_consent(self, recorded_utc, fields=None):
+    def save_consent(self, values):
+        from dataclasses import replace
+        updated = replace(self.customer, consent_live=values['live'], consent_recordings=values['recordings'],
+                          consent_training=values['training'])
         self.consent_button.setEnabled(False)
-        customer_id = self.customer.id
-        self.consent_runner.start(lambda: self.backend.confirm_consent(customer_id, recorded_utc, fields))
+        self.consent_runner.start(lambda: self.backend.update_customer(updated))
 
     def consent_saved(self, customer, error):
         self.consent_button.setEnabled(True)

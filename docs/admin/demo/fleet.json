@@ -30,7 +30,7 @@
       "events_24h": 0,
       "alerts_24h": 0,
       "false_alarms_7d": 0,
-      "needs_details": true,
+      "needs_details": false,
       "enrolled_by": "admin",
       "app_version": null
     },
@@ -59,7 +59,7 @@
       "events_24h": 10,
       "alerts_24h": 4,
       "false_alarms_7d": 2,
-      "needs_details": true,
+      "needs_details": false,
       "enrolled_by": "admin",
       "app_version": null
     },

@@ -102,17 +102,15 @@ def test_customer_crud_and_patch_audit(client, staff_factory):
     got = client.get(f"/v1/customers/{cid}", headers=h).json()
     assert got["name"] == "Acme" and [d["site"] for d in got["devices"]] == ["home1"]
     assert client.get("/v1/customers/999", headers=h).status_code == 404
+    # consent comes from the sales contract (on); switching some off records the withdrawal
     body = {"name": "Acme 2", "timezone": "Asia/Jerusalem", "consent_live": True, "consent_recordings": False,
             "consent_training": False, "notes": "other secret"}
-    # consent comes from the customer (the box's setup), never from an admin's edit
-    refused = client.patch(f"/v1/customers/{cid}", json=body, headers=h)
-    assert refused.status_code == 422 and "gave at setup" in refused.json()["detail"]
-    assert client.post("/v1/customers", json={"name": "Other", "consent_training": True}, headers=h).status_code == 422
-    p = client.patch(f"/v1/customers/{cid}", json={**body, "consent_live": False}, headers=h)
-    assert p.status_code == 200 and p.json()["name"] == "Acme 2" and p.json()["consent_live"] is False
+    p = client.patch(f"/v1/customers/{cid}", json=body, headers=h)
+    assert p.status_code == 200 and p.json()["name"] == "Acme 2" and p.json()["consent_live"] is True
+    assert p.json()["consent_source"] == "withdrawn" and p.json()["consent_recordings"] is False
     assert len(client.get("/v1/customers", headers=h).json()) == 1
     with session_scope(client.app.state.engine) as s:
         row = s.scalars(select(AuditLog).where(AuditLog.action == "customer_update")).one()
     assert row.customer_id == cid
-    assert row.detail == {"changed": ["name", "notes"]}  # field names only, never values
+    assert row.detail == {"changed": ["consent_recordings", "consent_training", "name", "notes"]}  # names, never values
     assert "secret" not in str(row.detail) and "Acme" not in str(row.detail)

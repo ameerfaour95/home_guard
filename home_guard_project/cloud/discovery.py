@@ -1,6 +1,7 @@
 """Auto-enrolment: boxes publish dataset_<site>/_status/registration.json (installer-recorded owner, consents,
 host) next to heartbeat.json; this pass turns them into a Customer + Device so the setup program adds the household
-to the admin panel by itself. Read-only toward S3 (HEAD / GET / list only).
+to the admin panel by itself. Read-only toward S3 (HEAD / GET / list only). Consent comes from the sales contract:
+the consents the box recorded at setup are stored as information only.
 
 Registrations are deduplicated by ETag in raw_revisions. An admin's choices win: a customer name an admin typed
 (`name_source == "admin"`) is never overwritten, and consents change only when the registration carries a newer
@@ -122,38 +123,18 @@ def _proposal(values: dict, recorded: datetime, reg: dict) -> dict:
 
 
 def _apply_consents(session, cust: Customer, dev: Device, reg: dict, now: datetime, first: bool = False) -> None:
-    """Box consent is a proposal, never a grant. Owner revocations (true -> false) apply on their own except on an
-    admin-enrolled device; grants, and every consent on first enrolment, wait for an admin to confirm."""
+    """Consent comes from the sales contract, not from the box: what the setup recorded is kept as information only
+    (the newest answer), and never changes the customer's consent. Only an admin switches consent off or on."""
     parsed = _consents_of(reg)
     if parsed is None:
         return
     values, recorded = parsed
-    prior = cust.consent_proposed.get("recorded_utc") if isinstance(cust.consent_proposed, dict) else None
-    baseline = max([t for t in (cust.consent_recorded_utc, _utc(prior)) if t is not None], default=None)
-    if baseline is not None and recorded <= baseline:
+    prior = _utc(cust.consent_proposed.get("recorded_utc")) if isinstance(cust.consent_proposed, dict) else None
+    if prior is not None and recorded <= prior:
         return
-    revoked, granted = [], []
-    for key, field in CONSENTS:
-        have = bool(getattr(cust, field))
-        if have and not values[key]:
-            revoked.append(field)
-        elif values[key] and not have:
-            granted.append(field)
-    admin_owned = dev.enrolled_by == "admin"
-    if not admin_owned and not first:
-        for field in revoked:
-            setattr(cust, field, False)
-        if revoked:
-            audit.record(session, None, "consent_revoked_by_owner", target=dev.site, customer_id=cust.id,
-                         device_id=dev.device_id, detail={"fields": sorted(revoked)}, ts=now,
-                         staff_name=ACTOR_DISCOVERY)
-    if first or granted or (admin_owned and revoked):
-        cust.consent_proposed = _proposal(values, recorded, reg)
-        fields = sorted(f for _, f in CONSENTS) if first else sorted(granted + (revoked if admin_owned else []))
-        audit.record(session, None, "consent_proposed", target=dev.site, customer_id=cust.id, device_id=dev.device_id,
-                     detail={"fields": fields}, ts=now, staff_name=ACTOR_SETUP)
-    elif cust.consent_proposed is not None:
-        cust.consent_proposed = None  # the owner's newer answer asks for nothing beyond what is confirmed
+    cust.consent_proposed = _proposal(values, recorded, reg)
+    audit.record(session, None, "consent_recorded_at_setup", target=dev.site, customer_id=cust.id,
+                 device_id=dev.device_id, detail={k: v for k, v in values.items()}, ts=now, staff_name=ACTOR_SETUP)
 
 
 def _enroll(session, site: str, reg: Optional[dict], now: datetime) -> str:

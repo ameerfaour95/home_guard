@@ -8,6 +8,7 @@
     "notes": "Detached house in Ramat Gan. Installed in July, three cameras.",
     "id": 1,
     "consent_proposed": null,
+    "consent_source": "contract",
     "devices": [
       {
         "device_id": "4c2fb54d-51c9-5af2-8288-3caad30115a2",
@@ -49,6 +50,7 @@
       "recorded_utc": "2026-10-03T08:30:00Z",
       "installer": "Ameer"
     },
+    "consent_source": "contract",
     "devices": [
       {
         "device_id": "76b32708-d2ce-5118-9e16-2c15bc450234",
@@ -80,7 +82,7 @@
         "events_24h": 0,
         "alerts_24h": 0,
         "false_alarms_7d": 0,
-        "needs_details": true,
+        "needs_details": false,
         "enrolled_by": "admin",
         "app_version": null
       },
@@ -109,7 +111,7 @@
         "events_24h": 10,
         "alerts_24h": 4,
         "false_alarms_7d": 2,
-        "needs_details": true,
+        "needs_details": false,
         "enrolled_by": "admin",
         "app_version": null
       }
@@ -124,6 +126,7 @@
     "notes": "Ground-floor flat in Haifa with a shared building entrance.",
     "id": 2,
     "consent_proposed": null,
+    "consent_source": "contract",
     "devices": [
       {
         "device_id": "7cdc4b44-de01-5ba8-8078-81b1a1072578",
