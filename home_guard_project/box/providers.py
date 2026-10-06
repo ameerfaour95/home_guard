@@ -57,8 +57,10 @@ def get(name: str) -> Provider:
         raise ProviderError(f"unknown provider {name!r}; known: {', '.join(sorted(PROVIDERS))}") from None
 
 
-def resolve(name: str, env: Mapping[str, str]) -> Tuple[str, Optional[str], Optional[Dict[str, Any]]]:
-    """``(api_key, base_url, extra_body)`` for *name*; raises naming the missing variable."""
+def resolve(name: str, env: Mapping[str, str],
+            model: str = "") -> Tuple[str, Optional[str], Optional[Dict[str, Any]]]:
+    """``(api_key, base_url, extra_body)`` for *name*; raises naming the missing variable.
+    A ``*thinking*`` model gets no extras: its provider refuses "thinking off"."""
     p = get(name)
     url = (str(env.get(p.base_url_env) or "").strip() if p.base_url_env else "") or p.base_url
     if url is None and p.base_url_env:
@@ -68,7 +70,8 @@ def resolve(name: str, env: Mapping[str, str]) -> Tuple[str, Optional[str], Opti
         if p.key_required:
             raise ProviderError(f"{p.key_env} is not set (put it in api_key.env at the repo root)")
         key = "ollama" if p.name == "ollama" else "none"   # the SDK wants some key; these servers ignore it
-    return key, url, dict(p.extra_body) if p.extra_body else None
+    extra = dict(p.extra_body) if p.extra_body and "thinking" not in model.lower() else None
+    return key, url, extra
 
 
 def model_key(provider: str, model: str) -> str:

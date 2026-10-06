@@ -15,6 +15,11 @@ class ProvidersTest(unittest.TestCase):
         self.assertEqual((key, url), ("or-1", "https://openrouter.ai/api/v1"))
         self.assertEqual(extra, {"reasoning": {"enabled": False}})
 
+    def test_thinking_models_keep_their_reasoning(self) -> None:
+        env = {"OPENROUTER_API_KEY": "or-1"}
+        self.assertIsNone(pv.resolve("openrouter", env, "qwen/qwen3-vl-8b-thinking")[2])
+        self.assertEqual(pv.resolve("openrouter", env, "qwen/qwen3-vl-8b-instruct")[2], {"reasoning": {"enabled": False}})
+
     def test_ollama_needs_no_key_and_url_can_be_overridden(self) -> None:
         self.assertEqual(pv.resolve("ollama", {})[:2], ("ollama", "http://localhost:11434/v1"))
         self.assertEqual(pv.resolve("ollama", {"OLLAMA_BASE_URL": "http://gpu:11434/v1"})[1], "http://gpu:11434/v1")

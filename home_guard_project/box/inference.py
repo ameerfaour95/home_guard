@@ -631,7 +631,7 @@ class FallbackBackend:
 
 
 def build_gpt(provider: str, model: str, env: Mapping[str, str], timeout: float = 30.0) -> GptBackend:
-    key, base_url, extra_body = providers.resolve(provider, env)
+    key, base_url, extra_body = providers.resolve(provider, env, model)
     return GptBackend(key, model, base_url=base_url, extra_body=extra_body, timeout=timeout)
 
 
