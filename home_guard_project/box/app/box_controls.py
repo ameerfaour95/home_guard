@@ -5,6 +5,7 @@ import time
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional
 from .. import control, boxconfig
+from .box_layout import box_command
 
 
 @dataclass(frozen=True)
@@ -156,7 +157,7 @@ class RemoteSettingsBackend:
         changed = {key:value for key,value in settings.options().items() if self._settings.options()[key]!=value}
         for key,value in changed.items():
             value = str(value).lower() if isinstance(value,bool) else str(value)
-            command = r'cd /d C:\home_guard && .venv\Scripts\python.exe -m home_guard_project.box set-option '+key+'='+value
+            command = box_command('-m home_guard_project.box set-option '+key+'='+value)
             result = self.runner.run(['ssh.exe','-i',str(self.key),'-o','LogLevel=ERROR',self.target,command])
             if result.returncode: raise RuntimeError('Settings command failed')
             self._settings = replace(self._settings, **{key:getattr(settings,key)})

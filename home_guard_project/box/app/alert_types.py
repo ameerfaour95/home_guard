@@ -2,6 +2,7 @@
 import json
 import re
 from ..boxconfig import SET_OPTIONS
+from .box_layout import PATHS_COMMAND, parse_paths, type_command
 from .sensitivity import CameraSensitivityBackend, parse_thresholds
 
 TYPES = SET_OPTIONS['alert_on']
@@ -56,9 +57,16 @@ class CameraAlertsBackend(CameraSensitivityBackend):
     def alert_reported_status(self):
         if not getattr(self, 'remote', False) or self.box.demo:
             return self.box.reported_status()
-        command = r'cd /d C:\home_guard && type logs\ai_status.json'
+        command = type_command(self.box_paths()['logs_dir'], 'ai_status.json')
         result = self.command(['ssh.exe', '-i', str(self.key), '-o', 'LogLevel=ERROR', self.target, command], allow_failed=True)
         return alert_result(result.stdout) if not result.returncode else {}
+
+    def box_paths(self):
+        # Where the box keeps its logs (asked once; an old box keeps them in its code folder).
+        if getattr(self, '_box_paths', None) is None:
+            result = self.command(['ssh.exe', '-i', str(self.key), '-o', 'LogLevel=ERROR', self.target, PATHS_COMMAND], allow_failed=True)
+            self._box_paths = parse_paths(result.stdout, result.returncode)
+        return self._box_paths
 
     def _alert_command(self, args):
         if getattr(self, 'remote', False):

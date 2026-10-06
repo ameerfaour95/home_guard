@@ -201,8 +201,9 @@ if (-not $DryRun -and -not (Test-Path $KeyPath)) {
 
 $BoxUser = $Target.Substring(0, $Target.IndexOf('@'))
 $RemoteHome = "C:\Users\$BoxUser"
-$InstallDir = 'C:\home_guard'
+$InstallDir = 'C:\home_guard'                 # the box's code; where its files are, it says itself (Get-BoxPaths)
 $BoxBox = "$InstallDir\home_guard_project\box"
+$PosixBox = '/' + $InstallDir.Substring(0, 1).ToLower() + $InstallDir.Substring(2).Replace('\', '/') + '/home_guard_project/box'
 $Bash = 'C:\PROGRA~1\Git\bin\bash.exe'      # short path of C:\Program Files: no spaces, so no quotes needed
 $Python = '.venv\Scripts\python.exe'
 
@@ -250,6 +251,23 @@ function Invoke-Box([string]$command) {
                           '-o', 'StrictHostKeyChecking=accept-new', $Target, $command)
 }
 
+# Where the box keeps its config, secrets and logs: the box says (python -m home_guard_project.box
+# paths --json, paths.py): C:\ProgramData\HomeGuard on a migrated box. A box too old to answer keeps
+# them in its code folder. Asked once, and again after the update (it may bring the answer).
+$script:BoxPaths = $null
+function Get-BoxPaths {
+    if ($script:BoxPaths) { return $script:BoxPaths }
+    $legacy = [pscustomobject]@{ mode = 'legacy'; network_json = "$BoxBox\network.json"; secrets_env = "$InstallDir\api_key.env" }
+    if ($DryRun) { return $legacy }
+    $out = (Invoke-Box "cd /d $InstallDir && $Python -m home_guard_project.box paths --json 2>nul" | Out-String)
+    $answer = $null
+    if ($LASTEXITCODE -eq 0) {
+        try { $answer = $out.Substring($out.IndexOf('{')) | ConvertFrom-Json } catch { $answer = $null }
+    }
+    if ($answer -and $answer.network_json -and $answer.secrets_env) { $script:BoxPaths = $answer } else { $script:BoxPaths = $legacy }
+    return $script:BoxPaths
+}
+
 # The box drops its network link when it joins the customer/home Wi-Fi during the network step.
 # Wait for it to come back over Tailscale, and read back what network.json recorded.
 function Wait-ForBox([int]$seconds = 90) {
@@ -265,7 +283,7 @@ function Wait-ForBox([int]$seconds = 90) {
 }
 function Get-BoxNetMode {
     if ($DryRun) { return $Mode }
-    $json = (Invoke-Box "type $InstallDir\home_guard_project\box\network.json" | Out-String)
+    $json = (Invoke-Box "type `"$((Get-BoxPaths).network_json)`"" | Out-String)
     if ($json -match '"mode"\s*:\s*"([a-z]+)"') { return $Matches[1] }
     return ''
 }
@@ -360,7 +378,8 @@ if (-not $SkipUpdate) {
         $isCheckout = ((Invoke-Box "if exist $InstallDir\.git (echo True) else (echo False)" | Out-String).Trim() -eq 'True')
     }
     if ($isCheckout) {
-        Invoke-Box "$Bash -lc /c/home_guard/home_guard_project/box/update.sh" | ForEach-Object { Note "    $_" }
+        Invoke-Box "$Bash -lc $PosixBox/update.sh" | ForEach-Object { Note "    $_" }
+        $script:BoxPaths = $null     # the new software may place the box's files elsewhere
         if ($LASTEXITCODE -eq 0) { Ok 'Box software updated and restarted.'; Step-Ok 'update' 'updated and restarted' }
         else { Bad 'The update did not finish. Continuing with the software already on the box.'; Step-Warn 'update' 'update did not finish; using existing software' }
     } else {
@@ -563,7 +582,7 @@ if ($UseAI) {
     } else {
         $apiLocal = [IO.Path]::GetTempFileName()
         [IO.File]::WriteAllText($apiLocal, "OPENAI_API_KEY=$oaiKey`nTELEGRAM_BOT_TOKEN=$tgTok`n", (New-Object Text.UTF8Encoding($false)))
-        try { Copy-ToBox $apiLocal "$InstallDir\api_key.env" } finally { Remove-Item $apiLocal -ErrorAction SilentlyContinue }
+        try { Copy-ToBox $apiLocal (Get-BoxPaths).secrets_env } finally { Remove-Item $apiLocal -ErrorAction SilentlyContinue }
         Invoke-Box "$SetOpt mode inference"                | ForEach-Object { Note "    $_" }
         Invoke-Box "$SetOpt alert_start_hour $AlertStart"   | Out-Null
         Invoke-Box "$SetOpt alert_end_hour $AlertEnd"       | Out-Null
@@ -572,7 +591,7 @@ if ($UseAI) {
         Invoke-Box "$SetOpt notify_dry_run false"           | Out-Null
         Invoke-Box "$SetOpt telegram_chat_ids=$tgChats"     | Out-Null
         # Restart so run_collector.sh picks up inference mode.
-        Invoke-Box "$Bash -lc /c/home_guard/home_guard_project/box/stop_collector.sh" | Out-Null
+        Invoke-Box "$Bash -lc $PosixBox/stop_collector.sh" | Out-Null
         Invoke-Box 'schtasks /Run /TN HomeGuard-Collector' | Out-Null
         Ok "AI alerts ON: a person seen between ${AlertStart}:00 and ${AlertEnd}:00 sends a Telegram alert with a photo."
         Step-Ok 'alerts' "inference ${AlertStart}-${AlertEnd}, cooldown ${AlertCooldown}s"
