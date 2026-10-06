@@ -1,121 +1,156 @@
 # Qwen vision swap (week 0, item 1) — design
 
 Date: 2026-10-06. Plan page: https://claude.ai/artifact/XmTeET2SSoXqQt1UBdVEwW §2, §13 "שבוע 0".
+
 Owner decisions (2026-10-06):
-- gpt-4o is replaced as the box's vision model regardless of the eval. It stays only as the fallback when the primary call fails.
-- The default replacement is the plan's pick, `qwen/qwen3.5-9b`. A Qwen VL model (`qwen3-vl-*`) replaces it only if it beats it on our eval.
-- This is research, not a product for sale, so licence is not a filter.
+- gpt-4o is replaced as the box's vision model, and it is **not** the fallback either.
+- Default primary: **`Qwen/Qwen3-VL-4B-Instruct`**. `Qwen3.5-4B` replaces it only if it beats it on our eval.
+- Fallback is the other Qwen: primary Qwen3-VL-4B → fallback Qwen3.5-4B; primary Qwen3.5-4B → fallback Qwen3-VL-4B.
+- Families to measure: Qwen3-VL (instruct **and** thinking), Qwen2.5-VL, Qwen3.5. Both 4B models are candidates.
+- This is research, not a product for sale, so licence is not a filter (Qwen2.5-VL-3B's non-commercial licence is fine here).
 
 ## Goal
 
-Measure Qwen vision models on our 220 tagged home clips, with real token counts and cost, pick the primary model by the rule in §6, and switch the box to it without touching the alert path.
+Measure the Qwen vision models on our 220 tagged home clips with real token counts, latency and cost, choose primary and fallback by the rule in §6, and give the box a backend that reaches them without touching the alert path.
 
-Reference for the report (2026-10-03, prompt `2026-10-03.tagged-rules-label-animals`, gpt-4o): alerts caught 16/18, normal flagged 21/177 (11.9%), 0 errors.
+Reference for the report: gpt-4o on today's prompt (the 2026-10-03 baseline, 16/18 alerts caught and 21/177 normal flagged, used an older prompt version).
+
+## Where each model runs
+
+OpenRouter (checked 2026-10-06) hosts no 4B, 3B or 7B Qwen vision model. Hugging Face lists Qwen3-VL-4B and Qwen2.5-VL-3B/7B on Featherless only, and Qwen3.5-4B nowhere. So:
+
+| Where | Models | Cost |
+|---|---|---|
+| **Laptop GPU** (RTX 5070 Ti, 12 GB) through Ollama's OpenAI-compatible endpoint | `qwen3-vl:4b-instruct-bf16`, `qwen3-vl:4b-thinking-bf16`, `qwen3.5:4b-bf16`, `qwen2.5vl:3b-fp16`, `qwen2.5vl:7b-q8_0`, `qwen3-vl:8b-instruct-q8_0` | free |
+| **OpenRouter** (one key, needs credit) | `qwen/qwen3-vl-8b-instruct`, `qwen/qwen3-vl-8b-thinking`, `qwen/qwen3-vl-32b-instruct`, `qwen/qwen3.5-9b`, `qwen/qwen2.5-vl-72b-instruct`, `openai/gpt-4o` (reference) | about $4 total, $3.3 of it gpt-4o |
+
+The 4B models run unquantized (bf16), as they would on a rented GPU with vLLM, so their accuracy carries over. The 7B and 8B run at q8_0 to fit 12 GB: near-lossless, and they are reported, not candidates for primary.
+
+The local 4B runs give accuracy and latency on an RTX-class GPU, but no API cost. Cost per call for the 4B models is estimated from tokens at the plan's GPU numbers (§2 of the plan page), not billed.
+
+### Hosting the 4B models for the box
+
+Decided with the eval results in hand, not now. Options to put to the owner then:
+- a rented GPU (e.g. RunPod RTX 4090, about $0.34–0.69/hour) running vLLM with both 4B models, which is the plan's stage B setup;
+- Featherless (flat monthly fee) for Qwen3-VL-4B; Qwen3.5-4B is not hosted there;
+- the laptop serving the box over Tailscale, for research hours only.
+
+Until then the box keeps gpt-4o; the code from this work is merged with defaults that change nothing.
 
 ## Approach
 
-Every candidate is reachable through an OpenAI-compatible `chat.completions` endpoint. `inference.GptBackend` already builds the request (prompt + 5 JPEG frames + strict `json_schema`, falling back to `json_object` when a model refuses the schema). We add a `base_url` and a key name to it; nothing else in the alert path changes.
+Every endpoint above (Ollama, OpenRouter, vLLM, Featherless) speaks the OpenAI `chat.completions` API. `inference.GptBackend` already builds the request (prompt + 5 JPEG frames + strict `json_schema`, falling back to `json_object` when a model refuses the schema). We give it a `base_url`, a key and request extras from a provider table. Nothing else in the alert path changes.
 
-Rejected: a separate `QwenBackend` class (duplicates frame encoding and the schema fallback), LiteLLM (new dependency on the box for one URL).
+Rejected: a separate `QwenBackend` class (duplicates frame encoding and the schema fallback), LiteLLM (new dependency on the box for one URL), loading the models with `transformers` inside the eval (a second inference code path that production would not use).
 
 ## Components
 
 ### 1. `box/providers.py` (new)
 
-A table, one entry per provider:
+| name | base_url | key env var | extras |
+|---|---|---|---|
+| `openai` | (SDK default) | `OPENAI_API_KEY` | — |
+| `openrouter` | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` | `{"reasoning": {"enabled": false}}` |
+| `ollama` | `http://localhost:11434/v1` (or `OLLAMA_BASE_URL`) | none (sends `"ollama"`) | — |
+| `vllm` | `VLLM_BASE_URL` (required) | `VLLM_API_KEY` (optional) | — |
+| `dashscope-intl` | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` | `{"enable_thinking": false}` |
 
-| name | base_url | key env var |
-|---|---|---|
-| `openai` | (SDK default) | `OPENAI_API_KEY` |
-| `openrouter` | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
-| `dashscope-intl` | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` |
+Thinking is off by default for the hybrid models (Qwen3.5) because the task does not need it; the dedicated `*-thinking` Qwen3-VL models are measured as they are, since thinking is what they are. Whether Ollama honours "thinking off" for `qwen3.5:4b` through the OpenAI endpoint is checked on a 3-clip smoke run; if it does not, the provider sends Ollama's own switch (`think: false`) and the smoke run is repeated.
 
-Plus a per-model price table ($ per million input / output tokens) used only for reporting. `price_of(model)` returns `None` for unknown models; the report then shows tokens without dollars.
-
-`resolve(provider, env) -> (api_key, base_url)` raises a clear error naming the missing variable.
+Plus a price table ($ per million input / output tokens) for hosted models, used only for reports.
 
 ### 2. `GptBackend` changes (`box/inference.py`)
 
-- `GptBackend(api_key, model, base_url=None, extra_body=None)`.
-- After each call, `self.last_usage = {"prompt_tokens", "completion_tokens"}` from `resp.usage` (zeros when the provider omits it).
-- Reasoning off: Qwen3.5/3.6 are hybrid thinking models. For `openrouter`, send `extra_body={"reasoning": {"enabled": False}}`. Thinking costs money and seconds and the task does not need it.
-- Timeout: 30 s per call on the client, so a slow provider cannot stall an alert.
+- `GptBackend(api_key, model, base_url=None, extra_body=None, timeout=30.0)`.
+- After each call, `self.last_usage = {"prompt_tokens", "completion_tokens"}` from `resp.usage` (zeros when absent).
+- The eval passes a longer timeout (120 s), because the thinking models and the first call that loads a model into the GPU are slow.
 
-### 3. Fallback in production (`box/inference.py`, `alert_settings.py`)
+### 3. Fallback (`box/inference.py`)
 
-New settings, defaults keep today's behaviour exactly:
+Settings (box.yaml), defaults keep today's behaviour exactly:
 
 ```yaml
-vlm_provider: openai        # openai | openrouter | dashscope-intl
+vlm_provider: openai
 vlm_model: gpt-4o
-vlm_fallback_provider: openai
-vlm_fallback_model: gpt-4o  # empty = no fallback
+vlm_fallback_provider: ""   # empty = no fallback
+vlm_fallback_model: ""
 ```
 
-`make_backend` builds a `FallbackBackend(primary, fallback)` when a fallback is set and differs from the primary. On any exception or empty/unparseable answer from the primary, the same frames go to the fallback once; the log says `[cam] VLM fallback: <reason>` and the training record stores which model answered (`model_name`). If the primary key is missing, the fallback alone is used with a warning. The alert is never dropped because of the swap.
+After the switch, for example:
+
+```yaml
+vlm_provider: vllm
+vlm_model: Qwen/Qwen3-VL-4B-Instruct
+vlm_fallback_provider: vllm
+vlm_fallback_model: Qwen/Qwen3.5-4B
+```
+
+`make_backend` builds `FallbackBackend(primary, fallback)` when a fallback is set and differs from the primary. On any exception or an answer that is not a JSON object, the same frames go to the fallback once; the log says `[cam] VLM fallback to <model>: <reason>`, and the training record stores the model that answered. If the primary cannot be built, the fallback alone is used with a warning; if neither can, `NullBackend` (today's behaviour for a missing key). The alert is never dropped because of the swap.
 
 ### 4. Eval (`box/eval_prompt.py`)
 
-- `run --provider <name> --model <id>`; the model id is stored with its provider (`openrouter:qwen/qwen3.5-9b`) so tags and resume keys never collide across providers.
-- Each answer row also stores `prompt_tokens`, `completion_tokens`, `cost_usd`, `latency_s`.
-- Summary adds:
-  - day / night split of every metric (night = clip local time 19:00–06:00, from `clip_local_time`);
-  - the clip ids of missed alerts and of false alarms;
-  - mean prompt tokens per call, mean latency, $ per call;
-  - projected $ per box per month at 150 and 300 calls/day.
-- A `compare` subcommand prints one table across tags (the gpt-4o reference tag plus each candidate) and names the chosen model by the §6 rule.
+- `run --provider <name> --model <id>`; results name the model `provider:model` (`ollama:qwen3-vl:4b-instruct-bf16`), except bare for `openai` so older results still match.
+- Each answer row stores `prompt_tokens`, `completion_tokens`, `cost_usd` (hosted models only), `latency_s`.
+- Summary adds: day / night split (night = clip local time 19:00–05:59), clip ids of missed alerts and false alarms, mean tokens and latency per call, $ per call and $ per box per month at 150 and 300 calls/day (when priced).
+- `compare` prints one table across results files, names primary and fallback by §6, and puts the gpt-4o reference in its first line.
 
-### 5. Candidates (all via one OpenRouter key)
+### 5. Candidates
 
-| model | why |
-|---|---|
-| `qwen/qwen3.5-9b` | plan's pick; same family as the training base (Qwen3.5-4B) |
-| `qwen/qwen3.5-flash-02-23` | cheapest Qwen3.5 |
-| `qwen/qwen3-vl-8b-instruct` | dedicated VL model, small |
-| `qwen/qwen3-vl-32b-instruct` | dedicated VL model, larger, still cheap |
-| `qwen/qwen3.6-35b-a3b` | newest open MoE; candidate teacher for tagging (reported, not eligible as primary) |
+| model | where | role |
+|---|---|---|
+| Qwen3-VL-4B-Instruct | laptop, bf16 | **default primary** |
+| Qwen3.5-4B | laptop, bf16 | challenger; default fallback |
+| Qwen3-VL-4B-Thinking | laptop, bf16 | measured (instruct vs thinking) |
+| Qwen2.5-VL-3B-Instruct | laptop, fp16 | measured (older family) |
+| Qwen2.5-VL-7B-Instruct | laptop, q8_0 | measured |
+| Qwen3-VL-8B-Instruct | laptop q8_0 and OpenRouter | measured; quantization check (same model both ways) |
+| Qwen3-VL-8B-Thinking | OpenRouter | measured |
+| Qwen3-VL-32B-Instruct | OpenRouter | measured; teacher candidate |
+| Qwen3.5-9B | OpenRouter | measured; next size up from the training base |
+| Qwen2.5-VL-72B-Instruct | OpenRouter | measured |
+| gpt-4o | OpenRouter | reference on today's prompt |
 
-Thinking variants are excluded. Expected spend: under $1 for all five (≈220 calls × ≈3k input tokens each).
+### 6. Choosing primary and fallback
 
-### 6. Choosing the primary model
+1. Primary is one of the two 4B models; the other is the fallback.
+2. Default: primary Qwen3-VL-4B-Instruct, fallback Qwen3.5-4B.
+3. Qwen3.5-4B becomes primary (and Qwen3-VL-4B the fallback) only if it **beats** Qwen3-VL-4B on the full 220 clips:
+   - it catches more alerts, or the same number with fewer normal clips flagged;
+   - and it does not miss a forced-entry / climbing-in alert that Qwen3-VL-4B caught;
+   - and it has no more errors (unparseable or refused answers).
+4. The other models are reported next to the two 4B models. If one of them clearly beats both (more alerts caught with no more false alarms), the report says so as a recommendation for the owner; it does not change the choice by itself.
+5. The first line of `compare` says whether the chosen primary is worse than the gpt-4o reference and lists the clips. This doesn't block the switch (the owner has decided), but it tells the week-1 prompt work where to start.
 
-1. Default: `qwen/qwen3.5-9b`.
-2. A VL model (`qwen3-vl-8b-instruct` or `qwen3-vl-32b-instruct`) replaces it only if it **beats** it on the full 220 clips:
-   - catches more alerts; or catches the same number with fewer normal clips flagged;
-   - and does not miss any alert that `qwen3.5-9b` caught on a forced-entry / climbing-in clip;
-   - and has no more errors (unparseable / refused).
-   Between two VL models that both beat it, the one with more alerts caught wins, then fewer false alarms, then cheaper.
-3. `qwen3.5-flash-02-23` is in the run for cost data only; it becomes primary only if it ties `qwen3.5-9b` on alerts and false alarms and is cheaper.
-4. gpt-4o is replaced whatever the numbers say. If the chosen model is worse than the gpt-4o reference (fewer than 16/18 alerts, or more than 21/177 normal flagged), the report says so in its first line and lists the clips, so the prompt work in week 1 starts from them.
-
-18 alerts is a small set (16/18 spans roughly 67–97%); a one-clip difference is noise. The report states this, and the plan's week 1 enlarges the eval set.
+18 alerts is a small set (16/18 spans roughly 67–97%); a one-clip difference is noise. The report says so, and week 1 of the plan enlarges the eval set.
 
 ## Data flow
 
-Laptop: `eval_prompt.py prepare` (existing, S3 → frames + manifest) → `run --provider openrouter` per candidate → `summary` / `compare`, which applies §6 and names the chosen model. The run happens on the laptop, so the live box keeps its own OpenAI quota (avoids the 429s of 2026-10-03).
-Box: once the model is chosen, `config.live.yaml` gets `vlm_provider`/`vlm_model`, `api_key.env` on the box gets `OPENROUTER_API_KEY`, then `update.sh`. The first hour of box logs is checked for fallback lines and parse errors.
+Laptop: the prepared eval set (220 clips, already on the laptop) is copied to `C:\Users\ameer\Ameer\home_guard_eval\eval_set` → `run --provider ollama` for each local model (Ollama serves one model at a time; the runs are sequential) → `run --provider openrouter` for each hosted model once the account has credit → `compare`.
+Box: unchanged by this work. The switch waits for the hosting decision above.
 
 ## Error handling
 
-- Missing key → the eval exits with the variable name; production falls back to gpt-4o with a warning.
-- 429 / 5xx → existing retry in the eval loop; resume never re-pays an answered clip.
-- Model ignores the schema → existing `json_object` fallback; still-unparseable answers count as errors in the §6 choice.
-- Provider returns no `usage` → tokens recorded as 0 and marked `usage_missing`, cost shown as unknown.
+- Missing key / base URL → the eval exits naming the variable; production uses the fallback or `NullBackend` with a warning.
+- Ollama not running or model not pulled → connection/404 error recorded per clip; resume re-asks only failed clips.
+- 429 / 5xx / timeout → recorded as an error; re-running resumes without re-paying answered clips.
+- Model ignores the schema → existing `json_object` fallback; still-unparseable answers count as errors in §6.
+- No `usage` in the response → tokens recorded as 0, cost unknown.
 
 ## Testing
 
 Unit tests (pytest, no network, fake OpenAI client):
-- `providers.resolve` for each provider and for a missing key;
-- `GptBackend` passes `base_url`, `extra_body`, records `last_usage`;
-- `FallbackBackend`: primary raises → fallback answers; primary returns junk → fallback; primary fine → fallback never called; both fail → raises (caller keeps today's handling);
-- `make_backend` with default settings builds exactly today's single gpt-4o backend;
-- eval summary day/night split, cost projection, and `compare` applying the §6 choice rule on fixed rows (default kept, VL wins on alerts, VL wins on false alarms at equal alerts, VL loses by missing a forced-entry clip the default caught).
-Then `run --fake` end to end before the first paid call.
+- `providers.resolve` for each provider, a missing key, a provider without a key (ollama), `vllm` without `VLLM_BASE_URL`;
+- `GptBackend` passes `base_url`, `timeout`, `extra_body`, records `last_usage`; a backend built with `__new__` (as older tests do) still works;
+- `FallbackBackend`: primary raises → fallback; primary junk → fallback; primary fine → fallback never called; both fail → raises;
+- `make_backend`: default settings → today's single gpt-4o backend; Qwen pair → `FallbackBackend`; missing primary → fallback alone; nothing → `NullBackend`;
+- eval: usage/cost/latency columns, day/night split, cost projection, `--provider`; `compare` choice rule (default kept, Qwen3.5-4B wins on alerts, wins on false alarms at equal alerts, loses by missing a forced-entry clip the default caught, loses on errors).
+Then `run --fake` end to end, then a 3-clip smoke run per model before each full run.
 
 ## Needs the owner
 
-`OPENROUTER_API_KEY=...` in `api_key.env` at the repo root (laptop), with a few dollars of OpenRouter credit. Everything else is built and tested before that.
+- Credit on the OpenRouter account (it shows $0 on 2026-10-06; about $10 covers every hosted run). The local runs don't need it.
+- Later: the hosting choice for the box (above).
 
 ## Out of scope
 
-The situation-aware prompt (`eye_prompt.py`, week 1), the bigger eval set (week 1), the gateway (week 1–2), training.
+The situation-aware prompt (`eye_prompt.py`, week 1), the bigger eval set (week 1), the gateway (week 1–2), training, renting the GPU.
