@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
-from . import providers
+from . import messenger, providers
 
 log = logging.getLogger("box.inference")
 
@@ -1495,10 +1495,16 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                                  "ts": job.ts}
                     if fact:
                         alert_ref.update(softened=softened, applied_fact_id=fact["id"])
-                graded = graded_alert_text(shown_label, camera_name, owner_summary(summary, summary_owner, lang),
-                                           why, lang)
+                owner_text, owner_why = owner_summary(summary, summary_owner, lang), why
+                if messenger.uses_translator(box_settings, lang):
+                    # A house note's reason is already in the box language; only the model's own why is translated.
+                    told = messenger.messenger_for(box_settings, env).to_owner(
+                        {"summary": summary, "why": "" if fact else why, "summary_owner": summary_owner},
+                        lang, keep=(camera_name,))
+                    owner_text, owner_why = told["summary"], why if fact else told["why"]
+                graded = graded_alert_text(shown_label, camera_name, owner_text, owner_why, lang)
                 if softened:
-                    sentence = owner_summary(summary, summary_owner, lang).rstrip(". ")
+                    sentence = owner_text.rstrip(". ")
                     graded = f"🟢 {camera_name}: {sentence}. {why}"
                 res = dispatch_alert(box_settings, env, cmd, f"{camera_name}: {alert_summary(label, summary)}", reason,
                                      image=image or None, assistant=assistant, alert=alert_ref, graded=graded,

@@ -419,6 +419,16 @@ Small models run on the laptop GPU through Ollama (no key; `ollama pull <model>`
 
 `vllm` needs `VLLM_BASE_URL` (and `VLLM_API_KEY` if the server has one) in `api_key.env`. If the main model fails, the same alert goes to the fallback once (`VLM fallback` in the log). Without these settings the box keeps gpt-4o.
 
+### Alerts in Hebrew (box.yaml)
+
+    owner_language: he
+    owner_translation: translator          # model (default): the vision model writes the Hebrew itself
+    messenger_provider: openrouter         # openrouter | openai | google (GEMINI_API_KEY) | ...
+    messenger_model: google/gemini-3.1-flash-lite
+    messenger_timeout_sec: 4
+
+With `translator`, a cheap text model (`messenger.py`; Gemini 3.1 Flash Lite, about $0.0003 an alert) translates the alert's summary and "why" in one call, keeping camera names, numbers and times. It never holds an alert longer than the timeout: on any failure the owner reads the vision model's own Hebrew when it wrote one, else the English (`Translation to he failed` in the log). Read at start. To judge the translation, `python -m home_guard_project.box.eval_translation <meta folder or eval results .jsonl> --limit 50` writes `translation_eval.csv` with Gemini Flash Lite and gpt-6-luna side by side (`--fake` checks the setup without calling anyone).
+
 ## Troubleshooting
 
 | Problem | What to do |
