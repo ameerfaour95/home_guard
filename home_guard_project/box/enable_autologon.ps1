@@ -15,7 +15,8 @@
 #       the registry as plain text
 #    3. Turns on AutoAdminLogon for this user
 #    4. Turns off the Windows 11 "passwordless" switch that hides auto sign-in
-#    5. No sign-in screen when the display wakes up
+#    5. No sign-in screen when the display wakes up, and no "finish setting
+#       up your device" screen after big updates
 # ============================================================================
 #Requires -RunAsAdministrator
 param(
@@ -147,3 +148,9 @@ powercfg /SETACVALUEINDEX SCHEME_CURRENT SUB_NONE CONSOLELOCK 0
 powercfg /SETACTIVE SCHEME_CURRENT
 Set-ItemProperty 'HKCU:\Control Panel\Desktop' -Name ScreenSaverIsSecure -Value '0'
 Ok 'No sign-in screen when the display wakes.'
+
+# After a big update Windows can open "Let's finish setting up your device" over the desktop.
+$engage = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\UserProfileEngagement'
+if (-not (Test-Path $engage)) { New-Item $engage -Force | Out-Null }
+Set-ItemProperty $engage -Name ScoobeSystemSettingEnabled -Value 0 -Type DWord
+Ok 'No "finish setting up your device" screen after updates.'

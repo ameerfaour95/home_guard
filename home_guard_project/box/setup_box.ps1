@@ -118,7 +118,9 @@ powercfg /change standby-timeout-ac 0
 powercfg /change hibernate-timeout-ac 0
 powercfg /change disk-timeout-ac 0
 powercfg /hibernate off
-Ok 'Sleep and hibernate disabled on AC power.'
+# Fast Startup is a half-hibernate; off, so every start is a clean boot.
+Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power' -Name HiberbootEnabled -Value 0 -Type DWord
+Ok 'Sleep, hibernate and Fast Startup disabled on AC power.'
 
 # After a power cut Windows can stop at a recovery screen and wait for a keyboard. The box has none.
 bcdedit /set '{current}' bootstatuspolicy ignoreallfailures | Out-Null
