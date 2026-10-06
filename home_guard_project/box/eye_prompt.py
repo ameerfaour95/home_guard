@@ -33,7 +33,10 @@ from . import taxonomy as tx
 from .situation import Situation
 
 # Bumped whenever the wording or a schema changes, so training records and eval results can be told apart.
-EYE_PROMPT_VERSION = "2026-10-06.eye-v2"
+EYE_PROMPT_VERSION = "2026-10-06.eye-v3"
+
+# Flags that make a "normal" answer at least suspicious (eval 2026-10-06: the Eye called handle-trying normal).
+RISK_FLAGS = frozenset({"touching_handle", "weapon_visible", "crouching", "flashlight"})
 
 QUALITY = ("good", "limited", "unusable")
 CONFIDENCE = ("clear", "partial", "cannot_tell")
@@ -105,12 +108,13 @@ How to describe:
   who the person is.
 - Describe only what is there and what happens. Do not mention what is absent or the background (parked
   cars, walls, plants) unless someone acts on it.
-- Appearance alone is never a category and never a reason: dark clothes, a hood, a cap, a helmet or a face
-  you cannot see mean nothing by themselves. Judge what people do.
+- Clothing alone is never a reason: dark clothes, a hood, a cap or a courier's helmet mean nothing by
+  themselves. Judge what people do. Hiding the face on purpose (pulling a hood or mask over it, covering it,
+  turning it away from the camera) while coming toward a door, window, gate or car IS something they do: S5.
 - Write in English only.
 
-What a scene can be (one category id; the ids never change):
-{tx.prompt_list()}
+What a scene can be (one category id; the ids never change). The serious ones come first:
+{tx.prompt_list(order=("E", "S", "N"))}
 """.strip()
 
 
@@ -206,6 +210,11 @@ Look first, judge last. Fill the fields in this order:
   nothing moves (parked cars, plants, light changes), write exactly "No special activity."
 - "category": the one id above that fits what you SEE. "other" when none fits, with a few words in
   "other_text"; otherwise "other_text" is an empty string.
+  Before you choose a Normal category, check every frame for: a hand on a door handle, window, gate latch or
+  car door; reaching into or over something; climbing; crouching or hiding; a face hidden on purpose while
+  approaching; picking something up and leaving with it; looking into windows or cars; running away. If any of
+  these happens, the category is S or E, not N. N1 is only someone who passes without stopping at the
+  property; N7 is only someone using their own car the normal way.
 - "zone": where it happens: {' | '.join(tx.ZONES)}.
 - "movement": {' | '.join(tx.MOVEMENTS)}.
 - "flags": each one you clearly see: {', '.join(tx.FLAGS)}; [] when none.
@@ -380,6 +389,12 @@ def postprocess(parsed: Any, situation: Situation) -> Optional[Dict[str, Any]]:
     ctx = situation.to_taxonomy_context(obs["movement"], obs["zone"], obs["flags"])
     judgement = tx.contextual_label(obs["category"], raw, ctx, obs["visibility"])
     label = _higher(judgement.label, raw, model_label)
+    risky = sorted(set(obs["flags"]) & RISK_FLAGS)
+    if label == "normal" and risky and "key_or_door_opened_from_inside" not in obs["flags"]:
+        # The Eye saw a hand on a handle, a weapon, crouching or a flashlight and still called it normal.
+        label = "suspicious"
+        judgement = tx.Judgement(label, judgement.expectation, judgement.escalation_candidate, True,
+                                 judgement.reasons + (f"risk flag {', '.join(risky)} on a normal category",))
     serious = parsed.get("serious_behaviour") is True or judgement.expectation in (tx.SERIOUS, tx.ESCALATION)
     why = " ".join(str(parsed.get("why") or "").split())
     if label != "normal" and (not why or label != _higher(raw, model_label)):

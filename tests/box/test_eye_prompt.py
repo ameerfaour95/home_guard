@@ -103,12 +103,27 @@ class PromptTest(unittest.TestCase):
         self.assertIn(s.header(), text)
         self.assertIn("appears to", text)
         self.assertIn("never guess names, age, ethnicity", text)
-        self.assertIn("Appearance alone is never a category", text)
+        self.assertIn("Clothing alone is never a reason", text)
+        self.assertIn("Hiding the face on purpose", text)          # S5 is an act, not clothing (eye-v3)
+        self.assertIn("Before you choose a Normal category", text)
+        self.assertLess(text.index("Escalation:"), text.index("Normal:"))   # the serious ones are read first
         self.assertIn("English", text)
         for cid in tx.CATEGORY_IDS:
             self.assertIn(cid, text)
         self.assertNotIn("summary_owner", text)
         self.assertNotIn("Hebrew", text)
+
+    def test_a_risk_flag_raises_a_normal_answer(self) -> None:
+        base = {"summary": "A man at the car.", "category": "N7", "other_text": "", "zone": "car",
+                "movement": "staying", "people": 1, "vehicles": 1, "vehicle_moving": False, "animals": 0,
+                "visibility": "clear", "appearance": [], "evidence_frame": 2, "raw_label": "normal",
+                "label": "normal", "applied_fact_id": "", "serious_behaviour": False, "why": ""}
+        day = sit(DAY_TS, "front_side")
+        self.assertEqual(eye.postprocess(dict(base, flags=["touching_handle"]), day)["label"], "suspicious")
+        self.assertEqual(eye.postprocess(dict(base, flags=[]), day)["label"], "normal")
+        # Opening the own door with a key is not a risk.
+        self.assertEqual(eye.postprocess(dict(base, category="N2", flags=["touching_handle",
+                                                   "key_or_door_opened_from_inside"]), day)["label"], "normal")
 
     def test_night_expectations_and_attention(self) -> None:
         text = eye.build_prompt(sit(NIGHT_TS, "back_yard"))
