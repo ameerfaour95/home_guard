@@ -680,6 +680,45 @@ py -m home_guard_project.analysis.build_yolo_dataset dataset_v1     --source ana
   box ran one frame late and frame 0 of every clip had no boxes.
 * **Split:** by clip, 15% of each batch's clips go to val, at 3 frames a second.
 
+### 8g. Making the YOLO data richer: outside house cameras + a mined tagging batch
+
+dataset_v1 had almost no night (IR) frames, about two thirds of it came from one
+house, and it had no bus or bird boxes and only 20 bicycles. Two tools address
+this (2026-10-06):
+
+```bash
+H=C:/Users/ameer/Ameer/home_guard_data
+# 1. outside house-camera sets (raw/roboflow, YOLO exports) -> dataset/yolo/images|labels/ext_<set>/
+py -m home_guard_project.analysis.external_sets $H/dataset/yolo --set $H/raw/roboflow/backyard \
+    --set $H/raw/roboflow/garage --set $H/raw/roboflow/home-sj1vf --set $H/raw/roboflow/reolink-yolo-iupfd \
+    --eval-set reolink-yolo-iupfd --weights $H/models/yolo11x.pt --cache $H/cache/detections/external_sets.yolo11x.json
+# 2. rank untagged clips, copy the best into a folder for Label Studio
+py -m home_guard_project.analysis.mine_clips $H/to_tag/mined_batch_1 --source $H/raw/untagged_s3/<prefix> ... \
+    --base $H/dataset/yolo --skip-tagged $H/dataset/clips --weights $H/models/yolo11x.pt \
+    --cache $H/cache/detections/mine_clips.yolo11x.json
+py -m home_guard_project.labeling --dataset-dir $H/to_tag/mined_batch_1
+```
+
+* **Outside sets:** names map to our 9 classes. Classes we don't detect (deer,
+  raccoon, bins) lose their boxes and the frame stays as background. A generic
+  "Animal" box drops the frame. Roboflow's augmented copies are removed. The
+  same rule as 8f decides which frames stay: if yolo11x sees one of our classes
+  at conf >= 0.6 and no box covers it, the frame is left out. Kept frames are
+  listed in `external_frames.txt`. One whole house (`--eval-set`) goes to
+  `newhouse_eval.txt` and is never trained on; it checks how the model does on
+  a new house. No train/val split is made.
+* **Look before importing:** draw a few labelled frames per set. Two sets were
+  rejected that way: `bnw-front-door-training` boxes heads only (ours box the
+  whole body), and `backyard-wildlife-detector` boxes squirrels as `bird`.
+* **Mining:** a clip scores for classes the dataset lacks (weight grows with
+  rarity), night frames, people under 0.5% of the frame, and `fp` /
+  `false_positive` / `owner_feedback` clips (hard-negative candidates). At most
+  `--per-camera` clips come from one camera, so one parked truck can't fill
+  the batch. `mined.csv` lists every clip with its score and reasons.
+* **Night:** the untagged S3 footage is almost all daytime (2 night clips of
+  291). Night frames come from the outside sets for now. When the split is
+  built, adding grayscale copies of some day frames is a cheap extra.
+
 ---
 
 ## 9. Fine-Tuning YOLO
