@@ -41,7 +41,21 @@ inference process in the GUI. See [UI handoff](../../docs/ui/HANDOFF.md) and the
 1. Finish Windows setup, connect Ethernet, run Windows Update until nothing is left.
 2. Install Tailscale and sign in with the same account as the laptop.
 3. **Disable key expiry for this box** (required for lasting remote access). In the Tailscale admin console — [login.tailscale.com/admin/machines](https://login.tailscale.com/admin/machines) — find this box, open its **⋯** menu, and choose **Disable key expiry**. Without this, Tailscale re-authentication expires (~every 6 months by default) and the box silently drops off the network — and you'd need physical access at the customer's house to sign it back in. (`setup_box.ps1` already turns on unattended mode so it reconnects at boot; key expiry is the one thing that can only be set here in the web console, so do it now while you have the box in front of you.)
-4. In the BIOS, set "restore on AC power loss" (or similar) to **Power On**, so the box starts by itself after a power cut.
+4. In the BIOS (press **Delete** at power-on), set **State After G3** (on other boards: "Restore on AC Power Loss") to **S0 State / Power On**, so the box starts by itself when the power comes back. On Beelink boards it is usually under *Chipset → PCH-IO Configuration*. Check it on every new model: pull the plug, plug it back, and the box must start without the button.
+
+#### After a power cut, with nobody at the box
+
+| What | How | Needs a sign-in? |
+|---|---|---|
+| Box turns on | BIOS setting above | - |
+| No recovery screen | `setup_box.ps1` (bcdedit) | - |
+| Wi-Fi joins again | all-users, auto-connect profile (`setup_network.ps1`) | no |
+| Alert program starts | `HomeGuard-Collector` task at boot, session 0, like a service; restarts it forever, and the hourly heartbeat starts the task again if it died | no |
+| Uses the iGPU | OpenVINO works in session 0 (checked 2026-10-06: 89 ms a frame next to the running program) | no |
+| On/off state kept | **Stop** writes `logs/collector.stop`; it survives reboots, so a stopped box stays stopped and a running box starts again | no |
+| Home Guard window | Startup shortcut, opens after the automatic sign-in from `enable_autologon.ps1` (step 7 of `setup_box.ps1`) | automatic |
+
+`enable_autologon.ps1` asks for the Windows password once and keeps it like Sysinternals Autologon does (an LSA secret, not plain text in the registry). `-Off` undoes it. `check_box.ps1` warns while it is off.
 
 ### 2. Let the laptop in (once)
 

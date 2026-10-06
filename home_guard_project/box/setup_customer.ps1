@@ -568,7 +568,7 @@ Step-Ok 'readiness' 'report complete'
 # ---- summary ----------------------------------------------------------------
 Write-Host ''
 Info '=== Still to do by hand ==='
-Write-Host ' 1. BIOS: set "restore on AC power loss" to Power On (needs a screen once).'
+Write-Host ' 1. BIOS: set "State After G3" / "restore on AC power loss" to Power On (S0) (needs a screen once).'
 Write-Host ' 2. Tailscale admin console: disable key expiry for this box.'
 if (-not $DoCameras) { Write-Host ' 3. Camera discovery at the customer site (run again and find cameras).' }
 Write-Host ' *. Before delivery, run again with -ForgetOtherWifi to drop your own Wi-Fi.'

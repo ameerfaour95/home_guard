@@ -20,6 +20,9 @@ $sb = powercfg /q SCHEME_CURRENT SUB_SLEEP STANDBYIDLE | Out-String
 if ($sb -match 'AC Power Setting Index:\s*0x00000000') { Pass 'Sleep on AC disabled' } else { Warn 'Box may sleep on AC power' }
 $boot = bcdedit /enum '{current}' | Out-String
 if ($boot -match 'bootstatuspolicy\s+IgnoreAllFailures') { Pass 'No recovery screen on bad boot' } else { Warn 'Box may stop at a recovery screen after a power cut' }
+$wl = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
+if ($wl.AutoAdminLogon -eq '1') { Pass "Auto sign-in on ($($wl.DefaultUserName)): the Home Guard window comes back after a power cut" }
+else { Warn 'Auto sign-in off: alerts still run after a power cut, but the Home Guard window waits for a sign-in (run enable_autologon.ps1)' }
 
 # --- Scheduled tasks ---
 foreach ($t in 'HomeGuard-Collector', 'HomeGuard-Upload', 'HomeGuard-Heartbeat') {

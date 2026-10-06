@@ -11,6 +11,8 @@
 #    4. Writes box.yaml with the site name
 #    5. Installs the Python environment (uv sync)
 #    6. Registers three scheduled tasks: collector (at boot), upload (every 15 minutes), heartbeat (hourly)
+#    7. Windows signs in by itself at boot (enable_autologon.ps1, asks for the
+#       password once), so the Home Guard window comes back after a power cut
 #
 #  Not done here (see README.md): BIOS power-on setting, Tailscale sign-in,
 #  AWS credentials, camera discovery.
@@ -28,7 +30,10 @@ param(
 
     # Clips leave the box for S3 this often; local copies are deleted once S3 has them.
     [ValidateRange(5, 1440)]
-    [int]$UploadEveryMinutes = 15
+    [int]$UploadEveryMinutes = 15,
+
+    # Leave auto sign-in as it is (the alert program does not need it, only the window does).
+    [switch]$SkipAutologon
 )
 
 $ErrorActionPreference = 'Stop'
@@ -56,7 +61,7 @@ function Update-SessionPath {
 }
 
 # ----------------------------------------------------------------------------
-Step '1/6 Tools'
+Step '1/7 Tools'
 
 if (Test-Path $GitBash) {
     Ok 'Git Bash already installed.'
@@ -107,7 +112,7 @@ if (Test-Path 'C:\Program Files\Tailscale\tailscale.exe') {
 if ($LASTEXITCODE -eq 0) { Ok 'Tailscale unattended mode on.' } else { Warn 'Could not set Tailscale unattended mode (sign in first, then re-run).' }
 
 # ----------------------------------------------------------------------------
-Step '2/6 Power: never sleep'
+Step '2/7 Power: never sleep'
 
 powercfg /change standby-timeout-ac 0
 powercfg /change hibernate-timeout-ac 0
@@ -121,7 +126,7 @@ bcdedit /set '{current}' recoveryenabled no | Out-Null
 Ok 'Windows will boot straight through after a power cut (no recovery screen).'
 
 # ----------------------------------------------------------------------------
-Step '3/6 Remote Desktop'
+Step '3/7 Remote Desktop'
 
 $edition = (Get-CimInstance Win32_OperatingSystem).Caption
 if ($edition -match 'Home') {
@@ -133,7 +138,7 @@ if ($edition -match 'Home') {
 }
 
 # ----------------------------------------------------------------------------
-Step '4/6 box.yaml'
+Step '4/7 box.yaml'
 
 # Replace "key: ..." in the lines of a YAML file, or append it. Other lines are kept as they are.
 function Set-YamlValue([string[]]$lines, [string]$key, [string]$value) {
@@ -164,7 +169,7 @@ $lines | Set-Content -Path $boxYaml -Encoding ascii
 Ok "Wrote $boxYaml ($(($lines | Where-Object { $_ -match '^(site|mode)\s*:' }) -join ', '))"
 
 # ----------------------------------------------------------------------------
-Step '5/6 Python environment (first run downloads several GB)'
+Step '5/7 Python environment (first run downloads several GB)'
 
 Push-Location $Root
 try {
@@ -176,7 +181,7 @@ try {
 Ok 'Python environment ready.'
 
 # ----------------------------------------------------------------------------
-Step '6/6 Scheduled tasks'
+Step '6/7 Scheduled tasks'
 
 # C:\home_guard -> /c/home_guard
 $posixRoot = '/' + $Root.Substring(0, 1).ToLower() + $Root.Substring(2).Replace('\', '/')
@@ -215,9 +220,26 @@ Step 'Home Guard desktop + startup shortcut'
 # "Home Guard" shortcut on the desktop and in Startup.
 & (Join-Path $BoxDir 'make_shortcut.ps1')
 
+# ----------------------------------------------------------------------------
+Step '7/7 Auto sign-in (the Home Guard window comes back after a power cut)'
+# The alert program needs nobody signed in; the window in Startup does.
+$autoLogon = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon').AutoAdminLogon
+if ($SkipAutologon) {
+    Warn 'Auto sign-in left as it is (-SkipAutologon).'
+} elseif ($autoLogon -eq '1') {
+    Ok 'Auto sign-in already on.'
+} else {
+    try {
+        & (Join-Path $BoxDir 'enable_autologon.ps1')
+    } catch {
+        Warn "Auto sign-in not set: $($_.Exception.Message)"
+        Warn "Run at the box (or over ssh -t): powershell -ExecutionPolicy Bypass -File $BoxDir\enable_autologon.ps1"
+    }
+}
+
 Write-Host ''
 Write-Host 'Setup finished. Still to do by hand (details in box\README.md):' -ForegroundColor Green
-Write-Host '  1. BIOS: set "restore on AC power loss" to Power On.'
+Write-Host '  1. BIOS: set "State After G3" / "restore on AC power loss" to Power On (S0).'
 Write-Host '  2. Tailscale: run  tailscale up  and approve the login link.'
 Write-Host "  3. AWS: put the box's own access key in $env:USERPROFILE\.aws\credentials."
 Write-Host '  4. Cameras: run camera discovery once to create cameras.yaml.'
