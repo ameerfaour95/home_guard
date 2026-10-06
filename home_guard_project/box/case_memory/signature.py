@@ -109,10 +109,17 @@ def build_signature(camera: str, ts: float, observation: Optional[Mapping[str, A
                     label: str = "", cameras_in_incident: int = 1, eye_model: str = "",
                     prompt_version: str = "") -> Signature:
     """The signature of one event. *label* is the box's label after the priors (``decision["final_label"]``);
-    when empty, the Eye's ``label`` is used."""
-    obs = dict(observation or {})
+    when empty, the Eye's ``label`` is used.
+
+    *observation* may be the Eye's processed answer (``eye_prompt.postprocess``) as is: the cleaned values in its
+    nested ``observation`` win over the model's raw top-level copies, its nested ``situation`` is used when
+    *situation* is not given, and the flags are the union of both lists, so the veto never sees fewer."""
+    top = dict(observation or {})
+    nested = top.get("observation") if isinstance(top.get("observation"), Mapping) else {}
+    obs = {**top, **nested}
     trk = dict(tracker or {})
-    sit = dict(situation or {})
+    sit = dict(situation or (top.get("situation") if isinstance(top.get("situation"), Mapping) else None) or {})
+    flag_lists = [x.get("flags") for x in (top, nested)]
     moment = datetime.fromtimestamp(ts)
     category = obs.get("category")
     category = tx.normalize_id(category) if category not in (None, "") else ""
@@ -124,7 +131,8 @@ def build_signature(camera: str, ts: float, observation: Optional[Mapping[str, A
     if vehicles is None:
         vehicles = 1 if obs.get("vehicle_moving") else 0
     people = trk.get("people") if trk.get("people") is not None else obs.get("people")
-    flags = tuple(sorted({str(f).strip().lower() for f in (obs.get("flags") or ()) if str(f).strip()}))
+    flags = tuple(sorted({str(f).strip().lower() for fl in flag_lists if isinstance(fl, (list, tuple))
+                          for f in fl if str(f).strip()}))
     final = str(label or obs.get("label") or "").strip().lower()
     sig = Signature(
         camera=str(camera), ts=float(ts), minute=moment.hour * 60 + moment.minute, weekday=moment.weekday(),
