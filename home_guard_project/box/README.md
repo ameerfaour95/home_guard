@@ -435,7 +435,7 @@ Small models run on the laptop GPU through Ollama (no key; `ollama pull <model>`
 ### Alerts in Hebrew (box.yaml)
 
     owner_language: he
-    owner_translation: translator          # model (default): the vision model writes the Hebrew itself
+    owner_translation: translator          # the default; model: the vision model writes the Hebrew itself
     messenger_provider: openrouter         # openrouter | openai | google (GEMINI_API_KEY) | ...
     messenger_model: google/gemini-3.1-flash-lite
     messenger_timeout_sec: 4
@@ -444,7 +444,7 @@ With `translator`, a cheap text model (`messenger.py`; Gemini 3.1 Flash Lite, ab
 
 ### The situational Eye (box.yaml)
 
-    eye_prompt: situational                # legacy (default): today's prompt, unchanged
+    eye_prompt: situational                # the default; legacy: the 2026-10-03 prompt
     camera_roles: {front_side: street, left_side_1: private}   # optional; else guessed from the name
     camera_zones: {main_door: [entrance, gate]}                # optional
 

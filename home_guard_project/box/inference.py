@@ -22,6 +22,7 @@ relies on cleanup handlers for correctness.
 from __future__ import annotations
 
 import base64
+import inspect
 import json
 import logging
 import os
@@ -438,7 +439,7 @@ class AlertSettings:
     conf_person: Optional[float] = None
     conf_vehicle: Optional[float] = None
     conf_animal: Optional[float] = None
-    eye_prompt: str = "legacy"      # legacy: build_prompt as before; situational: eye_prompt.py with the situation
+    eye_prompt: str = "situational"  # situational (default): eye_prompt.py with the situation; legacy: build_prompt
 
     def thresholds(self) -> Dict[str, float]:
         """The house's certainty per type (person / vehicle / animal)."""
@@ -473,7 +474,7 @@ class AlertSettings:
             conf_person=_optional_float(g("conf_person")),
             conf_vehicle=_optional_float(g("conf_vehicle")),
             conf_animal=_optional_float(g("conf_animal")),
-            eye_prompt=_eye_prompt_mode(g("eye_prompt", "legacy")),
+            eye_prompt=_eye_prompt_mode(g("eye_prompt", "situational")),
         )
 
 
@@ -481,11 +482,12 @@ EYE_PROMPT_MODES = ("legacy", "situational")
 
 
 def _eye_prompt_mode(value: Any) -> str:
-    """box.yaml ``eye_prompt``: ``legacy`` (today's prompt) or ``situational`` (eye_prompt.py); anything else is legacy."""
-    mode = str(value or "legacy").strip().lower()
+    """box.yaml ``eye_prompt``: ``situational`` (the default, eye_prompt.py) or ``legacy`` (the 2026-10-03 prompt);
+    anything else is the default."""
+    mode = str(value or "situational").strip().lower()
     if mode not in EYE_PROMPT_MODES:
-        log.warning("Unknown eye_prompt '%s'; using legacy.", value)
-        return "legacy"
+        log.warning("Unknown eye_prompt '%s'; using situational.", value)
+        return "situational"
     return mode
 
 
@@ -1404,10 +1406,23 @@ def _jpegs(frames: List[Any]) -> List[bytes]:
     return out
 
 
+def _takes_situation(backend: Any) -> bool:
+    """Whether *backend*.analyze accepts ``situation=``: a backend that does not keeps today's prompt, and its
+    answer keeps its description, instead of failing on an unexpected argument."""
+    try:
+        params = inspect.signature(backend.analyze).parameters.values()
+    except (AttributeError, TypeError, ValueError):
+        return False
+    return any(p.name == "situation" or p.kind is inspect.Parameter.VAR_KEYWORD for p in params)
+
+
 def _eye_situation(settings: AlertSettings, box_settings: Dict[str, Any], camera: str, alert_ts: float,
-                   facts: Sequence[Dict[str, Any]], labels: Sequence[str]) -> Any:
+                   facts: Sequence[Dict[str, Any]], labels: Sequence[str], backend: Any = None) -> Any:
     """The look's situation with ``eye_prompt: situational`` (else None). A failure falls back to the legacy prompt."""
     if settings.eye_prompt != "situational":
+        return None
+    if backend is not None and not _takes_situation(backend):
+        log.debug("[%s] %s takes no situation; using the legacy prompt", camera, type(backend).__name__)
         return None
     try:
         from .situation import build_situation  # noqa: PLC0415
@@ -1463,7 +1478,7 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
         facts = facts_for_alert(camera_name, alert_ts)
         # Keep legacy/evaluation backends callable when no facts are available.
         context = {"facts": facts, "alert_ts": alert_ts} if facts else {}
-        situation = _eye_situation(settings, box_settings, camera_name, alert_ts, facts, labels)
+        situation = _eye_situation(settings, box_settings, camera_name, alert_ts, facts, labels, backend)
         if situation is not None:
             context["situation"] = situation
         try:

@@ -256,13 +256,14 @@ def settings_of(box_settings: Mapping[str, Any]) -> Tuple[str, str, float]:
 
 
 def uses_translator(box_settings: Mapping[str, Any], lang: str) -> bool:
-    """``owner_translation: translator`` and a box language other than English. Without an explicit
-    ``owner_translation``, ``eye_prompt: situational`` means the translator: that Eye answers in English only."""
+    """The translator writes what the owner reads whenever the box language is not English. It is the default:
+    the situational Eye (the default prompt) answers in English only. ``owner_translation: model`` keeps the
+    vision model's own Hebrew, and ``eye_prompt: legacy`` without an ``owner_translation`` does too."""
     if lang == "en":
         return False
     chosen = str(box_settings.get("owner_translation") or "").strip().lower()
     if not chosen:
-        chosen = "translator" if str(box_settings.get("eye_prompt") or "").strip().lower() == "situational" else "model"
+        chosen = "model" if str(box_settings.get("eye_prompt") or "").strip().lower() == "legacy" else "translator"
     return chosen == "translator"
 
 

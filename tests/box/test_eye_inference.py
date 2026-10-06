@@ -38,9 +38,9 @@ def note(**over):
 
 
 class SettingTest(unittest.TestCase):
-    def test_legacy_is_the_default(self) -> None:
-        self.assertEqual(inf.AlertSettings().eye_prompt, "legacy")
-        self.assertEqual(inf.AlertSettings.from_box_settings({}).eye_prompt, "legacy")
+    def test_situational_is_the_default(self) -> None:
+        self.assertEqual(inf.AlertSettings().eye_prompt, "situational")
+        self.assertEqual(inf.AlertSettings.from_box_settings({}).eye_prompt, "situational")
 
     def test_box_yaml_value(self) -> None:
         self.assertEqual(inf.AlertSettings.from_box_settings({"eye_prompt": "situational"}).eye_prompt,
@@ -48,7 +48,7 @@ class SettingTest(unittest.TestCase):
         self.assertEqual(inf.AlertSettings.from_box_settings({"eye_prompt": " Situational "}).eye_prompt,
                          "situational")
         with self.assertLogs("box.inference", level="WARNING"):
-            self.assertEqual(inf.AlertSettings.from_box_settings({"eye_prompt": "smart"}).eye_prompt, "legacy")
+            self.assertEqual(inf.AlertSettings.from_box_settings({"eye_prompt": "smart"}).eye_prompt, "situational")
 
 
 class WorkerTest(unittest.TestCase):

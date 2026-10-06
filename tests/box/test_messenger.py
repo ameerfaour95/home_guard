@@ -155,7 +155,7 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(msg.settings_of({"messenger_timeout_sec": "soon"})[2], 4.0)
 
     def test_the_translator_is_used_only_when_chosen_and_not_english(self) -> None:
-        self.assertFalse(msg.uses_translator({}, "he"))                                  # default: model
+        self.assertTrue(msg.uses_translator({}, "he"))                                   # default: translator
         self.assertFalse(msg.uses_translator({"owner_translation": "model"}, "he"))
         self.assertFalse(msg.uses_translator({"owner_translation": "translator"}, "en"))
         self.assertTrue(msg.uses_translator({"owner_translation": " Translator "}, "he"))
@@ -208,9 +208,15 @@ class WorkerWiringTest(unittest.TestCase):
                         [object()], assistant, job)
         return assistant.sent[0]["text"], job
 
-    def test_the_default_is_todays_behaviour_with_no_call(self) -> None:
+    def test_the_default_translates_for_a_hebrew_box(self) -> None:
         client = _FakeClient(HE)
         text, _ = self._work({}, client)
+        self.assertEqual(text, graded_alert_text("suspicious", "gate", HE["summary"], HE["why"], "he"))
+        self.assertEqual(len(client.calls), 1)
+
+    def test_model_keeps_the_vision_models_own_hebrew_with_no_call(self) -> None:
+        client = _FakeClient(HE)
+        text, _ = self._work({"owner_translation": "model"}, client)
         self.assertEqual(text, graded_alert_text("suspicious", "gate", "גבר ליד השער.", "tries the gate", "he"))
         self.assertEqual(client.calls, [])
 
