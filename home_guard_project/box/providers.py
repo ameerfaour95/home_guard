@@ -85,7 +85,7 @@ def resolve(name: str, env: Mapping[str, str],
     key = str(env.get(p.key_env) or "").strip() if p.key_env else ""
     if not key:
         if p.key_required:
-            raise ProviderError(f"{p.key_env} is not set (put it in api_key.env at the repo root)")
+            raise ProviderError(f"{p.key_env} is not set (put it in api_key.env: python -m home_guard_project.box paths --get secrets_env)")
         key = "ollama" if p.name == "ollama" else "none"   # the SDK wants some key; these servers ignore it
     extra = dict(p.extra_body) if p.extra_body and "thinking" not in model.lower() else None
     return key, url, extra

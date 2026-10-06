@@ -243,7 +243,8 @@ class ShellAgreesTest(unittest.TestCase):
         script = (f'source "{BOX_DIR.replace(os.sep, "/")}/_common.sh"; '
                   'native() { if command -v cygpath >/dev/null; then cygpath -w "$1"; else printf "%s" "$1"; fi; }; '
                   'printf "%s|%s|%s|%s" "$HG_LAYOUT" "$HOMEGUARD_HOME" "$(native "$LOG_DIR")" "$(native "$CAMERAS_YAML")"')
-        out = subprocess.run([BASH, "-c", script], env=env, capture_output=True, text=True, timeout=60)
+        out = subprocess.run([BASH, "-c", script], env=env, capture_output=True, text=True, timeout=60,
+                             stdin=subprocess.DEVNULL)
         self.assertEqual(out.returncode, 0, out.stderr)
         layout, exported, logs, cameras = out.stdout.strip().split("|")
         return {"layout": layout, "exported": exported, "logs": logs, "cameras": cameras}

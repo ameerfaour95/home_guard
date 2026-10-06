@@ -195,7 +195,7 @@ def verify_item(item: Item, files: Dict[str, int]) -> List[str]:
 
 # -- the box's tasks and processes -------------------------------------------------------------------
 def default_run(cmd: Sequence[str], env: Optional[Dict[str, str]] = None) -> subprocess.CompletedProcess:
-    return subprocess.run(list(cmd), capture_output=True, text=True, env=env, check=False)
+    return subprocess.run(list(cmd), capture_output=True, text=True, env=env, check=False, stdin=subprocess.DEVNULL)
 
 
 def _posix(path: str) -> str:
