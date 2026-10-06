@@ -438,6 +438,7 @@ class AlertSettings:
     conf_person: Optional[float] = None
     conf_vehicle: Optional[float] = None
     conf_animal: Optional[float] = None
+    eye_prompt: str = "legacy"      # legacy: build_prompt as before; situational: eye_prompt.py with the situation
 
     def thresholds(self) -> Dict[str, float]:
         """The house's certainty per type (person / vehicle / animal)."""
@@ -472,7 +473,20 @@ class AlertSettings:
             conf_person=_optional_float(g("conf_person")),
             conf_vehicle=_optional_float(g("conf_vehicle")),
             conf_animal=_optional_float(g("conf_animal")),
+            eye_prompt=_eye_prompt_mode(g("eye_prompt", "legacy")),
         )
+
+
+EYE_PROMPT_MODES = ("legacy", "situational")
+
+
+def _eye_prompt_mode(value: Any) -> str:
+    """box.yaml ``eye_prompt``: ``legacy`` (today's prompt) or ``situational`` (eye_prompt.py); anything else is legacy."""
+    mode = str(value or "legacy").strip().lower()
+    if mode not in EYE_PROMPT_MODES:
+        log.warning("Unknown eye_prompt '%s'; using legacy.", value)
+        return "legacy"
+    return mode
 
 
 def _optional_float(value: Any) -> Optional[float]:
@@ -510,7 +524,8 @@ class NullBackend:
 
     def analyze(self, frames_bgr: List[Any], camera_name: str, t_sec: int,
                 start_hour: int, end_hour: int, owner_language: str = "en",
-                facts: Sequence[Dict[str, Any]] = (), alert_ts: Optional[float] = None) -> Tuple[str, Optional[Dict[str, Any]]]:
+                facts: Sequence[Dict[str, Any]] = (), alert_ts: Optional[float] = None,
+                situation: Any = None) -> Tuple[str, Optional[Dict[str, Any]]]:
         parsed = {"summary": ""}
         return json.dumps(parsed), parsed
 
@@ -556,10 +571,19 @@ class GptBackend:
 
     def analyze(self, frames_bgr: List[Any], camera_name: str, t_sec: int,
                 start_hour: int, end_hour: int, owner_language: str = "en",
-                facts: Sequence[Dict[str, Any]] = (), alert_ts: Optional[float] = None) -> Tuple[str, Optional[Dict[str, Any]]]:
-        moment = datetime.now() if alert_ts is None else datetime.fromtimestamp(alert_ts)
-        prompt = build_prompt(camera_name, t_sec, moment.strftime("%H:%M:%S"), start_hour, end_hour,
-                              owner_language=owner_language, facts=facts, alert_ts=alert_ts)
+                facts: Sequence[Dict[str, Any]] = (), alert_ts: Optional[float] = None,
+                situation: Any = None) -> Tuple[str, Optional[Dict[str, Any]]]:
+        if situation is None:
+            moment = datetime.now() if alert_ts is None else datetime.fromtimestamp(alert_ts)
+            prompt = build_prompt(camera_name, t_sec, moment.strftime("%H:%M:%S"), start_hour, end_hour,
+                                  owner_language=owner_language, facts=facts, alert_ts=alert_ts)
+            schema_format = VLM_RESPONSE_FORMAT
+        else:
+            # eye_prompt: situational. The Eye answers in English; its schema follows the situation's intent.
+            from . import eye_prompt  # noqa: PLC0415
+
+            prompt = eye_prompt.build_prompt(situation, facts=facts)
+            schema_format = eye_prompt.response_format(situation.intent)
         self.last_prompt = prompt
         content: List[Dict[str, Any]] = [{"type": "text", "text": prompt}]
         self.last_frame_jpegs = []
@@ -569,11 +593,13 @@ class GptBackend:
                 self.last_frame_jpegs.append(data)
                 b64 = base64.b64encode(data).decode("utf-8")
                 content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
+        # A model that refused schemas once gets plain JSON from then on, whichever prompt is asked.
+        fmt = schema_format if self._response_format.get("type") == "json_schema" else self._response_format
         try:
-            resp = self._complete(content, self._response_format)
+            resp = self._complete(content, fmt)
         except Exception as exc:  # noqa: BLE001
             # A model without structured output refuses the schema: ask for plain JSON from now on.
-            if self._response_format.get("type") == "json_schema" and "response_format" in str(exc):
+            if fmt.get("type") == "json_schema" and "response_format" in str(exc):
                 log.warning("%s does not take a JSON schema (%s); asking for a JSON object instead.", self._model, exc)
                 self._response_format = {"type": "json_object"}
                 resp = self._complete(content, self._response_format)
@@ -1378,6 +1404,30 @@ def _jpegs(frames: List[Any]) -> List[bytes]:
     return out
 
 
+def _eye_situation(settings: AlertSettings, box_settings: Dict[str, Any], camera: str, alert_ts: float,
+                   facts: Sequence[Dict[str, Any]], labels: Sequence[str]) -> Any:
+    """The look's situation with ``eye_prompt: situational`` (else None). A failure falls back to the legacy prompt."""
+    if settings.eye_prompt != "situational":
+        return None
+    try:
+        from .situation import build_situation  # noqa: PLC0415
+
+        kinds = detected_fact_kinds(labels)
+        return build_situation(camera, alert_ts, "alert_triage", settings=box_settings,
+                               facts=[f for f in facts if f.get("kind") in kinds])
+    except Exception as exc:  # noqa: BLE001 - the alert goes on with today's prompt
+        log.warning("[%s] no situation for the Eye (%s); using the legacy prompt", camera, exc)
+        return None
+
+
+def _eye_answer(parsed: Any, situation: Any) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
+    """The Eye's answer with the situation's judgement applied, and the records for the teacher and meta."""
+    from . import eye_prompt  # noqa: PLC0415
+
+    processed = eye_prompt.postprocess(parsed, situation)
+    return processed, eye_prompt.records(processed, situation)
+
+
 def _worker(backend, box_settings, env, settings: AlertSettings,
             camera_name: str, frames: List[Any],
             assistant: Any = None, job: Optional[AlertJob] = None, status: Any = None,
@@ -1413,12 +1463,20 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
         facts = facts_for_alert(camera_name, alert_ts)
         # Keep legacy/evaluation backends callable when no facts are available.
         context = {"facts": facts, "alert_ts": alert_ts} if facts else {}
+        situation = _eye_situation(settings, box_settings, camera_name, alert_ts, facts, labels)
+        if situation is not None:
+            context["situation"] = situation
         try:
             raw, parsed = backend.analyze(frames, camera_name, int(time.time()),
                                           settings.alert_start_hour, settings.alert_end_hour, owner_language=lang, **context)
         except Exception as exc:  # noqa: BLE001 - an outage or the gateway's daily cap: the detector's alert still goes out
             log.warning("[%s] VLM call failed: %s", camera_name, exc)
             raw, parsed = "", None
+        answer, eye_record = parsed, {}
+        if situation is not None:
+            parsed, eye_record = _eye_answer(parsed, situation)
+            if job is not None:
+                job.input_meta.update(eye_record)
         model_label = str((parsed or {}).get("label") or "").strip().lower()
         # Older answers have only label. They retain their original meaning when no notes were shown.
         raw_label = str((parsed or {}).get("raw_label", model_label if not facts else "") or "").strip().lower()
@@ -1435,12 +1493,13 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
             # the question, and the answer word for word.
             job.teacher = {
                 "model": getattr(backend, "last_model", "") or getattr(backend, "model_name", settings.vlm_model),
-                "prompt_version": PROMPT_VERSION,
+                "prompt_version": eye_record.get("prompt_version", PROMPT_VERSION),
                 "prompt": getattr(backend, "last_prompt", ""),
                 "frames": (list(backend.last_frame_jpegs) if isinstance(backend, (GptBackend, FallbackBackend))
                            else _jpegs(frames)),
                 "raw": raw,
-                "parsed": dict(parsed, label=decision["raw_label"]) if parsed else parsed,
+                "parsed": dict(answer, label=decision["raw_label"]) if answer else answer,
+                **eye_record,
             }
         summary = ""
         if parsed:

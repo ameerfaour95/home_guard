@@ -256,8 +256,14 @@ def settings_of(box_settings: Mapping[str, Any]) -> Tuple[str, str, float]:
 
 
 def uses_translator(box_settings: Mapping[str, Any], lang: str) -> bool:
-    """``owner_translation: translator`` and a box language other than English."""
-    return lang != "en" and str(box_settings.get("owner_translation") or "model").strip().lower() == "translator"
+    """``owner_translation: translator`` and a box language other than English. Without an explicit
+    ``owner_translation``, ``eye_prompt: situational`` means the translator: that Eye answers in English only."""
+    if lang == "en":
+        return False
+    chosen = str(box_settings.get("owner_translation") or "").strip().lower()
+    if not chosen:
+        chosen = "translator" if str(box_settings.get("eye_prompt") or "").strip().lower() == "situational" else "model"
+    return chosen == "translator"
 
 
 def build_client(provider: str, env: Mapping[str, str], timeout: float, model: str = "") -> Tuple[Any, Optional[Dict[str, Any]]]:

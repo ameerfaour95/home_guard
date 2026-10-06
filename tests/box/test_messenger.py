@@ -159,6 +159,11 @@ class SettingsTest(unittest.TestCase):
         self.assertFalse(msg.uses_translator({"owner_translation": "model"}, "he"))
         self.assertFalse(msg.uses_translator({"owner_translation": "translator"}, "en"))
         self.assertTrue(msg.uses_translator({"owner_translation": " Translator "}, "he"))
+        # The situational Eye answers in English only, so it brings the translator unless the owner chose otherwise.
+        self.assertTrue(msg.uses_translator({"eye_prompt": "situational"}, "he"))
+        self.assertFalse(msg.uses_translator({"eye_prompt": "situational"}, "en"))
+        self.assertFalse(msg.uses_translator({"eye_prompt": "situational", "owner_translation": "model"}, "he"))
+        self.assertFalse(msg.uses_translator({"eye_prompt": "legacy"}, "he"))
 
     def test_a_messenger_that_cannot_be_built_still_answers(self) -> None:
         with mock.patch.dict(msg._MESSENGERS, clear=True):

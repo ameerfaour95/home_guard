@@ -429,6 +429,14 @@ Small models run on the laptop GPU through Ollama (no key; `ollama pull <model>`
 
 With `translator`, a cheap text model (`messenger.py`; Gemini 3.1 Flash Lite, about $0.0003 an alert) translates the alert's summary and "why" in one call, keeping camera names, numbers and times. It never holds an alert longer than the timeout: on any failure the owner reads the vision model's own Hebrew when it wrote one, else the English (`Translation to he failed` in the log). Read at start. To judge the translation, `python -m home_guard_project.box.eval_translation <meta folder or eval results .jsonl> --limit 50` writes `translation_eval.csv` with Gemini Flash Lite and gpt-6-luna side by side (`--fake` checks the setup without calling anyone).
 
+### The situational Eye (box.yaml)
+
+    eye_prompt: situational                # legacy (default): today's prompt, unchanged
+    camera_roles: {front_side: street, left_side_1: private}   # optional; else guessed from the name
+    camera_zones: {main_door: [entrance, gate]}                # optional
+
+With `situational` the guard loop asks the vision model with `eye_prompt.py`: the fixed categories (`taxonomy.py`), one `SITUATION:` line (time, day/evening/late_night/dawn, dark, house state, camera role, what the owner expects) and what that situation means. The model names what it sees; code turns it into the label (a visitor at 02:30 is suspicious, at 14:00 normal), never below the model's own label and never softening escalation. The house state (awake / asleep / away / vacation, and "expecting" notes) lives in `production_multi/.registry/house_state.jsonl` (`house_state.py`); without commands the house is asleep 00:00-06:00. Restart after changing these. Score it first with `run --prompt eye` (each clip in its own situation, scored per category and per situation).
+
 ## Troubleshooting
 
 | Problem | What to do |

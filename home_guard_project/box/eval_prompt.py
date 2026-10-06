@@ -8,6 +8,8 @@ Two steps, on two machines, because the box cannot read tagging/ on S3:
     python -m home_guard_project.box.eval_prompt run --dir eval_set
     python -m home_guard_project.box.eval_prompt run --dir eval_set --prompt-file my_prompt.txt
     python -m home_guard_project.box.eval_prompt summary --dir eval_set --tag <tag>
+    # The situational Eye (eye_prompt.py) instead of the box's prompt:
+    python -m home_guard_project.box.eval_prompt run --dir eval_set --prompt eye
 
 ``prepare`` writes ``frames/<clip_id>_<i>.jpg`` and ``manifest.jsonl`` (one row per
 clip with our label and text). ``run`` asks the model about every clip with 5 frames,
@@ -36,6 +38,16 @@ marked ``[delete]`` or with no text are left out, as in the training set.
 
 The prompt is told the clip's own time of day (from the epoch in its name), not
 the time the evaluation runs, so a score does not change with the hour it ran.
+
+``--prompt eye`` asks the situational Eye: each clip's situation is built from its own local
+time with the default house schedule (asleep 00:00-06:00, else awake; never away), its camera's
+role guessed from the name, intent ``alert_triage`` and no house notes. The answer is labelled
+the way the box labels it (``eye_prompt.postprocess``). Besides the usual score, the summary
+reports the AI's categories, per-category agreement where the manifest row has a truth
+``category`` (or ``ours_category``), and a day / night / away split in which every clip is
+judged against its own situation's priors: a truth category that is unusual at that hour (a
+visitor at 02:30) counts as an alert there, not as a false alarm. Clips without a truth category
+are judged by our label, as before.
 """
 
 from __future__ import annotations
@@ -54,7 +66,9 @@ import time
 from datetime import datetime
 from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
 
-from . import inference, providers
+from . import eye_prompt, house_state, inference, providers
+from . import taxonomy as tx
+from .situation import build_situation
 
 log = logging.getLogger("box.eval_prompt")
 
@@ -83,6 +97,13 @@ ANSWER_COLUMNS = ("clip_id", "ai_label", "ai_summary", "ai_people", "ai_animals"
 RESULT_COLUMNS = ("clip_id", "camera", "ours_label", "ours_text", "ai_label", "ai_summary", "ai_people", "ai_animals",
                   "ai_vehicle_moving", "raw", "error", "prompt_id", "prompt_sha12", "model", "input_sha12"
                   ) + USAGE_COLUMNS + ("local_time", "batch")
+# --prompt eye: the Eye's observation and the clip's situation, then (scored) our category and its label there.
+EYE_ANSWER_COLUMNS = ("ai_category", "ai_raw_label", "ai_expectation", "ai_open_case", "sit_phase", "sit_dark",
+                      "sit_house_state", "sit_camera_role")
+EYE_RESULT_COLUMNS = EYE_ANSWER_COLUMNS + ("ours_category", "ours_expected_label")
+EYE_PROMPT_ID = f"eye-{eye_prompt.EYE_PROMPT_VERSION}"
+TRUTH_CATEGORY_KEYS = ("category", "ours_category", "truth_category")
+UNKNOWN_TIME_DAY = datetime(2026, 3, 15, 12, 0)   # a clip with no time is asked as a plain day
 NIGHT_FROM, NIGHT_UNTIL = 19, 6          # local hours: 19:00-05:59 is night
 CALLS_PER_DAY = (150, 300)               # a typical and a busy house (plan page section 2)
 
@@ -187,17 +208,52 @@ def clip_hash(clip_id: str) -> int:
     return int(hashlib.sha256(clip_id.encode("utf-8")).hexdigest(), 16)
 
 
-def prompt_id_of(prompt_text: Optional[str]) -> str:
+def prompt_id_of(prompt_text: Optional[str], eye: bool = False) -> str:
+    if eye:
+        return EYE_PROMPT_ID
     if prompt_text is None:
         return inference.PROMPT_VERSION
     return f"file-{hashlib.sha256(prompt_text.encode('utf-8')).hexdigest()[:12]}"
 
 
-def default_tag(prompt_text: Optional[str], model: str, fake: bool = False) -> str:
+def default_tag(prompt_text: Optional[str], model: str, fake: bool = False, eye: bool = False) -> str:
     """Results file name ``<prompt id>__<model>``; a fake run gets its own ``fake-`` file."""
     safe = re.sub(r"[^A-Za-z0-9._-]", "_", str(model or "unknown"))
-    tag = f"{prompt_id_of(prompt_text)}__{safe}"
+    tag = f"{prompt_id_of(prompt_text, eye)}__{safe}"
     return f"fake-{tag}" if fake else tag
+
+
+def clip_timestamp(row: Dict[str, Any]) -> Optional[float]:
+    """The clip's moment: the epoch in its name, else its manifest time of day on a fixed date; None if neither."""
+    m = _EPOCH_RE.search(str(row.get("clip_id") or ""))
+    if m:
+        return float(m.group(1))
+    when = row.get("local_time")
+    if when:
+        try:
+            clock = datetime.strptime(str(when), "%H:%M:%S").time()
+        except ValueError:
+            return None
+        return datetime.combine(UNKNOWN_TIME_DAY.date(), clock).timestamp()
+    return None
+
+
+def eye_situation_for(row: Dict[str, Any]) -> Any:
+    """The situation the Eye is asked with for a manifest clip: its own time, the default schedule."""
+    ts = clip_timestamp(row)
+    if ts is None:
+        ts = UNKNOWN_TIME_DAY.timestamp()
+    return build_situation(str(row.get("camera") or ""), ts, "alert_triage", house=house_state.scheduled(ts))
+
+
+def truth_category(row: Dict[str, Any]) -> str:
+    """Our category for a manifest clip (``N3``...), or ``""`` when the row has none."""
+    for key in TRUTH_CATEGORY_KEYS:
+        value = str(row.get(key) or "").strip()
+        if value:
+            cid = tx.normalize_id(value)
+            return cid if cid != tx.OTHER or value.lower() == tx.OTHER else ""
+    return ""
 
 
 class ResultsConflict(Exception):
@@ -268,6 +324,8 @@ def summarize(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         "home": _counts([r for r in rows if _is_home(r)]),
         "external": _counts([r for r in rows if not _is_home(r)]),
     }
+    if any("sit_phase" in r for r in rows):
+        extra.update(_eye_summary(ok))
     return {**extra, **{
         "rows": len(rows),
         "alerts_caught": len(caught),
@@ -285,6 +343,73 @@ def summarize(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         "words_ours_mean": (sum(_words(r["ours_text"]) for r in both) / len(both)) if both else None,
         "errors": len(rows) - len(ok),
     }}
+
+
+def _situational_truth(r: Dict[str, Any]) -> str:
+    """``alert`` or ``normal`` for a clip judged by its own situation: our category's label there when we have
+    one, else our label."""
+    expected = r.get("ours_expected_label")
+    if expected in tx.LABELS:
+        return "normal" if expected == "normal" else "alert"
+    return "alert" if r.get("ours_label") == "alert" else "normal"
+
+
+def _category_order(cid: str) -> int:
+    return tx.CATEGORY_IDS.index(cid) if cid in tx.CATEGORY_IDS else len(tx.CATEGORY_IDS)
+
+
+def _eye_summary(ok: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    """The --prompt eye part of the score (rows without an error)."""
+    by_situation: Dict[str, List[Dict[str, Any]]] = {tx.DAY: [], tx.NIGHT: [], tx.AWAY: []}
+    by_phase: Dict[str, List[Dict[str, Any]]] = {phase: [] for phase in tx.PHASES}
+    for r in ok:
+        phase = str(r.get("sit_phase") or "day")
+        judged = dict(r, ours_label=_situational_truth(r))
+        by_situation[tx.column(phase, str(r.get("sit_house_state") or "home_awake"))].append(judged)
+        by_phase.setdefault(phase, []).append(judged)
+    per_category: Dict[str, Dict[str, int]] = {}
+    confusion: Dict[str, Dict[str, int]] = {}
+    ai_categories: Dict[str, int] = {}
+    for r in ok:
+        ai = str(r.get("ai_category") or "?")
+        ai_categories[ai] = ai_categories.get(ai, 0) + 1
+        cid = r.get("ours_category") or ""
+        if not cid:
+            continue
+        c = per_category.setdefault(cid, {"total": 0, "same_category": 0, "label_ok": 0})
+        c["total"] += 1
+        c["same_category"] += r.get("ai_category") == cid
+        c["label_ok"] += r.get("ai_label") == r.get("ours_expected_label")
+        confusion.setdefault(cid, {})
+        confusion[cid][ai] = confusion[cid].get(ai, 0) + 1
+    return {
+        "by_situation": {col: _counts(rows) for col, rows in by_situation.items()},
+        "by_phase": {phase: _counts(rows) for phase, rows in by_phase.items()},
+        "per_category": dict(sorted(per_category.items(), key=lambda kv: _category_order(kv[0]))),
+        "confusion": confusion,
+        "ai_categories": dict(sorted(ai_categories.items(), key=lambda kv: _category_order(kv[0]))),
+        "no_truth_category": sum(not r.get("ours_category") for r in ok),
+        "situation_raised": sum(r.get("ai_raw_label") == "normal" and r.get("ai_label") not in ("", "normal")
+                                for r in ok),
+    }
+
+
+def _eye_lines(s: Dict[str, Any]) -> List[str]:
+    if "by_situation" not in s:
+        return []
+    lines = ["by situation      each clip judged against its own situation's priors "
+             "(priors column: day = family awake, night = after midnight or asleep, away):"]
+    lines += [_split_line(f"  {col}", c) for col, c in s["by_situation"].items()]
+    lines += [_split_line(f"  at {phase}", c) for phase, c in s.get("by_phase", {}).items()]
+    lines.append(f"raised by situation {s['situation_raised']} (the Eye said normal; the situation made it more)")
+    cats = ", ".join(f"{cid} {n}" for cid, n in s["ai_categories"].items())
+    lines.append(f"AI categories     {cats or '-'}")
+    for cid, c in s["per_category"].items():
+        lines.append(f"  ours {cid:<5} {c['total']:>3} clips, AI same category {c['same_category']}, "
+                     f"label right for the situation {c['label_ok']}")
+    if s.get("no_truth_category"):
+        lines.append(f"no truth category {s['no_truth_category']} clips (judged by our label)")
+    return lines
 
 
 def _pct(value: Optional[float]) -> str:
@@ -328,8 +453,8 @@ def format_summary(s: Dict[str, Any]) -> str:
         ("cost              unknown (local or unpriced model)" if s.get("cost_per_call") is None else
          f"cost              ${s['cost_per_call']:.5f} per call; per box per month "
          f"${s['per_month_150']:.2f} at 150 calls/day, ${s['per_month_300']:.2f} at 300"),
-    ] + ([f"outdated          {s['outdated']} answers were for other frames, camera or time; left out "
-          "(run again to ask)"] if s.get("outdated") else [])
+    ] + _eye_lines(s) + ([f"outdated          {s['outdated']} answers were for other frames, camera or time; "
+                         "left out (run again to ask)"] if s.get("outdated") else [])
     return "\n".join(line for line in lines if line)
 
 
@@ -592,13 +717,16 @@ class FakeBackend:
 
     model_name = "fake"
 
-    def __init__(self, fail_ids: Iterable[str] = ()) -> None:
+    def __init__(self, fail_ids: Iterable[str] = (), eye: bool = False) -> None:
         self.fail_ids = set(fail_ids)
+        self.eye = eye
         self.calls = 0
         self.last_usage = {"prompt_tokens": 1000, "completion_tokens": 50}
         self.prompts: List[str] = []
 
     def ask(self, row: Dict[str, Any], frames: List[Any]) -> Tuple[str, Optional[Dict[str, Any]]]:
+        if self.eye:
+            return self._ask_eye(row)
         self.calls += 1
         self.prompts.append(inference.build_prompt(row.get("camera", ""), int(time.time()),
                                                    datetime.now().strftime("%H:%M:%S"), 0, 0))
@@ -618,6 +746,32 @@ class FakeBackend:
         return json.dumps(parsed), parsed
 
 
+    def _ask_eye(self, row: Dict[str, Any]) -> Tuple[str, Optional[Dict[str, Any]]]:
+        """The Eye's schema: alert -> E1 or S1 by the clip hash; empty -> N10; normal -> our category or N1."""
+        self.calls += 1
+        self.prompts.append(eye_prompt.build_prompt(eye_situation_for(row)))
+        clip_id = str(row.get("clip_id", ""))
+        if clip_id in self.fail_ids:
+            raise RuntimeError(f"forced failure for {clip_id}")
+        ours = row.get("ours_label")
+        if ours == "alert":
+            even = clip_hash(clip_id) % 2 == 0
+            cid, summary, people = ("E1", "Two men force the door open.", 2) if even else (
+                "S1", "A man tries the door handle.", 1)
+        elif ours == "empty":
+            cid, summary, people = "N10", NO_ACTIVITY, 0
+        else:
+            cid, summary, people = truth_category(row) or "N1", "A person walks to the door.", 1
+        raw_label = tx.BY_ID[cid].label if cid in tx.BY_ID else "suspicious"
+        parsed = {"summary": summary, "category": cid, "other_text": "", "zone": "entrance",
+                  "movement": "none" if people == 0 else "approaching", "flags": [], "people": people,
+                  "vehicle_moving": False, "animals": 0, "visibility": "clear",
+                  "evidence_frame": 0 if people == 0 else 1, "raw_label": raw_label, "label": raw_label,
+                  "applied_fact_id": "", "serious_behaviour": cid[0] in "SE",
+                  "why": "" if raw_label == "normal" else "the act"}
+        return json.dumps(parsed), parsed
+
+
 class GptAsker:
     """Asks inference.GptBackend as the box does (same prompt function and request, 5 frames; which frames differ)."""
 
@@ -632,6 +786,15 @@ class GptAsker:
     def ask(self, row: Dict[str, Any], frames: List[Any]) -> Tuple[str, Optional[Dict[str, Any]]]:
         # Hours 0,0 = always inside the alert window; the prompt does not use them.
         return self.backend.analyze(frames, row.get("camera", ""), int(time.time()), 0, 0)
+
+
+class EyeAsker(GptAsker):
+    """Asks inference.GptBackend as the box does with ``eye_prompt: situational``: the clip's situation, the Eye's
+    prompt and schema (no house notes)."""
+
+    def ask(self, row: Dict[str, Any], frames: List[Any]) -> Tuple[str, Optional[Dict[str, Any]]]:
+        return self.backend.analyze(frames, row.get("camera", ""), int(time.time()), 0, 0,
+                                    situation=eye_situation_for(row))
 
 
 class _PromptState:
@@ -703,7 +866,7 @@ def input_fingerprint(out_dir: str, row: Dict[str, Any]) -> str:
 
 def _answer_row(clip_id: str, raw: Any, parsed: Any, error: str, prompt_id: str, model: str,
                 prompt_sha12: str, input_sha12: str, usage: Optional[Dict[str, int]] = None,
-                latency_s: Optional[float] = None) -> Dict[str, Any]:
+                latency_s: Optional[float] = None, situation: Any = None) -> Dict[str, Any]:
     """One results line: the model's answer to one clip. An answer that is not JSON, or not a JSON
     object, is an error with the raw text kept; an object is labelled exactly as the box labels it."""
     if not error and parsed is None:
@@ -714,7 +877,18 @@ def _answer_row(clip_id: str, raw: Any, parsed: Any, error: str, prompt_id: str,
     summary = p.get("summary")
     pin = (usage or {}).get("prompt_tokens")
     pout = (usage or {}).get("completion_tokens")
+    eye_columns: Dict[str, Any] = {}
+    if situation is not None:
+        # Labelled as the box labels it with eye_prompt: situational.
+        p = (eye_prompt.postprocess(p, situation) or {}) if p else {}
+        judgement = p.get("judgement") or {}
+        eye_columns = {"ai_category": (p.get("observation") or {}).get("category", ""),
+                       "ai_raw_label": p.get("raw_label", ""), "ai_expectation": judgement.get("expectation", ""),
+                       "ai_open_case": judgement.get("open_case"), "sit_phase": situation.phase,
+                       "sit_dark": situation.dark, "sit_house_state": situation.house_state,
+                       "sit_camera_role": situation.camera_role}
     return {
+        **eye_columns,
         "clip_id": clip_id,
         "ai_label": "" if error else inference.label_of(p),
         "ai_summary": "" if summary is None else str(summary).strip(),
@@ -827,11 +1001,27 @@ def score_rows(manifest: Sequence[Dict[str, Any]], latest: Dict[str, Dict[str, A
         if r.get("input_sha12") != fingerprints[m["clip_id"]]:
             outdated += 1
             continue
-        scored.append({**{k: r.get(k) for k in ANSWER_COLUMNS}, "clip_id": m["clip_id"],
-                       "camera": m.get("camera", ""), "ours_label": m.get("ours_label", ""),
-                       "ours_text": m.get("ours_text", ""), "local_time": _clip_time(m),
-                       "batch": m.get("batch", "")})
+        row = {**{k: r.get(k) for k in ANSWER_COLUMNS}, "clip_id": m["clip_id"],
+               "camera": m.get("camera", ""), "ours_label": m.get("ours_label", ""),
+               "ours_text": m.get("ours_text", ""), "local_time": _clip_time(m),
+               "batch": m.get("batch", "")}
+        if "sit_phase" in r:
+            row.update({k: r.get(k) for k in EYE_ANSWER_COLUMNS})
+            row.update(_eye_truth(m, r))
+        scored.append(row)
     return scored, outdated
+
+
+def _eye_truth(m: Dict[str, Any], r: Dict[str, Any]) -> Dict[str, Any]:
+    """Our category and the label it gets in the clip's situation (the priors table), from the CURRENT manifest."""
+    cid = truth_category(m)
+    if not cid:
+        return {"ours_category": "", "ours_expected_label": ""}
+    ctx = tx.Context(phase=str(r.get("sit_phase") or "day"),
+                     house_state=str(r.get("sit_house_state") or "home_awake"),
+                     dark=bool(r.get("sit_dark")), camera_role=str(r.get("sit_camera_role") or ""))
+    raw = tx.BY_ID[cid].label if cid in tx.BY_ID else ""
+    return {"ours_category": cid, "ours_expected_label": tx.contextual_label(cid, raw, ctx).label}
 
 
 def _utf8_safe(value: Any) -> Any:
@@ -840,11 +1030,13 @@ def _utf8_safe(value: Any) -> Any:
 
 
 def _write_csv(path: str, rows: Sequence[Dict[str, Any]]) -> None:
+    columns = list(RESULT_COLUMNS) + (list(EYE_RESULT_COLUMNS) if any("sit_phase" in r for r in rows) else [])
+
     def write(f: Any) -> None:
-        writer = csv.DictWriter(f, fieldnames=list(RESULT_COLUMNS))
+        writer = csv.DictWriter(f, fieldnames=columns)
         writer.writeheader()
         for row in rows:
-            writer.writerow({k: _utf8_safe(row.get(k)) for k in RESULT_COLUMNS})
+            writer.writerow({k: _utf8_safe(row.get(k)) for k in columns})
 
     _atomic_write(path, write)
 
@@ -871,7 +1063,7 @@ def _fingerprints(out_dir: str, manifest: Sequence[Dict[str, Any]]) -> Dict[str,
 def run_eval(out_dir: str, backend: Any, prompt_text: Optional[str] = None, model: Optional[str] = None,
              tag: Optional[str] = None, limit: Optional[int] = None,
              progress: Callable[[str], None] = log.info, overwrite: bool = False,
-             wait: bool = False) -> Dict[str, Any]:
+             wait: bool = False, eye: bool = False) -> Dict[str, Any]:
     """Ask *backend* about each clip in the manifest; write results and the summary; return it.
 
     Only one run per results file: ``<tag>.lock`` is taken first, and ``ResultsLocked`` is raised
@@ -883,12 +1075,16 @@ def run_eval(out_dir: str, backend: Any, prompt_text: Optional[str] = None, mode
     is raised and nothing is touched, unless *overwrite* is true (those answers are then removed).
     With *wait*, a run of more than CONFIRM_OVER clips names the model and pauses
     CONFIRM_SECONDS first (Ctrl+C aborts).
+    With *eye*, *backend* asks the situational Eye (FakeBackend(eye=True) or EyeAsker) and each answer is labelled
+    with the clip's own situation.
     """
+    if eye and prompt_text is not None:
+        raise ValueError("the Eye's prompt is composed per clip; a prompt file cannot be used with it")
     manifest = read_jsonl(os.path.join(out_dir, MANIFEST))
-    prompt_id = prompt_id_of(prompt_text)
+    prompt_id = prompt_id_of(prompt_text, eye)
     model = model or getattr(backend, "model_name", "unknown")
-    tag = tag or default_tag(prompt_text, model, fake=isinstance(backend, FakeBackend))
-    sha12 = prompt_sha12_of(prompt_text)
+    tag = tag or default_tag(prompt_text, model, fake=isinstance(backend, FakeBackend), eye=eye)
+    sha12 = eye_sha12() if eye else prompt_sha12_of(prompt_text)
     jsonl_path, _, _ = _results_paths(out_dir, tag)
     os.makedirs(os.path.dirname(jsonl_path), exist_ok=True)
 
@@ -937,6 +1133,7 @@ def run_eval(out_dir: str, backend: Any, prompt_text: Optional[str] = None, mode
                     continue
                 clip_id = m["clip_id"]
                 state.local_time = _clip_time(m)
+                situation = eye_situation_for(m) if eye else None
                 raw: Any = ""
                 try:
                     frames = _load_frames(out_dir, m["frames"])
@@ -944,10 +1141,11 @@ def run_eval(out_dir: str, backend: Any, prompt_text: Optional[str] = None, mode
                     raw, parsed = backend.ask(m, frames)
                     took = time.monotonic() - started
                     result = _answer_row(clip_id, raw, parsed, "", prompt_id, model, sha12, fingerprints[clip_id],
-                                         usage=getattr(backend, "last_usage", None), latency_s=took)
+                                         usage=getattr(backend, "last_usage", None), latency_s=took,
+                                         situation=situation)
                 except Exception as exc:  # noqa: BLE001 - recorded, the run goes on
                     result = _answer_row(clip_id, raw, None, f"{type(exc).__name__}: {exc}", prompt_id, model,
-                                         sha12, fingerprints[clip_id])
+                                         sha12, fingerprints[clip_id], situation=situation)
                 latest[clip_id] = result
                 out.write(json.dumps(result, ensure_ascii=True) + "\n")
                 out.flush()
@@ -962,6 +1160,17 @@ def run_eval(out_dir: str, backend: Any, prompt_text: Optional[str] = None, mode
 
 def prompt_sha12_of(prompt_text: Optional[str]) -> str:
     return hashlib.sha256(_prompt_template(prompt_text).encode("utf-8")).hexdigest()[:12]
+
+
+def eye_sha12() -> str:
+    """The Eye's wording: its prompt for a day, a sleeping-house night and an away look, a placeholder camera."""
+    texts = []
+    for when, away in ((datetime(2026, 3, 15, 12, 0), False), (datetime(2026, 3, 15, 2, 0), False),
+                       (datetime(2026, 3, 15, 12, 0), True)):
+        ts = when.timestamp()
+        now = house_state.HouseNow("away", "owner", None, None) if away else house_state.scheduled(ts)
+        texts.append(eye_prompt.build_prompt(build_situation("{camera_name}", ts, house=now)))
+    return hashlib.sha256("\n\n".join(texts).encode("utf-8")).hexdigest()[:12]
 
 
 def _prompt_template(prompt_text: Optional[str]) -> str:
@@ -1085,7 +1294,7 @@ def load_scored(out_dir: str, tag: str) -> List[Dict[str, Any]]:
 # ----------------------------------------------------------------------------
 # Command line
 # ----------------------------------------------------------------------------
-def _make_gpt(provider: str, model: str) -> Any:
+def _make_gpt(provider: str, model: str, eye: bool = False) -> Any:
     try:
         import truststore  # noqa: PLC0415
 
@@ -1104,7 +1313,7 @@ def _make_gpt(provider: str, model: str) -> Any:
     except providers.ProviderError as exc:
         raise SystemExit(f"{exc}, or use --fake.") from None
     backend.model_name = providers.model_key(provider, model)
-    return GptAsker(backend)
+    return EyeAsker(backend) if eye else GptAsker(backend)
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -1127,6 +1336,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     runp.add_argument("--dir", required=True, help="The folder prepare wrote.")
     runp.add_argument("--prompt-file", default=None,
                       help="Use this text as the prompt; {camera_name} and {local_time_str} are filled in.")
+    runp.add_argument("--prompt", choices=("box", "eye"), default="box",
+                      help="box: the box's legacy prompt (or --prompt-file). eye: the situational Eye "
+                           "(eye_prompt.py), each clip asked in its own situation (its time, the default "
+                           "schedule) and scored per category and per situation.")
     runp.add_argument("--model", default="gpt-4o")
     runp.add_argument("--provider", default="openai", choices=sorted(providers.PROVIDERS),
                       help="Where the model is asked: openai, openrouter (OPENROUTER_API_KEY), ollama (the laptop "
@@ -1175,17 +1388,25 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if not os.path.isfile(os.path.join(args.dir, MANIFEST)):
             print(f"Error: {os.path.join(args.dir, MANIFEST)} not found; run prepare first.", file=sys.stderr)
             return 1
+        eye = args.prompt == "eye"
+        if eye and args.prompt_file:
+            print("Error: --prompt eye composes its prompt per clip; it cannot take --prompt-file.", file=sys.stderr)
+            return 1
         prompt_text = None
         if args.prompt_file:
             with open(args.prompt_file, encoding="utf-8") as f:
                 prompt_text = f.read()
         model_id = providers.model_key(args.provider, args.model)
-        backend = FakeBackend() if args.fake else _make_gpt(args.provider, args.model)
+        if args.fake:
+            backend = FakeBackend(eye=eye)
+        else:
+            backend = _make_gpt(args.provider, args.model, eye=True) if eye else _make_gpt(args.provider, args.model)
         model = None if args.fake else model_id
-        tag = args.tag or default_tag(prompt_text, "fake" if args.fake else model_id, fake=args.fake)
+        tag = args.tag or default_tag(prompt_text, "fake" if args.fake else model_id, fake=args.fake, eye=eye)
         try:
             summary = run_eval(args.dir, backend, prompt_text=prompt_text, model=model, tag=tag,
-                               limit=args.limit, overwrite=args.overwrite, wait=not (args.fake or args.yes))
+                               limit=args.limit, overwrite=args.overwrite, wait=not (args.fake or args.yes),
+                               eye=eye)
         except ResultsConflict as exc:
             print(f"Error: {exc}", file=sys.stderr)
             return 2
