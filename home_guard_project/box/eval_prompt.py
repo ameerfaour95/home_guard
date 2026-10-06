@@ -71,7 +71,8 @@ DATASET_ENV = "HOME_GUARD_DATASET"        # default --dataset: a folder or s3://
 ANNOTATIONS = "annotations/clips.jsonl"   # inside the dataset
 TRUTH_LABELS = ("alert", "normal", "empty")
 # The eval's own truth on a clip, on top of the dataset's; prepare keeps it per clip_id.
-EVAL_KEYS = ("category", "subset", "day_night")
+# hard: why an alert is in the misses set (night, occlusion, subtle, loitering).
+EVAL_KEYS = ("category", "subset", "day_night", "hard")
 MISSES = "misses"
 
 CONFIRM_OVER = 20          # a real run of more clips than this names the model and waits

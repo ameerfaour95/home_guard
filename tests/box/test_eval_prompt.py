@@ -331,7 +331,7 @@ class PrepareTest(PreparedDirMixin, unittest.TestCase):
         self.prepare_home()
         path = os.path.join(self.out, "manifest.jsonl")
         rows = read_jsonl(path)
-        rows[2].update({"category": "E1", "subset": "misses", "day_night": "night"})
+        rows[2].update({"category": "E1", "subset": "misses", "day_night": "night", "hard": ["night"]})
         added = {"clip_id": "Burglary_x_w0001", "source": "uca", "batch": "uca_eval_v2", "camera": "Burglary",
                  "ours_text": "A man pries the window.", "ours_label": "alert", "segment": [0.5, 1.5],
                  "frames": ev.frame_paths("Burglary_x_w0001"), "local_time": None}
@@ -339,8 +339,8 @@ class PrepareTest(PreparedDirMixin, unittest.TestCase):
         counts = self.prepare_home()
         self.assertEqual(counts["added_kept"], 1)
         after = {r["clip_id"]: r for r in read_jsonl(path)}
-        self.assertEqual({k: after["cam_b_1771700000_trigger"][k] for k in ("category", "subset", "day_night")},
-                         {"category": "E1", "subset": "misses", "day_night": "night"})
+        self.assertEqual({k: after["cam_b_1771700000_trigger"][k] for k in ("category", "subset", "day_night", "hard")},
+                         {"category": "E1", "subset": "misses", "day_night": "night", "hard": ["night"]})
         self.assertEqual(after["Burglary_x_w0001"], added)
 
     def test_counts_are_printable(self) -> None:
