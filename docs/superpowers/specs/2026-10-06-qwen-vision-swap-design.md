@@ -11,7 +11,7 @@ Owner decisions (2026-10-06):
 
 ## Goal
 
-Measure the Qwen vision models on our 220 tagged home clips with real token counts, latency and cost, choose primary and fallback by the rule in §6, and give the box a backend that reaches them without touching the alert path.
+Measure the Qwen vision models on our 292 tagged clips (all of `s3://security-camera-project-v1/tagging/`: 220 home clips with 18 alerts, plus 43 UCF-Crime and 29 SmartHome-Bench clips with 36 more alerts) with real token counts, latency and cost, choose primary and fallback by the rule in §6, and give the box a backend that reaches them without touching the alert path.
 
 Reference for the report: gpt-4o on today's prompt (the 2026-10-03 baseline, 16/18 alerts caught and 21/177 normal flagged, used an older prompt version).
 
@@ -91,7 +91,7 @@ vlm_fallback_model: Qwen/Qwen3.5-4B
 
 - `run --provider <name> --model <id>`; results name the model `provider:model` (`ollama:qwen3-vl:4b-instruct-bf16`), except bare for `openai` so older results still match.
 - Each answer row stores `prompt_tokens`, `completion_tokens`, `cost_usd` (hosted models only), `latency_s`.
-- Summary adds: day / night split (night = clip local time 19:00–05:59), clip ids of missed alerts and false alarms, mean tokens and latency per call, $ per call and $ per box per month at 150 and 300 calls/day (when priced).
+- Summary adds: home / external split (our cameras vs UCA and SmartHome-Bench, a different camera domain), day / night split (night = clip local time 19:00–05:59), clip ids of missed alerts and false alarms, mean tokens and latency per call, $ per call and $ per box per month at 150 and 300 calls/day (when priced).
 - `compare` prints one table across results files, names primary and fallback by §6, and puts the gpt-4o reference in its first line.
 
 ### 5. Candidates
@@ -114,18 +114,18 @@ vlm_fallback_model: Qwen/Qwen3.5-4B
 
 1. Primary is one of the two 4B models; the other is the fallback.
 2. Default: primary Qwen3-VL-4B-Instruct, fallback Qwen3.5-4B.
-3. Qwen3.5-4B becomes primary (and Qwen3-VL-4B the fallback) only if it **beats** Qwen3-VL-4B on the full 220 clips:
+3. Qwen3.5-4B becomes primary (and Qwen3-VL-4B the fallback) only if it **beats** Qwen3-VL-4B on all 292 clips:
    - it catches more alerts, or the same number with fewer normal clips flagged;
    - and it does not miss a forced-entry / climbing-in alert that Qwen3-VL-4B caught;
    - and it has no more errors (unparseable or refused answers).
 4. The other models are reported next to the two 4B models. If one of them clearly beats both (more alerts caught with no more false alarms), the report says so as a recommendation for the owner; it does not change the choice by itself.
 5. The first line of `compare` says whether the chosen primary is worse than the gpt-4o reference and lists the clips. This doesn't block the switch (the owner has decided), but it tells the week-1 prompt work where to start.
 
-18 alerts is a small set (16/18 spans roughly 67–97%); a one-clip difference is noise. The report says so, and week 1 of the plan enlarges the eval set.
+54 alerts (18 of them from our home cameras) is still a small set; a one-clip difference is noise. The report shows home and external separately, and week 1 of the plan enlarges the eval set.
 
 ## Data flow
 
-Laptop: the prepared eval set (220 clips, already on the laptop) is copied to `C:\Users\ameer\Ameer\home_guard_eval\eval_set` → `run --provider ollama` for each local model (Ollama serves one model at a time; the runs are sequential) → `run --provider openrouter` for each hosted model once the account has credit → `compare`.
+Laptop: the eval set (292 clips from all four tagging batches) is at `C:\Users\ameer\Ameer\home_guard_eval\eval_set` → `run --provider ollama` for each local model (Ollama serves one model at a time; the runs are sequential) → `run --provider openrouter` for each hosted model once the account has credit → `compare`.
 Box: unchanged by this work. The switch waits for the hosting decision above.
 
 ## Error handling
@@ -148,7 +148,7 @@ Then `run --fake` end to end, then a 3-clip smoke run per model before each full
 
 ## Needs the owner
 
-- Credit on the OpenRouter account (it shows $0 on 2026-10-06; about $10 covers every hosted run). The local runs don't need it.
+- Credit on the OpenRouter account: added 2026-10-06 ($20).
 - Later: the hosting choice for the box (above).
 
 ## Out of scope

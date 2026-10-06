@@ -616,7 +616,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Produces:
   - `USAGE_COLUMNS = ("prompt_tokens", "completion_tokens", "cost_usd", "latency_s")`; `ANSWER_COLUMNS` and `RESULT_COLUMNS` end with it, and `RESULT_COLUMNS` then ends with `"local_time"`
   - `is_night(local_time: Optional[str]) -> Optional[bool]` (19:00–05:59 is night; None when unknown)
-  - `summarize(rows)` adds keys `missed_alerts: List[str]`, `false_alarms: List[str]`, `tokens_in_mean`, `tokens_out_mean`, `cost_per_call`, `latency_mean`, `per_month_150`, `per_month_300` (all `Optional[float]`), `day` and `night` (each `{"alerts_caught", "alerts_total", "normal_flagged", "normal_total", "errors"}`), and `unknown_time: int`
+  - `summarize(rows)` adds keys `missed_alerts: List[str]`, `false_alarms: List[str]`, `tokens_in_mean`, `tokens_out_mean`, `cost_per_call`, `latency_mean`, `per_month_150`, `per_month_300` (all `Optional[float]`), `day` and `night`, `home` and `external` (each `{"alerts_caught", "alerts_total", "normal_flagged", "normal_total", "errors"}`; home = batch starting `ameer_house`, external = the UCA and SmartHome-Bench clips), and `unknown_time: int`
   - `_make_gpt(provider: str, model: str) -> GptAsker` (timeout 120 s, because thinking models and a model's first load into the GPU are slow)
   - CLI: `run --provider {dashscope-intl,ollama,openai,openrouter,vllm}` (default `openai`); results `model` = `providers.model_key(provider, model)`
 
@@ -636,7 +636,8 @@ class CostAndTimeTest(unittest.TestCase):
         return [r("a1", "alert", "suspicious", "02:10:00"), r("a2", "alert", "normal", "14:00:00"),
                 r("n1", "normal", "suspicious", "21:30:00"), r("n2", "normal", "normal", "09:00:00"),
                 r("n3", "normal", "normal", None, cost=None, pin=None, pout=None, lat=None),
-                r("e1", "normal", "", "10:00:00", error="boom")]
+                r("e1", "normal", "", "10:00:00", error="boom"),
+                {**r("u1", "alert", "escalation", None), "batch": "uca_dataset_batch"}]
 
     def test_is_night(self) -> None:
         self.assertTrue(ev.is_night("02:10:00"))
@@ -655,7 +656,13 @@ class CostAndTimeTest(unittest.TestCase):
         self.assertEqual((s["night"]["normal_flagged"], s["night"]["normal_total"]), (1, 1))
         self.assertEqual((s["day"]["alerts_caught"], s["day"]["alerts_total"]), (0, 1))
         self.assertEqual(s["day"]["errors"], 1)
-        self.assertEqual(s["unknown_time"], 1)
+        self.assertEqual(s["unknown_time"], 2)   # n3 and u1 have no time
+
+    def test_home_external_split(self) -> None:
+        rows = [{**x, "batch": x.get("batch", "ameer_house_batch_1")} for x in self.rows()]
+        s = ev.summarize(rows)
+        self.assertEqual((s["home"]["alerts_caught"], s["home"]["alerts_total"]), (1, 2))
+        self.assertEqual((s["external"]["alerts_caught"], s["external"]["alerts_total"]), (1, 1))
 
     def test_cost_includes_errored_calls_and_projects_a_month(self) -> None:
         s = ev.summarize(self.rows())
@@ -779,6 +786,8 @@ def _mean(values: Iterable[Any]) -> Optional[float]:
         "day": _counts([r for r in rows if is_night(r.get("local_time")) is False]),
         "night": _counts([r for r in rows if is_night(r.get("local_time")) is True]),
         "unknown_time": sum(is_night(r.get("local_time")) is None for r in rows),
+        "home": _counts([r for r in rows if str(r.get("batch") or "").startswith(HOME_BATCH_PREFIX)]),
+        "external": _counts([r for r in rows if not str(r.get("batch") or "").startswith(HOME_BATCH_PREFIX)]),
     }
 ```
 
@@ -795,6 +804,8 @@ def _split_line(name: str, c: Optional[Dict[str, int]]) -> str:
 ```python
         _split_line("day", s.get("day")),
         _split_line("night", s.get("night")),
+        _split_line("home clips", s.get("home")),
+        _split_line("external clips", s.get("external")),
         f"missed alerts     {', '.join(s['missed_alerts']) or '-'}" if "missed_alerts" in s else "",
         f"false alarms      {', '.join(s['false_alarms']) or '-'}" if "false_alarms" in s else "",
         (f"tokens per call   in {_num(s.get('tokens_in_mean'))} out {_num(s.get('tokens_out_mean'))}   "
@@ -827,7 +838,7 @@ and add to the returned dict:
         "latency_s": None if latency_s is None else round(latency_s, 3),
 ```
 
-3i. In `score_rows`, add `"local_time": _clip_time(m)` to each scored dict.
+3i. In `score_rows`, add `"local_time": _clip_time(m)` and `"batch": m.get("batch", "")` to each scored dict, and add `"batch"` to the end of `RESULT_COLUMNS` (after `"local_time"`).
 
 3j. In the `run_eval` loop, time the call and pass the usage:
 
@@ -1059,7 +1070,7 @@ def format_compare(default: Tuple[str, List[Dict[str, Any]]], challenger: Tuple[
                          f"{', '.join(c['false_alarms']) or '-'}")
         else:
             lines.append(f"{primary} is no worse than gpt-4o on this set.")
-    lines.append(f"{'model':44} {'alerts':>7} {'false':>7} {'err':>4} {'night alerts':>12} {'tok in':>7} "
+    lines.append(f"{'model':44} {'alerts':>7} {'false':>7} {'err':>4} {'home al.':>9} {'ext al.':>8} {'night al.':>9} {'tok in':>7} "
                  f"{'sec':>5} {'$/call':>9} {'$/mo@150':>9}")
     table = dict(rows_of)
     if reference is not None:
@@ -1067,15 +1078,17 @@ def format_compare(default: Tuple[str, List[Dict[str, Any]]], challenger: Tuple[
     for m, rows in table.items():
         s = summarize(rows)
         night = f"{s['night']['alerts_caught']}/{s['night']['alerts_total']}"
+        home = f"{s['home']['alerts_caught']}/{s['home']['alerts_total']}"
+        ext = f"{s['external']['alerts_caught']}/{s['external']['alerts_total']}"
         lines.append(f"{m:44} {s['alerts_caught']:>3}/{s['alerts_total']:<3} "
-                     f"{s['normal_flagged']:>3}/{s['normal_total']:<3} {s['errors']:>4} {night:>12} "
+                     f"{s['normal_flagged']:>3}/{s['normal_total']:<3} {s['errors']:>4} {home:>9} {ext:>8} {night:>9} "
                      f"{_num(s['tokens_in_mean']):>7} {_num(s['latency_mean']):>5} "
                      f"{_money(s['cost_per_call'], '${:.5f}'):>9} {_money(s['per_month_150'], '${:.2f}'):>9}")
     lines += [f"primary: {primary}", f"fallback: {fallback}", f"  {why}"]
     for m, rows in others.items():
         if beats(rows, default[1])[0] and beats(rows, challenger[1])[0]:
             lines.append(f"  recommendation: {m} beats both 4B models (owner's call; not chosen automatically)")
-    lines.append("  (18 alerts is a small set: a one-clip difference is noise)")
+    lines.append("  (54 alerts, 18 of them from our home cameras: a one-clip difference is noise)")
     return "\n".join(lines)
 
 
@@ -1165,14 +1178,9 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 Operational, with no new code. Do the steps in order and stop at the first failure.
 
-- [ ] **Step 1: Keep the eval set somewhere durable**
+- [ ] **Step 1: Eval set (done 2026-10-06)**
 
-```bash
-mkdir -p /c/Users/ameer/Ameer/home_guard_eval
-cp -r "/c/Users/ameer/AppData/Local/Temp/claude/C--Users-ameer-Ameer-home-guard/7a43598a-6e5e-48cb-909b-165aa43912a1/scratchpad/eval_set" /c/Users/ameer/Ameer/home_guard_eval/
-wc -l /c/Users/ameer/Ameer/home_guard_eval/eval_set/manifest.jsonl
-```
-Expected: `220`.
+`/c/Users/ameer/Ameer/home_guard_eval/eval_set` holds all four tagging batches (`ameer_house_batch_1`, `ameer_house_batch_2`, `uca_dataset_batch`, `smarthome_dataset_batch`), prepared with `prepare --batches ...`: 292 clips, 54 alerts (18 home, 24 UCA, 12 SmartHome-Bench). `wc -l manifest.jsonl` prints `292`.
 
 - [ ] **Step 2: Fake run end to end**
 
