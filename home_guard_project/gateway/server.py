@@ -32,7 +32,7 @@ from urllib.parse import parse_qs, urlsplit
 import httpx
 
 from . import router
-from .config import Config
+from .settings import Config
 from .store import Call, Store, utc_day
 
 log = logging.getLogger("gateway.server")

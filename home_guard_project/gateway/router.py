@@ -19,7 +19,7 @@ import httpx
 
 from home_guard_project.box import providers
 
-from .config import ENDPOINTS, Alias, Upstream
+from .settings import ENDPOINTS, Alias, Upstream
 
 log = logging.getLogger("gateway.router")
 

@@ -19,7 +19,7 @@ import httpx
 
 from home_guard_project.box import providers
 from home_guard_project.gateway import cli, router
-from home_guard_project.gateway.config import ConfigError, parse_config
+from home_guard_project.gateway.settings import ConfigError, parse_config
 from home_guard_project.gateway.server import Gateway, make_server
 from home_guard_project.gateway.store import Store, hash_token
 
@@ -407,7 +407,7 @@ class ConfigTest(unittest.TestCase):
                          ("sk-eye", "https://api.openai.com/v1"))
 
     def test_the_example_config_loads(self) -> None:
-        from home_guard_project.gateway.config import load_config
+        from home_guard_project.gateway.settings import load_config
 
         path = os.path.join(os.path.dirname(router.__file__), "gateway.example.yaml")
         cfg = load_config(path, env={})

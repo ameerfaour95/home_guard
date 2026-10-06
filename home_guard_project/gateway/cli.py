@@ -24,7 +24,7 @@ import re
 import sys
 from typing import List, Optional, TextIO
 
-from .config import ConfigError, load_config
+from .settings import ConfigError, load_config
 from .store import Store, StoreError, new_token
 
 log = logging.getLogger("gateway.cli")
