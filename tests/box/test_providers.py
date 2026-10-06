@@ -23,6 +23,8 @@ class ProvidersTest(unittest.TestCase):
     def test_ollama_needs_no_key_and_url_can_be_overridden(self) -> None:
         self.assertEqual(pv.resolve("ollama", {})[:2], ("ollama", "http://localhost:11434/v1"))
         self.assertEqual(pv.resolve("ollama", {"OLLAMA_BASE_URL": "http://gpu:11434/v1"})[1], "http://gpu:11434/v1")
+        self.assertEqual(pv.resolve("ollama", {}, "qwen3.5:4b-bf16")[2], {"reasoning_effort": "none"})
+        self.assertIsNone(pv.resolve("ollama", {}, "qwen3-vl:4b-thinking-bf16")[2])
 
     def test_vllm_needs_a_url_key_optional(self) -> None:
         with self.assertRaises(pv.ProviderError) as cm:

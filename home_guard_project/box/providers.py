@@ -24,9 +24,10 @@ PROVIDERS: Dict[str, Provider] = {
     # Hybrid Qwen models think by default; the task does not need it and it costs money and seconds.
     "openrouter": Provider("openrouter", "https://openrouter.ai/api/v1", "OPENROUTER_API_KEY",
                            {"reasoning": {"enabled": False}}),
-    # The laptop GPU (research runs of the 4B/3B/7B models).
-    "ollama": Provider("ollama", "http://localhost:11434/v1", None, base_url_env="OLLAMA_BASE_URL",
-                       key_required=False),
+    # The laptop GPU (research runs of the 4B/3B/7B models). Ollama ignores ``think: false`` on its
+    # OpenAI endpoint; ``reasoning_effort: none`` turns Qwen3.5's thinking off (1,000+ tokens -> ~100).
+    "ollama": Provider("ollama", "http://localhost:11434/v1", None, {"reasoning_effort": "none"},
+                       base_url_env="OLLAMA_BASE_URL", key_required=False),
     # Our own GPU server (stage B): the URL is required, the key optional.
     "vllm": Provider("vllm", None, "VLLM_API_KEY", base_url_env="VLLM_BASE_URL", key_required=False),
     "dashscope-intl": Provider("dashscope-intl", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
