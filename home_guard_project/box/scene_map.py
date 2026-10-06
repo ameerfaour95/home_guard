@@ -68,8 +68,10 @@ _ROLE_OF_ZONE = {"yard": "private", "roof": "private", "window": "private", "fen
 
 
 def plain_name(text: Any) -> str:
-    """Owner words fit for a one-line prompt: no quotes, separators or line breaks, at most NAME_LIMIT long."""
-    return " ".join(re.sub(r"[\"'`;\r\n]", " ", str(text or "")).split())[:NAME_LIMIT].strip()
+    """Owner words fit for a one-line prompt: no quotes, separators or line breaks (an apostrophe becomes a
+    typographic one, so "neighbour's" still reads), at most NAME_LIMIT long."""
+    text = str(text or "").replace("'", "’")
+    return " ".join(re.sub(r"[\"`;\r\n]", " ", text).split())[:NAME_LIMIT].strip()
 
 
 def _points(points: Any) -> Tuple[Point, ...]:

@@ -71,6 +71,7 @@ dist/
 
 # Inference-mode clips waiting for S3 (box)
 production_multi/
+scene_interview/
 production_archive/
 
 # OpenVINO copies of the YOLO models, made on the box at start
