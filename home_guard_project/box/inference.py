@@ -1443,6 +1443,69 @@ def _eye_answer(parsed: Any, situation: Any) -> Tuple[Optional[Dict[str, Any]], 
     return processed, eye_prompt.records(processed, situation)
 
 
+def case_memory_on(box_settings: Mapping[str, Any]) -> bool:
+    """box.yaml ``case_memory: on|off``. On by default; anything unknown is on."""
+    value = box_settings.get("case_memory", True)
+    if isinstance(value, bool):   # YAML reads on/off as booleans
+        return value
+    text = str(value).strip().lower()
+    if text in ("off", "false", "no", "0"):
+        return False
+    if text not in ("on", "true", "yes", "1", ""):
+        log.warning("Unknown case_memory '%s'; using on.", value)
+    return True
+
+
+def start_case_memory(box_settings: Mapping[str, Any], env: Mapping[str, str]) -> bool:
+    """Install the investigator's case memory (case_memory/INTEGRATION.md section 1) once at start. Any failure
+    leaves it off: every alert then goes out exactly as before."""
+    try:
+        from .case_memory import configure, make_default  # noqa: PLC0415
+    except Exception as exc:  # noqa: BLE001 - without memory every alert goes out as before
+        log.warning("Case memory not started (%s); alerts go out as before", exc)
+        return False
+    if not case_memory_on(box_settings):
+        configure(None)
+        log.info("Case memory is off (box.yaml case_memory: off)")
+        return False
+    try:
+        configure(make_default(env=env))
+    except Exception as exc:  # noqa: BLE001 - without memory every alert goes out as before
+        configure(None)
+        log.warning("Case memory not started (%s); alerts go out as before", exc)
+        return False
+    log.info("Case memory on")
+    return True
+
+
+def _case_memory(job: Optional[AlertJob], camera: str, alert_ts: float, parsed: Optional[Dict[str, Any]],
+                 label: str, cmd: str, decision: Dict[str, Any], backend: Any,
+                 prompt_version: str) -> Tuple[str, Any, Optional[Dict[str, Any]]]:
+    """``(delivery_level, note, signature)`` for an alert about to go out. Escalation and calls never reach
+    memory; without a configured memory, or on any failure, ``("alert", None, None)``: today's path."""
+    if label == "escalation" or cmd == "[call_owner]":
+        return "alert", None, None
+    try:
+        from .case_memory import CaseEvent, apply_case_memory, current  # noqa: PLC0415
+
+        if current() is None:
+            return "alert", None, None
+        event = CaseEvent.build(
+            event_id=job.stem if job is not None else f"{camera}_{int(alert_ts)}", camera=camera, ts=alert_ts,
+            observation=parsed, tracker=getattr(job, "tracker_facts", None) or None, label=label,
+            cameras_in_incident=getattr(job, "incident_cameras", 0) or 1,
+            eye_model=getattr(backend, "last_model", "") or getattr(backend, "model_name", ""),
+            prompt_version=prompt_version)
+        level, note = apply_case_memory(event, {"final_label": label, "alert_command": cmd,
+                                                "serious_behaviour": decision["serious_behaviour"]})
+        if level not in ("alert", "quiet", "digest"):
+            level = "alert"
+        return level, note, event.signature.to_dict()
+    except Exception as exc:  # noqa: BLE001 - memory must never stop or soften an alert by failing
+        log.warning("[%s] case memory failed; alerting as usual: %s", camera, exc)
+        return "alert", None, None
+
+
 def _worker(backend, box_settings, env, settings: AlertSettings,
             camera_name: str, frames: List[Any],
             assistant: Any = None, job: Optional[AlertJob] = None, status: Any = None,
@@ -1558,6 +1621,16 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
         except Exception as exc:  # noqa: BLE001
             log.warning("[%s] could not encode snapshot: %s", camera_name, exc)
         muted = bool(assistant is not None and assistant.is_muted(camera_name))
+        # Case memory (case_memory/INTEGRATION.md section 1): a precedent the owner explained may lower this
+        # delivery one step, and adds a line saying why. Outside the softened lock: the judge may take seconds.
+        level, case_note, case_signature = "alert", None, None
+        if not muted:
+            level, case_note, case_signature = _case_memory(
+                job, camera_name, alert_ts, parsed, label, cmd, decision, backend,
+                eye_record.get("prompt_version", PROMPT_VERSION))
+        if level == "digest":
+            log.info("[%s] case memory chose the digest, which the box doesn't have yet; sending quietly", camera_name)
+        case_line = case_note.text(lang) if case_note is not None else ""
         # Serialize softened deliveries so concurrent workers cannot both claim the first sound.
         with _SOFTENED_LOCK if softened else nullcontext():
             sound_key = (fact["id"], datetime.fromtimestamp(alert_ts).date().isoformat()) if softened else None
@@ -1568,6 +1641,8 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                     if key[1] < sound_key[1]:
                         del _SOFTENED_DAYS[key]
             silent = is_silent(shown_label) and (not softened or sound_key in _SOFTENED_DAYS)
+            if level in ("quiet", "digest"):
+                silent = True
             if muted:
                 res: Dict[str, Any] = {"sent": False, "reason": "paused by the owner"}
                 log.info("[%s] alert not sent: the owner paused alerts", camera_name)
@@ -1591,6 +1666,8 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                 if softened:
                     sentence = owner_text.rstrip(". ")
                     graded = f"🟢 {camera_name}: {sentence}. {why}"
+                if case_line:
+                    graded = f"{graded}\n{case_line}"
                 res = dispatch_alert(box_settings, env, cmd, f"{camera_name}: {alert_summary(label, summary)}", reason,
                                      image=image or None, assistant=assistant, alert=alert_ref, graded=graded,
                                      silent=silent, lang=lang)
@@ -1611,7 +1688,11 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
         if job is not None:
             job.alert = {**decision, "summary": summary, "alert_command": cmd, "alert_reason": reason,
                          "labels": job.labels, "muted": muted, "dispatch": res,
-                         "why": why, "summary_owner": summary_owner, "silent": silent, "people": people}
+                         "why": why, "summary_owner": summary_owner, "silent": silent, "people": people,
+                         # Buttons wait for the assistant's callbacks; they are recorded, not sent.
+                         "delivery_level": level, "case_memory": case_note.record() if case_note is not None else None,
+                         "case_buttons": list(case_note.buttons) if case_note is not None else [],
+                         "case_signature": case_signature}
     except Exception as exc:  # noqa: BLE001
         log.warning("[%s] worker error: %s", camera_name, exc)
     finally:
@@ -1753,6 +1834,7 @@ def run() -> int:
              + (f" -> {settings.vlm_fallback_model}" if settings.vlm_fallback_model else ""), settings.dry_run)
 
     backend = make_backend(settings, env)
+    start_case_memory(box_settings, env)
     model, device = load_detector(settings.model, settings.device)
     predict_args = {"device": device} if device else {}
 
