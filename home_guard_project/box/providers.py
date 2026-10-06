@@ -32,6 +32,8 @@ PROVIDERS: Dict[str, Provider] = {
     "vllm": Provider("vllm", None, "VLLM_API_KEY", base_url_env="VLLM_BASE_URL", key_required=False),
     "dashscope-intl": Provider("dashscope-intl", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
                                "DASHSCOPE_API_KEY", {"enable_thinking": False}),
+    # Google AI Studio's OpenAI-compatible endpoint (the translator, without OpenRouter in between).
+    "google": Provider("google", "https://generativelanguage.googleapis.com/v1beta/openai/", "GEMINI_API_KEY"),
 }
 
 # $ per million tokens (input, output). OpenRouter list prices on 2026-10-06; OpenAI's own for gpt-4o.
@@ -44,6 +46,10 @@ PRICES: Dict[str, Tuple[float, float]] = {
     "qwen/qwen3-vl-8b-thinking": (0.18, 2.10),
     "qwen/qwen3-vl-32b-instruct": (0.104, 0.416),
     "qwen/qwen2.5-vl-72b-instruct": (0.80, 1.00),
+    # The owner's translator (messenger.py) and the model it is compared with.
+    "google/gemini-3.1-flash-lite": (0.25, 1.50),
+    "google/gemini-3.5-flash-lite": (0.30, 2.50),
+    "openai/gpt-6-luna": (0.10, 0.50),
 }
 
 
