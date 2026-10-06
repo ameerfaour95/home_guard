@@ -1086,7 +1086,7 @@ class Window(QMainWindow):
         if hasattr(self, "demo_media_dir"): self.demo_media_dir.cleanup()
         if hasattr(self, "camera_retry"): self.camera_retry.clear()
         if hasattr(self,"saved_run_answers"):
-            self.saved_run_answers.wifi_password="";self.saved_run_answers.camera_password=""
+            self.saved_run_answers.wifi_password="";self.saved_run_answers.camera_password="";self.saved_run_answers.box_password=""
         if hasattr(self, "discovery_timer"): self.discovery_timer.stop()
         if hasattr(self, "discovery_pool"): self.discovery_pool.shutdown(wait=False, cancel_futures=True)
         if hasattr(self, "cameras_page"):
@@ -1182,6 +1182,8 @@ class Window(QMainWindow):
         self.box_user = QLineEdit()
         self.page_layouts[Page.ADDRESS].addWidget(self.box_user)
         self.page_layouts[Page.ADDRESS].addWidget(label(tr("box_user_help"), "muted"))
+        self.add_input(Page.ADDRESS, "box_password", tr("box_password"), True)
+        self.page_layouts[Page.ADDRESS].addWidget(label(tr("box_password_help"), "muted"))
         self.page_layouts[Page.ADDRESS].addWidget(self.field_guidance["address"])
         self.only_cameras = QPushButton(tr("only_check_cameras"))
         self.page_layouts[Page.ADDRESS].setSpacing(8)
@@ -1750,8 +1752,8 @@ class Window(QMainWindow):
 
     def finish_engine(self,success):
         self.setup_cancel.setEnabled(False)
-        for key in ("wifi_password","camera_password"): self.inputs[key].clear()
-        self.run_answers.wifi_password="";self.run_answers.camera_password=""
+        for key in ("wifi_password","camera_password","box_password"): self.inputs[key].clear()
+        self.run_answers.wifi_password="";self.run_answers.camera_password="";self.run_answers.box_password=""
         if not success:
             from .engine_backend import OWNERS
             self.update_step_bar(OWNERS.get(self.engine_failed_step,0))
@@ -1801,7 +1803,7 @@ class Window(QMainWindow):
     def setup_success(self):
         self.setup_completed=True
         if hasattr(self,"saved_run_answers"):
-            self.saved_run_answers.wifi_password="";self.saved_run_answers.camera_password=""
+            self.saved_run_answers.wifi_password="";self.saved_run_answers.camera_password="";self.saved_run_answers.box_password=""
         if not self.engine_cameras: self.set_page(Page.SUMMARY)
         else: self.open_camera_check()
 

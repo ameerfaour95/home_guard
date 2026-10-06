@@ -8,6 +8,7 @@
 #  Run on the box from an elevated PowerShell (locally, or over "ssh -t"):
 #      powershell -ExecutionPolicy Bypass -File enable_autologon.ps1
 #      powershell -ExecutionPolicy Bypass -File enable_autologon.ps1 -Off
+#      ... enable_autologon.ps1 -PasswordFile <file>   (the setup wizard; the file is deleted)
 #
 #  What it does (safe to re-run):
 #    1. Asks for this user's Windows password and checks it
@@ -21,7 +22,11 @@
 #Requires -RunAsAdministrator
 param(
     # Turn auto sign-in off and delete the stored password.
-    [switch]$Off
+    [switch]$Off,
+
+    # Read the password from this file instead of asking, and delete the file.
+    # Used by the setup wizard, which copies it over and never puts it on a command line.
+    [string]$PasswordFile
 )
 
 $ErrorActionPreference = 'Stop'
@@ -114,9 +119,14 @@ if ($Off) {
     return
 }
 
-$secure = Read-Host "Windows password for $account" -AsSecureString
-$password = [Runtime.InteropServices.Marshal]::PtrToStringUni(
-    [Runtime.InteropServices.Marshal]::SecureStringToGlobalAllocUnicode($secure))
+if ($PasswordFile) {
+    try { $password = [IO.File]::ReadAllText($PasswordFile).TrimEnd("`r", "`n") }
+    finally { Remove-Item -LiteralPath $PasswordFile -Force -ErrorAction SilentlyContinue }
+} else {
+    $secure = Read-Host "Windows password for $account" -AsSecureString
+    $password = [Runtime.InteropServices.Marshal]::PtrToStringUni(
+        [Runtime.InteropServices.Marshal]::SecureStringToGlobalAllocUnicode($secure))
+}
 
 $err = [HgAutologon]::CheckPassword($user, $domain, $password)
 if ($err -eq 1326) { throw 'Wrong password - nothing changed.' }

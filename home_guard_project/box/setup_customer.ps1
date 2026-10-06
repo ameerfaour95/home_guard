@@ -28,7 +28,10 @@
 #     "alerts":false,"alert_start_hour":0,"alert_end_hour":0,
 #     "alert_cooldown_sec":120,
 #     "owner_name":"Dana Cohen","owner_phone":"","consent_live":false,
-#     "consent_recordings":false,"consent_training":false,"installer":"Ameer"}
+#     "consent_recordings":false,"consent_training":false,"installer":"Ameer",
+#     "box_password":""}
+#    box_password is the box's Windows password: with it the box signs in by
+#    itself after a power cut (enable_autologon.ps1). Empty = leave as it is.
 #    The last six are optional (an older answers file still works): consents
 #    default to no and owner_name to the house name. The register step sends
 #    them to the box (`box register --from-json`) so the customer appears in
@@ -144,6 +147,7 @@ $ShowCameras = $false; $UseAI = $false; $AlertStart = 0; $AlertEnd = 0; $AlertCo
 $DoCameras = $false; $CamUser = ''; $CamPass = ''
 $OwnerName = ''; $OwnerPhone = ''; $Installer = $env:USERNAME
 $ConsentLive = $false; $ConsentRecordings = $false; $ConsentTraining = $false
+$BoxPassword = ''
 
 if ($NonInteractive) {
     if (-not (Test-Path $AnswersFile)) { throw "Answers file not found: $AnswersFile" }
@@ -168,6 +172,7 @@ if ($NonInteractive) {
     $ConsentLive = ($a.consent_live -is [bool] -and $a.consent_live)
     $ConsentRecordings = ($a.consent_recordings -is [bool] -and $a.consent_recordings)
     $ConsentTraining = ($a.consent_training -is [bool] -and $a.consent_training)
+    $BoxPassword = [string]$a.box_password
     if ($Target -notmatch '^[^@\s]+@\S+$') { throw "answers: 'target' must be user@host (got '$Target')" }
     if (@('ethernet', 'wifi') -notcontains $Mode) { throw "answers: 'network' must be ethernet or wifi (got '$Mode')" }
     if ($Site -notmatch '^[a-z0-9_]+$') { throw "answers: 'site' must be lowercase letters, digits or underscores (got '$Site')" }
@@ -300,6 +305,10 @@ if (-not $NonInteractive) {
     Write-Host '  and the cameras are labelled with it. Lowercase letters, digits and underscores only.'
     $Site = Read-NonEmpty 'House name, for example cohen_haifa' '[a-z0-9_]+'
 
+    Info "`nThe box's Windows password lets it sign in by itself after a power cut,"
+    Write-Host '  so the Home Guard window comes back without a keyboard.'
+    $BoxPassword = Read-Secret "Box Windows password (Enter = leave sign-in as it is)"
+
     Info "`nThe owner."
     $OwnerName = (Read-Host "Owner's name (Enter = $Site)").Trim()
     $OwnerPhone = (Read-Host "Owner's phone number (optional, Enter to skip)").Trim()
@@ -373,6 +382,27 @@ $showVal = 'false'; if ($ShowCameras) { $showVal = 'true' }
 Invoke-Box "cd /d $InstallDir && $Python -m home_guard_project.box set-option show_cameras $showVal" | ForEach-Object { Note "    $_" }
 Ok "Camera windows on the box's own screen: $showVal"
 Invoke-Box "powershell -ExecutionPolicy Bypass -File $BoxBox\make_shortcut.ps1" | ForEach-Object { Note "    $_" }
+# Auto sign-in (enable_autologon.ps1), so the window comes back after a power cut. The
+# alerts do not need it. The password travels in a temp file that the box deletes.
+if ($BoxPassword) {
+    $pwLocal = [IO.Path]::GetTempFileName()
+    $pwRemote = "$RemoteHome\autologon_$([Guid]::NewGuid().ToString('N')).txt"
+    try {
+        [IO.File]::WriteAllText($pwLocal, $BoxPassword, (New-Object Text.UTF8Encoding($false)))
+        Copy-ToBox $pwLocal $pwRemote
+        $alOut = (Invoke-Box "powershell -ExecutionPolicy Bypass -File $BoxBox\enable_autologon.ps1 -PasswordFile $pwRemote" | Out-String)
+        if ($DryRun -or $alOut -match 'Auto sign-in on') { Ok 'The box signs in by itself after a power cut.' }
+        else { Bad 'Auto sign-in was not set (wrong Windows password?). Setup goes on; the readiness report shows it.' }
+    } catch {
+        Bad 'Auto sign-in was not set. Setup goes on; the readiness report shows it.'
+    } finally {
+        try { Invoke-Box "cmd /c if exist $pwRemote del $pwRemote" | Out-Null } catch { }
+        Remove-Item -LiteralPath $pwLocal -Force -ErrorAction SilentlyContinue
+        $BoxPassword = ''
+    }
+} else {
+    Note '  Auto sign-in left as it is (no box password given).'
+}
 Step-Ok 'site' "dataset_$Site, show_cameras=$showVal"
 
 # ---- register the customer (shows up in the Admin Center) -------------------

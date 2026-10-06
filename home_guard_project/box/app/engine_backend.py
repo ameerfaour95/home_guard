@@ -60,7 +60,7 @@ class OutputParser:
         return Event('detail',text=self.safe(line),facts=facts)
 
 def answers_payload(answers):
-    return dict(owner_name=answers.owner_name,owner_phone=answers.owner_phone,installer=answers.installer,consent_live=answers.consent_live,consent_recordings=answers.consent_recordings,consent_training=answers.consent_training,target=answers.address,network=answers.network,wifi_ssid=answers.ssid,wifi_password=answers.wifi_password,site=answers.house,show_cameras=answers.show_cameras,find_cameras=answers.find_cameras,camera_user=answers.camera_user,camera_password=answers.camera_password,alerts=answers.alerts,alert_start_hour=answers.start_hour,alert_end_hour=answers.end_hour,alert_cooldown_sec=answers.cooldown_sec)
+    return dict(owner_name=answers.owner_name,owner_phone=answers.owner_phone,installer=answers.installer,consent_live=answers.consent_live,consent_recordings=answers.consent_recordings,consent_training=answers.consent_training,target=answers.address,network=answers.network,wifi_ssid=answers.ssid,wifi_password=answers.wifi_password,site=answers.house,show_cameras=answers.show_cameras,find_cameras=answers.find_cameras,camera_user=answers.camera_user,camera_password=answers.camera_password,alerts=answers.alerts,alert_start_hour=answers.start_hour,alert_end_hour=answers.end_hour,alert_cooldown_sec=answers.cooldown_sec,box_password=answers.box_password)
 
 class ProcessRunner:
     def spawn(self,args):
@@ -82,7 +82,7 @@ class EngineBackend:
         self.cancelled=threading.Event()
     def cancel(self): self.cancelled.set()
     def run(self,answers,emit):
-        parser=OutputParser((answers.address,answers.address.rsplit("@",1)[-1],answers.wifi_password,answers.camera_password,answers.owner_name,answers.owner_phone))
+        parser=OutputParser((answers.address,answers.address.rsplit("@",1)[-1],answers.wifi_password,answers.camera_password,answers.box_password,answers.owner_name,answers.owner_phone))
         process=None
         try:
             executable=self.executable or shutil.which('powershell')
@@ -149,7 +149,7 @@ class EngineBackend:
             if process is not None:
                 self.runner.stop(process)
                 if process.stdout: process.stdout.close()
-            answers.wifi_password='';answers.camera_password=''
+            answers.wifi_password='';answers.camera_password='';answers.box_password=''
 
 class DemoEngine:
     def __init__(self,failure=False):

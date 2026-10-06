@@ -82,6 +82,8 @@ TEXT = {
     "box_address_placeholder": "Box address, for example 100.100.100.10",
     "box_user_label": "Windows user name on the box",
     "box_user_help": "The Windows account on the box. On the box, open Command Prompt and type whoami; it is the part after the backslash.",
+    "box_password": "Windows password on the box",
+    "box_password_help": "Lets the box sign in by itself after a power cut, so the Home Guard window comes back without a keyboard. Leave it empty if the box already signs in by itself.",
     "box_manual": "Type an address",
     "box_peer": "{name} - {address}",
     "box_offline": " (offline)",

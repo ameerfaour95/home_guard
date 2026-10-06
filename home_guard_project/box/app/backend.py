@@ -27,6 +27,7 @@ class Answers:
     find_cameras: bool = True
     camera_user: str = ""
     camera_password: str = field(default="", repr=False)
+    box_password: str = field(default="", repr=False)
 
 
 @dataclass(frozen=True)

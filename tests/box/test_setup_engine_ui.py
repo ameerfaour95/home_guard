@@ -46,7 +46,7 @@ class EngineTests(unittest.TestCase):
             answers=Answers(address='installer@box.example',house='cedar_house',cooldown_sec=90,wifi_password=secrets.token_hex(12),camera_password=secrets.token_hex(12))
             self.assertTrue(backend.run(answers,events.append))
         self.assertEqual(runner.payload['alert_cooldown_sec'],90)
-        self.assertEqual(set(runner.payload),{'owner_name','owner_phone','installer','consent_live','consent_recordings','consent_training','target','network','wifi_ssid','wifi_password','site','show_cameras','find_cameras','camera_user','camera_password','alerts','alert_start_hour','alert_end_hour','alert_cooldown_sec'})
+        self.assertEqual(set(runner.payload),{'owner_name','owner_phone','installer','consent_live','consent_recordings','consent_training','target','network','wifi_ssid','wifi_password','site','show_cameras','find_cameras','camera_user','camera_password','alerts','alert_start_hour','alert_end_hour','alert_cooldown_sec','box_password'})
         self.assertEqual(runner.args[1:5],['-NoProfile','-ExecutionPolicy','Bypass','-File'])
         self.assertFalse(runner.path.exists())
         self.assertEqual(answers.wifi_password,'')
