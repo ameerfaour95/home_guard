@@ -178,13 +178,12 @@ class TracksTest(unittest.TestCase):
         self.assertEqual(tracks[0].kind, "vehicle")
 
     def test_detections_from_a_yolo_result_are_normalised(self) -> None:
-        class Boxes:
-            xyxy = np.array([[64.0, 0.0, 128.0, 96.0], [0, 0, 10, 10]])
-            cls = np.array([0.0, 14.0])
-            conf = np.array([0.8, 0.9])
+        class Box:                                   # one box the way ultralytics iterates them
+            def __init__(self, cls, xyxy, conf):
+                self.cls, self.xyxy, self.conf = np.array([cls]), np.array([xyxy]), np.array([conf])
 
         class Result:
-            boxes = Boxes()
+            boxes = [Box(0.0, [64.0, 0.0, 128.0, 96.0], 0.8), Box(14.0, [0, 0, 10, 10], 0.9)]
 
         self.assertEqual(sm.detections_from_result(Result(), 256, 96), [(0, 0.8, 0.25, 0.0, 0.5, 1.0)])
         self.assertEqual(sm.detections_from_result(None, 256, 96), [])

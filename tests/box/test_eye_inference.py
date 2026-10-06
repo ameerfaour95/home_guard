@@ -55,7 +55,7 @@ class WorkerTest(unittest.TestCase):
     def setUp(self) -> None:
         inf._SOFTENED_DAYS.clear()
 
-    def run_worker(self, parsed, ts=NIGHT, facts=(), mode="situational", box=None):
+    def run_worker(self, parsed, ts=NIGHT, facts=(), mode="situational", box=None, scene_looks=None):
         backend = mock.Mock()
         backend.model_name = "fake"
         backend.last_prompt = "the eye prompt"
@@ -65,6 +65,7 @@ class WorkerTest(unittest.TestCase):
         assistant.send_alert.return_value = {"sent": True}
         job = inf.AlertJob(camera=CAM, stem=f"{CAM}_{int(ts)}_alert", ts=ts, labels=["person"],
                            input_meta={"vlm_input": "crop"})
+        job.scene_looks = list(scene_looks or [])
         settings = inf.AlertSettings(eye_prompt=mode)
         with mock.patch.object(inf, "FACTS_PROVIDER", mock.Mock(return_value=list(facts))), \
                 mock.patch.object(inf, "owner_language", return_value="en"), \
@@ -99,6 +100,32 @@ class WorkerTest(unittest.TestCase):
         job, assistant, _ = self.run_worker(answer(), ts=DAY)
         self.assertEqual(job.alert["label"], "normal")
         self.assertEqual(job.input_meta["judgement"]["expectation"], "expected")
+
+    def test_the_scene_map_says_where_and_the_eye_says_what(self) -> None:
+        from home_guard_project.box import scene_map as sm
+
+        scene = sm.SceneMap(CAM, areas=(
+            sm.Area("yard", sm.MINE, "yard", ((0, 0), (0.5, 0), (0.5, 1), (0, 1))),
+            sm.Area("road", sm.WATCH, "street", ((0.5, 0), (1, 0), (1, 1), (0.5, 1)))))
+        looks = [(NIGHT, [(0, 0.9, 0.70, 0.2, 0.80, 0.6)]), (NIGHT + 5, [(0, 0.9, 0.72, 0.2, 0.82, 0.6)])]
+        with mock.patch.object(sm, "load_scene_map", return_value=scene) as load:
+            job, _, backend = self.run_worker(answer(), scene_looks=looks)
+        load.assert_called_once_with(CAM)
+        situation = backend.analyze.call_args.kwargs["situation"]
+        self.assertEqual(situation.zone_facts, "ZONE FACTS (from code): person 1 is in 'road' (public) for 5s")
+        self.assertEqual(situation.camera_role, "private")
+        self.assertEqual(job.alert["label"], "normal")              # a visitor on the road at night is expected
+        self.assertEqual(job.input_meta["situation"]["scene"]["ground"], "public")
+
+    def test_a_broken_scene_map_never_stops_the_alert(self) -> None:
+        from home_guard_project.box import scene_map as sm
+
+        with mock.patch.object(sm, "load_scene_map", side_effect=OSError("disk")), \
+                self.assertLogs("box.inference", level="WARNING"):
+            job, assistant, backend = self.run_worker(answer(), scene_looks=[(NIGHT, [])])
+        self.assertEqual(backend.analyze.call_args.kwargs["situation"].zone_facts, "")
+        self.assertEqual(job.alert["label"], "suspicious")
+        assistant.send_alert.assert_called_once()
 
     def test_the_camera_role_comes_from_box_yaml(self) -> None:
         _, _, backend = self.run_worker(answer(), box={"camera_roles": {CAM: "private"}})

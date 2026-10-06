@@ -12,8 +12,12 @@ Eye prompt carries, identical at training and inference:
   ``evening`` to midnight. ``dark`` separately (before first light or after last light). A month-level sunrise
   and sunset table for Israel (local wall clock, daylight saving included) is close enough for this.
 - ``house_state``: from ``house_state.current`` (a vacation reads as ``away``).
-- ``camera_role``: ``camera_roles: {camera: role}`` in box.yaml, else guessed from the camera's name.
-- ``zones``: ``camera_zones: {camera: [names]}`` in box.yaml (optional).
+- ``camera_role``: ``camera_roles: {camera: role}`` in box.yaml, else what the camera's scene map suggests
+  (``scene_map.SceneMap.camera_role``), else guessed from the camera's name.
+- ``zones``: ``camera_zones: {camera: [names]}`` in box.yaml (optional), else the scene map's zones.
+- ``zone_facts``, ``ground``, ``crossed_in``, ``scene_zone``: what the scene map says about this look
+  (``scene_map.scene_facts``). The ZONE FACTS line goes into the Eye's prompt next to the header, never inside
+  it; ``record()["scene"]`` keeps it for training. The map's zone and ground win over the Eye's guess.
 - ``expecting``: the owner's live expecting notes for this camera; ``fact_covers``: a live "lower" house note.
 """
 
@@ -73,16 +77,23 @@ def guess_role(camera: str) -> str:
     return DEFAULT_ROLE
 
 
-def camera_role(camera: str, settings: Optional[Mapping[str, Any]] = None) -> str:
-    """The role set for *camera* in box.yaml (``camera_roles``), else one guessed from its name."""
+def camera_role(camera: str, settings: Optional[Mapping[str, Any]] = None, scene_map: Any = None) -> str:
+    """The role set for *camera* in box.yaml (``camera_roles``), else the one its scene map suggests, else one
+    guessed from its name."""
     roles = (settings or {}).get("camera_roles") if isinstance(settings, Mapping) else None
     chosen = str((roles or {}).get(camera) or "").strip().lower() if isinstance(roles, Mapping) else ""
-    return chosen if chosen in tx.CAMERA_ROLES else guess_role(camera)
+    if chosen in tx.CAMERA_ROLES:
+        return chosen
+    from_map = scene_map.camera_role() if scene_map is not None else ""
+    return from_map if from_map in tx.CAMERA_ROLES else guess_role(camera)
 
 
-def _zones(camera: str, settings: Optional[Mapping[str, Any]], zones: Optional[Iterable[str]]) -> Tuple[str, ...]:
+def _zones(camera: str, settings: Optional[Mapping[str, Any]], zones: Optional[Iterable[str]],
+           scene_map: Any = None) -> Tuple[str, ...]:
     if zones is None and isinstance(settings, Mapping) and isinstance(settings.get("camera_zones"), Mapping):
         zones = settings["camera_zones"].get(camera)
+    if zones is None and scene_map is not None:
+        zones = scene_map.zones()
     if not zones or isinstance(zones, str):
         return ()
     return tuple(z for z in (str(v).strip().lower() for v in zones) if z in tx.ZONES)
@@ -107,6 +118,10 @@ class Situation:
     zones: Tuple[str, ...] = ()
     expecting: Tuple[str, ...] = ()
     fact_covers: bool = False
+    zone_facts: str = ""      # "ZONE FACTS (from code): ..." for the prompt, next to the header; "" without a map
+    ground: str = ""          # whose ground the look happens on (taxonomy.GROUNDS), from the scene map
+    crossed_in: bool = False  # someone crossed a boundary line onto the owner's ground
+    scene_zone: str = ""      # where it happens by the scene map (taxonomy.ZONES); wins over the Eye's zone
 
     def header(self) -> str:
         expecting = ", ".join(f"'{t}'" for t in self.expecting) or "none"
@@ -117,23 +132,35 @@ class Situation:
     def to_taxonomy_context(self, movement: str = "", zone: str = "", flags: Sequence[str] = ()) -> tx.Context:
         return tx.Context(phase=self.phase, house_state=self.house_state, dark=self.dark,
                           camera_role=self.camera_role, expecting=bool(self.expecting),
-                          fact_covers=self.fact_covers, movement=movement, zone=zone, flags=tuple(flags))
+                          fact_covers=self.fact_covers, movement=movement, zone=self.scene_zone or zone,
+                          flags=tuple(flags), ground=self.ground, crossed_in=self.crossed_in)
 
     def record(self) -> Dict[str, Any]:
-        """``situation`` in the training record and .meta.json."""
-        return {"phase": self.phase, "dark": self.dark, "house_state": self.house_state, "intent": self.intent,
-                "camera_role": self.camera_role}
+        """``situation`` in the training record and .meta.json (``scene`` only when the map said something)."""
+        out: Dict[str, Any] = {"phase": self.phase, "dark": self.dark, "house_state": self.house_state,
+                               "intent": self.intent, "camera_role": self.camera_role}
+        if self.zone_facts:
+            out["scene"] = {"zone_facts": self.zone_facts, "ground": self.ground, "crossed_in": self.crossed_in,
+                            "zone": self.scene_zone}
+        return out
 
 
 def build_situation(camera: str, ts: float, intent: str = "alert_triage",
                     settings: Optional[Mapping[str, Any]] = None, house: Any = None,
                     facts: Sequence[Dict[str, Any]] = (), zones: Optional[Iterable[str]] = None,
-                    state_path: Optional[str] = None, mute_path: Optional[str] = None) -> Situation:
+                    state_path: Optional[str] = None, mute_path: Optional[str] = None,
+                    scene_map: Any = None, scene_facts: Any = None) -> Situation:
     """The situation for one look at *camera* at local time *ts*.
 
     *house* is a ``house_state.HouseNow``; when None it is read with ``house_state.current`` (never raises).
     *facts* are the live house notes offered for this look; a ``lower`` note sets ``fact_covers``.
+    *scene_map* (``scene_map.SceneMap``) feeds the role and zones when it says anything beyond today's drawn zone;
+    *scene_facts* (``scene_map.SceneFacts``) is what it says about this look.
     """
+    if scene_map is not None and not scene_map.informative:
+        scene_map = None                # only today's drawn zone: the situation is as before
+    ground = str(getattr(scene_facts, "ground", "") or "")
+    scene_zone = str(getattr(scene_facts, "zone", "") or "")
     if intent not in tx.INTENTS:
         raise ValueError(f"intent must be one of {', '.join(tx.INTENTS)}")
     if house is None:
@@ -145,8 +172,11 @@ def build_situation(camera: str, ts: float, intent: str = "alert_triage",
     expecting = tuple(t for t in (_plain(n.get("text")) for n in notes) if t)
     return Situation(
         camera=str(camera), ts=float(ts), time=dt.datetime.fromtimestamp(ts).strftime("%H:%M"), phase=phase,
-        dark=dark, house_state=house.taxonomy_state, camera_role=camera_role(camera, settings), intent=intent,
-        house_detail=house.state if house.state != house.taxonomy_state else "",
-        zones=_zones(camera, settings, zones), expecting=expecting,
+        dark=dark, house_state=house.taxonomy_state, camera_role=camera_role(camera, settings, scene_map),
+        intent=intent, house_detail=house.state if house.state != house.taxonomy_state else "",
+        zones=_zones(camera, settings, zones, scene_map), expecting=expecting,
         fact_covers=any(isinstance(f, dict) and f.get("effect") == "lower" for f in facts or ()),
+        zone_facts=str(getattr(scene_facts, "line", "") or ""), ground=ground if ground in tx.GROUNDS else "",
+        crossed_in=getattr(scene_facts, "crossed_in", False) is True,
+        scene_zone=scene_zone if scene_zone in tx.ZONES else "",
     )

@@ -121,3 +121,50 @@ class SituationTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SceneMapSituationTest(unittest.TestCase):
+    """Owner-drawn zones feed the situation: the camera's role and zones, and per look the ZONE FACTS."""
+
+    def setUp(self) -> None:
+        from home_guard_project.box import scene_map as sm
+
+        self.sm = sm
+        self.map = sm.SceneMap("front", areas=(
+            sm.Area("yard", sm.MINE, "yard", ((0, 0), (0.5, 0), (0.5, 1), (0, 1))),
+            sm.Area("road", sm.WATCH, "street", ((0.5, 0), (1, 0), (1, 1), (0.5, 1))),
+        ))
+        self.facts = sm.SceneFacts(line="ZONE FACTS (from code): person 1 is in 'road' (public)", ground="public",
+                                   crossed_in=False, zone="street")
+        self.ts = at(10, 2, 14)
+
+    def test_the_map_sets_role_and_zones_unless_box_yaml_does(self) -> None:
+        sit = st.build_situation("front", self.ts, house=asleep(self.ts), scene_map=self.map)
+        self.assertEqual(sit.camera_role, "private")                 # the name alone would say street
+        self.assertEqual(sit.zones, ("yard", "street"))
+        settings = {"camera_roles": {"front": "parking"}, "camera_zones": {"front": ["gate"]}}
+        sit = st.build_situation("front", self.ts, settings=settings, house=asleep(self.ts), scene_map=self.map)
+        self.assertEqual((sit.camera_role, sit.zones), ("parking", ("gate",)))
+
+    def test_a_migrated_map_changes_nothing(self) -> None:
+        plain = st.build_situation("front", self.ts, house=asleep(self.ts))
+        migrated = st.build_situation("front", self.ts, house=asleep(self.ts),
+                                      scene_map=self.sm.SceneMap("front", watched=((0, 0), (1, 0), (1, 1))),
+                                      scene_facts=self.sm.NO_FACTS)
+        self.assertEqual(plain, migrated)
+
+    def test_zone_facts_ride_along_but_the_header_stays_the_same(self) -> None:
+        plain = st.build_situation("front", self.ts, house=asleep(self.ts), scene_map=self.map)
+        sit = st.build_situation("front", self.ts, house=asleep(self.ts), scene_map=self.map,
+                                 scene_facts=self.facts)
+        self.assertEqual(sit.header(), plain.header())
+        self.assertEqual(sit.zone_facts, self.facts.line)
+        self.assertEqual(sit.record()["scene"], self.facts.record())
+        self.assertNotIn("scene", plain.record())
+
+    def test_the_map_decides_where_for_the_priors(self) -> None:
+        sit = st.build_situation("front", self.ts, house=asleep(self.ts), scene_map=self.map, scene_facts=self.facts)
+        ctx = sit.to_taxonomy_context("passing", "yard", ())          # the Eye said yard; the map says street
+        self.assertEqual((ctx.zone, ctx.ground, ctx.crossed_in), ("street", "public", False))
+        no_map = st.build_situation("front", self.ts, house=asleep(self.ts)).to_taxonomy_context("passing", "yard")
+        self.assertEqual((no_map.zone, no_map.ground), ("yard", ""))

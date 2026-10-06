@@ -368,21 +368,21 @@ def _kind(cls_id: int) -> str:
 
 
 def detections_from_result(result: Any, width: int, height: int) -> List[Detection]:
-    """A YOLO result's person and vehicle boxes, normalised to the picture. [] for anything unreadable."""
+    """A YOLO result's person and vehicle boxes, normalised to the picture (read box by box, the way
+    ``vlm_crop.scale_boxes`` reads them). [] for anything unreadable."""
+    def number(v: Any) -> float:
+        return float(v.item() if hasattr(v, "item") else v)
+
     try:
-        import numpy as np  # noqa: PLC0415
-
-        boxes = result.boxes
-
-        def arr(v: Any) -> Any:
-            return np.asarray(v.cpu() if hasattr(v, "cpu") else v, dtype=float)
-
-        xyxy, cls, conf = arr(boxes.xyxy).reshape(-1, 4), arr(boxes.cls).reshape(-1), arr(boxes.conf).reshape(-1)
         out = []
-        for (x1, y1, x2, y2), c, p in zip(xyxy, cls, conf):
-            if _kind(int(c)):
-                out.append((int(c), round(float(p), 3), round(float(x1) / width, 4), round(float(y1) / height, 4),
-                            round(float(x2) / width, 4), round(float(y2) / height, 4)))
+        for b in (result.boxes if result is not None and result.boxes is not None else []):
+            cid = int(number(b.cls))
+            if not _kind(cid):
+                continue
+            x1, y1, x2, y2 = (float(v) for v in b.xyxy[0].tolist())
+            conf = number(b.conf) if getattr(b, "conf", None) is not None else 0.0
+            out.append((cid, round(conf, 3), round(x1 / width, 4), round(y1 / height, 4),
+                        round(x2 / width, 4), round(y2 / height, 4)))
         return out
     except Exception:  # noqa: BLE001 - no detections is the safe answer: no zone facts
         return []

@@ -68,6 +68,11 @@ class CropParityTest(unittest.TestCase):
         self.assertEqual(golden.digest(frames), golden.digest(expected))
         self.assertEqual(golden.digest(task.crop.frames), golden.GOLDEN_SHA256)
         self.assertEqual(detector.call_count, 20)
+        # The crop's own YOLO looks are kept, normalised, for the scene map (no extra detector call).
+        self.assertEqual(len(task.scene_looks), 20)
+        self.assertTrue(all(1000. <= ts <= 1010. for ts, _ in task.scene_looks))
+        people = [d for _, dets in task.scene_looks for d in dets]
+        self.assertTrue(people and all(d[0] == 0 and 0 <= d[2] <= d[4] <= 1 for d in people))
         for call in detector.call_args_list:
             self.assertEqual(call.kwargs, dict(verbose=False, conf=cfg.YOLO_TRIGGER_CONF,
                                                imgsz=cfg.YOLO_IMGSZ, device="intel:gpu"))
