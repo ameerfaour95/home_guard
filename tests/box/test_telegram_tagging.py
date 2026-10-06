@@ -784,7 +784,9 @@ class InboxTaggingTest(unittest.TestCase):
                     msg["message"]["caption"] = "Can you identify this?"
                     before = len(self._saved())
                     inbox.handle_update(msg)
-                    self.assertEqual(self.tg.texts()[-1], "Please write the tag as text.")
+                    # No transcriber here: a voice answer is asked for in writing, like a photo.
+                    asked = t("tag_voice_failed", "en") if kind == "voice" else "Please write the tag as text."
+                    self.assertEqual(self.tg.texts()[-1], asked)
                     self.assertEqual(len(self._saved()), before)
                     inbox = self._inbox(agent)
                     inbox.handle_update(text(3, "gardener"))

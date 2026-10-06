@@ -30,7 +30,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
-from . import telegram_notify
+from . import telegram_notify, voice
 from .agent import UNAVAILABLE_REPLY, AgentContext, OwnerAgent, make_chat_model
 from .chat_feed import ChatFeed
 from .brain.i18n import LANGS
@@ -678,8 +678,10 @@ def start(
                 ))
     except Exception as exc:  # noqa: BLE001 - a missing library must not stop the alerts
         log.warning("Owner agent not available (%s); buttons still work.", exc)
+    transcriber = voice.make_transcriber(env, str(box_settings.get("transcribe_model") or voice.DEFAULT_MODEL))
     inbox = TelegramInbox(cfg, agent, index, mute, live_dir, os.path.join(log_dir, "telegram_offset.json"),
-                          feed=feed, deliverer=deliverer, archive_dir=archive_dir, lang=box_language)
+                          feed=feed, deliverer=deliverer, archive_dir=archive_dir, lang=box_language,
+                          transcriber=transcriber)
     assistant = OwnerAssistant(cfg=cfg, index=index, mute=mute, inbox=inbox, feed=feed, deliverer=deliverer,
                                feedback_dir=live_dir, archive_dir=archive_dir)
     if cfg.enabled and not cfg.dry_run:
@@ -736,8 +738,13 @@ class TelegramInbox:
         training_dir: Optional[str] = None,
         archive_dir: Optional[str] = None,
         lang: Optional[Callable[[], str]] = None,
+        transcriber: Optional[voice.Transcriber] = None,
+        fetch_voice: Optional[Callable[[str], Tuple[bytes, str]]] = None,
     ) -> None:
         self.feed = feed
+        # A spoken answer to "Other…": fetched from Telegram, then transcribed (None: asked for in writing).
+        self.transcriber = transcriber
+        self._fetch_voice = fetch_voice or (lambda file_id: voice.download(self.cfg.bot_token, file_id, post=self._post))
         self.deliverer = deliverer
         # Where a tagged clip is copied for training, and the archive searched for it (None: the box's own).
         self.training_dir, self.archive_dir = training_dir, archive_dir
@@ -1074,14 +1081,52 @@ class TelegramInbox:
                 except Exception as exc2:  # noqa: BLE001
                     log.warning("Could not answer the tag button: %s", exc2)
 
-    def _take_tag_text(self, chat_id: str, sender: Dict[str, Any], text: str, message: Dict[str, Any]) -> bool:
+    def _wait_for(self, chat_id: str, user_id: Any, message: Dict[str, Any], now: float) -> Optional[Dict[str, Any]]:
+        """The "Other…" wait *message* answers (a reply to its question or alert, or the newest open wait)."""
+        replied = (message.get("reply_to_message") or {}).get("message_id")
+        reply_alert = None
+        if replied is not None:
+            replied_alert = self.index.lookup(chat_id, replied)
+            reply_alert = str((replied_alert or {}).get("alert_id") or "") or None
+        return self.pending.match(chat_id, user_id, now, reply_to=replied, reply_alert=reply_alert)
+
+    def _take_voice(self, chat_id: str, sender: Dict[str, Any], message: Dict[str, Any]) -> bool:
+        """True when *message* is a voice answer to an "Other…" wait: it is transcribed and saved as the
+        words; when it cannot be, the owner is asked to write them (the wait stays). Never raises."""
+        spoken = message.get("voice") or message.get("audio")
+        if not isinstance(spoken, dict) or not spoken.get("file_id"):
+            return False
+        lang = self._language()
+        try:
+            if not self._wait_for(chat_id, sender.get("id"), message, self._now()):
+                return False
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Voice message not matched to a tag: %s", exc)
+            return False
+        heard = ""
+        try:
+            if self.transcriber is not None:
+                audio, name = self._fetch_voice(str(spoken["file_id"]))
+                heard = " ".join(str(self.transcriber(audio, name, lang) or "").split())
+        except Exception as exc:  # noqa: BLE001 - the owner is asked to write instead
+            log.warning("Voice message not transcribed: %s", exc)
+        if heard:
+            return self._take_tag_text(chat_id, sender, heard, message, spoken=True)
+        try:
+            self._say(chat_id, tr("tag_voice_failed", lang), reply_to=message.get("message_id"))
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Could not ask for the tag in writing: %s", exc)
+        return True
+
+    def _take_tag_text(self, chat_id: str, sender: Dict[str, Any], text: str, message: Dict[str, Any],
+                       spoken: bool = False) -> bool:
         """True when *text* was handled as the words of an "Other…" tag (or its asker's late reply to the
         question): then neither agent sees it. Only a text meant for the wait is taken - one that replies
         to nothing, to the question, or to the alert's own message; a reply to anything else (another
         alert, an answer of the assistant) goes to the agent and the wait stays. A command ("/...") ends
-        the waits and goes on as usual."""
+        the waits and goes on as usual. *spoken*: *text* is the transcript of a voice message."""
         user_id = sender.get("id")
-        if text.startswith("/"):
+        if text.startswith("/") and not spoken:
             self._cancel_tag(chat_id, user_id)
             return False
         lang = self._language()
@@ -1089,11 +1134,7 @@ class TelegramInbox:
         try:
             now = self._now()
             replied = (message.get("reply_to_message") or {}).get("message_id")
-            reply_alert = None
-            if replied is not None:
-                replied_alert = self.index.lookup(chat_id, replied)
-                reply_alert = str((replied_alert or {}).get("alert_id") or "") or None
-            request = self.pending.match(chat_id, user_id, now, reply_to=replied, reply_alert=reply_alert)
+            request = self._wait_for(chat_id, user_id, message, now)
             who = _who(sender)
             if not request:
                 if replied is not None and self.pending.expired_prompt(chat_id, replied, user_id, now):
@@ -1109,8 +1150,9 @@ class TelegramInbox:
             self._mark_answered(alert)
             words = text[:MAX_TAG_TEXT_CHARS]
             feedback = Feedback(verdict=verdict_for("other", str(alert.get("label") or "")), owner_label="other",
-                                owner_text=words, tagged_by=who["name"] or str(user_id or ""), source="text",
-                                request_id=request["request_id"])
+                                owner_text=words, tagged_by=who["name"] or str(user_id or ""),
+                                source="voice" if spoken else "text", request_id=request["request_id"],
+                                transcript=words if spoken else "")
             save_feedback(self.feedback_dir, alert, feedback, text, who, chat_id, now,
                           training_dir=self.training_dir, archive_dir=self.archive_dir)
             self.pending.complete(request["request_id"])
@@ -1136,6 +1178,8 @@ class TelegramInbox:
         if not self._allowed(chat_id) or sender.get("is_bot"):
             return
         if not text:
+            if self._take_voice(chat_id, sender, message):
+                return
             replied = (message.get("reply_to_message") or {}).get("message_id")
             if self.pending.needs_text(chat_id, sender.get("id"), self._now(), replied):
                 self._say(chat_id, tr("tag_need_text", self._language()), reply_to=message.get("message_id"))
