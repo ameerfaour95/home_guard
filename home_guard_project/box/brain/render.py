@@ -35,6 +35,8 @@ def undo_what(tool: str, detail: dict, target: str, lang: str) -> str:
         return t(key, lang) if key in TEMPLATES else str(detail.get("setting") or target)
     if tool in ("set_alert_types", "set_sensitivity"):
         return t(f"undo_what_{tool[4:]}", lang, where=camera or t("the_house", lang))
+    if tool == "set_alias":
+        return t("undo_what_alias", lang, alias=str(detail.get("alias") or ""))
     key = f"what_{tool}"
     return t(key, lang) if key in TEMPLATES else str(tool)
 
@@ -75,20 +77,21 @@ def _receipt_line(receipt: Receipt, lang: str, retention_days: float) -> str:
         what = t(what_key, lang) if what_key in TEMPLATES else receipt.tool
         return t("failed", lang, what=what, reason=reason)
     # Inspect only fields used by the renderer; extra detail such as `by` is ignored.
-    for key in ("camera", "kind", "bounds", "until", "verdict", "alias"):
+    for key in ("camera", "kind", "bounds", "until", "verdict", "alias", "aka"):
         if key in d and not isinstance(d[key], str):
             raise ValueError("Invalid receipt text")
     camera = d.get("camera") or receipt.target
+    named = f"{camera} ({d['aka']})" if d.get("aka") else camera     # "camera_3 (פרגולה)": the owner's word too
     if receipt.tool == "send_media":
         if d.get("kind") == "photo":
             return t("sent_photo", lang, camera=camera)
         return t("sent_video", lang, bounds=d.get("bounds", ""))
     if receipt.tool == "check_camera":
-        return t("sent_photo", lang, camera=camera)
+        return t("sent_photo", lang, camera=named)
     if receipt.tool == "record_clip":
         if "seconds" in d:
             _nonnegative_number(d["seconds"])
-        return t("sent_live_clip", lang, seconds=d.get("seconds", ""), camera=camera)
+        return t("sent_live_clip", lang, seconds=d.get("seconds", ""), camera=named)
     if receipt.tool == "pause_alerts":
         if d.get("camera"):
             return t("paused_camera", lang, camera=d["camera"], until=d.get("until", ""))
@@ -120,7 +123,8 @@ def _receipt_line(receipt: Receipt, lang: str, retention_days: float) -> str:
     if receipt.tool == "record_verdict":
         return t("verdict_saved", lang, verdict=t(f"verdict_{d.get('verdict')}", lang))
     if receipt.tool == "set_alias":
-        return t("alias_saved", lang, alias=d.get("alias", ""), camera=camera)
+        key = "alias_removed" if d.get("undo_of") == "set_alias" else "alias_saved"
+        return t(key, lang, alias=d.get("alias", ""), camera=camera)
     if receipt.tool == "change_setting":
         for key in ("setting", "old", "new"):
             if key in d and not isinstance(d[key], str):

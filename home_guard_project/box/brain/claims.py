@@ -68,9 +68,12 @@ CLAIMS: Dict[str, Dict[str, object]] = {
     },
     "save": {
         "tools": {"record_verdict", "set_alias"},
+        # A promise to remember is a save too (2026-10-05: "I'll remember" went out and nothing was saved).
         "en": [_fp("marked|saved|changed|updated"), _BEEN % "saved|marked|changed|updated",
-               _OPEN + r"(?:saved|marked)\b"],
-        "he": ["סימנתי", "שמרתי", "רשמתי", "שיניתי", "עדכנתי", "הגדרתי"],
+               _OPEN + r"(?:saved|marked)\b", r"\bI(?:['’]ll| will| shall)?\s+(?:always\s+)?remember\b",
+               r"\bI(?:['’]ll| will)\s+keep (?:that|it|this) in mind\b", r"\bI(?:['’]ve| have)\s+noted\b",
+               _OPEN + r"noted\s*[:.!,\-–—]"],
+        "he": ["סימנתי", "שמרתי", "רשמתי", "שיניתי", "עדכנתי", "הגדרתי", "אזכור", "זוכר", "זכרתי"],
         "ar": ["سجلت(?! (?:لك )?(?:فيديو|مقطع))", "حفظت", "غيرت", "حدثت", _NOW_AR % "التسجيل|تغيير"],
     },
     "record": {

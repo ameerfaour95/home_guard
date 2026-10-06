@@ -30,6 +30,13 @@
     "parameters": {"type": "object", "properties": {
       "handle": {"type": "string", "description": "An event handle from find_events or summarize_period."}
     }, "required": ["handle"]}}},
+  {"type": "function", "function": {"name": "ask_vision",
+    "description": "Ask the vision model about a saved event's video when the observation does not say it (a colour, clothing, what is in a hand, a plate, which way someone went). It looks again at more frames and answers with the frame that shows it; the answer is kept with the event.",
+    "parameters": {"type": "object", "properties": {
+      "event_id": {"type": "string", "description": "An event handle (E1, E2 ...); leave it out for the event being discussed."},
+      "question": {"type": "string", "description": "The owner's question, in their own words."},
+      "time_range": {"type": "object", "description": "Only part of the video: seconds from the moment the detector fired (negative = before).", "properties": {"from_sec": {"type": "number"}, "to_sec": {"type": "number"}}}
+    }, "required": ["question"]}}},
   {"type": "function", "function": {"name": "ask_clarification",
     "description": "Ask the owner one short question with 2 to 5 button choices when the camera, the event or the request is unclear. Then stop; nothing else runs this turn.",
     "parameters": {"type": "object", "properties": {
@@ -39,14 +46,14 @@
   {"type": "function", "function": {"name": "check_camera",
     "description": "Take a live photo from one camera now, send it to the chat, and describe it (with the picture quality; in guard mode also a label).",
     "parameters": {"type": "object", "properties": {
-      "camera": {"type": "string", "description": "A camera name or the owner's word for it."}
-    }, "required": ["camera"]}}},
+      "camera": {"type": "string", "description": "A camera name or the owner's word for it. Leave it out when the owner names no camera: the box uses the camera being discussed, or asks."}
+    }}}},
   {"type": "function", "function": {"name": "record_clip",
     "description": "Record a new video from one camera now and send it.",
     "parameters": {"type": "object", "properties": {
-      "camera": {"type": "string", "description": "A camera name or the owner's word for it."},
+      "camera": {"type": "string", "description": "A camera name or the owner's word for it. Leave it out when the owner names no camera: the box uses the camera being discussed, or asks."},
       "seconds": {"type": "number", "description": "1 to 30 seconds; default 10."}
-    }, "required": ["camera"]}}},
+    }}}},
   {"type": "function", "function": {"name": "send_media",
     "description": "Send the video (or photo) behind a handle. For part of a saved video give from_sec (seconds from the moment the detector fired; negative = before) and seconds.",
     "parameters": {"type": "object", "properties": {
@@ -82,7 +89,7 @@
       "active": {"type": "boolean"}
     }, "required": ["camera", "active"]}}},
   {"type": "function", "function": {"name": "set_alias",
-    "description": "Give a camera another name the family uses (\"call camera 6 the entrance\").",
+    "description": "Give a camera another name the family uses (\"call camera 6 the entrance\", \"remember that the pergola is camera 3\"). The box sends a photo of the camera with the confirmation.",
     "parameters": {"type": "object", "properties": {
       "camera": {"type": "string", "description": "The camera, by name or an existing word for it."},
       "alias": {"type": "string", "description": "The new name, as the owner wrote it."}

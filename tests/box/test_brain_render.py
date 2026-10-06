@@ -80,6 +80,19 @@ class ClaimsTest(unittest.TestCase):
         self.assertEqual(unbacked_claims("Two events tonight, both at the entrance.", []), [])
         self.assertEqual(unbacked_claims("היו שני אירועים היום במצלמה test_ch6.", []), [])
 
+    def test_remember_promises_need_a_save_receipt(self) -> None:
+        # The pergola bug (2026-10-05): "I'll remember" passed although set_alias never ran.
+        for text in ("אזכור שהפרגולה זה מצלמה 3.", "בסדר, אני זוכר: פרגולה = מצלמה 3", "אני אזכור את זה",
+                     "סבבה, זוכרת!", "I'll remember that the pergola is camera 3.", "I will remember it.",
+                     "Got it - I'll keep that in mind.", "Noted: pergola means camera 3.", "I've noted that."):
+            with self.subTest(text=text):
+                self.assertEqual(unbacked_claims(text, []), ["save"])
+                self.assertEqual(unbacked_claims(text, [r("set_alias", DONE)]), [])
+        for text in ("אני לא זוכר שהיה שם מישהו", "I don't remember any event there", "I noted two events at 22:00",
+                     "Remember to lock the gate", "עדיין לא שמרתי את זה"):
+            with self.subTest(text=text):
+                self.assertEqual(unbacked_claims(text, []), [])
+
     def test_malformed_claim_inputs_are_skipped_and_logged_once(self) -> None:
         with self.assertLogs("box.brain.claims", level="WARNING") as logs:
             self.assertEqual(unbacked_claims("I sent it", [None, {}, r([], DONE)]), ["send"])
@@ -109,6 +122,16 @@ class RenderTest(unittest.TestCase):
         self.assertEqual(receipt_line(r("set_alias", FAILED, reason='"x" already names y'), "en"),
                          '✗ Saving the camera name could not be done: "x" already names y')
         self.assertIn("נשלחה", receipt_line(r("check_camera", DONE, camera="gate"), "he"))
+
+    def test_lines_name_the_camera_the_way_the_owner_does(self) -> None:
+        self.assertEqual(receipt_line(r("check_camera", DONE, camera="camera_3", aka="פרגולה"), "he"),
+                         "✓ התמונה נשלחה (camera_3 (פרגולה))")
+        self.assertEqual(receipt_line(r("record_clip", DONE, camera="camera_3", aka="pergola", seconds=10), "en"),
+                         "✓ New 10-second video from camera_3 (pergola) sent")
+        self.assertEqual(receipt_line(r("set_alias", DONE, camera="camera_3", alias="פרגולה", photo=True), "he"),
+                         '✓ "פרגולה" מעכשיו זה camera_3')
+        self.assertEqual(receipt_line(r("set_alias", DONE, camera="camera_3", alias="pergola", undo_of="set_alias"),
+                                      "en"), '✓ "pergola" no longer means camera_3')
 
     def test_reply_is_answer_then_receipt_lines(self) -> None:
         text = render_reply("Two events tonight.", [r("send_media", DONE, kind="video", bounds="b")], "en")

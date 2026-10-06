@@ -32,9 +32,15 @@ HOUR = 3600.0
 
 
 class FakeVision:
-    def __init__(self, result=None):
+    def __init__(self, result=None, ask_result=None):
         self.calls = []
         self.result = result
+        self.asked = []
+        self.ask_result = ask_result
+
+    def ask(self, camera, images, question, language="English"):
+        self.asked.append((camera, question, language, len(images)))
+        return self.ask_result or {"ok": True, "answer": "A phone.", "frame": 2, "seen": True}
 
     def look(self, camera, images, guard, question="", what=""):
         self.calls.append((camera, guard, question))

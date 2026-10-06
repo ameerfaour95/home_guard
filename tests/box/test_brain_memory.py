@@ -6,7 +6,7 @@ import os
 import tempfile
 import unittest
 
-from home_guard_project.box.brain.memory import KEEP_HANDLES, MAX_HISTORY_TURNS, ChatMemory, ChatState
+from home_guard_project.box.brain.memory import KEEP_HANDLES, MAX_HISTORY_TURNS, TOPIC_SECONDS, ChatMemory, ChatState
 
 TS = 1_790_000_000.0
 
@@ -61,6 +61,49 @@ class ChatStateTest(unittest.TestCase):
         self.assertEqual(len(msgs), 2 * MAX_HISTORY_TURNS)
         self.assertNotIn("yesterday morning", [m["content"] for m in msgs])
         self.assertEqual(msgs[-2]["content"], "q69")
+
+    def test_topic_camera_and_event_are_kept_for_an_hour(self) -> None:
+        s = ChatState()
+        self.assertIsNone(s.topic_camera(TS))
+        s.set_topic_camera("camera_3", "פרגולה", TS)
+        self.assertEqual(s.topic_camera(TS + 60), ("camera_3", "פרגולה"))
+        self.assertIsNone(s.topic_camera(TS + TOPIC_SECONDS + 1))
+        h = s.add_handle("event", "camera_3_1_alert", "camera_3", TS, "A man walks to the gate.")
+        s.set_topic_event(h, TS)
+        self.assertEqual(s.topic_event(TS + 60), "E1")
+        self.assertIsNone(s.topic_event(TS + TOPIC_SECONDS + 1))
+        s.set_topic_event("E9", TS)                      # an unknown handle is no topic
+        self.assertIsNone(s.topic_event(TS))
+
+    def test_an_alert_goes_into_the_history_as_text_without_images(self) -> None:
+        s = ChatState()
+        h = s.add_handle("event", "camera_3_1_alert", "camera_3", TS, "A man in a grey hoodie walks to the gate.")
+        s.note_observation(h, "A man in a grey hoodie walks to the gate.", "face hidden by the hood", "suspicious")
+        s.add_event_turn(h, TS)
+        s.add_answer(h, "what was in his hand?", "A phone.", 3, "14:02:05")
+        s.add_turn("u1", "מה היה לו ביד?", "טלפון.", [h], [], TS + 30)
+        msgs = s.history_messages(now=TS + 60)
+        self.assertEqual(msgs[0]["role"], "assistant")
+        text = msgs[0]["content"]
+        self.assertIn("[ALERT E1", text)
+        self.assertIn("camera_3", text)
+        self.assertIn("A man in a grey hoodie walks to the gate.", text)
+        self.assertIn("not visible: face hidden by the hood", text)
+        self.assertLess(len(text), 900)                  # about 150 tokens, never a picture
+        self.assertEqual(msgs[1], {"role": "user", "content": "מה היה לו ביד?"})
+        self.assertIn('asked "what was in his hand?": A phone. (frame 3, 14:02:05)', s.event_text(h))
+
+    def test_topics_and_observations_survive_a_round_trip_and_bad_files(self) -> None:
+        s = ChatState()
+        h = s.add_handle("event", "x", "camera_3", TS, "a car")
+        s.note_observation(h, "a car", "", "")
+        s.set_topic_camera("camera_3", "", TS)
+        s.set_topic_event(h, TS)
+        back = ChatState.from_dict(s.to_dict())
+        self.assertEqual(back.to_dict(), s.to_dict())
+        bad = ChatState.from_dict({"version": 2, "topic": "x", "topic_event_ref": {"handle": 5, "ts": "y"}})
+        self.assertIsNone(bad.topic_camera(TS))
+        self.assertIsNone(bad.topic_event(TS))
 
 
 class ChatMemoryTest(unittest.TestCase):

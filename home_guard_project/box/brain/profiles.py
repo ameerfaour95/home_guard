@@ -21,8 +21,8 @@ _DIR = os.path.dirname(os.path.abspath(__file__))
 TOOLS_PATH = os.path.join(_DIR, "agent_tools_v2.json")
 PROMPTS_DIR = os.path.join(_DIR, "prompts")
 
-COMMON_TOOLS = ("find_events", "summarize_period", "check_camera", "record_clip", "send_media", "pause_alerts",
-                "resume_alerts", "set_camera_active", "set_alias", "change_setting", "record_verdict",
+COMMON_TOOLS = ("find_events", "summarize_period", "ask_vision", "check_camera", "record_clip", "send_media",
+                "pause_alerts", "resume_alerts", "set_camera_active", "set_alias", "change_setting", "record_verdict",
                 "ask_clarification", "get_alert_settings", "set_alert_types", "set_sensitivity", "reply")
 GUARD_TOOLS = COMMON_TOOLS[:2] + ("assess_event",) + COMMON_TOOLS[2:]
 ASSISTANT_TOOLS = COMMON_TOOLS[:2] + ("describe_event",) + COMMON_TOOLS[2:]
@@ -39,7 +39,7 @@ _BIG_WORDS_EN = re.compile(
     r"set|call (?:it|camera)|rename|wrong|false|mistake|not (?:me|us|true|right)|it" + _APOS + r"?s (?:me|us)|"
     r"that" + _APOS + r"?s me|(?:that |it )?was (?:me|us)|nobody|why|"
     r"angry|annoying|useless|stupid|broken|doesn" + _APOS + r"?t work|language|hebrew|english|suspicious|"
-    r"alert me about|alerts for|cars too|also vehicles|animals|sensitivity|sensitive|"
+    r"alert me about|alerts for|cars too|also vehicles|animals|sensitivity|sensitive|remember|"
     r"(?:less|fewer|more) alerts)\b",
     re.IGNORECASE)
 _BIG_WORDS_HE = ("תכבה", "תדליק", "תשתיק", "תפסיק", "עצור", "תמשיך", "תחזיר", "תשנה", "שנה", "תקרא", "טעות",
@@ -47,7 +47,12 @@ _BIG_WORDS_HE = ("תכבה", "תדליק", "תשתיק", "תפסיק", "עצור
                  "עברית", "אנגלית", "חשוד",
                  "תפעיל", "הפעל", "תכבי", "כבה", "תדליקי", "הדלק", "השתק", "תשתיקי", "הפסק", "תפסיקי",
                  "תגדיר", "הגדר", "תחזירי", "תמשיכי",
-                 "התראות על", "גם על רכבים", "רגישות", "פחות התראות", "יותר התראות")
+                 "התראות על", "גם על רכבים", "רגישות", "פחות התראות", "יותר התראות",
+                 "תזכור", "תזכרי", "זכור", "תרשום", "תרשמי", "תקראי")
+# Whole words only (2026-10-05: "למה" matched inside "מצלמה", so every camera message skipped the fast model),
+# each with up to two Hebrew prefix letters (ולמה, שתכבה) and a plural or feminine ending on the last word (תפסיקו).
+_BIG_HE = re.compile("|".join(
+    r"(?<!\w)[ושהבלמכ]{0,2}" + r"\s+".join(map(re.escape, words.split())) + r"[וי]?(?!\w)" for words in _BIG_WORDS_HE))
 
 
 # "בטל" as a word, with up to two prefix letters (לבטל, ולבטל, תבטל) and one suffix (בטלו, תבטלי) - never inside
@@ -62,7 +67,30 @@ def needs_big(text: str, threaded: bool = False) -> bool:
         log.warning("Invalid message text; routing to the big model")
         return True
     return (bool(_BIG_WORDS_EN.search(text or "")) or bool(_CANCEL_HE.search(text or ""))
-            or any(w in (text or "") for w in _BIG_WORDS_HE))
+            or bool(_BIG_HE.search(text or "")))
+
+
+# "Are there people near the pergola?" is about right now: a live look, not a search of the saved events
+# (2026-10-05: the fast model searched history). A word of the past ("was", "היו", "yesterday") makes it history.
+_NOW = re.compile(r"\b(?:now|right now|currently|at the moment)\b|(?<!\w)[וה]?(?:עכשיו|כרגע|כעת)(?!\w)",
+                  re.IGNORECASE)
+_PRESENCE = re.compile(
+    r"\b(?:is|are)\s+there\s+(?:any(?:one|body)?|some(?:one|body)|people|a\s+\w+|\w+s)\b|"
+    r"\b(?:is|are)\s+(?:any(?:one|body)|some(?:one|body)|people)\b|"
+    r"\bany(?:one|body)\s+(?:there|around|outside|at|near|in)\b|"
+    r"(?<!\w)[וה]?יש\s+(?:\S+\s+)?(?:אנשים|מישהו|אדם|רכב|רכבים|ילדים|עובדים|פועלים|חיות|כלב|חתול)(?!\w)|"
+    r"(?<!\w)[וה]?מישהו(?!\w)", re.IGNORECASE)
+_PAST = re.compile(
+    r"\b(?:was|were|did|had|happened|came|yesterday|earlier|last night|today|this morning|ago|before)\b|"
+    r"(?<!\w)[וש]?(?:היה|היו|היתה|הייתה|קרה|הגיע|הגיעו|אתמול|קודם|הבוקר|הלילה|היום|לפני|מאתמול)(?!\w)",
+    re.IGNORECASE)
+
+
+def asks_about_now(text: str) -> bool:
+    """True when the message asks what is happening right now (people near X, anyone at the gate)."""
+    if not isinstance(text, str) or not text.strip() or _PAST.search(text):
+        return False
+    return bool(_NOW.search(text) or _PRESENCE.search(text))
 
 
 def load_schemas(path: str = TOOLS_PATH) -> Dict[str, Dict]:

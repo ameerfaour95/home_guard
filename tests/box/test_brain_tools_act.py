@@ -92,7 +92,7 @@ class ActToolsTest(unittest.TestCase):
                            book=ReceiptBook(os.path.join(self.root, ".receipts"), now=lambda: NOW))
 
     def test_every_tool_is_registered(self) -> None:
-        self.assertEqual(len(TOOLS), 17)
+        self.assertEqual(len(TOOLS), 18)
 
     def test_quoted_from(self) -> None:
         self.assertTrue(quoted_from("stop until six", "it's me, stop until six please"))
@@ -191,6 +191,44 @@ class ActToolsTest(unittest.TestCase):
         boom = self.ctx(add_alias=lambda cam, alias, cams: (_ for _ in ()).throw(ValueError('"x" already names y')))
         out = set_alias(boom, {"camera": "front", "alias": "x"})
         self.assertEqual((out["status"], out["reason"]), (FAILED, '"x" already names y'))
+
+    def test_a_saved_alias_shows_a_photo_of_the_camera_and_becomes_the_topic(self) -> None:
+        ctx = self.ctx()
+        out = set_alias(ctx, {"camera": "front", "alias": "פרגולה"})
+        self.assertEqual(out["status"], DONE)
+        self.assertEqual(self.deliver.sent, [("photo", self.photo)])     # the owner sees which camera it is
+        self.assertTrue(ctx.receipts[0].detail["photo"])
+        self.assertEqual(ctx.state.topic_camera(NOW), ("front_side", "פרגולה"))
+        self.assertFalse(ctx.receipts[0].detail.get("already"))
+        again = self.ctx()
+        set_alias(again, {"camera": "front_side", "alias": "Front"})          # it already had that name
+        self.assertTrue(again.receipts[0].detail["already"])
+
+    def test_a_photo_without_a_camera_uses_the_camera_being_discussed(self) -> None:
+        ctx = self.ctx()
+        ctx.state.set_topic_camera("front_side", "פרגולה", NOW - 60)
+        out = check_camera(ctx, {})
+        self.assertEqual((out["status"], out["camera"]), (DONE, "front_side"))
+        self.assertTrue(out["used_camera_being_discussed"])
+        self.assertEqual(ctx.receipts[0].detail["aka"], "פרגולה")
+
+    def test_a_photo_without_a_camera_or_a_topic_asks_with_camera_buttons(self) -> None:
+        ctx = self.ctx()
+        out = check_camera(ctx, {"camera": ""})
+        self.assertFalse(out["ok"])
+        self.assertEqual(ctx.clarification["choices"], ["main_entrance", "front_side"])   # the cameras that are on
+        self.assertEqual(ctx.clarification["question"], "על איזו מצלמה?")
+        self.assertEqual((self.deliver.sent, ctx.receipts), ([], []))
+        stale = self.ctx()
+        stale.state.set_topic_camera("front_side", "", NOW - 2 * HOUR)        # an old topic is no topic
+        self.assertFalse(record_clip(stale, {})["ok"])
+        self.assertIsNotNone(stale.clarification)
+
+    def test_a_named_camera_becomes_the_topic(self) -> None:
+        ctx = self.ctx()
+        check_camera(ctx, {"camera": "entrance"})
+        self.assertEqual(ctx.state.topic_camera(NOW), ("main_entrance", "entrance"))
+        self.assertEqual(ctx.receipts[0].detail["aka"], "entrance")
 
 
     def test_acting_entries_contain_malformed_arguments(self):

@@ -483,7 +483,30 @@ class OwnerAssistant:
 
     def send_alert(self, alert: Dict[str, Any], text: str, image: Optional[bytes] = None, silent: bool = False,
                    lang: str = "en") -> Dict[str, Any]:
-        return send_alert(self.cfg, self.index, alert, text, image, feed=self.feed, silent=silent, lang=lang)
+        res = send_alert(self.cfg, self.index, alert, text, image, feed=self.feed, silent=silent, lang=lang)
+        self._note_alert(alert, res)
+        return res
+
+    def _note_alert(self, alert: Dict[str, Any], res: Dict[str, Any]) -> None:
+        """The v2 assistant keeps a delivered alert in each chat's history as text (its observation), so a follow-up
+        question knows the clip. On its own thread: a turn in progress must not hold up the detector. Never raises."""
+        try:
+            agent = getattr(self.inbox, "agent", None)
+            if getattr(agent, "version", 1) != 2 or not isinstance(alert, dict) or not isinstance(res, dict):
+                return
+            chats = [str(r.get("chat_id")) for r in res.get("results") or [] if isinstance(r, dict) and r.get("ok")]
+
+            def note() -> None:
+                for chat_id in chats:
+                    try:
+                        agent.note_alert(chat_id, alert)
+                    except Exception as exc:  # noqa: BLE001
+                        log.warning("Alert not noted in the chat history: %s", exc)
+
+            if chats:
+                threading.Thread(target=note, name="note-alert", daemon=True).start()
+        except Exception as exc:  # noqa: BLE001 - the alert itself is already out
+            log.warning("Alert not noted in the chat history: %s", exc)
 
     def remind_if_silent(self, alert: Dict[str, Any], text: str, lang: str = "en", delay: float = REMIND_SEC) -> None:
         """For an escalation: if nobody answered within *delay*, send it once more, loud. Never raises."""

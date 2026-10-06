@@ -11,6 +11,7 @@ handles (E1, E2 ...) kept in the chat memory. Tools that act write a receipt
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import logging
 import math
@@ -27,6 +28,7 @@ from ..alert_clips import PRE_SECONDS
 from ..archive import AlertRecord
 from ..feedback import MAX_MUTE_HOURS, VERDICTS, Feedback, MuteState, feedback_from_fields, save_feedback
 from . import media
+from .aliases import normalize
 from .events import (
     coverage,
     event_doc,
@@ -52,6 +54,7 @@ MAX_FOUND = 8
 SUMMARY_MAX_EVENTS = 60
 MAX_DESCRIBE_PER_TURN = 5
 MAX_MEDIA_PER_TURN = 3
+MAX_ASK_FRAMES = 8          # a follow-up question looks at twice the frames of a first look
 
 
 @dataclass
@@ -69,8 +72,10 @@ class Services:
     record_live: Optional[Callable[[str, float], Dict[str, Any]]] = None
     cut_segment: Optional[Callable[..., Any]] = None
     clip_frames: Callable[[str], List[bytes]] = media.clip_frames
+    clip_frames_at: Callable[..., List[Tuple[float, bytes]]] = media.clip_frames_at
     set_camera: Optional[Callable[[str, bool], Dict[str, Any]]] = None
     add_alias: Optional[Callable[[str, str, Sequence[str]], List[str]]] = None
+    remove_alias: Optional[Callable[[str, str], List[str]]] = None
     request_restart: Optional[Callable[[], None]] = None
     embedder: Any = None
     now: Callable[[], float] = time.time
@@ -104,6 +109,8 @@ class ToolContext:
     saved: int = 0
     done_calls: Dict[str, Dict[str, Any]] = field(default_factory=dict)   # idempotency within one turn
     camera_states: Dict[str, bool] = field(default_factory=dict)          # cameras changed earlier this turn
+    vision_notes: List[str] = field(default_factory=list)                 # vision answers, kept in the history
+    results: List[str] = field(default_factory=list)                      # every tool result of the turn, as JSON
 
 
 def _err(message: str, **extra: Any) -> Dict[str, Any]:
@@ -183,6 +190,7 @@ def _record_for(ctx: ToolContext, handle: Any) -> Tuple[Optional[AlertRecord], O
                    if r.alert_id == entry["ref"]), None)
     if record is None:
         return None, _err("that event is no longer on the box")
+    ctx.state.set_topic_event(str(handle).strip().upper(), _finite(ctx.services.now()))
     return record, None
 
 
@@ -289,17 +297,86 @@ def _look_clip(ctx: ToolContext, record: AlertRecord, guard: bool, question: str
     return dict(value, ok=True)
 
 
+def _keep_description(ctx: ToolContext, handle: str, question: str, text: str) -> None:
+    """What a look at a clip found stays with the event in the chat, so a later answer can rely on it."""
+    entry = ctx.state.resolve(handle) or {}
+    if question.strip():
+        ctx.state.add_answer(handle, question, text)
+    elif not entry.get("observation"):
+        ctx.state.note_observation(handle, text, str(entry.get("visibility") or ""), str(entry.get("label") or ""))
+    else:
+        ctx.state.add_answer(handle, "what happened?", text)
+
+
 @_safe_tool
 def describe_event(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     handle = str(args.get("handle") or "").strip().upper()
     record, bad = _record_for(ctx, handle)
     if bad:
         return bad
-    out = _look_clip(ctx, record, guard=False, question=str(args.get("question") or "")[:300])
+    question = str(args.get("question") or "")[:300]
+    out = _look_clip(ctx, record, guard=False, question=question)
     if not out.get("ok"):
         return out
+    _keep_description(ctx, handle, question, out["text"])
     return {"ok": True, "handle": handle, "camera": record.camera, "time": local(record.ts),
             "description": out["text"], "quality": out["quality"], "people": out["people"]}
+
+
+@_safe_tool
+def ask_vision(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+    """A follow-up question about a saved event ("what was in his hand?"): the vision model looks again at more
+    frames of the clip (or of one part of it) and answers with the frame that shows it. The chat keeps only the
+    answer, as text tied to the event; the pictures stay on the box."""
+    now = _finite(ctx.services.now())
+    handle = (str(args.get("event_id") or "").strip().upper() or ctx.state.topic_event(now)
+              or str(ctx.alert_handle or ""))
+    if not handle:
+        return _err("no event is being talked about; find it with find_events or ask the owner which event")
+    if ctx.services.vision is None:
+        return _err("the vision model is not available on this box")
+    record, bad = _record_for(ctx, handle)
+    if bad:
+        return bad
+    question = (str(args.get("question") or "").strip() or ctx.text.strip())[:300]
+    window = args.get("time_range")
+    if window is not None and not isinstance(window, dict):
+        return _err("time_range must be {\"from_sec\": number, \"to_sec\": number}")
+    entry = ctx.state.resolve(handle) or {}
+    for item in entry.get("answers") or [] if not window else []:
+        if isinstance(item, dict) and str(item.get("q") or "").casefold() == question.casefold():
+            return {"ok": True, "handle": handle, "camera": record.camera, "answer": item.get("a"),
+                    "frame": item.get("frame", 0), "time": item.get("at", ""), "cached": True}
+    if not record.clip_path:
+        return _err("the video of that event is no longer on the box")
+    if ctx.described >= MAX_DESCRIBE_PER_TURN:
+        return _err(f"only {MAX_DESCRIBE_PER_TURN} saved videos can be looked at per message")
+    clip_start = record.clip_start_ts if record.clip_start_ts else record.ts - 10.0
+    trigger = record.trigger_ts if record.trigger_ts else clip_start + PRE_SECONDS
+    start = end = None
+    if window:
+        if window.get("from_sec") is not None:
+            start = max(0.0, trigger + _finite(window["from_sec"]) - clip_start)
+        if window.get("to_sec") is not None:
+            end = max(0.0, trigger + _finite(window["to_sec"]) - clip_start)
+    ctx.described += 1
+    frames = ctx.services.clip_frames_at(record.clip_path, MAX_ASK_FRAMES, start, end)
+    if not frames:
+        return _err("the video of that event could not be read")
+    out = ctx.services.vision.ask(record.camera, [jpg for _, jpg in frames], question,
+                                  LANGUAGE_NAMES.get(ctx.lang, "English"))
+    if not isinstance(out, dict) or type(out.get("ok")) is not bool:
+        raise ValueError("vision result must contain a boolean ok field")
+    if not out["ok"]:
+        return {"ok": False, "error": str(out.get("error") or "vision_failed"), "refused": bool(out.get("refused"))}
+    frame = int(out.get("frame") or 0)
+    at = (dt.datetime.fromtimestamp(clip_start + _finite(frames[frame - 1][0])).strftime("%H:%M:%S")
+          if 1 <= frame <= len(frames) else "")
+    answer = str(out.get("answer") or "")
+    ctx.state.add_answer(handle, question, answer, frame, at)
+    ctx.vision_notes.append(f'{handle} asked "{question}": {answer}' + (f" (frame {frame}, {at})" if at else ""))
+    return {"ok": True, "handle": handle, "camera": record.camera, "answer": answer, "seen": out.get("seen") is True,
+            "frame": frame, "time": at, "frames_looked_at": len(frames)}
 
 
 @_safe_tool
@@ -315,6 +392,7 @@ def assess_event(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
                     "reason": "refused" if out.get("refused") else "failed",
                     "note": "Say: activity detected; assessment unavailable. This never means normal."}
         return out
+    _keep_description(ctx, handle, "", out["text"])
     return {"ok": True, "handle": handle, "camera": record.camera, "time": local(record.ts),
             "label": out.get("label", ""), "why": out.get("why", ""), "description": out["text"],
             "quality": out["quality"]}
@@ -403,18 +481,59 @@ def _media_sent(ctx: ToolContext) -> int:
                and r.status == DONE)
 
 
+MAX_CAMERA_CHOICES = 8
+
+
+def _owner_word(ctx: ToolContext, camera: str, words: Any) -> str:
+    """The owner's own name for *camera* in *words* ("פרגולה"), or the one already known for the topic."""
+    cam = ctx.snapshot.camera(camera)
+    wanted = normalize(str(words or ""))
+    for alias in cam.aliases if cam is not None else ():
+        key = normalize(alias)
+        if key and (wanted == key or (len(wanted) > len(key) and wanted.endswith(key) and wanted[0] in "הבלמושכ")):
+            return alias
+    topic = ctx.state.topic_camera(_finite(ctx.services.now()))
+    return topic[1] if topic and topic[0] == camera else ""
+
+
 def _one_camera(ctx: ToolContext, words: Any) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
     res = resolve_camera(ctx.snapshot, str(words or ""))
     if res.camera is None:
         return None, _camera_error(ctx, words, res)
+    # Every camera the turn identifies becomes the one being talked about ("give me a picture" next).
+    ctx.state.set_topic_camera(res.camera, _owner_word(ctx, res.camera, words), _finite(ctx.services.now()))
     return res.camera, None
+
+
+def _camera_or_topic(ctx: ToolContext, words: Any) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+    """A camera the model named, else the camera being talked about, else the owner is asked - with a button per
+    camera - instead of a guess (2026-10-05: "give me a picture" sent an unrelated camera)."""
+    if words is not None and str(words).strip():
+        return _one_camera(ctx, words)
+    topic = ctx.state.topic_camera(_finite(ctx.services.now()))
+    if topic and ctx.snapshot.camera(topic[0]) is not None:
+        return topic[0], None
+    choices = (ctx.snapshot.enabled_names or ctx.snapshot.names)[:MAX_CAMERA_CHOICES]
+    if len(choices) == 1:
+        return choices[0], None
+    ctx.clarification = {"question": t("which_camera", ctx.lang), "choices": list(choices),
+                         "ts": _finite(ctx.services.now())}
+    return None, _err("no camera was named and none is being talked about: the owner is asked which one with "
+                      "buttons; end the turn now")
+
+
+def _aka(ctx: ToolContext, camera: str) -> str:
+    """The owner's word for the camera, for the receipt: "camera_3 (פרגולה)"."""
+    topic = ctx.state.topic_camera(_finite(ctx.services.now()))
+    return topic[1] if topic and topic[0] == camera else ""
 
 
 @_safe_tool
 def check_camera(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
-    camera, bad = _one_camera(ctx, args.get("camera"))
+    camera, bad = _camera_or_topic(ctx, args.get("camera"))
     if bad:
         return bad
+    implied = not str(args.get("camera") or "").strip()
     if not ctx.snapshot.camera(camera).enabled:
         return _result(_issue(ctx, "check_camera", FAILED, camera, {"camera": camera}, "camera_off"))
     if _media_sent(ctx) >= MAX_MEDIA_PER_TURN:
@@ -427,11 +546,17 @@ def check_camera(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(shot["image"], str):
         raise ValueError("photo path must be a string")
     sent = _service_result(ctx.services.deliver.photo(ctx.chat_id, shot["image"]))
-    receipt = _issue(ctx, "check_camera", DONE if sent.get("ok") else FAILED, camera,
-                     {"camera": camera, "message_id": sent.get("message_id")}, "" if sent.get("ok") else "telegram")
+    detail = {"camera": camera, "message_id": sent.get("message_id")}
+    if _aka(ctx, camera):
+        detail["aka"] = _aka(ctx, camera)
+    receipt = _issue(ctx, "check_camera", DONE if sent.get("ok") else FAILED, camera, detail,
+                     "" if sent.get("ok") else "telegram")
     handle = ctx.state.add_handle("photo", shot["image"], camera, ctx.services.now())
     ctx.shown.append(handle)
+    ctx.state.topic_event_ref = {}        # the talk is about the live picture now, not an earlier alert's clip
     out = _result(receipt, camera=camera, handle=handle)
+    if implied:
+        out["used_camera_being_discussed"] = True
     look: Dict[str, Any] = {}
     if ctx.services.vision is not None:
         try:
@@ -451,6 +576,7 @@ def check_camera(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
             log.warning("Live-photo vision returned a malformed description")
             return dict(out, description_error="the picture could not be described")
         out.update(description=look["description"], quality=look["quality"], people=look["people"])
+        ctx.state.note_observation(handle, look["description"])
         if ctx.mode == GUARD:
             out.update(label=look.get("label", ""), why=look.get("why", ""))
     else:
@@ -461,7 +587,7 @@ def check_camera(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
 
 @_safe_tool
 def record_clip(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
-    camera, bad = _one_camera(ctx, args.get("camera"))
+    camera, bad = _camera_or_topic(ctx, args.get("camera"))
     if bad:
         return bad
     seconds = int(min(30, max(1, _finite(args.get("seconds") if args.get("seconds") is not None else 10))))
@@ -478,11 +604,14 @@ def record_clip(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(rec["path"], str):
         raise ValueError("recording path must be a string")
     sent = _service_result(ctx.services.deliver.video(ctx.chat_id, rec["path"], caption=f"{camera} · {bounds}"))
-    receipt = _issue(ctx, "record_clip", DONE if sent.get("ok") else FAILED, camera,
-                     {"camera": camera, "seconds": seconds, "bounds": bounds, "message_id": sent.get("message_id")},
+    detail = {"camera": camera, "seconds": seconds, "bounds": bounds, "message_id": sent.get("message_id")}
+    if _aka(ctx, camera):
+        detail["aka"] = _aka(ctx, camera)
+    receipt = _issue(ctx, "record_clip", DONE if sent.get("ok") else FAILED, camera, detail,
                      "" if sent.get("ok") else "telegram")
     handle = ctx.state.add_handle("clip", rec["path"], camera, rec["start"])
     ctx.shown.append(handle)
+    ctx.state.topic_event_ref = {}
     return _result(receipt, handle=handle, bounds=bounds)
 
 
@@ -705,11 +834,33 @@ def set_alias(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     if bad:
         return bad
     alias = str(args.get("alias") or "").strip()
+    cam = ctx.snapshot.camera(camera)
+    already = normalize(alias) in [normalize(a) for a in (cam.aliases if cam else ())] + [normalize(camera)]
     try:
         ctx.services.add_alias(camera, alias, ctx.snapshot.names)
     except (ValueError, TypeError) as exc:
         return _result(_issue(ctx, "set_alias", FAILED, camera, {"camera": camera, "alias": alias}, str(exc)))
-    return _result(_issue(ctx, "set_alias", DONE, camera, {"camera": camera, "alias": alias}))
+    ctx.state.set_topic_camera(camera, alias, _finite(ctx.services.now()))
+    # The receipt shows the camera itself, so a wrong camera is seen at once (and undone with one tap).
+    detail: Dict[str, Any] = {"camera": camera, "alias": alias, "already": already,
+                              "photo": _alias_photo(ctx, camera, alias)}
+    return _result(_issue(ctx, "set_alias", DONE, camera, detail))
+
+
+def _alias_photo(ctx: ToolContext, camera: str, alias: str) -> bool:
+    """A live photo of the newly named camera, sent with the receipt. A failed photo never fails the save."""
+    cam = ctx.snapshot.camera(camera)
+    if ctx.services.grab_photo is None or ctx.services.deliver is None or cam is None or not cam.enabled:
+        return False
+    try:
+        shot = ctx.services.grab_photo(camera)
+        if not isinstance(shot, dict) or shot.get("error") or not isinstance(shot.get("image"), str):
+            return False
+        sent = _service_result(ctx.services.deliver.photo(ctx.chat_id, shot["image"], caption=f"{camera} = {alias}"))
+        return bool(sent.get("ok"))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Alias photo of %s not sent: %s", camera, exc)
+        return False
 
 # -- settings --------------------------------------------------------------------
 SETTING_NAMES = ("alert_hours", "cooldown_minutes", "sensitivity", "language", "quiet_log")
@@ -1060,6 +1211,7 @@ TOOLS: Dict[str, Callable[[ToolContext, Dict[str, Any]], Dict[str, Any]]] = {
     "summarize_period": summarize_period,
     "describe_event": describe_event,
     "assess_event": assess_event,
+    "ask_vision": ask_vision,
     "ask_clarification": ask_clarification,
     "check_camera": check_camera,
     "record_clip": record_clip,

@@ -8,7 +8,8 @@ import unittest
 from unittest.mock import patch
 
 from home_guard_project.box.brain import profiles
-from home_guard_project.box.brain.profiles import load_schemas, needs_big, system_prompt, tool_names, tools_for
+from home_guard_project.box.brain.profiles import (asks_about_now, load_schemas, needs_big, system_prompt, tool_names,
+                                                   tools_for)
 from home_guard_project.box.brain.tools import TOOLS
 
 
@@ -200,6 +201,37 @@ class HebrewCancelTest(unittest.TestCase):
     def test_phone_words_do_not_match(self):
         for text in ("תשלח לי לטלפון", "בטלפון שלי", "ובטלפון", "לבטלפון", "בטלוויזיה"):
             self.assertFalse(needs_big(text), text)
+
+
+class HebrewWholeWordRoutingTest(unittest.TestCase):
+    """The pergola bug (2026-10-05): "למה" matched inside "מצלמה", and "תזכור" was not a big-model word."""
+
+    def test_a_word_inside_another_word_does_not_route(self):
+        for text in ("תביא לי תמונה מהמצלמה", "מה רואים במצלמה 3?", "תשלח מצלמה 2", "מצלמות"):
+            self.assertFalse(needs_big(text), text)
+
+    def test_words_with_hebrew_prefixes_still_route(self):
+        for text in ("ולמה זה קרה?", "למה אין התראות", "ותפסיק את ההתראות", "שתכבה את הכניסה", "זה לא נכון!",
+                     "ולא נכון", "תפסיקו", "חשוד?"):
+            self.assertTrue(needs_big(text), text)
+
+    def test_remember_and_naming_requests_route_to_big(self):
+        for text in ("תזכור שאם אני מדבר איתך על הפרגולה זה מצלמה 3", "זכור: הפרגולה זה מצלמה 3",
+                     "תרשום שהחניה זה מצלמה 2", "תקרא למצלמה 3 פרגולה", "ותזכרי את זה",
+                     "remember that the pergola is camera 3", "Please remember the shed is cam 4"):
+            self.assertTrue(needs_big(text), text)
+
+class AsksAboutNowTest(unittest.TestCase):
+    def test_questions_about_right_now(self):
+        for text in ("יש אנשים שעובדים ליד הפרגולה?", "יש מישהו בחצר?", "מה קורה עכשיו בכניסה", "מישהו שם?",
+                     "are there people at the gate?", "is anyone at the door now?", "what's happening right now"):
+            self.assertTrue(asks_about_now(text), text)
+
+    def test_questions_about_the_past_or_no_question(self):
+        for text in ("היו אנשים היום?", "מה קרה אתמול בלילה?", "was anyone at the gate?", "what happened today",
+                     "יש לך את הסרטון מאתמול?", "יש התראות חדשות?", "send me the video", "", None, 5):
+            self.assertFalse(asks_about_now(text), text)
+
 
 if __name__ == "__main__":
     unittest.main()
