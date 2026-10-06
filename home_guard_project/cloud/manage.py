@@ -241,6 +241,26 @@ def cmd_export_download(args) -> int:
     return 0
 
 
+def cmd_tagging_export(args) -> int:
+    """The tagging studio's two files (VLM training JSONL, eval manifest rows), written locally; with --eval-frames
+    also the eval folder's frames and its manifest.jsonl. Reads the database for the customers' clips and our tags."""
+    import json
+    import shutil
+
+    from .db import session_scope
+    from .tagstudio.config import StudioPaths
+    from .tagstudio.service import TagStudio
+
+    paths = StudioPaths.resolve(dataset=args.dataset, eval_dir=args.eval, exports=args.out)
+    studio = TagStudio(paths)
+    with session_scope(_engine()) as s:
+        result = studio.export(s, include_needs_check=args.include_needs_check, frames_dir=args.eval_frames)
+    if args.eval_frames:
+        shutil.copyfile(result["eval_path"], Path(args.eval_frames) / "manifest.jsonl")
+    print(json.dumps(result, indent=2))
+    return 0
+
+
 def cmd_serve(args) -> int:
     import uvicorn
 
@@ -283,6 +303,13 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument("export_id", type=int)
     d.add_argument("--dest", required=True, help="local folder to download into")
     d.set_defaults(fn=cmd_export_download)
+    t = sub.add_parser("tagging-export", help="write the tagging studio's training JSONL and eval manifest locally")
+    t.add_argument("--dataset", help="unified dataset folder (default: $HOMEGUARD_DATASET_DIR, then home_guard_data/dataset)")
+    t.add_argument("--eval", help="eval folder with results/ (default: $HOMEGUARD_EVAL_DIR, then home_guard_eval)")
+    t.add_argument("--out", help="exports folder (default: $HOMEGUARD_STUDIO_EXPORT_DIR, then studio_exports)")
+    t.add_argument("--eval-frames", help="also write frames/<clip>_<i>.jpg and manifest.jsonl into this eval folder")
+    t.add_argument("--include-needs-check", action="store_true")
+    t.set_defaults(fn=cmd_tagging_export)
     s = sub.add_parser("serve")
     s.add_argument("--port", type=int, default=8600)
     s.set_defaults(fn=cmd_serve)

@@ -106,6 +106,12 @@ def test_session_cap_family_started_at(client, staff_factory):
 
 def test_every_v1_route_requires_token(client):
     open_paths = {"/v1/auth/login", "/v1/auth/local", "/v1/auth/refresh"}
+    # The tagging studio's video files: the URL itself is the grant (HMAC-signed, 10 minutes, one file), like a
+    # presigned S3 URL, because the desktop's video player cannot send a bearer token. Without a valid grant: 404.
+    signed_paths = {"/v1/tagging/file/{token}"}
+    for path in signed_paths:
+        assert client.get(path.replace("{token}", "not-a-grant")).status_code == 404
+    open_paths |= signed_paths
     checked = 0
     for path, ops in client.app.openapi()["paths"].items():  # every registered route
         if not path.startswith("/v1") or path in open_paths:

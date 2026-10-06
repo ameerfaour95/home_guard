@@ -2374,6 +2374,438 @@
         "title": "StaffOut",
         "type": "object"
       },
+      "TagSave": {
+        "properties": {
+          "fields": {
+            "additionalProperties": true,
+            "title": "Fields",
+            "type": "object"
+          },
+          "key": {
+            "maxLength": 512,
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "fields"
+        ],
+        "title": "TagSave",
+        "type": "object"
+      },
+      "TagSaved": {
+        "properties": {
+          "assessment": {
+            "additionalProperties": true,
+            "title": "Assessment",
+            "type": "object"
+          },
+          "next_key": {
+            "title": "Next Key",
+            "type": "string"
+          },
+          "tag": {
+            "additionalProperties": true,
+            "title": "Tag",
+            "type": "object"
+          }
+        },
+        "required": [
+          "tag",
+          "assessment",
+          "next_key"
+        ],
+        "title": "TagSaved",
+        "type": "object"
+      },
+      "TaggingClip": {
+        "properties": {
+          "assessment": {
+            "additionalProperties": true,
+            "title": "Assessment",
+            "type": "object"
+          },
+          "form": {
+            "additionalProperties": true,
+            "title": "Form",
+            "type": "object"
+          },
+          "fps": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fps"
+          },
+          "history": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "History",
+            "type": "array"
+          },
+          "item": {
+            "additionalProperties": true,
+            "title": "Item",
+            "type": "object"
+          },
+          "media": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "title": "Media",
+            "type": "object"
+          },
+          "opinions": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Opinions",
+            "type": "object"
+          },
+          "prefilled_from": {
+            "title": "Prefilled From",
+            "type": "string"
+          },
+          "tag": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tag"
+          }
+        },
+        "required": [
+          "item",
+          "media",
+          "opinions",
+          "form",
+          "prefilled_from",
+          "assessment",
+          "history"
+        ],
+        "title": "TaggingClip",
+        "type": "object"
+      },
+      "TaggingExportOut": {
+        "properties": {
+          "counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Counts",
+            "type": "object"
+          },
+          "eval_path": {
+            "title": "Eval Path",
+            "type": "string"
+          },
+          "training_path": {
+            "title": "Training Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "training_path",
+          "eval_path",
+          "counts"
+        ],
+        "title": "TaggingExportOut",
+        "type": "object"
+      },
+      "TaggingExportRequest": {
+        "properties": {
+          "include_needs_check": {
+            "default": false,
+            "title": "Include Needs Check",
+            "type": "boolean"
+          }
+        },
+        "title": "TaggingExportRequest",
+        "type": "object"
+      },
+      "TaggingKey": {
+        "properties": {
+          "key": {
+            "maxLength": 512,
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key"
+        ],
+        "title": "TaggingKey",
+        "type": "object"
+      },
+      "TaggingMediaRequest": {
+        "properties": {
+          "key": {
+            "maxLength": 512,
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "clip",
+              "crop"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "kind"
+        ],
+        "title": "TaggingMediaRequest",
+        "type": "object"
+      },
+      "TaggingQueue": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TaggingQueueItem"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "count"
+        ],
+        "title": "TaggingQueue",
+        "type": "object"
+      },
+      "TaggingQueueItem": {
+        "properties": {
+          "alert": {
+            "title": "Alert",
+            "type": "boolean"
+          },
+          "batch": {
+            "default": "",
+            "title": "Batch",
+            "type": "string"
+          },
+          "camera": {
+            "default": "",
+            "title": "Camera",
+            "type": "string"
+          },
+          "clip_id": {
+            "title": "Clip Id",
+            "type": "string"
+          },
+          "conflicts": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Conflicts",
+            "type": "array"
+          },
+          "date": {
+            "default": "",
+            "title": "Date",
+            "type": "string"
+          },
+          "duration_sec": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Sec"
+          },
+          "event_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Id"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "labels": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Labels",
+            "type": "object"
+          },
+          "local_time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Local Time"
+          },
+          "origin": {
+            "title": "Origin",
+            "type": "string"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "sort_ts": {
+            "default": 0.0,
+            "title": "Sort Ts",
+            "type": "number"
+          },
+          "source": {
+            "default": "",
+            "title": "Source",
+            "type": "string"
+          },
+          "tier": {
+            "title": "Tier",
+            "type": "integer"
+          },
+          "tier_name": {
+            "enum": [
+              "contradiction",
+              "check",
+              "untagged",
+              "done"
+            ],
+            "title": "Tier Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "clip_id",
+          "origin",
+          "tier",
+          "tier_name",
+          "reasons",
+          "alert",
+          "conflicts",
+          "labels"
+        ],
+        "title": "TaggingQueueItem",
+        "type": "object"
+      },
+      "TaggingState": {
+        "properties": {
+          "can_ask_teacher": {
+            "title": "Can Ask Teacher",
+            "type": "boolean"
+          },
+          "counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Counts",
+            "type": "object"
+          },
+          "fields": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Fields",
+            "type": "object"
+          },
+          "paths": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Paths",
+            "type": "object"
+          },
+          "sources": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "taxonomy": {
+            "additionalProperties": true,
+            "title": "Taxonomy",
+            "type": "object"
+          },
+          "teachers": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Teachers",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "taxonomy",
+          "fields",
+          "counts",
+          "total",
+          "sources",
+          "teachers",
+          "can_ask_teacher",
+          "paths"
+        ],
+        "title": "TaggingState",
+        "type": "object"
+      },
+      "TeacherAnswer": {
+        "properties": {
+          "suggestion": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suggestion"
+          }
+        },
+        "title": "TeacherAnswer",
+        "type": "object"
+      },
       "TokenPair": {
         "properties": {
           "access_token": {
@@ -4504,6 +4936,382 @@
         "summary": "List Publishes",
         "tags": [
           "annotations"
+        ]
+      }
+    },
+    "/v1/tagging/clip": {
+      "get": {
+        "operationId": "tagging_clip_v1_tagging_clip_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaggingClip"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Tagging Clip",
+        "tags": [
+          "tagging"
+        ]
+      }
+    },
+    "/v1/tagging/export": {
+      "post": {
+        "operationId": "tagging_export_v1_tagging_export_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaggingExportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaggingExportOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Tagging Export",
+        "tags": [
+          "tagging"
+        ]
+      }
+    },
+    "/v1/tagging/file/{token}": {
+      "get": {
+        "operationId": "tagging_file_v1_tagging_file__token__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Tagging File",
+        "tags": [
+          "tagging"
+        ]
+      }
+    },
+    "/v1/tagging/media": {
+      "post": {
+        "operationId": "tagging_media_v1_tagging_media_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaggingMediaRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaAccess"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Tagging Media",
+        "tags": [
+          "tagging"
+        ]
+      }
+    },
+    "/v1/tagging/queue": {
+      "get": {
+        "operationId": "tagging_queue_v1_tagging_queue_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "tier",
+            "required": false,
+            "schema": {
+              "default": "open",
+              "maxLength": 32,
+              "title": "Tier",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "origin",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 32,
+              "title": "Origin",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 200,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 2000,
+              "maximum": 10000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaggingQueue"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Tagging Queue",
+        "tags": [
+          "tagging"
+        ]
+      }
+    },
+    "/v1/tagging/state": {
+      "get": {
+        "operationId": "tagging_state_v1_tagging_state_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaggingState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Tagging State",
+        "tags": [
+          "tagging"
+        ]
+      }
+    },
+    "/v1/tagging/tag": {
+      "post": {
+        "operationId": "tagging_save_v1_tagging_tag_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagSave"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TagSaved"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Tagging Save",
+        "tags": [
+          "tagging"
+        ]
+      }
+    },
+    "/v1/tagging/teach": {
+      "post": {
+        "operationId": "tagging_teach_v1_tagging_teach_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaggingKey"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeacherAnswer"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Tagging Teach",
+        "tags": [
+          "tagging"
         ]
       }
     }

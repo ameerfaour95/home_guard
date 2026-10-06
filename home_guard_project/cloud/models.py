@@ -389,3 +389,17 @@ class TaggingPublish(Base):
     created_at: Mapped[datetime] = mapped_column(TS)
     worker_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     heartbeat_at: Mapped[Optional[datetime]] = mapped_column(TS, nullable=True)
+
+
+class TagEvent(Base):
+    """One save in the tagging studio (append-only): the fields it set for one clip. A clip's tag is the fold of its
+    events in id order (cloud/tagstudio/fields.py). `clip_key` names the clip across sources: "ds:<clip id>" (the
+    unified dataset), "ev:<event id>" (an indexed event), "of:<prefix>/<stem>" (a local owner-feedback copy)."""
+    __tablename__ = "tag_events"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    clip_key: Mapped[str] = mapped_column(String(512), index=True)
+    clip_id: Mapped[str] = mapped_column(String(255), default="", server_default="")
+    fields: Mapped[Any] = mapped_column(JSONType)
+    staff_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # no FK: events outlive staff
+    staff_name: Mapped[str] = mapped_column(Text, default="", server_default="")
+    created_at: Mapped[datetime] = mapped_column(TS)

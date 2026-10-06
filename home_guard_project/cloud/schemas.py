@@ -417,3 +417,89 @@ class PublishOut(BaseModel):
     missing: list[PublishMissing]
     created_utc: datetime
     created_by: str
+
+
+# ---------------------------------------------------------------- tagging studio (cloud/tagstudio)
+# Clips are named by a key across sources ("ds:<clip id>", "ev:<event id>", "of:<prefix>/<stem>"). Opinions, tags and
+# the taxonomy are open JSON objects: their vocabulary is fleet_contract/taxonomy.py, not this file.
+
+class TaggingState(BaseModel):
+    taxonomy: dict
+    fields: dict[str, str]
+    counts: dict[str, int]
+    total: int
+    sources: list[dict]
+    teachers: list[dict]
+    can_ask_teacher: bool
+    paths: dict[str, str]
+
+
+class TaggingQueueItem(BaseModel):
+    key: str
+    clip_id: str
+    origin: str
+    source: str = ""
+    batch: str = ""
+    camera: str = ""
+    date: str = ""
+    duration_sec: Optional[float] = None
+    local_time: Optional[str] = None
+    sort_ts: float = 0.0
+    event_id: Optional[int] = None
+    tier: int
+    tier_name: Literal["contradiction", "check", "untagged", "done"]
+    reasons: list[str]
+    alert: bool
+    conflicts: list[dict]
+    labels: dict[str, dict]
+
+
+class TaggingQueue(BaseModel):
+    items: list[TaggingQueueItem]
+    count: int
+
+
+class TaggingClip(BaseModel):
+    item: dict
+    media: dict[str, bool]
+    fps: Optional[float] = None
+    opinions: dict[str, dict]
+    tag: Optional[dict] = None
+    form: dict
+    prefilled_from: str
+    assessment: dict
+    history: list[dict]
+
+
+class TagSave(BaseModel):
+    key: str = Field(max_length=512)
+    fields: dict
+
+
+class TagSaved(BaseModel):
+    tag: dict
+    assessment: dict
+    next_key: str
+
+
+class TaggingMediaRequest(BaseModel):
+    key: str = Field(max_length=512)
+    kind: Literal["clip", "crop"]
+
+
+class TaggingKey(BaseModel):
+    key: str = Field(max_length=512)
+
+
+class TaggingExportRequest(BaseModel):
+    include_needs_check: bool = False
+
+
+class TaggingExportOut(BaseModel):
+    training_path: str
+    eval_path: str
+    counts: dict[str, int]
+
+
+class TeacherAnswer(BaseModel):
+    suggestion: Optional[dict] = None

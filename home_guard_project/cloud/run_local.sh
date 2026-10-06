@@ -44,7 +44,19 @@ RUN=(env -u SSLKEYLOGFILE -u PYTHONSTARTUP AWS_CA_BUNDLE=C:/Users/ameer/.homegua
      uv run --group cloud --system-certs)
 
 # Start the embedded Postgres and publish its URI to this shell (no secrets are printed).
-HG_CLOUD_DB_URL="$("${RUN[@]}" python -c 'import pgserver,sys; print(pgserver.get_server(sys.argv[1], cleanup_mode=None).get_uri())' "$PG_DIR" | tail -n1)"
+# After an unclean shutdown Postgres first recovers (about 30 s on this laptop: it retries a file the antivirus
+# holds), longer than pgserver's 10 s start timeout. The server keeps starting, so ask again until it answers.
+HG_CLOUD_DB_URL=""
+for attempt in 1 2 3 4 5 6; do
+  if HG_CLOUD_DB_URL="$("${RUN[@]}" python -c 'import pgserver,sys; print(pgserver.get_server(sys.argv[1], cleanup_mode=None).get_uri())' "$PG_DIR" | tail -n1)" \
+     && [ -n "$HG_CLOUD_DB_URL" ]; then
+    break
+  fi
+  echo "database not ready yet (attempt ${attempt}); waiting 10 s"
+  HG_CLOUD_DB_URL=""
+  sleep 10
+done
+[ -n "$HG_CLOUD_DB_URL" ] || { echo "the embedded database did not start; see ${PG_DIR}/log" >&2; exit 1; }
 export HG_CLOUD_DB_URL
 export HG_CLOUD_RUN_LOOPS=1
 
