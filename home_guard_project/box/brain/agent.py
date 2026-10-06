@@ -980,9 +980,14 @@ def follow_up_camera_receipts(book: ReceiptBook, registry: Any, deliverer: Any, 
 def _house_store(live_dir: str, mute: Any) -> Any:
     """The house state's one writer, on the box's own log (next to the brain's other registry files)."""
     try:
-        from ..house_state import FILE_NAME, HouseStateStore  # noqa: PLC0415
+        from .. import boxconfig  # noqa: PLC0415
+        from ..house_state import FILE_NAME, HouseStateStore, default_path  # noqa: PLC0415
 
-        return HouseStateStore(os.path.join(live_dir, ".registry", FILE_NAME), mute_path=getattr(mute, "path", None))
+        # On the box the file's place belongs to house_state (it moves with the data dir); only a test's own
+        # live_dir gets a file of its own.
+        same = os.path.normcase(os.path.abspath(live_dir)) == os.path.normcase(os.path.abspath(boxconfig.PRODUCTION_LIVE_DIR))
+        path = default_path() if same else os.path.join(live_dir, ".registry", FILE_NAME)
+        return HouseStateStore(path, mute_path=getattr(mute, "path", None))
     except Exception as exc:  # noqa: BLE001 - the assistant works without it
         log.warning("House state not available to the assistant: %s", exc)
         return None

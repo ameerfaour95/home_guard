@@ -126,5 +126,20 @@ class HouseAgentTest(unittest.TestCase):
                          "expired")
 
 
+class HouseStorePathTest(unittest.TestCase):
+    def test_the_assistant_uses_house_states_own_paths(self) -> None:
+        # The file is moving to a data dir resolved by house_state; the brain never builds the path itself.
+        from unittest.mock import patch
+
+        from home_guard_project.box import house_state
+        from home_guard_project.box.brain.agent import _house_store
+
+        with patch.object(house_state, "default_path", return_value="X:/data/house.jsonl"),                 patch.object(house_state, "default_mute_path", return_value="X:/logs/mute.json"):
+            store = _house_store(None)
+            self.assertEqual((store.path, store.mute_path), ("X:/data/house.jsonl", "X:/logs/mute.json"))
+            with_mute = _house_store(type("Mute", (), {"path": "Y:/mute.json"})())
+            self.assertEqual((with_mute.path, with_mute.mute_path), ("X:/data/house.jsonl", "Y:/mute.json"))
+
+
 if __name__ == "__main__":
     unittest.main()
