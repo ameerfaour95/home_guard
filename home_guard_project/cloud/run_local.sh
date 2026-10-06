@@ -61,6 +61,8 @@ export HG_CLOUD_DB_URL
 export HG_CLOUD_RUN_LOOPS=1
 
 "${RUN[@]}" python -m home_guard_project.cloud.manage init-db
+# The launcher compares this with the folder's current commit and restarts a server that runs older code.
+git -C "$ROOT" rev-parse HEAD > "${HG_HOME}/cloud_server.version" 2>/dev/null || true
 echo "Admin Center API on http://127.0.0.1:${HG_CLOUD_PORT:-8610} (loops on)"
 exec "${RUN[@]}" python -m uvicorn home_guard_project.cloud.app:create_app_from_env --factory \
   --host 127.0.0.1 --port "${HG_CLOUD_PORT:-8610}"

@@ -24,6 +24,20 @@ function Test-Port([int]$p) {
     } catch { return $false } finally { $c.Close() }
 }
 
+# A server started before the folder was updated keeps serving the old code: stop it, so the start below runs
+# the current code (and its database migrations). run_local.sh writes the commit it started from.
+$versionFile = Join-Path $env:USERPROFILE ".homeguard\cloud_server.version"
+$head = (& git -C $repo rev-parse HEAD 2>$null)
+if ((Test-Port $Port) -and $head) {
+    $running = if (Test-Path $versionFile) { (Get-Content $versionFile -Raw).Trim() } else { "" }
+    if ($running -ne $head.Trim()) {
+        foreach ($conn in @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)) {
+            Stop-Process -Id $conn.OwningProcess -Force -ErrorAction SilentlyContinue
+        }
+        for ($i = 0; $i -lt 15 -and (Test-Port $Port); $i++) { Start-Sleep -Seconds 1 }
+    }
+}
+
 if (-not (Test-Port $Port)) {
     $bash = "C:\Program Files\Git\bin\bash.exe"
     $script = ((Join-Path $repo "home_guard_project\cloud\run_local.sh") -replace "\\", "/")
@@ -49,10 +63,11 @@ if (-not (Test-Port $Port)) {
 }
 
 $appArgs = @("--server", "http://127.0.0.1:$Port", "--local")
-try {
-    Start-Process -FilePath $App -ArgumentList $appArgs
-} catch {
-    # Windows Smart App Control can block a freshly built, unsigned exe. The same app runs from this folder's Python.
-    $pythonw = Join-Path $repo ".venv\Scripts\pythonw.exe"
+# The app runs from this folder's code, so it is always the current version. The packaged exe in dist\ is a
+# snapshot that is only rebuilt by hand (and Windows Smart App Control can block it): it is the fallback.
+$pythonw = Join-Path $repo ".venv\Scripts\pythonw.exe"
+if (Test-Path $pythonw) {
     Start-Process -FilePath $pythonw -ArgumentList (@("-m", "home_guard_project.admin") + $appArgs) -WorkingDirectory $repo
+} else {
+    Start-Process -FilePath $App -ArgumentList $appArgs
 }
