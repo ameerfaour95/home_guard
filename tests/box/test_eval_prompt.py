@@ -1078,5 +1078,88 @@ class ProviderRunTest(PreparedDirMixin, unittest.TestCase):
         self.assertEqual(rows[0]["model"], "ollama:qwen3-vl:4b-instruct-bf16")
 
 
+def scored(model, caught=(), missed=(), flagged=(), clean=(), errors=0, cost=None, serious=()):
+    """Scored rows for one model: alert clips caught/missed, normal clips flagged/clean."""
+    def alert(cid, ai):
+        text = "A man forces the door. [alert]" if cid in serious else "Loitering. [alert]"
+        return {"clip_id": cid, "ours_label": "alert", "ai_label": ai, "model": model, "ours_text": text,
+                "cost_usd": cost, "error": ""}
+    rows = [alert(c, "suspicious") for c in caught] + [alert(c, "normal") for c in missed]
+    rows += [{"clip_id": c, "ours_label": "normal", "ai_label": "suspicious", "model": model, "ours_text": "",
+              "cost_usd": cost, "error": ""} for c in flagged]
+    rows += [{"clip_id": c, "ours_label": "normal", "ai_label": "normal", "model": model, "ours_text": "",
+              "cost_usd": cost, "error": ""} for c in clean]
+    rows += [{"clip_id": f"err{i}", "ours_label": "normal", "ai_label": "", "model": model, "ours_text": "",
+              "cost_usd": cost, "error": "boom"} for i in range(errors)]
+    return rows
+
+
+VL, Q35 = "ollama:qwen3-vl:4b-instruct-bf16", "ollama:qwen3.5:4b-bf16"
+
+
+class ChoosePairTest(unittest.TestCase):
+    def test_default_kept_when_challenger_is_not_better(self) -> None:
+        p, f, _ = ev.choose_pair((VL, scored(VL, caught="ab", missed="c", flagged="x")),
+                                 (Q35, scored(Q35, caught="ab", missed="c", flagged="xy")))
+        self.assertEqual((p, f), (VL, Q35))
+
+    def test_challenger_wins_on_alerts(self) -> None:
+        p, f, why = ev.choose_pair((VL, scored(VL, caught="ab", missed="c", flagged="x")),
+                                   (Q35, scored(Q35, caught="abc", flagged="xy")))
+        self.assertEqual((p, f), (Q35, VL))
+        self.assertIn("more alerts", why)
+
+    def test_challenger_wins_on_false_alarms_at_equal_alerts(self) -> None:
+        p, _, _ = ev.choose_pair((VL, scored(VL, caught="ab", flagged="xy")),
+                                 (Q35, scored(Q35, caught="ab", flagged="x")))
+        self.assertEqual(p, Q35)
+
+    def test_challenger_loses_by_missing_a_forced_entry_the_default_caught(self) -> None:
+        d = scored(VL, caught="ab", missed="c", serious="a")
+        c = scored(Q35, caught="bcd", missed="a", serious="a")
+        p, _, why = ev.choose_pair((VL, d), (Q35, c))
+        self.assertEqual(p, VL)
+        self.assertIn("forced", why)
+
+    def test_challenger_loses_with_more_errors(self) -> None:
+        p, _, _ = ev.choose_pair((VL, scored(VL, caught="ab", missed="c")),
+                                 (Q35, scored(Q35, caught="abc", errors=3)))
+        self.assertEqual(p, VL)
+
+    def test_compare_names_pair_flags_reference_and_strong_others(self) -> None:
+        big = "openrouter:qwen/qwen3-vl-32b-instruct"
+        text = ev.format_compare((VL, scored(VL, caught="a", missed="b", flagged="xy")),
+                                 (Q35, scored(Q35, caught="a", missed="b", flagged="xyz")),
+                                 {big: scored(big, caught="ab", flagged="x", cost=0.0003)},
+                                 reference=scored("gpt-4o", caught="ab", flagged="x"))
+        self.assertIn("WORSE than gpt-4o", text.splitlines()[0])
+        self.assertIn(f"primary: {VL}", text)
+        self.assertIn(f"fallback: {Q35}", text)
+        self.assertIn(f"{big} beats both 4B models", text)
+
+
+class CompareCliTest(PreparedDirMixin, unittest.TestCase):
+    def setUp(self) -> None:
+        self.s3 = self.make_bucket()
+        ev.prepare(self.out, client=self.s3, batches=["ameer_house_batch_1", "ameer_house_batch_2", "uca_dataset_batch"])
+        for tag, model in (("vl", VL), ("q35", Q35)):
+            ev.run_eval(self.out, ev.FakeBackend(), model=model, tag=tag)
+
+    def tearDown(self) -> None:
+        self.cleanup()
+
+    def test_compare_prints_the_pair(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            code = ev.main(["compare", "--dir", self.out, "--default", "vl", "--challenger", "q35"])
+        self.assertEqual(code, 0)
+        self.assertIn(f"primary: {VL}", buf.getvalue())
+
+    def test_compare_missing_tag(self) -> None:
+        self.assertEqual(ev.main(["compare", "--dir", self.out, "--default", "vl", "--challenger", "nope"]), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

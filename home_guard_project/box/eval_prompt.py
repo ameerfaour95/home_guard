@@ -990,6 +990,99 @@ def load_summary(out_dir: str, tag: str) -> Dict[str, Any]:
 
 
 # ----------------------------------------------------------------------------
+# Choosing the box's vision model (spec 2026-10-06 section 6)
+# ----------------------------------------------------------------------------
+# Our alert text for a break-in: the one kind of alert a new primary may never newly miss.
+SERIOUS_RE = re.compile(r"\b(forc\w*|break\w*|broke|climb\w*|pry\w*|jimm\w*|smash\w*)\b", re.IGNORECASE)
+
+
+def serious_caught(rows: Sequence[Dict[str, Any]]) -> set:
+    return {str(r.get("clip_id")) for r in rows
+            if not r.get("error") and r.get("ours_label") == "alert" and r.get("ai_label") in CAUGHT_LABELS
+            and SERIOUS_RE.search(str(r.get("ours_text") or ""))}
+
+
+def beats(cand_rows: Sequence[Dict[str, Any]], base_rows: Sequence[Dict[str, Any]]) -> Tuple[bool, str]:
+    """Whether *cand* beats *base*: more alerts caught, or as many with fewer false alarms; never
+    by newly missing a forced-entry/climbing alert, never with more errors."""
+    c, b = summarize(cand_rows), summarize(base_rows)
+    if c["errors"] > b["errors"]:
+        return False, f"more errors ({c['errors']} vs {b['errors']})"
+    lost = sorted(serious_caught(base_rows) - serious_caught(cand_rows))
+    if lost:
+        return False, f"misses forced-entry/climbing clip(s) the other caught: {', '.join(lost)}"
+    if c["alerts_caught"] > b["alerts_caught"]:
+        return True, f"catches more alerts ({c['alerts_caught']} vs {b['alerts_caught']})"
+    if c["alerts_caught"] == b["alerts_caught"] and c["normal_flagged"] < b["normal_flagged"]:
+        return True, f"same alerts, fewer false alarms ({c['normal_flagged']} vs {b['normal_flagged']})"
+    return False, (f"not better (alerts {c['alerts_caught']} vs {b['alerts_caught']}, "
+                   f"false alarms {c['normal_flagged']} vs {b['normal_flagged']})")
+
+
+def choose_pair(default: Tuple[str, List[Dict[str, Any]]],
+                challenger: Tuple[str, List[Dict[str, Any]]]) -> Tuple[str, str, str]:
+    """``(primary, fallback, reason)``: the default stays primary unless the challenger beats it;
+    the other one is the fallback."""
+    ok, why = beats(challenger[1], default[1])
+    if ok:
+        return challenger[0], default[0], f"{challenger[0]} {why}"
+    return default[0], challenger[0], f"{challenger[0]} {why}"
+
+
+def _money(v: Optional[float], fmt: str) -> str:
+    return "-" if v is None else fmt.format(v)
+
+
+def format_compare(default: Tuple[str, List[Dict[str, Any]]], challenger: Tuple[str, List[Dict[str, Any]]],
+                   others: Dict[str, List[Dict[str, Any]]],
+                   reference: Optional[List[Dict[str, Any]]] = None) -> str:
+    primary, fallback, why = choose_pair(default, challenger)
+    rows_of = {default[0]: default[1], challenger[0]: challenger[1], **others}
+    c = summarize(rows_of[primary])
+    lines: List[str] = []
+    if reference is not None:
+        r = summarize(reference)
+        if c["alerts_caught"] < r["alerts_caught"] or c["normal_flagged"] > r["normal_flagged"]:
+            lines.append(f"NOTE: {primary} is WORSE than gpt-4o on this set (alerts {c['alerts_caught']} vs "
+                         f"{r['alerts_caught']}, false alarms {c['normal_flagged']} vs {r['normal_flagged']}); "
+                         f"misses: {', '.join(c['missed_alerts']) or '-'}; false alarms: "
+                         f"{', '.join(c['false_alarms']) or '-'}")
+        else:
+            lines.append(f"{primary} is no worse than gpt-4o on this set.")
+    lines.append(f"{'model':44} {'alerts':>7} {'false':>7} {'err':>4} {'home al.':>9} {'ext al.':>8} "
+                 f"{'night al.':>9} {'tok in':>7} {'sec':>5} {'$/call':>9} {'$/mo@150':>9}")
+    table = dict(rows_of)
+    if reference is not None:
+        table["gpt-4o (reference)"] = reference
+    for m, rows in table.items():
+        s = summarize(rows)
+        night = f"{s['night']['alerts_caught']}/{s['night']['alerts_total']}"
+        home = f"{s['home']['alerts_caught']}/{s['home']['alerts_total']}"
+        ext = f"{s['external']['alerts_caught']}/{s['external']['alerts_total']}"
+        lines.append(f"{m:44} {s['alerts_caught']:>3}/{s['alerts_total']:<3} "
+                     f"{s['normal_flagged']:>3}/{s['normal_total']:<3} {s['errors']:>4} {home:>9} {ext:>8} "
+                     f"{night:>9} {_num(s['tokens_in_mean']):>7} {_num(s['latency_mean']):>5} "
+                     f"{_money(s['cost_per_call'], '${:.5f}'):>9} {_money(s['per_month_150'], '${:.2f}'):>9}")
+    lines += [f"primary: {primary}", f"fallback: {fallback}", f"  {why}"]
+    for m, rows in others.items():
+        if beats(rows, default[1])[0] and beats(rows, challenger[1])[0]:
+            lines.append(f"  recommendation: {m} beats both 4B models (owner's call; not chosen automatically)")
+    lines.append("  (54 alerts, 18 of them from our home cameras: a one-clip difference is noise)")
+    return "\n".join(lines)
+
+
+def load_scored(out_dir: str, tag: str) -> List[Dict[str, Any]]:
+    """Scored rows of results file *tag*: the latest answer per clip next to the current manifest."""
+    jsonl_path, _, _ = _results_paths(out_dir, tag)
+    with _results_lock(_lock_path(out_dir, tag)):
+        manifest = read_jsonl(os.path.join(out_dir, MANIFEST))
+        fingerprints = _fingerprints(out_dir, manifest)
+        latest = current_answers(read_jsonl(jsonl_path), fingerprints)
+        scored, _ = score_rows(manifest, latest, fingerprints)
+    return scored
+
+
+# ----------------------------------------------------------------------------
 # Command line
 # ----------------------------------------------------------------------------
 def _make_gpt(provider: str, model: str) -> Any:
@@ -1053,6 +1146,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     summ.add_argument("--dir", required=True)
     summ.add_argument("--tag", required=True)
 
+    comp = sub.add_parser("compare", help="One table across results files, and the box's primary and fallback model.")
+    comp.add_argument("--dir", required=True)
+    comp.add_argument("--default", required=True, help="Results file of Qwen3-VL-4B-Instruct (the default primary).")
+    comp.add_argument("--challenger", required=True, help="Results file of Qwen3.5-4B.")
+    comp.add_argument("--others", nargs="*", default=[], help="Results files of the other models, reported only.")
+    comp.add_argument("--reference", default=None, help="Results file of gpt-4o on the same prompt.")
+
     args = parser.parse_args(argv)
     logging.basicConfig(
         level=logging.INFO, stream=sys.stderr,
@@ -1096,6 +1196,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print("Aborted.", file=sys.stderr)
             return 130
         print(format_summary(summary))
+        return 0
+
+    if args.command == "compare":
+        tags = [args.default, args.challenger, *args.others] + ([args.reference] if args.reference else [])
+        for tag in tags:
+            if not os.path.isfile(_results_paths(args.dir, tag)[0]):
+                print(f"Error: no results named {tag} in {os.path.join(args.dir, RESULTS_DIR)}", file=sys.stderr)
+                return 1
+
+        def named(tag: str) -> Tuple[str, List[Dict[str, Any]]]:
+            rows = load_scored(args.dir, tag)
+            return (_one_value(rows, "model") or tag), rows
+
+        others = dict(named(t) for t in args.others)
+        reference = load_scored(args.dir, args.reference) if args.reference else None
+        print(format_compare(named(args.default), named(args.challenger), others, reference))
         return 0
 
     if not os.path.isfile(_results_paths(args.dir, args.tag)[0]):

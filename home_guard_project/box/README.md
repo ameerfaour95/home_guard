@@ -394,6 +394,30 @@ What the score means:
 | words per summary | The AI's length against ours |
 | errors | Clips the AI could not answer; they are left out of the other lines |
 | outdated | Shown only when some saved answers were for other frames, camera or time (not yet asked again); they are left out |
+| day / night, home / external | The same counts split by the clip's time (night 19:00-05:59) and by where it comes from (our cameras vs the UCA and SmartHome-Bench batches) |
+| missed alerts, false alarms | The clip names, to look at |
+| tokens per call, cost | What the provider billed, and $ per box per month at 150 and 300 calls a day (hosted models only) |
+
+### Comparing vision models
+
+Every tagged batch can go into one eval set: `prepare --batches ameer_house_batch_1 ameer_house_batch_2 uca_dataset_batch smarthome_dataset_batch` (292 clips, 54 alerts on 2026-10-06).
+
+Small models run on the laptop GPU through Ollama (no key; `ollama pull <model>` first, and start the server with `OLLAMA_CONTEXT_LENGTH=8192`, because 5 frames are about 6,000 tokens); hosted ones through OpenRouter (`OPENROUTER_API_KEY` in `api_key.env`). On the laptop, Python's TLS needs the antivirus workaround: `env -u SSLKEYLOGFILE -u PYTHONSTARTUP SSL_CERT_FILE=<bundle.pem>`.
+
+    .venv\Scripts\python.exe -m home_guard_project.box.eval_prompt run --dir <eval_set> --provider ollama --model qwen3-vl:4b-instruct-bf16 --yes
+    .venv\Scripts\python.exe -m home_guard_project.box.eval_prompt run --dir <eval_set> --provider openrouter --model qwen/qwen3-vl-32b-instruct --yes
+    .venv\Scripts\python.exe -m home_guard_project.box.eval_prompt compare --dir <eval_set> --default <Qwen3-VL-4B tag> --challenger <Qwen3.5-4B tag> --others <tags...> --reference <gpt-4o tag>
+
+`compare` prints one table and names the box's primary and fallback: Qwen3-VL-4B-Instruct primary and Qwen3.5-4B fallback, swapped only if Qwen3.5-4B catches more alerts (or as many with fewer false alarms) without newly missing a break-in and without more errors.
+
+### The box's vision model settings (box.yaml)
+
+    vlm_provider: vllm                     # openai | openrouter | ollama | vllm | dashscope-intl
+    vlm_model: Qwen/Qwen3-VL-4B-Instruct
+    vlm_fallback_provider: vllm            # empty: no fallback
+    vlm_fallback_model: Qwen/Qwen3.5-4B
+
+`vllm` needs `VLLM_BASE_URL` (and `VLLM_API_KEY` if the server has one) in `api_key.env`. If the main model fails, the same alert goes to the fallback once (`VLM fallback` in the log). Without these settings the box keeps gpt-4o.
 
 ## Troubleshooting
 
