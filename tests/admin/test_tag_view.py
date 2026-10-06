@@ -131,11 +131,17 @@ def test_consent_can_only_confirm_what_the_box_recorded(widgets, wait):
     dialog = screen.review_consent()
     texts = [w.text() for w in dialog.findChildren(QLabel)]
     assert any('2026-10-02 09:30' in t and 'Maya' in t for t in texts)
-    assert not dialog.findChildren(QCheckBox)                  # nothing to tick: only the customer's own answers
+    boxes = {box.text().split(':')[0]: box for box in dialog.findChildren(QCheckBox)}
+    live = boxes['Live view']
+    assert not live.isEnabled() and not live.isChecked() and 'not agreed at setup' in live.text()
+    assert boxes['Recordings'].isEnabled() and boxes['Training'].isChecked()
+    boxes['Recordings'].setChecked(False)                      # confirm only part of what was agreed
     dialog.accept()
     wait(lambda: not screen.consent_runner.busy and not screen.runner.busy and screen.customer is not None
          and screen.customer.consent_training, 5)
-    assert b.customer(3).consent_proposed is None and not screen.consent_note.isVisible()
+    after = b.customer(3)
+    assert (after.consent_live, after.consent_recordings, after.consent_training) == (False, True, True)
+    assert after.consent_proposed is None and not screen.consent_note.isVisible()
     with pytest.raises(ValidationError, match='can only come from the customer'):
         b.confirm_consent(3, '2026-10-02T09:30:00Z')            # nothing left to confirm
 
@@ -151,3 +157,20 @@ def test_no_proposal_means_nothing_to_confirm(widgets, wait):
     from dataclasses import replace
     with pytest.raises(ValidationError, match='gave at setup'):
         b.update_customer(replace(b.customer(2), consent_live=True))
+
+
+def test_missing_video_explains_why_and_the_clip_can_still_be_tagged(widgets, wait):
+    class NoVideo(DemoBackend):
+        def tagging_clip(self, key):
+            detail = super().tagging_clip(key)
+            detail['media'] = {'clip': False, 'crop': False}
+            detail['media_reasons'] = {'clip': 'removed from S3 (the indexer saw it, the file is gone)',
+                                       'crop': 'never uploaded to S3'}
+            return detail
+    v, b = tag_view(widgets, wait, NoVideo())
+    assert 'removed from S3' in v.canvas.message and 'Crop: never uploaded to S3' in v.canvas.message
+    assert 'still tag it' in v.canvas.message and not v.media_runner.busy
+    assert v.segments['clip'].toolTip().startswith('removed from S3')
+    v.set_category('N10'); v.save()
+    wait(lambda: not v.save_runner.busy, 5)
+    assert b.tagging_clip(v.model.rows[0]['key']) is not None

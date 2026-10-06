@@ -19,6 +19,7 @@ TIMEZONE_MAX = 64  # the column's width
 # Consent comes from the customer, through the box's setup: an admin settles what the box recorded and may withdraw
 # consent, but never grants what the customer did not give.
 NO_PROPOSAL = "No consent was recorded at this customer's setup: consent can only come from the customer"
+NOT_AGREED = "The customer did not agree to {} at setup: it cannot be turned on"
 GRANT_REFUSED = ("Consent comes from the customer: confirm the consent this customer gave at setup instead of "
                  "granting it here")
 STALE_PROPOSAL = "The box recorded a newer answer from this customer: reload and check it again"
@@ -101,7 +102,9 @@ def update_customer(customer_id: int, body: CustomerIn, request: Request,
             redact.backfill(session, device, everything=True)
     if confirmed:
         audit.record(session, staff.id, "consent_confirmed", target=c.name, customer_id=c.id,
-                     detail={"fields": set_consents}, ts=now_of(request))
+                     detail={"fields": set_consents, "proposal_recorded_utc": proposed.get("recorded_utc"),
+                             "proposal": {k: proposed.get(k) for k in ("live", "recordings", "training", "installer")}},
+                     ts=now_of(request))
     if changed:
         audit.record(session, staff.id, "customer_update", target=c.name, customer_id=c.id,
                      detail={"changed": changed}, ts=now_of(request))
@@ -121,17 +124,24 @@ def confirm_consent(customer_id: int, body: ConsentConfirm, request: Request,
     recorded = _utc(proposed.get("recorded_utc"))
     if recorded is None or recorded != _utc(body.recorded_utc.isoformat()):
         raise HTTPException(status_code=409, detail=STALE_PROPOSAL)
+    wanted = None if body.fields is None else set(body.fields)
+    for key in sorted(wanted or ()):
+        if not proposed.get(key):
+            raise HTTPException(status_code=422, detail=NOT_AGREED.format(key))
     changed = []
     for f in _CONSENTS:
-        value = bool(proposed.get(f.removeprefix("consent_")))
-        if getattr(c, f) != value:
-            changed.append(f)
-            setattr(c, f, value)
+        key = f.removeprefix("consent_")
+        # a "no" at setup is the customer's answer and applies; a "yes" applies when the admin confirms it
+        value = bool(proposed.get(key)) and (wanted is None or key in wanted)
+        if not proposed.get(key) or value:
+            if getattr(c, f) != value:
+                changed.append(f)
+                setattr(c, f, value)
     c.consent_proposed = None
     c.consent_recorded_utc = recorded  # the customer's own answer is the newest one applied
     audit.record(session, staff.id, "consent_confirmed", target=c.name, customer_id=c.id,
-                 detail={"fields": changed, "proposal": {k: proposed.get(k) for k in
-                                                         ("live", "recordings", "training", "recorded_utc", "installer")}},
+                 detail={"fields": changed, "proposal_recorded_utc": proposed.get("recorded_utc"),
+                         "proposal": {k: proposed.get(k) for k in ("live", "recordings", "training", "installer")}},
                  ts=now_of(request))
     session.flush()
     return _out(session, request, c)

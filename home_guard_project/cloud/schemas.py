@@ -98,6 +98,8 @@ class ConsentProposal(BaseModel):
 
 class ConsentConfirm(BaseModel):
     recorded_utc: datetime  # the proposal the admin was shown: a newer one must be read before it is confirmed
+    # which of the proposal's yes answers to turn on (default: all of them); a "no" answer can never be listed
+    fields: Optional[list[Literal["live", "recordings", "training"]]] = None
 
 
 class CustomerOut(CustomerIn):
@@ -456,6 +458,7 @@ class TaggingQueueItem(BaseModel):
     alert: bool
     conflicts: list[dict]
     labels: dict[str, dict]
+    has_media: bool = True
 
 
 class TaggingQueue(BaseModel):
@@ -466,6 +469,7 @@ class TaggingQueue(BaseModel):
 class TaggingClip(BaseModel):
     item: dict
     media: dict[str, bool]
+    media_reasons: dict[str, str] = {}   # why a video kind cannot be opened ("" when it can)
     fps: Optional[float] = None
     opinions: dict[str, dict]
     tag: Optional[dict] = None

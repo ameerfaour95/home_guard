@@ -1,6 +1,6 @@
 from .formatting import camera_name
 from PySide6.QtCore import Signal, Qt
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget, QTabWidget, QDialog
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget, QTabWidget, QDialog, QCheckBox
 from .backend import OfflineError, AuthError
 from .fleet_model import SEVERITY
 from .formatting import site_name, age, utcnow
@@ -130,16 +130,21 @@ class CustomerScreen(QWidget):
             when = str(proposed.get('recorded_utc') or '')[:16].replace('T', ' ')
             by = proposed.get('installer') or 'the installer'
             layout.addWidget(label(f'At setup on {when} UTC ({by} installed the box), the customer answered:', 'muted', True))
+            boxes = {}
             for key, text in (('live', 'Live view: staff may watch the cameras live'),
                               ('recordings', 'Recordings: staff may open saved clips'),
                               ('training', 'Training: clips may be tagged and used to train the AI')):
-                layout.addWidget(label(f'{"Yes" if proposed.get(key) else "No"}   ·   {text}',
-                                       '' if proposed.get(key) else 'muted'))
-            layout.addWidget(label('Confirming applies exactly these answers and is recorded in the audit log with your '
-                                   'name. Consent the customer did not give cannot be added here.', 'muted', True))
+                agreed = bool(proposed.get(key))
+                box = QCheckBox(text if agreed else f'{text}  ·  not agreed at setup')
+                box.setChecked(agreed); box.setEnabled(agreed)
+                layout.addWidget(box); boxes[key] = box
+            layout.addWidget(label('Only what the customer agreed to can be confirmed; untick one to leave it as it is now. '
+                                   'The confirmation is recorded in the audit log with your name and the setup time.',
+                                   'muted', True))
             row.addWidget(button('Cancel', dialog.reject))
             row.addWidget(button('Confirm the consent this customer gave at setup', dialog.accept, 'primary'))
-            dialog.accepted.connect(lambda: self.confirm_consent(proposed.get('recorded_utc')))
+            dialog.accepted.connect(lambda: self.confirm_consent(
+                proposed.get('recorded_utc'), [k for k, b in boxes.items() if b.isEnabled() and b.isChecked()]))
         else:
             current = '  ·  '.join(f'{text}: {"yes" if getattr(customer, f"consent_{key}") else "no"}'
                                    for key, text in (('live', 'live view'), ('recordings', 'recordings'), ('training', 'training')))
@@ -153,10 +158,10 @@ class CustomerScreen(QWidget):
         self.consent_dialog = dialog
         return dialog
 
-    def confirm_consent(self, recorded_utc):
+    def confirm_consent(self, recorded_utc, fields=None):
         self.consent_button.setEnabled(False)
         customer_id = self.customer.id
-        self.consent_runner.start(lambda: self.backend.confirm_consent(customer_id, recorded_utc))
+        self.consent_runner.start(lambda: self.backend.confirm_consent(customer_id, recorded_utc, fields))
 
     def consent_saved(self, customer, error):
         self.consent_button.setEnabled(True)

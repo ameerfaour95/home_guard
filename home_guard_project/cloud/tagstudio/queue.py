@@ -125,7 +125,8 @@ def assess(item: ClipItem, tag: Optional[Tag] = None) -> Assessment:
 
 
 def order_key(item: ClipItem, a: Assessment) -> Tuple:
-    return (a.tier, not a.alert, -len(a.conflicts), -item.sort_ts, item.key)
+    # Among clips of the same priority, one whose video opens comes first: the tagger starts on a playable clip.
+    return (a.tier, not a.alert, -len(a.conflicts), not item.info.get("has_media", True), -item.sort_ts, item.key)
 
 
 def build(items: Iterable[ClipItem], tags: Dict[str, Tag]) -> List[Tuple[ClipItem, Assessment]]:

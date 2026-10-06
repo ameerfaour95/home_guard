@@ -361,6 +361,7 @@ def test_admin_patch_of_consents_confirms_the_proposal(client, staff_factory, s3
     audit_rows = client.get("/v1/audit", headers=admin).json()["items"]
     conf = next(a for a in audit_rows if a["action"] == "consent_confirmed")
     assert conf["detail"]["fields"] == ["consent_live", "consent_recordings"]
+    assert conf["detail"]["proposal_recorded_utc"].startswith("2026-10-02T10:00:00")
     with session_scope(client.app.state.engine) as s:
         assert s.get(m.Customer, cust["id"]).consent_recorded_utc is not None
 
@@ -417,7 +418,7 @@ def test_confirm_settles_exactly_the_consent_the_customer_gave_at_setup(client, 
     conf = next(a for a in client.get("/v1/audit", headers=admin).json()["items"] if a["action"] == "consent_confirmed")
     assert conf["staff"] == staff.name and conf["ts"] and conf["detail"]["fields"] == ["consent_live", "consent_recordings"]
     assert conf["detail"]["proposal"]["installer"] == "Ameer"
-    assert conf["detail"]["proposal"]["recorded_utc"].startswith("2026-10-02T10:00:00")
+    assert conf["detail"]["proposal_recorded_utc"].startswith("2026-10-02T10:00:00")
     with session_scope(client.app.state.engine) as s:
         assert s.get(m.Customer, cust["id"]).consent_recorded_utc == datetime(2026, 10, 2, 10, tzinfo=timezone.utc)
     # nothing left to confirm: blocked with a clear message
@@ -437,3 +438,24 @@ def test_only_admins_confirm_consent(client, staff_factory, s3, role):
     r = client.post(f"/v1/customers/{cust['id']}/consent/confirm", headers=other,
                     json={"recorded_utc": cust["consent_proposed"]["recorded_utc"]})
     assert r.status_code == 403
+
+
+def test_confirm_only_some_of_the_yes_answers_and_never_a_no(client, staff_factory, s3):
+    _discovered(client, s3)
+    _, _, _, admin = staff_factory("admin")
+    cust = client.get("/v1/customers", headers=admin).json()[0]
+    url = f"/v1/customers/{cust['id']}/consent/confirm"
+    when = cust["consent_proposed"]["recorded_utc"]
+    r = client.post(url, headers=admin, json={"recorded_utc": when, "fields": ["live", "training"]})
+    assert r.status_code == 422 and "did not agree to training" in r.json()["detail"]
+    r = client.post(url, headers=admin, json={"recorded_utc": when, "fields": ["recordings"]})
+    assert r.status_code == 200, r.text
+    got = r.json()
+    assert (got["consent_live"], got["consent_recordings"], got["consent_training"]) == (False, True, False)
+    assert got["consent_proposed"] is None
+    # with the proposal settled, nothing more can be turned on
+    r = client.patch(f"/v1/customers/{cust['id']}", headers=admin, json={"name": cust["name"], "consent_live": True})
+    assert r.status_code == 422
+    # what is already on may be sent again unchanged
+    r = client.patch(f"/v1/customers/{cust['id']}", headers=admin, json={"name": cust["name"], "consent_recordings": True})
+    assert r.status_code == 200

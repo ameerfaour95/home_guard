@@ -83,6 +83,7 @@ class TagStudio:
             else:
                 out[item.key] = item
         for item in out.values():
+            item.info["has_media"] = any(ok for ok, _ in self.media_status(item).values())
             item.opinions.pop(TEACHER, None)
             op = first_suggestion(self.teachers, item)
             if op is not None:
@@ -142,7 +143,7 @@ class TagStudio:
             if tag is not None:
                 labels["studio"] = {"label": tag.raw_label, "category": tag.fields.get("category", ""),
                                     "disputes_ai": False}
-            out.append({**item.summary(), **a.as_dict(), "labels": labels})
+            out.append({**item.summary(), **a.as_dict(), "labels": labels, "has_media": bool(item.info.get("has_media"))})
         return {"items": out[:limit], "count": len(out)}
 
     def _item(self, session, key: str) -> Tuple[ClipItem, Dict[str, ClipItem]]:
@@ -174,11 +175,12 @@ class TagStudio:
         else:
             form, prefilled = self.prefill(item), (OLD if OLD in item.opinions else "")
         fps = item.fps or (self.dataset.fps(item) if item.meta_path else None)
-        media = {kind: bool(path and os.path.isfile(path)) or kind in item.artifacts
-                 for kind, path in (("clip", item.video), ("crop", item.crop))}
+        status = self.media_status(item)
         return {
             "item": {**item.summary(), "info": item.info, "video_s3": item.video_s3, "crop_s3": item.crop_s3},
-            "media": media, "fps": fps, "opinions": {who: op.as_dict() for who, op in item.opinions.items()},
+            "media": {kind: ok for kind, (ok, _) in status.items()},
+            "media_reasons": {kind: why for kind, (_, why) in status.items()}, "fps": fps,
+            "opinions": {who: op.as_dict() for who, op in item.opinions.items()},
             "tag": tag.as_dict() if tag else None, "form": form, "prefilled_from": prefilled,
             "assessment": work_queue.assess(item, tag).as_dict(), "history": self.history(session, key),
         }
@@ -201,6 +203,25 @@ class TagStudio:
         return {"tag": tag.as_dict(), "assessment": work_queue.assess(item, tag).as_dict(), "next_key": next_key}
 
     # ------------------------------------------------------------ media
+    def media_status(self, item: ClipItem) -> Dict[str, Tuple[bool, str]]:
+        """Per video kind: can it be opened, and if not, why (shown to the tagger, who can still tag from the cards)."""
+        out: Dict[str, Tuple[bool, str]] = {}
+        no_consent = item.origin == "customer" and item.info.get("consent_training") is False
+        for kind, path in (("clip", item.video), ("crop", item.crop)):
+            name = "full-frame clip" if kind == "clip" else "crop"
+            local = bool(path) and os.path.isfile(path)
+            if local or kind in item.artifacts:
+                out[kind] = (False, "no training consent from this customer") if no_consent else (True, "")
+            elif path:
+                out[kind] = (False, f"{name} not on this computer ({path})")
+            elif item.origin == "customer":
+                out[kind] = (False, (item.info.get("media_missing") or {}).get(kind) or f"no {name} recorded")
+            elif item.origin == "dataset":
+                out[kind] = (False, f"the dataset has no {name} for this clip")
+            else:
+                out[kind] = (False, f"no {name} in the local copy")
+        return out
+
     def local_media(self, item: ClipItem, kind: str) -> Optional[str]:
         path = item.video if kind == "clip" else item.crop if kind == "crop" else ""
         return path if path and os.path.isfile(path) else None

@@ -148,3 +148,25 @@ def test_admin_only(client, staff_factory, studio, role):
     assert client.get("/v1/tagging/state", headers=h).status_code == 403
     assert client.post("/v1/tagging/tag", headers=h, json={"key": "ds:x", "fields": {}}).status_code == 403
     assert client.get("/v1/tagging/queue").status_code == 401
+
+
+def test_missing_video_says_why_and_playable_clips_come_first(client, staff_factory, studio):
+    _, ids = studio
+    _, _, _, h = staff_factory("admin")
+    with session_scope(client.app.state.engine) as s:
+        house = s.scalar(select(m.Device).where(m.Device.site == "house2"))
+        gone = _event(s, house, "house2_ch5_1791091500_alert", verdict="false_alarm", owner_label="empty", videos=False)
+        s.add(m.Artifact(event_id=gone, role="original_video", s3_key="dataset_house2/clips/gone.mp4", available=False))
+    clip = client.get("/v1/tagging/clip", params={"key": f"ev:{gone}"}, headers=h).json()
+    assert clip["media"] == {"clip": False, "crop": False}
+    assert clip["media_reasons"]["clip"].startswith("removed from S3")
+    assert clip["media_reasons"]["crop"] == "never uploaded to S3"
+    refusing = client.get("/v1/tagging/clip", params={"key": f"ev:{ids['refusing']}"}, headers=h).json()
+    assert refusing["media_reasons"]["clip"] == "no training consent from this customer"
+    dataset = client.get("/v1/tagging/clip", params={"key": "ds:front_side_1771696897_trigger"}, headers=h).json()
+    assert dataset["media"] == {"clip": True, "crop": True} and dataset["media_reasons"] == {"clip": "", "crop": ""}
+    # both are the same kind of contradiction (owner empty vs AI suspicious): the one with a video comes first
+    queue = client.get("/v1/tagging/queue", headers=h).json()["items"]
+    order = [i["key"] for i in queue]
+    assert order.index(f"ev:{ids['consenting']}") < order.index(f"ev:{gone}")
+    assert next(i for i in queue if i["key"] == f"ev:{gone}")["has_media"] is False

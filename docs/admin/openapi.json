@@ -699,6 +699,25 @@
       },
       "ConsentConfirm": {
         "properties": {
+          "fields": {
+            "anyOf": [
+              {
+                "items": {
+                  "enum": [
+                    "live",
+                    "recordings",
+                    "training"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fields"
+          },
           "recorded_utc": {
             "format": "date-time",
             "title": "Recorded Utc",
@@ -2476,6 +2495,14 @@
             "title": "Media",
             "type": "object"
           },
+          "media_reasons": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {},
+            "title": "Media Reasons",
+            "type": "object"
+          },
           "opinions": {
             "additionalProperties": {
               "additionalProperties": true,
@@ -2662,6 +2689,11 @@
               }
             ],
             "title": "Event Id"
+          },
+          "has_media": {
+            "default": true,
+            "title": "Has Media",
+            "type": "boolean"
           },
           "key": {
             "title": "Key",

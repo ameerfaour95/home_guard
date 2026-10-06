@@ -329,10 +329,13 @@ def event_items(session, bucket: str) -> List[ClipItem]:
         if run.status == "real" or run.event_id not in runs:
             runs[run.event_id] = run
     arts: Dict[int, Dict[str, Any]] = {}
+    gone: Dict[int, set] = {}            # videos the indexer saw once and S3 no longer has
     for art in session.scalars(select(Artifact).where(Artifact.event_id.in_(ids),
-                                                      Artifact.role.in_(("original_video", "crop_video")),
-                                                      Artifact.available.is_(True))):
+                                                      Artifact.role.in_(("original_video", "crop_video")))):
         kind = "clip" if art.role == "original_video" else "crop"
+        if not art.available:
+            gone.setdefault(art.event_id, set()).add(kind)
+            continue
         current = arts.setdefault(art.event_id, {}).get(kind)
         # The training copy (dataset_<site>/) outlives the production copy, which S3 empties after 14 days.
         if current is None or (art.s3_key.startswith("dataset_") and not current.s3_key.startswith("dataset_")):
@@ -365,6 +368,9 @@ def event_items(session, bucket: str) -> List[ClipItem]:
                   "consent_training": bool(customer.consent_training),
                   "consent_proposed": customer.consent_proposed is not None,
                   "production_only": bool(art) and all(a.s3_key.startswith("production_") for a in art.values()),
+                  "media_missing": {kind: ("removed from S3 (the indexer saw it, the file is gone)"
+                                           if kind in gone.get(ev.id, ()) else "never uploaded to S3")
+                                    for kind in ("clip", "crop") if kind not in art},
                   "num_persons": parsed.get("people"), "detected": ev.detected or []},
         )
         detail = {"model": (run.model if run else "") or "", "prompt_version": (run.prompt_version if run else "") or "",

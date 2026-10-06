@@ -151,7 +151,7 @@
       }
     ],
     "consent_proposed": {
-      "live": true,
+      "live": false,
       "recordings": true,
       "training": true,
       "recorded_utc": "2026-10-02T09:30:00Z",

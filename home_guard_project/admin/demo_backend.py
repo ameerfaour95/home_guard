@@ -55,16 +55,22 @@ class DemoBackend(DemoTagging, DemoAnnotations, DemoStudio):
             setattr(customer, key, value)
         return customer
 
-    def confirm_consent(self, customer_id, recorded_utc):
+    def confirm_consent(self, customer_id, recorded_utc, fields=None):
         customer = self.customer(customer_id)
         proposed = customer.consent_proposed
         if not proposed:
             raise ValidationError("No consent was recorded at this customer's setup: consent can only come from the customer")
         if proposed.get('recorded_utc') != recorded_utc:
             raise ValidationError('The box recorded a newer answer from this customer: reload and check it again')
+        for key in fields or ():
+            if not proposed.get(key):
+                raise ValidationError(f'The customer did not agree to {key} at setup: it cannot be turned on')
+        def value(key):
+            return bool(proposed.get(key)) and (fields is None or key in fields)
+        changes = {f'consent_{k}': value(k) for k in ('live', 'recordings', 'training')
+                   if not proposed.get(k) or value(k)}
         self.__dict__.setdefault('_customer_changes', {}).setdefault(int(customer_id), {}).update(
-            consent_live=bool(proposed.get('live')), consent_recordings=bool(proposed.get('recordings')),
-            consent_training=bool(proposed.get('training')), consent_proposed=None)
+            **changes, consent_proposed=None)
         return self.customer(customer_id)
 
     def update_customer(self, customer):

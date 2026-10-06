@@ -30,7 +30,7 @@ HELP = [('Ctrl + Enter', 'Save and open the next clip'), ('n / s / e, then 1–9
         ('v', 'Crop / full frame'), ('f', 'Evidence frame = this moment'), ('a', "Use the teacher's suggestion"),
         ('c / x', 'Needs check / delete'), ('j / k', 'Next / previous clip'), ('d', 'Write the description'),
         ('Esc', 'Leave a text field'), ('?', 'This help')]
-EMPTY_TEXT = {'clip': 'No full-frame video for this clip', 'crop': 'No crop for this clip'}
+KIND_NAMES = {'clip': 'Full frame', 'crop': 'Crop'}
 
 
 class TagView(QWidget):
@@ -167,8 +167,10 @@ class TagView(QWidget):
         col = QVBoxLayout(outer); col.setContentsMargins(0, 0, 0, 0); col.setSpacing(0)
         scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # a fixed scrollbar keeps the width stable: wrapping category names change the height with the width
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         body = QWidget(); body.setObjectName('tagForm'); scroll.setWidget(body)
-        form = QVBoxLayout(body); form.setContentsMargins(16, 14, 16, 14); form.setSpacing(8)
+        form = QVBoxLayout(body); form.setContentsMargins(16, 14, 26, 14)  # room for the scrollbar drawn over the right edge; form.setSpacing(8)
         head = QHBoxLayout(); head.addWidget(label('CATEGORY', 'eyebrow')); head.addStretch()
         self.started_from = label('', 'muted'); head.addWidget(self.started_from)
         self.chord_label = Pill(self.theme); self.chord_label.hide(); head.addWidget(self.chord_label)
@@ -233,7 +235,8 @@ class TagView(QWidget):
             chips = ChipGroup(values, multi); chips.changed.connect(lambda n=name: self.chip_changed(n))
             self.fields_box.addWidget(chips); self.chips[name] = chips
         evidence = QHBoxLayout(); evidence.addWidget(label('EVIDENCE FRAME', 'eyebrow')); evidence.addSpacing(8)
-        self.evidence = label('none', 'muted'); evidence.addWidget(self.evidence); evidence.addStretch()
+        self.evidence = label('none', 'muted'); self.evidence.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        evidence.addWidget(self.evidence, 1)
         mark = button('Mark  F', self.mark_evidence, 'link'); mark.setToolTip('This moment is the frame that shows best what happens (F)')
         evidence.addWidget(mark)
         evidence.addWidget(button('Go to', self.go_to_evidence, 'link'))
@@ -246,6 +249,8 @@ class TagView(QWidget):
         if columns == self.card_columns:
             return
         self.card_columns = columns
+        for c in range(4):
+            self.card_grid.setColumnStretch(c, 1 if c < columns else 0)
         for i, who in enumerate(('old', 'owner', 'ai', 'teacher')):
             self.card_grid.addWidget(self.cards[who], i // columns, i % columns)
 
@@ -375,15 +380,17 @@ class TagView(QWidget):
         self.banner.hide()
         if self.view not in [k for k, ok in detail['media'].items() if ok]:
             self.view = 'crop' if detail['media'].get('crop') else 'clip'
+        reasons = detail.get('media_reasons') or {}
         for kind, b in self.segments.items():
             b.setEnabled(bool(detail['media'].get(kind))); b.setChecked(kind == self.view)
+            b.setToolTip(reasons.get(kind) or 'Crop: what the AI sees · Full frame: the whole camera  (V)')
         self.load_media()
 
     def load_media(self):
         self.player.stop(); self.player.setSource(QUrl())
         self.canvas.image = QImage(); self.canvas.message = 'Loading video…'; self.canvas.update()
         if not self.detail or not self.detail['media'].get(self.view):
-            self.show_video_message(EMPTY_TEXT[self.view]); return
+            self.show_video_message(self.missing_text()); return
         request = (self.key, self.view)
         if not self.media_runner.start(lambda: (request, self.backend.tagging_media(*request))):
             self.pending_media = True
@@ -406,6 +413,13 @@ class TagView(QWidget):
             self.load_media(); return
         self.player.setSource(QUrl(access['url'])); self.player.setPlaybackRate(self.speed.currentData())
         self.player.play(); self.player.pause()
+
+    def missing_text(self):
+        """Why there is nothing to play, per video kind, and that the clip can still be tagged."""
+        media, reasons = (self.detail or {}).get('media', {}), (self.detail or {}).get('media_reasons', {})
+        lines = [f"{KIND_NAMES[k]}: {'available' if media.get(k) else reasons.get(k) or 'not available'}"
+                 for k in ('clip', 'crop')]
+        return '\n'.join(['No video to play here.', *lines, 'You can still tag it from the answers below.'])
 
     def show_video_message(self, message):
         self.canvas.image = QImage(); self.canvas.message = message; self.canvas.update()

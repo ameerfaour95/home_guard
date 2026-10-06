@@ -91,6 +91,9 @@ class QueueDelegate(QStyledItemDelegate):
                    QFontMetrics(font).elidedText(row['clip_id'], Qt.TextElideMode.ElideMiddle, w - ow - 10 - (tx - x)))
         p.setFont(small); p.setPen(QColor(t['muted']))
         p.drawText(QRect(x + w - ow, r.y() + 8, ow, 18), Qt.AlignmentFlag.AlignVCenter, origin)
+        if not row.get('has_media', True):
+            p.drawText(QRect(x + w - 60, r.y() + 47, 60, 16), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight,
+                       'no video')
         p.setPen(QColor(t['secondary']))
         reason = '; '.join(row['reasons'])
         p.drawText(QRect(x, r.y() + 27, w, 16), Qt.AlignmentFlag.AlignVCenter,
@@ -102,7 +105,7 @@ class QueueDelegate(QStyledItemDelegate):
                 continue
             text = f"{WHO_TITLES[who].split()[0][0] if who != 'studio' else '✓'} {short_label(entry)}"
             tw = QFontMetrics(small).horizontalAdvance(text) + 12
-            if cx + tw > x + w:
+            if cx + tw > x + w - (64 if not row.get('has_media', True) else 0):
                 break
             color = QColor(t[LABEL_TOKENS.get(entry.get('label', ''), 'muted')])
             chip = QRectF(cx, r.y() + 47, tw, 16)
@@ -113,7 +116,8 @@ class QueueDelegate(QStyledItemDelegate):
 
 
 class CategoryButton(QAbstractButton):
-    """One taxonomy category: id and English name, the Hebrew name under it (right to left)."""
+    """One taxonomy category: id and English name (two lines when narrow), the Hebrew name under it (right to left)."""
+    ONE_LINE, TWO_LINES = 46, 62
 
     def __init__(self, category, theme='dark', parent=None):
         super().__init__(parent)
@@ -123,14 +127,31 @@ class CategoryButton(QAbstractButton):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setToolTip(f"{category['id']}  {category['name']}\n{category['definition']}\n{category['he']}")
         self.setAccessibleName(f"{category['id']} {category['name']}")
-        self.setMinimumHeight(46)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        policy.setHeightForWidth(True)
+        self.setSizePolicy(policy)
+
+    def _fonts(self):
+        bold = QFont(self.font()); bold.setPixelSize(12); bold.setWeight(QFont.Weight.DemiBold)
+        normal = QFont(self.font()); normal.setPixelSize(12)
+        return bold, normal
+
+    def _wraps(self, width):
+        bold, normal = self._fonts()
+        room = width - 22 - QFontMetrics(bold).horizontalAdvance(self.category['id']) - 6
+        return QFontMetrics(normal).horizontalAdvance(self.category['name']) > room
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        return self.TWO_LINES if self._wraps(width) else self.ONE_LINE
 
     def sizeHint(self):
-        return QSize(120, 46)
+        return QSize(120, self.heightForWidth(self.width() if self.width() > 0 else 120))
 
     def minimumSizeHint(self):
-        return QSize(64, 46)
+        return QSize(64, self.ONE_LINE)
 
     def paintEvent(self, event):
         p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -146,19 +167,26 @@ class CategoryButton(QAbstractButton):
         if self.hint and not self.isChecked():
             p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor(t['action']))
             p.drawEllipse(QRectF(rect.right() - 10, rect.top() + 6, 5, 5))
-        bold = QFont(self.font()); bold.setPixelSize(12); bold.setWeight(QFont.Weight.DemiBold)
-        normal = QFont(self.font()); normal.setPixelSize(12)
+        bold, normal = self._fonts()
         idw = QFontMetrics(bold).horizontalAdvance(self.category['id']) + 6
         p.setFont(bold); p.setPen(accent if self.category['id'] != 'other' else QColor(t['text']))
-        top = QRect(9, 5, self.width() - 22, 18)
-        p.drawText(top, Qt.AlignmentFlag.AlignVCenter, self.category['id'])
+        p.drawText(QRect(9, 5, idw, 18), Qt.AlignmentFlag.AlignVCenter, self.category['id'])
         p.setFont(normal); p.setPen(QColor(t['text']))
-        name_rect = top.adjusted(idw, 0, 0, 0)
-        p.drawText(name_rect, Qt.AlignmentFlag.AlignVCenter,
-                   QFontMetrics(normal).elidedText(self.category['name'], Qt.TextElideMode.ElideRight, name_rect.width()))
+        wraps = self._wraps(self.width())
+        name_rect = QRect(9 + idw, 5, self.width() - 22 - idw, 34 if wraps else 18)
+        if wraps:      # two lines; a name still too long for them is cut at the end of the second
+            fm = QFontMetrics(normal)
+            words, first = self.category['name'].split(), ''
+            while words and fm.horizontalAdvance((first + ' ' + words[0]).strip()) <= name_rect.width():
+                first = (first + ' ' + words.pop(0)).strip()
+            second = fm.elidedText(' '.join(words), Qt.TextElideMode.ElideRight, name_rect.width())
+            p.drawText(QRect(name_rect.x(), 5, name_rect.width(), 17), Qt.AlignmentFlag.AlignVCenter, first)
+            p.drawText(QRect(name_rect.x(), 22, name_rect.width(), 17), Qt.AlignmentFlag.AlignVCenter, second)
+        else:
+            p.drawText(name_rect, Qt.AlignmentFlag.AlignVCenter, self.category['name'])
         he = QFont(self.font()); he.setPixelSize(11); p.setFont(he); p.setPen(QColor(t['muted']))
         p.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
-        bottom = QRect(9, 24, self.width() - 18, 16)
+        bottom = QRect(9, self.height() - 22, self.width() - 18, 16)
         p.drawText(bottom, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight,
                    QFontMetrics(he).elidedText(self.category['he'], Qt.TextElideMode.ElideRight, bottom.width()))
 
@@ -309,7 +337,7 @@ class OpinionCard(QFrame):
             bits = {'owner': [d.get('verdict', '').replace('_', ' '), d.get('owner_label') and 'tag: ' + d['owner_label'],
                               d.get('from'), (op.get('at') or '')[:16].replace('T', ' ')],
                     'ai': [d.get('model'), d.get('prompt_version'), d.get('final_label') and d['final_label'] != effective
-                           and 'acted on ' + d['final_label'], d.get('ai_status') not in (None, 'real') and d.get('ai_status')],
+                           and 'acted on ' + d['final_label'], d.get('ai_status') not in (None, 'real') and f"AI call: {d['ai_status']}"],
                     'teacher': [d.get('model'), d.get('rank') and f"rank {d['rank']}", d.get('zone'), d.get('movement')],
                     'old': [d.get('by'), d.get('batch'), d.get('delete') and 'marked [delete]']}.get(self.who, [])
             self.detail.setText('  ·  '.join(str(b) for b in bits if b))
