@@ -977,17 +977,14 @@ def follow_up_camera_receipts(book: ReceiptBook, registry: Any, deliverer: Any, 
     return sent
 
 
-def _house_store(live_dir: str, mute: Any) -> Any:
-    """The house state's one writer, on the box's own log (next to the brain's other registry files)."""
+def _house_store(mute: Any) -> Any:
+    """The house state's one writer, on the file house_state itself names: its storage is moving to a data dir
+    that house_state resolves, so the brain never builds that path."""
     try:
-        from .. import boxconfig  # noqa: PLC0415
-        from ..house_state import FILE_NAME, HouseStateStore, default_path  # noqa: PLC0415
+        from .. import house_state  # noqa: PLC0415
 
-        # On the box the file's place belongs to house_state (it moves with the data dir); only a test's own
-        # live_dir gets a file of its own.
-        same = os.path.normcase(os.path.abspath(live_dir)) == os.path.normcase(os.path.abspath(boxconfig.PRODUCTION_LIVE_DIR))
-        path = default_path() if same else os.path.join(live_dir, ".registry", FILE_NAME)
-        return HouseStateStore(path, mute_path=getattr(mute, "path", None))
+        return house_state.HouseStateStore(house_state.default_path(),
+                                           mute_path=getattr(mute, "path", None) or house_state.default_mute_path())
     except Exception as exc:  # noqa: BLE001 - the assistant works without it
         log.warning("House state not available to the assistant: %s", exc)
         return None
@@ -1046,7 +1043,7 @@ def build_owner_agent(box_settings: Dict[str, Any], env: Dict[str, str], mute: A
         request_restart=_restart_running_mode,
         embedder=make_embedder(env, os.path.join(live_dir, ".alert_embeddings.json")),
         retention_days=retention, set_option=boxconfig.set_option, read_settings=boxconfig.load_box_settings,
-        alert_settings=alert_settings, house=_house_store(live_dir, mute),
+        alert_settings=alert_settings, house=_house_store(mute),
     )
     def quiet_log_on() -> bool:
         return bool(boxconfig.load_box_settings().get("quiet_log", False))
