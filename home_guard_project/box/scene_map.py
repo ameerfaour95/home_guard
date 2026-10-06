@@ -475,24 +475,31 @@ def _track_text(scene: SceneMap, track: Track, label: str) -> Tuple[str, str, Op
 
 
 def scene_facts(scene: SceneMap, tracks: Sequence[Track]) -> SceneFacts:
-    """What the map says about these tracks. NO_FACTS when the map is not informative or nobody was tracked."""
+    """What the map says about these tracks. NO_FACTS when the map is not informative or nobody was tracked.
+
+    The ground is the people's (vehicles only decide it when nobody is seen), cautiously: anyone on the owner's
+    ground makes it ``mine``; anyone the map cannot place keeps it unknown (""); only then the neighbour's, else
+    public. A passing car on the street never makes a person somewhere else "public"."""
     if not scene.informative or not tracks:
         return NO_FACTS
     texts: List[str] = []
-    best: Tuple[int, str, str] = (len(_GROUND_ORDER), "", "")   # (ground rank, ground, zone)
+    judged: List[Tuple[str, str, Optional[Area]]] = []          # (kind, ground, last area) for every track
     crossed = False
     for kind in ("person", "vehicle"):
-        for i, track in enumerate([t for t in tracks if t.kind == kind][:MAX_TRACKS_PER_KIND], 1):
+        for i, track in enumerate([t for t in tracks if t.kind == kind], 1):
             text, ground, last, came_in = _track_text(scene, track, f"{kind} {i}")
-            texts.append(text)
+            if i <= MAX_TRACKS_PER_KIND:
+                texts.append(text)
+            judged.append((kind, ground, last))
             crossed = crossed or came_in
-            rank = _GROUND_ORDER.index(ground) if ground in _GROUND_ORDER else len(_GROUND_ORDER)
-            if rank < best[0] or (not best[2] and last is not None and rank == best[0]):
-                best = (rank, ground, last.zone if last is not None else "")
+    deciders = [j for j in judged if j[0] == "person"] or judged
+    grounds = {g for _, g, _ in deciders}
+    ground = next((g for g in (MINE, "", NEIGHBOUR, PUBLIC) if g in grounds), "")
+    zone = next((last.zone for _, g, last in deciders if g == ground and last is not None), "")
     line = "ZONE FACTS (from code): "
     for i, text in enumerate(texts):
         piece = ("; " if i else "") + text
         if len(line) + len(piece) > FACTS_LIMIT:
             break
         line += piece
-    return SceneFacts(line=line, ground=best[1], crossed_in=crossed, zone=best[2])
+    return SceneFacts(line=line, ground=ground, crossed_in=crossed, zone=zone)

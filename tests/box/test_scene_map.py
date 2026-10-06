@@ -215,6 +215,23 @@ class FactsTest(unittest.TestCase):
         self.assertIn("person 1", facts.line)
         self.assertIn("person 2", facts.line)
 
+    def test_people_decide_the_ground_and_an_unplaced_person_keeps_it_unknown(self) -> None:
+        m = sm.SceneMap("front", areas=(sm.Area("road", sm.WATCH, "street", tuple(RIGHT)),
+                                        sm.Area("yard", sm.MINE, "yard", tuple(TOP_RIGHT))))
+        # A person the map cannot place (left half) and a car driving along the road.
+        looks = [(0.0, [det(0, 0.10, 0.2, 0.20, 0.6), det(2, 0.55, 0.5, 0.65, 0.8)]),
+                 (1.0, [det(0, 0.11, 0.2, 0.21, 0.6), det(2, 0.70, 0.5, 0.80, 0.8)])]
+        facts = sm.scene_facts(m, sm.tracks_from_detections(looks))
+        self.assertEqual((facts.ground, facts.zone), ("", ""))
+        self.assertIn("vehicle 1", facts.line)
+        # Two people: one on the road, one unplaced: still unknown.
+        looks = [(0.0, [det(0, 0.10, 0.2, 0.20, 0.6), det(0, 0.70, 0.2, 0.80, 0.6)]),
+                 (1.0, [det(0, 0.11, 0.2, 0.21, 0.6), det(0, 0.71, 0.2, 0.81, 0.6)])]
+        self.assertEqual(sm.scene_facts(m, sm.tracks_from_detections(looks)).ground, "")
+        # Only a car on the road: the vehicle decides.
+        looks = [(0.0, [det(2, 0.55, 0.5, 0.65, 0.8)]), (1.0, [det(2, 0.70, 0.5, 0.80, 0.8)])]
+        self.assertEqual(sm.scene_facts(m, sm.tracks_from_detections(looks)).ground, "public")
+
     def test_no_facts_without_an_informative_map_or_without_tracks(self) -> None:
         looks = [(0.0, [det(0, 0.70, 0.2, 0.80, 0.6)]), (5.0, [det(0, 0.72, 0.2, 0.82, 0.6)])]
         migrated = sm.SceneMap("front", watched=tuple(LEFT))
