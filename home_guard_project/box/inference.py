@@ -608,7 +608,7 @@ class GptBackend:
         raw = resp.choices[0].message.content or ""
         self.last_usage = usage_of(resp)
         answered = getattr(resp, "model", None)
-        self.last_model = answered.strip() if isinstance(answered, str) and answered.strip() else self._model
+        self.last_model = answered.strip() if isinstance(answered, str) and answered.strip() else getattr(self, "_model", "")
         return raw, parse_vlm_json(raw)
 
     def _complete(self, content: List[Dict[str, Any]], response_format: Dict[str, Any]) -> Any:
