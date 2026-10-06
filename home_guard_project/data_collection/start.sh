@@ -121,7 +121,10 @@ ok "config.yaml found."
 # ============================================================================
 step "Camera Setup"
 
-CAMERAS_YAML="${SCRIPT_DIR}/cameras.yaml"
+# Per-machine config lives where the layout keeps it (home_guard_project/box/paths.py).
+CAMERAS_YAML="$($UVRUN python -m home_guard_project.box paths --get cameras_yaml 2>/dev/null || true)"
+[[ -n "$CAMERAS_YAML" ]] || CAMERAS_YAML="${SCRIPT_DIR}/cameras.yaml"
+if command -v cygpath &>/dev/null; then CAMERAS_YAML="$(cygpath -m "$CAMERAS_YAML")"; fi
 
 need_discover=false
 

@@ -134,7 +134,11 @@ if ($ForgetOtherWifi) {
 
 Step '3/3 network.json'
 $net = [ordered]@{ mode = $mode; wifi_ssid = $wifiSsid; rescue_ssid = $rescueSsid }
-$net | ConvertTo-Json | Set-Content -Path (Join-Path $BoxDir 'network.json') -Encoding ascii
+# In the box's config folder (box_paths.ps1): C:\ProgramData\HomeGuard\config, or box\ on the old layout.
+. (Join-Path $BoxDir 'box_paths.ps1')
+$netJson = (Get-HomeGuardPaths).NetworkJson
+New-Item -ItemType Directory -Force -Path (Split-Path $netJson) | Out-Null
+$net | ConvertTo-Json | Set-Content -Path $netJson -Encoding ascii
 Ok "Wrote network.json (mode: $mode)"
 Write-Host ''
 Ok 'Network setup finished.'
