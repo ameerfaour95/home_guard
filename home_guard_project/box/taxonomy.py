@@ -246,17 +246,24 @@ def contextual_label(category_id: str, raw_label: str, ctx: Context, visibility:
                      open_case=bool(reasons), reasons=tuple(reasons))
 
 
-def expectation_lines(ctx: Context, categories: Iterable[str] = ()) -> List[str]:
-    """For the prompt's expectations block: categories whose meaning differs from a plain day, in this situation.
+def expectation_changes(ctx: Context, categories: Iterable[str] = ()) -> List[Tuple[str, str, str]]:
+    """``(id, now, by day)`` for the categories whose meaning differs from a plain day, in this situation.
     ``categories`` limits the list (default: every N and S)."""
     wanted = list(categories) or [c.id for c in CATEGORIES if c.group in ("N", "S")]
     day = Context(phase="day", house_state="home_awake")
-    lines = []
+    out = []
     for cid in wanted:
         now, usual = expectation(cid, ctx), expectation(cid, day)
         if now != usual:
-            lines.append(f"{cid} {BY_ID[cid].name}: {now} now (by day: {usual})")
-    return lines
+            out.append((cid, now, usual))
+    return out
+
+
+def expectation_lines(ctx: Context, categories: Iterable[str] = ()) -> List[str]:
+    """For the prompt's expectations block: categories whose meaning differs from a plain day, in this situation.
+    ``categories`` limits the list (default: every N and S)."""
+    return [f"{cid} {BY_ID[cid].name}: {now} now (by day: {usual})"
+            for cid, now, usual in expectation_changes(ctx, categories)]
 
 
 def prompt_list() -> str:
