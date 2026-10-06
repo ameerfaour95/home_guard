@@ -444,7 +444,7 @@ With `translator`, a cheap text model (`messenger.py`; Gemini 3.1 Flash Lite, ab
 
 ### The situational Eye (box.yaml)
 
-    eye_prompt: situational                # the default; legacy: the 2026-10-03 prompt
+    eye_prompt: situational                # legacy is the default until a situational version wins the eval
     camera_roles: {front_side: street, left_side_1: private}   # optional; else guessed from the name
     camera_zones: {main_door: [entrance, gate]}                # optional
 

@@ -439,7 +439,7 @@ class AlertSettings:
     conf_person: Optional[float] = None
     conf_vehicle: Optional[float] = None
     conf_animal: Optional[float] = None
-    eye_prompt: str = "situational"  # situational (default): eye_prompt.py with the situation; legacy: build_prompt
+    eye_prompt: str = "legacy"       # legacy (default until a situational version beats it on the eval); situational: eye_prompt.py
 
     def thresholds(self) -> Dict[str, float]:
         """The house's certainty per type (person / vehicle / animal)."""
@@ -474,7 +474,7 @@ class AlertSettings:
             conf_person=_optional_float(g("conf_person")),
             conf_vehicle=_optional_float(g("conf_vehicle")),
             conf_animal=_optional_float(g("conf_animal")),
-            eye_prompt=_eye_prompt_mode(g("eye_prompt", "situational")),
+            eye_prompt=_eye_prompt_mode(g("eye_prompt", "legacy")),
         )
 
 
@@ -482,12 +482,13 @@ EYE_PROMPT_MODES = ("legacy", "situational")
 
 
 def _eye_prompt_mode(value: Any) -> str:
-    """box.yaml ``eye_prompt``: ``situational`` (the default, eye_prompt.py) or ``legacy`` (the 2026-10-03 prompt);
-    anything else is the default."""
-    mode = str(value or "situational").strip().lower()
+    """box.yaml ``eye_prompt``: ``legacy`` (the default, the 2026-10-03 prompt) or ``situational`` (eye_prompt.py);
+    anything else is the default. Legacy stays the default because the 2026-10-06 eval on Qwen3.5-9B (the box's
+    primary) showed eye-v3 with more false alarms on our cameras (37% vs 26%) and fewer alerts caught (1/3 vs 3/3)."""
+    mode = str(value or "legacy").strip().lower()
     if mode not in EYE_PROMPT_MODES:
-        log.warning("Unknown eye_prompt '%s'; using situational.", value)
-        return "situational"
+        log.warning("Unknown eye_prompt '%s'; using legacy.", value)
+        return "legacy"
     return mode
 
 

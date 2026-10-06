@@ -106,7 +106,7 @@ class WorkerTest(unittest.TestCase):
                 mock.patch.object(inf, "owner_language", return_value="en"), \
                 mock.patch.object(inf, "_jpegs", return_value=[]), \
                 mock.patch.object(hs, "current", side_effect=lambda now, **kw: hs.scheduled(now)):
-            inf._worker(backend, {"alert_channel": "telegram"}, {}, settings or inf.AlertSettings(), CAM, [],
+            inf._worker(backend, {"alert_channel": "telegram"}, {}, settings or inf.AlertSettings(eye_prompt="situational"), CAM, [],
                         assistant, job)
         self.assertTrue(job.ready.is_set())
         return job, assistant
@@ -223,7 +223,8 @@ class WorkerTest(unittest.TestCase):
     def test_out_of_window_does_not_call_memory(self) -> None:
         fake = FakeMemory("quiet", case_note())
         job, assistant = self.run_worker(answer(), fake, ts=NIGHT,
-                                         settings=inf.AlertSettings(alert_start_hour=8, alert_end_hour=20))
+                                         settings=inf.AlertSettings(alert_start_hour=8, alert_end_hour=20,
+                                                                 eye_prompt="situational"))
         self.assertEqual(fake.calls, [])
         assistant.send_alert.assert_not_called()
 
