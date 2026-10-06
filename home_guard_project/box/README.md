@@ -347,13 +347,15 @@ On the box itself, without network: `uv run python -m home_guard_project.box sta
 
 ## Scoring the AI's prompt against our tags
 
-`eval_prompt.py` gives one repeatable score for the prompt the box sends to the AI, over every tagged home clip (about 220). It runs in two steps, because only the laptop can read `tagging/` on S3 and only the box needs the OpenAI key.
+`eval_prompt.py` gives one repeatable score for the prompt the box sends to the AI, over a frozen set of clips with our human labels. The current set is `home_guard_eval/eval_set_v2` on the laptop (see "The frozen eval set" below).
 
-**1. On the laptop: fetch the clips' frames.** This lists the `ameer_house*` tagging batches, finds each clip's video, and saves 5 frames spaced evenly across it. Re-running it fetches only what is missing; `--limit N` fetches at most N new clips, and `--batches` picks other batches.
+**1. On the laptop: build the set.** `prepare` reads `home_guard_dataset` (its `annotations/clips.jsonl` and `clips/`; a local folder, or `s3://security-camera-project-v1/home_guard_dataset` with the same paths) and saves 5 frames spaced evenly across every reviewed clip. Only `dataset_row()` in `eval_prompt.py` reads the dataset's fields, so a renamed field is fixed in one place. Re-running it reads only what is missing and keeps what the eval added on a clip (`category`, `subset`, `day_night`, `hard`); `--sources` and `--batches` narrow the clips, `--limit N` reads at most N new ones. `add --picks picks.jsonl` adds clips from outside the dataset, with 5 frames evenly spaced inside an annotated `segment` (the same sampling and size). `freeze` writes `FROZEN.json` (sha256 of the manifest and every frame, one set hash and the set's make-up); after that, `prepare` and `add` refuse the folder.
 
 ```bash
+.venv/Scripts/python.exe -m home_guard_project.box.eval_prompt prepare --out eval_set --dataset <home_guard_dataset>
 env -u SSLKEYLOGFILE -u PYTHONSTARTUP AWS_CA_BUNDLE=<bundle.pem> \
-  .venv/Scripts/python.exe -m home_guard_project.box.eval_prompt prepare --out eval_set
+  .venv/Scripts/python.exe -m home_guard_project.box.eval_prompt add --dir eval_set --picks picks.jsonl
+.venv/Scripts/python.exe -m home_guard_project.box.eval_prompt freeze --dir eval_set
 ```
 
 Python can only reach S3 from this laptop with that prefix. The antivirus sets `SSLKEYLOGFILE`, which crashes Python's TLS ("no OPENSSL_Applink"), and it intercepts TLS with a root certificate that is in the Windows store but not in Python's own list ("CERTIFICATE_VERIFY_FAILED"). Build `bundle.pem` once from certifi's bundle plus the Windows `ROOT` and `CA` stores (`ssl.enum_certificates`, converted with `ssl.DER_cert_to_PEM_cert`) and point `AWS_CA_BUNDLE` at it. Never turn certificate checks off. The box does not need any of this.
@@ -371,6 +373,8 @@ scp -i ~/.ssh/homeguard_box -r eval_set <user>@<box-ip>:C:/home_guard/eval_set
 .venv\Scripts\python.exe -m home_guard_project.box.eval_prompt run --dir eval_set --prompt-file new_prompt.txt
 .venv\Scripts\python.exe -m home_guard_project.box.eval_prompt summary --dir eval_set --tag <tag>
 ```
+
+If the folder is frozen, `run` first checks every hash: a changed set prints a loud warning (its scores do not compare with the frozen ones), and `--strict-frozen` refuses with exit code 4, before any call, when the set changed or was never frozen. The summary names the set (`eval set  frozen <sha12>`).
 
 `--prompt-file` tries a new wording without touching `inference.py`; `{camera_name}`, `{local_time_str}` and `{owner_language}` (default `en`) in the file are filled in. Results go to `eval_set/results/<tag>.jsonl`, `.csv` and `.summary.json`, named by the tag. A stopped run continues where it left off, and a clip that failed is asked again. `--fake` checks the setup without calling the AI.
 
@@ -394,13 +398,14 @@ What the score means:
 | words per summary | The AI's length against ours |
 | errors | Clips the AI could not answer; they are left out of the other lines |
 | outdated | Shown only when some saved answers were for other frames, camera or time (not yet asked again); they are left out |
-| day / night, home / external | The same counts split by the clip's time (night 19:00-05:59) and by where it comes from (our cameras vs the UCA and SmartHome-Bench batches) |
+| day / night, home / external | The same counts split by the clip's time (night 19:00-05:59; the manifest's `day_night` for clips without a time) and by where it comes from (our own cameras vs everything else, including the web videos imported into a home batch) |
+| misses set | The same counts on the hard cases only (`subset: misses`: night, partial occlusion, subtle attempts, loitering) |
 | missed alerts, false alarms | The clip names, to look at |
 | tokens per call, cost | What the provider billed, and $ per box per month at 150 and 300 calls a day (hosted models only) |
 
 ### Comparing vision models
 
-Every tagged batch can go into one eval set: `prepare --batches ameer_house_batch_1 ameer_house_batch_2 uca_dataset_batch smarthome_dataset_batch` (292 clips, 54 alerts on 2026-10-06).
+Run every model on the frozen set (`eval_set_v2`, see below) with `--strict-frozen`, so all the results in one table were made on the same frames.
 
 Small models run on the laptop GPU through Ollama (no key; `ollama pull <model>` first, and start the server with `OLLAMA_CONTEXT_LENGTH=8192`, because 5 frames are about 6,000 tokens); hosted ones through OpenRouter (`OPENROUTER_API_KEY` in `api_key.env`). On the laptop, Python's TLS needs the antivirus workaround: `env -u SSLKEYLOGFILE -u PYTHONSTARTUP SSL_CERT_FILE=<bundle.pem>`.
 
@@ -409,6 +414,10 @@ Small models run on the laptop GPU through Ollama (no key; `ollama pull <model>`
     .venv\Scripts\python.exe -m home_guard_project.box.eval_prompt compare --dir <eval_set> --default <Qwen3-VL-4B tag> --challenger <Qwen3.5-4B tag> --others <tags...> --reference <gpt-4o tag>
 
 `compare` prints one table and names the box's primary and fallback: Qwen3-VL-4B-Instruct primary and Qwen3.5-4B fallback, swapped only if Qwen3.5-4B catches more alerts (or as many with fewer false alarms) without newly missing a break-in and without more errors.
+
+### The frozen eval set
+
+`home_guard_eval/eval_set_v2` on the laptop, frozen 2026-10-06: 489 clips, 181 alerts (4 from our own cameras), 281 normal, 27 empty; a misses set of 108 hard alerts (night, partial occlusion, subtle attempts, loitering). Set sha256 `2054eca82da2...`. How it was built, the fields, the category mapping for the public datasets and the known limits are in `docs/eval/eval-set-v2.md`; what to film at home for the next set is in `docs/eval/staged-clips-shot-list.md`. The clips added in v2 (`picks_v2.jsonl`, batches `uca_eval_v2` and `smarthome_eval_v2`) are test data: keep them out of training.
 
 ### The box's vision model settings (box.yaml)
 

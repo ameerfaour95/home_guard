@@ -64,6 +64,9 @@ class SituationForClipTest(unittest.TestCase):
         self.assertEqual((sit.phase, sit.house_state, sit.time), ("late_night", "home_asleep", "03:10"))
         unknown = ev.eye_situation_for({"clip_id": "Burglary001", "camera": "external"})
         self.assertEqual((unknown.phase, unknown.house_state), ("day", "home_awake"))
+        # A public clip the set marks as night is asked as a dark evening, not as noon.
+        dark = ev.eye_situation_for({"clip_id": "Burglary002", "camera": "external", "day_night": "night"})
+        self.assertEqual((dark.phase, dark.dark, dark.house_state, dark.time), ("evening", True, "home_awake", "22:00"))
 
 
 class FakeEyeTest(unittest.TestCase):
