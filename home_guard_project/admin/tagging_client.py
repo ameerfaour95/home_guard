@@ -46,6 +46,15 @@ class HttpTagging:
             raise ValidationError(detail)
         raise ServerError()
 
+    def confirm_consent(self, customer_id, recorded_utc):
+        """Settle the consent the box recorded at setup (the server applies exactly that proposal)."""
+        from .models import CustomerOut, decode
+        data = self._tag_json('POST', f'customers/{int(customer_id)}/consent/confirm', json=dict(recorded_utc=recorded_utc))
+        try:
+            return decode(CustomerOut, data)
+        except (ValueError, TypeError, KeyError, AttributeError):
+            raise ServerError() from None
+
     def tagging_state(self):
         return self._tag_json('GET', 'tagging/state')
 
@@ -74,7 +83,7 @@ class DemoTagging:
     def _tag_studio(self):
         if getattr(self, '_tagstudio', None) is None:
             root = Path(__file__).parent / 'demo_data' / 'tagging'
-            paths = StudioPaths(dataset=root / 'dataset', eval_results=root / 'eval' / 'results',
+            paths = StudioPaths(dataset=root / 'dataset', eval_results=(root / 'eval' / 'results',),
                                 exports=Path.home() / 'AppData' / 'Local' / 'HomeGuardAdmin' / 'demo_exports')
             self._tagstudio = _MemoryStudio(paths)
         return self._tagstudio

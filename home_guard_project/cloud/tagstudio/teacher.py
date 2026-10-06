@@ -68,8 +68,9 @@ class EvalResultsTeacher:
 
     name = "eval"
 
-    def __init__(self, results_dir: str, prefer: Sequence[str] = ()):
-        self.results_dir = str(results_dir)
+    def __init__(self, results_dirs, prefer: Sequence[str] = ()):
+        dirs = [results_dirs] if isinstance(results_dirs, (str, os.PathLike)) else list(results_dirs)
+        self.results_dirs = [str(d) for d in dirs]
         self.prefer = tuple(p for p in prefer if p)
         self._stamp: Optional[tuple] = None
         self._ranking: List[Dict[str, Any]] = []
@@ -77,7 +78,7 @@ class EvalResultsTeacher:
         self._lock = threading.Lock()
 
     def _files(self) -> List[str]:
-        return sorted(p for p in glob.glob(os.path.join(glob.escape(self.results_dir), "*.jsonl"))
+        return sorted(p for d in self.results_dirs for p in glob.glob(os.path.join(glob.escape(d), "*.jsonl"))
                       if not os.path.basename(p).startswith("fake"))
 
     def _signature(self) -> tuple:
@@ -96,7 +97,10 @@ class EvalResultsTeacher:
             return
         ranking, answers = [], {}
         for path in self._files():
+            # eval_set and eval_set_v2 may hold a results file of the same name: the folder keeps them apart
             tag = os.path.basename(path)[:-len(".jsonl")]
+            if len(self.results_dirs) > 1:
+                tag = f"{os.path.basename(os.path.dirname(os.path.dirname(path)))}/{tag}"
             summary: Dict[str, Any] = {}
             try:
                 with open(path[:-len(".jsonl")] + ".summary.json", encoding="utf-8") as f:
@@ -145,7 +149,7 @@ class EvalResultsTeacher:
 
     def status(self) -> Dict[str, Any]:
         ranking = self.ranking()
-        return {"name": self.name, "results_dir": self.results_dir, "models": len(ranking),
+        return {"name": self.name, "results_dirs": self.results_dirs, "models": len(ranking),
                 "best": ranking[0]["model"] if ranking else "", "ranking": ranking[:5]}
 
 

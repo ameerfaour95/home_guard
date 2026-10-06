@@ -96,6 +96,10 @@ class ConsentProposal(BaseModel):
     installer: str
 
 
+class ConsentConfirm(BaseModel):
+    recorded_utc: datetime  # the proposal the admin was shown: a newer one must be read before it is confirmed
+
+
 class CustomerOut(CustomerIn):
     id: int
     consent_proposed: Optional[ConsentProposal] = None  # admin/support only: what the box recorded, unconfirmed

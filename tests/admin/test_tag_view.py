@@ -4,7 +4,7 @@ import httpx
 import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QCheckBox
+from PySide6.QtWidgets import QCheckBox, QLabel, QPushButton
 
 from home_guard_project.admin.demo_backend import DemoBackend
 from home_guard_project.admin.http_backend import HttpBackend
@@ -98,6 +98,8 @@ def test_http_backend_reports_consent_and_validation_details():
             return httpx.Response(403, json={'detail': 'This customer has not agreed to training use'})
         if request.url.path.endswith('/tagging/tag'):
             return httpx.Response(422, json={'detail': "category: 'Q1' is not one of N1, ..."})
+        if request.url.path.endswith('/customers/7/consent/confirm'):
+            return httpx.Response(409, json={'detail': "No consent was recorded at this customer's setup: consent can only come from the customer"})
         if request.url.path.endswith('/artifacts/5/access'):
             return httpx.Response(403, json={'detail': 'This customer has not agreed to recordings access'})
         return httpx.Response(200, json={'items': [], 'count': 0})
@@ -108,6 +110,8 @@ def test_http_backend_reports_consent_and_validation_details():
         backend.tagging_save('ev:1', {'category': 'Q1'})
     with pytest.raises(ForbiddenError, match="customer's page"):
         backend.artifact_access(5)
+    with pytest.raises(ValidationError, match='can only come from the customer'):
+        backend.confirm_consent(7, '2026-10-02T10:00:00Z')
     assert backend.tagging_queue()['count'] == 0
 
 
@@ -118,15 +122,32 @@ def test_shell_has_a_tag_screen_and_studio_links_to_it(widgets, wait):
     assert shell.navigation['Tag'].isChecked()
 
 
-def test_customer_consent_confirmation(widgets, wait):
+def test_consent_can_only_confirm_what_the_box_recorded(widgets, wait):
     b = DemoBackend()
     screen = CustomerScreen(b, 'dark', 'admin'); widgets.append(screen); screen.resize(1366, 768); screen.show()
-    screen.open(1); wait(lambda: screen.customer is not None and not screen.runner.busy, 5)
-    assert screen.consent_button.isVisible()
+    screen.open(3); wait(lambda: screen.customer is not None and not screen.runner.busy, 5)
+    assert screen.consent_button.isVisible() and screen.consent_button.text() == 'Confirm consent given at setup…'
+    assert screen.consent_note.isVisible() and 'nobody has confirmed it yet' in screen.consent_note.text()
     dialog = screen.review_consent()
-    for box in dialog.findChildren(QCheckBox):
-        box.setChecked(False)
+    texts = [w.text() for w in dialog.findChildren(QLabel)]
+    assert any('2026-10-02 09:30' in t and 'Maya' in t for t in texts)
+    assert not dialog.findChildren(QCheckBox)                  # nothing to tick: only the customer's own answers
     dialog.accept()
     wait(lambda: not screen.consent_runner.busy and not screen.runner.busy and screen.customer is not None
-         and not screen.customer.consent_training, 5)
-    assert b.customer(1).consent_recordings is False
+         and screen.customer.consent_training, 5)
+    assert b.customer(3).consent_proposed is None and not screen.consent_note.isVisible()
+    with pytest.raises(ValidationError, match='can only come from the customer'):
+        b.confirm_consent(3, '2026-10-02T09:30:00Z')            # nothing left to confirm
+
+
+def test_no_proposal_means_nothing_to_confirm(widgets, wait):
+    b = DemoBackend()
+    screen = CustomerScreen(b, 'dark', 'admin'); widgets.append(screen); screen.resize(1366, 768); screen.show()
+    screen.open(2); wait(lambda: screen.customer is not None and not screen.runner.busy, 5)
+    assert screen.consent_button.text() == 'Consent…'
+    dialog = screen.review_consent()
+    assert any('nothing to confirm' in w.text() for w in dialog.findChildren(QLabel))
+    assert [x.text() for x in dialog.findChildren(QPushButton)] == ['Close']
+    from dataclasses import replace
+    with pytest.raises(ValidationError, match='gave at setup'):
+        b.update_customer(replace(b.customer(2), consent_live=True))

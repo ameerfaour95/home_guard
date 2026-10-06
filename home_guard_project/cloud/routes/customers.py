@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from .. import audit, redact
 from ..deps import NAME_MAX, NOTES_MAX, SessionDep, check_length, require_id, require_role
 from ..models import Customer, Device, Staff
-from ..schemas import CustomerIn, CustomerOut
+from ..schemas import ConsentConfirm, CustomerIn, CustomerOut
 from .fleet import build_summaries, now_of
 
 router = APIRouter(tags=["customers"])
@@ -16,6 +16,12 @@ _FIELDS = tuple(CustomerIn.model_fields)
 _NOT_FOUND = "Customer not found"
 _CONSENTS = ("consent_live", "consent_recordings", "consent_training")
 TIMEZONE_MAX = 64  # the column's width
+# Consent comes from the customer, through the box's setup: an admin settles what the box recorded and may withdraw
+# consent, but never grants what the customer did not give.
+NO_PROPOSAL = "No consent was recorded at this customer's setup: consent can only come from the customer"
+GRANT_REFUSED = ("Consent comes from the customer: confirm the consent this customer gave at setup instead of "
+                 "granting it here")
+STALE_PROPOSAL = "The box recorded a newer answer from this customer: reload and check it again"
 
 
 def _out(session: Session, request: Request, c: Customer) -> CustomerOut:
@@ -45,6 +51,8 @@ def list_customers(request: Request, session: Session = SessionDep):
 def create_customer(body: CustomerIn, request: Request, staff: Staff = Depends(require_role("admin")),
                     session: Session = SessionDep):
     _check(body)
+    if any(getattr(body, f) for f in _CONSENTS):  # a new customer has given nothing yet
+        raise HTTPException(status_code=422, detail=GRANT_REFUSED)
     c = Customer(**body.model_dump())
     session.add(c)
     session.flush()
@@ -65,6 +73,10 @@ def update_customer(customer_id: int, body: CustomerIn, request: Request,
     # notes). The audit row names the changed fields only, never their values; a no-op writes no row.
     _check(body)
     c = _get(session, customer_id)
+    proposed = c.consent_proposed if isinstance(c.consent_proposed, dict) else {}
+    for f in sorted(body.model_fields_set & set(_CONSENTS)):
+        if getattr(body, f) and not getattr(c, f) and not proposed.get(f.removeprefix("consent_")):
+            raise HTTPException(status_code=422, detail=GRANT_REFUSED)
     old_name = c.name
     changed = []
     for f in sorted(body.model_fields_set & set(_FIELDS)):
@@ -93,4 +105,33 @@ def update_customer(customer_id: int, body: CustomerIn, request: Request,
     if changed:
         audit.record(session, staff.id, "customer_update", target=c.name, customer_id=c.id,
                      detail={"changed": changed}, ts=now_of(request))
+    return _out(session, request, c)
+
+
+@router.post("/customers/{customer_id}/consent/confirm", response_model=CustomerOut)
+def confirm_consent(customer_id: int, body: ConsentConfirm, request: Request,
+                    staff: Staff = Depends(require_role("admin")), session: Session = SessionDep):
+    # Settles the consent the customer gave at setup: exactly what the box recorded, nothing more.
+    c = _get(session, customer_id)
+    proposed = c.consent_proposed if isinstance(c.consent_proposed, dict) else None
+    if proposed is None:
+        raise HTTPException(status_code=409, detail=NO_PROPOSAL)
+    from ..discovery import _utc
+
+    recorded = _utc(proposed.get("recorded_utc"))
+    if recorded is None or recorded != _utc(body.recorded_utc.isoformat()):
+        raise HTTPException(status_code=409, detail=STALE_PROPOSAL)
+    changed = []
+    for f in _CONSENTS:
+        value = bool(proposed.get(f.removeprefix("consent_")))
+        if getattr(c, f) != value:
+            changed.append(f)
+            setattr(c, f, value)
+    c.consent_proposed = None
+    c.consent_recorded_utc = recorded  # the customer's own answer is the newest one applied
+    audit.record(session, staff.id, "consent_confirmed", target=c.name, customer_id=c.id,
+                 detail={"fields": changed, "proposal": {k: proposed.get(k) for k in
+                                                         ("live", "recordings", "training", "recorded_utc", "installer")}},
+                 ts=now_of(request))
+    session.flush()
     return _out(session, request, c)

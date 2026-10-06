@@ -72,9 +72,13 @@ Unsaved edits are kept when you move to another clip.
 | Customers' alerts and answers | The Cloud database (indexed from S3) | |
 | Customers' alerts and answers (local copies) | `owner_feedback/` inside the dataset folder | |
 | Old tags | The unified dataset: `home_guard_data/dataset` next to the app folder | `HOMEGUARD_DATASET_DIR` |
-| Teacher suggestions | The eval results: `home_guard_eval/eval_set/results` | `HOMEGUARD_EVAL_DIR` |
+| Teacher suggestions | The eval results in `eval_set/results` and `eval_set_v2/results` of `home_guard_data/eval` (else `home_guard_eval`) | `HOMEGUARD_EVAL_DIR` |
 
-A clip from a household that has not given training consent stays in the queue, but its video does not open. Confirm the box's consent proposal with **Confirm consent…** on the customer's page.
+A clip from a household that has not given training consent stays in the queue, but its video does not open.
+
+Consent comes from the customer, through the box's setup. When a box recorded the customer's answers, the customer's page shows **Confirm consent given at setup…**. It lists what the customer answered and when, and confirming applies exactly those answers. The confirmation goes into the audit log with your name and the proposal.
+
+An admin cannot add consent the customer did not give. A customer with no setup answers has nothing to confirm and stays blocked. Withdrawing consent is always possible.
 
 ### Exports
 

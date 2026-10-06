@@ -38,5 +38,12 @@
       "alerts_24h": 6,
       "false_alarms_7d": 2
     }
-  ]
+  ],
+  "consent_proposed": {
+    "live": true,
+    "recordings": true,
+    "training": true,
+    "recorded_utc": "2026-10-02T09:30:00Z",
+    "installer": "Maya"
+  }
 }

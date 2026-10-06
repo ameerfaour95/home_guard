@@ -697,6 +697,20 @@
         "title": "Completeness",
         "type": "object"
       },
+      "ConsentConfirm": {
+        "properties": {
+          "recorded_utc": {
+            "format": "date-time",
+            "title": "Recorded Utc",
+            "type": "string"
+          }
+        },
+        "required": [
+          "recorded_utc"
+        ],
+        "title": "ConsentConfirm",
+        "type": "object"
+      },
       "ConsentProposal": {
         "properties": {
           "installer": {
@@ -3356,6 +3370,63 @@
           }
         ],
         "summary": "Update Customer",
+        "tags": [
+          "customers"
+        ]
+      }
+    },
+    "/v1/customers/{customer_id}/consent/confirm": {
+      "post": {
+        "operationId": "confirm_consent_v1_customers__customer_id__consent_confirm_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "customer_id",
+            "required": true,
+            "schema": {
+              "title": "Customer Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsentConfirm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Confirm Consent",
         "tags": [
           "customers"
         ]

@@ -50,7 +50,7 @@ class TagStudio:
         self.paths, self.bucket = paths, bucket
         self.dataset = DatasetSource(str(paths.dataset), bucket=bucket)
         self.owner_feedback = OwnerFeedbackSource(str(paths.dataset / "owner_feedback"))
-        self.eval_teacher = EvalResultsTeacher(str(paths.eval_results))
+        self.eval_teacher = EvalResultsTeacher([str(p) for p in paths.eval_results])
         self.ask_teacher: Optional[OpenAICompatibleTeacher] = None
         self.teacher_error = ""
         if paths.teacher_base_url and paths.teacher_model:
@@ -119,7 +119,7 @@ class TagStudio:
             teachers.append({"name": "openai", "error": self.teacher_error})
         return {"taxonomy": taxonomy_table(), "fields": FIELDS, "counts": counts, "total": len(rows),
                 "sources": sources, "teachers": teachers, "can_ask_teacher": self.ask_teacher is not None,
-                "paths": {"dataset": str(self.paths.dataset), "eval_results": str(self.paths.eval_results),
+                "paths": {"dataset": str(self.paths.dataset), "eval_results": "; ".join(str(p) for p in self.paths.eval_results),
                           "exports": str(self.paths.exports)}}
 
     def queue(self, session, tier: str = "open", origin: str = "", text: str = "", limit: int = 2000

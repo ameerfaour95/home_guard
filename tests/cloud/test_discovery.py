@@ -387,3 +387,53 @@ def test_staff_names_cannot_impersonate_system_actors(capsys):
                                              "--role", "admin"])
     assert manage.cmd_create_staff(args) == 1
     assert "system:" in capsys.readouterr().err
+
+
+def _discovered(client, s3):
+    from home_guard_project.cloud.db import session_scope
+
+    s3.client.put_object(Bucket=b.BUCKET, Key="dataset_dana_house/_status/registration.json",
+                         Body=json.dumps(registration()).encode())
+    with session_scope(client.app.state.engine) as s:
+        discovery.discover(s, s3, now=NOW)
+
+
+def test_confirm_settles_exactly_the_consent_the_customer_gave_at_setup(client, staff_factory, s3):
+    from home_guard_project.cloud.db import session_scope
+
+    _discovered(client, s3)
+    staff, _, _, admin = staff_factory("admin")
+    cust = client.get("/v1/customers", headers=admin).json()[0]
+    url = f"/v1/customers/{cust['id']}/consent/confirm"
+    # a grant beyond the proposal (training was not given) is refused, in PATCH as well
+    r = client.patch(f"/v1/customers/{cust['id']}", headers=admin, json={"name": cust["name"], "consent_training": True})
+    assert r.status_code == 422
+    assert client.post(url, headers=admin, json={"recorded_utc": "2026-10-01T10:00:00Z"}).status_code == 409  # stale
+    r = client.post(url, headers=admin, json={"recorded_utc": cust["consent_proposed"]["recorded_utc"]})
+    assert r.status_code == 200, r.text
+    got = r.json()
+    assert (got["consent_live"], got["consent_recordings"], got["consent_training"]) == (True, True, False)
+    assert got["consent_proposed"] is None
+    conf = next(a for a in client.get("/v1/audit", headers=admin).json()["items"] if a["action"] == "consent_confirmed")
+    assert conf["staff"] == staff.name and conf["ts"] and conf["detail"]["fields"] == ["consent_live", "consent_recordings"]
+    assert conf["detail"]["proposal"]["installer"] == "Ameer"
+    assert conf["detail"]["proposal"]["recorded_utc"].startswith("2026-10-02T10:00:00")
+    with session_scope(client.app.state.engine) as s:
+        assert s.get(m.Customer, cust["id"]).consent_recorded_utc == datetime(2026, 10, 2, 10, tzinfo=timezone.utc)
+    # nothing left to confirm: blocked with a clear message
+    r = client.post(url, headers=admin, json={"recorded_utc": "2026-10-02T10:00:00Z"})
+    assert r.status_code == 409 and "can only come from the customer" in r.json()["detail"]
+    # withdrawing is always allowed
+    r = client.patch(f"/v1/customers/{cust['id']}", headers=admin, json={"name": cust["name"], "consent_live": False})
+    assert r.status_code == 200 and r.json()["consent_live"] is False
+
+
+@pytest.mark.parametrize("role", ["support", "labeler"])
+def test_only_admins_confirm_consent(client, staff_factory, s3, role):
+    _discovered(client, s3)
+    _, _, _, admin = staff_factory("admin")
+    _, _, _, other = staff_factory(role)
+    cust = client.get("/v1/customers", headers=admin).json()[0]
+    r = client.post(f"/v1/customers/{cust['id']}/consent/confirm", headers=other,
+                    json={"recorded_utc": cust["consent_proposed"]["recorded_utc"]})
+    assert r.status_code == 403

@@ -204,6 +204,16 @@ def test_eval_teacher_takes_the_strongest_model_per_clip(tmp_path):
     assert EvalResultsTeacher(results, prefer=["weak"]).suggest(ClipItem("ds:a", "a", "dataset")).label == "normal"
 
 
+def test_eval_teacher_reads_eval_set_and_eval_set_v2(tmp_path):
+    v1, v2 = tmp_path / "eval" / "eval_set" / "results", tmp_path / "eval" / "eval_set_v2" / "results"
+    eval_results(str(v1), "p__m", "m", {"a": "normal"}, 0.5, 0.3)
+    eval_results(str(v2), "p__m", "m", {"a": "escalation", "b": "suspicious"}, 0.9, 0.1)
+    teacher = EvalResultsTeacher(StudioPaths.resolve(env={"HOMEGUARD_EVAL_DIR": str(tmp_path / "eval")}).eval_results)
+    assert [r["tag"] for r in teacher.ranking()] == ["eval_set_v2/p__m", "eval_set/p__m"]
+    assert teacher.suggest(ClipItem("ds:a", "a", "dataset")).label == "escalation"
+    assert teacher.suggest(ClipItem("ds:b", "b", "dataset")).label == "suspicious"
+
+
 def test_openai_teacher_asks_once_and_caches(tmp_path):
     class Completions:
         def __init__(self):
@@ -337,9 +347,11 @@ def test_media_grants_are_signed_and_expire(tmp_path):
 
 def test_paths_flag_then_env_then_default(tmp_path):
     env = {"HOMEGUARD_DATASET_DIR": str(tmp_path / "env_ds"), "HOMEGUARD_EVAL_DIR": str(tmp_path / "ev")}
-    (tmp_path / "ev" / "results").mkdir(parents=True)
+    for folder in ("eval_set/results", "eval_set_v2/results"):
+        (tmp_path / "ev" / folder).mkdir(parents=True)
     p = StudioPaths.resolve(env=env)
-    assert p.dataset == tmp_path / "env_ds" and p.eval_results == tmp_path / "ev" / "results"
+    assert p.dataset == tmp_path / "env_ds"
+    assert p.eval_results == (tmp_path / "ev" / "eval_set" / "results", tmp_path / "ev" / "eval_set_v2" / "results")
     assert p.exports == tmp_path / "studio_exports"
     flagged = StudioPaths.resolve(env=env, dataset=str(tmp_path / "flag"), exports=str(tmp_path / "out"))
     assert flagged.dataset == tmp_path / "flag" and flagged.exports == tmp_path / "out"

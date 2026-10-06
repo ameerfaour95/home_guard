@@ -404,7 +404,13 @@ def test_customer_patch_updates_only_the_fields_sent(client, staff_factory):
     _, _, _, adm = staff_factory("admin")
     full = {"name": "Acme", "timezone": "Europe/London", "consent_live": True, "consent_recordings": True,
             "consent_training": True, "notes": "gate code is private"}
-    cid = client.post("/v1/customers", headers=adm, json=full).json()["id"]
+    # consent comes from the customer (a confirmed setup proposal), never from the create request
+    assert client.post("/v1/customers", headers=adm, json=full).status_code == 422
+    cid = client.post("/v1/customers", headers=adm, json={**full, "consent_live": False, "consent_recordings": False,
+                                                         "consent_training": False}).json()["id"]
+    with session_scope(client.app.state.engine) as s:
+        c = s.get(m.Customer, cid)
+        c.consent_live = c.consent_recordings = c.consent_training = True
     r = client.patch(f"/v1/customers/{cid}", headers=adm, json={"name": "Acme Ltd"})
     assert r.status_code == 200, r.text
     assert r.json() | {"devices": []} == {**full, "name": "Acme Ltd", "id": cid, "devices": [], "consent_proposed": None}

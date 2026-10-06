@@ -6,7 +6,7 @@ from datetime import datetime, timezone, timedelta
 from threading import RLock
 from urllib.parse import urlsplit, unquote
 from pathlib import Path
-from .backend import ForbiddenError, ServerError
+from .backend import ForbiddenError, ServerError, ValidationError
 from .models import decode, TokenPair, StaffOut, FleetResponse, CustomerOut, EventPage, EventDetail, EventSummary, DetectionsOut, MediaAccess
 
 
@@ -55,11 +55,27 @@ class DemoBackend(DemoTagging, DemoAnnotations, DemoStudio):
             setattr(customer, key, value)
         return customer
 
+    def confirm_consent(self, customer_id, recorded_utc):
+        customer = self.customer(customer_id)
+        proposed = customer.consent_proposed
+        if not proposed:
+            raise ValidationError("No consent was recorded at this customer's setup: consent can only come from the customer")
+        if proposed.get('recorded_utc') != recorded_utc:
+            raise ValidationError('The box recorded a newer answer from this customer: reload and check it again')
+        self.__dict__.setdefault('_customer_changes', {}).setdefault(int(customer_id), {}).update(
+            consent_live=bool(proposed.get('live')), consent_recordings=bool(proposed.get('recordings')),
+            consent_training=bool(proposed.get('training')), consent_proposed=None)
+        return self.customer(customer_id)
+
     def update_customer(self, customer):
         self._identity_access()
         changes = {k: getattr(customer, k) for k in ('name', 'timezone', 'consent_live', 'consent_recordings',
                                                        'consent_training', 'notes')}
-        changes['consent_proposed'] = None
+        current = self.customer(customer.id)
+        proposed = current.consent_proposed or {}
+        for key in ('live', 'recordings', 'training'):
+            if changes[f'consent_{key}'] and not getattr(current, f'consent_{key}') and not proposed.get(key):
+                raise ValidationError('Consent comes from the customer: confirm the consent this customer gave at setup')
         self.__dict__.setdefault('_customer_changes', {})[int(customer.id)] = changes
         return self.customer(customer.id)
 
