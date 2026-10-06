@@ -446,6 +446,111 @@ class AddTest(PreparedDirMixin, unittest.TestCase):
         self.assertEqual(len(read_jsonl(os.path.join(self.out, "manifest.jsonl"))), 4)
 
 
+class OwnerSetTest(unittest.TestCase):
+    """prepare-owner: the alerts the owner judged on Telegram, framed as the box sent them."""
+
+    def setUp(self) -> None:
+        self.ds = tempfile.mkdtemp()
+        self.out = tempfile.mkdtemp()
+        fb = os.path.join(self.ds, "owner_feedback")
+        os.makedirs(fb)
+
+        def alert(box, cam, alert_id, n_frames, fps, crop=None, label="escalation"):
+            day = "2026-10-04"
+            clip_rel = f"clips\\{cam}\\{day}\\{alert_id}.mp4"
+            path = os.path.join(fb, box, "clips", cam, day, f"{alert_id}.mp4")
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            write_video(path, [i * 10 % 250 for i in range(n_frames)])
+            meta = {"camera_name": cam, "clip_path": clip_rel, "fps_estimated": fps,
+                    "alert": {"label": label, "summary": "Someone at the window."}}
+            if crop:
+                crop_rel = f"vlm_crops\\{cam}\\{day}\\{alert_id}.mp4"
+                cpath = os.path.join(fb, box, "vlm_crops", cam, day, f"{alert_id}.mp4")
+                os.makedirs(os.path.dirname(cpath), exist_ok=True)
+                write_video(cpath, [i * 10 for i in range(crop[0])])
+                meta.update({"vlm_input": "crop", "vlm_crop": {"vlm_crop_path": crop_rel, "fps": crop[1]}})
+            mpath = os.path.join(fb, box, "meta", cam, day, f"{alert_id}.meta.json")
+            os.makedirs(os.path.dirname(mpath), exist_ok=True)
+            with open(mpath, "w", encoding="utf-8") as f:
+                json.dump(meta, f)
+
+        alert("box_a", "ch2", "ch2_1791101694_alert", 20, 10.0, crop=(25, 5.0))   # crop: every 5th frame
+        alert("box_a", "ch3", "ch3_1791126021_alert", 20, 10.0, label="normal")
+        alert("box_b", "ch6", "ch6_1790979739_alert", 30, 10.0, label="normal")
+        alert("box_b", "ch6", "ch6_1790980014_alert", 20, 10.0, label="suspicious")
+
+        def row(alert_id, box, verdict, t, owner_label="", text="", model="escalation"):
+            return {"box": box, "alert_id": alert_id, "verdict": verdict, "owner_label": owner_label,
+                    "owner_text": text, "model_label": model, "time_utc": t}
+
+        jsonl_file(os.path.join(fb, "feedback_index.jsonl"), [
+            row("ch2_1791101694_alert", "box_a", "expected", "2026-10-04T08:15:58Z", "normal"),
+            row("ch2_1791101694_alert", "box_a", "real_but_wrong", "2026-10-04T08:17:04Z", "other", "ordinary"),
+            row("ch3_1791126021_alert", "box_a", "real_but_wrong", "2026-10-04T15:02:42Z", "other", "walks by",
+                model="normal"),
+            row("ch6_1790979739_alert", "box_b", "true_alert", "2026-10-02T22:25:21Z", None, None, model=None),
+            row("ch6_1790980014_alert", "box_b", "false_alarm", "2026-10-02T22:27:05Z", None, None, model=None),
+            row("gone_1790000000_alert", "box_c", "false_alarm", "2026-10-02T22:00:00Z"),       # no clip saved
+            row("ch2_1791101694_alert", "box_a", "none", "2026-10-04T09:00:00Z", "", "is it you?"),
+            row(None, "box_a", "none", "2026-10-04T09:01:00Z", "", "anyone outside?"),
+        ])
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.ds, ignore_errors=True)
+        shutil.rmtree(self.out, ignore_errors=True)
+
+    def test_truth_rules(self) -> None:
+        r = lambda v, t, tag="", model="escalation": {"verdict": v, "time_utc": t, "owner_label": tag,  # noqa: E731
+                                                       "model_label": model}
+        self.assertEqual(ev.owner_truth([r("true_alert", "1")])[0], "alert")
+        self.assertEqual(ev.owner_truth([r("false_alarm", "1")])[0], "normal")
+        self.assertEqual(ev.owner_truth([r("expected", "1")])[0], "normal")
+        self.assertEqual(ev.owner_truth([r("real_but_wrong", "1", "suspicious")])[0], "alert")
+        self.assertEqual(ev.owner_truth([r("expected", "1", "normal"), r("real_but_wrong", "2", "other")])[:2],
+                         ("normal", "owner tag normal"))
+        self.assertEqual(ev.owner_truth([r("real_but_wrong", "1", "other", "normal")])[:2],
+                         ("normal", "model_label_kept"))
+        self.assertEqual(ev.owner_truth([r("real_but_wrong", "1", "other", None)])[0], None)
+        self.assertEqual(ev.owner_truth([r("true_alert", "1"), r("false_alarm", "2")])[0], "normal")  # latest wins
+
+    def test_prepare_owner(self) -> None:
+        counts = ev.prepare_owner(self.out, self.ds)
+        self.assertEqual((counts["alerts_judged"], counts["added"], counts["no_media"]),
+                         (5, 4, ["gone_1790000000_alert"]))
+        rows = {r["clip_id"]: r for r in read_jsonl(os.path.join(self.out, "manifest.jsonl"))}
+        crop = rows["ch2_1791101694_alert"]
+        self.assertEqual((crop["ours_label"], crop["truth_from"], crop["frames_from"]),
+                         ("normal", "owner tag normal", "crop"))
+        self.assertEqual(len(crop["frames"]), 5)                 # 25 crop frames at 5 fps, 1 a second
+        self.assertEqual((crop["camera"], crop["model_label"], crop["ours_text"], crop["subset"]),
+                         ("ch2", "escalation", "ordinary", "owner"))
+        self.assertEqual(crop["local_time"], ev.clip_local_time("ch2_1791101694_alert"))
+        self.assertEqual(crop["day_night"], ev.day_night_of({"local_time": crop["local_time"]}))
+        self.assertTrue(crop["clip"].startswith("owner_feedback/box_a/vlm_crops/ch2/"))
+        self.assertEqual((rows["ch3_1791126021_alert"]["ours_label"], rows["ch3_1791126021_alert"]["truth_from"]),
+                         ("normal", "model_label_kept"))
+        whole = rows["ch6_1790979739_alert"]
+        self.assertEqual((whole["ours_label"], whole["frames_from"], len(whole["frames"])), ("alert", "clip", 3))
+        self.assertEqual(rows["ch6_1790980014_alert"]["ours_label"], "normal")
+        for r in rows.values():
+            for rel in r["frames"]:
+                self.assertTrue(os.path.isfile(os.path.join(self.out, rel)), rel)
+
+        s = ev.run_eval(self.out, ev.FakeBackend(), tag="t")
+        self.assertEqual((s["alerts_total"], s["normal_total"], s["errors"]), (1, 3, 0))
+        ev.freeze(self.out)
+        self.assertEqual(ev.frozen_changes(self.out), [])
+        with self.assertRaises(ev.FrozenSet):
+            ev.prepare_owner(self.out, self.ds)
+
+    def test_main_takes_dir_and_dataset(self) -> None:
+        with mock.patch.dict(os.environ, {ev.DATASET_ENV: self.ds}):
+            self.assertEqual(ev.main(["prepare-owner", "--dir", self.out]), 0)
+        self.assertEqual(len(read_jsonl(os.path.join(self.out, "manifest.jsonl"))), 4)
+        self.assertEqual(ev.main(["prepare-owner", "--dir", self.out, "--dataset",
+                                  os.path.join(self.ds, "nowhere")]), 1)
+
+
 class FreezeTest(PreparedDirMixin, unittest.TestCase):
     def setUp(self) -> None:
         self.dataset = self.make_dataset()
