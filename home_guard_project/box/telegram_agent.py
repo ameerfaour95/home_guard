@@ -1,7 +1,8 @@
 """The Telegram side of the owner's assistant: alerts go out with a question, answers come back in.
 
-    send_alert()      sends an alert with the feedback question and buttons, and
-                      remembers which message carries which alert
+    send_alert()      sends an alert as one message - its video, a short caption
+                      and the tag buttons - and remembers which message carries
+                      which alert
     TelegramInbox     long-polls the bot's updates and hands each one to the
                       buttons or to the agent, then answers in the chat
 
@@ -26,7 +27,7 @@ import time
 import urllib.error
 import uuid
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from . import telegram_notify
@@ -67,29 +68,61 @@ BUTTON_LABELS = {code: label for row in FEEDBACK_BUTTONS for label, code in row}
 REMIND_SEC = 300.0   # an escalation nobody answered is sent once more, loud, after this long
 TAG_WAIT_SEC = 600.0  # how long "Other…" waits for the owner's words
 CALLBACK_DATA_LIMIT = 64  # Telegram refuses a button whose callback data is longer (bytes)
+VIDEO_WAIT_SEC = 60.0  # an alert waits this long for its video; then it goes out with the picture
 
 # The buttons under an alert: (emoji, i18n key, callback code). The owner tags the clip with one of
-# OWNER_LABELS; "Other…" waits for their own words; fb:mute60 stays the pause.
+# OWNER_LABELS; "Other…" waits for their own words. Alerts sent before carry tag:escalation, tag:empty and
+# fb:mute60, which are still accepted.
 _ALERT_BUTTONS = (
-    (("🟢", "btn_tag_normal", "tag:normal"), ("🟡", "btn_tag_suspicious", "tag:suspicious"),
-     ("🔴", "btn_tag_escalation", "tag:escalation")),
-    (("⚪", "btn_tag_empty", "tag:empty"), ("✏️", "btn_tag_other", "tag:other"), ("⏸", "btn_mute60", "fb:mute60")),
+    (("🟡", "btn_tag_suspicious", "tag:suspicious"), ("🟢", "btn_tag_normal", "tag:normal"),
+     ("✏️", "btn_tag_other", "tag:other")),
 )
+# Under an alert that a house rule (an owner's "raise" note) made suspicious.
+_RULE_BUTTON = ("📏", "btn_tag_rule_mismatch", "tag:rule_mismatch")
 
 
-def feedback_keyboard(lang: str = "en", ai_label: str = "") -> str:
+def feedback_keyboard(lang: str = "en", ai_label: str = "", rule: bool = False) -> str:
     """The buttons under an alert, as Telegram's ``reply_markup`` JSON, in the box language.
 
     The label the AI gave the clip (*ai_label*) carries a leading "✓ ", so tagging what the AI already
-    said is one glance away.
+    said is one glance away. *rule*: the alert went out because of a house rule, which the owner can say
+    does not match.
     """
     def text(emoji: str, key: str, code: str) -> str:
         words = f"{emoji} {tr(key, lang)}"
         return f"✓ {words}" if ai_label and code == f"tag:{ai_label}" else words
 
+    rows = _ALERT_BUTTONS + (((_RULE_BUTTON,),) if rule else ())
     return json.dumps({"inline_keyboard": [
-        [{"text": text(*button), "callback_data": button[2]} for button in row] for row in _ALERT_BUTTONS
+        [{"text": text(*button), "callback_data": button[2]} for button in row] for row in rows
     ]})
+
+
+def raised_by_rule(alert: Any) -> bool:
+    """The alert was made suspicious by a house note (the owner's own rule), not lowered by one."""
+    return bool(isinstance(alert, dict) and alert.get("applied_fact_id") and alert.get("softened") is False)
+
+
+def alert_keyboard(alert: Any, lang: str = "en") -> str:
+    """Everything under one alert: the tag buttons, and the rule and "not them" buttons when they apply."""
+    alert = alert if isinstance(alert, dict) else {}
+    keyboard = feedback_keyboard(lang, ai_label=str(alert.get("label") or ""), rule=raised_by_rule(alert))
+    button = not_them_button(alert, lang)
+    if button:
+        markup = json.loads(keyboard)
+        markup["inline_keyboard"].append([button])
+        keyboard = json.dumps(markup)
+    return keyboard
+
+
+def _with_clock(text: str, alert: Dict[str, Any]) -> str:
+    """*text* with the alert's local time at the end of its first line ("🟡 Suspicious · door · 02:14")."""
+    try:
+        clock = dt.datetime.fromtimestamp(float(alert.get("ts"))).strftime("%H:%M")
+    except (TypeError, ValueError, OverflowError, OSError):
+        return text
+    first, sep, rest = text.partition("\n")
+    return f"{first} · {clock}{sep}{rest}"
 
 
 def box_language() -> str:
@@ -316,37 +349,57 @@ def send_alert(
     feed: Optional[ChatFeed] = None,
     silent: bool = False,
     lang: str = "en",
+    video: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Send one alert to every chat, with the feedback question and buttons. Never raises.
+    """Send one alert to every chat, with its buttons. Never raises.
 
     *alert* is what an answer will be filed under: ``{"alert_id", "camera",
     "summary", "ts"}``. Each chat's message id is stored in *index*. With a
     *feed*, the alert also appears in the box's window, delivered or not.
-    *silent* delivers it without a sound (a normal scene); the question and the
-    buttons are in *lang*, the box language.
+    *silent* delivers it without a sound (a normal scene); the buttons are in
+    *lang*, the box language. With *video* (the alert's clip) the alert is that
+    video with a short caption: the text, with the time. A video that cannot be
+    read or is refused falls back to the picture (or the text) with the
+    feedback question, as without one.
     """
     if cfg.dry_run or not cfg.enabled:
         reason = "dry_run" if cfg.dry_run else "not_configured"
         log.info("Telegram alert not sent (%s): %s", reason, text)
         return {"sent": False, "reason": reason}
     body = f"{text}\n\n{tr('feedback_question', lang)}"
-    keyboard = feedback_keyboard(lang, ai_label=str((alert.get("label") if isinstance(alert, dict) else "") or ""))
-    button = not_them_button(alert, lang)
-    if button:
-        markup = json.loads(keyboard)
-        markup["inline_keyboard"].append([button])
-        keyboard = json.dumps(markup)
+    keyboard = alert_keyboard(alert, lang)
     quiet = {"disable_notification": "true"} if silent else {}
+    clip = None
+    if video:
+        try:
+            with open(video, "rb") as f:
+                clip = (os.path.basename(video), f.read(), "video/mp4")
+        except OSError as exc:
+            log.warning("Alert video not readable (%s); sending the picture", exc)
     results = []
     for chat_id in cfg.chat_ids:
         try:
-            if image:
+            resp = None
+            if clip is not None:
+                try:
+                    resp = post_multipart(
+                        cfg.bot_token, "sendVideo",
+                        {"chat_id": chat_id, "caption": _with_clock(text, alert)[:CAPTION_LIMIT],
+                         "reply_markup": keyboard, "supports_streaming": "true", **quiet},
+                        {"video": clip}, timeout=120.0,
+                    )
+                except (urllib.error.URLError, OSError) as exc:
+                    log.warning("Alert video not sent to %s (%s); sending the picture", chat_id, telegram_error(exc))
+                if resp is not None and not resp.get("ok"):
+                    log.warning("Alert video not ok for %s (%s); sending the picture", chat_id, resp.get("description"))
+                    resp = None
+            if resp is None and image:
                 resp = post_multipart(
                     cfg.bot_token, "sendPhoto",
                     {"chat_id": chat_id, "caption": body[:CAPTION_LIMIT], "reply_markup": keyboard, **quiet},
                     {"photo": ("alert.jpg", image, "image/jpeg")},
                 )
-            else:
+            elif resp is None:
                 resp = post(cfg.bot_token, "sendMessage",
                             {"chat_id": chat_id, "text": body, "reply_markup": keyboard, **quiet})
             ok = bool(resp.get("ok"))
@@ -452,6 +505,10 @@ class OwnerAssistant:
     deliverer: Any = None
     feedback_dir: str = ""
     archive_dir: str = PRODUCTION_ARCHIVE_DIR   # the upload moves answers here, one folder per site
+    video_wait: float = VIDEO_WAIT_SEC
+    # Alerts waiting for their video (alert id -> what send_alert was given), so alert and clip are one message.
+    _held: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    _held_lock: Any = field(default_factory=threading.Lock)
 
     def answered(self, alert_id: str) -> bool:
         """True once the owner answered *alert_id*: seen by the inbox in this run, or saved in the live folder or
@@ -483,7 +540,52 @@ class OwnerAssistant:
 
     def send_alert(self, alert: Dict[str, Any], text: str, image: Optional[bytes] = None, silent: bool = False,
                    lang: str = "en") -> Dict[str, Any]:
-        return send_alert(self.cfg, self.index, alert, text, image, feed=self.feed, silent=silent, lang=lang)
+        """Send an alert. A new alert waits for its video (:meth:`send_clip`), at most ``video_wait`` seconds,
+        so the owner gets one message: the clip, the caption and the buttons. Never raises.
+
+        The answer says it is on its way (``sent``); the picture goes out instead if the video never comes.
+        An alert already delivered (the escalation reminder) goes out at once.
+        """
+        alert_id = str((alert or {}).get("alert_id") or "") if isinstance(alert, dict) else ""
+        delivered = bool(alert_id and self.index is not None and self.index.messages(alert_id))
+        if not alert_id or delivered or self.cfg.dry_run or not self.cfg.enabled:
+            return self._deliver(alert, text, image, silent, lang)
+        try:
+            with self._held_lock:
+                if alert_id in self._held:
+                    return {"sent": True, "held": "waiting for the video"}
+                self._held[alert_id] = {"alert": alert, "text": text, "image": image, "silent": silent, "lang": lang}
+            timer = threading.Timer(self.video_wait, self._release, args=(alert_id, ""))
+            timer.daemon = True
+            timer.start()
+        except Exception as exc:  # noqa: BLE001 - without a timer the alert goes out now, with its picture
+            log.warning("Alert %s not held for its video (%s); sending it now", alert_id, exc)
+            return self._release(alert_id, "") or self._deliver(alert, text, image, silent, lang)
+        return {"sent": True, "held": "waiting for the video"}
+
+    def _deliver(self, alert: Dict[str, Any], text: str, image: Optional[bytes], silent: bool, lang: str,
+                 video: Optional[str] = None) -> Dict[str, Any]:
+        return send_alert(self.cfg, self.index, alert, text, image, post=telegram_notify._http_post,
+                          post_multipart=telegram_notify._http_post_multipart, feed=self.feed, silent=silent,
+                          lang=lang, video=video)
+
+    def _release(self, alert_id: str, video: str) -> Optional[Dict[str, Any]]:
+        """Send the held alert *alert_id*, as *video* when it can be read, else with its picture. None when nothing
+        was held (already sent, or never held). Never raises."""
+        try:
+            with self._held_lock:
+                held = self._held.pop(alert_id, None)
+            if held is None:
+                return None
+            if not video:
+                log.info("Alert %s goes out without its video", alert_id)
+            res = self._deliver(held["alert"], held["text"], held["image"], held["silent"], held["lang"], video or None)
+            if not res.get("sent"):
+                log.warning("Alert %s not delivered: %s", alert_id, res)
+            return res
+        except Exception as exc:  # noqa: BLE001 - runs on a timer thread too
+            log.warning("Held alert %s not sent: %s", alert_id, exc)
+            return {"sent": False, "error": str(exc)}
 
     def remind_if_silent(self, alert: Dict[str, Any], text: str, lang: str = "en", delay: float = REMIND_SEC) -> None:
         """For an escalation: if nobody answered within *delay*, send it once more, loud. Never raises."""
@@ -507,8 +609,16 @@ class OwnerAssistant:
             log.warning("Escalation reminder not scheduled: %s", exc)
 
     def send_clip(self, alert_id: str, clip_path: str, silent: bool = False) -> Dict[str, Any]:
-        """The alert's video, as a reply under the alert. Call it once the clip has been written."""
-        return send_clip(self.cfg, self.index, alert_id, clip_path, feed=self.feed, silent=silent)
+        """The alert's video. Call it once the clip has been written (with ``""`` when it could not be).
+
+        An alert still waiting for it goes out now as one message, the video with the alert's caption and
+        buttons; an alert already sent with its picture gets the video as a reply under it.
+        """
+        released = self._release(alert_id, clip_path)
+        if released is not None:
+            return released
+        return send_clip(self.cfg, self.index, alert_id, clip_path,
+                         post_multipart=telegram_notify._http_post_multipart, feed=self.feed, silent=silent)
 
 
 def alert_roots(live_dir: str = PRODUCTION_LIVE_DIR, archive_dir: str = PRODUCTION_ARCHIVE_DIR) -> List[str]:

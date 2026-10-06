@@ -200,6 +200,7 @@ TEMPLATES: Dict[str, Dict[str, str]] = {
     "btn_tag_escalation": {"en": "Escalation", "he": "אירוע חמור", "ar": "تصعيد"},
     "btn_tag_empty": {"en": "Nothing there", "he": "אין שם כלום", "ar": "لا يوجد شيء"},
     "btn_tag_other": {"en": "Other…", "he": "אחר…", "ar": "غير ذلك…"},
+    "btn_tag_rule_mismatch": {"en": "Doesn't match the rule", "he": "לא מתאים לכלל", "ar": "لا يطابق القاعدة"},
     "tag_ask_text": {"en": "Write the correct tag for this clip.", "he": "כתבו את התיוג הנכון לסרטון הזה.",
                      "ar": "اكتب الوسم الصحيح لهذا المقطع."},
     "tag_saved": {"en": "✓ Saved as {label}.", "he": "✓ נשמר בתור {label}.", "ar": "✓ تم الحفظ كـ {label}."},

@@ -107,7 +107,7 @@ def callback_codes(call: Dict[str, Any]) -> List[str]:
 
 class VerdictForTest(unittest.TestCase):
     def test_every_owner_label_against_every_ai_label(self) -> None:
-        self.assertEqual(OWNER_LABELS, ("normal", "suspicious", "escalation", "empty", "other"))
+        self.assertEqual(OWNER_LABELS, ("normal", "suspicious", "escalation", "empty", "other", "rule_mismatch"))
         expected = {
             "normal": {"normal": "expected", "suspicious": "expected", "escalation": "expected", "": "expected"},
             "empty": {"normal": "false_alarm", "suspicious": "false_alarm", "escalation": "false_alarm",
@@ -118,6 +118,8 @@ class VerdictForTest(unittest.TestCase):
                            "": "real_but_wrong"},
             "other": {"normal": "real_but_wrong", "suspicious": "real_but_wrong", "escalation": "real_but_wrong",
                       "": "real_but_wrong"},
+            "rule_mismatch": {"normal": "expected", "suspicious": "expected", "escalation": "expected",
+                              "": "expected"},
         }
         for owner, by_ai in expected.items():
             for ai, verdict in by_ai.items():
@@ -132,30 +134,23 @@ class KeyboardTest(unittest.TestCase):
     def _rows(self, raw: str) -> List[List[Dict[str, str]]]:
         return json.loads(raw)["inline_keyboard"]
 
-    def test_two_rows_six_buttons_with_the_tag_codes(self) -> None:
+    def test_one_row_suspicious_normal_other(self) -> None:
         rows = self._rows(feedback_keyboard("en"))
-        self.assertEqual([[b["callback_data"] for b in row] for row in rows], [
-            ["tag:normal", "tag:suspicious", "tag:escalation"],
-            ["tag:empty", "tag:other", "fb:mute60"],
-        ])
-        self.assertEqual([[b["text"] for b in row] for row in rows], [
-            ["🟢 Normal", "🟡 Suspicious", "🔴 Escalation"],
-            ["⚪ Nothing there", "✏️ Other…", "⏸ Pause 1 hour"],
-        ])
+        self.assertEqual([[b["callback_data"] for b in row] for row in rows],
+                         [["tag:suspicious", "tag:normal", "tag:other"]])
+        self.assertEqual([[b["text"] for b in row] for row in rows], [["🟡 Suspicious", "🟢 Normal", "✏️ Other…"]])
 
     def test_the_ai_label_gets_a_tick(self) -> None:
         texts = [b["text"] for row in self._rows(feedback_keyboard("en", ai_label="suspicious")) for b in row]
-        self.assertEqual(texts[1], "✓ 🟡 Suspicious")
+        self.assertEqual(texts[0], "✓ 🟡 Suspicious")
         self.assertEqual([x for x in texts if x.startswith("✓")], ["✓ 🟡 Suspicious"])
         unticked = [b["text"] for row in self._rows(feedback_keyboard("en", ai_label="bogus")) for b in row]
         self.assertFalse(any(x.startswith("✓") for x in unticked))
 
     def test_hebrew_texts(self) -> None:
-        texts = [b["text"] for row in self._rows(feedback_keyboard("he", ai_label="escalation")) for b in row]
+        texts = [b["text"] for row in self._rows(feedback_keyboard("he", ai_label="normal")) for b in row]
         self.assertEqual(texts, [
-            f"🟢 {t('btn_tag_normal', 'he')}", f"🟡 {t('btn_tag_suspicious', 'he')}",
-            f"✓ 🔴 {t('btn_tag_escalation', 'he')}",
-            f"⚪ {t('btn_tag_empty', 'he')}", f"✏️ {t('btn_tag_other', 'he')}", f"⏸ {t('btn_mute60', 'he')}",
+            f"🟡 {t('btn_tag_suspicious', 'he')}", f"✓ 🟢 {t('btn_tag_normal', 'he')}", f"✏️ {t('btn_tag_other', 'he')}",
         ])
         self.assertNotEqual(t("btn_tag_normal", "he"), t("btn_tag_normal", "en"))
 

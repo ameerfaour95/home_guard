@@ -56,7 +56,7 @@ FIND_SPAN_SEC = 3600.0  # "the video from 3pm" searches the hour from 15:00
 FEEDBACK_QUESTION = "Was this alert right? Tap a button, or just reply in your own words."
 
 # The labels the owner tags an alert with from Telegram (telegram_agent.feedback_keyboard).
-OWNER_LABELS = ("normal", "suspicious", "escalation", "empty", "other")
+OWNER_LABELS = ("normal", "suspicious", "escalation", "empty", "other", "rule_mismatch")
 MAX_TAG_TEXT_CHARS = 500
 TAG_UNDONE_NOTE = "tag undone"
 
@@ -100,7 +100,7 @@ def verdict_for(owner_label: str, ai_label: str) -> str:
     """The verdict an owner's tag means, given the AI's label. The one mapping every tagging path uses."""
     if owner_label == "empty":
         return "false_alarm"
-    if owner_label == "normal":
+    if owner_label in ("normal", "rule_mismatch"):   # the house rule should not have raised it
         return "expected"
     if owner_label in ("suspicious", "escalation"):
         return "true_alert" if owner_label == ai_label else "real_but_wrong"

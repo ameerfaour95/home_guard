@@ -1733,9 +1733,11 @@ def _save_clip(job: AlertJob, frames: List[Any], production_dir: str, training_d
                              extra=job.input_meta, **clip_options)
         if meta:
             log.info("[%s] clip saved: %s (%d frames)", job.camera, os.path.basename(meta), len(frames))
-        if (meta and assistant is not None and not job.false_positive and not job.paused
+        if (assistant is not None and not job.false_positive and not job.paused
                 and delivery(alert.get("dispatch") or {})[0]):
-            res = assistant.send_clip(job.stem, clip_file(production_dir, meta), silent=bool(alert.get("silent")))
+            # The alert waits for this video; a clip that could not be written ("") releases it with its picture.
+            res = assistant.send_clip(job.stem, clip_file(production_dir, meta) if meta else "",
+                                      silent=bool(alert.get("silent")))
             log.info("[%s] video %s", job.camera, "sent" if res.get("sent") else f"not sent: {res}")
     except Exception as exc:  # noqa: BLE001
         log.warning("[%s] could not save the clip %s: %s", job.camera, job.stem, exc)
