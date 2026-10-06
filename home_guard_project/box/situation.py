@@ -18,6 +18,8 @@ Eye prompt carries, identical at training and inference:
 - ``zone_facts``, ``ground``, ``crossed_in``, ``scene_zone``: what the scene map says about this look
   (``scene_map.scene_facts``). The ZONE FACTS line goes into the Eye's prompt next to the header, never inside
   it; ``record()["scene"]`` keeps it for training. The map's zone and ground win over the Eye's guess.
+- ``tracker_facts``: the tracker's TRACKER FACTS line (``tracker.TrackerFacts.line``) when box.yaml
+  ``eye_tracker_facts`` is on; it goes right under the ZONE FACTS line and into ``record()["tracker_facts"]``.
 - ``expecting``: the owner's live expecting notes for this camera; ``fact_covers``: a live "lower" house note.
 """
 
@@ -122,6 +124,7 @@ class Situation:
     ground: str = ""          # whose ground the look happens on (taxonomy.GROUNDS), from the scene map
     crossed_in: bool = False  # someone crossed a boundary line onto the owner's ground
     scene_zone: str = ""      # where it happens by the scene map (taxonomy.ZONES); wins over the Eye's zone
+    tracker_facts: str = ""   # "TRACKER FACTS (from code): ..." (eye_tracker_facts: on), under the ZONE FACTS line
 
     def header(self) -> str:
         expecting = ", ".join(f"'{t}'" for t in self.expecting) or "none"
@@ -142,6 +145,8 @@ class Situation:
         if self.zone_facts:
             out["scene"] = {"zone_facts": self.zone_facts, "ground": self.ground, "crossed_in": self.crossed_in,
                             "zone": self.scene_zone}
+        if self.tracker_facts:
+            out["tracker_facts"] = self.tracker_facts
         return out
 
 
@@ -149,13 +154,14 @@ def build_situation(camera: str, ts: float, intent: str = "alert_triage",
                     settings: Optional[Mapping[str, Any]] = None, house: Any = None,
                     facts: Sequence[Dict[str, Any]] = (), zones: Optional[Iterable[str]] = None,
                     state_path: Optional[str] = None, mute_path: Optional[str] = None,
-                    scene_map: Any = None, scene_facts: Any = None) -> Situation:
+                    scene_map: Any = None, scene_facts: Any = None, tracker_facts: str = "") -> Situation:
     """The situation for one look at *camera* at local time *ts*.
 
     *house* is a ``house_state.HouseNow``; when None it is read with ``house_state.current`` (never raises).
     *facts* are the live house notes offered for this look; a ``lower`` note sets ``fact_covers``.
     *scene_map* (``scene_map.SceneMap``) feeds the role and zones when it says anything beyond today's drawn zone;
     *scene_facts* (``scene_map.SceneFacts``) is what it says about this look.
+    *tracker_facts* is the tracker's one line for the prompt ("" leaves the prompt as without the tracker).
     """
     if scene_map is not None and not scene_map.informative:
         scene_map = None                # only today's drawn zone: the situation is as before
@@ -179,4 +185,5 @@ def build_situation(camera: str, ts: float, intent: str = "alert_triage",
         zone_facts=str(getattr(scene_facts, "line", "") or ""), ground=ground if ground in tx.GROUNDS else "",
         crossed_in=getattr(scene_facts, "crossed_in", False) is True,
         scene_zone=scene_zone if scene_zone in tx.ZONES else "",
+        tracker_facts=" ".join(str(tracker_facts or "").split()),
     )
