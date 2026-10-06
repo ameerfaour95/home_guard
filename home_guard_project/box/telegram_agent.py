@@ -1,7 +1,8 @@
 """The Telegram side of the owner's assistant: alerts go out with a question, answers come back in.
 
-    send_alert()      sends an alert with the feedback question and buttons, and
-                      remembers which message carries which alert
+    send_alert()      sends an alert as one message - its video, a short caption
+                      and the tag buttons - and remembers which message carries
+                      which alert
     TelegramInbox     long-polls the bot's updates and hands each one to the
                       buttons or to the agent, then answers in the chat
 
@@ -26,10 +27,10 @@ import time
 import urllib.error
 import uuid
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
-from . import telegram_notify
+from . import telegram_notify, voice
 from .agent import UNAVAILABLE_REPLY, AgentContext, OwnerAgent, make_chat_model
 from .chat_feed import ChatFeed
 from .brain.i18n import LANGS
@@ -65,31 +66,64 @@ Post = Callable[..., Dict[str, Any]]
 BUTTON_LABELS = {code: label for row in FEEDBACK_BUTTONS for label, code in row}
 
 REMIND_SEC = 300.0   # an escalation nobody answered is sent once more, loud, after this long
-TAG_WAIT_SEC = 600.0  # how long "Other…" waits for the owner's words
+TAG_WAIT_SEC = 86400.0     # how long "Other…" waits for the owner's words, as a reply to the question or video
+TAG_IMPLICIT_SEC = 1800.0  # how long a message that replies to nothing is taken as those words
 CALLBACK_DATA_LIMIT = 64  # Telegram refuses a button whose callback data is longer (bytes)
+VIDEO_WAIT_SEC = 60.0  # an alert waits this long for its video; then it goes out with the picture
 
 # The buttons under an alert: (emoji, i18n key, callback code). The owner tags the clip with one of
-# OWNER_LABELS; "Other…" waits for their own words; fb:mute60 stays the pause.
+# OWNER_LABELS; "Other…" waits for their own words. Alerts sent before carry tag:escalation, tag:empty and
+# fb:mute60, which are still accepted.
 _ALERT_BUTTONS = (
-    (("🟢", "btn_tag_normal", "tag:normal"), ("🟡", "btn_tag_suspicious", "tag:suspicious"),
-     ("🔴", "btn_tag_escalation", "tag:escalation")),
-    (("⚪", "btn_tag_empty", "tag:empty"), ("✏️", "btn_tag_other", "tag:other"), ("⏸", "btn_mute60", "fb:mute60")),
+    (("🟡", "btn_tag_suspicious", "tag:suspicious"), ("🟢", "btn_tag_normal", "tag:normal"),
+     ("✏️", "btn_tag_other", "tag:other")),
 )
+# Under an alert that a house rule (an owner's "raise" note) made suspicious.
+_RULE_BUTTON = ("📏", "btn_tag_rule_mismatch", "tag:rule_mismatch")
 
 
-def feedback_keyboard(lang: str = "en", ai_label: str = "") -> str:
+def feedback_keyboard(lang: str = "en", ai_label: str = "", rule: bool = False) -> str:
     """The buttons under an alert, as Telegram's ``reply_markup`` JSON, in the box language.
 
     The label the AI gave the clip (*ai_label*) carries a leading "✓ ", so tagging what the AI already
-    said is one glance away.
+    said is one glance away. *rule*: the alert went out because of a house rule, which the owner can say
+    does not match.
     """
     def text(emoji: str, key: str, code: str) -> str:
         words = f"{emoji} {tr(key, lang)}"
         return f"✓ {words}" if ai_label and code == f"tag:{ai_label}" else words
 
+    rows = _ALERT_BUTTONS + (((_RULE_BUTTON,),) if rule else ())
     return json.dumps({"inline_keyboard": [
-        [{"text": text(*button), "callback_data": button[2]} for button in row] for row in _ALERT_BUTTONS
+        [{"text": text(*button), "callback_data": button[2]} for button in row] for row in rows
     ]})
+
+
+def raised_by_rule(alert: Any) -> bool:
+    """The alert was made suspicious by a house note (the owner's own rule), not lowered by one."""
+    return bool(isinstance(alert, dict) and alert.get("applied_fact_id") and alert.get("softened") is False)
+
+
+def alert_keyboard(alert: Any, lang: str = "en") -> str:
+    """Everything under one alert: the tag buttons, and the rule and "not them" buttons when they apply."""
+    alert = alert if isinstance(alert, dict) else {}
+    keyboard = feedback_keyboard(lang, ai_label=str(alert.get("label") or ""), rule=raised_by_rule(alert))
+    button = not_them_button(alert, lang)
+    if button:
+        markup = json.loads(keyboard)
+        markup["inline_keyboard"].append([button])
+        keyboard = json.dumps(markup)
+    return keyboard
+
+
+def _with_clock(text: str, alert: Dict[str, Any]) -> str:
+    """*text* with the alert's local time at the end of its first line ("🟡 Suspicious · door · 02:14")."""
+    try:
+        clock = dt.datetime.fromtimestamp(float(alert.get("ts"))).strftime("%H:%M")
+    except (TypeError, ValueError, OverflowError, OSError):
+        return text
+    first, sep, rest = text.partition("\n")
+    return f"{first} · {clock}{sep}{rest}"
 
 
 def box_language() -> str:
@@ -119,8 +153,11 @@ class PendingTags:
     KEEP_EXPIRED_MAX = 100
     MAX_PROMPTS = 5
 
-    def __init__(self, path: str, ttl: float = TAG_WAIT_SEC) -> None:
+    def __init__(self, path: str, ttl: float = TAG_WAIT_SEC, implicit_ttl: float = TAG_IMPLICIT_SEC) -> None:
         self.path, self.ttl = path, float(ttl)
+        # A wait takes a message that replies to nothing only this long; later, "it's me, pause until six"
+        # is a request for the assistant, and only a reply to the question or to the clip is the answer.
+        self.implicit_ttl = min(float(implicit_ttl), self.ttl)
         data = _read_json(path)
         pending = data.get("pending") if isinstance(data.get("pending"), dict) else {}
         expired = data.get("expired_prompts") if isinstance(data.get("expired_prompts"), dict) else {}
@@ -229,7 +266,8 @@ class PendingTags:
         mine = self._mine(chat_id, user_id)
         chosen = None
         if reply_to is None:
-            open_waits = [kv for kv in mine if not kv[1].get("reply_only")]
+            open_waits = [kv for kv in mine if not kv[1].get("reply_only")
+                          and now - float(kv[1]["ts"]) <= self.implicit_ttl]
             if open_waits:
                 chosen = open_waits[0]
         else:
@@ -316,37 +354,57 @@ def send_alert(
     feed: Optional[ChatFeed] = None,
     silent: bool = False,
     lang: str = "en",
+    video: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Send one alert to every chat, with the feedback question and buttons. Never raises.
+    """Send one alert to every chat, with its buttons. Never raises.
 
     *alert* is what an answer will be filed under: ``{"alert_id", "camera",
     "summary", "ts"}``. Each chat's message id is stored in *index*. With a
     *feed*, the alert also appears in the box's window, delivered or not.
-    *silent* delivers it without a sound (a normal scene); the question and the
-    buttons are in *lang*, the box language.
+    *silent* delivers it without a sound (a normal scene); the buttons are in
+    *lang*, the box language. With *video* (the alert's clip) the alert is that
+    video with a short caption: the text, with the time. A video that cannot be
+    read or is refused falls back to the picture (or the text) with the
+    feedback question, as without one.
     """
     if cfg.dry_run or not cfg.enabled:
         reason = "dry_run" if cfg.dry_run else "not_configured"
         log.info("Telegram alert not sent (%s): %s", reason, text)
         return {"sent": False, "reason": reason}
     body = f"{text}\n\n{tr('feedback_question', lang)}"
-    keyboard = feedback_keyboard(lang, ai_label=str((alert.get("label") if isinstance(alert, dict) else "") or ""))
-    button = not_them_button(alert, lang)
-    if button:
-        markup = json.loads(keyboard)
-        markup["inline_keyboard"].append([button])
-        keyboard = json.dumps(markup)
+    keyboard = alert_keyboard(alert, lang)
     quiet = {"disable_notification": "true"} if silent else {}
+    clip = None
+    if video:
+        try:
+            with open(video, "rb") as f:
+                clip = (os.path.basename(video), f.read(), "video/mp4")
+        except OSError as exc:
+            log.warning("Alert video not readable (%s); sending the picture", exc)
     results = []
     for chat_id in cfg.chat_ids:
         try:
-            if image:
+            resp = None
+            if clip is not None:
+                try:
+                    resp = post_multipart(
+                        cfg.bot_token, "sendVideo",
+                        {"chat_id": chat_id, "caption": _with_clock(text, alert)[:CAPTION_LIMIT],
+                         "reply_markup": keyboard, "supports_streaming": "true", **quiet},
+                        {"video": clip}, timeout=120.0,
+                    )
+                except (urllib.error.URLError, OSError) as exc:
+                    log.warning("Alert video not sent to %s (%s); sending the picture", chat_id, telegram_error(exc))
+                if resp is not None and not resp.get("ok"):
+                    log.warning("Alert video not ok for %s (%s); sending the picture", chat_id, resp.get("description"))
+                    resp = None
+            if resp is None and image:
                 resp = post_multipart(
                     cfg.bot_token, "sendPhoto",
                     {"chat_id": chat_id, "caption": body[:CAPTION_LIMIT], "reply_markup": keyboard, **quiet},
                     {"photo": ("alert.jpg", image, "image/jpeg")},
                 )
-            else:
+            elif resp is None:
                 resp = post(cfg.bot_token, "sendMessage",
                             {"chat_id": chat_id, "text": body, "reply_markup": keyboard, **quiet})
             ok = bool(resp.get("ok"))
@@ -452,6 +510,10 @@ class OwnerAssistant:
     deliverer: Any = None
     feedback_dir: str = ""
     archive_dir: str = PRODUCTION_ARCHIVE_DIR   # the upload moves answers here, one folder per site
+    video_wait: float = VIDEO_WAIT_SEC
+    # Alerts waiting for their video (alert id -> what send_alert was given), so alert and clip are one message.
+    _held: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    _held_lock: Any = field(default_factory=threading.Lock)
 
     def answered(self, alert_id: str) -> bool:
         """True once the owner answered *alert_id*: seen by the inbox in this run, or saved in the live folder or
@@ -483,9 +545,54 @@ class OwnerAssistant:
 
     def send_alert(self, alert: Dict[str, Any], text: str, image: Optional[bytes] = None, silent: bool = False,
                    lang: str = "en") -> Dict[str, Any]:
-        res = send_alert(self.cfg, self.index, alert, text, image, feed=self.feed, silent=silent, lang=lang)
-        self._note_alert(alert, res)
+        """Send an alert. A new alert waits for its video (:meth:`send_clip`), at most ``video_wait`` seconds,
+        so the owner gets one message: the clip, the caption and the buttons. Never raises.
+
+        The answer says it is on its way (``sent``); the picture goes out instead if the video never comes.
+        An alert already delivered (the escalation reminder) goes out at once.
+        """
+        alert_id = str((alert or {}).get("alert_id") or "") if isinstance(alert, dict) else ""
+        delivered = bool(alert_id and self.index is not None and self.index.messages(alert_id))
+        if not alert_id or delivered or self.cfg.dry_run or not self.cfg.enabled:
+            return self._deliver(alert, text, image, silent, lang)
+        try:
+            with self._held_lock:
+                if alert_id in self._held:
+                    return {"sent": True, "held": "waiting for the video"}
+                self._held[alert_id] = {"alert": alert, "text": text, "image": image, "silent": silent, "lang": lang}
+            timer = threading.Timer(self.video_wait, self._release, args=(alert_id, ""))
+            timer.daemon = True
+            timer.start()
+        except Exception as exc:  # noqa: BLE001 - without a timer the alert goes out now, with its picture
+            log.warning("Alert %s not held for its video (%s); sending it now", alert_id, exc)
+            return self._release(alert_id, "") or self._deliver(alert, text, image, silent, lang)
+        return {"sent": True, "held": "waiting for the video"}
+
+    def _deliver(self, alert: Dict[str, Any], text: str, image: Optional[bytes], silent: bool, lang: str,
+                 video: Optional[str] = None) -> Dict[str, Any]:
+        res = send_alert(self.cfg, self.index, alert, text, image, post=telegram_notify._http_post,
+                         post_multipart=telegram_notify._http_post_multipart, feed=self.feed, silent=silent,
+                         lang=lang, video=video)
+        self._note_alert(alert, res)  # into the chat history only once it has really gone out
         return res
+
+    def _release(self, alert_id: str, video: str) -> Optional[Dict[str, Any]]:
+        """Send the held alert *alert_id*, as *video* when it can be read, else with its picture. None when nothing
+        was held (already sent, or never held). Never raises."""
+        try:
+            with self._held_lock:
+                held = self._held.pop(alert_id, None)
+            if held is None:
+                return None
+            if not video:
+                log.info("Alert %s goes out without its video", alert_id)
+            res = self._deliver(held["alert"], held["text"], held["image"], held["silent"], held["lang"], video or None)
+            if not res.get("sent"):
+                log.warning("Alert %s not delivered: %s", alert_id, res)
+            return res
+        except Exception as exc:  # noqa: BLE001 - runs on a timer thread too
+            log.warning("Held alert %s not sent: %s", alert_id, exc)
+            return {"sent": False, "error": str(exc)}
 
     def _note_alert(self, alert: Dict[str, Any], res: Dict[str, Any]) -> None:
         """The v2 assistant keeps a delivered alert in each chat's history as text (its observation), so a follow-up
@@ -530,8 +637,16 @@ class OwnerAssistant:
             log.warning("Escalation reminder not scheduled: %s", exc)
 
     def send_clip(self, alert_id: str, clip_path: str, silent: bool = False) -> Dict[str, Any]:
-        """The alert's video, as a reply under the alert. Call it once the clip has been written."""
-        return send_clip(self.cfg, self.index, alert_id, clip_path, feed=self.feed, silent=silent)
+        """The alert's video. Call it once the clip has been written (with ``""`` when it could not be).
+
+        An alert still waiting for it goes out now as one message, the video with the alert's caption and
+        buttons; an alert already sent with its picture gets the video as a reply under it.
+        """
+        released = self._release(alert_id, clip_path)
+        if released is not None:
+            return released
+        return send_clip(self.cfg, self.index, alert_id, clip_path,
+                         post_multipart=telegram_notify._http_post_multipart, feed=self.feed, silent=silent)
 
 
 def alert_roots(live_dir: str = PRODUCTION_LIVE_DIR, archive_dir: str = PRODUCTION_ARCHIVE_DIR) -> List[str]:
@@ -586,14 +701,28 @@ def start(
                 ))
     except Exception as exc:  # noqa: BLE001 - a missing library must not stop the alerts
         log.warning("Owner agent not available (%s); buttons still work.", exc)
+    transcriber = voice.make_transcriber(env, str(box_settings.get("transcribe_model") or voice.DEFAULT_MODEL))
     inbox = TelegramInbox(cfg, agent, index, mute, live_dir, os.path.join(log_dir, "telegram_offset.json"),
-                          feed=feed, deliverer=deliverer, archive_dir=archive_dir, lang=box_language)
+                          feed=feed, deliverer=deliverer, archive_dir=archive_dir, lang=box_language,
+                          transcriber=transcriber)
     assistant = OwnerAssistant(cfg=cfg, index=index, mute=mute, inbox=inbox, feed=feed, deliverer=deliverer,
                                feedback_dir=live_dir, archive_dir=archive_dir)
     if cfg.enabled and not cfg.dry_run:
         assistant.thread = threading.Thread(target=inbox.run, name="telegram-inbox", daemon=True)
         assistant.thread.start()
     return assistant
+
+
+def _clock_of(alert: Dict[str, Any]) -> str:
+    """The alert's local time, "02:14"; the alert id ends ``_<epoch>_alert`` when its record has no time."""
+    stamp = alert.get("ts")
+    if stamp is None:
+        parts = str(alert.get("alert_id") or "").split("_")
+        stamp = next((p for p in reversed(parts) if p.isdigit()), None)
+    try:
+        return dt.datetime.fromtimestamp(float(stamp)).strftime("%H:%M")
+    except (TypeError, ValueError, OverflowError, OSError):
+        return "?"
 
 
 def _who(sender: Dict[str, Any]) -> Dict[str, Any]:
@@ -632,8 +761,13 @@ class TelegramInbox:
         training_dir: Optional[str] = None,
         archive_dir: Optional[str] = None,
         lang: Optional[Callable[[], str]] = None,
+        transcriber: Optional[voice.Transcriber] = None,
+        fetch_voice: Optional[Callable[[str], Tuple[bytes, str]]] = None,
     ) -> None:
         self.feed = feed
+        # A spoken answer to "Other…": fetched from Telegram, then transcribed (None: asked for in writing).
+        self.transcriber = transcriber
+        self._fetch_voice = fetch_voice or (lambda file_id: voice.download(self.cfg.bot_token, file_id, post=self._post))
         self.deliverer = deliverer
         # Where a tagged clip is copied for training, and the archive searched for it (None: the box's own).
         self.training_dir, self.archive_dir = training_dir, archive_dir
@@ -827,6 +961,29 @@ class TelegramInbox:
         code = f"tu:{alert_id}"
         return code if len(code.encode("utf-8")) <= CALLBACK_DATA_LIMIT else ""
 
+    def _edit_buttons(self, chat_id: str, message_id: Any, markup: Dict[str, Any]) -> bool:
+        """Replace the buttons under *message_id*. False when Telegram would not (too old, gone, offline)."""
+        if message_id is None:
+            return False
+        try:
+            resp = self._post(self.cfg.bot_token, "editMessageReplyMarkup",
+                              {"chat_id": chat_id, "message_id": str(message_id), "reply_markup": json.dumps(markup)})
+        except Exception as exc:  # noqa: BLE001 - the tag is saved; the receipt falls back to a message
+            log.warning("Buttons of message %s not replaced: %s", message_id, exc)
+            return False
+        return bool(isinstance(resp, dict) and resp.get("ok"))
+
+    def _receipt(self, chat_id: str, message_id: Any, label: str, alert_id: str, lang: str) -> bool:
+        """The alert's buttons become "✓ Saved: <label>" and Undo."""
+        row = [{"text": tr("tag_receipt", lang, label=tr(f"btn_tag_{label}", lang)), "callback_data": "tag:noop"}]
+        undo = self._undo_code(alert_id)
+        if undo:
+            row.append({"text": tr("undo_button", lang), "callback_data": undo})
+        return self._edit_buttons(chat_id, message_id, {"inline_keyboard": [row]})
+
+    def _alert_messages(self, chat_id: str, alert_id: str) -> List[int]:
+        return [message_id for chat, message_id in self.index.messages(alert_id) if chat == str(chat_id)]
+
     def _answer_callback(self, query: Dict[str, Any], text: str = "") -> None:
         fields = {"callback_query_id": str(query.get("id"))}
         if text:
@@ -881,6 +1038,14 @@ class TelegramInbox:
                 alert = self.index.alert(alert_id) or {"alert_id": alert_id}
                 self._note("owner", "button", _button_text(message, code, tr("undo_button", lang)), who["name"], alert)
                 undone = self._undo_tag(alert, who, chat_id, now)
+                on_alert = message.get("message_id") in self._alert_messages(chat_id, alert_id)
+                if undone:
+                    for alert_message in self._alert_messages(chat_id, alert_id):   # the tag buttons come back
+                        self._edit_buttons(chat_id, alert_message, json.loads(alert_keyboard(alert, lang)))
+                if undone and on_alert:
+                    answered = True
+                    self._answer_callback(query, tr("tag_undone", lang))
+                    return
                 self._answer_callback(query)
                 answered = True
                 self._say(chat_id, tr("tag_undone" if undone else "tag_undo_partial", lang),
@@ -888,6 +1053,10 @@ class TelegramInbox:
                           undo_data="" if undone else self._undo_code(alert_id), lang=lang)
                 return
             label = code[4:]
+            if label == "noop":                         # the receipt itself: nothing to do
+                answered = True
+                self._answer_callback(query)
+                return
             known = label in OWNER_LABELS
             alert = self.index.lookup(chat_id, message.get("message_id")) if known else None
             self._note("owner", "button", _button_text(message, code, tr(f"btn_tag_{label}", lang) if known else code),
@@ -923,8 +1092,9 @@ class TelegramInbox:
                           training_dir=self.training_dir, archive_dir=self.archive_dir)
             self._answer_callback(query)
             answered = True
-            self._say(chat_id, tr("tag_saved", lang, label=tr(f"btn_tag_{label}", lang)),
-                      reply_to=message.get("message_id"), undo_data=self._undo_code(alert_id), lang=lang)
+            if not self._receipt(chat_id, message.get("message_id"), label, alert_id, lang):
+                self._say(chat_id, tr("tag_saved", lang, label=tr(f"btn_tag_{label}", lang)),
+                          reply_to=message.get("message_id"), undo_data=self._undo_code(alert_id), lang=lang)
         except Exception as exc:  # noqa: BLE001 - a tag must never stop the inbox
             log.warning("Tag %s not saved: %s", code, exc)
             if not answered:
@@ -934,14 +1104,52 @@ class TelegramInbox:
                 except Exception as exc2:  # noqa: BLE001
                     log.warning("Could not answer the tag button: %s", exc2)
 
-    def _take_tag_text(self, chat_id: str, sender: Dict[str, Any], text: str, message: Dict[str, Any]) -> bool:
+    def _wait_for(self, chat_id: str, user_id: Any, message: Dict[str, Any], now: float) -> Optional[Dict[str, Any]]:
+        """The "Other…" wait *message* answers (a reply to its question or alert, or the newest open wait)."""
+        replied = (message.get("reply_to_message") or {}).get("message_id")
+        reply_alert = None
+        if replied is not None:
+            replied_alert = self.index.lookup(chat_id, replied)
+            reply_alert = str((replied_alert or {}).get("alert_id") or "") or None
+        return self.pending.match(chat_id, user_id, now, reply_to=replied, reply_alert=reply_alert)
+
+    def _take_voice(self, chat_id: str, sender: Dict[str, Any], message: Dict[str, Any]) -> bool:
+        """True when *message* is a voice answer to an "Other…" wait: it is transcribed and saved as the
+        words; when it cannot be, the owner is asked to write them (the wait stays). Never raises."""
+        spoken = message.get("voice") or message.get("audio")
+        if not isinstance(spoken, dict) or not spoken.get("file_id"):
+            return False
+        lang = self._language()
+        try:
+            if not self._wait_for(chat_id, sender.get("id"), message, self._now()):
+                return False
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Voice message not matched to a tag: %s", exc)
+            return False
+        heard = ""
+        try:
+            if self.transcriber is not None:
+                audio, name = self._fetch_voice(str(spoken["file_id"]))
+                heard = " ".join(str(self.transcriber(audio, name, lang) or "").split())
+        except Exception as exc:  # noqa: BLE001 - the owner is asked to write instead
+            log.warning("Voice message not transcribed: %s", exc)
+        if heard:
+            return self._take_tag_text(chat_id, sender, heard, message, spoken=True)
+        try:
+            self._say(chat_id, tr("tag_voice_failed", lang), reply_to=message.get("message_id"))
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Could not ask for the tag in writing: %s", exc)
+        return True
+
+    def _take_tag_text(self, chat_id: str, sender: Dict[str, Any], text: str, message: Dict[str, Any],
+                       spoken: bool = False) -> bool:
         """True when *text* was handled as the words of an "Other…" tag (or its asker's late reply to the
         question): then neither agent sees it. Only a text meant for the wait is taken - one that replies
         to nothing, to the question, or to the alert's own message; a reply to anything else (another
         alert, an answer of the assistant) goes to the agent and the wait stays. A command ("/...") ends
-        the waits and goes on as usual."""
+        the waits and goes on as usual. *spoken*: *text* is the transcript of a voice message."""
         user_id = sender.get("id")
-        if text.startswith("/"):
+        if text.startswith("/") and not spoken:
             self._cancel_tag(chat_id, user_id)
             return False
         lang = self._language()
@@ -949,11 +1157,7 @@ class TelegramInbox:
         try:
             now = self._now()
             replied = (message.get("reply_to_message") or {}).get("message_id")
-            reply_alert = None
-            if replied is not None:
-                replied_alert = self.index.lookup(chat_id, replied)
-                reply_alert = str((replied_alert or {}).get("alert_id") or "") or None
-            request = self.pending.match(chat_id, user_id, now, reply_to=replied, reply_alert=reply_alert)
+            request = self._wait_for(chat_id, user_id, message, now)
             who = _who(sender)
             if not request:
                 if replied is not None and self.pending.expired_prompt(chat_id, replied, user_id, now):
@@ -969,13 +1173,16 @@ class TelegramInbox:
             self._mark_answered(alert)
             words = text[:MAX_TAG_TEXT_CHARS]
             feedback = Feedback(verdict=verdict_for("other", str(alert.get("label") or "")), owner_label="other",
-                                owner_text=words, tagged_by=who["name"] or str(user_id or ""), source="text",
-                                request_id=request["request_id"])
+                                owner_text=words, tagged_by=who["name"] or str(user_id or ""),
+                                source="voice" if spoken else "text", request_id=request["request_id"],
+                                transcript=words if spoken else "")
             save_feedback(self.feedback_dir, alert, feedback, text, who, chat_id, now,
                           training_dir=self.training_dir, archive_dir=self.archive_dir)
             self.pending.complete(request["request_id"])
-            self._say(chat_id, tr("tag_saved_text", lang, text=words), reply_to=message.get("message_id"),
-                      undo_data=self._undo_code(alert_id), lang=lang)
+            for alert_message in self._alert_messages(chat_id, alert_id):
+                self._receipt(chat_id, alert_message, "other", alert_id, lang)
+            self._say(chat_id, tr("tag_saved_explanation", lang, time=_clock_of(alert)),
+                      reply_to=message.get("message_id"), undo_data=self._undo_code(alert_id), lang=lang)
             return True
         except Exception as exc:  # noqa: BLE001 - a tag must never stop the inbox
             log.warning("Tag text not saved: %s", exc)
@@ -994,6 +1201,8 @@ class TelegramInbox:
         if not self._allowed(chat_id) or sender.get("is_bot"):
             return
         if not text:
+            if self._take_voice(chat_id, sender, message):
+                return
             replied = (message.get("reply_to_message") or {}).get("message_id")
             if self.pending.needs_text(chat_id, sender.get("id"), self._now(), replied):
                 self._say(chat_id, tr("tag_need_text", self._language()), reply_to=message.get("message_id"))

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import os
 import urllib.error
@@ -107,7 +108,7 @@ def callback_codes(call: Dict[str, Any]) -> List[str]:
 
 class VerdictForTest(unittest.TestCase):
     def test_every_owner_label_against_every_ai_label(self) -> None:
-        self.assertEqual(OWNER_LABELS, ("normal", "suspicious", "escalation", "empty", "other"))
+        self.assertEqual(OWNER_LABELS, ("normal", "suspicious", "escalation", "empty", "other", "rule_mismatch"))
         expected = {
             "normal": {"normal": "expected", "suspicious": "expected", "escalation": "expected", "": "expected"},
             "empty": {"normal": "false_alarm", "suspicious": "false_alarm", "escalation": "false_alarm",
@@ -118,6 +119,8 @@ class VerdictForTest(unittest.TestCase):
                            "": "real_but_wrong"},
             "other": {"normal": "real_but_wrong", "suspicious": "real_but_wrong", "escalation": "real_but_wrong",
                       "": "real_but_wrong"},
+            "rule_mismatch": {"normal": "expected", "suspicious": "expected", "escalation": "expected",
+                              "": "expected"},
         }
         for owner, by_ai in expected.items():
             for ai, verdict in by_ai.items():
@@ -132,30 +135,23 @@ class KeyboardTest(unittest.TestCase):
     def _rows(self, raw: str) -> List[List[Dict[str, str]]]:
         return json.loads(raw)["inline_keyboard"]
 
-    def test_two_rows_six_buttons_with_the_tag_codes(self) -> None:
+    def test_one_row_suspicious_normal_other(self) -> None:
         rows = self._rows(feedback_keyboard("en"))
-        self.assertEqual([[b["callback_data"] for b in row] for row in rows], [
-            ["tag:normal", "tag:suspicious", "tag:escalation"],
-            ["tag:empty", "tag:other", "fb:mute60"],
-        ])
-        self.assertEqual([[b["text"] for b in row] for row in rows], [
-            ["🟢 Normal", "🟡 Suspicious", "🔴 Escalation"],
-            ["⚪ Nothing there", "✏️ Other…", "⏸ Pause 1 hour"],
-        ])
+        self.assertEqual([[b["callback_data"] for b in row] for row in rows],
+                         [["tag:suspicious", "tag:normal", "tag:other"]])
+        self.assertEqual([[b["text"] for b in row] for row in rows], [["🟡 Suspicious", "🟢 Normal", "✏️ Other…"]])
 
     def test_the_ai_label_gets_a_tick(self) -> None:
         texts = [b["text"] for row in self._rows(feedback_keyboard("en", ai_label="suspicious")) for b in row]
-        self.assertEqual(texts[1], "✓ 🟡 Suspicious")
+        self.assertEqual(texts[0], "✓ 🟡 Suspicious")
         self.assertEqual([x for x in texts if x.startswith("✓")], ["✓ 🟡 Suspicious"])
         unticked = [b["text"] for row in self._rows(feedback_keyboard("en", ai_label="bogus")) for b in row]
         self.assertFalse(any(x.startswith("✓") for x in unticked))
 
     def test_hebrew_texts(self) -> None:
-        texts = [b["text"] for row in self._rows(feedback_keyboard("he", ai_label="escalation")) for b in row]
+        texts = [b["text"] for row in self._rows(feedback_keyboard("he", ai_label="normal")) for b in row]
         self.assertEqual(texts, [
-            f"🟢 {t('btn_tag_normal', 'he')}", f"🟡 {t('btn_tag_suspicious', 'he')}",
-            f"✓ 🔴 {t('btn_tag_escalation', 'he')}",
-            f"⚪ {t('btn_tag_empty', 'he')}", f"✏️ {t('btn_tag_other', 'he')}", f"⏸ {t('btn_mute60', 'he')}",
+            f"🟡 {t('btn_tag_suspicious', 'he')}", f"✓ 🟢 {t('btn_tag_normal', 'he')}", f"✏️ {t('btn_tag_other', 'he')}",
         ])
         self.assertNotEqual(t("btn_tag_normal", "he"), t("btn_tag_normal", "en"))
 
@@ -163,9 +159,10 @@ class KeyboardTest(unittest.TestCase):
         self.assertEqual([t(k, "en") for k in ("btn_tag_normal", "btn_tag_suspicious", "btn_tag_escalation",
                                                "btn_tag_empty", "btn_tag_other")],
                          ["Normal", "Suspicious", "Escalation", "Nothing there", "Other…"])
-        self.assertEqual(t("tag_ask_text", "en"), "Write the correct tag for this clip.")
+        self.assertEqual(t("tag_ask_text", "en"), "What's happening in the clip? Write or send a voice message.")
         self.assertEqual(t("tag_saved", "en", label="Normal"), "✓ Saved as Normal.")
-        self.assertEqual(t("tag_saved_text", "en", text="a cat"), "✓ Saved as: \"a cat\"")
+        self.assertEqual(t("tag_receipt", "en", label="Normal"), "✓ Saved: Normal")
+        self.assertEqual(t("tag_saved_explanation", "en", time="02:14"), "✓ Saved your explanation for the 02:14 clip.")
         self.assertEqual(t("tag_undone", "en"), "Tag removed.")
         self.assertEqual(t("tag_expired", "en"), "That tag request expired; tap Other… again.")
 
@@ -316,10 +313,43 @@ class InboxTaggingTest(unittest.TestCase):
         self.assertEqual(meta["owner_feedback"][-1]["ai_label"], "suspicious")
         self.assertTrue(os.path.isfile(self._training_clip()))
         self.assertEqual(len(self.tg.sent("answerCallbackQuery")), 1)
+        self.assertEqual(self.tg.sent("sendMessage"), [])
+        (edit,) = self.tg.sent("editMessageReplyMarkup")
+        self.assertEqual((edit["fields"]["chat_id"], edit["fields"]["message_id"]), (CHAT, "77"))
+        self.assertEqual(markup(edit), {"inline_keyboard": [[
+            {"text": "✓ Saved: Suspicious", "callback_data": "tag:noop"},
+            {"text": "↩ Undo", "callback_data": f"tu:{ALERT_ID}"}]]})
+        self.assertIn(ALERT_ID, inbox.answered)                   # the escalation reminder stops
+
+    def test_a_receipt_telegram_will_not_edit_is_a_message_with_undo(self) -> None:
+        post = self.tg.post
+
+        def refuse_edits(token, method, fields, timeout=15.0):
+            if method == "editMessageReplyMarkup":
+                return {"ok": False, "description": "Bad Request: message can't be edited"}
+            return post(token, method, fields, timeout)
+
+        self.tg.post = refuse_edits
+        self._inbox().handle_update(tap(1, "tag:suspicious", 77))
         (said,) = self.tg.sent("sendMessage")
         self.assertEqual(said["fields"]["text"], "✓ Saved as Suspicious.")
         self.assertEqual(callback_codes(said), [f"tu:{ALERT_ID}"])
-        self.assertIn(ALERT_ID, inbox.answered)                   # the escalation reminder stops
+
+    def test_undo_on_the_receipt_brings_the_buttons_back_without_a_message(self) -> None:
+        inbox = self._inbox()
+        inbox.handle_update(tap(1, "tag:normal", 77))
+        inbox.handle_update(tap(2, f"tu:{ALERT_ID}", 77))
+        self.assertEqual([s["note"] for s in self._saved()], ["", "tag undone"])
+        restored = self.tg.sent("editMessageReplyMarkup")[-1]
+        self.assertEqual(restored["fields"]["message_id"], "77")
+        self.assertEqual(restored["fields"]["reply_markup"], feedback_keyboard("en", ai_label="suspicious"))
+        self.assertEqual(self.tg.sent("answerCallbackQuery")[-1]["fields"]["text"], "Tag removed.")
+        self.assertEqual(self.tg.sent("sendMessage"), [])
+
+    def test_tapping_the_receipt_itself_does_nothing(self) -> None:
+        self._inbox().handle_update(tap(1, "tag:noop", 77))
+        self.assertEqual(self._saved(), [])
+        self.assertEqual([c["method"] for c in self.tg.calls], ["answerCallbackQuery"])
 
     def test_a_different_label_is_real_but_wrong_and_the_newest_tag_is_last(self) -> None:
         inbox = self._inbox()
@@ -338,9 +368,10 @@ class InboxTaggingTest(unittest.TestCase):
     def test_a_tag_confirmation_speaks_the_box_language(self) -> None:
         self.lang = "he"
         self._inbox().handle_update(tap(1, "tag:normal", 77))
-        (said,) = self.tg.sent("sendMessage")
-        self.assertEqual(said["fields"]["text"], t("tag_saved", "he", label=t("btn_tag_normal", "he")))
-        self.assertEqual(markup(said)["inline_keyboard"][0][0]["text"], t("undo_button", "he"))
+        (edit,) = self.tg.sent("editMessageReplyMarkup")
+        receipt, undo = markup(edit)["inline_keyboard"][0]
+        self.assertEqual(receipt["text"], t("tag_receipt", "he", label=t("btn_tag_normal", "he")))
+        self.assertEqual(undo["text"], t("undo_button", "he"))
 
     def test_a_tag_on_an_unknown_message_saves_nothing(self) -> None:
         self._inbox().handle_update(tap(1, "tag:normal", 12345))
@@ -377,8 +408,11 @@ class InboxTaggingTest(unittest.TestCase):
         self.assertEqual(saved["tagged_by"], "Dana")
         self.assertEqual(self._training_meta()["owner_feedback"][-1]["owner_text"], "two kids on bikes")
         said = self.tg.sent("sendMessage")[-1]
-        self.assertEqual(said["fields"]["text"], "✓ Saved as: \"two kids on bikes\"")
+        clock = dt.datetime.fromtimestamp(ALERT["ts"]).strftime("%H:%M")
+        self.assertEqual(said["fields"]["text"], f"✓ Saved your explanation for the {clock} clip.")
         self.assertEqual(callback_codes(said), [f"tu:{ALERT_ID}"])
+        (receipt,) = self.tg.sent("editMessageReplyMarkup")              # the alert shows it too
+        self.assertEqual((receipt["fields"]["message_id"], callback_codes(receipt)), ("77", ["tag:noop", f"tu:{ALERT_ID}"]))
         self.assertEqual(agent.seen, [])
 
     def test_the_v2_agent_does_not_see_the_tag_text_either(self) -> None:
@@ -422,22 +456,31 @@ class InboxTaggingTest(unittest.TestCase):
         inbox.handle_update(text(3, "hello"))
         self.assertEqual(agent.seen, ["hello"])
 
-    def test_a_pending_tag_older_than_ten_minutes_is_not_consumed(self) -> None:
+    def test_after_half_an_hour_a_plain_message_goes_to_the_assistant(self) -> None:
         agent = FakeAgentV1()
         inbox = self._inbox(agent)
         inbox.handle_update(tap(1, "tag:other", 77))
-        self.clock += 601
-        inbox.handle_update(text(2, "what happened today?"))
-        self.assertEqual(agent.seen, ["what happened today?"])
+        self.clock += 1801
+        inbox.handle_update(text(2, "it's me, pause until six"))
+        self.assertEqual(agent.seen, ["it's me, pause until six"])
         self.assertEqual(self._saved(), [])
         self.assertNotIn(t("tag_expired", "en"), self.tg.texts())
+
+    def test_a_reply_to_the_question_or_the_clip_is_the_answer_for_a_day(self) -> None:
+        agent = FakeAgentV1()
+        inbox = self._inbox(agent)
+        inbox.handle_update(tap(1, "tag:other", 77))
+        self.clock += 23 * 3600
+        inbox.handle_update(text(2, "the neighbour's son", reply_to=77))      # a reply to the video itself
+        self.assertEqual(agent.seen, [])
+        self.assertEqual(self._saved()[0]["owner_text"], "the neighbour's son")
 
     def test_a_reply_to_an_expired_prompt_says_it_expired(self) -> None:
         agent = FakeAgentV1()
         inbox = self._inbox(agent)
         inbox.handle_update(tap(1, "tag:other", 77))
         prompt_id = self.tg.sent("sendMessage")[0]["message_id"]    # the "Other…" question
-        self.clock += 601
+        self.clock += 86401
         inbox.handle_update(text(2, "a delivery", reply_to=prompt_id))
         self.assertEqual(agent.seen, [])
         self.assertEqual(self._saved(), [])
@@ -572,7 +615,7 @@ class InboxTaggingTest(unittest.TestCase):
         inbox = self._inbox(agent)
         inbox.handle_update(tap(1, "tag:other", 77))
         (prompt,) = self._prompts()
-        self.clock += 700
+        self.clock += 86401
         inbox.handle_update(text(2, "is the door locked?", sender=OMER, reply_to=prompt))
         self.assertEqual(agent.seen, ["is the door locked?"])
         self.assertNotIn(t("tag_expired", "en"), self.tg.texts())
@@ -583,7 +626,7 @@ class InboxTaggingTest(unittest.TestCase):
     def test_an_expired_prompt_keeps_its_user_across_a_restart(self) -> None:
         self._inbox().handle_update(tap(1, "tag:other", 77))
         (prompt,) = self._prompts()
-        self.clock += 700
+        self.clock += 86401
         self._inbox(FakeAgentV1()).handle_update(text(2, "hi", sender=OMER))      # the purge writes the file
         agent = FakeAgentV1()
         inbox = self._inbox(agent)
@@ -741,7 +784,9 @@ class InboxTaggingTest(unittest.TestCase):
                     msg["message"]["caption"] = "Can you identify this?"
                     before = len(self._saved())
                     inbox.handle_update(msg)
-                    self.assertEqual(self.tg.texts()[-1], "Please write the tag as text.")
+                    # No transcriber here: a voice answer is asked for in writing, like a photo.
+                    asked = t("tag_voice_failed", "en") if kind == "voice" else "Please write the tag as text."
+                    self.assertEqual(self.tg.texts()[-1], asked)
                     self.assertEqual(len(self._saved()), before)
                     inbox = self._inbox(agent)
                     inbox.handle_update(text(3, "gardener"))
@@ -777,7 +822,7 @@ class InboxTaggingTest(unittest.TestCase):
                          {ALERT_ID: "A label", self.B_ID: "B label"})
         inbox.handle_update(tap(6, "tag:other", 77))
         expired = self._prompts()[-1]
-        self.clock += 601
+        self.clock += 86401
         inbox = self._inbox(agent)
         inbox.handle_update(tap(7, "tag:other", 88, sender=OMER))
         inbox.handle_update(text(8, "Omer question", sender=OMER, reply_to=expired))

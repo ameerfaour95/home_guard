@@ -56,7 +56,7 @@ FIND_SPAN_SEC = 3600.0  # "the video from 3pm" searches the hour from 15:00
 FEEDBACK_QUESTION = "Was this alert right? Tap a button, or just reply in your own words."
 
 # The labels the owner tags an alert with from Telegram (telegram_agent.feedback_keyboard).
-OWNER_LABELS = ("normal", "suspicious", "escalation", "empty", "other")
+OWNER_LABELS = ("normal", "suspicious", "escalation", "empty", "other", "rule_mismatch")
 MAX_TAG_TEXT_CHARS = 500
 TAG_UNDONE_NOTE = "tag undone"
 
@@ -93,13 +93,14 @@ class Feedback:
     owner_text: str = ""                # the owner's own words for an "other" tag
     tagged_by: str = ""                 # who tagged it (name, or Telegram user id)
     request_id: str = ""                # durable completion of an Other prompt
+    transcript: str = ""                # a voice answer, as transcribed (also in owner_text)
 
 
 def verdict_for(owner_label: str, ai_label: str) -> str:
     """The verdict an owner's tag means, given the AI's label. The one mapping every tagging path uses."""
     if owner_label == "empty":
         return "false_alarm"
-    if owner_label == "normal":
+    if owner_label in ("normal", "rule_mismatch"):   # the house rule should not have raised it
         return "expected"
     if owner_label in ("suspicious", "escalation"):
         return "true_alert" if owner_label == ai_label else "real_but_wrong"
@@ -649,6 +650,8 @@ def save_feedback(
     with the clips. An answer can arrive long after its clip was uploaded,
     which is why it is not written into the clip's meta. An answer that judges
     the alert also keeps the clip for training (:func:`keep_for_training`).
+    Every answer is also kept for good, at the same path under the training
+    folder (:func:`_kept_answers_dir`), with its :func:`training_record`.
     """
     camera = (alert or {}).get("camera") or "_general"
     alert_id = (alert or {}).get("alert_id") or "general"
@@ -673,7 +676,7 @@ def save_feedback(
         path = os.path.join(folder, f"{alert_id}_{stamp}.feedback.json")
 
     utc = lambda ts: dt.datetime.fromtimestamp(ts, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")  # noqa: E731
-    _write_json(path, {
+    record = {
         "time_utc": utc(now),
         "alert": alert,
         "verdict": feedback.verdict,
@@ -689,13 +692,132 @@ def save_feedback(
         "owner_text": feedback.owner_text,
         "tagged_by": feedback.tagged_by,
         "request_id": feedback.request_id,
-    })
+        "transcript": feedback.transcript,
+    }
+    _write_json(path, record)
+    kept_meta = None
     if feedback.verdict in LABELLING_VERDICTS and (alert or {}).get("alert_id"):
         try:
-            keep_for_training(alert or {}, feedback, raw_text, who, now, root_dir, training_dir, archive_dir)
+            kept_meta = keep_for_training(alert or {}, feedback, raw_text, who, now, root_dir, training_dir, archive_dir)
         except Exception as exc:  # noqa: BLE001 - the answer is saved; the training copy must not break the inbox
             log.warning("Could not keep the clip of %s for training: %s", alert_id, exc)
+    kept_dir = _kept_answers_dir(root_dir, training_dir)
+    if kept_dir:
+        try:
+            meta, meta_rel = _event_meta(alert_id, kept_meta, kept_dir, root_dir, archive_dir)
+            _write_json(os.path.join(kept_dir, os.path.relpath(path, root_dir)),
+                        dict(record, training=training_record(alert, feedback, who, now, meta, meta_rel)))
+        except Exception as exc:  # noqa: BLE001 - the answer is saved; its kept copy must not break the inbox
+            log.warning("Could not keep the answer to %s for training: %s", alert_id, exc)
     return path
+
+
+def _kept_answers_dir(root_dir: str, training_dir: Optional[str]) -> Optional[str]:
+    """Where an answer is kept for good: the training folder, uploaded to ``dataset_<site>/feedback/``.
+
+    The production folder's copy is uploaded under ``production_<site>/``, which the bucket empties after two
+    weeks (retention.py). Only the box's own production folder pairs with the box's own dataset when no training
+    folder is named, so a scratch folder never writes into the box's dataset.
+    """
+    from . import boxconfig  # noqa: PLC0415
+
+    if training_dir:
+        return training_dir
+    if os.path.abspath(root_dir) == os.path.abspath(boxconfig.PRODUCTION_LIVE_DIR):
+        return boxconfig.LIVE_DIR
+    return None
+
+
+def _production_roots(production_dir: str, archive_dir: str) -> List[str]:
+    """The production folder, then one folder per site in the archive."""
+    return [production_dir] + sorted(
+        os.path.join(archive_dir, name) for name in (os.listdir(archive_dir) if os.path.isdir(archive_dir) else [])
+        if os.path.isdir(os.path.join(archive_dir, name))
+    )
+
+
+def _event_meta(alert_id: str, kept_meta: Optional[str], training_dir: str, production_dir: str,
+                archive_dir: Optional[str]) -> Tuple[Dict[str, Any], Optional[str]]:
+    """The saved meta of *alert_id* and its path inside its folder (``meta/<camera>/<day>/<stem>.meta.json``):
+    the training copy first, else the production copy. ``({}, None)`` when neither is on this box."""
+    from .boxconfig import PRODUCTION_ARCHIVE_DIR  # noqa: PLC0415
+
+    found: Optional[Tuple[str, str]] = None
+    if kept_meta and os.path.isfile(kept_meta):
+        found = (kept_meta, training_dir)
+    elif alert_id and alert_id != "general":
+        for root in [training_dir] + _production_roots(production_dir, archive_dir or PRODUCTION_ARCHIVE_DIR):
+            files = _alert_files(alert_id, [root])
+            if files:
+                found = (files[0], root)
+                break
+    if not found:
+        return {}, None
+    with open(found[0], encoding="utf-8") as f:
+        meta = json.load(f)
+    return (meta if isinstance(meta, dict) else {}), os.path.relpath(found[0], found[1]).replace("\\", "/")
+
+
+def _dict(value: Any) -> Dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def training_record(
+    alert: Optional[Dict[str, Any]],
+    feedback: Feedback,
+    who: Dict[str, Any],
+    now: float,
+    meta: Dict[str, Any],
+    meta_rel: Optional[str] = None,
+) -> Dict[str, Any]:
+    """What one answer teaches, in one place: the event, the owner's answer, the clip and the crop the AI saw
+    (paths inside the dataset folder), what the detector found, what the model said and the situation it was in.
+
+    *meta* is the event's ``.meta.json`` (empty when the clip is no longer on this box: the alert's own record
+    then gives what it can).
+    """
+    alert = alert or {}
+    said, crop, teacher = _dict(meta.get("alert")), _dict(meta.get("vlm_crop")), _dict(meta.get("teacher"))
+    response, observation = _dict(meta.get("model_response")), _dict(meta.get("observation"))
+    camera = str(alert.get("camera") or meta.get("camera_name") or "")
+    ts = alert.get("ts") or meta.get("trigger_ts") or meta.get("clip_start_ts")
+    try:
+        time_local = dt.datetime.fromtimestamp(float(ts)).strftime("%Y-%m-%d %H:%M:%S")
+    except (TypeError, ValueError, OverflowError, OSError):
+        time_local = None
+    return {
+        "event_id": str(alert.get("alert_id") or ""),
+        "answer": {
+            "label": feedback.owner_label,
+            "verdict": feedback.verdict,
+            "text": feedback.owner_text or feedback.note,
+            "transcript": feedback.transcript,
+            "source": feedback.source,
+            "by": {"user_id": (who or {}).get("user_id"), "name": (who or {}).get("name") or ""},
+            "time_utc": dt.datetime.fromtimestamp(now, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        },
+        "media": {
+            "meta_path": meta_rel,
+            "clip_path": meta.get("clip_path"),
+            "vlm_crop_path": crop.get("vlm_crop_path"),
+            "vlm_input": meta.get("vlm_input"),
+        },
+        "yolo": meta.get("yolo"),
+        "yolo_export": meta.get("yolo_export"),
+        "model": {
+            "description": said.get("summary") or alert.get("summary") or "",
+            "category": observation.get("category") or response.get("category") or "",
+            "raw_label": said.get("raw_label", ""),
+            "label": said.get("label") or alert.get("label") or "",
+            "why": said.get("why", ""),
+            "model": teacher.get("model") or "",
+            "prompt_version": teacher.get("prompt_version") or meta.get("prompt_version") or "",
+        },
+        "situation": dict(_dict(meta.get("situation")), camera=camera, time_local=time_local),
+        # The situational Eye's records, as inference saved them; None for a clip saved without them.
+        "observation": meta.get("observation"),
+        "judgement": meta.get("judgement"),
+    }
 
 
 def _alert_files(alert_id: str, roots: Sequence[str]) -> Optional[Tuple[str, str]]:
@@ -741,10 +863,7 @@ def keep_for_training(
     training_dir = training_dir or LIVE_DIR
     archive_dir = archive_dir or PRODUCTION_ARCHIVE_DIR
     alert_id = str(alert.get("alert_id"))
-    roots = [production_dir] + sorted(
-        os.path.join(archive_dir, name) for name in (os.listdir(archive_dir) if os.path.isdir(archive_dir) else [])
-        if os.path.isdir(os.path.join(archive_dir, name))
-    )
+    roots = _production_roots(production_dir, archive_dir)
     answer = {
         "time_utc": dt.datetime.fromtimestamp(now, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "verdict": feedback.verdict,
@@ -755,6 +874,7 @@ def keep_for_training(
         "owner_label": feedback.owner_label,
         "owner_text": feedback.owner_text,
         "tagged_by": feedback.tagged_by,
+        "transcript": feedback.transcript,
         "ai_label": str(alert.get("label") or ""),
     }
     kept = _alert_files(alert_id, [training_dir])
@@ -775,16 +895,35 @@ def keep_for_training(
         meta = json.load(f)
     clip_rel = str(meta.get("clip_path") or "").replace("\\", "/")
     new_clip = os.path.join(training_dir, *clip_rel.split("/"))
-    new_meta = os.path.join(training_dir, os.path.relpath(meta_path, os.path.dirname(os.path.dirname(
-        os.path.dirname(os.path.dirname(meta_path))))))
+    source_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(meta_path))))
+    new_meta = os.path.join(training_dir, os.path.relpath(meta_path, source_root))
     os.makedirs(os.path.dirname(new_clip), exist_ok=True)
     shutil.copy2(clip_path, new_clip)                       # the clip first: a meta on disk means a complete clip
+    for path in _clip_companions(meta_path, source_root):   # the crop the AI saw, its pictures and raw answer
+        target = os.path.join(training_dir, os.path.relpath(path, source_root))
+        if os.path.normcase(os.path.abspath(path)) != os.path.normcase(os.path.abspath(clip_path)):
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            shutil.copy2(path, target)
     meta["kind"] = "owner_feedback"
     meta["owner_feedback"] = [answer]
     meta["kept_from"] = os.path.basename(production_dir)
     _write_json(new_meta, meta)
     log.info("Kept the clip of %s for training with the owner's answer (%s).", alert_id, feedback.verdict)
     return new_meta
+
+
+def _clip_companions(meta_path: str, root: str) -> List[str]:
+    """Every file of the clip *meta_path* describes besides its meta, in the folders the outbox moves with it."""
+    from .outbox import _CLIP_DIRS, _belongs_to_clip, META_SUFFIX  # noqa: PLC0415
+
+    stem = os.path.basename(meta_path)[: -len(META_SUFFIX)]
+    camera_date = os.path.relpath(os.path.dirname(meta_path), os.path.join(root, "meta"))
+    found = []
+    for sub in _CLIP_DIRS:
+        folder = os.path.join(root, *sub.split("/"), camera_date)
+        if os.path.isdir(folder):
+            found += [os.path.join(folder, n) for n in sorted(os.listdir(folder)) if _belongs_to_clip(n, stem)]
+    return found
 
 
 def _is_tag_answer(answer: Any) -> bool:

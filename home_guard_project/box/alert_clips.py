@@ -287,7 +287,13 @@ def write_alert_clip(
             log.warning("[%s] could not save VLM crop: %s", camera, exc)
             meta["vlm_crop_save_error"] = str(exc)
     if teacher:
-        meta.update(teacher_record(root_dir, camera, day, stem, teacher))
+        try:
+            fields = teacher_record(root_dir, camera, day, stem, teacher)
+            json.dumps(fields)
+            meta.update(fields)
+        except Exception as exc:  # noqa: BLE001 - the owner's clip must survive a teacher record that cannot be saved
+            log.warning("[%s] could not save the teacher record: %s", camera, exc)
+            meta["teacher_save_error"] = str(exc)
     tmp = f"{meta_path}.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=2)
