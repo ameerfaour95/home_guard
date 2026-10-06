@@ -13,6 +13,8 @@ $targets = @(
     (Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'Home Guard.lnk'),
     (Join-Path ([Environment]::GetFolderPath('Startup')) 'Home Guard.lnk')
 )
+# An early version put "Home Guard.cmd" in Startup; with the shortcut as well, two windows opened at sign-in.
+Remove-Item -Path (Join-Path ([Environment]::GetFolderPath('Startup')) 'Home Guard.cmd') -Force -ErrorAction SilentlyContinue
 foreach ($lnk in $targets) {
     try {
         # Delete any existing .lnk first so Explorer re-reads the (new) icon
