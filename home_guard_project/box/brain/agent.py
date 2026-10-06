@@ -1030,11 +1030,15 @@ def build_owner_agent(box_settings: Dict[str, Any], env: Dict[str, str], mute: A
     except (TypeError, ValueError, OverflowError):
         log.warning("Invalid vision daily budget; using 300")
         vision_budget = 300
+    # The same vision model as the Eye: box.yaml vlm_provider / vlm_model and its fallback (OpenAI by default).
+    vision = make_vision(env, str(box_settings.get("vlm_model") or "gpt-4o"),
+                         provider=str(box_settings.get("vlm_provider") or "openai").strip().lower(),
+                         fallback_provider=str(box_settings.get("vlm_fallback_provider") or "").strip().lower(),
+                         fallback_model=str(box_settings.get("vlm_fallback_model") or "").strip())
     services = Services(
         roots=lambda: alert_roots(live_dir, archive_dir), desc_dir=os.path.join(live_dir, ".desc"),
         feedback_dir=live_dir, work_dir=work_dir, mute=mute, deliver=deliverer,
-        vision=_budgeted(make_vision(env, str(box_settings.get("vlm_model") or "gpt-4o")),
-                         vision_budget,
+        vision=_budgeted(vision, vision_budget,
                          os.path.join(live_dir, ".registry", "vision_budget.json"), BudgetedVision),
         grab_photo=lambda camera: media.grab_photo(camera, work_dir, CAMERAS_PATH),
         record_live=lambda camera, seconds: media.record_live(camera, seconds, work_dir, CAMERAS_PATH),
