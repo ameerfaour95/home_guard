@@ -66,7 +66,8 @@ Post = Callable[..., Dict[str, Any]]
 BUTTON_LABELS = {code: label for row in FEEDBACK_BUTTONS for label, code in row}
 
 REMIND_SEC = 300.0   # an escalation nobody answered is sent once more, loud, after this long
-TAG_WAIT_SEC = 600.0  # how long "Other…" waits for the owner's words
+TAG_WAIT_SEC = 86400.0     # how long "Other…" waits for the owner's words, as a reply to the question or video
+TAG_IMPLICIT_SEC = 1800.0  # how long a message that replies to nothing is taken as those words
 CALLBACK_DATA_LIMIT = 64  # Telegram refuses a button whose callback data is longer (bytes)
 VIDEO_WAIT_SEC = 60.0  # an alert waits this long for its video; then it goes out with the picture
 
@@ -152,8 +153,11 @@ class PendingTags:
     KEEP_EXPIRED_MAX = 100
     MAX_PROMPTS = 5
 
-    def __init__(self, path: str, ttl: float = TAG_WAIT_SEC) -> None:
+    def __init__(self, path: str, ttl: float = TAG_WAIT_SEC, implicit_ttl: float = TAG_IMPLICIT_SEC) -> None:
         self.path, self.ttl = path, float(ttl)
+        # A wait takes a message that replies to nothing only this long; later, "it's me, pause until six"
+        # is a request for the assistant, and only a reply to the question or to the clip is the answer.
+        self.implicit_ttl = min(float(implicit_ttl), self.ttl)
         data = _read_json(path)
         pending = data.get("pending") if isinstance(data.get("pending"), dict) else {}
         expired = data.get("expired_prompts") if isinstance(data.get("expired_prompts"), dict) else {}
@@ -262,7 +266,8 @@ class PendingTags:
         mine = self._mine(chat_id, user_id)
         chosen = None
         if reply_to is None:
-            open_waits = [kv for kv in mine if not kv[1].get("reply_only")]
+            open_waits = [kv for kv in mine if not kv[1].get("reply_only")
+                          and now - float(kv[1]["ts"]) <= self.implicit_ttl]
             if open_waits:
                 chosen = open_waits[0]
         else:
@@ -683,6 +688,18 @@ def start(
     return assistant
 
 
+def _clock_of(alert: Dict[str, Any]) -> str:
+    """The alert's local time, "02:14"; the alert id ends ``_<epoch>_alert`` when its record has no time."""
+    stamp = alert.get("ts")
+    if stamp is None:
+        parts = str(alert.get("alert_id") or "").split("_")
+        stamp = next((p for p in reversed(parts) if p.isdigit()), None)
+    try:
+        return dt.datetime.fromtimestamp(float(stamp)).strftime("%H:%M")
+    except (TypeError, ValueError, OverflowError, OSError):
+        return "?"
+
+
 def _who(sender: Dict[str, Any]) -> Dict[str, Any]:
     name = " ".join(x for x in (sender.get("first_name"), sender.get("last_name")) if x)
     return {"user_id": sender.get("id"), "name": name or sender.get("username") or ""}
@@ -914,6 +931,29 @@ class TelegramInbox:
         code = f"tu:{alert_id}"
         return code if len(code.encode("utf-8")) <= CALLBACK_DATA_LIMIT else ""
 
+    def _edit_buttons(self, chat_id: str, message_id: Any, markup: Dict[str, Any]) -> bool:
+        """Replace the buttons under *message_id*. False when Telegram would not (too old, gone, offline)."""
+        if message_id is None:
+            return False
+        try:
+            resp = self._post(self.cfg.bot_token, "editMessageReplyMarkup",
+                              {"chat_id": chat_id, "message_id": str(message_id), "reply_markup": json.dumps(markup)})
+        except Exception as exc:  # noqa: BLE001 - the tag is saved; the receipt falls back to a message
+            log.warning("Buttons of message %s not replaced: %s", message_id, exc)
+            return False
+        return bool(isinstance(resp, dict) and resp.get("ok"))
+
+    def _receipt(self, chat_id: str, message_id: Any, label: str, alert_id: str, lang: str) -> bool:
+        """The alert's buttons become "✓ Saved: <label>" and Undo."""
+        row = [{"text": tr("tag_receipt", lang, label=tr(f"btn_tag_{label}", lang)), "callback_data": "tag:noop"}]
+        undo = self._undo_code(alert_id)
+        if undo:
+            row.append({"text": tr("undo_button", lang), "callback_data": undo})
+        return self._edit_buttons(chat_id, message_id, {"inline_keyboard": [row]})
+
+    def _alert_messages(self, chat_id: str, alert_id: str) -> List[int]:
+        return [message_id for chat, message_id in self.index.messages(alert_id) if chat == str(chat_id)]
+
     def _answer_callback(self, query: Dict[str, Any], text: str = "") -> None:
         fields = {"callback_query_id": str(query.get("id"))}
         if text:
@@ -968,6 +1008,14 @@ class TelegramInbox:
                 alert = self.index.alert(alert_id) or {"alert_id": alert_id}
                 self._note("owner", "button", _button_text(message, code, tr("undo_button", lang)), who["name"], alert)
                 undone = self._undo_tag(alert, who, chat_id, now)
+                on_alert = message.get("message_id") in self._alert_messages(chat_id, alert_id)
+                if undone:
+                    for alert_message in self._alert_messages(chat_id, alert_id):   # the tag buttons come back
+                        self._edit_buttons(chat_id, alert_message, json.loads(alert_keyboard(alert, lang)))
+                if undone and on_alert:
+                    answered = True
+                    self._answer_callback(query, tr("tag_undone", lang))
+                    return
                 self._answer_callback(query)
                 answered = True
                 self._say(chat_id, tr("tag_undone" if undone else "tag_undo_partial", lang),
@@ -975,6 +1023,10 @@ class TelegramInbox:
                           undo_data="" if undone else self._undo_code(alert_id), lang=lang)
                 return
             label = code[4:]
+            if label == "noop":                         # the receipt itself: nothing to do
+                answered = True
+                self._answer_callback(query)
+                return
             known = label in OWNER_LABELS
             alert = self.index.lookup(chat_id, message.get("message_id")) if known else None
             self._note("owner", "button", _button_text(message, code, tr(f"btn_tag_{label}", lang) if known else code),
@@ -1010,8 +1062,9 @@ class TelegramInbox:
                           training_dir=self.training_dir, archive_dir=self.archive_dir)
             self._answer_callback(query)
             answered = True
-            self._say(chat_id, tr("tag_saved", lang, label=tr(f"btn_tag_{label}", lang)),
-                      reply_to=message.get("message_id"), undo_data=self._undo_code(alert_id), lang=lang)
+            if not self._receipt(chat_id, message.get("message_id"), label, alert_id, lang):
+                self._say(chat_id, tr("tag_saved", lang, label=tr(f"btn_tag_{label}", lang)),
+                          reply_to=message.get("message_id"), undo_data=self._undo_code(alert_id), lang=lang)
         except Exception as exc:  # noqa: BLE001 - a tag must never stop the inbox
             log.warning("Tag %s not saved: %s", code, exc)
             if not answered:
@@ -1061,8 +1114,10 @@ class TelegramInbox:
             save_feedback(self.feedback_dir, alert, feedback, text, who, chat_id, now,
                           training_dir=self.training_dir, archive_dir=self.archive_dir)
             self.pending.complete(request["request_id"])
-            self._say(chat_id, tr("tag_saved_text", lang, text=words), reply_to=message.get("message_id"),
-                      undo_data=self._undo_code(alert_id), lang=lang)
+            for alert_message in self._alert_messages(chat_id, alert_id):
+                self._receipt(chat_id, alert_message, "other", alert_id, lang)
+            self._say(chat_id, tr("tag_saved_explanation", lang, time=_clock_of(alert)),
+                      reply_to=message.get("message_id"), undo_data=self._undo_code(alert_id), lang=lang)
             return True
         except Exception as exc:  # noqa: BLE001 - a tag must never stop the inbox
             log.warning("Tag text not saved: %s", exc)
