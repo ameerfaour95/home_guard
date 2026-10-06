@@ -31,6 +31,29 @@ def answer(**over):
     return base
 
 
+class CaseMemoryHandoffTest(unittest.TestCase):
+    """The Eye's observation is what case_memory.signature reads: the names must agree."""
+
+    def test_appearance_and_vehicles_reach_the_case_signature(self) -> None:
+        from home_guard_project.box.case_memory.signature import build_signature
+
+        parsed = {"category": "N2", "zone": "gate", "movement": "leaving", "flags": [], "visibility": "clear",
+                  "evidence_frame": 2, "people": 1, "vehicles": 2, "animals": 0,
+                  "appearance": ["dark coat", "backpack", "  ", "x" * 80, "cap", "red bag", "sixth"]}
+        obs = eye.observation_of(parsed)
+        self.assertEqual(obs["appearance"], ["dark coat", "backpack", "x" * 40, "cap"])
+        self.assertEqual(obs["vehicles"], 2)
+        sig = build_signature("gate", datetime(2026, 10, 6, 7, 40).timestamp(), {**parsed, **obs})
+        self.assertEqual((sig.category, sig.vehicles, sig.people), ("N2", 2, 1))
+        self.assertIn("backpack", sig.appearance)
+
+    def test_the_alert_schema_asks_for_appearance_and_vehicles(self) -> None:
+        props = eye.schema("alert_triage")["properties"]
+        self.assertEqual(props["appearance"], {"type": "array", "items": {"type": "string"}})
+        self.assertEqual(props["vehicles"], {"type": "integer"})
+        self.assertIn("Never the face", eye._alert_triage())
+
+
 class SchemaTest(unittest.TestCase):
     def test_every_intent_has_a_strict_schema(self) -> None:
         for intent in tx.INTENTS:
@@ -45,7 +68,8 @@ class SchemaTest(unittest.TestCase):
     def test_alert_triage_observes_first_and_labels_last(self) -> None:
         props = list(eye.schema("alert_triage")["properties"])
         self.assertEqual(props, ["summary", "category", "other_text", "zone", "movement", "flags", "people",
-                                 "vehicle_moving", "animals", "visibility", "evidence_frame", "raw_label", "label",
+                                 "vehicles", "vehicle_moving", "animals", "visibility", "appearance",
+                                 "evidence_frame", "raw_label", "label",
                                  "applied_fact_id", "serious_behaviour", "why"])
         p = eye.schema("alert_triage")["properties"]
         self.assertEqual(p["category"]["enum"], list(tx.CATEGORY_IDS))
@@ -159,7 +183,7 @@ class PostprocessTest(unittest.TestCase):
                                             "intent": "alert_triage", "camera_role": "entrance"})
         self.assertEqual(out["observation"], {"category": "N4", "other_text": "", "zone": "entrance",
                                               "movement": "approaching", "flags": [], "visibility": "clear",
-                                              "evidence_frame": 2})
+                                              "evidence_frame": 2, "appearance": [], "vehicles": 0})
 
     def test_escalation_is_never_softened(self) -> None:
         out = eye.postprocess(answer(category="E1", raw_label="escalation", label="normal"), sit(DAY_TS))

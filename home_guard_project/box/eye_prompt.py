@@ -33,7 +33,7 @@ from . import taxonomy as tx
 from .situation import Situation
 
 # Bumped whenever the wording or a schema changes, so training records and eval results can be told apart.
-EYE_PROMPT_VERSION = "2026-10-06.eye-v1"
+EYE_PROMPT_VERSION = "2026-10-06.eye-v2"
 
 QUALITY = ("good", "limited", "unusable")
 CONFIDENCE = ("clear", "partial", "cannot_tell")
@@ -59,7 +59,8 @@ _SCHEMAS: Dict[str, Dict[str, Any]] = {
     "alert_triage": _obj({
         "summary": _STR, "category": _enum(tx.CATEGORY_IDS), "other_text": _STR, "zone": _enum(tx.ZONES),
         "movement": _enum(tx.MOVEMENTS), "flags": {"type": "array", "items": _enum(tx.FLAGS)},
-        "people": _INT, "vehicle_moving": _BOOL, "animals": _INT, "visibility": _enum(tx.VISIBILITY),
+        "people": _INT, "vehicles": _INT, "vehicle_moving": _BOOL, "animals": _INT,
+        "visibility": _enum(tx.VISIBILITY), "appearance": {"type": "array", "items": _STR},
         "evidence_frame": _INT, "raw_label": _enum(tx.LABELS), "label": _enum(tx.LABELS),
         "applied_fact_id": _STR, "serious_behaviour": _BOOL, "why": _STR,
     }),
@@ -208,9 +209,13 @@ Look first, judge last. Fill the fields in this order:
 - "zone": where it happens: {' | '.join(tx.ZONES)}.
 - "movement": {' | '.join(tx.MOVEMENTS)}.
 - "flags": each one you clearly see: {', '.join(tx.FLAGS)}; [] when none.
-- "people": how many people are visible; "vehicle_moving": true if a vehicle drives, arrives or leaves (false
+- "people": how many people are visible; "vehicles": how many vehicles are visible (parked ones too);
+  "vehicle_moving": true if a vehicle drives, arrives or leaves (false
   if vehicles are only parked or there are none); "animals": how many animals (not birds).
 - "visibility": "clear", or "partial" when darkness, distance or cover hides what the person does.
+- "appearance": up to 4 short phrases that would recognise the same person or vehicle again: clothing colour
+  and type, what they carry, a vehicle's colour and type ("dark coat", "backpack", "white van"). Never the face,
+  hair, body, age or sex. [] when nobody is there. Appearance never decides the category.
 - "evidence_frame": the frame number that shows the category best; 0 when nothing happens.
 - "raw_label": judge the scene WITHOUT the situation and without house notes: "normal" for an N category,
   "suspicious" for S, "escalation" for E; for "other", your own judgement.
@@ -224,8 +229,8 @@ Look first, judge last. Fill the fields in this order:
 
 Reply with EXACTLY ONE strict JSON object and nothing else:
 {{"summary": "...", "category": "N1".."E8" | "other", "other_text": "", "zone": "...", "movement": "...",
-  "flags": [], "people": 0, "vehicle_moving": false, "animals": 0, "visibility": "clear",
-  "evidence_frame": 1, "raw_label": "normal" | "suspicious" | "escalation",
+  "flags": [], "people": 0, "vehicles": 0, "vehicle_moving": false, "animals": 0, "visibility": "clear",
+  "appearance": [], "evidence_frame": 1, "raw_label": "normal" | "suspicious" | "escalation",
   "label": "normal" | "suspicious" | "escalation", "applied_fact_id": "", "serious_behaviour": false,
   "why": ""}}
 """.strip()
@@ -338,6 +343,7 @@ def observation_of(parsed: Dict[str, Any]) -> Dict[str, Any]:
     """The context-free observation, normalized to the taxonomy's words."""
     category = tx.normalize_id(parsed.get("category"))
     flags = parsed.get("flags") if isinstance(parsed.get("flags"), list) else []
+    appearance = parsed.get("appearance") if isinstance(parsed.get("appearance"), list) else []
     try:
         frame = max(0, int(parsed.get("evidence_frame") or 0))
     except (TypeError, ValueError, OverflowError):
@@ -349,7 +355,10 @@ def observation_of(parsed: Dict[str, Any]) -> Dict[str, Any]:
             "flags": [f for f in tx.FLAGS if f in {str(x).strip().lower() for x in flags}],
             # Unknown visibility counts as partial: on a serious category that opens a case.
             "visibility": _choice(parsed.get("visibility"), tx.VISIBILITY, "partial"),
-            "evidence_frame": frame}
+            "evidence_frame": frame,
+            # Recognising the same person or car again (case memory); clothing and vehicle words only.
+            "appearance": [" ".join(str(a).split())[:40] for a in appearance if str(a).strip()][:4],
+            "vehicles": _count(parsed.get("vehicles"))}
 
 
 def postprocess(parsed: Any, situation: Situation) -> Optional[Dict[str, Any]]:

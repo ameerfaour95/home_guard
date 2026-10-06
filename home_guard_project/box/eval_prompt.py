@@ -765,7 +765,7 @@ class FakeBackend:
         raw_label = tx.BY_ID[cid].label if cid in tx.BY_ID else "suspicious"
         parsed = {"summary": summary, "category": cid, "other_text": "", "zone": "entrance",
                   "movement": "none" if people == 0 else "approaching", "flags": [], "people": people,
-                  "vehicle_moving": False, "animals": 0, "visibility": "clear",
+                  "vehicles": 0, "vehicle_moving": False, "animals": 0, "visibility": "clear", "appearance": [],
                   "evidence_frame": 0 if people == 0 else 1, "raw_label": raw_label, "label": raw_label,
                   "applied_fact_id": "", "serious_behaviour": cid[0] in "SE",
                   "why": "" if raw_label == "normal" else "the act"}
