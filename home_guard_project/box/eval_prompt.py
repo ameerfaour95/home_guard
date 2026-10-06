@@ -49,6 +49,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import csv
+import glob
 import hashlib
 import json
 import logging
@@ -62,6 +63,7 @@ from datetime import datetime
 from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
 
 from . import inference, providers
+from .feedback import LABELLING_VERDICTS
 
 log = logging.getLogger("box.eval_prompt")
 
@@ -899,6 +901,141 @@ def format_freeze(record: Dict[str, Any]) -> str:
 
 
 # ----------------------------------------------------------------------------
+# prepare-owner (laptop): the alerts the owner judged on Telegram, as the box saw them
+# ----------------------------------------------------------------------------
+OWNER_INDEX = "owner_feedback/feedback_index.jsonl"   # inside the dataset
+OWNER_SUBSET = "owner"
+VLM_SAMPLE_FPS = 1.0   # data_collection config vlm.sample_fps: what the box sent the AI, 1 frame a second
+# The owner's verdict (box/feedback.py) as our truth. false_alarm ("nothing there") is normal, not empty,
+# so these clips count in "normal flagged": they are the box's real false alarms.
+VERDICT_TRUTH = {"true_alert": "alert", "expected": "normal", "false_alarm": "normal"}
+TAG_TRUTH = {"suspicious": "alert", "escalation": "alert", "normal": "normal", "empty": "normal"}
+
+
+def owner_truth(verdicts: Sequence[Dict[str, Any]]) -> Tuple[Optional[str], str, Dict[str, Any]]:
+    """``(label, how, latest)`` from one alert's index rows with a labelling verdict.
+
+    The latest row that names a label wins: a tag (suspicious/escalation -> alert, normal/empty -> normal), else
+    the verdict (true_alert -> alert, expected/false_alarm -> normal). ``real_but_wrong`` with an ``other`` tag
+    says the description was wrong, not the label: an earlier verdict on the alert decides, else the box's own
+    label is kept (``how`` = ``model_label_kept``)."""
+    rows = sorted(verdicts, key=lambda r: str(r.get("time_utc") or ""))
+    latest = rows[-1]
+    for r in reversed(rows):
+        tag = str(r.get("owner_label") or "")
+        if tag in TAG_TRUTH:
+            return TAG_TRUTH[tag], f"owner tag {tag}", latest
+        if r.get("verdict") in VERDICT_TRUTH:
+            return VERDICT_TRUTH[r["verdict"]], f"owner verdict {r['verdict']}", latest
+    model = str(latest.get("model_label") or "")
+    if model in ("suspicious", "escalation", "normal"):
+        return ("normal" if model == "normal" else "alert"), "model_label_kept", latest
+    return None, "no label", latest
+
+
+def _all_frames(path: str) -> List[Any]:
+    import cv2  # noqa: PLC0415
+
+    cap = cv2.VideoCapture(path)
+    frames = []
+    try:
+        while True:
+            ok, frame = cap.read()
+            if not ok or frame is None:
+                break
+            frames.append(frame)
+    finally:
+        cap.release()
+    return frames
+
+
+def box_sent_frames(path: str, fps: float, sample_fps: float = VLM_SAMPLE_FPS) -> List[Any]:
+    """The frames the box sends the AI from this clip: every round(fps / sample_fps)-th frame from the first
+    (data_collection.vlm_crop.sample_for_vlm), long side at most MAX_SIDE."""
+    step = max(1, int(round(float(fps) / max(1e-6, float(sample_fps)))))
+    return [fit_long_side(f) for f in _all_frames(path)[::step]]
+
+
+def _box_path(box_dir: str, rel: str) -> str:
+    return os.path.join(box_dir, *str(rel).replace("\\", "/").split("/"))
+
+
+def prepare_owner(out_dir: str, dataset_dir: str) -> Dict[str, Any]:
+    """Build a set from ``owner_feedback/feedback_index.jsonl`` of the dataset at *dataset_dir* (a folder).
+
+    One clip per alert with a labelling verdict and its saved meta and clip. Truth from :func:`owner_truth`.
+    Frames: the box's own sampling of the crop the AI saw (``vlm_input: crop``), else of the alert clip.
+    The rest of a row: the alert's camera, clip time, the box's label then, the owner's words. A frozen set
+    is refused; the frames and manifest are rewritten whole.
+    """
+    _refuse_if_frozen(out_dir)
+    index_path = os.path.join(dataset_dir, OWNER_INDEX)
+    if not os.path.isfile(index_path):
+        raise FileNotFoundError(f"no {OWNER_INDEX} in {dataset_dir}; name the dataset with --dataset or "
+                                f"${DATASET_ENV}")
+    root = os.path.dirname(index_path)
+    by_alert: Dict[str, List[Dict[str, Any]]] = {}
+    rows = read_jsonl(index_path)
+    for r in rows:
+        if r.get("alert_id") and r.get("verdict") in LABELLING_VERDICTS:
+            by_alert.setdefault(str(r["alert_id"]), []).append(r)
+    os.makedirs(os.path.join(out_dir, FRAMES_DIR), exist_ok=True)
+    counts: Dict[str, Any] = {"index_rows": len(rows), "alerts_judged": len(by_alert), "added": 0,
+                              "no_media": [], "no_label": [], "unreadable": []}
+    manifest = []
+    for alert_id, verdicts in sorted(by_alert.items()):
+        label, how, latest = owner_truth(verdicts)
+        if label is None:
+            counts["no_label"].append(alert_id)
+            continue
+        box_dir = os.path.join(root, str(latest.get("box") or ""))
+        metas = sorted(glob.glob(os.path.join(box_dir, "meta", "*", "*", f"{alert_id}.meta.json")))
+        if not metas:
+            counts["no_media"].append(alert_id)
+            continue
+        with open(metas[0], encoding="utf-8") as f:
+            meta = json.load(f)
+        crop = meta.get("vlm_crop") or {}
+        use_crop = meta.get("vlm_input") == "crop" and crop.get("vlm_crop_path")
+        source_rel = crop["vlm_crop_path"] if use_crop else meta.get("clip_path", "")
+        fps = float((crop.get("fps") if use_crop else meta.get("fps_estimated")) or 0)
+        path = _box_path(box_dir, source_rel)
+        frames = box_sent_frames(path, fps) if os.path.isfile(path) and fps > 0 else []
+        if not frames:
+            counts["unreadable"].append(alert_id)
+            continue
+        rels = [f"{FRAMES_DIR}/{alert_id}_{i}.jpg" for i in range(len(frames))]
+        for rel, frame in zip(rels, frames):
+            _write_jpeg(os.path.join(out_dir, rel), frame)
+        local_time = clip_local_time(alert_id)
+        night = is_night(local_time)
+        texts = [str(r.get("owner_text") or "").strip() for r in verdicts]
+        manifest.append({
+            "clip_id": alert_id, "source": "house", "batch": f"owner_{latest.get('box')}",
+            "camera": meta.get("camera_name") or "", "ours_text": next((t for t in reversed(texts) if t), ""),
+            "ours_label": label, "frames": rels, "local_time": local_time,
+            "day_night": None if night is None else ("night" if night else "day"), "subset": OWNER_SUBSET,
+            "owner_verdict": latest.get("verdict"), "owner_label": latest.get("owner_label") or "",
+            "truth_from": how, "model_label": latest.get("model_label") or (meta.get("alert") or {}).get("label"),
+            "box_summary": (meta.get("alert") or {}).get("summary") or "",
+            "frames_from": "crop" if use_crop else "clip",
+            "clip": "/".join(["owner_feedback", str(latest.get("box")), source_rel.replace("\\", "/")]),
+        })
+        counts["added"] += 1
+    _write_jsonl(os.path.join(out_dir, MANIFEST), manifest)
+    return counts
+
+
+def format_owner_counts(c: Dict[str, Any]) -> str:
+    lines = [f"index rows        {c['index_rows']}", f"alerts judged     {c['alerts_judged']}",
+             f"added             {c['added']}"]
+    for key, name in (("no_media", "no clip saved"), ("no_label", "no label"), ("unreadable", "unreadable")):
+        if c[key]:
+            lines.append(f"{name:<18}{len(c[key])}: {', '.join(c[key])}")
+    return "\n".join(lines)
+
+
+# ----------------------------------------------------------------------------
 # run (box, calls the model)
 # ----------------------------------------------------------------------------
 class FakeBackend:
@@ -1465,6 +1602,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                       help=f"For picks that name a dataset clip instead of an s3_key (default: ${DATASET_ENV}, "
                            f"else {DEFAULT_DATASET}).")
 
+    own = sub.add_parser("prepare-owner", help="Laptop: a set of the alerts the owner judged on Telegram "
+                                               "(owner_feedback/), truth from the owner's verdict.",
+                         description="Frames are the box's own 1-a-second sampling of the crop the AI saw, else of "
+                                     "the alert clip. Reads a local dataset folder.")
+    own.add_argument("--dir", required=True, help="Folder to write frames/ and manifest.jsonl into.")
+    own.add_argument("--dataset", default=None,
+                     help=f"home_guard_dataset folder (default: ${DATASET_ENV}, else {DEFAULT_DATASET}).")
+
     frz = sub.add_parser("freeze", help="Write FROZEN.json: sha256 of the manifest and every frame, and the "
                                         "set's make-up. run then warns if the set changes.")
     frz.add_argument("--dir", required=True)
@@ -1528,6 +1673,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             return EXIT_FROZEN
         except Exception as exc:  # noqa: BLE001
             print(f"Error: {exc}\n{S3_HELP}", file=sys.stderr)
+            return 1
+        return 0
+
+    if args.command == "prepare-owner":
+        try:
+            print(format_owner_counts(prepare_owner(args.dir, dataset_root(args.dataset))))
+        except FrozenSet as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return EXIT_FROZEN
+        except (OSError, ValueError) as exc:
+            print(f"Error: {exc}", file=sys.stderr)
             return 1
         return 0
 

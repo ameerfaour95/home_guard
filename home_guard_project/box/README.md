@@ -419,6 +419,10 @@ Small models run on the laptop GPU through Ollama (no key; `ollama pull <model>`
 
 `home_guard_eval/eval_set_v2` on the laptop, frozen 2026-10-06: 489 clips, 181 alerts (4 from our own cameras), 281 normal, 27 empty; a misses set of 108 hard alerts (night, partial occlusion, subtle attempts, loitering). Set sha256 `2054eca82da2...`. How it was built, the fields, the category mapping for the public datasets and the known limits are in `docs/eval/eval-set-v2.md`; what to film at home for the next set is in `docs/eval/staged-clips-shot-list.md`. The clips added in v2 (`picks_v2.jsonl`, batches `uca_eval_v2` and `smarthome_eval_v2`) are test data: keep them out of training.
 
+### The owner's verdicts (eval_set_owner)
+
+`prepare-owner --dir <folder>` builds a separate small set from the alerts the owner judged on Telegram (`owner_feedback/feedback_index.jsonl` in the dataset; `--dataset`, else `$HOMEGUARD_DATASET_DIR`, else the default). Each judged alert with a saved clip becomes one row. Its truth comes from the owner's latest verdict: a tag of suspicious or escalation is an alert, normal or empty is normal, `true_alert` is an alert, and `expected` or `false_alarm` is normal. `false_alarm` counts as normal rather than empty, so it shows up in "normal flagged". A `real_but_wrong` tagged `other` says the description was wrong, not the label: an earlier verdict on the same alert decides, otherwise the box's own label is kept (`truth_from` records which). The frames are the box's own 1-a-second sampling of the crop the AI saw (`vlm_input: crop`), otherwise of the alert clip, so a row has as many frames as the box sent (7 to 12). Each row also keeps the camera, the clip time, the box's label at the time and the owner's words. Freeze it like the main set. The first build (2026-10-06): 10 clips, 1 alert and 9 normal (all 9 are false alarms the box raised), set sha256 `f1c841bb78d7...`. It is too small to score on its own; read it next to `eval_set_v2`.
+
 ### The box's vision model settings (box.yaml)
 
     vlm_provider: vllm                     # openai | openrouter | ollama | vllm | dashscope-intl
