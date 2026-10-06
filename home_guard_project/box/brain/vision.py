@@ -240,17 +240,29 @@ class BudgetedVision:
             return {"ok": False, "refused": False, "error": "vision_failed"}
 
 
-def make_vision(env: Dict[str, str], model: str = "gpt-4o") -> Optional[Vision]:
-    """The OpenAI-backed Vision, or None without a key. Uses the OS trust store (TLS interception)."""
-    if not isinstance(env, Mapping):  # os.environ is a Mapping, not a dict
-        log.warning("Vision environment must be a mapping")
-        return None
-    key = env.get("OPENAI_API_KEY", "")
-    if not isinstance(key, str):
-        log.warning("Vision API key must be a string")
-        return None
-    if not key:
-        return None
+def _completer(env: Mapping[str, Any], provider: str,
+               model: str) -> Optional[Callable[[str, List[bytes], Dict[str, Any]], str]]:
+    """The model call for one provider (``complete(prompt, jpegs, schema) -> raw text``), or None when it cannot
+    be built. ``openai`` reads OPENAI_API_KEY exactly as before; any other provider takes its key, address and
+    extra request body from ``providers.resolve``, as the Eye does (``inference.build_gpt``) - so Qwen3.5 on
+    OpenRouter gets its "reasoning off" body."""
+    extra: Optional[Dict[str, Any]] = None
+    base_url: Optional[str] = None
+    if provider == "openai":
+        key = env.get("OPENAI_API_KEY", "")
+        if not isinstance(key, str):
+            log.warning("Vision API key must be a string")
+            return None
+        if not key:
+            return None
+    else:
+        try:
+            from .. import providers  # noqa: PLC0415
+
+            key, base_url, extra = providers.resolve(provider, env, model)
+        except Exception as exc:  # noqa: BLE001 - unknown provider, missing key or address
+            log.warning("Vision model %s (%s) cannot be used: %s", model, provider, exc)
+            return None
     http_client = None
     try:
         import ssl  # noqa: PLC0415
@@ -259,7 +271,10 @@ def make_vision(env: Dict[str, str], model: str = "gpt-4o") -> Optional[Vision]:
         from openai import OpenAI  # noqa: PLC0415
 
         http_client = httpx.Client(verify=ssl.create_default_context())
-        client = OpenAI(api_key=key, http_client=http_client, timeout=30.0, max_retries=1)
+        kwargs: Dict[str, Any] = {"api_key": key, "http_client": http_client, "timeout": 30.0, "max_retries": 1}
+        if base_url:
+            kwargs["base_url"] = base_url
+        client = OpenAI(**kwargs)
     except Exception as exc:  # noqa: BLE001 - unavailable client/TLS configuration
         log.warning("Vision client could not be created: %s", exc)
         if http_client is not None:
@@ -268,20 +283,81 @@ def make_vision(env: Dict[str, str], model: str = "gpt-4o") -> Optional[Vision]:
             except Exception:  # noqa: BLE001 - cleanup must not escape either
                 pass
         return None
+    plain_json: List[bool] = []          # set once the model refused a JSON schema: plain JSON from then on
 
     def complete(prompt: str, images: List[bytes], schema: Dict[str, Any]) -> str:
         content: List[Dict[str, Any]] = [{"type": "text", "text": prompt}]
         for data in images:
             b64 = base64.b64encode(data).decode("ascii")
             content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
-        resp = client.chat.completions.create(
-            model=model, temperature=0, messages=[{"role": "user", "content": content}],
-            response_format={"type": "json_schema",
-                             "json_schema": {"name": "camera_look", "strict": True, "schema": schema}},
-        )
+
+        def create(response_format: Dict[str, Any]) -> Any:
+            kwargs: Dict[str, Any] = dict(model=model, temperature=0, messages=[{"role": "user", "content": content}],
+                                          response_format=response_format)
+            if extra:
+                kwargs["extra_body"] = extra
+            return client.chat.completions.create(**kwargs)
+
+        strict = {"type": "json_schema", "json_schema": {"name": "camera_look", "strict": True, "schema": schema}}
+        if plain_json:
+            resp = create({"type": "json_object"})
+        else:
+            try:
+                resp = create(strict)
+            except Exception as exc:  # noqa: BLE001 - a model without structured output refuses the schema
+                if "response_format" not in str(exc):
+                    raise
+                log.warning("%s does not take a JSON schema (%s); asking for a JSON object instead.", model, exc)
+                plain_json.append(True)
+                resp = create({"type": "json_object"})
         msg = resp.choices[0].message
         if getattr(msg, "refusal", None):
             raise VisionRefused(str(msg.refusal))
         return msg.content or ""
 
-    return Vision(complete, model)
+    return complete
+
+
+def _with_fallback(primary: Callable[[str, List[bytes], Dict[str, Any]], str],
+                   fallback: Callable[[str, List[bytes], Dict[str, Any]], str],
+                   fallback_model: str) -> Callable[[str, List[bytes], Dict[str, Any]], str]:
+    """Ask *primary*; on any failure or an answer that is not a JSON object, ask *fallback* once with the same
+    pictures - the rule of ``inference.FallbackBackend``, which wraps the Eye's ``analyze`` and so cannot be
+    reused here."""
+    def complete(prompt: str, images: List[bytes], schema: Dict[str, Any]) -> str:
+        try:
+            raw = primary(prompt, images, schema)
+            if isinstance(parse_vlm_json(raw) if isinstance(raw, str) else None, dict):
+                return raw
+            reason = "the answer was not a JSON object"
+        except Exception as exc:  # noqa: BLE001 - any failure (a refusal too) goes to the fallback
+            reason = f"{type(exc).__name__}: {exc}"
+        log.warning("Vision fallback to %s: %s", fallback_model, reason)
+        return fallback(prompt, images, schema)
+
+    return complete
+
+
+def make_vision(env: Dict[str, str], model: str = "gpt-4o", provider: str = "openai", fallback_provider: str = "",
+                fallback_model: str = "") -> Optional[Vision]:
+    """The assistant's Vision on box.yaml's ``vlm_provider`` / ``vlm_model``, with the one-shot fallback
+    (``vlm_fallback_provider`` / ``vlm_fallback_model``) when one is set and differs; None when neither can be
+    built. Without a provider it is OpenAI, as before. Uses the OS trust store (TLS interception)."""
+    if not isinstance(env, Mapping):  # os.environ is a Mapping, not a dict
+        log.warning("Vision environment must be a mapping")
+        return None
+    provider = str(provider or "openai").strip().lower()
+    fallback_provider = str(fallback_provider or "").strip().lower() or provider
+    fallback_model = str(fallback_model or "").strip()
+    primary = _completer(env, provider, model)
+    fallback = None
+    if fallback_model and (fallback_provider, fallback_model) != (provider, model):
+        fallback = _completer(env, fallback_provider, fallback_model)
+    if primary is not None and fallback is not None:
+        return Vision(_with_fallback(primary, fallback, fallback_model), model)
+    if primary is not None:
+        return Vision(primary, model)
+    if fallback is not None:
+        log.warning("Using the fallback vision model %s alone.", fallback_model)
+        return Vision(fallback, fallback_model)
+    return None
