@@ -512,7 +512,14 @@ py -m home_guard_project.analysis EXPORT.json [OPTIONS]
   --no-excel          Skip Excel workbook
   --no-yolo           Skip YOLO training data
   --no-vlm            Skip VLM JSONL
+  --dataset-dir DIR   Folder with the clips' meta/ (needed for 30 fps / 24 fps clips:
+                      Label Studio ran them at 10 fps and the native fps comes from meta)
+  --purge-dropped     Also delete the S3 / local files of [delete]-marked and untagged
+                      tasks. Off by default: false-trigger clips are YOLO hard negatives.
 ```
+
+Only the newest annotation of a task counts (a re-tagged task keeps the old
+one too, and merging them doubled every box).
 
 ### 8c. How YOLO labels are extracted
 
@@ -635,6 +642,43 @@ The VLM text is a separate `textarea` result:
   "value": { "text": ["A person walks through the front door carrying a bag."] }
 }
 ```
+
+### 8f. Fixing the tags and building the YOLO training set
+
+The first four `tagging/` batches were checked against two detectors
+(2026-10-06). Annotators drew every vehicle as `car`, and some frames carry an
+object nobody tagged. Four tools in `analysis/` fix this; each runs on CPU
+except `detections`.
+
+```bash
+B=ameer_house_batch_1; D=path/to/$B/dataset_multi          # clips/ + meta/
+# 1. cache detector boxes once per batch (GPU): a big model and the deployed one
+py -m home_guard_project.analysis.detections $B.json --dataset-dir $D --out $B.yolo11x.json     --weights yolo11x.pt --imgsz 1280
+py -m home_guard_project.analysis.detections $B.json --dataset-dir $D --out $B.yolo11s.json     --weights yolo11s.pt --imgsz 640 --conf 0.25
+# 2. car -> truck / bus / motorcycle by the big model's vote  -> $B.vehicles.json + .csv
+py -m home_guard_project.analysis.vehicle_classes $B.json --detections $B.yolo11x.json
+# 3. hard negatives + disputed frames                           -> $B.vehicles.review.json
+py -m home_guard_project.analysis.review_frames $B.vehicles.json --big $B.yolo11x.json     --deployed $B.yolo11s.json
+# 4. labels from the fixed export
+py -m home_guard_project.analysis $B.vehicles.json --output-dir analysis/$B --dataset-dir $D
+# 5. one dataset from every batch (repeat --source / --review per batch)
+py -m home_guard_project.analysis.build_yolo_dataset dataset_v1     --source analysis/$B=$D --review $B.vehicles.review.json
+```
+
+* **Vehicles:** a `car` track becomes truck / bus / motorcycle when that class
+  won >= 60% of the vote over >= 3 frames. Annotator-chosen truck / bus /
+  motorcycle labels are never changed. Unsure tracks are listed in the CSV
+  for a human.
+* **Hard negatives:** the deployed yolo11s sees a person where no human box
+  is, and yolo11x agrees nobody is there. They are always kept and repeated
+  3x in `train.txt`.
+* **Disputed frames (left out):** yolo11x sees an object at conf >= 0.6 that
+  no human box covers, or a person / animal box is held past its last
+  keyframe with nothing under it. A human should re-tag these clips.
+* **Keyframe clock:** Label Studio writes `time = frame / fps`, so
+  `utils/ls_convert.box_at` reads each sequence's own clock. Before this, every
+  box ran one frame late and frame 0 of every clip had no boxes.
+* **Split:** by clip, 15% of each batch's clips go to val, at 3 frames a second.
 
 ---
 
