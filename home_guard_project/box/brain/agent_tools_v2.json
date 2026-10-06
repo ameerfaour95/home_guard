@@ -39,14 +39,14 @@
   {"type": "function", "function": {"name": "check_camera",
     "description": "Take a live photo from one camera now, send it to the chat, and describe it (with the picture quality; in guard mode also a label).",
     "parameters": {"type": "object", "properties": {
-      "camera": {"type": "string", "description": "A camera name or the owner's word for it."}
-    }, "required": ["camera"]}}},
+      "camera": {"type": "string", "description": "A camera name or the owner's word for it. Leave it out when the owner names no camera: the box uses the camera being discussed, or asks."}
+    }}}},
   {"type": "function", "function": {"name": "record_clip",
     "description": "Record a new video from one camera now and send it.",
     "parameters": {"type": "object", "properties": {
-      "camera": {"type": "string", "description": "A camera name or the owner's word for it."},
+      "camera": {"type": "string", "description": "A camera name or the owner's word for it. Leave it out when the owner names no camera: the box uses the camera being discussed, or asks."},
       "seconds": {"type": "number", "description": "1 to 30 seconds; default 10."}
-    }, "required": ["camera"]}}},
+    }}}},
   {"type": "function", "function": {"name": "send_media",
     "description": "Send the video (or photo) behind a handle. For part of a saved video give from_sec (seconds from the moment the detector fired; negative = before) and seconds.",
     "parameters": {"type": "object", "properties": {
@@ -82,7 +82,7 @@
       "active": {"type": "boolean"}
     }, "required": ["camera", "active"]}}},
   {"type": "function", "function": {"name": "set_alias",
-    "description": "Give a camera another name the family uses (\"call camera 6 the entrance\").",
+    "description": "Give a camera another name the family uses (\"call camera 6 the entrance\", \"remember that the pergola is camera 3\"). The box sends a photo of the camera with the confirmation.",
     "parameters": {"type": "object", "properties": {
       "camera": {"type": "string", "description": "The camera, by name or an existing word for it."},
       "alias": {"type": "string", "description": "The new name, as the owner wrote it."}

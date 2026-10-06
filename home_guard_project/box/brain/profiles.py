@@ -70,6 +70,28 @@ def needs_big(text: str, threaded: bool = False) -> bool:
             or bool(_BIG_HE.search(text or "")))
 
 
+# "Are there people near the pergola?" is about right now: a live look, not a search of the saved events
+# (2026-10-05: the fast model searched history). A word of the past ("was", "היו", "yesterday") makes it history.
+_NOW = re.compile(r"\b(?:now|right now|currently|at the moment)\b|(?<!\w)[וה]?(?:עכשיו|כרגע|כעת)(?!\w)",
+                  re.IGNORECASE)
+_PRESENCE = re.compile(
+    r"\b(?:is|are)\s+there\s+(?:any(?:one|body)?|some(?:one|body)|people|a\s+\w+|\w+s)\b|"
+    r"\b(?:is|are)\s+(?:any(?:one|body)|some(?:one|body)|people)\b|\bany(?:one|body)\s+(?:there|around|outside|at|near|in)\b|"
+    r"(?<!\w)[וה]?יש\s+(?:\S+\s+)?(?:אנשים|מישהו|אדם|רכב|רכבים|ילדים|עובדים|פועלים|חיות|כלב|חתול)(?!\w)|"
+    r"(?<!\w)[וה]?מישהו(?!\w)", re.IGNORECASE)
+_PAST = re.compile(
+    r"\b(?:was|were|did|had|happened|came|yesterday|earlier|last night|today|this morning|ago|before)\b|"
+    r"(?<!\w)[וש]?(?:היה|היו|היתה|הייתה|קרה|הגיע|הגיעו|אתמול|קודם|הבוקר|הלילה|היום|לפני|מאתמול)(?!\w)",
+    re.IGNORECASE)
+
+
+def asks_about_now(text: str) -> bool:
+    """True when the message asks what is happening right now (people near X, anyone at the gate)."""
+    if not isinstance(text, str) or not text.strip() or _PAST.search(text):
+        return False
+    return bool(_NOW.search(text) or _PRESENCE.search(text))
+
+
 def load_schemas(path: str = TOOLS_PATH) -> Dict[str, Dict]:
     """Load usable definitions, skipping malformed entries with one warning per load.
 

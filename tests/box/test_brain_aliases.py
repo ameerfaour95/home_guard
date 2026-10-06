@@ -6,7 +6,7 @@ import unittest
 
 import yaml
 
-from home_guard_project.box.brain.aliases import add_alias, load_aliases, normalize, remap_aliases
+from home_guard_project.box.brain.aliases import add_alias, load_aliases, normalize, remap_aliases, remove_alias
 from home_guard_project.box.find_cameras import apply_changes
 
 CAMS = ["main_entrance", "back_door", "front_side"]
@@ -40,6 +40,14 @@ class AliasesTest(unittest.TestCase):
             add_alias("garage", "garage", CAMS, self.path)
         with self.assertRaises(ValueError):
             add_alias("front_side", "   ", CAMS, self.path)
+
+    def test_remove_alias_takes_back_one_name(self) -> None:
+        add_alias("main_entrance", "Entrance", CAMS, self.path)
+        add_alias("main_entrance", "פרגולה", CAMS, self.path)
+        self.assertEqual(remove_alias("main_entrance", "פרגולה", self.path), ["Entrance"])
+        self.assertEqual(remove_alias("main_entrance", "nothing", self.path), ["Entrance"])
+        self.assertEqual(remove_alias("main_entrance", " entrance ", self.path), [])
+        self.assertEqual(load_aliases(self.path), {})
 
     def test_remap_follows_renames_and_swaps(self) -> None:
         add_alias("main_entrance", "entrance", CAMS, self.path)

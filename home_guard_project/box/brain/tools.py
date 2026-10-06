@@ -27,6 +27,7 @@ from ..alert_clips import PRE_SECONDS
 from ..archive import AlertRecord
 from ..feedback import MAX_MUTE_HOURS, VERDICTS, Feedback, MuteState, feedback_from_fields, save_feedback
 from . import media
+from .aliases import normalize
 from .events import (
     coverage,
     event_doc,
@@ -71,6 +72,7 @@ class Services:
     clip_frames: Callable[[str], List[bytes]] = media.clip_frames
     set_camera: Optional[Callable[[str, bool], Dict[str, Any]]] = None
     add_alias: Optional[Callable[[str, str, Sequence[str]], List[str]]] = None
+    remove_alias: Optional[Callable[[str, str], List[str]]] = None
     request_restart: Optional[Callable[[], None]] = None
     embedder: Any = None
     now: Callable[[], float] = time.time
@@ -403,18 +405,59 @@ def _media_sent(ctx: ToolContext) -> int:
                and r.status == DONE)
 
 
+MAX_CAMERA_CHOICES = 8
+
+
+def _owner_word(ctx: ToolContext, camera: str, words: Any) -> str:
+    """The owner's own name for *camera* in *words* ("פרגולה"), or the one already known for the topic."""
+    cam = ctx.snapshot.camera(camera)
+    wanted = normalize(str(words or ""))
+    for alias in cam.aliases if cam is not None else ():
+        key = normalize(alias)
+        if key and (wanted == key or (len(wanted) > len(key) and wanted.endswith(key) and wanted[0] in "הבלמושכ")):
+            return alias
+    topic = ctx.state.topic_camera(_finite(ctx.services.now()))
+    return topic[1] if topic and topic[0] == camera else ""
+
+
 def _one_camera(ctx: ToolContext, words: Any) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
     res = resolve_camera(ctx.snapshot, str(words or ""))
     if res.camera is None:
         return None, _camera_error(ctx, words, res)
+    # Every camera the turn identifies becomes the one being talked about ("give me a picture" next).
+    ctx.state.set_topic_camera(res.camera, _owner_word(ctx, res.camera, words), _finite(ctx.services.now()))
     return res.camera, None
+
+
+def _camera_or_topic(ctx: ToolContext, words: Any) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+    """A camera the model named, else the camera being talked about, else the owner is asked - with a button per
+    camera - instead of a guess (2026-10-05: "give me a picture" sent an unrelated camera)."""
+    if words is not None and str(words).strip():
+        return _one_camera(ctx, words)
+    topic = ctx.state.topic_camera(_finite(ctx.services.now()))
+    if topic and ctx.snapshot.camera(topic[0]) is not None:
+        return topic[0], None
+    choices = (ctx.snapshot.enabled_names or ctx.snapshot.names)[:MAX_CAMERA_CHOICES]
+    if len(choices) == 1:
+        return choices[0], None
+    ctx.clarification = {"question": t("which_camera", ctx.lang), "choices": list(choices),
+                         "ts": _finite(ctx.services.now())}
+    return None, _err("no camera was named and none is being talked about: the owner is asked which one with "
+                      "buttons; end the turn now")
+
+
+def _aka(ctx: ToolContext, camera: str) -> str:
+    """The owner's word for the camera, for the receipt: "camera_3 (פרגולה)"."""
+    topic = ctx.state.topic_camera(_finite(ctx.services.now()))
+    return topic[1] if topic and topic[0] == camera else ""
 
 
 @_safe_tool
 def check_camera(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
-    camera, bad = _one_camera(ctx, args.get("camera"))
+    camera, bad = _camera_or_topic(ctx, args.get("camera"))
     if bad:
         return bad
+    implied = not str(args.get("camera") or "").strip()
     if not ctx.snapshot.camera(camera).enabled:
         return _result(_issue(ctx, "check_camera", FAILED, camera, {"camera": camera}, "camera_off"))
     if _media_sent(ctx) >= MAX_MEDIA_PER_TURN:
@@ -427,11 +470,16 @@ def check_camera(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(shot["image"], str):
         raise ValueError("photo path must be a string")
     sent = _service_result(ctx.services.deliver.photo(ctx.chat_id, shot["image"]))
-    receipt = _issue(ctx, "check_camera", DONE if sent.get("ok") else FAILED, camera,
-                     {"camera": camera, "message_id": sent.get("message_id")}, "" if sent.get("ok") else "telegram")
+    detail = {"camera": camera, "message_id": sent.get("message_id")}
+    if _aka(ctx, camera):
+        detail["aka"] = _aka(ctx, camera)
+    receipt = _issue(ctx, "check_camera", DONE if sent.get("ok") else FAILED, camera, detail,
+                     "" if sent.get("ok") else "telegram")
     handle = ctx.state.add_handle("photo", shot["image"], camera, ctx.services.now())
     ctx.shown.append(handle)
     out = _result(receipt, camera=camera, handle=handle)
+    if implied:
+        out["used_camera_being_discussed"] = True
     look: Dict[str, Any] = {}
     if ctx.services.vision is not None:
         try:
@@ -461,7 +509,7 @@ def check_camera(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
 
 @_safe_tool
 def record_clip(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
-    camera, bad = _one_camera(ctx, args.get("camera"))
+    camera, bad = _camera_or_topic(ctx, args.get("camera"))
     if bad:
         return bad
     seconds = int(min(30, max(1, _finite(args.get("seconds") if args.get("seconds") is not None else 10))))
@@ -478,8 +526,10 @@ def record_clip(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(rec["path"], str):
         raise ValueError("recording path must be a string")
     sent = _service_result(ctx.services.deliver.video(ctx.chat_id, rec["path"], caption=f"{camera} · {bounds}"))
-    receipt = _issue(ctx, "record_clip", DONE if sent.get("ok") else FAILED, camera,
-                     {"camera": camera, "seconds": seconds, "bounds": bounds, "message_id": sent.get("message_id")},
+    detail = {"camera": camera, "seconds": seconds, "bounds": bounds, "message_id": sent.get("message_id")}
+    if _aka(ctx, camera):
+        detail["aka"] = _aka(ctx, camera)
+    receipt = _issue(ctx, "record_clip", DONE if sent.get("ok") else FAILED, camera, detail,
                      "" if sent.get("ok") else "telegram")
     handle = ctx.state.add_handle("clip", rec["path"], camera, rec["start"])
     ctx.shown.append(handle)
@@ -705,11 +755,33 @@ def set_alias(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     if bad:
         return bad
     alias = str(args.get("alias") or "").strip()
+    cam = ctx.snapshot.camera(camera)
+    already = normalize(alias) in [normalize(a) for a in (cam.aliases if cam else ())] + [normalize(camera)]
     try:
         ctx.services.add_alias(camera, alias, ctx.snapshot.names)
     except (ValueError, TypeError) as exc:
         return _result(_issue(ctx, "set_alias", FAILED, camera, {"camera": camera, "alias": alias}, str(exc)))
-    return _result(_issue(ctx, "set_alias", DONE, camera, {"camera": camera, "alias": alias}))
+    ctx.state.set_topic_camera(camera, alias, _finite(ctx.services.now()))
+    # The receipt shows the camera itself, so a wrong camera is seen at once (and undone with one tap).
+    detail: Dict[str, Any] = {"camera": camera, "alias": alias, "already": already,
+                              "photo": _alias_photo(ctx, camera, alias)}
+    return _result(_issue(ctx, "set_alias", DONE, camera, detail))
+
+
+def _alias_photo(ctx: ToolContext, camera: str, alias: str) -> bool:
+    """A live photo of the newly named camera, sent with the receipt. A failed photo never fails the save."""
+    cam = ctx.snapshot.camera(camera)
+    if ctx.services.grab_photo is None or ctx.services.deliver is None or cam is None or not cam.enabled:
+        return False
+    try:
+        shot = ctx.services.grab_photo(camera)
+        if not isinstance(shot, dict) or shot.get("error") or not isinstance(shot.get("image"), str):
+            return False
+        sent = _service_result(ctx.services.deliver.photo(ctx.chat_id, shot["image"], caption=f"{camera} = {alias}"))
+        return bool(sent.get("ok"))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Alias photo of %s not sent: %s", camera, exc)
+        return False
 
 # -- settings --------------------------------------------------------------------
 SETTING_NAMES = ("alert_hours", "cooldown_minutes", "sensitivity", "language", "quiet_log")

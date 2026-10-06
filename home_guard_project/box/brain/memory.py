@@ -6,8 +6,11 @@ earlier claims. The model now sees every turn of the last 24 hours, and every tu
 E2 ... -> real alert ids or files), the receipts of what it did, the question
 it is waiting on, and each family member's language. "Both" and "the second
 one" are resolved against handles in code, and a short reply like "8" is
-answered in the language its writer used last. Same file names as version 1;
-a version-1 file is upgraded when read.
+answered in the language its writer used last. The camera and the event being
+talked about are kept too ("give me a picture" means the pergola mentioned a
+minute ago), and an alert the box sent goes into the history as its
+observation text - never as a picture. Same file names as version 1; a
+version-1 file is upgraded when read.
 """
 
 from __future__ import annotations
@@ -19,7 +22,7 @@ import math
 import os
 import re
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from ..conversation import _chat_file
 from .i18n import DEFAULT_LANG, SUPPORTED_LANGS, detect_language, language_override
@@ -32,6 +35,14 @@ HISTORY_HOURS = 24.0  # the model sees the whole conversation of the last day...
 MAX_HISTORY_TURNS = 60  # ...but never more than this many turns
 KEEP_TURNS = 500      # turns kept on disk
 KEEP_HANDLES = 150    # more than one turn can show (a summary details up to 60 events)
+TOPIC_SECONDS = 3600.0  # "give me a picture" an hour after the pergola was mentioned is still about the pergola
+MAX_OBSERVATION_CHARS = 500   # an alert's observation in the history: about 150 tokens of text, never a picture
+MAX_ANSWERS = 8               # vision answers kept per event
+
+
+def _clip(text: Any, limit: int) -> str:
+    text = " ".join(str(text or "").split())
+    return text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
 
 
 @dataclass
@@ -42,6 +53,81 @@ class ChatState:
     pending: Optional[Dict[str, Any]] = None
     languages: Dict[str, str] = field(default_factory=dict)
     overrides: Dict[str, str] = field(default_factory=dict)
+    # What the conversation is about, kept in code (2026-10-05: "give me a picture" had no camera and the model
+    # guessed). topic: {"camera", "word" (the owner's name for it), "ts"}; topic_event: {"handle", "ts"}.
+    topic: Dict[str, Any] = field(default_factory=dict)
+    topic_event_ref: Dict[str, Any] = field(default_factory=dict)
+
+    def set_topic_camera(self, camera: str, word: str, ts: float) -> None:
+        if camera:
+            self.topic = {"camera": str(camera), "word": str(word or ""), "ts": _num(ts)}
+
+    def topic_camera(self, now: float) -> Optional[Tuple[str, str]]:
+        """``(camera, the owner's word for it)`` while the topic is fresh, else None."""
+        camera = self.topic.get("camera")
+        if not isinstance(camera, str) or not camera or _num(now) - _num(self.topic.get("ts")) > TOPIC_SECONDS:
+            return None
+        return camera, str(self.topic.get("word") or "")
+
+    def set_topic_event(self, handle: str, ts: float) -> None:
+        if handle:
+            self.topic_event_ref = {"handle": str(handle), "ts": _num(ts)}
+
+    def topic_event(self, now: float) -> Optional[str]:
+        """The handle of the event being talked about while the topic is fresh and the handle known."""
+        handle = self.topic_event_ref.get("handle")
+        if (not isinstance(handle, str) or not isinstance(self.handles.get(handle), dict)
+                or _num(now) - _num(self.topic_event_ref.get("ts")) > TOPIC_SECONDS):
+            return None
+        return handle
+
+    def note_observation(self, handle: str, observation: str, visibility: str = "", label: str = "") -> None:
+        """What the vision agent saw in an event (text only); *visibility* says what it could not see."""
+        entry = self.handles.get(handle)
+        if isinstance(entry, dict):
+            entry["observation"] = _clip(observation, MAX_OBSERVATION_CHARS)
+            entry["visibility"] = _clip(visibility, 200)
+            if label:
+                entry["label"] = str(label)
+
+    def add_answer(self, handle: str, question: str, answer: str, frame: int = 0, at: str = "") -> None:
+        """A vision answer about an event, kept as text tied to the event."""
+        entry = self.handles.get(handle)
+        if isinstance(entry, dict):
+            answers = entry.get("answers") if isinstance(entry.get("answers"), list) else []
+            answers.append({"q": _clip(question, 200), "a": _clip(answer, 300), "frame": int(frame or 0),
+                            "at": str(at or "")})
+            entry["answers"] = answers[-MAX_ANSWERS:]
+
+    def event_text(self, handle: str) -> str:
+        """An event as the model reads it: what was seen, what was not, and what was asked about it since."""
+        entry = self.handles.get(handle)
+        if not isinstance(entry, dict):
+            return f"{handle}=(forgotten)"
+        head = [handle, str(entry.get("camera") or "")]
+        if entry.get("ts"):
+            try:
+                head.append(dt.datetime.fromtimestamp(entry["ts"]).strftime("%a %d %b %H:%M"))
+            except (ValueError, OverflowError, OSError, TypeError):
+                pass
+        if entry.get("label"):
+            head.append(str(entry["label"]))
+        parts = [" · ".join(p for p in head if p),
+                 "observation: " + (str(entry.get("observation") or entry.get("summary") or "") or "none")]
+        if entry.get("visibility"):
+            parts.append(f"not visible: {entry['visibility']}")
+        for item in entry.get("answers") or []:
+            if isinstance(item, dict):
+                where = ", ".join(x for x in (f"frame {item.get('frame')}" if item.get("frame") else "",
+                                              str(item.get("at") or "")) if x)
+                parts.append(f'asked "{item.get("q")}": {item.get("a")}' + (f" ({where})" if where else ""))
+        return " · ".join(parts)
+
+    def add_event_turn(self, handle: str, ts: float) -> None:
+        """An alert the box sent, as a turn of its own: the model later reads its observation in the history."""
+        self.turns.append({"kind": "alert", "speaker": "box", "text": "", "reply": "", "handles": [handle],
+                           "receipts": [], "ts": _num(ts)})
+        self.turns = self.turns[-KEEP_TURNS:]
 
     def add_handle(self, kind: str, ref: str, camera: str = "", ts: float = 0.0, summary: str = "") -> str:
         for handle, entry in self.handles.items():
@@ -82,9 +168,12 @@ class ChatState:
         return default if default in SUPPORTED_LANGS else DEFAULT_LANG
 
     def add_turn(self, speaker: str, text: str, reply: str, handles: List[str], receipts: List[str],
-                 ts: float) -> None:
-        self.turns.append({"speaker": speaker, "text": text, "reply": reply, "handles": list(handles),
-                           "receipts": list(receipts), "ts": ts})
+                 ts: float, notes: Optional[List[str]] = None) -> None:
+        turn = {"speaker": speaker, "text": text, "reply": reply, "handles": list(handles),
+                "receipts": list(receipts), "ts": ts}
+        if notes:
+            turn["notes"] = [str(n) for n in notes]     # e.g. what the vision model answered about an event
+        self.turns.append(turn)
         self.turns = self.turns[-KEEP_TURNS:]
 
     def _handle_note(self, handle: str) -> str:
@@ -106,8 +195,15 @@ class ChatState:
         recent = [turn for turn in self.turns
                   if isinstance(turn, dict) and now - _num(turn.get("ts")) <= hours * 3600]
         for turn in recent[-max_turns:]:
+            if turn.get("kind") == "alert":
+                # The box's own alert message: its observation as text; the clip stays on the box.
+                out.extend({"role": "assistant", "content": f"[ALERT {self.event_text(str(h))}]"}
+                           for h in (turn.get("handles") or [])[:1])
+                continue
             out.append({"role": "user", "content": str(turn.get("text") or "")})
             notes = []
+            if isinstance(turn.get("notes"), list) and turn["notes"]:
+                notes.append("; ".join(str(n) for n in turn["notes"]))
             handles = turn.get("handles")
             if isinstance(handles, list) and handles:
                 notes.append("handles: " + ", ".join(self._handle_note(str(h)) for h in handles))
@@ -135,6 +231,8 @@ class ChatState:
             turn["reply"] = _text(t.get("reply"))
             turn["handles"] = _str_list(t.get("handles"))
             turn["receipts"] = _str_list(t.get("receipts"))
+            if "notes" in turn:
+                turn["notes"] = _str_list(t.get("notes"))
             turns.append(turn)
         handles: Dict[str, Dict[str, Any]] = {}
         raw_handles = data.get("handles")
@@ -150,8 +248,15 @@ class ChatState:
         if not (isinstance(pending, dict) and isinstance(pending.get("question"), str)
                 and isinstance(pending.get("choices"), list)):
             pending = None
+        topic = data.get("topic")
+        topic = ({"camera": topic["camera"], "word": _text(topic.get("word")), "ts": _num(topic.get("ts"))}
+                 if isinstance(topic, dict) and isinstance(topic.get("camera"), str) else {})
+        event = data.get("topic_event_ref")
+        event = ({"handle": event["handle"], "ts": _num(event.get("ts"))}
+                 if isinstance(event, dict) and isinstance(event.get("handle"), str) else {})
         return cls(turns=turns, handles=handles, next_handle=max(next_handle, highest + 1, 1), pending=pending,
-                   languages=_lang_map(data.get("languages")), overrides=_lang_map(data.get("overrides")))
+                   languages=_lang_map(data.get("languages")), overrides=_lang_map(data.get("overrides")),
+                   topic=topic, topic_event_ref=event)
 
 
 def _num(value: Any) -> float:

@@ -14,6 +14,7 @@ from home_guard_project.box.brain.registry import (
     CameraState,
     HouseRegistry,
     HouseSnapshot,
+    mentioned_cameras,
     render_block,
     resolve_camera,
 )
@@ -53,6 +54,32 @@ class ResolveTest(unittest.TestCase):
 
     def test_a_bare_number_matches_the_channel(self) -> None:
         self.assertEqual(resolve_camera(CAMS, "8").camera, "test_ch8")
+
+    def test_camera_and_a_number_matches_the_channel(self) -> None:
+        for words in ("מצלמה 8", "המצלמה 8", "camera 8", "Cam 8", "the camera 8", "camera #8", "מצלמה מספר 8"):
+            with self.subTest(words=words):
+                self.assertEqual(resolve_camera(CAMS, words).camera, "test_ch8")
+        self.assertIsNone(resolve_camera(CAMS, "מצלמה 3").camera)
+
+
+class MentionsTest(unittest.TestCase):
+    def test_aliases_names_and_numbers_in_a_message(self) -> None:
+        self.assertEqual(mentioned_cameras(CAMS, "יש אנשים ליד הכניסה?"), [("כניסה", "main_entrance")])
+        self.assertEqual(mentioned_cameras(CAMS, "what about the front door now"),
+                         [("front door", "main_entrance")])
+        self.assertEqual(mentioned_cameras(CAMS, "תביא תמונה ממצלמה 8"), [("מצלמה 8", "test_ch8")])
+        self.assertEqual(mentioned_cameras(CAMS, "show test_ch8"), [("test_ch8", "test_ch8")])
+        self.assertEqual(set(mentioned_cameras(CAMS, "the street and the back")),
+                         {("street", "front_side"), ("back", "back_door")})
+
+    def test_words_inside_other_words_are_not_mentions(self) -> None:
+        for text in ("give me a picture", "תביא לי תמונה", "background noise", "frontal", "camera 3", "מצלמה"):
+            with self.subTest(text=text):
+                self.assertEqual(mentioned_cameras(CAMS, text), [])
+
+    def test_bad_input_is_no_mention(self) -> None:
+        self.assertEqual(mentioned_cameras(CAMS, None), [])
+        self.assertEqual(mentioned_cameras(CAMS, 5), [])
 
     def test_ambiguity_returns_the_candidates(self) -> None:
         res = resolve_camera(CAMS, "front door and street")

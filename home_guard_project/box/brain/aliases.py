@@ -76,3 +76,14 @@ def remap_aliases(renames: Dict[str, str], path: str = ALIASES_PATH) -> None:
         if name not in renames and name not in out:
             out[name] = aliases
     _save(out, path)
+
+
+def remove_alias(camera: str, alias: str, path: str = ALIASES_PATH) -> List[str]:
+    """Take *alias* off *camera* (the Undo of a name saved by chat); returns the aliases left."""
+    data = load_aliases(path)
+    mine = data.get(camera, [])
+    left = [a for a in mine if normalize(a) != normalize(alias)]
+    if len(left) != len(mine):
+        data[camera] = left
+        _save(data, path)
+    return left

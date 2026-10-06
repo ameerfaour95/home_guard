@@ -102,12 +102,22 @@ def _variants(query: str) -> List[str]:
     return list(dict.fromkeys([" ".join(words), " ".join(stripped)]))
 
 
+# "camera 3", "cam #3", "מצלמה 3", "המצלמה מספר 3": the owner's way of saying channel 3.
+_CAMERA_WORD = r"(?:the\s+)?(?:camera|cam|ה?מצלמה|מצלמת)\s*(?:#|no\.?|number|מספר)?\s*(\d+)"
+_CAMERA_NUMBER = re.compile(rf"^{_CAMERA_WORD}$")
+_CAMERA_NUMBER_IN_TEXT = re.compile(rf"(?<!\w)[ושהבלמכ]{{0,2}}({_CAMERA_WORD})(?!\w)")
+
+
 def resolve_camera(snapshot: HouseSnapshot, words: str) -> Resolution:
-    """Which camera *words* means: exact name or alias, then a bare channel number,
+    """Which camera *words* means: exact name or alias, then a bare channel number ("3", "camera 3"),
     then a name or alias inside the phrase, then a unique name prefix."""
     query = normalize(words)
     if not query:
         return Resolution(None)
+    numbered_phrase = _CAMERA_NUMBER.match(query)
+    if numbered_phrase and not any(query in [normalize(c.name)] + [normalize(a) for a in c.aliases]
+                                   for c in snapshot.cameras):
+        query = numbered_phrase.group(1)
     variants = _variants(query)
 
     def keys(cam: CameraState) -> List[str]:
@@ -126,6 +136,37 @@ def resolve_camera(snapshot: HouseSnapshot, words: str) -> Resolution:
         return _result(inside)
     prefix = [c.name for c in snapshot.cameras if normalize(c.name).startswith(query)]
     return _result(prefix) if prefix else Resolution(None)
+
+
+def mentioned_cameras(snapshot: HouseSnapshot, text: str) -> List[Tuple[str, str]]:
+    """``(word, camera)`` for every camera a message names - by its name, one of the owner's names for it, or
+    "camera 3" - as whole words (Hebrew prefixes allowed: "בפרגולה"), in the order they appear. Where two names
+    overlap ("front door" and "front") the longer one wins. Resolved in code so the model never has to guess
+    what "the pergola" is (2026-10-05)."""
+    if not isinstance(text, str):
+        return []
+    norm = normalize(text)
+    found: List[Tuple[int, int, str, str]] = []
+    for cam in snapshot.cameras:
+        for word in (cam.name,) + tuple(cam.aliases):
+            key = normalize(word)
+            if not key:
+                continue
+            for m in re.finditer(rf"(?<!\w)[ושהבלמכ]{{0,2}}({re.escape(key)})(?!\w)", norm):
+                found.append((m.start(1), m.end(1), word, cam.name))
+    for m in _CAMERA_NUMBER_IN_TEXT.finditer(norm):
+        res = resolve_camera(snapshot, m.group(2))
+        if res.camera:
+            found.append((m.start(1), m.end(1), m.group(1), res.camera))
+    kept: List[Tuple[int, int, str, str]] = []
+    for hit in sorted(found, key=lambda h: (h[0] - h[1], h[0])):           # longest first
+        if all(hit[1] <= k[0] or hit[0] >= k[1] for k in kept):
+            kept.append(hit)
+    out: List[Tuple[str, str]] = []
+    for _, _, word, camera in sorted(kept):
+        if (word, camera) not in out:
+            out.append((word, camera))
+    return out
 
 
 def render_block(snapshot: HouseSnapshot) -> str:

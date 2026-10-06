@@ -8,7 +8,8 @@ import unittest
 from unittest.mock import patch
 
 from home_guard_project.box.brain import profiles
-from home_guard_project.box.brain.profiles import load_schemas, needs_big, system_prompt, tool_names, tools_for
+from home_guard_project.box.brain.profiles import (asks_about_now, load_schemas, needs_big, system_prompt, tool_names,
+                                                   tools_for)
 from home_guard_project.box.brain.tools import TOOLS
 
 
@@ -219,6 +220,18 @@ class HebrewWholeWordRoutingTest(unittest.TestCase):
                      "תרשום שהחניה זה מצלמה 2", "תקרא למצלמה 3 פרגולה", "ותזכרי את זה",
                      "remember that the pergola is camera 3", "Please remember the shed is cam 4"):
             self.assertTrue(needs_big(text), text)
+
+class AsksAboutNowTest(unittest.TestCase):
+    def test_questions_about_right_now(self):
+        for text in ("יש אנשים שעובדים ליד הפרגולה?", "יש מישהו בחצר?", "מה קורה עכשיו בכניסה", "מישהו שם?",
+                     "are there people at the gate?", "is anyone at the door now?", "what's happening right now"):
+            self.assertTrue(asks_about_now(text), text)
+
+    def test_questions_about_the_past_or_no_question(self):
+        for text in ("היו אנשים היום?", "מה קרה אתמול בלילה?", "was anyone at the gate?", "what happened today",
+                     "יש לך את הסרטון מאתמול?", "יש התראות חדשות?", "send me the video", "", None, 5):
+            self.assertFalse(asks_about_now(text), text)
+
 
 if __name__ == "__main__":
     unittest.main()

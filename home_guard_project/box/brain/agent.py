@@ -29,10 +29,11 @@ from ..feedback import Feedback, save_feedback
 from .claims import unbacked_claims
 from .i18n import LANGUAGE_NAMES, t
 from .memory import ChatMemory, ChatState
-from .profiles import needs_big, system_prompt, tool_names, tools_for
+from .aliases import normalize
+from .profiles import asks_about_now, needs_big, system_prompt, tool_names, tools_for
 from .receipts import ACTING_TOOLS, DONE, FAILED, REQUESTED, UNDONE, Receipt, ReceiptBook
 from .mode import hhmm
-from .registry import render_block, resolve_camera
+from .registry import mentioned_cameras, render_block, resolve_camera
 from .render import receipt_line, render_reply, undo_what
 from .tools import DEFAULTS, TOOLS, KEYS, Services, ToolContext, _issue, settings_line
 from .tools import _alert_state, _alert_target, _alert_types, _alert_values
@@ -40,7 +41,7 @@ from .tools import _alert_state, _alert_target, _alert_types, _alert_values
 log = logging.getLogger("box.brain.agent")
 
 FAST, BIG = "fast", "big"
-UNDOABLE = ("pause_alerts", "set_camera_active", "change_setting", "set_alert_types", "set_sensitivity")
+UNDOABLE = ("pause_alerts", "set_camera_active", "change_setting", "set_alert_types", "set_sensitivity", "set_alias")
 
 
 def _finite(value: Any) -> float:
@@ -156,7 +157,7 @@ def _touches_pause(entry: Optional[str], later: Receipt) -> bool:
 
 def context_block(snapshot: Any, settings_text: str, now: float, lang: str, alert_handle: Optional[str],
                   alert: Optional[Dict[str, Any]], pending_answer: Optional[Tuple[Dict[str, Any], str]],
-                  text: str, box_lang: str = "en") -> str:
+                  text: str, box_lang: str = "en", focus: Sequence[str] = ()) -> str:
     lines = ["[HOUSE]", render_block(snapshot)]
     if settings_text:
         lines.append(settings_text)
@@ -174,8 +175,50 @@ def context_block(snapshot: Any, settings_text: str, now: float, lang: str, aler
         question, answer = pending_answer
         lines.append(f'[YOUR QUESTION] You asked: "{question.get("question")}" with the choices '
                      f'{", ".join(question.get("choices") or [])}. The owner answered: "{answer}".')
+    lines += list(focus)
     lines += ["[MESSAGE]", text]
     return "\n".join(lines)
+
+
+def focus_lines(state: ChatState, snapshot: Any, text: str, now: float, alert_handle: Optional[str] = None,
+                alert: Optional[Dict[str, Any]] = None) -> List[str]:
+    """What this message is about, worked out in code before the model reads it (the pergola bug, 2026-10-05):
+    the cameras it names by the owner's own words, the camera and the event being talked about (kept in the chat
+    state across turns), and whether it asks about right now. Updates the state's topics."""
+    mentions = mentioned_cameras(snapshot, text)
+    named = list(dict.fromkeys(camera for _, camera in mentions))
+    if len(named) == 1:
+        cam = snapshot.camera(named[0])
+        own = [w for w, c in mentions if cam is not None and w in cam.aliases]
+        old = state.topic_camera(now)
+        state.set_topic_camera(named[0], own[0] if own else (old[1] if old and old[0] == named[0] else ""), now)
+    if alert_handle and alert:
+        state.note_observation(alert_handle, str(alert.get("observation") or alert.get("summary") or ""),
+                               str(alert.get("visibility") or ""), str(alert.get("label") or ""))
+        state.set_topic_event(alert_handle, now)
+        old = state.topic_camera(now)
+        if not named and alert.get("camera"):
+            camera = str(alert["camera"])
+            state.set_topic_camera(camera, old[1] if old and old[0] == camera else "", now)
+    lines = []
+    said = [f"{w} = {c}" for w, c in mentions if normalize(w) != normalize(c)]
+    if said:
+        lines.append("[CAMERAS IN THIS MESSAGE] " + ", ".join(said))
+    topic = state.topic_camera(now)
+    if topic:
+        lines.append(f"[CAMERA BEING DISCUSSED] {topic[0]}" + (f" ({topic[1]})" if topic[1] else "")
+                     + " - a request that names no camera means this one: leave camera out of check_camera / "
+                       "record_clip and the box uses it")
+    else:
+        lines.append("[CAMERA BEING DISCUSSED] none - if the owner names no camera, leave camera out and the box "
+                     "asks them; never guess one")
+    event = state.topic_event(now)
+    if event:
+        lines.append(f"[EVENT BEING DISCUSSED] {state.event_text(event)}")
+    if asks_about_now(text):
+        lines.append("[RIGHT NOW] the message asks what is happening now: look live with check_camera, "
+                     "not find_events")
+    return lines
 
 
 def _default_run_tool(ctx: ToolContext, name: str, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -570,6 +613,19 @@ class OwnerAgentV2:
                 raise ValueError("alert restore was not saved")
             _issue(ctx, r.tool, DONE, camera or "house",
                    {"camera": camera or "", "old": d["new"], "new": row[key], "undo_of": r.tool})
+        elif r.tool == "set_alias":
+            camera, alias = d.get("camera"), d.get("alias")
+            if not isinstance(camera, str) or not isinstance(alias, str) or not alias.strip():
+                raise ValueError("invalid alias restore data")
+            cam = snapshot.camera(camera)
+            if (cam is None or normalize(alias) not in [normalize(a) for a in cam.aliases]
+                    or any(x.tool == "set_alias" and normalize(str(x.detail.get("alias") or "")) == normalize(alias)
+                           for x in later)):
+                raise _ChangedSince()
+            if self.services.remove_alias is None:
+                raise ValueError("aliases cannot be removed on this box")
+            self.services.remove_alias(camera, alias)
+            _issue(ctx, "set_alias", DONE, camera, {"camera": camera, "alias": alias, "undo_of": "set_alias"})
         elif r.tool == "change_setting":
             setting = d.get("setting")
             restore, wrote = d.get("restore"), d.get("wrote")
@@ -639,8 +695,9 @@ class OwnerAgentV2:
             if snapshot is None:
                 raise RuntimeError("no house snapshot")
             settings_text = settings_line(settings, lang) if settings else ""
+            focus = focus_lines(state, snapshot, text, now, ctx.alert_handle, alert)
             block = context_block(snapshot, settings_text, now, lang, ctx.alert_handle, alert,
-                                  (pending, text) if pending else None, text, box_lang)
+                                  (pending, text) if pending else None, text, box_lang, focus)
             history = state.history_messages(now)
             skip_fast = self.fast_model is None or needs_big(text, threaded or bool(alert)) or pending is not None
             tiers = [(BIG, self.model)] if skip_fast else [(FAST, self.fast_model), (BIG, self.model)]
@@ -678,14 +735,21 @@ class OwnerAgentV2:
                     guard_hits += 1
                     if answer:
                         messages.append({"role": "assistant", "content": answer})
+                    # A promise to remember with nothing saved (2026-10-05): the model may still save it now.
+                    save = "save" in bad and "set_alias" in tool_names(ctx.mode, tier)
                     messages.append({"role": "user", "content": (
-                        f"[BOX] Your answer describes actions that did not happen ({', '.join(bad)}). Write the "
-                        "answer again with facts only and call reply. Do not call any other tool.")})
-                    answer = self._loop(ctx, model, messages, tier, usage, called, only=["reply"])
-                    if unbacked_claims(answer, ctx.receipts):
+                        f"[BOX] Your answer describes actions that did not happen ({', '.join(bad)}). "
+                        + ("If the owner asked you to remember a name for a camera, call set_alias now. " if save
+                           else "") +
+                        "Write the answer again with facts only and call reply. Do not call any other tool.")})
+                    answer = self._loop(ctx, model, messages, tier, usage, called,
+                                        only=["reply", "set_alias"] if save else ["reply"])
+                    still = unbacked_claims(answer, ctx.receipts)
+                    if still:
                         guard_hits += 1
                         log.warning("claim_guard: the answer still claims actions; sending only the receipt lines")
-                        answer = ""
+                        # Never "I'll remember" without a save receipt: say plainly that nothing was saved.
+                        answer = t("not_saved_yet", lang) if "save" in still else ""
                 break
         except Exception as exc:  # noqa: BLE001 - no network, a model error: the owner still gets an answer
             log.warning("The agent could not handle a message: %s", exc)
@@ -823,6 +887,7 @@ def build_owner_agent(box_settings: Dict[str, Any], env: Dict[str, str], mute: A
         grab_photo=lambda camera: media.grab_photo(camera, work_dir, CAMERAS_PATH),
         record_live=lambda camera, seconds: media.record_live(camera, seconds, work_dir, CAMERAS_PATH),
         cut_segment=media.cut_segment, set_camera=set_camera, add_alias=aliases.add_alias,
+        remove_alias=aliases.remove_alias,
         request_restart=_restart_running_mode,
         embedder=make_embedder(env, os.path.join(live_dir, ".alert_embeddings.json")),
         retention_days=retention, set_option=boxconfig.set_option, read_settings=boxconfig.load_box_settings,
