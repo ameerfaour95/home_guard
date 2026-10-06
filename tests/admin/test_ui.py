@@ -98,7 +98,7 @@ def test_totp_auto_advance_and_paste(widgets, app, tmp_path):
     assert screen.totp.code() == '654321'
 
 
-@pytest.mark.parametrize('role,expected', [('admin', ['Fleet', 'Review', 'Studio', 'Label', 'Audit']), ('support', ['Fleet', 'Review', 'Studio']), ('labeler', ['Label', 'Review', 'Studio'])])
+@pytest.mark.parametrize('role,expected', [('admin', ['Fleet', 'Review', 'Studio', 'Tag', 'Label', 'Audit']), ('support', ['Fleet', 'Review', 'Studio']), ('labeler', ['Label', 'Review', 'Studio'])])
 def test_role_navigation(role, expected, widgets, wait):
     class CountBackend(DemoBackend):
         calls = 0

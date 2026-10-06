@@ -1,6 +1,6 @@
 from PySide6.QtCore import Qt, Signal, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices, QColor, QFont
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QStackedWidget, QApplication, QStyledItemDelegate, QSizePolicy
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QStackedWidget, QApplication, QStyledItemDelegate, QSizePolicy, QFrame
 from .workers import TaskRunner
 from .backend import AuthError, UnsupportedError
 from .formatting import local_time, humanise, export_warning
@@ -31,6 +31,7 @@ class StudioScreen(QWidget):
     filter_requested = Signal(str)
     event_requested = Signal(int)
     session_expired = Signal()
+    tagging_requested = Signal()
 
     def __init__(self, backend, role='admin', theme='dark'):
         super().__init__(); self.backend,self.role = backend,role
@@ -44,6 +45,20 @@ class StudioScreen(QWidget):
         self.refresh_button = button('Refresh',self.refresh); top.addWidget(self.refresh_button)
         self.export_button = button('Export collection…',self.open_export,'primary'); self.export_button.setVisible(role != 'support'); top.addWidget(self.export_button)
         box.addLayout(top)
+        self.tagging = None
+        if role == 'admin':
+            self.tagging = QFrame(); self.tagging.setObjectName('panel')
+            card = QHBoxLayout(self.tagging); card.setContentsMargins(20,14,16,14); card.setSpacing(24)
+            words = QVBoxLayout(); words.setSpacing(2); words.addWidget(label('TAGGING','eyebrow'))
+            words.addWidget(label('Category tags for the AI: old tags, customer answers and teacher suggestions side by side.','muted',True))
+            card.addLayout(words,1)
+            self.tag_counts = {}
+            for key,title in (('contradiction','Contradictions'),('check','To check'),('untagged','Untagged'),('done','Done')):
+                cell = QVBoxLayout(); cell.setSpacing(0); number = label('—','statNumber'); cell.addWidget(number)
+                cell.addWidget(label(title,'muted')); card.addLayout(cell); self.tag_counts[key] = number
+            card.addWidget(button('Open tagging studio',self.tagging_requested.emit,'primary'))
+            box.addWidget(self.tagging)
+            self.tag_runner = TaskRunner(self); self.tag_runner.finished.connect(self.tagging_counts)
         self.message = label('Loading Studio…','muted',True); box.addWidget(self.message)
         self.tabs = QTabWidget(); self.tabs.tabBar().setDrawBase(False)
         self.content_stack = QStackedWidget(); self.content_stack.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Ignored)
@@ -115,7 +130,14 @@ class StudioScreen(QWidget):
     def hideEvent(self,event):
         self.poll.stop(); super().hideEvent(event)
 
+    def tagging_counts(self, state, error):
+        if error is None:
+            for key, number in self.tag_counts.items():
+                number.setText(str(state['counts'].get(key, 0)))
+
     def refresh(self):
+        if self.tagging is not None and not self.tag_runner.busy and hasattr(self.backend, 'tagging_state'):
+            self.tag_runner.start(self.backend.tagging_state)
         if self.runner.busy:
             self.refresh_dirty = True
             return

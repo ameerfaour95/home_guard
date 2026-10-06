@@ -5,7 +5,7 @@ from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter, QComboBox,
     QApplication, QLineEdit, QPlainTextEdit, QAbstractSpinBox, QSizePolicy)
 from .timeline import TimelineScreen
-from .timeline_model import TimelineDelegate
+from .timeline_model import TimelineDelegate, status_chip_width
 from .event_view import EventView
 from .event_logic import KINDS
 from .formatting import local_time
@@ -25,7 +25,9 @@ class ReviewDelegate(TimelineDelegate):
                 e,t,p = index.data(Qt.ItemDataRole.UserRole),self.t,painter
                 p.save()
                 for i,(name,present) in enumerate([('video',e.completeness.video),('boxes',e.completeness.boxes != 'none'),('ai',e.completeness.ai == 'real')]):
-                    draw_icon(p,name,QRectF(option.rect.x()+12+i*25,option.rect.bottom()-24,16,16),t['action' if present else 'border'])
+                    # beside the annotation chip, which the timeline paints at the cell's bottom left
+                    x = option.rect.x()+10+status_chip_width((e.annotation_status or 'new').title())+6+i*20
+                    draw_icon(p,name,QRectF(x,option.rect.bottom()-25,15,15),t['action' if present else 'border'])
                 p.restore()
             return
         from PySide6.QtWidgets import QStyle

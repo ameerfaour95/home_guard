@@ -1,6 +1,6 @@
 from .formatting import camera_name
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, QRectF
-from PySide6.QtGui import QPainter, QColor, QFont, QPixmap
+from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QPixmap
 from PySide6.QtWidgets import QStyledItemDelegate, QStyle
 from .event_logic import KINDS, VERDICTS, decision, ai_status, provenance
 from .formatting import local_time, age
@@ -70,6 +70,11 @@ class TimelineModel(QAbstractTableModel):
                     '', ''][col]
 
 
+def status_chip_width(text):
+    """The annotation chip fits its word, so the evidence icons can sit beside it."""
+    return QFontMetrics(QFont('Segoe UI', 8)).horizontalAdvance(text) + 16
+
+
 class TimelineDelegate(QStyledItemDelegate):
     def __init__(self, theme='dark', parent=None):
         super().__init__(parent)
@@ -125,7 +130,7 @@ class TimelineDelegate(QStyledItemDelegate):
             p.fillRect(option.rect.x(), option.rect.y(), 2, option.rect.height(), QColor(t['action']))
         if col == 0:
             text = (e.annotation_status or 'new').title()
-            chip = QRectF(rect.x(), rect.bottom()-18, 88, 19)
+            chip = QRectF(rect.x(), rect.bottom()-18, status_chip_width(text), 19)
             p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor(t['bubble'])); p.drawRoundedRect(chip, 3, 3)
             p.setPen(QColor(t['error'] if e.annotation_status == 'rejected' else t['action']))
             p.setFont(QFont('Segoe UI', 8)); p.drawText(chip, Qt.AlignmentFlag.AlignCenter, text)

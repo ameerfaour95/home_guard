@@ -81,6 +81,29 @@ QProgressBar::chunk { background: @action; }
 QScrollArea { border: none; background: transparent; }
 QWidget#detailBody { background: @surface; }
 QDialog#commandPalette { background: @surface; border: 1px solid @border; border-radius: 12px; }
+QLabel#eyebrowMuted { color: @muted; font-size: 11px; font-weight: 600; }
+QLabel#clipTitle { font-size: 16px; font-weight: 600; }
+QLabel#statNumber { font-size: 18px; font-weight: 600; }
+QFrame#panel { background: @surface; border: 1px solid @border; border-radius: 10px; }
+QFrame#panel QLabel, QFrame#panel QCheckBox { background: transparent; }
+QFrame#opinion { background: @surface; border: 1px solid @border; border-radius: 8px; }
+QFrame#opinion[conflict="yes"] { border: 1px solid @error; }
+QFrame#opinion QLabel { background: transparent; }
+QLabel#opinionText { font-size: 13px; }
+QLabel#opinionText[empty="yes"] { color: @muted; font-style: italic; }
+QLabel#opinionDetail { font-size: 11px; }
+QFrame#banner { background: @raised; border: 1px solid @border; border-radius: 8px; }
+QFrame#banner QLabel { background: transparent; }
+QPushButton#chip { background: @surface; border: 1px solid @border; border-radius: 13px; padding: 3px 11px; min-height: 18px; font-size: 12px; }
+QPushButton#chip:hover { background: @raised; }
+QPushButton#chip:checked { background: @bubble; color: @action; border-color: @action; }
+QPushButton#segment { border-radius: 0; padding: 6px 14px; min-height: 18px; }
+QPushButton#segment:checked { background: @bubble; color: @action; border-color: @action; }
+QPushButton#compact { padding: 6px 12px; min-height: 18px; }
+QListView#tagQueue { border: none; background: @surface; }
+QWidget#tagForm { background: @surface; }
+QWidget#tagForm QLabel, QWidget#tagForm QCheckBox { background: transparent; }
+QWidget#tagForm QLineEdit, QWidget#tagForm QPlainTextEdit { background: @bg; }
 '''
     for key, value in t.items():
         sheet = sheet.replace('@' + key, value)

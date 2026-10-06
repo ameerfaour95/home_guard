@@ -1,7 +1,7 @@
 from datetime import timedelta, timezone
 from PySide6.QtCore import Qt, Signal, QTimer, QEvent, QDateTime
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QComboBox, QTableView,
-    QHeaderView, QAbstractItemView, QStackedWidget, QDialog, QDateTimeEdit, QDialogButtonBox, QSizePolicy)
+    QHeaderView, QAbstractItemView, QStackedWidget, QDialog, QDateTimeEdit, QDialogButtonBox, QSizePolicy, QScrollArea)
 from .backend import AuthError, BackendError
 from PySide6.QtGui import QPixmap
 from .formatting import utcnow, local_time, camera_name
@@ -41,7 +41,12 @@ class TimelineScreen(QWidget):
         self.range_text = label('', 'muted'); ranges.addWidget(self.range_text); ranges.addStretch()
         self.clear_cell = button('Clear hour filter', self.reset_cell, 'link'); self.clear_cell.hide(); ranges.addWidget(self.clear_cell)
         self.range_bar = QWidget(); self.range_bar.setLayout(ranges); layout.addWidget(self.range_bar)
-        self.density = DensityStrip(theme); self.density.selected.connect(self.filter_cell); layout.addWidget(self.density)
+        self.density = DensityStrip(theme); self.density.selected.connect(self.filter_cell)
+        # A house with many cameras would push the event list off a 768-pixel screen: show 8 rows, scroll the rest.
+        self.density_scroll = QScrollArea(); self.density_scroll.setWidget(self.density); self.density_scroll.setWidgetResizable(True)
+        self.density_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.density_scroll.setMaximumHeight(24+22*8+4); self.density_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        layout.addWidget(self.density_scroll)
         filters = QHBoxLayout(); filters.setSpacing(8)
         self.filters = {}
         choices = {'kind': [('All kinds', None)]+[(v, k) for k, v in KINDS.items()],

@@ -91,6 +91,7 @@ class CustomerOut:
     consent_training: bool = False
     notes: str = ''
     devices: list[DeviceSummary] = field(default_factory=list)
+    consent_proposed: dict | None = None  # what the box's setup recorded, waiting for an admin to confirm
 
 
 @dataclass

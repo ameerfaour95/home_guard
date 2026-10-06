@@ -1,0 +1,18 @@
+{
+ "time_utc": "2026-10-03T19:30:00Z",
+ "alert": {
+  "alert_id": "back_1791031000_alert",
+  "camera": "back_door",
+  "label": "normal"
+ },
+ "verdict": "real_but_wrong",
+ "action": "none",
+ "note": "",
+ "source": "button",
+ "raw_text": "It was the gardener taking out the bins",
+ "from": {
+  "name": "Demo owner"
+ },
+ "owner_label": "other",
+ "owner_text": "It was the gardener taking out the bins"
+}

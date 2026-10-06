@@ -1,0 +1,18 @@
+{
+ "time_utc": "2026-10-03T19:30:00Z",
+ "alert": {
+  "alert_id": "front_1791030000_alert",
+  "camera": "front_door",
+  "label": "suspicious"
+ },
+ "verdict": "false_alarm",
+ "action": "none",
+ "note": "",
+ "source": "button",
+ "raw_text": "",
+ "from": {
+  "name": "Demo owner"
+ },
+ "owner_label": "empty",
+ "owner_text": ""
+}

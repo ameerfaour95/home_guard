@@ -12,9 +12,10 @@ from .models import decode, TokenPair, StaffOut, FleetResponse, CustomerOut, Eve
 
 from .demo_studio import DemoStudio
 from .demo_annotations import DemoAnnotations
+from .tagging_client import DemoTagging
 
 
-class DemoBackend(DemoAnnotations, DemoStudio):
+class DemoBackend(DemoTagging, DemoAnnotations, DemoStudio):
     def __init__(self, data_dir=None, role='admin'):
         self.data_dir = Path(data_dir) if data_dir else Path(__file__).parent / 'demo_data'
         self.role = role
@@ -49,7 +50,18 @@ class DemoBackend(DemoAnnotations, DemoStudio):
 
     def customer(self, id):
         self._identity_access()
-        return self._load(f'customer_{int(id)}.json', CustomerOut)
+        customer = self._load(f'customer_{int(id)}.json', CustomerOut)
+        for key, value in getattr(self, '_customer_changes', {}).get(int(id), {}).items():
+            setattr(customer, key, value)
+        return customer
+
+    def update_customer(self, customer):
+        self._identity_access()
+        changes = {k: getattr(customer, k) for k in ('name', 'timezone', 'consent_live', 'consent_recordings',
+                                                       'consent_training', 'notes')}
+        changes['consent_proposed'] = None
+        self.__dict__.setdefault('_customer_changes', {})[int(customer.id)] = changes
+        return self.customer(customer.id)
 
     def events(self, **filters):
         if filters.get('filter'):

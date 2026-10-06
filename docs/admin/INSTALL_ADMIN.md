@@ -42,3 +42,57 @@ To update, close the app and replace the complete application folder with the ne
 In Studio, open an export marked **Ready** and choose **Open manifest** to inspect schema v2 counts and warnings. VLM exports include clips and write `vlm/{train,val,test}.jsonl` plus `vlm/dataset_info.json`.
 
 An administrator with the Cloud management environment downloads the dataset using `manage export-download <id> --dest DIR`. The export detail shows the command with its actual ID. The desktop app reads the server-provided manifest URL; it does not need AWS credentials.
+
+## Tagging studio (admins)
+
+**Tag** in the navigation (or **Open tagging studio** in Studio) is where clips get their category tags for the AI.
+
+| Area | What it shows |
+| --- | --- |
+| Work queue (left) | Contradictions first, alerts and suspicious-vs-escalation disagreements on top, then clips to check, then untagged clips. An old tag counts as done unless something contradicts it. |
+| Clip (middle) | The crop the AI sees, or the full frame. Under it, side by side: the old tag, the customer's answer, the AI label and the teacher suggestion. A card is outlined in red when it is part of the contradiction. |
+| Tag (right) | The category, grouped Normal / Suspicious / Escalation, with the Hebrew names. Then the raw label, zone, movement, flags, visibility, evidence frame, an English description, notes, Needs check and Delete. |
+
+Press **?** in the studio for the keys. The most used are:
+
+| Key | Action |
+| --- | --- |
+| `s` `3` | Category S3 (`n` `0` is N10) |
+| **Ctrl+Enter** | Save and open the next clip |
+| `f` | Mark the evidence frame |
+| `a` | Use the teacher's suggestion |
+| `j` / `k` | Next / previous clip |
+
+Unsaved edits are kept when you move to another clip.
+
+### Where the data comes from
+
+| Source | Location | Override |
+| --- | --- | --- |
+| Customers' alerts and answers | The Cloud database (indexed from S3) | |
+| Customers' alerts and answers (local copies) | `owner_feedback/` inside the dataset folder | |
+| Old tags | The unified dataset: `home_guard_data/dataset` next to the app folder | `HOMEGUARD_DATASET_DIR` |
+| Teacher suggestions | The eval results: `home_guard_eval/eval_set/results` | `HOMEGUARD_EVAL_DIR` |
+
+A clip from a household that has not given training consent stays in the queue, but its video does not open. Confirm the box's consent proposal with **Confirm consent…** on the customer's page.
+
+### Exports
+
+**Export training set…** writes these files into a timestamped folder under `studio_exports` next to the dataset (override: `HOMEGUARD_STUDIO_EXPORT_DIR`):
+
+- `vlm_training.jsonl`: the existing contract plus the category and observation fields.
+- `eval_manifest.jsonl`: eval rows that `box/eval_prompt.py` can score against.
+
+Nothing is written to S3. To export from the command line:
+
+```
+manage tagging-export [--dataset DIR] [--eval DIR] [--out DIR] [--eval-frames DIR]
+```
+
+`--eval-frames` also writes the frames and the `manifest.jsonl` that the eval needs.
+
+### Self-hosted teacher
+
+To ask a self-hosted teacher model on demand, set `HG_TEACHER_BASE_URL` and `HG_TEACHER_MODEL`, and `HG_TEACHER_API_KEY` if the server needs one. The server must speak the OpenAI-compatible API.
+
+The teacher is asked only when you press **Ask teacher**. Gemini is refused: its terms forbid training a competing model on its outputs.

@@ -1,0 +1,7 @@
+{
+ "model": "gpt-4o",
+ "rows": 6,
+ "errors": 0,
+ "alerts_caught_ratio": 0.89,
+ "normal_flagged_ratio": 0.12
+}

@@ -1,0 +1,25 @@
+{
+ "camera_name": "front_door",
+ "kind": "alert",
+ "clip_path": "../../../../media/person.mp4",
+ "clip_start_ts": 1791029996,
+ "clip_end_ts": 1791030006,
+ "clip_start_local": "2026-10-03 22:14:05",
+ "duration_sec": 6.0,
+ "fps_estimated": 12.0,
+ "alert": {
+  "raw_label": "suspicious",
+  "label": "suspicious",
+  "summary": "A person in dark clothes stands at the door for a long time.",
+  "people": 1
+ },
+ "model_response": {
+  "summary": "A person in dark clothes stands at the door for a long time.",
+  "label": "suspicious",
+  "raw_label": "suspicious"
+ },
+ "teacher": {
+  "model": "gpt-4o",
+  "prompt_version": "2026-10-03.demo"
+ }
+}

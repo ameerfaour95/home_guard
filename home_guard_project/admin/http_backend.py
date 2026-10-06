@@ -15,6 +15,9 @@ from .models import AnnotationOut, AnnotationVersion, PublishOut
 from dataclasses import asdict
 from .models import SavedFilter, CollectionOut, ExportOut, AuditPage, DensityOut, ReviewCount
 from .models import TokenPair, StaffOut, FleetResponse, CustomerOut, EventPage, EventDetail, EventSummary, DetectionsOut, MediaAccess, decode
+from .tagging_client import HttpTagging, ConsentError
+
+CONSENT_REFUSALS = ('This customer has not agreed to training use', 'This customer has not agreed to recordings access')
 
 
 def tls_context():
@@ -37,7 +40,7 @@ def tls_context():
     return context
 
 
-class HttpBackend:
+class HttpBackend(HttpTagging):
     def __init__(self, base_url: str, *, transport=None):
         origin = urlsplit(base_url)
         if (origin.scheme != 'https' and not (origin.scheme == 'http' and
@@ -83,6 +86,13 @@ class HttpBackend:
             safe = {'Name must not identify a household', 'Search is not available for this role'}
             raise ValidationError(detail if isinstance(detail, str) and detail in safe else
                                   'Check the entered values. Names must be 120 characters or fewer.')
+        if response.status_code == 403:
+            try:
+                detail = response.json().get('detail')
+            except (ValueError, AttributeError):
+                detail = None
+            if detail in CONSENT_REFUSALS:   # the household's consent, not the staff member's role, is missing
+                raise ConsentError(f"{detail}. An admin confirms consent on the customer's page.")
         if response.status_code >= 300:
             error = {401: AuthError, 403: ForbiddenError, 429: RateLimitError, 501: UnsupportedError}.get(response.status_code, ServerError)
             raise error()

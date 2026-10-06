@@ -1,6 +1,6 @@
 from .formatting import camera_name
 from PySide6.QtCore import Signal, Qt
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget, QTabWidget
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget, QTabWidget, QDialog, QCheckBox
 from .backend import OfflineError, AuthError
 from .fleet_model import SEVERITY
 from .formatting import site_name, age, utcnow
@@ -35,7 +35,12 @@ class CustomerScreen(QWidget):
         header.addLayout(names, 1)
         self.consent = label('Access follows customer consent' if review else '', 'muted', True)
         self.consent.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter); header.addWidget(self.consent)
+        self.consent_button = button('Review consent…', self.review_consent, 'compact'); self.consent_button.hide()
+        header.addWidget(self.consent_button, alignment=Qt.AlignmentFlag.AlignVCenter)
         content.addLayout(header)
+        self.consent_note = label('', 'error', True); self.consent_note.hide(); content.addWidget(self.consent_note)
+        self.customer = None
+        self.consent_runner = TaskRunner(self); self.consent_runner.finished.connect(self.consent_saved)
         self.tabs = QTabWidget(); self.tabs.setDocumentMode(True); content.addWidget(self.tabs, 1)
         self.tabs.tabBar().setDrawBase(False)
         self.timeline = TimelineScreen(backend, theme); self.event_view = EventView(backend, role, theme)
@@ -81,8 +86,20 @@ class CustomerScreen(QWidget):
             else:
                 self.stack.setCurrentWidget(self.offline if isinstance(error, OfflineError) else self.failure)
             return
-        self.zone = customer.timezone
+        self.zone, self.customer = customer.timezone, customer
         self.name.setText(customer.name)
+        proposed = getattr(customer, 'consent_proposed', None)
+        missing = not (customer.consent_recordings and customer.consent_training)
+        self.consent_button.setVisible(self.role == 'admin' and not self.review_mode)
+        self.consent_button.setText('Confirm consent…' if proposed else 'Review consent…')
+        self.consent_button.setObjectName('primary' if proposed else 'compact')
+        self.consent_button.style().unpolish(self.consent_button); self.consent_button.style().polish(self.consent_button)
+        if proposed and missing and self.role == 'admin':
+            self.consent_note.setText('The box’s setup recorded the owner’s consent, but nobody has confirmed it yet: '
+                                      'until then this household’s recordings cannot be opened or used for training.')
+            self.consent_note.show()
+        else:
+            self.consent_note.hide()
         devices = [d for d in customer.devices if d.device_id == self.device_id] or customer.devices
         if devices:
             device = min(devices, key=lambda d: SEVERITY[d.verdict])
@@ -98,6 +115,49 @@ class CustomerScreen(QWidget):
         self.tabs.setCurrentIndex(0); self.tabs.setTabEnabled(1, False)
         self.timeline.open(customer.id, customer.timezone)
         self.stack.setCurrentWidget(self.body)
+
+    def review_consent(self):
+        customer = self.customer
+        if customer is None:
+            return None
+        proposed = getattr(customer, 'consent_proposed', None) or {}
+        dialog = QDialog(self); dialog.setWindowTitle('Customer consent'); dialog.setObjectName('commandPalette')
+        layout = QVBoxLayout(dialog); layout.setContentsMargins(24, 20, 24, 20); layout.setSpacing(12)
+        layout.addWidget(label(f'Consent for {customer.name}', 'section'))
+        if proposed:
+            when = str(proposed.get('recorded_utc') or '')[:16].replace('T', ' ')
+            by = proposed.get('installer') or 'the installer'
+            layout.addWidget(label(f'Recorded by {by} during setup{" on " + when if when else ""}. Confirm what the owner agreed to.',
+                                   'muted', True))
+        boxes = {}
+        for key, text in (('live', 'Live view: staff may watch the cameras live'),
+                          ('recordings', 'Recordings: staff may open saved clips'),
+                          ('training', 'Training: clips may be tagged and used to train the AI')):
+            box = QCheckBox(text)
+            box.setChecked(bool(proposed.get(key)) if proposed else bool(getattr(customer, f'consent_{key}')))
+            layout.addWidget(box); boxes[key] = box
+        row = QHBoxLayout(); row.addStretch()
+        row.addWidget(button('Cancel', dialog.reject))
+        row.addWidget(button('Save consent', dialog.accept, 'primary')); layout.addLayout(row)
+        dialog.accepted.connect(lambda: self.save_consent({k: b.isChecked() for k, b in boxes.items()}))
+        dialog.show()
+        self.consent_dialog = dialog
+        return dialog
+
+    def save_consent(self, values):
+        from dataclasses import replace
+        updated = replace(self.customer, consent_live=values['live'], consent_recordings=values['recordings'],
+                          consent_training=values['training'])
+        self.consent_button.setEnabled(False)
+        self.consent_runner.start(lambda: self.backend.update_customer(updated))
+
+    def consent_saved(self, customer, error):
+        self.consent_button.setEnabled(True)
+        if error:
+            if isinstance(error, AuthError):
+                self.session_expired.emit(); return
+            self.consent_note.setText(f'Consent was not saved: {error}'); self.consent_note.show(); return
+        self.open(self.customer_id, self.device_id)
 
     def open_event(self, event_id):
         rows = self.timeline.model.rows

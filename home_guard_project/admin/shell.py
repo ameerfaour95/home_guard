@@ -9,6 +9,7 @@ from .customer import CustomerScreen
 from .review import ReviewScreen
 from .studio import StudioScreen
 from .label_view import LabelView
+from .tag_view import TagView
 from .audit import AuditScreen
 from .widgets.common import label, button, EmptyState
 from .widgets.palette import CommandPalette
@@ -54,7 +55,7 @@ class Shell(QWidget):
         self.navigation = {}
         self.pages = QStackedWidget()
         self.screens = {}
-        allowed = ['Label', 'Review', 'Studio'] if staff.role == 'labeler' else ['Fleet', 'Review', 'Studio'] + (['Label', 'Audit'] if staff.role == 'admin' else [])
+        allowed = ['Label', 'Review', 'Studio'] if staff.role == 'labeler' else ['Fleet', 'Review', 'Studio'] + (['Tag', 'Label', 'Audit'] if staff.role == 'admin' else [])
         for title in allowed:
             nav = button(title, lambda checked=False, name=title: self.navigate(name), 'nav')
             nav.setIcon(icon(title, theme))
@@ -74,6 +75,12 @@ class Shell(QWidget):
                 page.customer_requested.connect(self.open_customer)
                 page.loaded.connect(self.fleet_loaded)
                 page.session_expired.connect(self.session_expired)
+            elif title == 'Tag':
+                page = TagView(backend, staff.role, theme)
+                self.tag_page = page
+                page.session_expired.connect(self.session_expired)
+                page.customer_requested.connect(self.open_customer)
+                page.label_requested.connect(self.open_label)
             elif title == 'Label':
                 page = LabelView(backend, staff.role, theme)
                 self.label_page = page
@@ -87,6 +94,7 @@ class Shell(QWidget):
                 page = StudioScreen(backend, staff.role, theme)
                 page.filter_requested.connect(self.open_filter)
                 page.event_requested.connect(self.open_event)
+                page.tagging_requested.connect(lambda: self.navigate('Tag'))
                 page.session_expired.connect(self.session_expired)
             else:
                 page = AuditScreen(backend, theme)
@@ -167,6 +175,8 @@ class Shell(QWidget):
         self.pages.setCurrentWidget(self.screens[title])
         if title == 'Label' and not self.label_page.doc and not self.label_page.loader.busy:
             self.label_page.open_queue()
+        if title == 'Tag':
+            self.tag_page.open()
         for name, nav in self.navigation.items():
             nav.setChecked(name == title)
 
