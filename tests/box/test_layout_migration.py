@@ -247,6 +247,23 @@ class MigrationTest(unittest.TestCase):
             self.assertEqual(cmd[2:], ["/inheritance:r", "/grant:r", "*S-1-5-32-544:(OI)(CI)F", "*S-1-5-18:(OI)(CI)F",
                                        "*S-1-5-21-1-2-3-1001:(OI)(CI)M"])
 
+    def test_the_auto_sign_in_account_that_runs_the_window_is_granted_too(self) -> None:
+        real = self.fake.run
+
+        def run(cmd, env=None):
+            if cmd[0] == "reg":
+                return SimpleNamespace(returncode=0, stdout="\r\nHKEY_LOCAL_MACHINE\\...\\Winlogon\r\n"
+                                                            "    DefaultUserName    REG_SZ    homeguard\r\n")
+            return real(cmd, env)
+
+        self.box.run = run
+        self.migrate()
+        for cmd in (c for c in self.fake.calls if c[0] == "icacls"):
+            self.assertEqual(cmd[-2:], ["*S-1-5-21-1-2-3-1001:(OI)(CI)M", "homeguard:(OI)(CI)M"])
+        self.assertEqual(lm.box_users(lambda cmd, env=None: SimpleNamespace(
+            returncode=0, stdout="<UserId>BOX\\homeguard</UserId>    DefaultUserName    REG_SZ    homeguard")),
+            ["BOX\\homeguard"])          # the same account is granted once
+
     def test_waits_for_a_running_upload(self) -> None:
         self.fake.running = 2
         self.assertEqual(self.migrate(), 0)

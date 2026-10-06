@@ -12,7 +12,8 @@ before it leaves the box on the old layout and starts it again as it was.
 A run:
   1. pauses the upload and heartbeat tasks (waits for a running one to finish), ends the collector task
      and stop_collector.sh, and checks the runner and collector processes are gone;
-  2. creates the folders and locks them down (icacls: Administrators, SYSTEM and the task's user);
+  2. creates the folders and locks them down (icacls: Administrators, SYSTEM, the collector task's account
+     and the auto sign-in account that runs the window);
   3. copies (a file already there with the same size and time is not copied again, so a second run
      resumes), then checks every file's size, and config and secrets byte for byte;
   4. writes migration_manifest.json (every file copied) and then layout.json;
@@ -65,6 +66,7 @@ MODEL_PATTERNS = ("*.pt", "*_openvino_model")
 JUNK_PATTERNS = ("api_key.env.bak-*",)
 EMPTY_JUNK_DIRS = ("production_outbox",)
 
+WINLOGON_KEY = r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
 ADMINISTRATORS = "*S-1-5-32-544"
 SYSTEM = "*S-1-5-18"
 
@@ -212,9 +214,26 @@ def task_user(run: Runner) -> str:
     return "*" + user if user.upper().startswith("S-1-") else user
 
 
-def acl_commands(home: str, user: str) -> List[List[str]]:
-    """icacls lines: HOME and, again on its own, secrets\\ to Administrators, SYSTEM and *user* only."""
-    grants = ["/grant:r", f"{ADMINISTRATORS}:(OI)(CI)F", f"{SYSTEM}:(OI)(CI)F", f"{user}:(OI)(CI)M"]
+def window_user(run: Runner) -> Optional[str]:
+    """The account Windows signs in by itself (auto sign-in): it runs the Home Guard window. None if off."""
+    out = run(["reg", "query", WINLOGON_KEY, "/v", "DefaultUserName"])
+    match = re.search(r"DefaultUserName\s+REG_SZ\s+(\S.*)", getattr(out, "stdout", "") or "") \
+        if getattr(out, "returncode", 1) == 0 else None
+    return match.group(1).strip() if match else None
+
+
+def box_users(run: Runner) -> List[str]:
+    """Who works with the box's files: the collector task's account, and the window's when it is another."""
+    users = [task_user(run)]
+    window = window_user(run)
+    if window and window.lower() not in {u.lower().rsplit("\\", 1)[-1] for u in users}:
+        users.append(window)
+    return users
+
+
+def acl_commands(home: str, users: Sequence[str]) -> List[List[str]]:
+    """icacls lines: HOME and, again on its own, secrets\\ to Administrators, SYSTEM and *users* only."""
+    grants = ["/grant:r", f"{ADMINISTRATORS}:(OI)(CI)F", f"{SYSTEM}:(OI)(CI)F", *(f"{u}:(OI)(CI)M" for u in users)]
     return [["icacls", home, "/inheritance:r", *grants],
             ["icacls", os.path.join(home, "secrets"), "/inheritance:r", *grants]]
 
@@ -335,15 +354,15 @@ def migrate(code_dir: str, home: str, box: Box, dry_run: bool = False, set_acl: 
         box.say("Stopping the box...")
         box.stop(old)
         # The folders are locked down before anything is copied in (the copies inherit it).
-        user = task_user(box.run) if set_acl else ""
-        commands = acl_commands(home, user) if set_acl else []
+        users = box_users(box.run) if set_acl else []
+        commands = acl_commands(home, users) if set_acl else []
         if commands:
             _icacls(box, commands[0])
         for folder in ("config", "secrets", "data", "logs", "models"):
             os.makedirs(os.path.join(home, folder), exist_ok=True)
         if commands:
             _icacls(box, commands[1])
-            box.say(f"Locked down {home} (Administrators, SYSTEM, {user}).")
+            box.say(f"Locked down {home} (Administrators, SYSTEM, {', '.join(users)}).")
         # Planned again now the box is stopped: it may have saved or uploaded clips since the first look.
         items = plan(old, new)
         copied = [(item, copy_item(item)) for item in items]
