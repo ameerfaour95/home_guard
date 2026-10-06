@@ -27,10 +27,16 @@ from urllib.parse import quote as urlquote
 import cv2
 import yaml
 
+try:
+    from home_guard_project.box import paths as _paths
+except ImportError:  # run as a script (run_collector.sh): the repo root is not on sys.path yet
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")))
+    from home_guard_project.box import paths as _paths
+
 log = logging.getLogger(__name__)
 
 _DIR = os.path.dirname(os.path.abspath(__file__))
-_CAMERAS_YAML = os.path.join(_DIR, "cameras.yaml")
+_CAMERAS_YAML = _paths.cameras_yaml()   # per-box config (paths.py); config.yaml below is the code's
 
 # Common RTSP path templates per manufacturer.
 # {ch} = channel number, {stream} = stream index (1=main, 2=sub)

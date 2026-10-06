@@ -50,20 +50,20 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
+from . import paths
 from . import scene_map as sm
 from . import taxonomy as tx
-from .boxconfig import PROJECT_ROOT
 
 log = logging.getLogger("box.scene_interview")
 
-INTERVIEW_DIR = os.path.join(PROJECT_ROOT, "scene_interview")
+INTERVIEW_DIR = paths.scene_interview_dir()
 MAX_REGIONS = 12
 MAX_QUESTIONS = 7
 GRID_ROWS, GRID_COLS = 3, 4
 MIN_AREA, MAX_AREA = 0.01, 0.7          # of the picture; smaller is a speck, larger is the whole view
 DUPLICATE_IOU = 0.8
 BLACK_LEVEL, BLACK_SHARE = 8, 0.9       # a region this much black is the masked outside: never numbered
-FASTSAM_WEIGHTS = "FastSAM-s.pt"
+FASTSAM_WEIGHTS = "FastSAM-s.pt"      # a bare name: a file in the box's models folder (paths.resolve_model)
 OPTIONS = ("mine", "the neighbour's", "public / street", "hide it (black)", "skip", "don't know")
 
 # BGR, for the ownership picture.
@@ -106,7 +106,7 @@ def fastsam_segmenter(weights: str = FASTSAM_WEIGHTS) -> Segmenter:
     """SAM (FastSAM) through ultralytics. Raises when ultralytics or the weights are not available."""
     from ultralytics import FastSAM  # noqa: PLC0415
 
-    model = FastSAM(weights)
+    model = FastSAM(paths.resolve_model(weights))
 
     def segment(image: np.ndarray) -> List[np.ndarray]:
         results = model(image, retina_masks=True, imgsz=640, conf=0.4, iou=0.9, verbose=False)

@@ -22,10 +22,11 @@ def main() -> int:
 
     from dotenv import load_dotenv  # noqa: PLC0415
 
-    from .boxconfig import MODE_INFERENCE, PROJECT_ROOT, get_option  # noqa: PLC0415
+    from . import paths  # noqa: PLC0415
+    from .boxconfig import MODE_INFERENCE, get_option  # noqa: PLC0415
     from .telegram_notify import _as_chat_ids, check_group_readiness  # noqa: PLC0415
 
-    load_dotenv(os.path.join(PROJECT_ROOT, "api_key.env"))
+    load_dotenv(paths.secrets_env())
 
     if str(get_option("mode")) != MODE_INFERENCE:
         print("SKIP: data-collection mode - this box has no Telegram assistant")

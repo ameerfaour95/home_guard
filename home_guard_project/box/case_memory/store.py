@@ -98,11 +98,11 @@ class MemoryBackend:
 
 
 def default_path(live_dir: Optional[str] = None) -> str:
-    if live_dir is None:
-        from .. import boxconfig  # noqa: PLC0415
+    """The journal: in the box's state folder, or ``<live_dir>/.registry`` for any other alert folder."""
+    from .. import paths  # noqa: PLC0415
 
-        live_dir = boxconfig.PRODUCTION_LIVE_DIR
-    return os.path.join(live_dir, ".registry", FILE_NAME)
+    state_dir, _ = paths.state_paths_for(live_dir or paths.production_dir())
+    return os.path.join(state_dir, FILE_NAME)
 
 
 # -- scope comparisons ---------------------------------------------------------------------------------------------

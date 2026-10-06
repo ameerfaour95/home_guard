@@ -214,7 +214,7 @@ def main() -> None:
         datefmt="%H:%M:%S",
     )
 
-    cameras_path = os.path.join(_DIR, "cameras.yaml")
+    cameras_path = os.path.join(os.path.dirname(_ZONES_PATH), "cameras.yaml")   # next to zones.yaml
     if not os.path.isfile(cameras_path):
         print("cameras.yaml not found. Run camera discovery first.")
         sys.exit(1)

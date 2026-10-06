@@ -1767,9 +1767,9 @@ def _make_gpt(provider: str, model: str, eye: bool = False) -> Any:
         pass
     try:
         from dotenv import load_dotenv  # noqa: PLC0415
-        from .boxconfig import PROJECT_ROOT  # noqa: PLC0415
+        from . import paths  # noqa: PLC0415
 
-        load_dotenv(os.path.join(PROJECT_ROOT, "api_key.env"))
+        load_dotenv(paths.secrets_env())
     except Exception:  # noqa: BLE001
         pass
     try:

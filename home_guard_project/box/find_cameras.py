@@ -39,6 +39,8 @@ from urllib.parse import quote as urlquote
 
 import yaml
 
+from . import paths
+
 log = logging.getLogger("box.cameras")
 
 PASSWORD_ENV = "HG_CAMERA_PASSWORD"
@@ -126,9 +128,9 @@ def redact(url: str) -> str:
 
 # ── Camera confirmation (snapshots + apply), for the setup UI ────────────────
 _NAME_RE = re.compile(r"^[a-z0-9_]+$")
-CAMERAS_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data_collection", "cameras.yaml"))
-ZONES_PATH = os.path.join(os.path.dirname(CAMERAS_PATH), "zones.yaml")
-CAMERA_ALERTS_PATH = os.path.join(os.path.dirname(CAMERAS_PATH), "camera_alerts.yaml")
+CAMERAS_PATH = paths.cameras_yaml()
+ZONES_PATH = paths.zones_yaml()
+CAMERA_ALERTS_PATH = paths.camera_alerts_yaml()
 _YAML_HEADER = (
     "# ──────────────────────────────────────────────────────────────────────────────\n"
     "#  Camera RTSP streams — DO NOT COMMIT (contains credentials)\n"

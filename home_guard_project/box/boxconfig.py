@@ -9,20 +9,22 @@ from typing import Any, Dict, Optional, Union
 
 import yaml
 
-_DIR = os.path.dirname(os.path.abspath(__file__))
+from . import paths
 
-PROJECT_ROOT = os.path.abspath(os.path.join(_DIR, "..", ".."))
-LIVE_DIR = os.path.join(PROJECT_ROOT, "dataset_multi")      # written by the collector
-OUTBOX_DIR = os.path.join(PROJECT_ROOT, "dataset_outbox")   # finished clips waiting for S3
-LOG_DIR = os.path.join(PROJECT_ROOT, "logs")
-ALIVE_FILE = os.path.join(LOG_DIR, "collector.alive")       # touched by run_collector.sh
-BOX_YAML = os.path.join(_DIR, "box.yaml")
+# Aliases of paths.py, kept for the code that imports them. Where they point depends on the box's
+# layout (paths.py): %ProgramData%\HomeGuard on a migrated box, the old places in the code folder otherwise.
+PROJECT_ROOT = paths.CODE_DIR                     # the code (git checkout), not the data
+LIVE_DIR = paths.live_dir()                       # written by the collector
+OUTBOX_DIR = paths.outbox_dir()                   # finished clips waiting for S3
+LOG_DIR = paths.logs_dir()
+ALIVE_FILE = paths.alive_file()                   # touched by run_collector.sh
+BOX_YAML = paths.box_yaml()
 
 # Inference (production) mode saves its alert clips in folders of its own, in the
 # same layout. They are uploaded like the collector's clips, but to an S3 folder
 # that the bucket empties after PRODUCTION_RETENTION_DAYS (see retention.py).
-PRODUCTION_LIVE_DIR = os.path.join(PROJECT_ROOT, "production_multi")
-PRODUCTION_ARCHIVE_DIR = os.path.join(PROJECT_ROOT, "production_archive")
+PRODUCTION_LIVE_DIR = paths.production_dir()
+PRODUCTION_ARCHIVE_DIR = paths.archive_dir()
 PRODUCTION_PREFIX_ROOT = "production_"
 PRODUCTION_RETENTION_DAYS = 14
 

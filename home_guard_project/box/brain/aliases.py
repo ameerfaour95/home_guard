@@ -13,8 +13,9 @@ from typing import Dict, List, Sequence
 
 import yaml
 
-ALIASES_PATH = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "data_collection",
-                                             "camera_aliases.yaml"))
+from .. import paths
+
+ALIASES_PATH = paths.camera_aliases_yaml()
 MAX_ALIAS_CHARS = 40
 
 
