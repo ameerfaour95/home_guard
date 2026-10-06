@@ -250,7 +250,7 @@ class RunTest(unittest.TestCase):
             self.memories.append(memory)
             return memory
         self.admissions = []
-        def drain(pending, *args):
+        def drain(pending, *args, **kwargs):
             self.admissions.extend((j.camera, round(j.ts - start, 3), j.labels) for j in pending)
             pending.clear()
         with tempfile.TemporaryDirectory() as root, ExitStack() as stack:

@@ -1393,11 +1393,36 @@ def _scene_look(job: AlertJob, ts: Optional[float], frame: Any, results: Any) ->
         log.debug("[%s] look not kept for the scene map: %s", job.camera, exc)
 
 
+def _attach_tracker(job: AlertJob, trackers: Any, now: float) -> None:
+    """Give *job* its camera's tracker facts over ``[trigger - PRE_SECONDS, now]``: the case memory's tracker dict,
+    the record for .meta.json and the teacher (``tracker``, kept whether or not the prompt shows the line), the
+    TRACKER FACTS line and the tracks for ZONE FACTS. Never raises: without them the alert goes on as before."""
+    if trackers is None:
+        return
+    try:
+        from .alert_clips import PRE_SECONDS  # noqa: PLC0415
+
+        t0 = job.ts - PRE_SECONDS
+        facts = trackers.facts(job.camera, t0, now)
+        tracks = trackers.tracks_between(job.camera, t0, now)
+        record = facts.record()
+    except Exception as exc:  # noqa: BLE001 - the tracker only adds facts; it must never stop an alert
+        log.warning("[%s] tracker facts not taken: %s", job.camera, exc)
+        return
+    job.tracker_facts = record["case_memory"] or None
+    job.tracker = record
+    job.tracker_line = record["line"]
+    job.tracker_tracks = list(tracks)
+    job.input_meta["tracker"] = record
+
+
 def _start_due_alerts(pending: List[AlertJob], now: float, cfg: Any, detector: Any,
                       streams: Dict[str, Any], main_caps: Dict[str, Any], predict_args: Dict[str, Any],
                       backend: Any, box_settings: Dict[str, Any], env: Dict[str, str], settings: AlertSettings,
-                      assistant: Any, status: Any, production_dir: str, training_dir: str) -> Any:
-    """Start the reserved VLM call once its post-roll is complete; consume each job once."""
+                      assistant: Any, status: Any, production_dir: str, training_dir: str,
+                      trackers: Any = None) -> Any:
+    """Start the reserved VLM call once its post-roll is complete; consume each job once. With *trackers*
+    (tracker.TrackerRegistry) the job first takes its camera's tracker facts."""
     from .alert_clips import POST_SECONDS
 
     for job in list(pending):
@@ -1405,6 +1430,7 @@ def _start_due_alerts(pending: List[AlertJob], now: float, cfg: Any, detector: A
             continue
         frames, clip = _prepare_alert(job, cfg, detector, streams[job.camera].sub_cap,
                                       main_caps[job.camera], predict_args)
+        _attach_tracker(job, trackers, now)   # after _prepare_alert, which sets the job's input_meta afresh
         pending.remove(job)
         thread = threading.Thread(target=_worker,
                                   args=(backend, box_settings, env, settings, job.camera, frames,
@@ -2038,6 +2064,14 @@ def run() -> int:
     mode_watch = ModeWatch()
     worker = {"t": None}  # single in-flight VLM call across cameras (N150 budget)
     pending: List[AlertJob] = []
+    trackers = None   # one person/vehicle tracker per camera, fed by every look below (tracker.py)
+    tracker_failed: Set[str] = set()
+    try:
+        from .tracker import TrackerRegistry  # noqa: PLC0415
+
+        trackers = TrackerRegistry()
+    except Exception as exc:  # noqa: BLE001 - without the tracker every alert goes out as before
+        log.warning("Tracker not started (%s); alerts go out without tracker facts.", exc)
     assistant = None
     try:
         from . import telegram_agent  # noqa: PLC0415
@@ -2090,7 +2124,7 @@ def run() -> int:
                         log.warning("Clip memory not measured: %s", exc)
             due_worker = _start_due_alerts(pending, now_ts, cam_cfg, model, streams, main_caps, predict_args,
                                            backend, box_settings, env, settings, assistant, status,
-                                           PRODUCTION_LIVE_DIR, LIVE_DIR)
+                                           PRODUCTION_LIVE_DIR, LIVE_DIR, trackers=trackers)
             if due_worker is not None:
                 worker["t"] = due_worker
             for name in cameras:
@@ -2137,6 +2171,19 @@ def run() -> int:
                     status.detection(name, objects_from_result(results[0]) if results else [], now=seen_ts)
                 except Exception as exc:  # noqa: BLE001 - what the window shows must never stop the alerts
                     log.debug("[%s] status not updated: %s", name, exc)
+                # Every look feeds the camera's tracker too - active, cooldown and quiet looks alike - so an
+                # alert's facts cover the whole visit, from before the trigger.
+                if trackers is not None:
+                    try:
+                        from .scene_map import detections_from_result  # noqa: PLC0415
+
+                        height, width = frame.shape[:2]
+                        trackers.update(name, seen_ts,
+                                        detections_from_result(results[0], width, height) if results else [])
+                    except Exception as exc:  # noqa: BLE001 - the tracker only adds facts; it must never stop the alerts
+                        # Loud once per camera, then quiet: a broken tracker must not flood the log every look.
+                        (log.debug if name in tracker_failed else log.warning)("[%s] tracker not updated: %s", name, exc)
+                        tracker_failed.add(name)
                 # Every look feeds the camera's vehicle memory - the once-a-second looks of the
                 # cooldown too - so a car that arrives and parks during the cooldown is compared
                 # with its own parked position afterwards, and stays quiet.
