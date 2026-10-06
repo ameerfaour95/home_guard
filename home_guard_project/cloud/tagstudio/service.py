@@ -154,7 +154,9 @@ class TagStudio:
         return item, items
 
     def prefill(self, item: ClipItem) -> Dict[str, Any]:
-        """The old tag as the starting point: its text, and what its label says about the category/raw label."""
+        """The old tag as the starting point: its text and its level as the raw label. An old tag never had a category,
+        so none is filled in (it would bias the tagger), except "nothing there", which can only be N10. [alert] starts
+        as suspicious; escalation is the tagger's call. A teacher suggestion is never filled in: it is applied with A."""
         form = empty_form()
         old = item.opinions.get(OLD)
         if old is not None:
@@ -164,6 +166,8 @@ class TagStudio:
                 form["category"], form["raw_label"] = "N10", "normal"
             elif label == "normal":
                 form["raw_label"] = "normal"
+            elif label == "alert":
+                form["raw_label"] = "suspicious"
             form["delete"] = bool(old.detail.get("delete"))
         return form
 
@@ -193,6 +197,7 @@ class TagStudio:
             clean = clean_fields(fields)
         except TagError as e:
             raise StudioError(str(e), 422) from None
+        require_category(self.tags(session).get(key), clean)
         session.add(TagEvent(clip_key=key, clip_id=item.clip_id, fields=clean, staff_id=staff.id,
                              staff_name=staff.name, created_at=now))
         session.flush()
@@ -271,6 +276,16 @@ class TagStudio:
             result["frames"] = exporter.write_frames(
                 evals, frames_dir, lambda cid: self.local_media(by_clip[cid], "clip") if cid in by_clip else None)
         return result
+
+
+NEEDS_CATEGORY = "Choose a category before saving (or mark the clip Delete)"
+
+
+def require_category(current: Optional[Tag], fields: Dict[str, Any]) -> None:
+    """A saved tag always names a category, unless the clip is deleted: nothing is filled in for the tagger."""
+    merged = {**(current.fields if current else {}), **fields}
+    if not merged.get("category") and not merged.get("delete"):
+        raise StudioError(NEEDS_CATEGORY, 422)
 
 
 def _mac(secret: str, payload: str) -> str:

@@ -171,8 +171,10 @@ class TagView(QWidget):
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         body = QWidget(); body.setObjectName('tagForm'); scroll.setWidget(body)
         form = QVBoxLayout(body); form.setContentsMargins(16, 14, 26, 14)  # room for the scrollbar drawn over the right edge; form.setSpacing(8)
-        head = QHBoxLayout(); head.addWidget(label('CATEGORY', 'eyebrow')); head.addStretch()
-        self.started_from = label('', 'muted'); head.addWidget(self.started_from)
+        head = QHBoxLayout(); head.addWidget(label('CATEGORY', 'eyebrow'))
+        self.started_from = label('', 'muted'); self.started_from.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self.started_from.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        head.addWidget(self.started_from, 1)
         self.chord_label = Pill(self.theme); self.chord_label.hide(); head.addWidget(self.chord_label)
         form.addLayout(head)
         self.category_grid = QGridLayout(); self.category_grid.setHorizontalSpacing(6); self.category_grid.setVerticalSpacing(5)
@@ -321,7 +323,7 @@ class TagView(QWidget):
         self.model.set_rows(queue['items'])
         total = queue['count']
         self.queue_count.setText(f'{total} clip{"s" if total != 1 else ""}' + ('' if total <= len(queue['items']) else f' · first {len(queue["items"])} shown'))
-        target = self.select_after or self.key
+        target = self.select_after or self.key or self.wanted   # a clip someone asked for wins over the default
         self.select_after = None
         if target and self.model.row_of(target) >= 0:
             self.highlight(target)
@@ -371,7 +373,10 @@ class TagView(QWidget):
         for who, card in self.cards.items():
             card.show_opinion(detail['opinions'].get(who), who in conflicted, self.categories)
         self.accept_button.setEnabled('teacher' in detail['opinions'])
-        self.started_from.setText({'old': 'started from the old tag', 'studio': ''}.get(detail['prefilled_from'], 'new'))
+        self.started_from.setText({'old': 'old tag filled in · pick a category', 'studio': ''}.get(
+            detail['prefilled_from'], 'new'))
+        self.started_from.setToolTip('From the old tag: its words and its level as the raw label. Old tags had no '
+                                     'category, so none is filled in.' if detail['prefilled_from'] == 'old' else '')
         tag = detail.get('tag')
         self.history.setText(f"Saved {len(detail['history'])} time(s) · last by {tag['by']} at {tag['at'][:16].replace('T', ' ')}"
                              if tag else '')
@@ -612,8 +617,9 @@ class TagView(QWidget):
     def save(self):
         if self.form is None or not self.key:
             return
-        if not self.form.get('category') and not self.form.get('delete') and not self.form.get('needs_check'):
-            self.show_banner('Choose a category first (or mark the clip Needs check or Delete).'); return
+        if not self.form.get('category') and not self.form.get('delete'):
+            self.show_banner('Choose a category first (or mark the clip Delete). Old tags never had one, so it is '
+                             'left for you to pick.'); return
         key, fields = self.key, deepcopy(self.form)
         self.save_button.setEnabled(False); self.save_state.setText('Saving…')
         if not self.save_runner.start(lambda: (key, fields, self.backend.tagging_save(key, fields))):

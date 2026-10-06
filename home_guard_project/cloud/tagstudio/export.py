@@ -54,11 +54,13 @@ def decision(item: ClipItem, tag: Optional[Tag], include_needs_check: bool = Fal
     if work_queue.assess(item).tier != work_queue.DONE:
         return None, "contradicted"
     label = old.effective_label()
+    # An old tag is a level only (normal / nothing there / [alert]): no category is invented for it, and an [alert]
+    # did not say suspicious or escalation, so its raw label stays unknown too.
     return {
-        "description": old.text, "category": "", "other_text": "",
-        "raw_label": "normal" if label in ("normal", EMPTY) else "",   # an old [alert] did not say S or E
+        "description": old.text, "category": None, "other_text": "",
+        "raw_label": "normal" if label in ("normal", EMPTY) else None,
         "observation": {}, "notes": "", "tag_source": "migrated", "tagged_by": old.detail.get("by", ""),
-        "tagged_at": "", "empty": label == EMPTY, "old_alert": label == ALERT,
+        "tagged_at": "", "empty": label == EMPTY, "old_alert": label == ALERT, "old_label": label,
     }, ""
 
 
@@ -78,7 +80,7 @@ def training_record(item: ClipItem, d: Dict[str, Any]) -> Dict[str, Any]:
         "source": item.source,
         "batch": item.batch,
         "category": d["category"],
-        "category_name": cat.name if cat else ("other" if d["category"] == taxonomy.OTHER else ""),
+        "category_name": cat.name if cat else ("other" if d["category"] == taxonomy.OTHER else None),
         "other_text": d["other_text"],
         "raw_label": d["raw_label"],
         "alert": d["raw_label"] in ("suspicious", "escalation") or bool(d.get("old_alert")),
@@ -86,6 +88,7 @@ def training_record(item: ClipItem, d: Dict[str, Any]) -> Dict[str, Any]:
         "tag_source": d["tag_source"],
         "tagged_by": d["tagged_by"],
         "tagged_at": d["tagged_at"],
+        "old_label": d.get("old_label"),
         "taxonomy_version": taxonomy.TAXONOMY_VERSION,
         "video_expires": bool(item.info.get("production_only")),
     }
@@ -107,6 +110,7 @@ def eval_row(item: ClipItem, d: Dict[str, Any]) -> Dict[str, Any]:
         "frames": evalfmt.frame_paths(item.clip_id), "s3_key": parts[3] if len(parts) == 4 else "",
         "local_time": item.local_time or evalfmt.clip_local_time(item.clip_id),
         "category": d["category"], "raw_label": d["raw_label"], "source": item.source, "tag_source": d["tag_source"],
+        "old_label": d.get("old_label"),
     }
 
 

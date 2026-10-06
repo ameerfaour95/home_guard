@@ -287,8 +287,12 @@ def test_training_export_keeps_the_contract_and_adds_the_taxonomy(tmp_path):
     assert (t["category"], t["category_name"], t["raw_label"], t["alert"]) == ("S3", "surveying", "suspicious", True)
     assert t["observation"] == {"zone": "fence", "movement": "moving_around", "flags": ["flashlight"],
                                 "visibility": "clear", "evidence_frame": 29, "evidence_sec": 4.2}
-    assert (by_id["old_alert_1771696867_trigger"]["raw_label"], by_id["old_alert_1771696867_trigger"]["tag_source"]) \
-        == ("", "migrated")
+    old_alert = by_id["old_alert_1771696867_trigger"]
+    # a migrated old tag is a level only: no invented category, and an [alert] never said suspicious or escalation
+    assert (old_alert["category"], old_alert["category_name"], old_alert["raw_label"]) == (None, None, None)
+    assert (old_alert["tag_source"], old_alert["old_label"], old_alert["alert"]) == ("migrated", "alert", True)
+    assert by_id["old_empty_1771696866_trigger"]["category"] is None
+    assert by_id["old_empty_1771696866_trigger"]["raw_label"] == "normal"
     assert counts["delete"] == 2 and counts["needs_check"] == 1 and counts["contradicted"] == 1
     assert counts["untagged"] == 1 and counts["training"] == 4
 
@@ -357,3 +361,31 @@ def test_paths_flag_then_env_then_default(tmp_path):
     assert flagged.dataset == tmp_path / "flag" and flagged.exports == tmp_path / "out"
     assert StudioPaths.resolve(env={}).dataset.name in ("dataset", "home_guard_dataset")
     assert VIDEO_BYTES
+
+
+def test_prefill_from_an_old_tag_never_invents_a_category(tmp_path):
+    root = make_dataset(str(tmp_path / "ds2"), [
+        dataset_row("alert_1772734904_trigger", "Three men cover their faces at the gate.", alert=True),
+        dataset_row("normal_1772734905_trigger", "A man walks past.", alert=False),
+        dataset_row("empty_1772734906_trigger", "No special activity", alert=False)])
+    studio = TagStudio(StudioPaths.resolve(env={}, dataset=root, eval_dir=str(tmp_path / "none"),
+                                           exports=str(tmp_path / "out")))
+    items = studio.items(None)
+    alert = studio.prefill(items["ds:alert_1772734904_trigger"])
+    assert (alert["category"], alert["raw_label"]) == ("", "suspicious")
+    assert alert["description"] == "Three men cover their faces at the gate."
+    normal = studio.prefill(items["ds:normal_1772734905_trigger"])
+    assert (normal["category"], normal["raw_label"]) == ("", "normal")
+    empty = studio.prefill(items["ds:empty_1772734906_trigger"])
+    assert (empty["category"], empty["raw_label"]) == ("N10", "normal")       # the only category an old tag implies
+    # done = the old level stands; its category stays empty until someone tags it
+    rows = {i.key: a for i, a in wq.build(items.values(), {})}
+    assert rows["ds:alert_1772734904_trigger"].reasons == ["migrated old tag (no category yet)"]
+
+
+def test_a_saved_tag_needs_a_category_unless_deleted():
+    from home_guard_project.cloud.tagstudio.service import StudioError, require_category
+    with pytest.raises(StudioError, match="Choose a category"):
+        require_category(None, {"raw_label": "suspicious", "description": "x"})
+    require_category(None, {"delete": True})
+    require_category(Tag("k", {"category": "S2"}), {"needs_check": True})        # a later partial save is fine

@@ -10,7 +10,7 @@ from threading import RLock
 from home_guard_project.cloud.tagstudio import queue as work_queue
 from home_guard_project.cloud.tagstudio.config import StudioPaths
 from home_guard_project.cloud.tagstudio.fields import TagError, clean_fields, fold
-from home_guard_project.cloud.tagstudio.service import StudioError, TagStudio
+from home_guard_project.cloud.tagstudio.service import StudioError, TagStudio, require_category
 from .backend import AuthError, ForbiddenError, ServerError, UnsupportedError, ValidationError
 
 
@@ -146,6 +146,7 @@ class _MemoryStudio(TagStudio):
             clean = clean_fields(fields)
         except TagError as e:
             raise StudioError(str(e), 422) from None
+        require_category(self.tags(session).get(key), clean)
         with self._lock:
             self._events.append(dict(key=key, at=now.strftime('%Y-%m-%dT%H:%M:%S.%fZ'), by=staff.name, fields=clean))
         tags = self.tags(session)

@@ -57,11 +57,16 @@ def main():
             app.processEvents()
             assert shell.grab().save(str(out / f'{prefix}-{name}-{width}.png'))
 
-        capture('queue')
-        view.set_category('N3'); view.chips['zone'].set_value('entrance'); view.chip_changed('zone')
-        view.chips['movement'].set_value('leaving'); view.chip_changed('movement')
+        capture('queue')                        # the form as it opens: started from the old tag, no category
+        if not args.server:
+            view.set_category('S4')             # what a tagger picks for "stands at the door for a long time"
+        view.chips['zone'].set_value('entrance'); view.chip_changed('zone')
+        view.chips['movement'].set_value('staying'); view.chip_changed('movement')
         view.mark_evidence(); pump(.3)
-        capture('tagging')
+        capture('tagging')                      # real clips: the category is left for the tagger to pick
+        if args.server:
+            shell.close(); QThreadPool.globalInstance().waitForDone(); app.processEvents()
+            continue
         view.save()
         wait(lambda: not view.save_runner.busy and not view.clip_runner.busy and not view.queue_runner.busy, 20)
         pump(1.5)

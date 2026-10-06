@@ -94,6 +94,8 @@ def test_save_is_append_only_and_validated(client, staff_factory, studio):
     key = f"ev:{ids['consenting']}"
     r = client.post("/v1/tagging/tag", headers=h, json={"key": key, "fields": {"category": "Q1"}})
     assert r.status_code == 422 and "category" in r.json()["detail"]
+    r = client.post("/v1/tagging/tag", headers=h, json={"key": key, "fields": {"raw_label": "suspicious"}})
+    assert r.status_code == 422 and "Choose a category" in r.json()["detail"]
     r = client.post("/v1/tagging/tag", headers=h, json={"key": key, "fields": {
         "category": "N6", "zone": "yard", "description": "Two people walk along the wall to the car."}})
     assert r.status_code == 200, r.text
@@ -103,6 +105,8 @@ def test_save_is_append_only_and_validated(client, staff_factory, studio):
     client.post("/v1/tagging/tag", headers=h, json={"key": key, "fields": {"needs_check": True}})
     clip = client.get("/v1/tagging/clip", params={"key": key}, headers=h).json()
     assert clip["prefilled_from"] == "studio" and clip["form"]["zone"] == "yard" and clip["form"]["needs_check"]
+    old = client.get("/v1/tagging/clip", params={"key": "ds:front_side_1771696897_trigger"}, headers=h).json()
+    assert old["prefilled_from"] == "old" and old["form"]["category"] == "" and old["form"]["raw_label"] == "suspicious"
     assert len(clip["history"]) == 2 and clip["assessment"]["tier_name"] == "check"
     with session_scope(client.app.state.engine) as s:
         rows = s.scalars(select(m.TagEvent).order_by(m.TagEvent.id)).all()
