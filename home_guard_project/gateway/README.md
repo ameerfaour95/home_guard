@@ -36,6 +36,11 @@ box ──(box token, model "eye")──▶ gateway ──(our key, gpt-4o)─�
   (admin token). No streaming (the box does not stream) and no audio (the box does not
   transcribe). Every error the gateway sends has `x-should-retry: false`, so the box's
   OpenAI SDK does not repeat a call the gateway already retried.
+- **Who answered.** A successful answer's `model` field is the upstream that answered
+  (`gpt-4o-2024-08-06`, `openrouter:qwen/qwen3-vl-8b-instruct`; the `providers.model_key`
+  form), never the alias, and `x-homeguard-upstream` names the configured provider:model.
+  The box keeps it as `GptBackend.last_model`, which goes into the training record's
+  `teacher.model` in `.meta.json`.
 
 Two dependencies, both already in the repo's venv: `httpx`, `pyyaml`. The server is the
 standard library's threaded `http.server`: thousands of homes at about one call per ten
@@ -128,8 +133,6 @@ two. A token is printed once.
 
 - Anthropic (`ANTHROPIC_API_KEY`) and Gemini models in the box's brain call those providers
   directly; they are not OpenAI-shaped and do not go through the gateway.
-- The box records `eye` as the teacher model in its training metadata; the model that
-  actually answered is in the response's `model` field and the gateway's `calls` table.
 - Caps are per UTC day (they reset at 02:00 or 03:00 Israel time).
 - Every model name a box asks for needs an alias: add one for `agent_model` and any other
   model set in `box.yaml` before switching that box, or those calls get 400 `model_not_found`.

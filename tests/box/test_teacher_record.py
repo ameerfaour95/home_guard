@@ -65,6 +65,15 @@ class TeacherRecordTest(unittest.TestCase):
         self.assertEqual(json.loads(job.teacher["raw"]), ANSWER)
         self.assertEqual(job.teacher["parsed"], ANSWER)
 
+    def test_the_record_names_the_model_that_answered_not_the_alias(self) -> None:
+        backend = _TeachingBackend()
+        backend.model_name, backend.last_model = "eye", "gpt-4o-2024-08-06"   # asked the gateway for "eye"
+        job = inf.AlertJob(camera="door", stem="door_100_alert", ts=NOW, labels=["person"])
+        with mock.patch.object(inf, "dispatch_alert", return_value={"telegram": {"telegram": {"sent": True}}}):
+            inf._worker(backend, {"alert_channel": "telegram"}, {}, AlertSettings(), "door",
+                        [np.zeros((48, 64, 3), dtype=np.uint8)], None, job)
+        self.assertEqual(job.teacher["model"], "gpt-4o-2024-08-06")
+
     def test_the_record_travels_with_the_clip(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             frames = [(NOW + i * 0.2, encode_frame(np.zeros((48, 64, 3), dtype=np.uint8))) for i in range(5)]

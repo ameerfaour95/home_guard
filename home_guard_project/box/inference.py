@@ -548,6 +548,7 @@ class GptBackend:
         self._client = OpenAI(**kwargs)
         self._model = model
         self.model_name = model
+        self.last_model = model         # who answered the last call (the gateway names its upstream)
         self._extra_body = dict(extra_body) if extra_body else None
         self.last_usage = {"prompt_tokens": 0, "completion_tokens": 0}
         self.last_prompt = ""           # what the last call asked, kept for the training record
@@ -580,6 +581,8 @@ class GptBackend:
                 raise
         raw = resp.choices[0].message.content or ""
         self.last_usage = usage_of(resp)
+        answered = getattr(resp, "model", None)
+        self.last_model = answered.strip() if isinstance(answered, str) and answered.strip() else self._model
         return raw, parse_vlm_json(raw)
 
     def _complete(self, content: List[Dict[str, Any]], response_format: Dict[str, Any]) -> Any:
@@ -610,6 +613,10 @@ class FallbackBackend:
     @property
     def last_frame_jpegs(self) -> List[bytes]:
         return list(getattr(self._last, "last_frame_jpegs", None) or [])
+
+    @property
+    def last_model(self) -> str:
+        return str(getattr(self._last, "last_model", "") or self.model_name)
 
     @property
     def last_usage(self) -> Dict[str, int]:
@@ -1427,7 +1434,7 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
             # Everything a student model needs to learn this answer: the exact pictures,
             # the question, and the answer word for word.
             job.teacher = {
-                "model": getattr(backend, "model_name", settings.vlm_model),
+                "model": getattr(backend, "last_model", "") or getattr(backend, "model_name", settings.vlm_model),
                 "prompt_version": PROMPT_VERSION,
                 "prompt": getattr(backend, "last_prompt", ""),
                 "frames": (list(backend.last_frame_jpegs) if isinstance(backend, (GptBackend, FallbackBackend))

@@ -158,6 +158,16 @@ class RoutingTest(unittest.TestCase):
         self.assertEqual(sent["response_format"], {"type": "json_object"})     # the rest passes through
         self.assertEqual(headers["x-homeguard-upstream"], "openai:gpt-4o")
 
+    def test_the_answer_names_the_model_that_answered(self) -> None:
+        status, body, headers = post(self.gw, self.token, chat_payload())
+        self.assertEqual(body["model"], "gpt-4o-2024-08-06")              # OpenAI's own name, bare
+        self.assertEqual(headers["x-homeguard-upstream"], "openai:gpt-4o")
+        self.fake.script = {"api.openai.com": [(500, {})],
+                            "openrouter.ai": [(200, {k: v for k, v in completion().items() if k != "model"})]}
+        status, body, headers = post(self.gw, self.token, chat_payload())
+        self.assertEqual(body["model"], "openrouter:qwen/qwen3-vl-8b-instruct")   # none given: the configured one
+        self.assertEqual(body["choices"][0]["message"]["content"], '{"summary": "a person at the door"}')
+
     def test_the_providers_extras_are_added(self) -> None:
         self.fake.script = {"api.openai.com": [(500, {"error": {"message": "down"}})]}
         post(self.gw, self.token, chat_payload())
@@ -516,6 +526,13 @@ class EndToEndTest(unittest.TestCase):
         self.assertEqual(sent["response_format"]["type"], "json_schema")
         self.assertTrue(sent["messages"][0]["content"][1]["image_url"]["url"].startswith("data:image/jpeg;base64,"))
         self.assertAlmostEqual(self.gw.store.spent("house1"), providers.cost_usd("gpt-4o", 1000, 100))
+
+    def test_the_box_records_the_answering_model(self) -> None:
+        self.fake.script = {"api.openai.com": [(503, {})],
+                            "openrouter.ai": [(200, completion(model="qwen/qwen3-vl-8b-instruct"))]}
+        backend = self.backend()
+        backend.analyze(self.frames(), "front_door", 0, 0, 0)
+        self.assertEqual((backend.model_name, backend.last_model), ("eye", "openrouter:qwen/qwen3-vl-8b-instruct"))
 
     def test_over_the_cap_the_box_gets_one_clear_error_and_no_retries(self) -> None:
         import openai

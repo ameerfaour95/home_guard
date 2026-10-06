@@ -81,6 +81,19 @@ class GptBackendOptionsTest(unittest.TestCase):
                          {"reasoning": {"enabled": False}})
         self.assertEqual(b.last_usage, {"prompt_tokens": 2100, "completion_tokens": 75})
 
+    def test_the_answering_model_is_recorded(self) -> None:
+        with patched_client():
+            b = GptBackend("hgb_t", "eye", base_url="https://gw.example.com/v1")
+        b._client = mock.Mock()
+        answer = response(json.dumps(ANSWER))
+        answer.model = "openrouter:qwen/qwen3-vl-8b-instruct"     # the gateway names its upstream
+        b._client.chat.completions.create.return_value = answer
+        b.analyze([], "cam", 0, 0, 0)
+        self.assertEqual((b.last_model, b.model_name), ("openrouter:qwen/qwen3-vl-8b-instruct", "eye"))
+        b._client.chat.completions.create.return_value = response(json.dumps(ANSWER))   # no model in the answer
+        b.analyze([], "cam", 0, 0, 0)
+        self.assertEqual(b.last_model, "eye")
+
     def test_backend_built_without_init_still_works(self) -> None:
         """Older tests build GptBackend with __new__ and none of the new attributes."""
         b = GptBackend.__new__(GptBackend)
@@ -108,6 +121,16 @@ class FallbackBackendTest(unittest.TestCase):
         self.assertEqual(parsed["summary"], "f")
         self.assertEqual((fb.model_name, fb.last_frame_jpegs), ("qwen3.5", [b"qwen3.5"]))
         self.assertIn("VLM fallback", logs.output[0])
+
+    def test_last_model_is_the_answering_backends(self) -> None:
+        p, f = Stub("qwen3-vl", error=TimeoutError("slow")), Stub("qwen3.5", answer=("{}", {"summary": "f"}))
+        f.last_model = "Qwen/Qwen3.5-4B-0925"
+        fb = FallbackBackend(p, f)
+        fb.analyze([], "cam", 0, 0, 0)
+        self.assertEqual(fb.last_model, "Qwen/Qwen3.5-4B-0925")
+        fb = FallbackBackend(Stub("qwen3-vl", answer=("{}", dict(ANSWER))), f)
+        fb.analyze([], "cam", 0, 0, 0)
+        self.assertEqual(fb.last_model, "qwen3-vl")                 # a backend without one: its configured name
 
     def test_primary_junk_answer_goes_to_fallback(self) -> None:
         p, f = Stub("qwen3-vl", answer=("not json", None)), Stub("qwen3.5", answer=("{}", {"summary": "f"}))

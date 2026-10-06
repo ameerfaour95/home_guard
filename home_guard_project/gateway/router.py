@@ -132,7 +132,10 @@ def forward(alias: Alias, payload: Dict[str, Any], client: httpx.Client, env: Ma
                         p_in, p_out = _usage(parsed)
                         cost = upstream.cost_usd(p_in, p_out)
                         attempts.append(Attempt(upstream, 200, ms, p_in, p_out, cost))
-                        return Outcome(200, resp.content, attempts, upstream, cost)
+                        # The box records who answered (training metadata), never the alias it asked for.
+                        real = str(parsed.get("model") or "").strip() or upstream.model
+                        parsed["model"] = providers.model_key(upstream.provider, real)
+                        return Outcome(200, json.dumps(parsed).encode("utf-8"), attempts, upstream, cost)
                 else:
                     attempts.append(Attempt(upstream, status, ms, error=scrub(_message(resp))))
                     if status not in RETRYABLE and status not in NEXT_UPSTREAM:
