@@ -468,6 +468,7 @@ class CameraState:
     trigger_ts: float
     main_connect_ts: float
     roi_norm: Optional[List[Tuple[float, float]]]
+    roi_black: Optional[List[List[Tuple[float, float]]]] = None   # scene-map black areas, blacked out too
     last_score_log: float = 0.0
 
 
@@ -713,7 +714,7 @@ def main() -> None:
     now = time.time()
     for name, rtsp_sub in cfg.CAMERAS.items():
         rtsp_main = cfg.CAMERAS_MAIN.get(name, "")
-        cap = SubStreamThread(cfg, rtsp_sub, mask=mask_for(cfg.ROI_ZONES, name), name=name)
+        cap = SubStreamThread(cfg, rtsp_sub, mask=mask_for(cfg.ROI_ZONES, name, cfg.ROI_BLACK), name=name)
         norm_pts = cfg.ROI_ZONES.get(name)
         if norm_pts:
             log.info("%s: watch zone active (%d corners); everything outside is blacked out", name, len(norm_pts))
@@ -730,6 +731,7 @@ def main() -> None:
             yolo_class_counts={}, yolo_class_max_conf={},
             is_recording=False, trigger_ts=0.0, main_connect_ts=0.0,
             roi_norm=list(norm_pts) if norm_pts else None,
+            roi_black=cfg.ROI_BLACK.get(name) or None,
         )
 
     ready = 0
@@ -838,7 +840,7 @@ def main() -> None:
                     and st.trigger_detected
                     and st.detection_score > 0
                 ):
-                    st.main_cap = MainStreamThread(cfg, st.rtsp_main, mask=ZoneMask(st.roi_norm), name=st.name)
+                    st.main_cap = MainStreamThread(cfg, st.rtsp_main, mask=ZoneMask(st.roi_norm, st.roi_black), name=st.name)
                     st.main_connect_ts = now
                     log.info("[%s] Pre-connecting main-stream (score=%.1f)",
                              st.name, st.detection_score)
@@ -864,7 +866,7 @@ def main() -> None:
                     st.trigger_ts = 0.0
                     if cfg.MAIN_STREAM_ENABLED and st.rtsp_main:
                         if st.main_cap is None:
-                            st.main_cap = MainStreamThread(cfg, st.rtsp_main, mask=ZoneMask(st.roi_norm), name=st.name)
+                            st.main_cap = MainStreamThread(cfg, st.rtsp_main, mask=ZoneMask(st.roi_norm, st.roi_black), name=st.name)
                             st.main_connect_ts = now
                         if st.main_cap.frame_shape is not None:
                             st.trigger_ts = now

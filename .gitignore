@@ -45,6 +45,7 @@ label_studio_config.xml
 # Camera credentials (RTSP URLs) and deployment-specific zones
 cameras.yaml
 zones.yaml
+scene_maps.yaml
 camera_alerts.yaml
 
 # Per-deployment config loaders (kept local per machine)
@@ -70,6 +71,7 @@ dist/
 
 # Inference-mode clips waiting for S3 (box)
 production_multi/
+scene_interview/
 production_archive/
 
 # OpenVINO copies of the YOLO models, made on the box at start

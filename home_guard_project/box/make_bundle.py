@@ -48,7 +48,7 @@ INCLUDE_FILES = (
 )
 
 # Per-machine or secret files that must never be bundled.
-EXCLUDE_NAMES = frozenset({"cameras.yaml", "zones.yaml", "camera_alerts.yaml", "camera_aliases.yaml", "box.yaml",
+EXCLUDE_NAMES = frozenset({"cameras.yaml", "zones.yaml", "scene_maps.yaml", "camera_alerts.yaml", "camera_aliases.yaml", "box.yaml",
                            "network.json", "api_key.env", "registration.json"})
 EXCLUDE_SUFFIXES = (".pyc", ".pt", ".log", ".zip")
 

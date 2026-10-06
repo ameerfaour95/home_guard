@@ -53,6 +53,30 @@ class MediaTest(unittest.TestCase):
         self.assertEqual((out["start"], out["end"]), (1000.0, 1002.0))
         self.assertGreater(len(clip_frames(out["path"], count=3)), 0)
 
+    def test_record_live_blacks_out_scene_map_black_areas(self) -> None:
+        from home_guard_project.data_collection import zones
+
+        zones.write_scene_maps({"gate": {"areas": [
+            {"name": "w", "kind": "black", "points": [[0.5, 0], [1, 0], [1, 1], [0.5, 1]]}]}},
+            zones.scene_maps_path_for(self.zones))
+        out = record_live("gate", 2, self.dir, self.cameras, zones_path=self.zones, now=lambda: 1000.0,
+                          open_capture=lambda url: FakeCapture(100), clock=Clock(), h264=False)
+        self.assertTrue(out["ok"], out)
+        import cv2
+
+        frame = cv2.imdecode(np.frombuffer(clip_frames(out["path"], count=1)[0], np.uint8), cv2.IMREAD_COLOR)
+        self.assertLess(int(frame[:, 36:].max()), 30)
+        self.assertGreater(int(frame[:, :28].min()), 90)
+
+    def test_record_live_refuses_an_unreadable_scene_map(self) -> None:
+        from home_guard_project.data_collection import zones
+
+        with open(zones.scene_maps_path_for(self.zones), "w", encoding="utf-8") as f:
+            f.write("scene_maps: [unclosed")
+        out = record_live("gate", 2, self.dir, self.cameras, zones_path=self.zones,
+                          open_capture=lambda url: FakeCapture(100), clock=Clock(), h264=False)
+        self.assertEqual(out["error"], "error")
+
     def test_record_live_errors(self) -> None:
         self.assertEqual(record_live("nope", 2, self.dir, self.cameras, zones_path=self.zones)["error"],
                          "camera_unknown")

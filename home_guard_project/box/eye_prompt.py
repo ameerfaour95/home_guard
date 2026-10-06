@@ -8,7 +8,9 @@ Modules, in prompt order:
 
 1. Base: role, honesty ("appears to"; never names, age or ethnicity; appearance alone is never a category),
    English only (the owner's Hebrew comes from the messenger), and the taxonomy (``taxonomy.prompt_list``).
-2. The situation header (``Situation.header()``), identical at training and inference.
+2. The situation header (``Situation.header()``), identical at training and inference, and right under it the
+   scene map's ZONE FACTS line when the camera has a map (``zone_facts_block``; never inside the header, and
+   kept in the training record's ``situation.scene`` so training prompts carry the same line).
 3. The expectations block: plain sentences built from the priors table, only what differs from a plain day.
 4. The attention list: what to look for now (night: flashlights, hands on handles and windows, crouching,
    carrying things out; day: the act, not the clothes).
@@ -132,6 +134,18 @@ _NOT_EXPECTED_TEXT = {
 def _names(ids: Sequence[str], special: Optional[Dict[str, str]] = None) -> str:
     parts = [(special or {}).get(cid) or f"{tx.BY_ID[cid].name} ({cid})" for cid in ids]
     return parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
+
+
+ZONE_FACTS_RULE = ("Where things happen is measured by the box on the owner's map; trust these facts over the "
+                   "picture. Ground that is the neighbour's or public is not the owner's: people living their life "
+                   "there are expected. Still judge what they do.")
+
+
+def zone_facts_block(situation: Situation) -> str:
+    """The ZONE FACTS line and how to use it; "" when the camera's map has nothing to say."""
+    if not situation.zone_facts:
+        return ""
+    return situation.zone_facts + "\n" + ZONE_FACTS_RULE
 
 
 def expectations_block(situation: Situation) -> str:
@@ -295,7 +309,8 @@ def build_prompt(situation: Situation, facts: Sequence[Dict[str, Any]] = (), que
     """The Eye's prompt for *situation* (its intent picks the module and schema)."""
     intent = situation.intent
     schema(intent)                      # unknown intents fail here
-    parts = [_base(situation), situation.header()]
+    zone_facts = zone_facts_block(situation)
+    parts = [_base(situation), situation.header() + ("\n" + zone_facts if zone_facts else "")]
     if intent != "snapshot":
         parts += [expectations_block(situation), attention_block(situation)]
     if intent == "alert_triage":
@@ -341,6 +356,8 @@ def _situation_why(category: str, judgement: tx.Judgement, situation: Situation)
     when = _WHEN[tx.column(situation.phase, situation.house_state)]
     if situation.house_state == "home_asleep" and when != _WHEN[tx.AWAY]:
         when = "while the family sleeps"
+    if situation.crossed_in and when != _WHEN[tx.DAY] and judgement.expectation == tx.UNUSUAL:
+        return f"crossed onto the owner's ground {when}"
     if judgement.expectation == tx.UNUSUAL:
         return f"{what} is not expected {when}"
     if judgement.expectation in (tx.SERIOUS, tx.ESCALATION):

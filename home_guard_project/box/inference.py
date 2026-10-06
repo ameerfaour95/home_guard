@@ -1265,6 +1265,8 @@ class AlertJob:
     crop_settings: Any = None
     crop_fps: Optional[float] = None
     input_meta: Dict[str, Any] = field(default_factory=dict)
+    # (ts, detections) of the crop's own YOLO looks, normalised: the scene map's tracks (scene_map.py).
+    scene_looks: List[Any] = field(default_factory=list)
 
 
 def _camera_streams(cfg: Any) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -1274,10 +1276,11 @@ def _camera_streams(cfg: Any) -> Tuple[Dict[str, Any], Dict[str, Any]]:
 
     streams, main_caps = {}, {}
     for name, url in cfg.CAMERAS.items():
-        sub = SubStreamThread(cfg, url, mask=mask_for(cfg.ROI_ZONES, name), name=name)
+        black = getattr(cfg, "ROI_BLACK", None)
+        sub = SubStreamThread(cfg, url, mask=mask_for(cfg.ROI_ZONES, name, black), name=name)
         streams[name] = _Stream(name, url, sub_cap=sub)
         main_url = cfg.CAMERAS_MAIN.get(name)
-        main_caps[name] = (MainStreamThread(cfg, main_url, mask=mask_for(cfg.ROI_ZONES, name), name=name)
+        main_caps[name] = (MainStreamThread(cfg, main_url, mask=mask_for(cfg.ROI_ZONES, name, black), name=name)
                            if cfg.MAIN_STREAM_ENABLED and main_url else None)
     return streams, main_caps
 
@@ -1322,9 +1325,13 @@ def _prepare_alert(job: AlertJob, cfg: Any, detector: Any, sub_cap: Any, main_ca
             reason = "too_few_main_frames"
         else:
             try:
+                times = {id(frame): ts for ts, frame in clip}
+
                 # The crop supplies conf/imgsz from cfg; only device comes from inference.
                 def crop_detector(frame, **kwargs):
-                    return detector(frame, **kwargs, **predict_args)
+                    results = detector(frame, **kwargs, **predict_args)
+                    _scene_look(job, times.get(id(frame)), frame, results)
+                    return results
 
                 job.crop = vlm_crop.crop_clip(crop_detector, job.crop_settings, sub_frames, start, end,
                                                main[0], main[1], name=job.camera)
@@ -1342,6 +1349,19 @@ def _prepare_alert(job: AlertJob, cfg: Any, detector: Any, sub_cap: Any, main_ca
         log.warning("[%s] VLM whole_frame_fallback: %s", job.camera, reason)
         frames = vlm_crop.sample_for_vlm(sub_frames, fps=sub_fps, sample_fps=cfg.VLM_SAMPLE_FPS)
     return frames, clip
+
+
+def _scene_look(job: AlertJob, ts: Optional[float], frame: Any, results: Any) -> None:
+    """Keep one of the crop's YOLO looks for the scene map's tracks. Never raises: the crop comes first."""
+    if ts is None:
+        return
+    try:
+        from .scene_map import detections_from_result  # noqa: PLC0415
+
+        h, w = frame.shape[:2]
+        job.scene_looks.append((ts, detections_from_result(results[0] if results else None, w, h)))
+    except Exception as exc:  # noqa: BLE001
+        log.debug("[%s] look not kept for the scene map: %s", job.camera, exc)
 
 
 def _start_due_alerts(pending: List[AlertJob], now: float, cfg: Any, detector: Any,
@@ -1417,9 +1437,26 @@ def _takes_situation(backend: Any) -> bool:
     return any(p.name == "situation" or p.kind is inspect.Parameter.VAR_KEYWORD for p in params)
 
 
+def _scene(camera: str, looks: Any) -> Tuple[Any, Any]:
+    """The camera's scene map and what it says about this alert's tracks: ``(map, facts)``, or ``(None, None)``
+    without a map beyond today's drawn zone, or on any failure (the alert goes on as without a map)."""
+    try:
+        from . import scene_map  # noqa: PLC0415
+
+        scene = scene_map.load_scene_map(camera)
+        if not scene.informative:
+            return None, None
+        return scene, scene_map.scene_facts(scene, scene_map.tracks_from_detections(looks or []))
+    except Exception as exc:  # noqa: BLE001 - the map only adds facts; it must never stop an alert
+        log.warning("[%s] scene map not used: %s", camera, exc)
+        return None, None
+
+
 def _eye_situation(settings: AlertSettings, box_settings: Dict[str, Any], camera: str, alert_ts: float,
-                   facts: Sequence[Dict[str, Any]], labels: Sequence[str], backend: Any = None) -> Any:
-    """The look's situation with ``eye_prompt: situational`` (else None). A failure falls back to the legacy prompt."""
+                   facts: Sequence[Dict[str, Any]], labels: Sequence[str], backend: Any = None,
+                   looks: Any = None) -> Any:
+    """The look's situation with ``eye_prompt: situational`` (else None). A failure falls back to the legacy prompt.
+    *looks* are the alert's YOLO looks for the scene map (``AlertJob.scene_looks``)."""
     if settings.eye_prompt != "situational":
         return None
     if backend is not None and not _takes_situation(backend):
@@ -1429,8 +1466,10 @@ def _eye_situation(settings: AlertSettings, box_settings: Dict[str, Any], camera
         from .situation import build_situation  # noqa: PLC0415
 
         kinds = detected_fact_kinds(labels)
+        scene, scene_facts = _scene(camera, looks)
         return build_situation(camera, alert_ts, "alert_triage", settings=box_settings,
-                               facts=[f for f in facts if f.get("kind") in kinds])
+                               facts=[f for f in facts if f.get("kind") in kinds], scene_map=scene,
+                               scene_facts=scene_facts)
     except Exception as exc:  # noqa: BLE001 - the alert goes on with today's prompt
         log.warning("[%s] no situation for the Eye (%s); using the legacy prompt", camera, exc)
         return None
@@ -1542,7 +1581,8 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
         facts = facts_for_alert(camera_name, alert_ts)
         # Keep legacy/evaluation backends callable when no facts are available.
         context = {"facts": facts, "alert_ts": alert_ts} if facts else {}
-        situation = _eye_situation(settings, box_settings, camera_name, alert_ts, facts, labels, backend)
+        situation = _eye_situation(settings, box_settings, camera_name, alert_ts, facts, labels, backend,
+                                   looks=getattr(job, "scene_looks", None))
         if situation is not None:
             context["situation"] = situation
         try:

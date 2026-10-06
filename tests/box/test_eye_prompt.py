@@ -257,5 +257,74 @@ class PostprocessTest(unittest.TestCase):
         self.assertEqual(out["situation"]["intent"], "snapshot")
 
 
+
+def scene_sit(ts, ground, crossed_in=False, zone="street", camera="front"):
+    from home_guard_project.box import scene_map as sm
+
+    scene = sm.SceneMap(camera, areas=(sm.Area("yard", sm.MINE, "yard", ((0, 0), (0.5, 0), (0.5, 1), (0, 1))),
+                                       sm.Area("road", sm.WATCH, "street", ((0.5, 0), (1, 0), (1, 1), (0.5, 1)))))
+    facts = sm.SceneFacts(line=f"ZONE FACTS (from code): person 1 is in 'road' ({ground})", ground=ground,
+                          crossed_in=crossed_in, zone=zone)
+    return st.build_situation(camera, ts, "alert_triage", house=hs.scheduled(ts), scene_map=scene,
+                              scene_facts=facts)
+
+
+class ZoneFactsPromptTest(unittest.TestCase):
+    """Code decides where (the ZONE FACTS line next to the header), the Eye decides what."""
+
+    def test_the_line_follows_the_header_and_is_not_inside_it(self) -> None:
+        s = scene_sit(NIGHT_TS, "public")
+        prompt = eye.build_prompt(s)
+        header = s.header()
+        self.assertNotIn("ZONE FACTS", header)
+        self.assertIn(header + "\n" + s.zone_facts + "\n", prompt)
+        self.assertIn("trust these facts over the picture", prompt)
+
+    def test_no_map_no_line_and_the_prompt_is_unchanged(self) -> None:
+        self.assertNotIn("ZONE FACTS", eye.build_prompt(sit(NIGHT_TS)))
+        self.assertEqual(eye.build_prompt(sit(NIGHT_TS, camera="front")),
+                         eye.build_prompt(st.build_situation("front", NIGHT_TS, house=hs.scheduled(NIGHT_TS))))
+
+    def test_every_intent_gets_the_line(self) -> None:
+        for intent in tx.INTENTS:
+            s = scene_sit(NIGHT_TS, "public")
+            s = st.Situation(**{**s.__dict__, "intent": intent})
+            self.assertIn("ZONE FACTS", eye.build_prompt(s, question="who?", questions=["is it a man?"]))
+
+
+class ZoneFactsJudgementTest(unittest.TestCase):
+    def test_a_visitor_on_public_ground_at_night_is_expected(self) -> None:
+        out = eye.postprocess(answer(zone="entrance"), scene_sit(NIGHT_TS, "public"))
+        self.assertEqual(out["label"], "normal")
+        self.assertEqual(out["judgement"]["expectation"], "expected")
+        self.assertEqual(out["observation"]["zone"], "entrance")          # the Eye's own words stay its own
+        self.assertEqual(out["situation"]["scene"]["ground"], "public")
+
+    def test_the_same_visitor_on_the_owners_ground_is_suspicious(self) -> None:
+        out = eye.postprocess(answer(), scene_sit(NIGHT_TS, "mine", zone="yard"))
+        self.assertEqual(out["label"], "suspicious")
+
+    def test_a_suspicious_sign_on_the_neighbours_ground_keeps_its_meaning(self) -> None:
+        out = eye.postprocess(answer(category="S2", raw_label="suspicious", label="suspicious", zone="car"),
+                              scene_sit(NIGHT_TS, "neighbour", zone="parking"))
+        self.assertEqual(out["label"], "suspicious")
+        self.assertTrue(out["serious_behaviour"])
+        out = eye.postprocess(answer(category="E4", raw_label="escalation", label="escalation"),
+                              scene_sit(NIGHT_TS, "neighbour", zone="parking"))
+        self.assertEqual(out["label"], "escalation")
+
+    def test_crossing_onto_the_owners_ground_at_night_is_said_in_why(self) -> None:
+        out = eye.postprocess(answer(category="N1", movement="passing"),
+                              scene_sit(NIGHT_TS, "mine", crossed_in=True, zone="yard"))
+        self.assertEqual(out["label"], "suspicious")
+        self.assertTrue(out["judgement"]["open_case"])
+        self.assertIn("crossed onto the owner's ground", out["why"])
+
+    def test_the_records_keep_the_line_for_training(self) -> None:
+        s = scene_sit(NIGHT_TS, "public")
+        rec = eye.records(eye.postprocess(answer(), s), s)
+        self.assertEqual(rec["situation"]["scene"]["zone_facts"], s.zone_facts)
+
+
 if __name__ == "__main__":
     unittest.main()

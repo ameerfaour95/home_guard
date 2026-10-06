@@ -10,6 +10,11 @@ means by day, at night or while the family sleeps, and while nobody is home. Wha
 depend on the hour; what it *means* does. ``contextual_label`` turns the Eye's context-free observation
 into the label the box acts on. It never lowers an escalation and never goes below the Eye's own raw label.
 
+The "whose ground" column comes from the scene map (``scene_map.py``; code, never the Eye): ordinary life on
+ground that is not the owner's (a neighbour's, public) is expected at any hour, a suspicious or serious sign
+keeps its meaning anywhere, and crossing a boundary line onto the owner's ground at night or while nobody is
+home makes an ordinary category unusual and opens a case. An unknown ground (no map) is the table as before.
+
 Pure code, no model, no I/O.
 """
 from __future__ import annotations
@@ -87,6 +92,7 @@ PHASES = ("day", "evening", "late_night", "dawn")
 HOUSE_STATES = ("home_awake", "home_asleep", "away")
 INTENTS = ("alert_triage", "snapshot", "event_question", "follow_up")
 CAMERA_ROLES = ("street", "entrance", "private", "parking")
+GROUNDS = ("mine", "neighbour", "public")         # whose ground, from the scene map; "" = unknown
 
 # Observation vocabulary (what the Eye fills in, context-free).
 ZONES = ("street", "entrance", "window", "gate", "fence", "yard", "parking", "car", "roof", "other")
@@ -145,6 +151,8 @@ class Context:
     movement: str = ""
     zone: str = ""
     flags: Tuple[str, ...] = ()
+    ground: str = ""             # whose ground it happens on (GROUNDS), from the scene map; "" = unknown
+    crossed_in: bool = False     # someone crossed a boundary line onto the owner's ground (scene map)
 
 
 def expectation(category_id: str, ctx: Context) -> str:
@@ -161,7 +169,19 @@ def expectation(category_id: str, ctx: Context) -> str:
         if cat.id in _SERIOUS_ANYTIME or col != DAY:
             return SERIOUS
         return UNUSUAL
-    cid = cat.id
+    base = _normal(cat.id, ctx, col, covered)
+    if ctx.crossed_in and col != DAY:
+        # Onto the owner's ground at night or while away: only the owner coming home, animals and nothing stay usual.
+        if cat.id in ("N8", "N10") or (cat.id == "N2" and "key_or_door_opened_from_inside" in ctx.flags):
+            return base
+        return UNUSUAL
+    if ctx.ground in ("neighbour", "public"):
+        return EXPECTED            # ordinary life on someone else's ground, at any hour
+    return base
+
+
+def _normal(cid: str, ctx: Context, col: str, covered: bool) -> str:
+    """The table's ordinary (N) rows."""
     if cid in ("N1", "N8", "N10"):
         return EXPECTED
     if cid == "N2":
@@ -242,6 +262,8 @@ def contextual_label(category_id: str, raw_label: str, ctx: Context, visibility:
         reasons.append(f"{cid} is {exp}")
     if visibility == "partial" and exp in (SERIOUS, ESCALATION):
         reasons.append("partial visibility on a serious category")
+    if ctx.crossed_in and column(ctx.phase, ctx.house_state) != DAY:
+        reasons.append(f"crossed onto the owner's ground {column(ctx.phase, ctx.house_state)}")
     candidate = exp == SERIOUS and column(ctx.phase, ctx.house_state) != DAY
     label = _higher(derived, raw)
     return Judgement(label=label, expectation=exp, escalation_candidate=candidate,
@@ -290,7 +312,7 @@ def as_table() -> Dict[str, Any]:
             "he": "אחר"}],
         "zones": list(ZONES), "movements": list(MOVEMENTS), "flags": list(FLAGS),
         "visibility": list(VISIBILITY), "phases": list(PHASES), "house_states": list(HOUSE_STATES),
-        "camera_roles": list(CAMERA_ROLES), "intents": list(INTENTS),
+        "camera_roles": list(CAMERA_ROLES), "intents": list(INTENTS), "grounds": list(GROUNDS),
     }
 
 

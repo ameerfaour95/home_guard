@@ -5,6 +5,10 @@ One optional polygon per camera, in normalised 0-1 coordinates, kept in
 pixel outside the polygon; it is applied once, where a frame enters the
 system, so the detector, the VLM, the clips, the snapshots and the previews
 all see the same masked picture. A camera without a zone is watched whole.
+
+The scene map (``scene_maps.yaml``, same folder; the model is ``box/scene_map.py``) may add ``black``
+areas inside the picture (a neighbour's window): they are blacked out the same way, by the same mask.
+This module owns that file's raw storage so a camera rename carries both files together.
 """
 
 from __future__ import annotations
@@ -23,6 +27,9 @@ Point = Tuple[float, float]
 
 _DIR = os.path.dirname(os.path.abspath(__file__))
 ZONES_PATH = os.path.join(_DIR, "zones.yaml")
+SCENE_MAPS_FILE = "scene_maps.yaml"
+SCENE_MAPS_PATH = os.path.join(_DIR, SCENE_MAPS_FILE)
+BLACK = "black"            # the scene-map area kind that is blacked out like the outside of a zone
 
 MIN_POINTS = 3
 MAX_POINTS = 32
@@ -32,6 +39,13 @@ _HEADER = (
     "# ──────────────────────────────────────────────────────────────────────────────\n"
     "#  Watch zones — normalised polygon corners per camera; everything outside is\n"
     "#  blacked out. Cameras without an entry are watched whole.\n"
+    "#  DO NOT COMMIT (deployment-specific)\n"
+    "# ──────────────────────────────────────────────────────────────────────────────\n\n"
+)
+_SCENE_HEADER = (
+    "# ──────────────────────────────────────────────────────────────────────────────\n"
+    "#  Scene maps — per camera: named areas (mine / watch_no_alert / black) and\n"
+    "#  boundary lines with a direction. Black areas are blacked out. See box/scene_map.py.\n"
     "#  DO NOT COMMIT (deployment-specific)\n"
     "# ──────────────────────────────────────────────────────────────────────────────\n\n"
 )
@@ -199,54 +213,164 @@ def remap_zones(renames: Dict[str, str], path: str = ZONES_PATH,
     entries = _read_raw(path)
     final = remapped_zones(entries, renames)
     changed = final != entries
+    # The scene maps (black areas among them) follow their cameras the same way.
+    scene_path = scene_maps_path_for(path)
+    scenes = read_scene_maps(scene_path)
+    scenes_final = remapped_zones(scenes, renames)
+    scenes_changed = scenes_final != scenes
     if between is not None:
         if changed:
             save_zones({**entries, **final}, path)
+        if scenes_changed:
+            write_scene_maps({**scenes, **scenes_final}, scene_path)
         try:
             between()
         except BaseException:
             if changed:
                 save_zones(entries, path)   # the renamed file was not written: put the old zones back
+            if scenes_changed:
+                write_scene_maps(scenes, scene_path)
             raise
     if changed:
         save_zones(final, path)
+    if scenes_changed:
+        write_scene_maps(scenes_final, scene_path)
+
+
+# ----------------------------------------------------------------------------
+# The scene-map file (raw storage; the model and its rules are box/scene_map.py)
+# ----------------------------------------------------------------------------
+def scene_maps_path_for(zones_path: str) -> str:
+    """The scene-map file that sits next to *zones_path*."""
+    return os.path.join(os.path.dirname(os.path.abspath(zones_path)), SCENE_MAPS_FILE)
+
+
+def read_scene_maps(path: str = SCENE_MAPS_PATH, strict: bool = False) -> Dict[str, Any]:
+    """``{camera: raw entry}``. No file is ``{}``; a damaged file is ``{}`` too, or ValueError when *strict*."""
+    if not os.path.isfile(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        if not isinstance(data, dict):
+            raise ValueError("the scene-map file must contain a mapping")
+        raw = data.get("scene_maps", {}) or {}
+        if not isinstance(raw, dict):
+            raise ValueError("scene_maps must contain a mapping")
+    except Exception as exc:  # noqa: BLE001 - lenient readers see "no scene maps", strict ones fail closed
+        if strict:
+            raise ValueError(f"could not read {path}: {exc}") from None
+        log.warning("Could not read %s (%s); no scene maps", path, exc)
+        return {}
+    return {str(k): v for k, v in raw.items()}
+
+
+def write_scene_maps(entries: Dict[str, Any], path: str = SCENE_MAPS_PATH) -> None:
+    """Write the whole scene-map file (temp file + replace)."""
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(_SCENE_HEADER)
+            yaml.safe_dump({"scene_maps": dict(entries)}, f, default_flow_style=None, allow_unicode=True,
+                           sort_keys=False)
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+
+
+def black_polygons(entry: Any, strict: bool = False) -> List[List[Point]]:
+    """The ``black`` areas of one raw scene-map entry. A damaged black area is skipped (logged), or ValueError
+    when *strict*: a picture that must hide it is then not made at all."""
+    areas = entry.get("areas") if isinstance(entry, dict) else None
+    if entry is not None and not isinstance(areas, (list, type(None))):
+        if strict:
+            raise ValueError("areas must be a list")
+        return []
+    out: List[List[Point]] = []
+    for area in areas or []:
+        if not isinstance(area, dict) or area.get("kind") != BLACK:
+            continue
+        try:
+            out.append(validate_points(area.get("points")))
+        except ValueError as exc:
+            if strict:
+                raise
+            log.warning("Black area %r ignored: %s", area.get("name"), exc)
+    return out
+
+
+def load_black(path: str = SCENE_MAPS_PATH) -> Dict[str, List[List[Point]]]:
+    """``{camera: [polygon, ...]}``: every camera's black areas; never raises."""
+    out: Dict[str, List[List[Point]]] = {}
+    for camera, entry in read_scene_maps(path).items():
+        polygons = black_polygons(entry)
+        if polygons:
+            out[camera] = polygons
+    return out
+
+
+def strict_black(camera: str, path: str = SCENE_MAPS_PATH) -> Tuple[List[List[Point]], bool]:
+    """``(black polygons, readable)`` for *camera*. A file that exists but cannot be read, or a damaged black
+    area of this camera, is unreadable, so a capture fails closed. No file or no map is ``([], True)``."""
+    try:
+        entry = read_scene_maps(path, strict=True).get(str(camera))
+        return black_polygons(entry, strict=True), True
+    except Exception as exc:  # noqa: BLE001 - every failure fails closed
+        log.warning("Scene-map black areas for %s unreadable: %s", camera, exc)
+        return [], False
 
 
 # ----------------------------------------------------------------------------
 # The mask
 # ----------------------------------------------------------------------------
 class ZoneMask:
-    """Blacks out everything outside a camera's zone. ``ZoneMask(None)`` passes frames through.
+    """Blacks out everything outside a camera's zone, and its scene map's black areas inside it.
+    ``ZoneMask(None)`` passes frames through.
 
     The pixel mask is built once per frame size and cached, so a frame costs
     one ``cv2.bitwise_and``. Not thread-safe: give each reader its own.
     """
 
-    def __init__(self, polygon: Optional[Sequence[Point]]) -> None:
+    def __init__(self, polygon: Optional[Sequence[Point]], black: Optional[Sequence[Sequence[Point]]] = None) -> None:
         self.polygon: Optional[List[Point]] = validate_points(polygon) if polygon else None
+        self.black: List[List[Point]] = [validate_points(p) for p in black or ()]
         self._shape: Optional[Tuple[int, int]] = None
         self._mask: Optional[np.ndarray] = None
 
     @property
     def active(self) -> bool:
-        return self.polygon is not None
+        return self.polygon is not None or bool(self.black)
 
     def apply(self, frame: Any) -> Any:
-        """The frame with everything outside the zone black (a new array), or the frame itself when there is no zone."""
-        if self.polygon is None or frame is None:
+        """The frame with everything outside the zone and inside a black area black (a new array), or the frame
+        itself when there is nothing to hide."""
+        if not self.active or frame is None:
             return frame
         import cv2  # noqa: PLC0415 - keep the import cost off modules that never mask
 
         h, w = frame.shape[:2]
         if self._shape != (h, w) or self._mask is None:
-            mask = np.zeros((h, w), dtype=np.uint8)
-            corners = np.array([[int(round(x * (w - 1))), int(round(y * (h - 1)))] for x, y in self.polygon],
-                               dtype=np.int32)
-            cv2.fillPoly(mask, [corners], 255)
+            def corners(polygon: Sequence[Point]) -> np.ndarray:
+                return np.array([[int(round(x * (w - 1))), int(round(y * (h - 1)))] for x, y in polygon],
+                                dtype=np.int32)
+
+            if self.polygon is None:
+                mask = np.full((h, w), 255, dtype=np.uint8)
+            else:
+                mask = np.zeros((h, w), dtype=np.uint8)
+                cv2.fillPoly(mask, [corners(self.polygon)], 255)
+            if self.black:
+                cv2.fillPoly(mask, [corners(p) for p in self.black], 0)
             self._mask, self._shape = mask, (h, w)
         return cv2.bitwise_and(frame, frame, mask=self._mask)
 
 
-def mask_for(zones: Dict[str, List[Point]], camera: str) -> ZoneMask:
-    """The camera's mask from a loaded zones dict; a camera without a zone gets a pass-through."""
-    return ZoneMask(zones.get(camera))
+def mask_for(zones: Dict[str, List[Point]], camera: str,
+             black: Optional[Dict[str, List[List[Point]]]] = None) -> ZoneMask:
+    """The camera's mask from a loaded zones dict (and ``load_black``); a camera with neither gets a pass-through."""
+    return ZoneMask(zones.get(camera), (black or {}).get(camera))
