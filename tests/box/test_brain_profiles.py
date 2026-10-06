@@ -221,6 +221,27 @@ class HebrewWholeWordRoutingTest(unittest.TestCase):
                      "remember that the pergola is camera 3", "Please remember the shed is cam 4"):
             self.assertTrue(needs_big(text), text)
 
+class HouseRoutingTest(unittest.TestCase):
+    """House state the code does not parse goes to the big model (the fast one never changes state)."""
+
+    def test_house_words_route_to_the_big_model(self) -> None:
+        for text in ("אנחנו נוסעים לחופשה באילת", "ולישון כבר?", "יצאנו לכמה ימים", "קמנו מוקדם היום",
+                     "we're off on vacation for a week", "we're away for the weekend", "expecting the gardener"):
+            with self.subTest(text=text):
+                self.assertTrue(needs_big(text))
+        for text in ("לישוןנו", "מה רואים בחצר"):
+            with self.subTest(text=text):
+                self.assertFalse(needs_big(text))
+
+    def test_house_tools_in_both_modes_and_only_reading_on_the_fast_tier(self) -> None:
+        for mode in ("guard", "assistant"):
+            with self.subTest(mode=mode):
+                big, fast = tool_names(mode), tool_names(mode, "fast")
+                self.assertTrue({"house_state", "house_expect", "house_cancel", "house_status"} <= set(big))
+                self.assertIn("house_status", fast)
+                self.assertFalse({"house_state", "house_expect", "house_cancel"} & set(fast))
+
+
 class AsksAboutNowTest(unittest.TestCase):
     def test_questions_about_right_now(self):
         for text in ("יש אנשים שעובדים ליד הפרגולה?", "יש מישהו בחצר?", "מה קורה עכשיו בכניסה", "מישהו שם?",

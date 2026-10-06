@@ -76,6 +76,10 @@ def _receipt_line(receipt: Receipt, lang: str, retention_days: float) -> str:
         what_key = f"what_{receipt.tool}"
         what = t(what_key, lang) if what_key in TEMPLATES else receipt.tool
         return t("failed", lang, what=what, reason=reason)
+    if receipt.tool.startswith("house_"):         # their own detail: times as numbers (brain/house.py)
+        from .house import receipt_line as house_line  # noqa: PLC0415
+
+        return house_line(receipt, lang)
     # Inspect only fields used by the renderer; extra detail such as `by` is ignored.
     for key in ("camera", "kind", "bounds", "until", "verdict", "alias", "aka"):
         if key in d and not isinstance(d[key], str):

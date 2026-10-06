@@ -799,9 +799,11 @@ class TelegramInbox:
     def _say(self, chat_id: str, text: str, reply_to: Optional[int] = None,
              buttons: Sequence[str] = (), undo_token: str = "", lang: str = "en",
              question_token: str = "", undo_data: str = "", markup: Optional[Dict[str, Any]] = None,
-             entities: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+             entities: Optional[List[Dict[str, Any]]] = None,
+             rows: Sequence[Sequence[Sequence[str]]] = ()) -> Dict[str, Any]:
         """Send *text* (with retries) and return Telegram's answer. *undo_data* is a whole Undo callback
-        code (``tu:...``); *markup* is used when there are no buttons (a ``force_reply``)."""
+        code (``tu:...``); *markup* is used when there are no buttons (a ``force_reply``). *rows* are more button
+        rows of ``(label, callback)`` (the yes / no of a house-state request), after the others."""
         fields = {"chat_id": chat_id, "text": text}
         if reply_to is not None:
             fields["reply_to_message_id"] = str(reply_to)
@@ -820,6 +822,11 @@ class TelegramInbox:
             fields["reply_markup"] = json.dumps({"inline_keyboard": [undo_row]})
         elif markup:
             fields["reply_markup"] = json.dumps(markup)
+        extra = [[{"text": str(label)[:60], "callback_data": str(data)} for label, data in row] for row in rows or ()]
+        if extra:
+            keyboard = json.loads(fields.get("reply_markup") or "{}")
+            keyboard.setdefault("inline_keyboard", []).extend(extra)
+            fields["reply_markup"] = json.dumps(keyboard)
         # A dropped connection (WinError 10054) once swallowed the confirmation of a pause:
         # the owner never learned the house was unwatched. Try again before giving up.
         resp: Any = {}
@@ -846,7 +853,7 @@ class TelegramInbox:
         try:
             self._say(chat_id, reply.text, reply_to=reply_to, buttons=getattr(reply, "buttons", ()),
                       undo_token=getattr(reply, "undo_token", ""), lang=getattr(reply, "lang", "en"),
-                      question_token=getattr(reply, "question_token", ""))
+                      question_token=getattr(reply, "question_token", ""), rows=getattr(reply, "rows", ()))
         finally:
             self._after(reply)       # a camera change must be applied even if the answer could not be sent
 
@@ -895,13 +902,20 @@ class TelegramInbox:
             self._on_tag_button(query, message, chat_id, code)
             return
         self._cancel_tag(chat_id, (query.get("from") or {}).get("id"))   # any other tap ends an "Other…" wait
-        if getattr(self.agent, "version", 1) == 2 and (code.startswith("cl:") or code.startswith("u:")):
+        if getattr(self.agent, "version", 1) == 2 and code.startswith(("cl:", "u:", "hs:")):
             try:   # only stops the button's spinner: a dropped connection here must not lose the tap
                 self._post(self.cfg.bot_token, "answerCallbackQuery", {"callback_query_id": str(query.get("id"))})
             except Exception as exc:  # noqa: BLE001
                 log.warning("Could not stop the button's spinner: %s", exc)
             who = _who(query.get("from") or {})
-            if code.startswith("cl:"):
+            if code.startswith("hs:"):            # yes / no to a house-state request (brain/house.py)
+                parts = code.split(":")
+                if len(parts) != 3 or parts[2] not in ("y", "n") or not parts[1]:
+                    log.warning("Ignoring malformed house-state callback")
+                    return
+                self._note("owner", "button", _button_text(message, code, code), who["name"])
+                reply = self.agent.answer_proposal(chat_id, parts[1], parts[2] == "y", who)
+            elif code.startswith("cl:"):
                 try:
                     _, token, index = code.split(":", 2)
                     index = int(index)

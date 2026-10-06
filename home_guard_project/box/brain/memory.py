@@ -57,6 +57,7 @@ class ChatState:
     # guessed). topic: {"camera", "word" (the owner's name for it), "ts"}; topic_event: {"handle", "ts"}.
     topic: Dict[str, Any] = field(default_factory=dict)
     topic_event_ref: Dict[str, Any] = field(default_factory=dict)
+    house_last: Dict[str, Any] = field(default_factory=dict)   # the last house command: {"token", "ts"} (cancel)
 
     def set_topic_camera(self, camera: str, word: str, ts: float) -> None:
         if camera:
@@ -256,7 +257,13 @@ class ChatState:
                  if isinstance(event, dict) and isinstance(event.get("handle"), str) else {})
         return cls(turns=turns, handles=handles, next_handle=max(next_handle, highest + 1, 1), pending=pending,
                    languages=_lang_map(data.get("languages")), overrides=_lang_map(data.get("overrides")),
-                   topic=topic, topic_event_ref=event)
+                   topic=topic, topic_event_ref=event, house_last=_house_last(data.get("house_last")))
+
+
+def _house_last(value: Any) -> Dict[str, Any]:
+    if isinstance(value, dict) and isinstance(value.get("token"), str):
+        return {"token": value["token"], "ts": _num(value.get("ts"))}
+    return {}
 
 
 def _num(value: Any) -> float:

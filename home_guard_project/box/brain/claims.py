@@ -67,7 +67,8 @@ CLAIMS: Dict[str, Dict[str, object]] = {
         "ar": ["أعدت تشغيل التنبيهات", "عادت التنبيهات"],
     },
     "save": {
-        "tools": {"record_verdict", "set_alias"},
+        # "רשמתי שאתם בחופשה" after a real house change is backed too
+        "tools": {"record_verdict", "set_alias", "house_state", "house_expect", "house_cancel"},
         # A promise to remember is a save too (2026-10-05: "I'll remember" went out and nothing was saved).
         "en": [_fp("marked|saved|changed|updated"), _BEEN % "saved|marked|changed|updated",
                _OPEN + r"(?:saved|marked)\b", r"\bI(?:['’]ll| will| shall)?\s+(?:always\s+)?remember\b",
@@ -75,6 +76,18 @@ CLAIMS: Dict[str, Dict[str, object]] = {
                _OPEN + r"noted\s*[:.!,\-–—]"],
         "he": ["סימנתי", "שמרתי", "רשמתי", "שיניתי", "עדכנתי", "הגדרתי", "אזכור", "זוכר", "זכרתי"],
         "ar": ["سجلت(?! (?:لك )?(?:فيديو|مقطع))", "حفظت", "غيرت", "حدثت", _NOW_AR % "التسجيل|تغيير"],
+    },
+    # The house state: "I've set you to asleep" only after the writer confirmed it (a house_* receipt).
+    "house": {
+        "tools": {"house_state", "house_expect", "house_cancel", "house_answer"},
+        "en": [r"\bI(?:['’]ve| have| just)?\s+(?:just\s+)?(?:set|marked|switched|put|changed)\b[^.?!\n]{0,40}"
+               r"\b(?:asleep|sleep(?:ing)?|night mode|away|vacation|holiday|awake|home mode)\b",
+               r"\b(?:you(?:['’]re| are)|the house is|house is)\s+now\s+(?:marked\s+as\s+|set\s+to\s+)?"
+               r"(?:asleep|away|on vacation|on holiday|awake|in night mode)\b",
+               r"\bI(?:['’]ve| have| just)?\s+(?:noted|saved)\s+(?:that\s+)?you(?:['’]re| are)\s+expecting\b"],
+        "he": ["סימנתי שאתם", "סימנתי שאתה", "העברתי את הבית", "עברתי למצב", "הבית עכשיו במצב",
+               "הבית במצב (?:שינה|לילה|חופשה)", "רשמתי שמצפים", "רשמתי שאתם מצפים"],
+        "ar": ["وضعت البيت", "سجلت أنكم"],
     },
     "record": {
         "tools": {"record_clip"},

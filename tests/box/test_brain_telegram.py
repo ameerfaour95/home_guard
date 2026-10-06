@@ -34,6 +34,10 @@ class FakeAgent:
         self.calls.append(("undo", token))
         return AgentReply(text="✓ Alerts are back on.")
 
+    def answer_proposal(self, chat_id, proposal_id, approve, who=None):
+        self.calls.append(("proposal", proposal_id, approve))
+        return AgentReply(text="✓ Approved: set the house to home, awake")
+
 
 class FakeDeliverer:
     def __init__(self):
@@ -91,6 +95,21 @@ class InboxV2Test(unittest.TestCase):
         self.inbox.handle_update(tap("cl:ab12:1", 5))
         self.inbox.handle_update(tap("u:123", 6))
         self.assertEqual(self.agent.calls, [("choice", "ab12", 1), ("undo", "123")])
+
+    def test_house_proposal_buttons_go_out_and_their_taps_come_back(self) -> None:
+        rows = ((("✓ Yes", "hs:P1:y"), ("✗ No", "hs:P1:n")),)
+        self.agent.handle = lambda *a, **k: AgentReply(text="🏠 House: home, asleep", rows=rows)
+        self.inbox.handle_update(self.message("status"))
+        markup = json.loads(next(f for m, f in self.posts if m == "sendMessage")["reply_markup"])
+        self.assertEqual(markup["inline_keyboard"], [[{"text": "✓ Yes", "callback_data": "hs:P1:y"},
+                                                      {"text": "✗ No", "callback_data": "hs:P1:n"}]])
+        tap = lambda data, uid: {"update_id": uid, "callback_query": {  # noqa: E731
+            "id": "q", "data": data, "from": {"id": 7}, "message": {"chat": {"id": -5}, "message_id": 99}}}
+        self.inbox.handle_update(tap("hs:P1:y", 7))
+        self.inbox.handle_update(tap("hs:P1:n", 8))
+        self.inbox.handle_update(tap("hs:P1:maybe", 9))                 # malformed: ignored
+        self.assertEqual([c for c in self.agent.calls if c[0] == "proposal"],
+                         [("proposal", "P1", True), ("proposal", "P1", False)])
 
     def test_a_repeated_update_is_ignored(self) -> None:
         self.inbox.handle_update(self.message("hi", update_id=9))

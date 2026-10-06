@@ -27,7 +27,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 from ..alert_clips import PRE_SECONDS
 from ..archive import AlertRecord
 from ..feedback import MAX_MUTE_HOURS, VERDICTS, Feedback, MuteState, feedback_from_fields, save_feedback
-from . import media
+from . import house, media
 from .aliases import normalize
 from .events import (
     coverage,
@@ -84,6 +84,7 @@ class Services:
     set_option: Optional[Callable[[str, str], Any]] = None
     read_settings: Optional[Callable[[], Dict[str, Any]]] = None
     alert_settings: Any = None
+    house: Any = None          # house_state.HouseStateStore: the one writer of the house state (brain/house.py)
 
 
 @dataclass
@@ -1206,6 +1207,109 @@ def set_sensitivity(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     return _change_alerts(ctx, args, "set_sensitivity", "sensitivity", args.get("values"))
 
 
+# -- the house state (the commands in code are in house.py; these are for what the parser does not take) ---------
+_HOUSE_KINDS = {"asleep": "sleep", "awake": "up", "away": "left", "back": "back", "vacation": "vacation"}
+
+
+def _until_arg(value: Any, now: float) -> Optional[float]:
+    """"2026-10-20" (the end of that day), "2026-10-20 18:00", or "18:00" (the next one); None when not given."""
+    if value is None or not str(value).strip():
+        return None
+    text = str(value).strip()
+    for fmt, whole_day in (("%Y-%m-%d %H:%M", False), ("%Y-%m-%dT%H:%M", False), ("%Y-%m-%d", True)):
+        try:
+            moment = dt.datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+        return (moment.replace(hour=23, minute=59) if whole_day else moment).timestamp()
+    if re.fullmatch(r"\d{1,2}:\d{2}", text):
+        return house.next_at(now, text.zfill(5))
+    raise ValueError("until must look like 2026-10-20, 2026-10-20 18:00 or 18:00")
+
+
+def _house_ready(ctx: ToolContext, args: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if ctx.services.house is None:
+        return _err("the house state is not available on this box")
+    if not quoted_from(str(args.get("owner_words") or ""), ctx.text):
+        return _err("Not changed: change the house state only when this message says so; owner_words must be "
+                    "copied from it (two words or more).")
+    return None
+
+
+def _clock_text(ts: Any) -> str:
+    return dt.datetime.fromtimestamp(ts).isoformat(timespec="minutes") if ts else "until the owner says otherwise"
+
+
+@_safe_tool
+def house_state(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+    bad = _house_ready(ctx, args)
+    if bad:
+        return bad
+    kind = _HOUSE_KINDS.get(str(args.get("state") or "").strip().lower())
+    if kind is None:
+        return _err("state must be asleep, awake, away, back or vacation")
+    now = _finite(ctx.services.now())
+    try:
+        until = _until_arg(args.get("until"), now)
+    except ValueError as exc:
+        return _err(str(exc))
+    if kind == "vacation" and until is None:
+        return _err("a vacation needs until (the date they are back); ask the owner")
+    schedule = house.schedule_of(ctx.services.house, now) or house.DEFAULT_SCHEDULE
+    if until is None and kind in ("sleep", "up"):
+        until = house.next_at(now, schedule[1] if kind == "sleep" else schedule[0])
+    receipt = house.set_state(ctx, kind, until)
+    return _result(receipt, state=receipt.detail.get("state"), until=_clock_text(receipt.detail.get("until")))
+
+
+@_safe_tool
+def house_expect(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+    bad = _house_ready(ctx, args)
+    if bad:
+        return bad
+    text = str(args.get("text") or "").strip()
+    if not text:
+        return _err("give the note text, e.g. \"a package\" or \"the plumber at 10:00\"")
+    now = _finite(ctx.services.now())
+    try:
+        until = _until_arg(args.get("until"), now)
+    except ValueError as exc:
+        return _err(str(exc))
+    if until is None:
+        today = dt.datetime.fromtimestamp(now)
+        until = today.replace(hour=23, minute=59, second=0, microsecond=0).timestamp()
+    camera = None
+    if str(args.get("camera") or "").strip():
+        camera, bad = _one_camera(ctx, args["camera"])
+        if bad:
+            return bad
+    receipt = house.add_expect(ctx, text, until, camera)
+    return _result(receipt, text=receipt.detail.get("text"), until=_clock_text(receipt.detail.get("until")))
+
+
+@_safe_tool
+def house_cancel(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+    bad = _house_ready(ctx, args)
+    if bad:
+        return bad
+    what = str(args.get("what") or "").strip().lower()
+    if what not in ("state", "expect"):
+        return _err('what must be "state" (end the current house state) or "expect" (an expecting note)')
+    receipts = house.cancel(ctx, what, str(args.get("words") or "").strip())
+    ok = any(r.status == DONE for r in receipts)
+    return {"ok": ok, "status": DONE if ok else FAILED, "receipts": [r.id for r in receipts],
+            **({} if ok else {"reason": receipts[0].reason if receipts else "error"})}
+
+
+@_safe_tool
+def house_status(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+    if ctx.services.house is None:
+        return _err("the house state is not available on this box")
+    text, _rows = house.status(ctx)
+    return {"ok": True, "status": text, "note": "Pending requests are answered with buttons; tell the owner to "
+                                                  "type status to see them."}
+
+
 TOOLS: Dict[str, Callable[[ToolContext, Dict[str, Any]], Dict[str, Any]]] = {
     "find_events": find_events,
     "summarize_period": summarize_period,
@@ -1225,4 +1329,8 @@ TOOLS: Dict[str, Callable[[ToolContext, Dict[str, Any]], Dict[str, Any]]] = {
     "get_alert_settings": get_alert_settings,
     "set_alert_types": set_alert_types,
     "set_sensitivity": set_sensitivity,
+    "house_state": house_state,
+    "house_expect": house_expect,
+    "house_cancel": house_cancel,
+    "house_status": house_status,
 }
