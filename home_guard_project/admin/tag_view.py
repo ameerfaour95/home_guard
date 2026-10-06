@@ -4,7 +4,7 @@ the right with one-key hotkeys, and next/previous walks a slim queue.
 
 Keys (also in the help): Ctrl+Enter save and next · n/s/e then a digit picks a category (s3 = S3, n0 = N10) · o other
 · Shift+N/S/E raw label · Space play · , . one frame · ← → one second · v crop/full · f evidence frame · a use the
-teacher · c needs check · x delete · j/k next/previous clip · d description · ? help.
+teacher · g suggest the whole tag · c needs check · x delete · j/k next/previous clip · d description · ? help.
 """
 from copy import deepcopy
 from PySide6.QtCore import Qt, QTimer, QUrl, Signal
@@ -28,21 +28,25 @@ HELP = [('Ctrl + Enter', 'Save and open the next clip'), ('n / s / e, then 1–9
         ('o', 'Category: other'), ('Shift + N / S / E', 'Raw label: normal / suspicious / escalation'),
         ('Space', 'Play / pause'), (', / .', 'One frame back / forward'), ('← / →', 'One second back / forward'),
         ('v', 'Crop / full frame'), ('f', 'Evidence frame = this moment'), ('a', "Use the teacher's suggestion"),
+        ('g', 'Suggest the whole tag (a model fills the form in as a draft)'),
         ('c / x', 'Needs check / delete'), ('j / k', 'Next / previous clip'), ('d', 'Write the description'),
         ('Esc', 'Leave a text field'), ('?', 'This help')]
 KIND_NAMES = {'clip': 'Full frame', 'crop': 'Crop'}
+# The fields a "Suggest tag" draft fills in: a saved tag counts as accepted as-is when none of them changed.
+SUGGESTED = ('category', 'other_text', 'raw_label', 'zone', 'movement', 'flags', 'visibility', 'appearance', 'description', 'evidence_frame', 'evidence_sec')
 
 
 class TagView(QWidget):
     session_expired = Signal()
     customer_requested = Signal(int)
-    label_requested = Signal(int)
+    label_requested = Signal(object)   # an event id, or a dataset clip's key
 
     def __init__(self, backend, role='admin', theme='dark'):
         super().__init__()
         self.backend, self.role, self.theme = backend, role, theme
         self.state, self.detail, self.key, self.wanted = None, None, None, None
         self.form, self.saved_form, self.drafts = None, None, {}
+        self.suggested = {}   # clip key -> (model, the fields as suggested, the form before the suggestion)
         self.view, self.raw_manual, self.chord = 'crop', False, None
         self.categories = {}
         self.state_runner, self.queue_runner, self.clip_runner, self.media_runner, self.save_runner, self.side_runner = \
@@ -131,7 +135,7 @@ class TagView(QWidget):
         self.tier_pill = Pill(self.theme); reasons.addWidget(self.tier_pill)
         self.reasons = label('', 'muted'); self.reasons.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         reasons.addWidget(self.reasons, 1)
-        self.open_label = button('Edit boxes', lambda: self.detail and self.label_requested.emit(self.detail['item']['event_id']), 'link')
+        self.open_label = button('Edit boxes', self.edit_boxes, 'link')
         self.open_label.hide(); reasons.addWidget(self.open_label)
         col.addLayout(reasons)
         self.canvas = VideoCanvas(self.theme); self.canvas.overlay.hide(); self.canvas.message = 'Select a clip'
@@ -177,6 +181,11 @@ class TagView(QWidget):
         head.addWidget(self.started_from, 1)
         self.chord_label = Pill(self.theme); self.chord_label.hide(); head.addWidget(self.chord_label)
         form.addLayout(head)
+        self.suggest_bar = QFrame(); self.suggest_bar.setObjectName('banner')
+        bar = QHBoxLayout(self.suggest_bar); bar.setContentsMargins(10, 6, 6, 6); bar.setSpacing(6)
+        self.suggest_note = label('', 'muted', True); bar.addWidget(self.suggest_note, 1)
+        self.discard_button = button('Discard', self.discard_suggestion, 'link'); bar.addWidget(self.discard_button)
+        self.suggest_bar.hide(); form.addWidget(self.suggest_bar)
         self.category_grid = QGridLayout(); self.category_grid.setHorizontalSpacing(6); self.category_grid.setVerticalSpacing(5)
         form.addLayout(self.category_grid)
         self.category_buttons = {}
@@ -202,11 +211,19 @@ class TagView(QWidget):
         form.addStretch()
         col.addWidget(scroll, 1)
         actions = QFrame(); actions.setObjectName('banner')
-        row = QHBoxLayout(actions); row.setContentsMargins(12, 10, 12, 10); row.setSpacing(8)
+        stack = QVBoxLayout(actions); stack.setContentsMargins(12, 6, 12, 10); stack.setSpacing(4)
+        # the state has a line of its own: three buttons already fill the narrowest panel
+        self.save_state = label('', 'muted'); self.save_state.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self.save_state.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        stack.addWidget(self.save_state)
+        row = QHBoxLayout(); row.setSpacing(8); stack.addLayout(row)
         self.accept_button = button('Use teacher  A', self.accept_teacher, 'compact'); row.addWidget(self.accept_button)
+        self.suggest_button = button('Suggest tag  G', self.suggest, 'compact')
+        self.suggest_button.setToolTip('A model watches the clip and fills in the whole tag as a draft for you to '
+                                       'check, edit or discard (G)')
+        row.addWidget(self.suggest_button)
         self.teach_button = button('Ask teacher', self.teach, 'compact'); self.teach_button.hide(); row.addWidget(self.teach_button)
         row.addStretch()
-        self.save_state = label('', 'muted'); row.addWidget(self.save_state)
         self.save_button = button('Save && next', self.save, 'primary'); self.save_button.setToolTip('Ctrl + Enter')
         row.addWidget(self.save_button)
         col.addWidget(actions)
@@ -236,6 +253,13 @@ class TagView(QWidget):
             self.fields_box.addWidget(label(title, 'eyebrow'))
             chips = ChipGroup(values, multi); chips.changed.connect(lambda n=name: self.chip_changed(n))
             self.fields_box.addWidget(chips); self.chips[name] = chips
+        self.fields_box.addWidget(label('APPEARANCE · to recognise them again, never face or body', 'eyebrow'))
+        self.appearance = QLineEdit(); self.appearance.setPlaceholderText('dark jacket, grey trousers, white van')
+        self.appearance.setToolTip('Up to 4 short phrases, separated by commas: clothing colour and type, what they '
+                                   'carry, a vehicle\'s colour and type')
+        self.appearance.textChanged.connect(lambda t: self.set_field(
+            'appearance', [p.strip() for p in t.split(',') if p.strip()]))
+        self.fields_box.addWidget(self.appearance)
         evidence = QHBoxLayout(); evidence.addWidget(label('EVIDENCE FRAME', 'eyebrow')); evidence.addSpacing(8)
         self.evidence = label('none', 'muted'); self.evidence.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         evidence.addWidget(self.evidence, 1)
@@ -271,7 +295,8 @@ class TagView(QWidget):
         keys = {'Ctrl+Return': self.save, 'Ctrl+Enter': self.save, 'Ctrl+S': self.save, 'Space': self.toggle_play,
                 ',': lambda: self.step(-1), '.': lambda: self.step(1), 'Left': lambda: self.seek_by(-1000),
                 'Right': lambda: self.seek_by(1000), 'V': lambda: self.switch_view('clip' if self.view == 'crop' else 'crop'),
-                'F': self.mark_evidence, 'A': self.accept_teacher, 'C': lambda: self.needs_check.toggle(),
+                'F': self.mark_evidence, 'A': self.accept_teacher, 'G': self.suggest,
+                'C': lambda: self.needs_check.toggle(),
                 'X': lambda: self.delete.toggle(), 'J': lambda: self.move(1), 'K': lambda: self.move(-1),
                 'D': lambda: self.description.setFocus(), 'O': lambda: self.set_category('other'), '?': self.help,
                 'N': lambda: self.set_chord('N'), 'S': lambda: self.set_chord('S'), 'E': lambda: self.set_chord('E'),
@@ -368,7 +393,7 @@ class TagView(QWidget):
         needs = (item.get('info') or {}).get('needs_check')
         self.reasons.setText('; '.join(a['reasons']) + (f'   ·   dataset: {needs}' if needs else ''))
         self.reasons.setToolTip(self.reasons.text())
-        self.open_label.setVisible(bool(item.get('event_id')) and self.role == 'admin')
+        self.open_label.setVisible((bool(item.get('event_id')) or item.get('origin') == 'dataset') and self.role == 'admin')
         conflicted = {c['a'] for c in a['conflicts']} | {c['b'] for c in a['conflicts']}
         for who, card in self.cards.items():
             card.show_opinion(detail['opinions'].get(who), who in conflicted, self.categories)
@@ -383,6 +408,7 @@ class TagView(QWidget):
         self.render_form()
         self.update_save_state()
         self.banner.hide()
+        self.suggest_button.setEnabled(True)
         if self.view not in [k for k, ok in detail['media'].items() if ok]:
             self.view = 'crop' if detail['media'].get('crop') else 'clip'
         reasons = detail.get('media_reasons') or {}
@@ -471,6 +497,10 @@ class TagView(QWidget):
             for widget, name in ((self.description, 'description'), (self.notes, 'notes')):
                 if widget.toPlainText() != (f.get(name) or ''):
                     widget.setPlainText(f.get(name) or '')
+            phrases = [p.strip() for p in self.appearance.text().split(',') if p.strip()]
+            if phrases != list(f.get('appearance') or []):
+                self.appearance.setText(', '.join(f.get('appearance') or []))
+            self.render_suggestion()
             self.needs_check.setChecked(bool(f.get('needs_check'))); self.delete.setChecked(bool(f.get('delete')))
             self.render_evidence()
         finally:
@@ -621,6 +651,10 @@ class TagView(QWidget):
             self.show_banner('Choose a category first (or mark the clip Delete). Old tags never had one, so it is '
                              'left for you to pick.'); return
         key, fields = self.key, deepcopy(self.form)
+        if fields.get('suggested_by') and key in self.suggested:
+            _, suggested, _ = self.suggested[key]
+            same = all(_same(fields.get(n), suggested.get(n)) for n in SUGGESTED)
+            fields['suggestion_use'] = 'accepted' if same else 'edited'
         self.save_button.setEnabled(False); self.save_state.setText('Saving…')
         if not self.save_runner.start(lambda: (key, fields, self.backend.tagging_save(key, fields))):
             self.save_button.setEnabled(True)
@@ -632,7 +666,7 @@ class TagView(QWidget):
                 self.session_expired.emit(); return
             self.save_state.setText('Not saved'); self.show_banner(f'Not saved: {error}'); return
         key, fields, answer = result
-        self.drafts.pop(key, None)
+        self.drafts.pop(key, None); self.suggested.pop(key, None)
         if key == self.key:
             self.saved_form = deepcopy(fields)
         self.save_state.setText('Saved')
@@ -657,12 +691,55 @@ class TagView(QWidget):
             self.save_state.setText('Asking the teacher…')
             self.side_runner.start(lambda: ('teach', key, self.backend.tagging_teach(key)))
 
+    def edit_boxes(self):
+        if self.detail:
+            item = self.detail['item']
+            self.label_requested.emit(item['event_id'] or item['key'])
+
+    # ------------------------------------------------------------------ "Suggest tag"
+    def suggest(self):
+        if not self.key or self.form is None:
+            return
+        key = self.key
+        self.suggest_button.setEnabled(False); self.save_state.setText('Asking the model…')
+        if not self.side_runner.start(lambda: ('suggest', key, self.backend.tagging_suggest(key))):
+            self.suggest_button.setEnabled(True)
+
+    def apply_suggestion(self, key, answer):
+        """The model's whole tag fills the form as a draft (marked "suggested by"): check it, edit it or discard."""
+        before = deepcopy(self.form)
+        fields = {n: deepcopy(answer['fields'].get(n)) for n in SUGGESTED if n in answer['fields']}
+        for name, value in fields.items():
+            if name == 'flags':
+                value = [f for f in value or [] if f in self.chips['flags'].buttons]
+            self.form[name] = value
+        self.raw_manual = bool(self.form.get('raw_label'))
+        self.form['suggested_by'] = answer['model']
+        self.suggested[key] = (answer['model'], {n: deepcopy(self.form.get(n)) for n in SUGGESTED}, before)
+        self.render_form(); self.update_save_state()
+        self.save_state.setText('Suggestion filled in: check it' + ('  (cached)' if answer.get('cached') else ''))
+
+    def discard_suggestion(self):
+        if self.key in self.suggested and self.form is not None:
+            _, _, before = self.suggested.pop(self.key)
+            self.form = before; self.raw_manual = bool(self.form.get('raw_label'))
+            self.render_form(); self.update_save_state()
+
+    def render_suggestion(self):
+        model = (self.form or {}).get('suggested_by') or ''
+        draft = self.key in self.suggested
+        self.suggest_bar.setVisible(bool(model))
+        if model:
+            self.suggest_note.setText(f'Suggested by {model}' + (' · a draft: check every field, edit what is wrong, '
+                                                                  'then save' if draft else ''))
+        self.discard_button.setVisible(draft)
+
     def export(self):
         self.export_button.setEnabled(False)
         self.side_runner.start(lambda: ('export', None, self.backend.tagging_export()))
 
     def side_done(self, result, error):
-        self.export_button.setEnabled(True)
+        self.export_button.setEnabled(True); self.suggest_button.setEnabled(True)
         if error:
             if isinstance(error, AuthError):
                 self.session_expired.emit(); return
@@ -673,6 +750,8 @@ class TagView(QWidget):
             self.show_banner(f"Exported {c['training']} training rows and {c['eval']} eval rows "
                              f"({c['studio']} tagged here, {c['migrated']} old tags; {c['contradicted']} contradicted "
                              f"and {c['untagged']} untagged left out) to {answer['training_path'].rsplit(chr(92), 2)[0]}")
+        elif kind == 'suggest' and key == self.key:
+            self.apply_suggestion(key, answer)
         elif kind == 'teach' and key == self.key:
             self.save_state.setText(''); self.open_key(key)
 
@@ -690,3 +769,8 @@ class TagView(QWidget):
 
     def hideEvent(self, event):
         self.player.pause(); super().hideEvent(event)
+
+
+def _same(a, b):
+    """Form values compare equal when they mean the same: "" / None / [] are all "nothing"."""
+    return (a or None) == (b or None)

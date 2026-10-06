@@ -215,7 +215,8 @@ class Shell(QWidget):
     def open_label(self, eid):
         self.pages.setCurrentWidget(self.label_page)
         for name, nav in self.navigation.items(): nav.setChecked(name == 'Label')
-        self.label_page.open_event(eid)
+        if isinstance(eid, str): self.label_page.open_clip(eid)   # a dataset clip's key: no event behind it
+        else: self.label_page.open_event(eid)
 
     def annotation_saved(self, annotation):
         timelines = [self.review_page.timeline]

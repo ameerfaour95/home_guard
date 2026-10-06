@@ -567,6 +567,57 @@
         "title": "Box",
         "type": "object"
       },
+      "ClipAnnotationIn": {
+        "properties": {
+          "base_version": {
+            "title": "Base Version",
+            "type": "integer"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "drop_clip": {
+            "default": false,
+            "title": "Drop Clip",
+            "type": "boolean"
+          },
+          "key": {
+            "maxLength": 512,
+            "title": "Key",
+            "type": "string"
+          },
+          "needs_review": {
+            "default": false,
+            "title": "Needs Review",
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "edited",
+              "submitted"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "tracks": {
+            "items": {
+              "$ref": "#/components/schemas/Track"
+            },
+            "title": "Tracks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "base_version",
+          "tracks",
+          "description",
+          "status",
+          "key"
+        ],
+        "title": "ClipAnnotationIn",
+        "type": "object"
+      },
       "CollectionIn": {
         "properties": {
           "description": {
@@ -2428,6 +2479,64 @@
         "title": "TagSaved",
         "type": "object"
       },
+      "TagSuggestRequest": {
+        "properties": {
+          "key": {
+            "maxLength": 512,
+            "title": "Key",
+            "type": "string"
+          },
+          "refresh": {
+            "default": false,
+            "title": "Refresh",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "key"
+        ],
+        "title": "TagSuggestRequest",
+        "type": "object"
+      },
+      "TagSuggestion": {
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "cached": {
+            "title": "Cached",
+            "type": "boolean"
+          },
+          "fields": {
+            "additionalProperties": true,
+            "title": "Fields",
+            "type": "object"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "prompt_version": {
+            "default": "",
+            "title": "Prompt Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "model",
+          "at",
+          "fields",
+          "cached"
+        ],
+        "title": "TagSuggestion",
+        "type": "object"
+      },
       "TaggingClip": {
         "properties": {
           "assessment": {
@@ -2872,6 +2981,7 @@
             "default": "human",
             "enum": [
               "human",
+              "yolo",
               "suggestion"
             ],
             "title": "Source",
@@ -4961,6 +5071,98 @@
         ]
       }
     },
+    "/v1/tagging/boxes": {
+      "get": {
+        "operationId": "tagging_boxes_v1_tagging_boxes_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnnotationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Tagging Boxes",
+        "tags": [
+          "tagging"
+        ]
+      },
+      "put": {
+        "operationId": "tagging_save_boxes_v1_tagging_boxes_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClipAnnotationIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnnotationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Tagging Save Boxes",
+        "tags": [
+          "tagging"
+        ]
+      }
+    },
     "/v1/tagging/clip": {
       "get": {
         "operationId": "tagging_clip_v1_tagging_clip_get",
@@ -5240,6 +5442,52 @@
           }
         ],
         "summary": "Tagging State",
+        "tags": [
+          "tagging"
+        ]
+      }
+    },
+    "/v1/tagging/suggest": {
+      "post": {
+        "operationId": "tagging_suggest_v1_tagging_suggest_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagSuggestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TagSuggestion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Tagging Suggest",
         "tags": [
           "tagging"
         ]

@@ -39,6 +39,19 @@ class LabelDocument(QObject):
     def track(self):
         return next((t for t in self.tracks if t.track_id == self.selected), None)
 
+    def display_names(self):
+        """track id -> "person #1", "car #2": per class, numbered in order of first appearance in the clip. The
+        internal id stays in the data (and in tooltips) only."""
+        names, counts = {}, {}
+        first = lambda t: min((k.t_sec for k in t.keyframes), default=float('inf'))  # noqa: E731
+        for tr in sorted(self.tracks, key=lambda t: (first(t), t.track_id)):
+            counts[tr.label] = counts.get(tr.label, 0) + 1
+            names[tr.track_id] = f'{tr.label} #{counts[tr.label]}'
+        return names
+
+    def display_name(self, track):
+        return self.display_names().get(track.track_id, track.label)
+
     def time_for(self, frame):
         return self.timestamps.get(frame, frame_time(frame, self.fps))
 
@@ -140,8 +153,11 @@ class LabelDocument(QObject):
             self.checkpoint()
 
     def delete_track(self):
+        """Remove the selected box's whole track at once (Undo brings it back); the next save leaves it out."""
         if self.track:
             self.tracks.remove(self.track); self.selected = None; self.checkpoint()
+            return True
+        return False
 
     def change_class(self, name):
         self.current_class = name
@@ -157,6 +173,11 @@ class LabelDocument(QObject):
         for tr in self.tracks:
             tr.source = 'human'
         self.checkpoint()
+
+    @property
+    def unchecked(self):
+        """Preloaded detector tracks nobody has edited yet."""
+        return [t for t in self.tracks if t.source in ('yolo', 'suggestion')]
 
     def move_keyframe(self, track_id, old_frame, new_frame):
         tr = next(t for t in self.tracks if t.track_id == track_id)

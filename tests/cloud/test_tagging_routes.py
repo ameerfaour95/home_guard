@@ -174,3 +174,143 @@ def test_missing_video_says_why_and_playable_clips_come_first(client, staff_fact
     order = [i["key"] for i in queue]
     assert order.index(f"ev:{ids['consenting']}") < order.index(f"ev:{gone}")
     assert next(i for i in queue if i["key"] == f"ev:{gone}")["has_media"] is False
+
+
+# ---------------------------------------------------------------- delete, YOLO boxes of dataset clips, "Suggest tag"
+
+def test_delete_takes_a_clip_out_of_the_queue_and_the_export(client, staff_factory, studio):
+    _, _, _, h = staff_factory("admin")
+    key = "ds:front_side_1771696865_trigger"
+    assert key in [i["key"] for i in client.get("/v1/tagging/queue", headers=h).json()["items"]]
+    r = client.post("/v1/tagging/tag", headers=h, json={"key": key, "fields": {"delete": True}})
+    assert r.status_code == 200, r.text
+    assert key not in [i["key"] for i in client.get("/v1/tagging/queue", headers=h).json()["items"]]
+    out = client.post("/v1/tagging/export", headers=h, json={}).json()
+    assert out["counts"]["delete"] == 1
+    for path in (out["training_path"], out["eval_path"]):
+        assert "front_side_1771696865_trigger" not in open(path, encoding="utf-8").read()
+
+
+def _yolo(ds, folder, clip_id, frames):
+    """Label files of the unified dataset: {frame: [(class, cx, cy, w, h)]}, contiguous ids (0 person, 2 car)."""
+    root = os.path.join(ds, "yolo", "labels", folder)
+    os.makedirs(root, exist_ok=True)
+    with open(os.path.join(ds, "yolo", "classes.txt"), "w", encoding="utf-8") as f:
+        f.write("0 person\n1 bicycle\n2 car\n3 motorcycle\n4 bus\n5 truck\n6 bird\n7 cat\n8 dog\n")
+    for frame, boxes in frames.items():
+        with open(os.path.join(root, f"{clip_id}_f{frame:04d}.txt"), "w", encoding="utf-8") as f:
+            f.write("".join(f"{c} {cx} {cy} {w} {h}\n" for c, cx, cy, w, h in boxes))
+
+
+def test_dataset_clip_opens_with_its_yolo_boxes_editable(client, staff_factory, studio):
+    s, _ = studio
+    _, _, _, h = staff_factory("admin")
+    clip = "front_side_1771696865_trigger"
+    walk = {f: [(0, 0.2 + f * 0.01, 0.5, 0.1, 0.3), (2, 0.7, 0.7, 0.2, 0.2)] for f in range(0, 40, 4)}
+    _yolo(str(s.paths.dataset), "front_side", clip, walk)
+    r = client.get("/v1/tagging/boxes", params={"key": f"ds:{clip}"}, headers=h)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["version"] == 0 and body["status"] == "new" and body["suggestions_used"] is True
+    assert sorted(t["label"] for t in body["tracks"]) == ["car", "person"]
+    assert all(t["source"] == "yolo" for t in body["tracks"]) and body["frame_count"] >= 37
+    person = next(t for t in body["tracks"] if t["label"] == "person")
+    assert person["keyframes"][0]["xyxy"] == pytest.approx([0.15, 0.35, 0.25, 0.65])
+    # the tagger deletes the car and fixes the person: saved as a version of its own, the car gone for good
+    person["source"] = "human"
+    r = client.put("/v1/tagging/boxes", headers=h, json={"key": f"ds:{clip}", "base_version": 0, "tracks": [person],
+                                                          "description": "A man walks past.", "status": "edited"})
+    assert r.status_code == 200, r.text
+    again = client.get("/v1/tagging/boxes", params={"key": f"ds:{clip}"}, headers=h).json()
+    assert again["version"] == 1 and [t["label"] for t in again["tracks"]] == ["person"]
+    assert again["tracks"][0]["source"] == "human" and again["tracks"][0]["track_id"].startswith("t-")
+    stale = client.put("/v1/tagging/boxes", headers=h, json={"key": f"ds:{clip}", "base_version": 0, "tracks": [],
+                                                              "description": "", "status": "edited"})
+    assert stale.status_code == 409
+    # a clip without label files opens empty (the Label view says "No YOLO boxes for this clip")
+    empty = client.get("/v1/tagging/boxes", params={"key": "ds:front_side_1771696897_trigger"}, headers=h).json()
+    assert empty["tracks"] == [] and empty["suggestions_used"] is False
+
+
+class FakeModel:
+    model = "test/qwen-fake"
+
+    def __init__(self, answer):
+        self.answer, self.calls = answer, []
+        self.chat = self.completions = self
+
+    def create(self, **kwargs):
+        import json
+        from types import SimpleNamespace
+
+        self.calls.append(kwargs)
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(self.answer)))])
+
+
+def _frames(video):
+    import numpy as np
+
+    return [np.zeros((12, 16, 3), np.uint8)] * 5, [0, 17, 34, 51, 67], 7.0
+
+
+def test_suggest_fills_the_whole_tag_once_per_clip(client, staff_factory, studio):
+    s, ids = studio
+    _, _, _, h = staff_factory("admin")
+    fake = FakeModel({"summary": "A man walks to the gate, tries the latch and walks away.", "category": "s1",
+                      "other_text": "", "zone": "gate", "movement": "approaching", "flags": ["touching_handle", "x"],
+                      "people": 1, "vehicles": 0, "vehicle_moving": False, "animals": 0, "visibility": "clear",
+                      "appearance": ["dark jacket", "grey cap"], "evidence_frame": 3, "raw_label": "suspicious"})
+    s.suggest_client, s.suggest_frames = fake, _frames
+    key = f"ev:{ids['consenting']}"
+    r = client.post("/v1/tagging/suggest", headers=h, json={"key": key})
+    assert r.status_code == 200, r.text
+    got = r.json()
+    f = got["fields"]
+    assert got["model"] == "test/qwen-fake" and got["cached"] is False
+    assert f["category"] == "S1" and f["raw_label"] == "suspicious" and f["zone"] == "gate"
+    assert f["flags"] == ["touching_handle"] and f["appearance"] == ["dark jacket", "grey cap"]
+    assert f["description"].startswith("A man walks") and f["evidence_frame"] == 34
+    assert f["evidence_sec"] == pytest.approx(34 / 7, abs=1e-3)
+    sent = fake.calls[0]
+    assert sent["response_format"]["json_schema"]["strict"] is True and sent["temperature"] == 0
+    assert sum(1 for part in sent["messages"][0]["content"] if part["type"] == "image_url") == 5
+    assert "No special activity." in sent["messages"][0]["content"][0]["text"]
+    again = client.post("/v1/tagging/suggest", headers=h, json={"key": key}).json()
+    assert again["cached"] is True and len(fake.calls) == 1 and again["fields"] == f
+    # the tagger saves it as suggested: the tag says so, and the export carries it
+    tag = dict(f, suggested_by=got["model"], suggestion_use="accepted")
+    r = client.post("/v1/tagging/tag", headers=h, json={"key": key, "fields": tag})
+    assert r.status_code == 200, r.text
+    saved = r.json()["tag"]["fields"]
+    assert saved["suggestion_use"] == "accepted" and saved["appearance"] == f["appearance"]
+    bad = client.post("/v1/tagging/tag", headers=h, json={"key": key, "fields": {"suggestion_use": "maybe"}})
+    assert bad.status_code == 422
+    out = client.post("/v1/tagging/export", headers=h, json={}).json()
+    line = next(x for x in open(out["training_path"], encoding="utf-8") if STEM in x)
+    assert '"suggestion_use": "accepted"' in line and '"suggested_by": "test/qwen-fake"' in line
+    with session_scope(client.app.state.engine) as session:
+        assert session.scalars(select(m.AuditLog.action)).all().count("tag_suggested") == 1
+    # a customer who withdrew consent: the model never sees the clip
+    refused = client.post("/v1/tagging/suggest", headers=h, json={"key": f"ev:{ids['refusing']}"})
+    assert refused.status_code == 403 and len(fake.calls) == 1
+
+
+def test_suggest_says_why_it_cannot(client, staff_factory, studio, monkeypatch):
+    s, _ = studio
+    _, _, _, h = staff_factory("admin")
+    from home_guard_project.cloud.tagstudio import suggest
+
+    monkeypatch.setattr(suggest.SuggestConfig, "resolve", classmethod(lambda cls, **kw: cls(api_key="")))
+    s.suggest_frames = _frames
+    r = client.post("/v1/tagging/suggest", headers=h, json={"key": "ds:front_side_1771696865_trigger"})
+    assert r.status_code == 409 and "OPENROUTER_API_KEY" in r.json()["detail"]
+    with pytest.raises(suggest.SuggestError, match="Gemini"):
+        suggest.Suggester(suggest.SuggestConfig(model="google/gemini-2.5-pro", api_key="k"), "x.jsonl")
+
+
+def test_event_annotation_preloads_the_dataset_yolo_boxes_first(client, staff_factory, studio):
+    s, ids = studio
+    _, _, _, h = staff_factory("admin")
+    _yolo(str(s.paths.dataset), "house2_ch2", STEM, {f: [(0, 0.5, 0.5, 0.2, 0.4)] for f in range(0, 30, 5)})
+    body = client.get(f"/v1/events/{ids['consenting']}/annotation", headers=h).json()
+    assert [(t["label"], t["source"]) for t in body["tracks"]] == [("person", "yolo")]

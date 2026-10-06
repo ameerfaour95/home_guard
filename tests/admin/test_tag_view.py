@@ -179,3 +179,25 @@ def test_a_clip_asked_for_while_the_queue_loads_is_not_replaced_by_the_first_one
     v.open(target)                                   # e.g. a link from elsewhere, before the queue has arrived
     wait(lambda: v.detail is not None and not v.clip_runner.busy and not v.queue_runner.busy, 10)
     assert v.key == target
+
+
+def test_suggest_tag_fills_a_draft_and_the_save_says_accepted_or_edited(widgets, wait):
+    v, b = tag_view(widgets, wait)
+    first = v.key
+    v.setFocus(); QTest.keyClick(v, Qt.Key.Key_G)
+    wait(lambda: not v.side_runner.busy and v.form.get('suggested_by'), 10)
+    assert v.form['category'] == 'N1' and v.form['zone'] == 'entrance' and v.form['raw_label'] == 'normal'
+    assert v.form['appearance'] == ['dark jacket', 'grey trousers'] and v.appearance.text() == 'dark jacket, grey trousers'
+    assert v.form['description'].startswith('A man in a dark jacket') and v.form['evidence_frame'] is not None
+    assert v.suggest_bar.isVisible() and 'Suggested by demo/qwen3-vl-32b-instruct' in v.suggest_note.text()
+    v.discard_suggestion()
+    assert not v.form.get('suggested_by') and v.form['category'] != 'N1' and not v.suggest_bar.isVisible()
+    v.suggest(); wait(lambda: not v.side_runner.busy and v.form.get('suggested_by'), 10)
+    v.save(); wait(lambda: v.key != first and not v.queue_runner.busy and not v.clip_runner.busy, 10)
+    assert b.tagging_clip(first)['tag']['fields']['suggestion_use'] == 'accepted'
+    second = v.key
+    v.suggest(); wait(lambda: not v.side_runner.busy and v.form.get('suggested_by'), 10)
+    v.set_category('S1')
+    v.save(); wait(lambda: v.key != second and not v.queue_runner.busy and not v.clip_runner.busy, 10)
+    fields = b.tagging_clip(second)['tag']['fields']
+    assert fields['suggestion_use'] == 'edited' and fields['suggested_by'].startswith('demo/')

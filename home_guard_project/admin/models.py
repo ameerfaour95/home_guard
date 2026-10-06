@@ -325,7 +325,7 @@ class Track:
     track_id: str
     label: str
     keyframes: list[Keyframe]
-    source: Literal['human', 'suggestion'] = 'human'
+    source: Literal['human', 'yolo', 'suggestion'] = 'human'  # yolo: preloaded detector boxes nobody checked yet
 
 
 @dataclass

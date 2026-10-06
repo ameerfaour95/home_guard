@@ -11,6 +11,10 @@ from ..access import media_refusal
 from ..deps import SessionDep, require_role
 from ..models import Customer, Device, Staff
 from ..schemas import (
+    AnnotationOut,
+    ClipAnnotationIn,
+    TagSuggestion,
+    TagSuggestRequest,
     TagSave,
     TagSaved,
     TaggingClip,
@@ -135,3 +139,33 @@ def tagging_export(body: TaggingExportRequest, request: Request, staff: Staff = 
     audit.record(session, staff.id, "tagging_export", target=result["training_path"], reason="training",
                  detail={"counts": result["counts"]}, ts=request.app.state.clock())
     return result
+
+
+@router.post("/suggest", response_model=TagSuggestion)
+def tagging_suggest(body: TagSuggestRequest, request: Request, staff: Staff = Depends(_admin),
+                    session: Session = SessionDep):
+    studio = studio_of(request)
+    item, _ = _call(studio._item, session, body.key)
+    customer, device = _household(session, item)
+    if customer is not None:
+        refusal = media_refusal(staff.role, "training", customer.consent_recordings, customer.consent_training)
+        if refusal is not None:
+            raise HTTPException(status_code=403, detail=refusal)
+    result = _call(studio.suggest, session, body.key, body.refresh, request.app.state.s3)
+    if not result.get("cached"):
+        audit.record(session, staff.id, "tag_suggested", target=item.clip_id, reason="training",
+                     customer_id=customer.id if customer is not None else None,
+                     device_id=device.device_id if device is not None else None,
+                     detail={"model": result["model"]}, ts=request.app.state.clock())
+    return result
+
+
+@router.get("/boxes", response_model=AnnotationOut)
+def tagging_boxes(request: Request, key: str = Query(..., max_length=512), session: Session = SessionDep):
+    return _call(studio_of(request).clip_boxes, session, key)
+
+
+@router.put("/boxes", response_model=AnnotationOut)
+def tagging_save_boxes(body: ClipAnnotationIn, request: Request, staff: Staff = Depends(_admin),
+                       session: Session = SessionDep):
+    return _call(studio_of(request).save_clip_boxes, session, staff, body, request.app.state.clock())

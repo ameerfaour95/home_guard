@@ -25,7 +25,7 @@ from .items import ALERT, EMPTY, OLD, ClipItem
 
 TRAINING_FILE = "vlm_training.jsonl"
 EVAL_FILE = "eval_manifest.jsonl"
-OBSERVATION_FIELDS = ("zone", "movement", "flags", "visibility", "evidence_frame", "evidence_sec")
+OBSERVATION_FIELDS = ("zone", "movement", "flags", "visibility", "appearance", "evidence_frame", "evidence_sec")
 
 
 def decision(item: ClipItem, tag: Optional[Tag], include_needs_check: bool = False
@@ -45,6 +45,7 @@ def decision(item: ClipItem, tag: Optional[Tag], include_needs_check: bool = Fal
             "raw_label": f.get("raw_label") or default_raw_label(category),
             "observation": {k: f[k] for k in OBSERVATION_FIELDS if f.get(k) not in (None, "", [])},
             "notes": f.get("notes", ""), "tag_source": "studio", "tagged_by": tag.by, "tagged_at": tag.at,
+            "suggested_by": f.get("suggested_by", ""), "suggestion_use": f.get("suggestion_use", ""),
             "empty": category == "N10",
         }, ""
     if old is not None and old.detail.get("delete"):
@@ -89,6 +90,8 @@ def training_record(item: ClipItem, d: Dict[str, Any]) -> Dict[str, Any]:
         "tagged_by": d["tagged_by"],
         "tagged_at": d["tagged_at"],
         "old_label": d.get("old_label"),
+        "suggested_by": d.get("suggested_by", ""),
+        "suggestion_use": d.get("suggestion_use", ""),
         "taxonomy_version": taxonomy.TAXONOMY_VERSION,
         "video_expires": bool(item.info.get("production_only")),
     }

@@ -64,8 +64,8 @@ def _out(session: Session, request: Request, viewer: _Viewer, ev: Event) -> Anno
     row = labeling.version_row(session, ev.id, head.version) if head is not None else None
     common = dict(event_id=ev.id, ai_status=ai_status, ai_model=ai_model, ai_prompt_version=ai_prompt_version,
                   fps=fps, frame_count=frame_count, frame_size=frame_size)
-    if row is None:  # never saved: suggestions from the weak labels, the AI summary as the starting description
-        tracks = labeling.suggestions(session, request.app.state.s3, ev, fps, _now(request))
+    if row is None:  # never saved: the YOLO boxes as editable tracks, the AI summary as the starting description
+        tracks = preloaded_tracks(session, request, ev, fps)
         summary = shown(ev.summary)
         return AnnotationOut(**common, version=0, status="new", tracks=labeling.track_dicts(tracks),
                              description=summary, ai_description=summary, drop_clip=False, needs_review=False,
@@ -79,6 +79,23 @@ def _out(session: Session, request: Request, viewer: _Viewer, ev: Event) -> Anno
                          review_note=shown(review.note) if review is not None else "",
                          review_frame=review.frame if review is not None else None,
                          suggestions_used=row.suggestions_used)
+
+
+def preloaded_tracks(session: Session, request: Request, ev: Event, fps) -> list:
+    """The boxes a never-saved clip opens with, editable at once (source "yolo" until a person edits them): the
+    unified dataset's YOLO labels for this clip when it has them, else the event's own weak labels."""
+    from .tagging import studio_of  # noqa: PLC0415
+    from ..tagstudio.boxes import dataset_tracks  # noqa: PLC0415
+
+    try:
+        tracks = dataset_tracks(str(studio_of(request).paths.dataset), ev.stem, fps)
+    except Exception:  # noqa: BLE001 - an unreadable dataset never blocks the clip
+        tracks = []
+    if not tracks:
+        tracks = labeling.suggestions(session, request.app.state.s3, ev, fps, _now(request))
+    for tr in tracks:
+        tr.source = "yolo"
+    return tracks
 
 
 def _event(session: Session, request: Request, staff: Staff, event_id: int):
@@ -129,7 +146,7 @@ def save_annotation(event_id: int, body: AnnotationIn, request: Request, staff: 
                      description=body.description, ai_description=ev.summary or "",
                      ai_run_id=run.id if run is not None else None, drop_clip=body.drop_clip,
                      needs_review=body.needs_review,
-                     suggestions_used=any(t.source == "suggestion" for t in tracks)
+                     suggestions_used=any(t.source in ("yolo", "suggestion") for t in tracks)
                      or bool(previous is not None and previous.suggestions_used),
                      author_id=staff.id, author_name=staff.name, created_at=now)
     session.add(row)

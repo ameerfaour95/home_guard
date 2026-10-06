@@ -3,15 +3,20 @@
 The studio's wire objects stay plain JSON dicts: their vocabulary (categories, zones, flags) is
 fleet_contract/taxonomy.py, which both sides import, not a desktop model.
 """
+from copy import deepcopy
+from dataclasses import asdict
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from threading import RLock
+
+import httpx
 
 from home_guard_project.cloud.tagstudio import queue as work_queue
 from home_guard_project.cloud.tagstudio.config import StudioPaths
 from home_guard_project.cloud.tagstudio.fields import TagError, clean_fields, fold
 from home_guard_project.cloud.tagstudio.service import StudioError, TagStudio, require_category
-from .backend import AuthError, ForbiddenError, ServerError, UnsupportedError, ValidationError
+from .backend import AuthError, ConflictError, ForbiddenError, ServerError, UnsupportedError, ValidationError
+from .models import AnnotationOut, decode
 
 
 class ConsentError(ForbiddenError):
@@ -67,6 +72,18 @@ class HttpTagging:
     def tagging_export(self, include_needs_check=False):
         return self._tag_json('POST', 'tagging/export', json=dict(include_needs_check=include_needs_check))
 
+    def tagging_suggest(self, key, refresh=False):
+        # the model watches the clip first: up to a minute or two, not the usual 15 seconds
+        return self._tag_json('POST', 'tagging/suggest', json=dict(key=key, refresh=refresh),
+                              timeout=httpx.Timeout(180, connect=5))
+
+    def clip_boxes(self, key):
+        """The Label view's annotation of a dataset clip (not an indexed event)."""
+        return decode(AnnotationOut, self._tag_json('GET', 'tagging/boxes', params=dict(key=key)))
+
+    def save_clip_boxes(self, key, annotation):
+        return decode(AnnotationOut, self._tag_json('PUT', 'tagging/boxes', json=dict(asdict(annotation), key=key)))
+
 
 class DemoTagging:
     """The same studio logic over the bundled demo dataset, with tags kept in memory."""
@@ -104,6 +121,33 @@ class DemoTagging:
     def tagging_teach(self, key):
         raise ValidationError('No teacher model is configured in the demo')
 
+    def tagging_suggest(self, key, refresh=False):
+        """The demo answers from a canned model (no network): what "Suggest tag" would fill in."""
+        studio = self._tag_studio()
+        if getattr(studio, 'suggest_client', None) is None:
+            studio.suggest_client = DemoSuggestClient()
+        return _demo_call(lambda: studio.suggest(None, key, refresh))
+
+    def clip_boxes(self, key):
+        studio = self._tag_studio()
+        with studio._lock:
+            saved = studio._boxes.get(key)
+        if saved is not None:
+            return deepcopy(saved)
+        return decode(AnnotationOut, _demo_call(lambda: studio.clip_boxes(None, key)))
+
+    def save_clip_boxes(self, key, annotation):
+        studio, old = self._tag_studio(), self.clip_boxes(key)
+        if annotation.base_version != old.version:
+            raise ConflictError()
+        result = deepcopy(old)
+        for name in ('tracks', 'description', 'drop_clip', 'needs_review', 'status'):
+            setattr(result, name, deepcopy(getattr(annotation, name)))
+        result.version, result.updated_utc, result.author = old.version + 1, datetime.now(timezone.utc), self.me().name
+        with studio._lock:
+            studio._boxes[key] = result
+        return deepcopy(result)
+
     def tagging_export(self, include_needs_check=False):
         return self._tag_studio().export(None, include_needs_check=include_needs_check)
 
@@ -120,7 +164,20 @@ class _MemoryStudio(TagStudio):
 
     def __init__(self, paths):
         super().__init__(paths)
-        self._events, self._lock = [], RLock()
+        self._events, self._lock, self._boxes = [], RLock(), {}
+
+    def clip_boxes(self, session, key):
+        from home_guard_project.cloud.tagstudio.boxes import dataset_tracks
+        from home_guard_project.cloud.tagstudio.service import _track_dict
+
+        item, _ = self._item(session, key)
+        fps = item.fps or 7.0
+        frames = round(float(item.duration_sec or 0) * fps) or None
+        tracks = [_track_dict(t) for t in dataset_tracks(str(self.paths.dataset), item.clip_id, fps)]
+        return dict(event_id=0, version=0, status='new', tracks=tracks, description='', ai_description='',
+                    ai_status='none', ai_model=None, ai_prompt_version=None, drop_clip=False, needs_review=False,
+                    author=None, updated_utc=None, fps=fps, frame_count=frames, frame_size=None,
+                    suggestions_used=bool(tracks))
 
     def tags(self, session):
         with self._lock:
@@ -143,3 +200,25 @@ class _MemoryStudio(TagStudio):
         rows = work_queue.build(items.values(), tags)
         next_key = next((i.key for i, a in rows if a.tier != work_queue.DONE and i.key != key), '')
         return dict(tag=tags[key].as_dict(), assessment=work_queue.assess(item, tags[key]).as_dict(), next_key=next_key)
+
+
+class DemoSuggestClient:
+    """An OpenAI-shaped client that answers "Suggest tag" without the network (demo, screenshots, tests)."""
+
+    model = 'demo/qwen3-vl-32b-instruct (offline)'
+
+    def __init__(self, answer=None):
+        import json
+        self.calls = 0
+        self._answer = json.dumps(answer or dict(
+            summary='A man in a dark jacket walks up the driveway, looks at the front door and walks back out to the '
+                    'street.', category='N1', other_text='', zone='entrance', movement='approaching',
+            flags=[], people=1, vehicles=0, vehicle_moving=False, animals=0, visibility='clear',
+            appearance=['dark jacket', 'grey trousers'], evidence_frame=3, raw_label='normal'))
+        self.chat = self
+        self.completions = self
+
+    def create(self, **kwargs):
+        from types import SimpleNamespace
+        self.calls += 1
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=self._answer))])

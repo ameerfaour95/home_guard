@@ -230,3 +230,46 @@ def test_review_sends_the_displayed_version_and_a_stale_review_says_reload(widge
     assert sent[0].version == shown
     assert v.error.isVisible() and 'changed since you opened it' in v.error.text() and 'reload' in v.error.text()
     assert b.annotation(101).status == 'submitted'  # nothing approved unseen
+
+
+def test_readable_track_names_per_class_in_order_of_appearance(app):
+    d = document()
+    d.tracks = [Track('t-7', 'person', [Keyframe(3, .25, [.1, .1, .2, .2])], 'yolo'),
+                Track('966163d3', 'person', [Keyframe(0, 0., [.3, .1, .4, .2])]),
+                Track('t-2', 'car', [Keyframe(5, .4, [.5, .5, .7, .7])], 'yolo')]
+    assert d.display_names() == {'966163d3': 'person #1', 't-7': 'person #2', 't-2': 'car #1'}
+    assert d.display_name(d.tracks[0]) == 'person #2' and [t.track_id for t in d.unchecked] == ['t-7', 't-2']
+
+
+def test_delete_removes_the_selected_track_at_once_and_undo_brings_it_back(widgets, wait):
+    v = view(widgets, wait)
+    assert v.doc.tracks and all(t.source == 'yolo' for t in v.doc.tracks)       # preloaded, nothing to accept
+    assert 'not checked yet' in v.boxes_note.text() and not v.delete_box.isEnabled()
+    first = v.doc.tracks[0].track_id
+    v.doc.selected = first; v.selection_changed()
+    assert v.delete_box.isEnabled()
+    v.setFocus(); QTest.keyClick(v, Qt.Key.Key_Delete)
+    assert first not in [t.track_id for t in v.doc.tracks] and v.doc.dirty
+    QTest.keyClick(v, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
+    assert first in [t.track_id for t in v.doc.tracks]
+    v.doc.selected = first; v.selection_changed(); v.delete_box.click()
+    assert first not in [t.track_id for t in v.doc.tracks]
+    v.save(); wait(lambda: not v.writer.busy)
+    assert first not in [t.track_id for t in v.backend.annotation(101).tracks]   # the saved annotation lost it too
+
+
+def test_editing_a_yolo_box_makes_it_human(app):
+    d = document(); d.tracks[0].source = 'yolo'; d.selected = 'human1'; d.seek(0)
+    d.change_class('car')
+    assert d.tracks[0].source == 'human' and not d.unchecked
+
+
+def test_dataset_clip_opens_in_the_label_view(widgets, wait):
+    b = DemoBackend()
+    v = LabelView(b, b.role); widgets.append(v); v.resize(1366, 768); v.show()
+    v.open_clip('ds:front_door_1791000001_trigger')
+    wait(lambda: v.doc is not None and not v.loader.busy and not v.media.busy)
+    assert v.boxes_note.text() == 'No YOLO boxes for this clip' and v.title.text().endswith('front_door_1791000001_trigger')
+    v.doc.put_box([.2, .2, .4, .6]); v.save(); wait(lambda: not v.writer.busy)
+    saved = b.clip_boxes('ds:front_door_1791000001_trigger')
+    assert saved.version == 1 and [t.label for t in saved.tracks] == [v.doc.current_class]

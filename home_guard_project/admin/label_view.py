@@ -19,7 +19,7 @@ STALE_REVIEW = 'This clip changed since you opened it — reload'
 HELP = [('← / →', 'One frame'), ('Shift + ← / →', 'Five frames'), ('Space', 'Play / pause in real time'),
         ('. / ,', 'Next / previous keyframe'), ('1–9', 'Class: person, bicycle, car, motorcycle, bus, truck, bird, cat, dog'),
         ('K', 'Add / remove keyframe'), ('H', 'Hide / keep segment'), ('C', 'Copy box to next frame'),
-        ('Del / Shift + Del', 'Delete keyframe / track'), ('Ctrl + Z / Ctrl + Shift + Z', 'Undo / redo (including text)'),
+        ('Del / Shift + Del', 'Delete the selected box (its whole track) / only this keyframe'), ('Ctrl + Z / Ctrl + Shift + Z', 'Undo / redo (including text)'),
         ('Ctrl + S', 'Save draft'), ('Ctrl + Enter', 'Submit and open next clip'), ('Esc', 'Deselect'), ('?', 'Keyboard help')]
 
 
@@ -72,8 +72,8 @@ class LabelView(QWidget):
         for i, name in enumerate(CLASSES): self.classes.addItem(f'{i+1}  {name}', name)
         self.classes.activated.connect(lambda: self.doc and self.doc.change_class(self.classes.currentData()))
         tools.addWidget(self.classes)
-        self.suggestions = button('Accept all suggestions', lambda: self.doc and self.doc.accept_all())
-        tools.addWidget(self.suggestions); tools.addStretch()
+        # The YOLO boxes open as normal, editable tracks: fix them in place; nothing to accept first.
+        self.boxes_note = label('', 'muted'); tools.addWidget(self.boxes_note); tools.addStretch()
         tools.addWidget(label('Drag to draw · 8 resize handles', 'muted')); column.addLayout(tools)
         self.canvas = LabelCanvas(theme); self.canvas.selected.connect(self.selection_changed)
         self.canvas.interaction_started.connect(self.player.pause); column.addWidget(self.canvas, 1)
@@ -82,6 +82,9 @@ class LabelView(QWidget):
         self.position = label('Frame 1 · 0.000 s', 'muted'); transport.addWidget(self.position, 1)
         transport.addWidget(button('Keyframe K', lambda: self.doc and self.doc.toggle_keyframe()))
         transport.addWidget(button('Hide / keep H', lambda: self.doc and self.doc.set_enabled()))
+        self.delete_box = button('Delete box  Del', self.delete_selected)
+        self.delete_box.setToolTip('Remove the selected box and its whole track (Ctrl+Z brings it back)')
+        transport.addWidget(self.delete_box)
         column.addLayout(transport)
         self.timeline = TrackTimeline(theme); self.timeline.seek_requested.connect(self.seek); self.timeline.selected.connect(self.selection_changed)
         scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setWidget(self.timeline)
@@ -117,7 +120,7 @@ class LabelView(QWidget):
             'Shift+Left': lambda: self.step(-5), 'Shift+Right': lambda: self.step(5), 'Space': self.toggle_play,
             '.': lambda: self.jump_keyframe(1), ',': lambda: self.jump_keyframe(-1),
             'K': lambda: self.doc.toggle_keyframe(), 'H': lambda: self.doc.set_enabled(), 'C': self.copy_next,
-            'Del': lambda: self.doc.delete_keyframe(), 'Shift+Del': lambda: self.doc.delete_track(),
+            'Del': self.delete_selected, 'Shift+Del': lambda: self.doc.delete_keyframe(),
             'Ctrl+Z': lambda: self.doc.undo(), 'Ctrl+Shift+Z': lambda: self.doc.redo(),
             'Ctrl+S': self.save, 'Ctrl+Return': self.submit, 'Esc': self.deselect, '?': self.help}
         callbacks.update({str(i+1): lambda n=n: self.doc.change_class(n) for i, n in enumerate(CLASSES)})
@@ -163,6 +166,17 @@ class LabelView(QWidget):
     def open_event(self, event_id):
         self.open_queue('needs_labeling', event_id)
 
+    def open_clip(self, key):
+        """A clip of the unified dataset (key "ds:<clip id>"): its boxes and text, saved as versions of its own."""
+        if self.doc and (self.doc.dirty or self.writer.busy):
+            self.pending_open = ('clip', key); self.save(); return
+        if self.loader.busy: return
+        self.autosave.stop(); self.player.stop(); self.player.setSource(QUrl()); self.set_ready(False)
+        self.error.hide(); self.loading_kind = 'dataset'
+        self.queue, self.queue_index = [], -1; self.clip_picker.clear(); self.clip_picker.addItem(key)
+        self.queue_title.setText('DATASET CLIP')
+        self.loader.start(lambda: (key, self.backend.clip_boxes(key)))
+
     def choose_clip(self, index):
         self.clip_picker.setCurrentIndex(self.queue_index); self.open_index(index)
 
@@ -188,6 +202,17 @@ class LabelView(QWidget):
                 self.canvas.message = 'No clips in this queue'; self.canvas.update(); self.timeline.update()
                 self.ai_text.clear(); self.description.clear()
             return
+        if self.loading_kind == 'dataset':
+            from types import SimpleNamespace
+            key, annotation = result
+            self.recording = SimpleNamespace(id=key, clip_key=key, camera=key.split(':', 1)[-1], artifacts=[],
+                                             duration_sec=(annotation.frame_count / annotation.fps)
+                                             if annotation.frame_count and annotation.fps else None)
+            self.install(annotation)
+            self.title.setText(f'Label  ·  {self.recording.camera}')
+            self.canvas.image = QImage(); self.canvas.message = 'Loading recording…'
+            self.canvas.frame_size = tuple(annotation.frame_size or [640, 360])
+            self.request_media(); return
         event, annotation = result
         self.recording = event; self.install(annotation)
         self.title.setText(f'Label  ·  {event.camera}  ·  #{event.id}')
@@ -211,6 +236,10 @@ class LabelView(QWidget):
         if self.media.busy:
             self.media_dirty = True; return
         self.media_dirty = False; self.media_event = self.recording.id
+        if getattr(self.recording, 'clip_key', None):
+            from types import SimpleNamespace
+            key = self.recording.clip_key
+            self.media.start(lambda: SimpleNamespace(**self.backend.tagging_media(key, 'clip'))); return
         video = next((a for role in ('original_video', 'clip', 'rendition') for a in self.recording.artifacts if a.available and a.role == role), None)
         if not video: self.media_error(); return
         self.media.start(lambda: self.backend.artifact_access(video.id, 'training' if self.role == 'labeler' else 'review'))
@@ -283,6 +312,10 @@ class LabelView(QWidget):
         frames = [k.frame for k in self.doc.track.keyframes if (k.frame-self.doc.frame)*direction > 0]
         if frames: self.seek(min(frames) if direction > 0 else max(frames))
 
+    def delete_selected(self):
+        if self.doc and self.doc.delete_track():
+            self.canvas.update(); self.timeline.update()
+
     def deselect(self):
         self.doc.selected = None; self.selection_changed()
 
@@ -290,6 +323,7 @@ class LabelView(QWidget):
         if self.doc:
             name = self.doc.track.label if self.doc.track else self.doc.current_class
             self.classes.setCurrentIndex(CLASSES.index(name)); self.canvas.update(); self.timeline.update()
+            self.delete_box.setEnabled(self.doc.track is not None)
 
     def text_changed(self, *_):
         if self.doc: self.doc.set_text(self.description.toPlainText(), self.drop.isChecked(), self.needs_review.isChecked())
@@ -309,7 +343,11 @@ class LabelView(QWidget):
             widget.blockSignals(False)
         self.status.setText(self.doc.annotation.status.upper()); self.version.setText(f'v{self.doc.annotation.version} · Versions')
         self.diff.setText('Changed' if self.doc.description != self.doc.annotation.ai_description else 'AI draft')
-        self.suggestions.setEnabled(any(t.source == 'suggestion' for t in self.doc.tracks))
+        unchecked = len(self.doc.unchecked)
+        self.boxes_note.setText('No YOLO boxes for this clip' if not self.doc.tracks and not self.doc.annotation.version
+                                else f'{unchecked} YOLO box track{"s" if unchecked != 1 else ""} not checked yet'
+                                if unchecked else '')
+        self.delete_box.setEnabled(self.doc.track is not None)
         self.review_panel.setVisible(self.role == 'admin' and self.doc.annotation.status == 'submitted')
         self.timeline.refresh(); self.selection_changed(); self.update_save_state()
 
@@ -331,7 +369,12 @@ class LabelView(QWidget):
         self.sent_doc, self.sent_snapshot = self.doc, self.doc.snapshot()
         eid, request = self.doc.annotation.event_id, self.doc.request(status)
         if status == 'submitted': self.set_ready(False)
-        self.writer.start(lambda: self.backend.save_annotation(eid, request)); self.update_save_state()
+        key = getattr(self.recording, 'clip_key', None)
+        if key:
+            self.writer.start(lambda: self.backend.save_clip_boxes(key, request))
+        else:
+            self.writer.start(lambda: self.backend.save_annotation(eid, request))
+        self.update_save_state()
 
     def saved(self, annotation, error):
         self.set_ready(True)
@@ -359,6 +402,7 @@ class LabelView(QWidget):
         pending, self.pending_open = self.pending_open, None
         if pending:
             if pending[0] == 'queue': self.open_queue(*pending[1:])
+            elif pending[0] == 'clip': self.open_clip(pending[1])
             else: self.open_index(pending[1])
 
     def submit(self):
@@ -371,7 +415,7 @@ class LabelView(QWidget):
         self.reader.start(lambda: self.backend.annotation(eid))
 
     def versions(self):
-        if not self.doc or self.reader.busy: return
+        if not self.doc or self.reader.busy or getattr(self.recording, 'clip_key', None): return
         self.read_kind = 'history'; eid = self.doc.annotation.event_id
         self.read_event = eid
         self.reader.start(lambda: self.backend.annotation_history(eid))

@@ -53,7 +53,7 @@ def test_new_annotation_starts_from_weak_label_suggestions(client, staff_factory
     assert body["suggestions_used"] is True and body["author"] is None and body["updated_utc"] is None
     by_label = {t["label"]: t for t in body["tracks"]}
     assert set(by_label) == {"person", "dog"}  # class 4 of frame 0 is not one of the nine
-    assert all(t["source"] == "suggestion" for t in body["tracks"])
+    assert all(t["source"] == "yolo" for t in body["tracks"])  # preloaded and editable, nothing to accept first
     person = by_label["person"]
     assert [(k["frame"], k["enabled"]) for k in person["keyframes"]] == [(0, True), (2, True)]
     assert person["keyframes"][1]["t_sec"] == pytest.approx(2 / 7)

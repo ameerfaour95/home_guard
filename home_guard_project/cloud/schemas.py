@@ -347,7 +347,9 @@ class Track(BaseModel):
     track_id: str
     label: str
     keyframes: list[Keyframe]
-    source: Literal["human", "suggestion"] = "human"
+    # "yolo": preloaded detector boxes nobody has checked yet; "human" once a person edited (or kept) them;
+    # "suggestion" is the older name of "yolo", still accepted
+    source: Literal["human", "yolo", "suggestion"] = "human"
 
 
 class AnnotationIn(BaseModel):
@@ -477,6 +479,24 @@ class TaggingClip(BaseModel):
 class TagSave(BaseModel):
     key: str = Field(max_length=512)
     fields: dict
+
+
+class TagSuggestRequest(BaseModel):
+    key: str = Field(max_length=512)
+    refresh: bool = False
+
+
+class TagSuggestion(BaseModel):
+    key: str
+    model: str
+    prompt_version: str = ""
+    at: str
+    fields: dict
+    cached: bool
+
+
+class ClipAnnotationIn(AnnotationIn):
+    key: str = Field(max_length=512)
 
 
 class TagSaved(BaseModel):

@@ -48,6 +48,7 @@ class LabelCanvas(VideoCanvas):
         p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
         # Contract boxes_at supplies geometry; per-track box_at retains selection identity.
         visible = iter(self.doc.visible_boxes())
+        names = self.doc.display_names()
         for tr in self.doc.tracks:
             if box_at(tr, self.doc.t_sec) is None:
                 continue
@@ -56,9 +57,9 @@ class LabelCanvas(VideoCanvas):
                 xyxy = self.preview or xyxy
             r, color = self.rect_for(xyxy), class_color(tr.label, self.theme)
             pen = QPen(color, 2.5 if tr.track_id == self.doc.selected else 2)
-            if tr.source == 'suggestion': pen.setStyle(Qt.PenStyle.DashLine)
+            if tr.source in ('yolo', 'suggestion'): pen.setStyle(Qt.PenStyle.DashLine)
             p.setPen(pen); p.setBrush(Qt.BrushStyle.NoBrush); p.drawRect(r)
-            caption = tr.label + ('  ·  suggested' if tr.source == 'suggestion' else '  ·  '+tr.track_id[:6])
+            caption = names.get(tr.track_id, tr.label) + ('  ·  YOLO' if tr.source in ('yolo', 'suggestion') else '')
             tag = QRectF(r.x(), max(self.display_rect()[1], r.y()-25), p.fontMetrics().horizontalAdvance(caption)+16, 25)
             p.fillRect(tag, color); p.setPen(QColor('#07181b')); p.drawText(tag, Qt.AlignmentFlag.AlignCenter, caption)
             if tr.track_id == self.doc.selected:
@@ -124,7 +125,7 @@ class TrackTimeline(QWidget):
         super().__init__()
         self.doc, self.theme, self.drag = None, theme, None
         self.left, self.row_height = 172, 38
-        self.setMinimumHeight(110)
+        self.setMinimumHeight(110); self.setMouseTracking(True)
         self.setAccessibleName('Track timeline: drag keyframes; right-click segments to keep or hide')
 
     def x(self, frame):
@@ -145,11 +146,13 @@ class TrackTimeline(QWidget):
         for i in range(6):
             f = round((self.doc.frame_count-1)*i/5)
             p.drawText(QRectF(self.x(f)-28, 5, 56, 25), Qt.AlignmentFlag.AlignCenter, f'{self.doc.time_for(f):.1f}s')
+        names = self.doc.display_names()
         for row, tr in enumerate(self.doc.tracks):
             y = 48+row*self.row_height
             if tr.track_id == self.doc.selected: p.fillRect(QRectF(0, y-16, self.width(), 34), QColor(t['raised']))
             color = class_color(tr.label, self.theme)
-            p.setPen(color); p.drawText(14, y+5, f'{tr.label}  ·  {tr.track_id[:8]}')
+            unchecked = '  · YOLO' if tr.source in ('yolo', 'suggestion') else ''
+            p.setPen(color); p.drawText(14, y+5, names.get(tr.track_id, tr.label) + unchecked)
             for i, k in enumerate(tr.keyframes):
                 end = tr.keyframes[i+1].frame if i+1 < len(tr.keyframes) else self.doc.frame_count-1
                 pen = QPen(color, 5 if k.enabled else 1.5)
@@ -186,6 +189,11 @@ class TrackTimeline(QWidget):
 
     def mouseMoveEvent(self, event):
         if self.drag: self.seek_requested.emit(self.frame(event.position().x()))
+        elif self.doc:
+            row = int((event.position().y()-31)//self.row_height)
+            tracks = self.doc.tracks
+            self.setToolTip(f'{self.doc.display_name(tracks[row])}  ·  id {tracks[row].track_id}'
+                            if 0 <= row < len(tracks) and event.position().x() < self.left else '')
 
     def mouseReleaseEvent(self, event):
         if self.drag:

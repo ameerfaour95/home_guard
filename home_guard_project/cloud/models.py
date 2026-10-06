@@ -406,3 +406,21 @@ class TagEvent(Base):
     staff_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # no FK: events outlive staff
     staff_name: Mapped[str] = mapped_column(Text, default="", server_default="")
     created_at: Mapped[datetime] = mapped_column(TS)
+
+
+class ClipAnnotation(Base):
+    """One saved version of the boxes and text of a clip that is not an indexed event (a unified-dataset clip, key
+    "ds:<clip id>"). Append-only, like `annotations`."""
+    __tablename__ = "clip_annotations"
+    __table_args__ = (UniqueConstraint("clip_key", "version"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    clip_key: Mapped[str] = mapped_column(String(512), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(16))
+    tracks: Mapped[Any] = mapped_column(JSONType)
+    description: Mapped[str] = mapped_column(Text, default="", server_default="")
+    drop_clip: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
+    needs_review: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
+    author_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    author_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(TS)

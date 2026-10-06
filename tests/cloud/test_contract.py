@@ -77,7 +77,7 @@ def test_contract_amendment_2f_annotation_contract():
     assert "post" in paths[base + "/review"] and "get" in paths[base + "/history"]
     assert set(schemas["Keyframe"]["properties"]) == {"frame", "t_sec", "xyxy", "enabled"}
     assert schemas["Keyframe"]["properties"]["enabled"]["default"] is True
-    assert schemas["Track"]["properties"]["source"]["enum"] == ["human", "suggestion"]
+    assert schemas["Track"]["properties"]["source"]["enum"] == ["human", "yolo", "suggestion"]
     assert schemas["AnnotationIn"]["properties"]["status"]["enum"] == ["edited", "submitted"]
     assert set(schemas["AnnotationIn"]["required"]) == {"base_version", "tracks", "description", "status"}
     assert schemas["AnnotationOut"]["properties"]["status"]["enum"] == [

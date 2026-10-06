@@ -20,6 +20,8 @@ class DemoAnnotations:
             frames = self.detections(event_id).frames
             tracks = tracks_from_weak_labels([(f.frame_index, f.t_sec,
                       [(b.label, b.xyxy) for b in f.boxes]) for f in frames if f.status != 'not_run'])
+            for n, tr in enumerate(tracks, start=1):  # the YOLO boxes open as editable tracks
+                tr.track_id, tr.source = f't-{n}', 'yolo'
             run = next(iter(event.ai_runs), None)
             return AnnotationOut(event_id, 0, 'new', [decode(Track, asdict(t)) for t in tracks],
                 event.summary, event.summary, event.completeness.ai,
@@ -44,7 +46,7 @@ class DemoAnnotations:
             result = deepcopy(old)
             for key in ('tracks', 'description', 'drop_clip', 'needs_review', 'status'):
                 setattr(result, key, deepcopy(getattr(annotation, key)))
-            result.suggestions_used = any(t.source == 'suggestion' for t in old.tracks)
+            result.suggestions_used = any(t.source in ('yolo', 'suggestion') for t in old.tracks)
             self._record_annotation(old, result)
             return deepcopy(result)
 

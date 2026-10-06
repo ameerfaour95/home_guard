@@ -14,6 +14,7 @@ import logging
 import os
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from ...fleet_contract import taxonomy
@@ -251,6 +252,115 @@ class TagStudio:
         return path if isinstance(path, str) and os.path.isfile(path) else None
 
     # ------------------------------------------------------------ teacher and export
+    # ------------------------------------------------------------ "Suggest tag"
+    def suggester(self):
+        """The suggestion model (built once; ``suggest_client`` is injected by tests, never a real call there)."""
+        from .suggest import SuggestConfig, Suggester  # noqa: PLC0415
+
+        if getattr(self, "_suggester", None) is None:
+            repo = Path(__file__).resolve().parents[3]
+            keys = [Path(os.environ["HG_SUGGEST_KEY_FILE"])] if os.environ.get("HG_SUGGEST_KEY_FILE") else []
+            keys += [repo / "api_key.env", repo.parent / "home_guard" / "api_key.env",
+                     Path.home() / "Ameer" / "home_guard" / "api_key.env"]   # the founder laptop's key file
+            config, client = SuggestConfig.resolve(key_files=keys), getattr(self, "suggest_client", None)
+            if getattr(client, "model", None):  # a fake (tests, demo) says which model it stands for
+                config = SuggestConfig(model=client.model, base_url="offline", api_key="")
+            self._suggester = Suggester(config, str(self.paths.exports / "suggestions.jsonl"), client=client,
+                                        frames_for=getattr(self, "suggest_frames", None))
+        return self._suggester
+
+    def video_for(self, item: ClipItem, s3=None) -> Optional[str]:
+        """A local copy of the clip's full-frame video (else its crop): this machine's file, or one downloaded once
+        from S3 (read only) into the exports folder's media cache."""
+        for kind in ("clip", "crop"):
+            path = self.local_media(item, kind)
+            if path:
+                return path
+        if s3 is None or not item.video_s3.startswith("s3://"):
+            return None
+        key = item.video_s3.split("/", 3)[3]
+        dest = self.paths.exports / "media_cache" / (item.key.replace(":", "_").replace("/", "_") + ".mp4")
+        if not dest.is_file():
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            s3.download_to(key, dest)
+        return str(dest)
+
+    def suggest(self, session, key: str, refresh: bool = False, s3=None) -> Dict[str, Any]:
+        from .suggest import SuggestError  # noqa: PLC0415
+
+        item, _ = self._item(session, key)
+        try:
+            suggester = self.suggester()
+            if not refresh:
+                cached = suggester.cached(key)
+                if cached is not None:
+                    return {**cached, "cached": True}
+            video = self.video_for(item, s3)
+            if not video:
+                raise SuggestError("This clip has no video on this computer or in S3 to show the model")
+            return suggester.suggest(key, video, camera=item.camera, refresh=refresh)
+        except SuggestError as e:
+            raise StudioError(str(e), 409) from None
+
+    # ------------------------------------------------------------ boxes of dataset clips (not indexed events)
+    def clip_boxes(self, session, key: str) -> Dict[str, Any]:
+        """The Label view's annotation of a dataset clip: the newest saved version, else its YOLO boxes."""
+        from sqlalchemy import select  # noqa: PLC0415
+
+        from ..models import ClipAnnotation  # noqa: PLC0415
+        from .boxes import dataset_tracks  # noqa: PLC0415
+
+        item, _ = self._item(session, key)
+        if item.origin != "dataset" or item.event_id:
+            raise StudioError("This clip is an indexed event: open its own annotation", 400)
+        fps = item.fps or self.dataset.fps(item) or 7.0
+        duration = float(item.duration_sec or 0) or None
+        row = session.scalar(select(ClipAnnotation).where(ClipAnnotation.clip_key == key)
+                             .order_by(ClipAnnotation.version.desc()).limit(1))
+        old = item.opinions.get(OLD)
+        tracks = [_track_dict(t) for t in dataset_tracks(str(self.paths.dataset), item.clip_id, fps)]             if row is None else row.tracks or []
+        # the label files number the clip's own frames; fps is an estimate, so the clip is at least that long
+        last = max((k["frame"] for t in tracks for k in t.get("keyframes", [])), default=-1)
+        frames = max(round(duration * fps) if duration else 0, last + 1) or None
+        common = dict(event_id=0, ai_status="none", ai_model=None, ai_prompt_version=None, fps=fps,
+                      frame_count=frames, frame_size=None, ai_description=old.text if old else "")
+        if row is None:
+            return dict(common, version=0, status="new", tracks=tracks,
+                        description=old.text if old else "", drop_clip=False, needs_review=False, author=None,
+                        updated_utc=None, suggestions_used=bool(tracks))
+        return dict(common, version=row.version, status=row.status, tracks=row.tracks or [],
+                    description=row.description, drop_clip=row.drop_clip, needs_review=row.needs_review,
+                    author=row.author_name, updated_utc=row.created_at,
+                    suggestions_used=any(t.get("source") in ("yolo", "suggestion") for t in row.tracks or []))
+
+    def save_clip_boxes(self, session, staff, body, now: datetime) -> Dict[str, Any]:
+        from sqlalchemy import select, text  # noqa: PLC0415
+
+        from .. import labeling  # noqa: PLC0415
+        from ..models import ClipAnnotation  # noqa: PLC0415
+
+        item, _ = self._item(session, body.key)
+        current = self.clip_boxes(session, body.key)
+        session.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:k, 0))"), {"k": f"clipbox:{body.key}"})
+        latest = session.scalar(select(ClipAnnotation.version).where(ClipAnnotation.clip_key == body.key)
+                                .order_by(ClipAnnotation.version.desc()).limit(1)) or 0
+        if body.base_version != latest:
+            raise StudioError(f"Someone saved this clip since you opened it (now version {latest}). Reload it, "
+                              "then save again.", 409)
+        tracks = labeling.to_tracks([t.model_dump() for t in body.tracks])
+        earlier = list(session.scalars(select(ClipAnnotation).where(ClipAnnotation.clip_key == body.key)))
+        labeling.assign_track_ids(tracks, earlier, latest)
+        frames = current["frame_count"]
+        problems = labeling.problems(tracks, frames / current["fps"] if frames else None, frames)
+        if problems:
+            raise StudioError("; ".join(problems), 422)
+        session.add(ClipAnnotation(clip_key=body.key, version=latest + 1, status=body.status,
+                                   tracks=labeling.track_dicts(tracks), description=body.description,
+                                   drop_clip=body.drop_clip, needs_review=body.needs_review, author_id=staff.id,
+                                   author_name=staff.name, created_at=now))
+        session.flush()
+        return self.clip_boxes(session, body.key)
+
     def teach(self, session, key: str) -> Dict[str, Any]:
         if self.ask_teacher is None:
             raise StudioError(self.teacher_error or "No teacher model is configured (HG_TEACHER_BASE_URL, "
@@ -286,6 +396,12 @@ def require_category(current: Optional[Tag], fields: Dict[str, Any]) -> None:
     merged = {**(current.fields if current else {}), **fields}
     if not merged.get("category") and not merged.get("delete"):
         raise StudioError(NEEDS_CATEGORY, 422)
+
+
+def _track_dict(t) -> Dict[str, Any]:
+    return {"track_id": t.track_id, "label": t.label, "source": t.source,
+            "keyframes": [{"frame": k.frame, "t_sec": k.t_sec, "xyxy": list(k.xyxy), "enabled": k.enabled}
+                          for k in t.keyframes]}
 
 
 def _mac(secret: str, payload: str) -> str:

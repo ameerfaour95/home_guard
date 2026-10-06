@@ -21,11 +21,16 @@ FIELDS: Dict[str, str] = {
     "category": "choice", "other_text": "short_text", "zone": "choice", "movement": "choice",
     "flags": "multi", "visibility": "choice", "evidence_sec": "number", "evidence_frame": "int",
     "raw_label": "choice", "description": "text", "notes": "text", "needs_check": "bool", "delete": "bool",
+    "appearance": "phrases",          # up to 4 short phrases that recognise the person or vehicle again
+    "suggested_by": "short_text",     # the model whose "Suggest tag" draft this tag started from ("" = none)
+    "suggestion_use": "choice",       # "accepted" (saved as suggested) | "edited" | "" (no suggestion)
 }
 CHOICES: Dict[str, tuple] = {
     "category": taxonomy.CATEGORY_IDS, "zone": taxonomy.ZONES, "movement": taxonomy.MOVEMENTS,
     "visibility": taxonomy.VISIBILITY, "raw_label": taxonomy.LABELS, "flags": taxonomy.FLAGS,
+    "suggestion_use": ("accepted", "edited"),
 }
+MAX_PHRASES, MAX_PHRASE = 4, 60
 
 
 class TagError(ValueError):
@@ -50,6 +55,12 @@ def _clean_one(name: str, value: Any) -> Any:
                 raise TagError(f"{name}: {v!r} is not one of {', '.join(CHOICES[name])}")
             chosen.append(v)
         return [f for f in CHOICES[name] if f in chosen]          # the taxonomy's order, no repeats
+    if kind == "phrases":
+        values = value if isinstance(value, (list, tuple)) else ([] if value in (None, "") else [value])
+        phrases = [str(v).strip() for v in values if str(v).strip()]
+        if len(phrases) > MAX_PHRASES or any(len(p) > MAX_PHRASE for p in phrases):
+            raise TagError(f"{name}: at most {MAX_PHRASES} phrases of {MAX_PHRASE} characters")
+        return phrases
     if kind in ("text", "short_text"):
         text = str(value or "").replace("\r\n", "\n").strip()
         limit = MAX_SHORT_TEXT if kind == "short_text" else MAX_TEXT
@@ -89,8 +100,8 @@ def default_raw_label(category: str) -> str:
 
 
 def empty_form() -> Dict[str, Any]:
-    return {name: ([] if kind == "multi" else False if kind == "bool" else None if kind in ("number", "int") else "")
-            for name, kind in FIELDS.items()}
+    return {name: ([] if kind in ("multi", "phrases") else False if kind == "bool"
+                   else None if kind in ("number", "int") else "") for name, kind in FIELDS.items()}
 
 
 @dataclass
