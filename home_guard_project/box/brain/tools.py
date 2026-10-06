@@ -11,6 +11,7 @@ handles (E1, E2 ...) kept in the chat memory. Tools that act write a receipt
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import logging
 import math
@@ -53,6 +54,7 @@ MAX_FOUND = 8
 SUMMARY_MAX_EVENTS = 60
 MAX_DESCRIBE_PER_TURN = 5
 MAX_MEDIA_PER_TURN = 3
+MAX_ASK_FRAMES = 8          # a follow-up question looks at twice the frames of a first look
 
 
 @dataclass
@@ -70,6 +72,7 @@ class Services:
     record_live: Optional[Callable[[str, float], Dict[str, Any]]] = None
     cut_segment: Optional[Callable[..., Any]] = None
     clip_frames: Callable[[str], List[bytes]] = media.clip_frames
+    clip_frames_at: Callable[..., List[Tuple[float, bytes]]] = media.clip_frames_at
     set_camera: Optional[Callable[[str, bool], Dict[str, Any]]] = None
     add_alias: Optional[Callable[[str, str, Sequence[str]], List[str]]] = None
     remove_alias: Optional[Callable[[str, str], List[str]]] = None
@@ -106,6 +109,8 @@ class ToolContext:
     saved: int = 0
     done_calls: Dict[str, Dict[str, Any]] = field(default_factory=dict)   # idempotency within one turn
     camera_states: Dict[str, bool] = field(default_factory=dict)          # cameras changed earlier this turn
+    vision_notes: List[str] = field(default_factory=list)                 # vision answers, kept in the history
+    results: List[str] = field(default_factory=list)                      # every tool result of the turn, as JSON
 
 
 def _err(message: str, **extra: Any) -> Dict[str, Any]:
@@ -185,6 +190,7 @@ def _record_for(ctx: ToolContext, handle: Any) -> Tuple[Optional[AlertRecord], O
                    if r.alert_id == entry["ref"]), None)
     if record is None:
         return None, _err("that event is no longer on the box")
+    ctx.state.set_topic_event(str(handle).strip().upper(), _finite(ctx.services.now()))
     return record, None
 
 
@@ -297,11 +303,70 @@ def describe_event(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     record, bad = _record_for(ctx, handle)
     if bad:
         return bad
-    out = _look_clip(ctx, record, guard=False, question=str(args.get("question") or "")[:300])
+    question = str(args.get("question") or "")[:300]
+    out = _look_clip(ctx, record, guard=False, question=question)
     if not out.get("ok"):
         return out
+    if question.strip():                   # the answer is kept with the event, like an ask_vision answer
+        ctx.state.add_answer(handle, question, out["text"])
     return {"ok": True, "handle": handle, "camera": record.camera, "time": local(record.ts),
             "description": out["text"], "quality": out["quality"], "people": out["people"]}
+
+
+@_safe_tool
+def ask_vision(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+    """A follow-up question about a saved event ("what was in his hand?"): the vision model looks again at more
+    frames of the clip (or of one part of it) and answers with the frame that shows it. The chat keeps only the
+    answer, as text tied to the event; the pictures stay on the box."""
+    now = _finite(ctx.services.now())
+    handle = (str(args.get("event_id") or "").strip().upper() or ctx.state.topic_event(now)
+              or str(ctx.alert_handle or ""))
+    if not handle:
+        return _err("no event is being talked about; find it with find_events or ask the owner which event")
+    if ctx.services.vision is None:
+        return _err("the vision model is not available on this box")
+    record, bad = _record_for(ctx, handle)
+    if bad:
+        return bad
+    question = (str(args.get("question") or "").strip() or ctx.text.strip())[:300]
+    window = args.get("time_range")
+    if window is not None and not isinstance(window, dict):
+        return _err("time_range must be {\"from_sec\": number, \"to_sec\": number}")
+    entry = ctx.state.resolve(handle) or {}
+    for item in entry.get("answers") or [] if not window else []:
+        if isinstance(item, dict) and str(item.get("q") or "").casefold() == question.casefold():
+            return {"ok": True, "handle": handle, "camera": record.camera, "answer": item.get("a"),
+                    "frame": item.get("frame", 0), "time": item.get("at", ""), "cached": True}
+    if not record.clip_path:
+        return _err("the video of that event is no longer on the box")
+    if ctx.described >= MAX_DESCRIBE_PER_TURN:
+        return _err(f"only {MAX_DESCRIBE_PER_TURN} saved videos can be looked at per message")
+    clip_start = record.clip_start_ts if record.clip_start_ts else record.ts - 10.0
+    trigger = record.trigger_ts if record.trigger_ts else clip_start + PRE_SECONDS
+    start = end = None
+    if window:
+        if window.get("from_sec") is not None:
+            start = max(0.0, trigger + _finite(window["from_sec"]) - clip_start)
+        if window.get("to_sec") is not None:
+            end = max(0.0, trigger + _finite(window["to_sec"]) - clip_start)
+    ctx.described += 1
+    frames = ctx.services.clip_frames_at(record.clip_path, MAX_ASK_FRAMES, start, end)
+    if not frames:
+        return _err("the video of that event could not be read")
+    out = ctx.services.vision.ask(record.camera, [jpg for _, jpg in frames], question,
+                                  LANGUAGE_NAMES.get(ctx.lang, "English"))
+    if not isinstance(out, dict) or type(out.get("ok")) is not bool:
+        raise ValueError("vision result must contain a boolean ok field")
+    if not out["ok"]:
+        return {"ok": False, "error": str(out.get("error") or "vision_failed"), "refused": bool(out.get("refused"))}
+    frame = int(out.get("frame") or 0)
+    at = (dt.datetime.fromtimestamp(clip_start + _finite(frames[frame - 1][0])).strftime("%H:%M:%S")
+          if 1 <= frame <= len(frames) else "")
+    answer = str(out.get("answer") or "")
+    ctx.state.add_answer(handle, question, answer, frame, at)
+    ctx.vision_notes.append(f'{handle} asked "{question}": {answer}' + (f" (frame {frame}, {at})" if at else ""))
+    return {"ok": True, "handle": handle, "camera": record.camera, "answer": answer, "seen": out.get("seen") is True,
+            "frame": frame, "time": at, "frames_looked_at": len(frames)}
 
 
 @_safe_tool
@@ -1132,6 +1197,7 @@ TOOLS: Dict[str, Callable[[ToolContext, Dict[str, Any]], Dict[str, Any]]] = {
     "summarize_period": summarize_period,
     "describe_event": describe_event,
     "assess_event": assess_event,
+    "ask_vision": ask_vision,
     "ask_clarification": ask_clarification,
     "check_camera": check_camera,
     "record_clip": record_clip,

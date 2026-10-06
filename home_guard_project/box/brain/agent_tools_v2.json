@@ -30,6 +30,13 @@
     "parameters": {"type": "object", "properties": {
       "handle": {"type": "string", "description": "An event handle from find_events or summarize_period."}
     }, "required": ["handle"]}}},
+  {"type": "function", "function": {"name": "ask_vision",
+    "description": "Ask the vision model about a saved event's video when the observation does not say it (a colour, clothing, what is in a hand, a plate, which way someone went). It looks again at more frames and answers with the frame that shows it; the answer is kept with the event.",
+    "parameters": {"type": "object", "properties": {
+      "event_id": {"type": "string", "description": "An event handle (E1, E2 ...); leave it out for the event being discussed."},
+      "question": {"type": "string", "description": "The owner's question, in their own words."},
+      "time_range": {"type": "object", "description": "Only part of the video: seconds from the moment the detector fired (negative = before).", "properties": {"from_sec": {"type": "number"}, "to_sec": {"type": "number"}}}
+    }, "required": ["question"]}}},
   {"type": "function", "function": {"name": "ask_clarification",
     "description": "Ask the owner one short question with 2 to 5 button choices when the camera, the event or the request is unclear. Then stop; nothing else runs this turn.",
     "parameters": {"type": "object", "properties": {

@@ -9,7 +9,7 @@ from unittest import mock
 import numpy as np
 import yaml
 
-from home_guard_project.box.brain.media import bounds_text, clip_frames, cut_segment, record_live
+from home_guard_project.box.brain.media import bounds_text, clip_frames, clip_frames_at, cut_segment, record_live
 from home_guard_project.box.brain.media import grab_photo
 from home_guard_project.box import live_view
 
@@ -169,6 +169,20 @@ class MediaTest(unittest.TestCase):
                 self.assertIsNone(cut_segment("x", 100, 110, 100, value, "out", run=run, ffmpeg="ffmpeg"))
                 run.assert_not_called()
         self.assertEqual(bounds_text(float("nan"), "bad"), "")
+
+    def test_clip_frames_at_spreads_frames_over_a_time_range(self) -> None:
+        class Capture(FakeCapture):
+            def get(self, prop):
+                return 10.0                                   # frames per second
+
+        frames = clip_frames_at("x", count=4, open_video=lambda _: Capture(100))     # a 10-second clip
+        self.assertEqual([sec for sec, _ in frames], [0.0, 3.3, 6.6, 9.9])
+        self.assertTrue(all(isinstance(jpg, bytes) and jpg for _, jpg in frames))
+        part = clip_frames_at("x", count=3, start_sec=2.0, end_sec=4.0, open_video=lambda _: Capture(100))
+        self.assertEqual([sec for sec, _ in part], [2.0, 3.0, 4.0])
+        self.assertEqual(clip_frames_at("x", count=3, start_sec=50, open_video=lambda _: Capture(100)), [])
+        self.assertEqual(len(clip_frames_at("x", count=8, open_video=lambda _: FakeCapture(3))), 3)   # no fps
+        self.assertEqual(clip_frames_at("x", count=0, open_video=lambda _: Capture(10)), [])
 
     def test_clip_frames_releases_on_bad_frame_and_bad_count(self) -> None:
         capture = mock.Mock()

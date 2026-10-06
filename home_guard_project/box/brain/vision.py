@@ -2,7 +2,9 @@
 """One look at camera pictures by the vision model, for the assistant's tools.
 
 Used for a live photo (check_camera) and for frames of a saved clip
-(describe_event in Assistant mode, assess_event in Guard mode). The answer
+(describe_event in Assistant mode, assess_event in Guard mode), and to answer
+one follow-up question about a saved clip with the frame that shows it
+(ask_vision: "what was in his hand?"). The answer
 keeps picture quality apart from activity - "clear" means the picture is
 usable, not that nothing is happening (version 1 told the owner a blurry view
 was "clear"). Guard mode adds the tagging label and a short "why". A refusal
@@ -70,6 +72,27 @@ def look_prompt(camera: str, guard: bool, question: str = "", what: str = "a liv
     return "\n".join(lines)
 
 
+def ask_schema() -> Dict[str, Any]:
+    props = {"answer": {"type": "string"}, "frame": {"type": "integer"}, "seen": {"type": "boolean"}}
+    return {"type": "object", "properties": props, "required": list(props), "additionalProperties": False}
+
+
+def ask_prompt(camera: str, question: str, frames: int, language: str = "English") -> str:
+    return "\n".join([
+        f"You are the eyes of a home security system, looking at {frames} numbered frames (1 to {frames}, in time "
+        f'order) from a saved video of the homeowner\'s own camera "{camera}".',
+        f'The homeowner asks: "{question}"',
+        "",
+        f'"answer": the answer in {language}, in one or two short sentences, only from what the frames show. If the',
+        "frames cannot show it (too dark, too far, hidden, out of the picture), say so - never guess. Never guess",
+        "names, age or ethnicity.",
+        '"frame": the number of the frame that shows the answer best; 0 if none does.',
+        '"seen": true only when the frames clearly show the answer.',
+        "",
+        "Reply with exactly one JSON object with these fields and nothing else.",
+    ])
+
+
 class Vision:
     """*complete(prompt, jpeg_list, schema) -> raw text* does the model call (injected; raises VisionRefused)."""
 
@@ -112,6 +135,29 @@ class Vision:
             out["label"] = label_of(parsed)
             out["why"] = str(parsed.get("why") or "").strip() if out["label"] != "normal" else ""
         return out
+
+    def ask(self, camera: str, images: List[bytes], question: str, language: str = "English") -> Dict[str, Any]:
+        """One question about numbered frames: ``{"ok", "answer", "frame" (1-based, 0 for none), "seen"}``."""
+        if not images:
+            return {"ok": False, "refused": False, "error": "no_pictures"}
+        try:
+            raw = self._complete(ask_prompt(camera, question, len(images), language), list(images), ask_schema())
+        except VisionRefused:
+            return {"ok": False, "refused": True, "error": "refused"}
+        except Exception as exc:  # noqa: BLE001 - offline, TLS, a model error
+            log.warning("Vision question failed: %s", exc)
+            return {"ok": False, "refused": False, "error": "vision_failed"}
+        parsed = parse_vlm_json(raw) if isinstance(raw, str) else None
+        if (not isinstance(parsed, dict) or not isinstance(parsed.get("answer"), str)
+                or not parsed["answer"].strip()):
+            log.warning("Vision returned no usable answer to a question")
+            return {"ok": False, "refused": False, "error": "no_answer"}
+        try:
+            frame = int(parsed.get("frame") or 0)
+        except (TypeError, ValueError, OverflowError):
+            frame = 0
+        return {"ok": True, "answer": parsed["answer"].strip(), "frame": frame if 1 <= frame <= len(images) else 0,
+                "seen": parsed.get("seen") is True}
 
 
 class BudgetedVision:
@@ -158,6 +204,13 @@ class BudgetedVision:
 
     def look(self, camera: str, images: List[bytes], guard: bool, question: str = "",
              what: str = "a live photo") -> Dict[str, Any]:
+        return self._spend(lambda: self._vision.look(camera, images, guard, question, what))
+
+    def ask(self, camera: str, images: List[bytes], question: str, language: str = "English") -> Dict[str, Any]:
+        return self._spend(lambda: self._vision.ask(camera, images, question, language))
+
+    def _spend(self, call: Callable[[], Dict[str, Any]]) -> Dict[str, Any]:
+        """One vision call from today's budget."""
         try:
             with self._lock:
                 data = self._count()
@@ -181,7 +234,7 @@ class BudgetedVision:
                             os.remove(temp)
                         except OSError:
                             pass
-            return self._vision.look(camera, images, guard, question, what)
+            return call()
         except Exception as exc:  # noqa: BLE001 - includes bad clocks and injected backends
             log.warning("Budgeted vision failed: %s", exc)
             return {"ok": False, "refused": False, "error": "vision_failed"}

@@ -27,6 +27,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from ..feedback import Feedback, save_feedback
 from .claims import unbacked_claims
+from .grounding import evidence_text, ungrounded_details
 from .i18n import LANGUAGE_NAMES, t
 from .memory import ChatMemory, ChatState
 from .aliases import normalize
@@ -351,7 +352,60 @@ class OwnerAgentV2:
             ctx.call_key = ""
         if name in ACTING_TOOLS and (result.get("receipt") or result.get("receipts")):
             ctx.done_calls[key] = result
+        ctx.results.append(json.dumps(result, ensure_ascii=False, default=str))     # what an answer may rely on
         return result
+
+    # -- visual details must come from the clip ------------------------------------------
+    def _check_the_clip(self, ctx: ToolContext, answer: str, missing: List[str], now: float, lang: str,
+                        called: List[str]) -> str:
+        """The answer gives visual details (a colour, clothing, what is in a hand) that neither the observation nor
+        a vision answer backs: ask the clip in code and send what it shows instead of the model's words."""
+        handle = ctx.state.topic_event(now) or ctx.alert_handle
+        if not handle:
+            log.warning("grounding: %s is in no observation, and no event is being discussed", missing)
+            return answer
+        log.warning("grounding: %s is not in the observation; asking the clip", missing)
+        called.append("ask_vision")
+        result = self._dispatch(ctx, "ask_vision", {"event_id": handle, "question": ctx.text}, True, ["ask_vision"])
+        if not result.get("ok"):
+            return f"{t('checking_clip', lang)}\n{t('clip_check_failed', lang)}"
+        where = (f" ({t('clip_frame', lang, frame=result['frame'], time=result['time'])})"
+                 if result.get("frame") and result.get("time") else "")
+        return f"{t('checking_clip', lang)}\n{result.get('answer')}{where}"
+
+    def note_alert(self, chat_id: Any, alert: Dict[str, Any]) -> Optional[str]:
+        """An alert the box sent to this chat goes into its history as the vision agent's observation (text, about
+        150 tokens, with the event handle); the clip stays on the box. It becomes the event - and its camera the
+        camera - being talked about, so "what was in his hand?" knows which clip. Returns the handle; never raises."""
+        with self._lock:
+            try:
+                alert = _object(alert)
+                if not alert.get("alert_id"):
+                    return None
+                chat_id, now = str(chat_id), _finite(self._now())
+                try:
+                    ts = _finite(alert.get("ts") or now)
+                    dt.datetime.fromtimestamp(ts)
+                except (TypeError, ValueError, OverflowError, OSError):
+                    ts = now
+                camera = str(alert.get("camera") or "")
+                state = self.memory.load(chat_id)
+                handle = state.add_handle("event", str(alert["alert_id"]), camera, ts, str(alert.get("summary") or ""))
+                state.note_observation(handle, str(alert.get("observation") or alert.get("summary") or ""),
+                                       str(alert.get("visibility") or ""), str(alert.get("label") or ""))
+                noted = any(isinstance(turn, dict) and turn.get("kind") == "alert"
+                            and handle in (turn.get("handles") or []) for turn in state.turns[-20:])
+                if not noted:                                      # a reminder of the same alert is not a new one
+                    state.add_event_turn(handle, now)
+                state.set_topic_event(handle, now)
+                if camera:
+                    old = state.topic_camera(now)
+                    state.set_topic_camera(camera, old[1] if old and old[0] == camera else "", now)
+                self.memory.save(chat_id, state)
+                return handle
+            except Exception as exc:  # noqa: BLE001 - an alert must never fail because of the chat history
+                log.warning("Could not note the alert in the chat history: %s", exc)
+                return None
 
     # -- the model/tool loop -----------------------------------------------------------
     def _loop(self, ctx: ToolContext, model: Any, messages: List[Dict[str, Any]], tier: str,
@@ -751,6 +805,16 @@ class OwnerAgentV2:
                         # Never "I'll remember" without a save receipt: say plainly that nothing was saved.
                         answer = t("not_saved_yet", lang) if "save" in still else ""
                 break
+            if ctx.clarification is None and answer:
+                # The observation is partial: a visual detail it does not give was never checked (§10).
+                evidence = evidence_text([render_block(snapshot), str((alert or {}).get("summary") or ""),
+                                          str((alert or {}).get("observation") or ""), *focus, *ctx.results,
+                                          *(state.event_text(h) for h, e in state.handles.items()
+                                            if isinstance(e, dict) and e.get("kind") == "event")])
+                missing = ungrounded_details(answer, evidence)
+                if missing:
+                    guard_hits += 1
+                    answer = self._check_the_clip(ctx, answer, missing, now, lang, called)
         except Exception as exc:  # noqa: BLE001 - no network, a model error: the owner still gets an answer
             log.warning("The agent could not handle a message: %s", exc)
             failed = True
@@ -777,7 +841,8 @@ class OwnerAgentV2:
                 if not reply_text:
                     reply_text = t("unavailable" if failed else "nothing_done", lang)
             try:
-                state.add_turn(speaker, text, reply_text, ctx.shown, [r.summary() for r in ctx.receipts], now)
+                state.add_turn(speaker, text, reply_text, ctx.shown, [r.summary() for r in ctx.receipts], now,
+                               notes=ctx.vision_notes)
                 self.memory.save(chat_id, state)
             except Exception as exc:  # noqa: BLE001 - what was done is still reported, and its restart still runs
                 log.warning("Could not save the conversation: %s", exc)

@@ -8,7 +8,8 @@ import tempfile
 import unittest
 from unittest import mock
 
-from home_guard_project.box.brain.vision import BudgetedVision, Vision, VisionRefused, look_prompt, look_schema
+from home_guard_project.box.brain.vision import (BudgetedVision, Vision, VisionRefused, ask_prompt, ask_schema,
+                                                look_prompt, look_schema)
 from home_guard_project.box.brain.vision import make_vision
 from home_guard_project.box.inference import LABEL_RULES, build_prompt
 
@@ -71,6 +72,41 @@ class VisionTest(unittest.TestCase):
                          "daily_budget")                      # survives a restart
         clock["t"] += 86400
         self.assertTrue(budget.look("c", [b"x"], guard=False)["ok"])
+
+
+class AskTest(unittest.TestCase):
+    """A follow-up question about a saved clip: an answer, the frame that shows it, and whether it was seen."""
+
+    def test_ask_prompt_numbers_the_frames_and_forbids_guessing(self) -> None:
+        prompt = ask_prompt("camera_3", "what was in his hand?", 6, "Hebrew")
+        self.assertIn("6 numbered frames", prompt)
+        self.assertIn('"what was in his hand?"', prompt)
+        self.assertIn("in Hebrew", prompt)
+        self.assertIn("never guess", prompt)
+        self.assertEqual(set(ask_schema()["required"]), {"answer", "frame", "seen"})
+
+    def test_ask_parses_and_bounds_the_frame(self) -> None:
+        seen = {}
+
+        def complete(prompt, images, schema):
+            seen.update(images=images, schema=schema)
+            return json.dumps({"answer": "A phone.", "frame": 3, "seen": True})
+
+        out = Vision(complete).ask("camera_3", [b"a", b"b", b"c"], "what was in his hand?")
+        self.assertEqual(out, {"ok": True, "answer": "A phone.", "frame": 3, "seen": True})
+        self.assertEqual(seen["schema"], ask_schema())
+        far = Vision(lambda *_: json.dumps({"answer": "x", "frame": 9, "seen": True})).ask("c", [b"a"], "q")
+        self.assertEqual(far["frame"], 0)                  # a frame it was never shown
+        self.assertEqual(Vision(lambda *_: "{}").ask("c", [b"a"], "q")["error"], "no_answer")
+        self.assertEqual(Vision(lambda *_: "{}").ask("c", [], "q")["error"], "no_pictures")
+
+    def test_ask_counts_against_the_daily_budget(self) -> None:
+        path = os.path.join(tempfile.mkdtemp(), "vision_budget.json")
+        ok = Vision(lambda *_: json.dumps({"answer": "A phone.", "frame": 1, "seen": True}))
+        budget = BudgetedVision(ok, limit_per_day=1, path=path, now=lambda: 1_790_000_000.0)
+        self.assertTrue(budget.ask("c", [b"x"], "q")["ok"])
+        self.assertEqual(budget.ask("c", [b"x"], "q")["error"], "daily_budget")
+        self.assertEqual(budget.look("c", [b"x"], guard=False)["error"], "daily_budget")
 
 
 class VisionRobustnessTest(unittest.TestCase):

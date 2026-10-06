@@ -21,8 +21,8 @@ _DIR = os.path.dirname(os.path.abspath(__file__))
 TOOLS_PATH = os.path.join(_DIR, "agent_tools_v2.json")
 PROMPTS_DIR = os.path.join(_DIR, "prompts")
 
-COMMON_TOOLS = ("find_events", "summarize_period", "check_camera", "record_clip", "send_media", "pause_alerts",
-                "resume_alerts", "set_camera_active", "set_alias", "change_setting", "record_verdict",
+COMMON_TOOLS = ("find_events", "summarize_period", "ask_vision", "check_camera", "record_clip", "send_media",
+                "pause_alerts", "resume_alerts", "set_camera_active", "set_alias", "change_setting", "record_verdict",
                 "ask_clarification", "get_alert_settings", "set_alert_types", "set_sensitivity", "reply")
 GUARD_TOOLS = COMMON_TOOLS[:2] + ("assess_event",) + COMMON_TOOLS[2:]
 ASSISTANT_TOOLS = COMMON_TOOLS[:2] + ("describe_event",) + COMMON_TOOLS[2:]
@@ -76,7 +76,8 @@ _NOW = re.compile(r"\b(?:now|right now|currently|at the moment)\b|(?<!\w)[וה]?
                   re.IGNORECASE)
 _PRESENCE = re.compile(
     r"\b(?:is|are)\s+there\s+(?:any(?:one|body)?|some(?:one|body)|people|a\s+\w+|\w+s)\b|"
-    r"\b(?:is|are)\s+(?:any(?:one|body)|some(?:one|body)|people)\b|\bany(?:one|body)\s+(?:there|around|outside|at|near|in)\b|"
+    r"\b(?:is|are)\s+(?:any(?:one|body)|some(?:one|body)|people)\b|"
+    r"\bany(?:one|body)\s+(?:there|around|outside|at|near|in)\b|"
     r"(?<!\w)[וה]?יש\s+(?:\S+\s+)?(?:אנשים|מישהו|אדם|רכב|רכבים|ילדים|עובדים|פועלים|חיות|כלב|חתול)(?!\w)|"
     r"(?<!\w)[וה]?מישהו(?!\w)", re.IGNORECASE)
 _PAST = re.compile(

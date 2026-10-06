@@ -79,6 +79,50 @@ def clip_frames(clip_path: str, count: int = 4, open_video: Any = None) -> List[
         return []
 
 
+def clip_frames_at(clip_path: str, count: int = 8, start_sec: Optional[float] = None, end_sec: Optional[float] = None,
+                   open_video: Any = None) -> List[Tuple[float, bytes]]:
+    """*count* evenly spaced frames between *start_sec* and *end_sec* of a saved clip (seconds from its start; the
+    whole clip by default), as ``(seconds, JPEG bytes)`` so an answer can say which moment it saw. Empty on any
+    failure."""
+    try:
+        import cv2  # noqa: PLC0415
+
+        count = int(count)
+        if count <= 0:
+            return []
+        cap = (open_video or cv2.VideoCapture)(clip_path)
+        frames = []
+        try:
+            try:
+                fps = float(cap.get(cv2.CAP_PROP_FPS))
+            except Exception:  # noqa: BLE001 - a capture without a frame rate
+                fps = 0.0
+            while True:
+                ok, frame = cap.read()
+                if not ok:
+                    break
+                frames.append(frame)
+        finally:
+            cap.release()
+        if not math.isfinite(fps) or fps <= 0:
+            fps = 5.0
+        first = 0 if start_sec is None else max(0, int(round(_finite(start_sec) * fps)))
+        last = len(frames) - 1 if end_sec is None else min(len(frames) - 1, int(round(_finite(end_sec) * fps)))
+        if first > last:
+            return []
+        span = last - first
+        picks = sorted({first + round(i * span / (count - 1)) for i in range(count)}) if count > 1 else [first]
+        out = []
+        for index in picks:
+            ok, buf = cv2.imencode(".jpg", frames[index], [int(cv2.IMWRITE_JPEG_QUALITY), 85])
+            if ok:
+                out.append((round(index / fps, 1), buf.tobytes()))
+        return out
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Could not read frames from %s: %s", clip_path, exc)
+        return []
+
+
 def record_live(camera: str, seconds: float, out_dir: str, cameras_path: str, zones_path: Optional[str] = None,
                 now: Callable[[], float] = time.time, open_capture: Any = None,
                 clock: Callable[[], float] = time.monotonic, fps: float = 5.0, h264: bool = True) -> dict:

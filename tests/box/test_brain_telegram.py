@@ -253,6 +253,32 @@ class StartupTest(unittest.TestCase):
         assistant.cfg = []
         assistant.announce("mode")
 
+    def test_a_delivered_alert_goes_into_each_chats_history(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from home_guard_project.box.telegram_agent import OwnerAssistant
+
+        noted = []
+        agent = SimpleNamespace(version=2, note_alert=lambda chat_id, alert: noted.append((chat_id, alert["alert_id"])))
+        assistant = OwnerAssistant(CFG, None, None, SimpleNamespace(agent=agent))
+        sent = {"sent": True, "results": [{"chat_id": "-5", "ok": True}, {"chat_id": "-6", "ok": False}]}
+
+        class Now:                               # runs the background note at once
+            def __init__(self, target, **kw):
+                self.target = target
+
+            def start(self):
+                self.target()
+
+        with patch("home_guard_project.box.telegram_agent.send_alert", return_value=sent), \
+                patch("home_guard_project.box.telegram_agent.threading.Thread", Now):
+            self.assertEqual(assistant.send_alert({"alert_id": "a1", "camera": "gate"}, "text"), sent)
+            self.assertEqual(noted, [("-5", "a1")])                   # only where it arrived
+            agent.note_alert = lambda *a: (_ for _ in ()).throw(RuntimeError("boom"))
+            self.assertEqual(assistant.send_alert({"alert_id": "a2"}, "text"), sent)   # never breaks an alert
+            assistant.inbox = SimpleNamespace(agent=SimpleNamespace(version=1))
+            self.assertEqual(assistant.send_alert({"alert_id": "a3"}, "text"), sent)
+
     def test_no_cameras_hands_over_to_the_assistant_only_wait(self):
         # serve_without_cameras itself (assistant started even if it raises, waits) is
         # covered in test_inference.py; here run() must hand over to it, not exit.
