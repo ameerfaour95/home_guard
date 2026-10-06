@@ -1723,7 +1723,9 @@ def _save_clip(job: AlertJob, frames: List[Any], production_dir: str, training_d
             meta = write_alert_clip(training_dir, job.camera, f"{job.camera}_{int(job.ts)}_paused", frames,
                                     alert, kind="paused", extra=job.input_meta, **clip_options)
         else:
-            meta = write_alert_clip(production_dir, job.camera, job.stem, frames, alert,
+            # The owner's copy carries the teacher's answer too: an owner's late answer re-creates the
+            # training copy from it (feedback.keep_for_training) once the first one has been uploaded.
+            meta = write_alert_clip(production_dir, job.camera, job.stem, frames, alert, teacher=job.teacher,
                                     extra={"trigger_ts": job.ts, "mode": "guard", **job.input_meta}, **clip_options)
             # The owner's copy above expires in two weeks; the training set keeps every
             # alert with the teacher's answer, so a student model can be trained on it.
