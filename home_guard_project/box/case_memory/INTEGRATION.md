@@ -1,7 +1,7 @@
 # Case memory: how to wire it in
 
-The package is standalone and fully tested (`tests/box/test_case_memory_*.py`). Nothing in the guard loop or
-the assistant calls it yet. This page lists the calls each side makes. Design: plan page section 6 and
+The package is fully tested (`tests/box/test_case_memory_*.py`). The guard loop calls it (section 1, wired
+2026-10-06, on by default); the assistant doesn't yet (section 2). This page lists the calls each side makes. Design: plan page section 6 and
 `knowledge_base_home_gaurd/reports/זיכרון מקרים למתחקר.md`.
 
 ## What memory never does (enforced in code, tested)
@@ -19,6 +19,21 @@ the assistant calls it yet. This page lists the calls each side makes. Design: p
   which is today's behaviour.
 
 ## 1. Guard loop (`inference.py`, owner: the inference session)
+
+**Status: wired (2026-10-06), on by default.** `box.yaml` `case_memory: off` switches it off. `run()` calls
+`start_case_memory()` and `_worker` calls `_case_memory()` (`inference.py`); tests in
+`tests/box/test_case_memory_wiring.py`. What differs from the plan below until the pieces it needs exist:
+
+- **Buttons** aren't sent: the brain/ Telegram callbacks don't exist yet. They're recorded in
+  `job.alert["case_buttons"]` for the assistant session.
+- **Digest**: the box has no daily digest yet, so `digest` is delivered like `quiet` (silent, with the note
+  line) and logged (`case memory chose the digest, which the box doesn't have yet`). No message is ever dropped.
+- `tracker` is `job.tracker_facts` and `cameras_in_incident` is `job.incident_cameras`, both read with
+  `getattr`; neither exists yet, so events have no path and count one camera.
+- `_worker` refuses `escalation` and `[call_owner]` itself before calling memory, and any exception (start,
+  building the event, the memory) logs a warning and keeps today's path.
+- Memory runs only when the alert is about to go out: not when paused or muted (either check), out of window or
+  a false positive.
 
 **Startup (`run()`), once:**
 
