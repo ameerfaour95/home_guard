@@ -201,5 +201,24 @@ class HebrewCancelTest(unittest.TestCase):
         for text in ("תשלח לי לטלפון", "בטלפון שלי", "ובטלפון", "לבטלפון", "בטלוויזיה"):
             self.assertFalse(needs_big(text), text)
 
+
+class HebrewWholeWordRoutingTest(unittest.TestCase):
+    """The pergola bug (2026-10-05): "למה" matched inside "מצלמה", and "תזכור" was not a big-model word."""
+
+    def test_a_word_inside_another_word_does_not_route(self):
+        for text in ("תביא לי תמונה מהמצלמה", "מה רואים במצלמה 3?", "תשלח מצלמה 2", "מצלמות"):
+            self.assertFalse(needs_big(text), text)
+
+    def test_words_with_hebrew_prefixes_still_route(self):
+        for text in ("ולמה זה קרה?", "למה אין התראות", "ותפסיק את ההתראות", "שתכבה את הכניסה", "זה לא נכון!",
+                     "ולא נכון", "תפסיקו", "חשוד?"):
+            self.assertTrue(needs_big(text), text)
+
+    def test_remember_and_naming_requests_route_to_big(self):
+        for text in ("תזכור שאם אני מדבר איתך על הפרגולה זה מצלמה 3", "זכור: הפרגולה זה מצלמה 3",
+                     "תרשום שהחניה זה מצלמה 2", "תקרא למצלמה 3 פרגולה", "ותזכרי את זה",
+                     "remember that the pergola is camera 3", "Please remember the shed is cam 4"):
+            self.assertTrue(needs_big(text), text)
+
 if __name__ == "__main__":
     unittest.main()

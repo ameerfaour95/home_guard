@@ -39,7 +39,7 @@ _BIG_WORDS_EN = re.compile(
     r"set|call (?:it|camera)|rename|wrong|false|mistake|not (?:me|us|true|right)|it" + _APOS + r"?s (?:me|us)|"
     r"that" + _APOS + r"?s me|(?:that |it )?was (?:me|us)|nobody|why|"
     r"angry|annoying|useless|stupid|broken|doesn" + _APOS + r"?t work|language|hebrew|english|suspicious|"
-    r"alert me about|alerts for|cars too|also vehicles|animals|sensitivity|sensitive|"
+    r"alert me about|alerts for|cars too|also vehicles|animals|sensitivity|sensitive|remember|"
     r"(?:less|fewer|more) alerts)\b",
     re.IGNORECASE)
 _BIG_WORDS_HE = ("תכבה", "תדליק", "תשתיק", "תפסיק", "עצור", "תמשיך", "תחזיר", "תשנה", "שנה", "תקרא", "טעות",
@@ -47,7 +47,12 @@ _BIG_WORDS_HE = ("תכבה", "תדליק", "תשתיק", "תפסיק", "עצור
                  "עברית", "אנגלית", "חשוד",
                  "תפעיל", "הפעל", "תכבי", "כבה", "תדליקי", "הדלק", "השתק", "תשתיקי", "הפסק", "תפסיקי",
                  "תגדיר", "הגדר", "תחזירי", "תמשיכי",
-                 "התראות על", "גם על רכבים", "רגישות", "פחות התראות", "יותר התראות")
+                 "התראות על", "גם על רכבים", "רגישות", "פחות התראות", "יותר התראות",
+                 "תזכור", "תזכרי", "זכור", "תרשום", "תרשמי", "תקראי")
+# Whole words only (2026-10-05: "למה" matched inside "מצלמה", so every camera message skipped the fast model),
+# each with up to two Hebrew prefix letters (ולמה, שתכבה) and a plural or feminine ending on the last word (תפסיקו).
+_BIG_HE = re.compile("|".join(
+    r"(?<!\w)[ושהבלמכ]{0,2}" + r"\s+".join(map(re.escape, words.split())) + r"[וי]?(?!\w)" for words in _BIG_WORDS_HE))
 
 
 # "בטל" as a word, with up to two prefix letters (לבטל, ולבטל, תבטל) and one suffix (בטלו, תבטלי) - never inside
@@ -62,7 +67,7 @@ def needs_big(text: str, threaded: bool = False) -> bool:
         log.warning("Invalid message text; routing to the big model")
         return True
     return (bool(_BIG_WORDS_EN.search(text or "")) or bool(_CANCEL_HE.search(text or ""))
-            or any(w in (text or "") for w in _BIG_WORDS_HE))
+            or bool(_BIG_HE.search(text or "")))
 
 
 def load_schemas(path: str = TOOLS_PATH) -> Dict[str, Dict]:
