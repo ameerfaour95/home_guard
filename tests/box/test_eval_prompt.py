@@ -47,49 +47,53 @@ class TruthTest(unittest.TestCase):
     def test_other_tag_is_stripped_but_not_alert(self) -> None:
         self.assertEqual(ev.parse_truth("[note] A man walks by."), ("normal", "A man walks by."))
 
-    def test_dropped(self) -> None:
-        self.assertTrue(ev.is_dropped("[delete] blurry"))
-        self.assertTrue(ev.is_dropped(""))
-        self.assertFalse(ev.is_dropped("A man walks by. [alert]"))
+
+class DatasetRowTest(unittest.TestCase):
+    """The one adapter from a home_guard_dataset line to the eval's truth."""
+
+    def row(self, **kw):
+        base = {"clip_id": "front_side_1771696865_trigger", "source": "house", "batch": "ameer_house_batch_1",
+                "camera": "front_side", "clip": "clips/house/front_side_1771696865_trigger.mp4",
+                "description": "A man walks in.", "alert": False}
+        return {**base, **kw}
+
+    def test_labels(self) -> None:
+        self.assertEqual(ev.dataset_row(self.row())["ours_label"], "normal")
+        self.assertEqual(ev.dataset_row(self.row(alert=True, description="Two men force the door."))["ours_label"],
+                         "alert")
+        self.assertEqual(ev.dataset_row(self.row(description="No special activity."))["ours_label"], "empty")
+        self.assertEqual(ev.dataset_row(self.row(description=""))["ours_label"], "empty")
+
+    def test_alert_tag_left_in_text_still_counts(self) -> None:
+        got = ev.dataset_row(self.row(description="A man with a gun at the counter. [alet]", alert=False))
+        self.assertEqual((got["ours_label"], got["ours_text"]), ("alert", "A man with a gun at the counter."))
+
+    def test_unreviewed_and_deleted_are_left_out(self) -> None:
+        self.assertIsNone(ev.dataset_row(self.row(alert=None, description="")))
+        self.assertIsNone(ev.dataset_row(self.row(description="[delete] blurry")))
+
+    def test_fields(self) -> None:
+        self.assertEqual(ev.dataset_row(self.row()), {
+            "clip_id": "front_side_1771696865_trigger", "source": "house", "batch": "ameer_house_batch_1",
+            "camera": "front_side", "clip": "clips/house/front_side_1771696865_trigger.mp4",
+            "ours_text": "A man walks in.", "ours_label": "normal"})
 
 
-class IndexTest(unittest.TestCase):
-    def test_preference_order(self) -> None:
-        keys = [
-            "tagging/b1/dataset_multi/clips/cam/d/x.mp4",
-            "dataset_ameer_house/clips/cam/x.mp4",
-            "dataset_multi/clips/cam/d/x.mp4",
-            "tagging/b1/dataset_multi/clips/cam/d/y.mp4",
-            "dataset_ameer_house/vlm_crops/cam/y.mp4",
-            "dataset_ameer_house/clips/cam/y.mp4",
-            "tagging/b1/dataset_multi/vlm_crops/cam/d/z.mp4",
-            "tagging/b1/dataset_multi/clips/cam/d/z.mp4",
-            "tagging/b2/clips/w.mp4",
-            "tagging/b1/clips/w.mp4",
-            "tagging/b1/analysis_output/vlm_training.jsonl",
-        ]
-        index = ev.build_index(keys)
-        self.assertEqual(index["x"], "dataset_multi/clips/cam/d/x.mp4")
-        self.assertEqual(index["y"], "dataset_ameer_house/clips/cam/y.mp4")   # full clip beats crop
-        self.assertEqual(index["z"], "tagging/b1/dataset_multi/clips/cam/d/z.mp4")
-        self.assertEqual(index["w"], "tagging/b1/clips/w.mp4")                # sorted, deterministic
-        self.assertNotIn("vlm_training", index)
+class SourceAndTimeTest(unittest.TestCase):
+    def test_source_of_old_rows_by_batch(self) -> None:
+        self.assertEqual(ev.source_of({"batch": "ameer_house_batch_2", "clip_id": "external_1772301235_import"}),
+                         "external")
+        self.assertEqual(ev.source_of({"batch": "ameer_house_batch_2", "clip_id": "main_door_1772734917_trigger"}),
+                         "house")
+        self.assertEqual(ev.source_of({"batch": "uca_dataset_batch", "clip_id": "Abuse_Abuse001_x264_w0000"}), "uca")
+        self.assertEqual(ev.source_of({"batch": "smarthome_dataset_batch"}), "smarthome")
+        self.assertEqual(ev.source_of({"source": "uca", "batch": "ameer_house_batch_1"}), "uca")
 
-    def test_a_crop_never_beats_a_full_clip_across_prefix_tiers(self) -> None:
-        keys = ["dataset_ameer_house/vlm_crops/cam/q.mp4", "tagging/b1/dataset_multi/clips/cam/d/q.mp4"]
-        for ordered in (keys, list(reversed(keys))):
-            self.assertEqual(ev.build_index(ordered)["q"], "tagging/b1/dataset_multi/clips/cam/d/q.mp4")
-
-    def test_order_of_keys_does_not_matter(self) -> None:
-        keys = ["tagging/b2/clips/w.mp4", "tagging/b1/clips/w.mp4"]
-        self.assertEqual(ev.build_index(keys), ev.build_index(list(reversed(keys))))
-
-    def test_match_reports_unmatched(self) -> None:
-        index = {"a": "dataset_multi/clips/a.mp4"}
-        rows = [{"clip_id": "a"}, {"clip_id": "b"}, {"clip_id": "a.mp4"}]
-        matched, unmatched = ev.match_rows(rows, index)
-        self.assertEqual([key for _, key in matched], ["dataset_multi/clips/a.mp4"] * 2)
-        self.assertEqual(unmatched, ["b"])
+    def test_day_night_of(self) -> None:
+        self.assertEqual(ev.day_night_of({"day_night": "night", "local_time": "12:00:00"}), "night")
+        self.assertEqual(ev.day_night_of({"local_time": "23:10:00"}), "night")
+        self.assertEqual(ev.day_night_of({"local_time": "10:10:00"}), "day")
+        self.assertIsNone(ev.day_night_of({"local_time": None}))
 
 
 class SamplingTest(unittest.TestCase):
@@ -105,6 +109,14 @@ class SamplingTest(unittest.TestCase):
         self.assertEqual(ev.sample_indices(1), [0, 0, 0, 0, 0])
         self.assertEqual(ev.sample_indices(0), [])
 
+    def test_segment_range(self) -> None:
+        self.assertEqual(ev.segment_range(20, 10.0), (0, 20))
+        self.assertEqual(ev.segment_range(20, 10.0, 1.0, 2.0), (10, 20))
+        self.assertEqual(ev.segment_range(20, 10.0, 0.25, 1.05), (3, 11))
+        self.assertEqual(ev.segment_range(20, 10.0, 0.5, 9.0), (5, 20))   # cut at the clip's end
+        self.assertEqual(ev.segment_range(20, 10.0, 3.0, 4.0), (20, 20))  # past the end: nothing
+        self.assertEqual(ev.segment_range(20, 0.0, 1.0, 2.0), (0, 0))     # fps unknown: nothing
+
     def test_samples_five_evenly_spaced_frames(self) -> None:
         path = os.path.join(self.tmp, "clip.mp4")
         write_video(path, [i * 10 for i in range(20)])
@@ -113,6 +125,15 @@ class SamplingTest(unittest.TestCase):
         for frame, want in zip(frames, [0, 5, 10, 14, 19]):
             # Neighbouring frames differ by 10 grey levels; mp4v shifts them by about 4.
             self.assertLess(abs(float(frame.mean()) - want * 10), 5, f"frame {want}")
+
+    def test_samples_inside_a_segment(self) -> None:
+        path = os.path.join(self.tmp, "clip.mp4")
+        write_video(path, [i * 10 for i in range(20)])       # 10 fps: frame i is at i/10 s
+        frames = ev.sample_frames(path, start_sec=1.0, end_sec=2.0)
+        self.assertEqual(len(frames), 5)
+        for frame, want in zip(frames, [10, 12, 14, 17, 19]):
+            self.assertLess(abs(float(frame.mean()) - want * 10), 5, f"frame {want}")
+        self.assertEqual(ev.sample_frames(path, start_sec=5.0, end_sec=6.0), [])
 
     def test_unreadable_video_gives_no_frames(self) -> None:
         path = os.path.join(self.tmp, "bad.mp4")
@@ -143,20 +164,6 @@ class FakeS3:
         self.files = files
         self.downloads: List[str] = []
 
-    def get_paginator(self, name: str):
-        assert name == "list_objects_v2", name
-        files = self.files
-
-        class Pager:
-            def paginate(self, Bucket: str, Prefix: str = ""):  # noqa: N803
-                keys = sorted(k for k in files if k.startswith(Prefix))
-                for i in range(0, len(keys), 2):           # small pages, to exercise paging
-                    yield {"Contents": [{"Key": k} for k in keys[i:i + 2]]}
-                if not keys:
-                    yield {"KeyCount": 0}
-
-        return Pager()
-
     def download_file(self, Bucket: str, Key: str, Filename: str) -> None:  # noqa: N803
         if Key not in self.files:
             raise KeyError(Key)
@@ -171,41 +178,43 @@ def jsonl_file(path: str, rows: List[dict]) -> str:
     return path
 
 
-class PreparedDirMixin:
-    """A fake bucket with two home batches and one public batch, prepared into self.out."""
+def dataset_line(clip_id: str, source: str, batch: str, camera: str, description: str, alert) -> dict:
+    return {"clip_id": clip_id, "source": source, "batch": batch, "camera": camera, "date": "2026-02-21",
+            "duration_sec": 2.0, "clip": f"clips/{source}/{clip_id}.mp4", "crop": None, "meta": None,
+            "description": description, "alert": alert, "num_persons": 1, "num_cars": 0, "needs_check": None}
 
-    def make_bucket(self) -> FakeS3:
+
+class PreparedDirMixin:
+    """A fake home_guard_dataset (two house batches, one UCA clip), prepared into self.out."""
+
+    LINES = [
+        dataset_line("cam_a_1771696897_trigger", "house", "ameer_house_batch_1", "cam_a", "A man walks in.", False),
+        dataset_line("cam_a_1771696900_trigger", "house", "ameer_house_batch_1", "cam_a", "No special activity",
+                     False),
+        dataset_line("cam_a_missing", "house", "ameer_house_batch_1", "cam_a", "Lost clip.", False),
+        dataset_line("cam_a_unreviewed", "house", "ameer_house_batch_1", "cam_a", "", None),
+        dataset_line("cam_b_1771700000_trigger", "house", "ameer_house_batch_2", "cam_b",
+                     "Two men break the door.", True),
+        dataset_line("cam_b_1771700001_trigger", "house", "ameer_house_batch_2", "cam_b", "[delete] blurry", False),
+        dataset_line("Burglary001", "uca", "uca_dataset_batch", "Burglary", "A man steals.", True),
+    ]
+
+    def make_dataset(self) -> ev.Dataset:
         self.src = tempfile.mkdtemp()
         self.out = tempfile.mkdtemp()
-        video = os.path.join(self.src, "v.mp4")
-        write_video(video, [i * 10 for i in range(20)])
-        b1 = [
-            {"clip_id": "cam_a_1771696897_trigger", "camera_name": "cam_a", "description": "A man walks in.",
-             "video_s3_path": "s3://bucket/stale/cam_a_1771696897_trigger.mp4"},
-            {"clip_id": "cam_a_1771696900_trigger", "camera_name": "cam_a", "description": "No special activity"},
-            {"clip_id": "cam_a_missing", "camera_name": "cam_a", "description": "Lost clip."},
-        ]
-        b2 = [
-            {"clip_id": "cam_b_1771700000_trigger", "camera_name": "cam_b",
-             "description": "Two men break the door. [alert]"},
-            {"clip_id": "cam_b_1771700001_trigger", "camera_name": "cam_b", "description": "[delete] blurry"},
-        ]
-        pub = [{"clip_id": "Burglary001", "camera_name": "uca", "description": "A man steals. [alert]"}]
-        files = {
-            "tagging/ameer_house_batch_1/analysis_output/vlm_training.jsonl":
-                jsonl_file(os.path.join(self.src, "b1.jsonl"), b1),
-            "tagging/ameer_house_batch_2/analysis_output/vlm_training.jsonl":
-                jsonl_file(os.path.join(self.src, "b2.jsonl"), b2),
-            "tagging/uca_dataset_batch/analysis_output/vlm_training.jsonl":
-                jsonl_file(os.path.join(self.src, "pub.jsonl"), pub),
-            "dataset_multi/clips/cam_a/d/cam_a_1771696897_trigger.mp4": video,
-            "tagging/ameer_house_batch_1/dataset_multi/vlm_crops/cam_a/d/cam_a_1771696900_trigger.mp4": video,
-            "tagging/ameer_house_batch_1/dataset_multi/clips/cam_a/d/cam_a_1771696900_trigger.mp4": video,
-            "dataset_ameer_house/clips/cam_b/cam_b_1771700000_trigger.mp4": video,
-            "dataset_ameer_house/clips/cam_b/cam_b_1771700001_trigger.mp4": video,
-            "tagging/uca_dataset_batch/dataset_uca/Burglary001.mp4": video,
-        }
-        return FakeS3(files)
+        self.video = os.path.join(self.src, "v.mp4")
+        write_video(self.video, [i * 10 for i in range(20)])
+        os.makedirs(os.path.join(self.src, "annotations"))
+        jsonl_file(os.path.join(self.src, "annotations", "clips.jsonl"), self.LINES)
+        for line in self.LINES:
+            if line["clip_id"] != "cam_a_missing":
+                path = os.path.join(self.src, line["clip"])
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                shutil.copyfile(self.video, path)
+        return ev.Dataset(self.src)
+
+    def prepare_home(self) -> Dict:
+        return ev.prepare(self.out, self.dataset, sources=["house"])
 
     def cleanup(self) -> None:
         shutil.rmtree(self.src, ignore_errors=True)
@@ -219,20 +228,19 @@ def read_jsonl(path: str) -> List[dict]:
 
 class PrepareTest(PreparedDirMixin, unittest.TestCase):
     def setUp(self) -> None:
-        self.s3 = self.make_bucket()
+        self.dataset = self.make_dataset()
 
     def tearDown(self) -> None:
         self.cleanup()
 
     def test_prepare_end_to_end_and_cache(self) -> None:
-        counts = ev.prepare(self.out, client=self.s3)
-        self.assertEqual(counts["rows"], 5)
-        self.assertEqual(counts["dropped"], 1)
-        self.assertEqual(counts["matched"], 3)
-        self.assertEqual(counts["unmatched"], ["cam_a_missing"])
+        counts = self.prepare_home()
+        self.assertEqual(counts["rows"], 7)
+        self.assertEqual(counts["dropped"], 2)          # not reviewed, [delete]
+        self.assertEqual(counts["chosen"], 4)
         self.assertEqual(counts["new"], 3)
         self.assertEqual(counts["cached"], 0)
-        self.assertEqual(counts["failed"], [])
+        self.assertEqual(counts["failed"], ["cam_a_missing"])
 
         manifest = read_jsonl(os.path.join(self.out, "manifest.jsonl"))
         self.assertEqual([(r["batch"], r["clip_id"]) for r in manifest], [
@@ -242,30 +250,45 @@ class PrepareTest(PreparedDirMixin, unittest.TestCase):
         ])
         first, empty, alert = manifest
         self.assertEqual(first["camera"], "cam_a")
+        self.assertEqual(first["source"], "house")
         self.assertEqual(first["ours_label"], "normal")
         self.assertEqual(first["ours_text"], "A man walks in.")
-        self.assertEqual(first["s3_key"], "dataset_multi/clips/cam_a/d/cam_a_1771696897_trigger.mp4")
+        self.assertEqual(first["clip"], "clips/house/cam_a_1771696897_trigger.mp4")
         self.assertEqual(first["frames"], [f"frames/cam_a_1771696897_trigger_{i}.jpg" for i in range(5)])
-        self.assertEqual(empty["s3_key"],
-                         "tagging/ameer_house_batch_1/dataset_multi/clips/cam_a/d/cam_a_1771696900_trigger.mp4")
+        self.assertEqual(first["local_time"], ev.clip_local_time("cam_a_1771696897_trigger"))
+        self.assertEqual(first["day_night"], ev.day_night_of({"local_time": first["local_time"]}))
         self.assertEqual(empty["ours_label"], "empty")
         self.assertEqual((alert["ours_label"], alert["ours_text"]), ("alert", "Two men break the door."))
         for row in manifest:
             for rel in row["frames"]:
                 self.assertTrue(os.path.isfile(os.path.join(self.out, rel)), rel)
-        # No mp4 is left behind in the output folder.
         leftovers = [n for _, _, names in os.walk(self.out) for n in names if n.endswith(".mp4")]
         self.assertEqual(leftovers, [])
-        self.assertNotIn("tagging/uca_dataset_batch/dataset_uca/Burglary001.mp4", self.s3.downloads)
 
-        before = len(self.s3.downloads)
-        again = ev.prepare(self.out, client=self.s3)
-        self.assertEqual(len(self.s3.downloads) - before, 2, "only the two home jsonl files are fetched again")
-        self.assertTrue(all(k.endswith(".jsonl") for k in self.s3.downloads[before:]))
+        with mock.patch.object(ev, "sample_frames", wraps=ev.sample_frames) as sampled:
+            again = self.prepare_home()
+        self.assertEqual(sampled.call_count, 0, "cached clips are never read again")
         self.assertEqual((again["new"], again["cached"]), (0, 3))
         self.assertEqual(read_jsonl(os.path.join(self.out, "manifest.jsonl")), manifest)
 
-    def test_temp_mp4_lives_in_the_system_temp_dir_and_is_removed(self) -> None:
+    def test_same_frames_as_the_old_tagging_prepare(self) -> None:
+        """The sampling did not change: a clip read through the dataset gives the bytes it gave before."""
+        self.prepare_home()
+        frames = ev.sample_frames(self.video)
+        for i, frame in enumerate(frames):
+            other = os.path.join(self.src, f"old_{i}.jpg")
+            ev._write_jpeg(other, frame)
+            with open(other, "rb") as a, open(os.path.join(self.out, "frames", f"cam_a_1771696897_trigger_{i}.jpg"),
+                                               "rb") as b:
+                self.assertEqual(a.read(), b.read())
+
+    def test_s3_dataset_temp_mp4_is_removed(self) -> None:
+        prefix = "home_guard_dataset"
+        files = {f"{prefix}/annotations/clips.jsonl": os.path.join(self.src, "annotations", "clips.jsonl")}
+        for line in self.LINES:
+            if line["clip_id"] != "cam_a_missing":
+                files[f"{prefix}/{line['clip']}"] = os.path.join(self.src, line["clip"])
+        s3 = FakeS3(files)
         made: List[tuple] = []
         real = ev.tempfile.mkstemp
 
@@ -275,37 +298,362 @@ class PrepareTest(PreparedDirMixin, unittest.TestCase):
                 made.append((kwargs.get("dir"), path))
             return fd, path
 
-        ev.tempfile.mkstemp = spy
-        try:
-            ev.prepare(self.out, client=self.s3)
-        finally:
-            ev.tempfile.mkstemp = real
-        self.assertEqual(len(made), 3)
+        with mock.patch.object(ev.tempfile, "mkstemp", spy):
+            counts = ev.prepare(self.out, ev.Dataset(f"s3://bucket/{prefix}", client=s3), sources=["house"])
+        self.assertEqual((counts["new"], counts["failed"]), (3, ["cam_a_missing"]))
+        self.assertIn(f"{prefix}/annotations/clips.jsonl", s3.downloads)
+        self.assertEqual(len(made), 4)              # three clips and the missing one's attempt
         for directory, path in made:
             self.assertEqual(directory, tempfile.gettempdir())
             self.assertFalse(os.path.exists(path))
 
-    def test_limit_and_batches(self) -> None:
-        counts = ev.prepare(self.out, client=self.s3, limit=1)
+    def test_s3_dataset_needs_a_client(self) -> None:
+        with self.assertRaises(ValueError):
+            ev.Dataset("s3://bucket/home_guard_dataset")
+
+    def test_limit_sources_and_batches(self) -> None:
+        counts = ev.prepare(self.out, self.dataset, limit=1)
         self.assertEqual(counts["new"], 1)
         self.assertEqual(len(read_jsonl(os.path.join(self.out, "manifest.jsonl"))), 1)
 
-        counts = ev.prepare(self.out, client=self.s3, batches=["uca_dataset_batch"])
-        self.assertEqual((counts["rows"], counts["new"]), (1, 1))
+        counts = ev.prepare(self.out, self.dataset, sources=["uca"])
+        self.assertEqual((counts["chosen"], counts["new"]), (1, 1))
         manifest = read_jsonl(os.path.join(self.out, "manifest.jsonl"))
-        self.assertEqual([r["clip_id"] for r in manifest], ["Burglary001"])
+        self.assertEqual([(r["clip_id"], r["source"]) for r in manifest], [("Burglary001", "uca")])
+        self.assertIsNone(manifest[0]["local_time"])
+        self.assertNotIn("day_night", manifest[0])
+
+        counts = ev.prepare(self.out, self.dataset, batches=["ameer_house_batch_2"])
+        self.assertEqual([r["clip_id"] for r in read_jsonl(os.path.join(self.out, "manifest.jsonl"))],
+                         ["cam_b_1771700000_trigger"])
+
+    def test_eval_truth_and_added_clips_survive_a_new_prepare(self) -> None:
+        self.prepare_home()
+        path = os.path.join(self.out, "manifest.jsonl")
+        rows = read_jsonl(path)
+        rows[2].update({"category": "E1", "subset": "misses", "day_night": "night", "hard": ["night"]})
+        added = {"clip_id": "Burglary_x_w0001", "source": "uca", "batch": "uca_eval_v2", "camera": "Burglary",
+                 "ours_text": "A man pries the window.", "ours_label": "alert", "segment": [0.5, 1.5],
+                 "frames": ev.frame_paths("Burglary_x_w0001"), "local_time": None}
+        jsonl_file(path, rows + [added])
+        counts = self.prepare_home()
+        self.assertEqual(counts["added_kept"], 1)
+        after = {r["clip_id"]: r for r in read_jsonl(path)}
+        self.assertEqual({k: after["cam_b_1771700000_trigger"][k] for k in ("category", "subset", "day_night", "hard")},
+                         {"category": "E1", "subset": "misses", "day_night": "night", "hard": ["night"]})
+        self.assertEqual(after["Burglary_x_w0001"], added)
 
     def test_counts_are_printable(self) -> None:
-        counts = ev.prepare(self.out, client=self.s3)
-        text = ev.format_prepare_counts(counts)
+        text = ev.format_prepare_counts(self.prepare_home())
         self.assertIn("cam_a_missing", text)
-        self.assertIn("matched", text)
+        self.assertIn("chosen", text)
+
+    def test_dataset_root_flag_then_env_then_default(self) -> None:
+        self.assertEqual(ev.DATASET_ENV, "HOMEGUARD_DATASET_DIR")
+        with mock.patch.dict(os.environ, {ev.DATASET_ENV: "D:/env_root"}):
+            self.assertEqual(ev.dataset_root("D:/flag_root"), "D:/flag_root")
+            self.assertEqual(ev.dataset_root(None), "D:/env_root")
+        with mock.patch.dict(os.environ, {ev.DATASET_ENV: ""}):
+            self.assertEqual(ev.dataset_root(None), ev.DEFAULT_DATASET)
+        self.assertTrue(ev.DEFAULT_DATASET.replace("\\", "/").endswith("home_guard_data/dataset"))
+
+    def test_main_prepare_takes_the_dataset_from_flag_or_env(self) -> None:
+        missing = os.path.join(self.src, "nowhere")
+        with mock.patch.dict(os.environ, {ev.DATASET_ENV: missing}):
+            self.assertEqual(ev.main(["prepare", "--out", self.out]), 1)                      # env root has no data
+            self.assertEqual(ev.main(["prepare", "--out", self.out, "--dataset", self.src, "--sources", "house"]), 0)
+        self.assertEqual(len(read_jsonl(os.path.join(self.out, "manifest.jsonl"))), 3)
+        with mock.patch.dict(os.environ, {ev.DATASET_ENV: self.src}):
+            self.assertEqual(ev.main(["prepare", "--out", self.out, "--sources", "uca"]), 0)
+        self.assertEqual([r["clip_id"] for r in read_jsonl(os.path.join(self.out, "manifest.jsonl"))],
+                         ["Burglary001"])
+
+    def test_missing_dataset_names_the_flag_and_env(self) -> None:
+        with self.assertRaises(FileNotFoundError) as cm:
+            ev.Dataset(os.path.join(self.src, "nowhere")).rows()
+        self.assertIn(ev.DATASET_ENV, str(cm.exception))
+
+
+class AddTest(PreparedDirMixin, unittest.TestCase):
+    """Clips from outside the dataset, framed inside their annotated segment."""
+
+    def setUp(self) -> None:
+        self.dataset = self.make_dataset()
+        self.prepare_home()
+        self.s3 = FakeS3({"dataset_uca/clips/Burglary/B1/Burglary_B1_w0002.mp4": self.video})
+
+    def tearDown(self) -> None:
+        self.cleanup()
+
+    def pick(self, **kw) -> dict:
+        base = {"clip_id": "Burglary_B1_w0002", "source": "uca", "batch": "uca_eval_v2", "camera": "Burglary",
+                "ours_text": "A man pries the back door open.", "ours_label": "alert", "segment": [1.0, 2.0],
+                "s3_key": "dataset_uca/clips/Burglary/B1/Burglary_B1_w0002.mp4", "category": "E1",
+                "subset": "misses", "day_night": "night"}
+        return {**base, **kw}
+
+    def test_add_frames_inside_the_segment(self) -> None:
+        counts = ev.add_picks(self.out, [self.pick()], client=self.s3)
+        self.assertEqual((counts["new"], counts["failed"], counts["invalid"]), (1, [], []))
+        rows = {r["clip_id"]: r for r in read_jsonl(os.path.join(self.out, "manifest.jsonl"))}
+        self.assertEqual(len(rows), 4)
+        row = rows["Burglary_B1_w0002"]
+        self.assertEqual((row["segment"], row["category"], row["subset"], row["day_night"]),
+                         ([1.0, 2.0], "E1", "misses", "night"))
+        self.assertIsNone(row["local_time"])
+        import cv2
+
+        for rel, want in zip(row["frames"], [10, 12, 14, 17, 19]):
+            frame = cv2.imread(os.path.join(self.out, rel))
+            self.assertLess(abs(float(frame.mean()) - want * 10), 5, rel)
+
+        again = ev.add_picks(self.out, [self.pick()], client=self.s3)
+        self.assertEqual((again["new"], again["cached"]), (0, 1))
+        self.assertEqual(len(self.s3.downloads), 1)
+
+    def test_a_changed_segment_is_framed_again(self) -> None:
+        ev.add_picks(self.out, [self.pick()], client=self.s3)
+        counts = ev.add_picks(self.out, [self.pick(segment=[0.0, 0.5])], client=self.s3)
+        self.assertEqual(counts["new"], 1)
+        rows = {r["clip_id"]: r for r in read_jsonl(os.path.join(self.out, "manifest.jsonl"))}
+        self.assertEqual(rows["Burglary_B1_w0002"]["segment"], [0.0, 0.5])
+        self.assertEqual(len(rows), 4)
+
+    def test_invalid_picks_conflicts_and_failures(self) -> None:
+        counts = ev.add_picks(self.out, [
+            self.pick(clip_id="bad_label", ours_label="maybe"),
+            self.pick(clip_id="bad_segment", segment=[2.0, 1.0]),
+            {"clip_id": "short"},
+            self.pick(clip_id="cam_a_1771696897_trigger"),            # already in from the dataset
+            self.pick(clip_id="past_end", segment=[5.0, 6.0]),         # no frame in the segment
+            self.pick(clip_id="no_key", s3_key="dataset_uca/nope.mp4"),
+        ], client=self.s3)
+        self.assertEqual(len(counts["invalid"]), 3)
+        self.assertEqual(counts["conflicts"], ["cam_a_1771696897_trigger"])
+        self.assertEqual(counts["failed"], ["past_end", "no_key"])
+        self.assertEqual(len(read_jsonl(os.path.join(self.out, "manifest.jsonl"))), 3)
+        self.assertIn("already from dataset", ev.format_add_counts(counts))
+
+    def test_dataset_clip_pick(self) -> None:
+        pick = self.pick(clip_id="Burglary001_seg", s3_key=None, clip="clips/uca/Burglary001.mp4")
+        counts = ev.add_picks(self.out, [pick], dataset=self.dataset)
+        self.assertEqual(counts["new"], 1)
+
+    def test_main_add(self) -> None:
+        picks = jsonl_file(os.path.join(self.src, "picks.jsonl"), [self.pick()])
+        with mock.patch.object(ev, "_s3_client", return_value=self.s3):
+            self.assertEqual(ev.main(["add", "--dir", self.out, "--picks", picks]), 0)
+        self.assertEqual(len(read_jsonl(os.path.join(self.out, "manifest.jsonl"))), 4)
+
+
+class OwnerSetTest(unittest.TestCase):
+    """prepare-owner: the alerts the owner judged on Telegram, framed as the box sent them."""
+
+    def setUp(self) -> None:
+        self.ds = tempfile.mkdtemp()
+        self.out = tempfile.mkdtemp()
+        fb = os.path.join(self.ds, "owner_feedback")
+        os.makedirs(fb)
+
+        def alert(box, cam, alert_id, n_frames, fps, crop=None, label="escalation"):
+            day = "2026-10-04"
+            clip_rel = f"clips\\{cam}\\{day}\\{alert_id}.mp4"
+            path = os.path.join(fb, box, "clips", cam, day, f"{alert_id}.mp4")
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            write_video(path, [i * 10 % 250 for i in range(n_frames)])
+            meta = {"camera_name": cam, "clip_path": clip_rel, "fps_estimated": fps,
+                    "alert": {"label": label, "summary": "Someone at the window."}}
+            if crop:
+                crop_rel = f"vlm_crops\\{cam}\\{day}\\{alert_id}.mp4"
+                cpath = os.path.join(fb, box, "vlm_crops", cam, day, f"{alert_id}.mp4")
+                os.makedirs(os.path.dirname(cpath), exist_ok=True)
+                write_video(cpath, [i * 10 for i in range(crop[0])])
+                meta.update({"vlm_input": "crop", "vlm_crop": {"vlm_crop_path": crop_rel, "fps": crop[1]}})
+            mpath = os.path.join(fb, box, "meta", cam, day, f"{alert_id}.meta.json")
+            os.makedirs(os.path.dirname(mpath), exist_ok=True)
+            with open(mpath, "w", encoding="utf-8") as f:
+                json.dump(meta, f)
+
+        alert("box_a", "ch2", "ch2_1791101694_alert", 20, 10.0, crop=(25, 5.0))   # crop: every 5th frame
+        alert("box_a", "ch3", "ch3_1791126021_alert", 20, 10.0, label="normal")
+        alert("box_b", "ch6", "ch6_1790979739_alert", 30, 10.0, label="normal")
+        alert("box_b", "ch6", "ch6_1790980014_alert", 20, 10.0, label="suspicious")
+
+        def row(alert_id, box, verdict, t, owner_label="", text="", model="escalation"):
+            return {"box": box, "alert_id": alert_id, "verdict": verdict, "owner_label": owner_label,
+                    "owner_text": text, "model_label": model, "time_utc": t}
+
+        jsonl_file(os.path.join(fb, "feedback_index.jsonl"), [
+            row("ch2_1791101694_alert", "box_a", "expected", "2026-10-04T08:15:58Z", "normal"),
+            row("ch2_1791101694_alert", "box_a", "real_but_wrong", "2026-10-04T08:17:04Z", "other", "ordinary"),
+            row("ch3_1791126021_alert", "box_a", "real_but_wrong", "2026-10-04T15:02:42Z", "other", "walks by",
+                model="normal"),
+            row("ch6_1790979739_alert", "box_b", "true_alert", "2026-10-02T22:25:21Z", None, None, model=None),
+            row("ch6_1790980014_alert", "box_b", "false_alarm", "2026-10-02T22:27:05Z", None, None, model=None),
+            row("gone_1790000000_alert", "box_c", "false_alarm", "2026-10-02T22:00:00Z"),       # no clip saved
+            row("ch2_1791101694_alert", "box_a", "none", "2026-10-04T09:00:00Z", "", "is it you?"),
+            row(None, "box_a", "none", "2026-10-04T09:01:00Z", "", "anyone outside?"),
+        ])
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.ds, ignore_errors=True)
+        shutil.rmtree(self.out, ignore_errors=True)
+
+    def test_truth_rules(self) -> None:
+        r = lambda v, t, tag="", model="escalation": {"verdict": v, "time_utc": t, "owner_label": tag,  # noqa: E731
+                                                       "model_label": model}
+        self.assertEqual(ev.owner_truth([r("true_alert", "1")])[0], "alert")
+        self.assertEqual(ev.owner_truth([r("false_alarm", "1")])[0], "normal")
+        self.assertEqual(ev.owner_truth([r("expected", "1")])[0], "normal")
+        self.assertEqual(ev.owner_truth([r("real_but_wrong", "1", "suspicious")])[0], "alert")
+        self.assertEqual(ev.owner_truth([r("expected", "1", "normal"), r("real_but_wrong", "2", "other")])[:2],
+                         ("normal", "owner tag normal"))
+        self.assertEqual(ev.owner_truth([r("real_but_wrong", "1", "other", "normal")])[:2],
+                         ("normal", "model_label_kept"))
+        self.assertEqual(ev.owner_truth([r("real_but_wrong", "1", "other", None)])[0], None)
+        self.assertEqual(ev.owner_truth([r("true_alert", "1"), r("false_alarm", "2")])[0], "normal")  # latest wins
+
+    def test_prepare_owner(self) -> None:
+        counts = ev.prepare_owner(self.out, self.ds)
+        self.assertEqual((counts["alerts_judged"], counts["added"], counts["no_media"]),
+                         (5, 4, ["gone_1790000000_alert"]))
+        rows = {r["clip_id"]: r for r in read_jsonl(os.path.join(self.out, "manifest.jsonl"))}
+        crop = rows["ch2_1791101694_alert"]
+        self.assertEqual((crop["ours_label"], crop["truth_from"], crop["frames_from"]),
+                         ("normal", "owner tag normal", "crop"))
+        self.assertEqual(len(crop["frames"]), 5)                 # 25 crop frames at 5 fps, 1 a second
+        self.assertEqual((crop["camera"], crop["model_label"], crop["ours_text"], crop["subset"]),
+                         ("ch2", "escalation", "ordinary", "owner"))
+        self.assertEqual(crop["local_time"], ev.clip_local_time("ch2_1791101694_alert"))
+        self.assertEqual(crop["day_night"], ev.day_night_of({"local_time": crop["local_time"]}))
+        self.assertTrue(crop["clip"].startswith("owner_feedback/box_a/vlm_crops/ch2/"))
+        self.assertEqual((rows["ch3_1791126021_alert"]["ours_label"], rows["ch3_1791126021_alert"]["truth_from"]),
+                         ("normal", "model_label_kept"))
+        whole = rows["ch6_1790979739_alert"]
+        self.assertEqual((whole["ours_label"], whole["frames_from"], len(whole["frames"])), ("alert", "clip", 3))
+        self.assertEqual(rows["ch6_1790980014_alert"]["ours_label"], "normal")
+        for r in rows.values():
+            for rel in r["frames"]:
+                self.assertTrue(os.path.isfile(os.path.join(self.out, rel)), rel)
+
+        s = ev.run_eval(self.out, ev.FakeBackend(), tag="t")
+        self.assertEqual((s["alerts_total"], s["normal_total"], s["errors"]), (1, 3, 0))
+        ev.freeze(self.out)
+        self.assertEqual(ev.frozen_changes(self.out), [])
+        with self.assertRaises(ev.FrozenSet):
+            ev.prepare_owner(self.out, self.ds)
+
+    def test_main_takes_dir_and_dataset(self) -> None:
+        with mock.patch.dict(os.environ, {ev.DATASET_ENV: self.ds}):
+            self.assertEqual(ev.main(["prepare-owner", "--dir", self.out]), 0)
+        self.assertEqual(len(read_jsonl(os.path.join(self.out, "manifest.jsonl"))), 4)
+        self.assertEqual(ev.main(["prepare-owner", "--dir", self.out, "--dataset",
+                                  os.path.join(self.ds, "nowhere")]), 1)
+
+
+class FreezeTest(PreparedDirMixin, unittest.TestCase):
+    def setUp(self) -> None:
+        self.dataset = self.make_dataset()
+        ev.prepare(self.out, self.dataset)
+        path = os.path.join(self.out, "manifest.jsonl")
+        rows = read_jsonl(path)
+        for r in rows:
+            if r["clip_id"] == "Burglary001":
+                r.update({"category": "E3", "subset": "misses", "day_night": "night"})
+        jsonl_file(path, rows)
+
+    def tearDown(self) -> None:
+        self.cleanup()
+
+    def test_freeze_records_hashes_and_make_up(self) -> None:
+        record = ev.freeze(self.out)
+        with open(os.path.join(self.out, "FROZEN.json"), encoding="utf-8") as f:
+            saved = json.load(f)
+        self.assertEqual(saved["set_sha256"], record["set_sha256"])
+        self.assertEqual(saved["clips"], 4)
+        self.assertEqual(len(saved["frames"]), 20)
+        import hashlib
+
+        rel = "frames/Burglary001_0.jpg"
+        with open(os.path.join(self.out, rel), "rb") as f:
+            self.assertEqual(saved["frames"][rel], hashlib.sha256(f.read()).hexdigest())
+        c = saved["counts"]
+        self.assertEqual(c["by_source"], {"house": 3, "uca": 1})
+        self.assertEqual(c["by_label"], {"alert": 2, "empty": 1, "normal": 1})
+        self.assertEqual(c["alerts_by_category"], {"E3": 1, "none": 1})
+        self.assertEqual(c["by_subset"], {"main": 3, "misses": 1})
+        self.assertEqual(sum(c["by_day_night"].values()), 4)
+        self.assertEqual(ev.frozen_changes(self.out), [])
+        self.assertIn("set sha256", ev.format_freeze(record))
+
+    def test_freeze_refuses_missing_frames(self) -> None:
+        os.remove(os.path.join(self.out, "frames", "Burglary001_2.jpg"))
+        with self.assertRaises(ValueError):
+            ev.freeze(self.out)
+        self.assertFalse(os.path.exists(os.path.join(self.out, "FROZEN.json")))
+
+    def test_changes_are_found(self) -> None:
+        ev.freeze(self.out)
+        with open(os.path.join(self.out, "frames", "Burglary001_2.jpg"), "ab") as f:
+            f.write(b"x")
+        os.remove(os.path.join(self.out, "frames", "Burglary001_3.jpg"))
+        self.assertEqual(ev.frozen_changes(self.out),
+                         ["frames/Burglary001_2.jpg changed", "frames/Burglary001_3.jpg is missing"])
+        with open(os.path.join(self.out, "manifest.jsonl"), "a", encoding="utf-8") as f:
+            f.write("\n")
+        self.assertIn("manifest.jsonl changed", ev.frozen_changes(self.out))
+
+    def test_not_frozen(self) -> None:
+        self.assertIsNone(ev.frozen_changes(self.out))
+        self.assertIsNone(ev.frozen_status(self.out))
+
+    def test_run_warns_and_strict_refuses(self) -> None:
+        ev.freeze(self.out)
+        s = ev.run_eval(self.out, ev.FakeBackend(), tag="ok", strict_frozen=True)
+        self.assertTrue(s["frozen"].startswith("frozen "))
+        self.assertIn("eval set          frozen", ev.format_summary(s))
+
+        with open(os.path.join(self.out, "frames", "Burglary001_2.jpg"), "ab") as f:
+            f.write(b"x")
+        with self.assertLogs("box.eval_prompt", level="WARNING") as logs:
+            s = ev.run_eval(self.out, ev.FakeBackend(), tag="warned")
+        self.assertIn("THE FROZEN EVAL SET CHANGED", "\n".join(logs.output))
+        self.assertTrue(s["frozen"].startswith("CHANGED"))
+        backend = ev.FakeBackend()
+        with self.assertRaises(ev.FrozenChanged):
+            ev.run_eval(self.out, backend, tag="strict", strict_frozen=True)
+        self.assertEqual(backend.calls, 0)
+        self.assertFalse(os.path.exists(os.path.join(self.out, "results", "strict.jsonl")))
+
+    def test_strict_refuses_an_unfrozen_set(self) -> None:
+        with self.assertRaises(ev.FrozenChanged):
+            ev.run_eval(self.out, ev.FakeBackend(), tag="x", strict_frozen=True)
+        self.assertEqual(ev.main(["run", "--dir", self.out, "--fake", "--strict-frozen"]), ev.EXIT_FROZEN)
+        self.assertEqual(ev.main(["run", "--dir", self.out, "--fake"]), 0)
+
+    def test_main_freeze_then_strict_run_then_change(self) -> None:
+        self.assertEqual(ev.main(["freeze", "--dir", self.out]), 0)
+        self.assertEqual(ev.main(["run", "--dir", self.out, "--fake", "--strict-frozen"]), 0)
+        os.remove(os.path.join(self.out, "frames", "Burglary001_0.jpg"))
+        with mock.patch.object(ev, "_make_gpt") as make:
+            code = ev.main(["run", "--dir", self.out, "--provider", "ollama", "--model", "m", "--strict-frozen"])
+        self.assertEqual(code, ev.EXIT_FROZEN)
+        make.assert_not_called()
+
+    def test_a_frozen_set_refuses_prepare_and_add(self) -> None:
+        ev.freeze(self.out)
+        with self.assertRaises(ev.FrozenSet):
+            ev.prepare(self.out, self.dataset)
+        with self.assertRaises(ev.FrozenSet):
+            ev.add_picks(self.out, [])
+        self.assertEqual(ev.main(["prepare", "--out", self.out, "--dataset", self.src]), ev.EXIT_FROZEN)
+        self.assertEqual(ev.frozen_changes(self.out), [])
 
 
 class RunTest(PreparedDirMixin, unittest.TestCase):
     def setUp(self) -> None:
-        self.s3 = self.make_bucket()
-        ev.prepare(self.out, client=self.s3)
+        self.dataset = self.make_dataset()
+        self.prepare_home()
 
     def tearDown(self) -> None:
         self.cleanup()
@@ -550,8 +898,8 @@ class RunTest(PreparedDirMixin, unittest.TestCase):
 
 class PromptFileTest(PreparedDirMixin, unittest.TestCase):
     def setUp(self) -> None:
-        self.s3 = self.make_bucket()
-        ev.prepare(self.out, client=self.s3)
+        self.dataset = self.make_dataset()
+        self.prepare_home()
         self.original = inference.build_prompt
         self.prompt_file = os.path.join(self.src, "prompt.txt")
         with open(self.prompt_file, "w", encoding="utf-8") as f:
@@ -678,8 +1026,8 @@ class ReviewFixTest(PreparedDirMixin, unittest.TestCase):
     NORMAL, EMPTY, ALERT = "cam_a_1771696897_trigger", "cam_a_1771696900_trigger", "cam_b_1771700000_trigger"
 
     def setUp(self) -> None:
-        self.s3 = self.make_bucket()
-        ev.prepare(self.out, client=self.s3)
+        self.dataset = self.make_dataset()
+        self.prepare_home()
         self.manifest_path = os.path.join(self.out, "manifest.jsonl")
         self.original_prompt = inference.build_prompt
 
@@ -1019,6 +1367,24 @@ class CostAndTimeTest(unittest.TestCase):
         self.assertEqual((s["home"]["alerts_caught"], s["home"]["alerts_total"]), (1, 2))
         self.assertEqual((s["external"]["alerts_caught"], s["external"]["alerts_total"]), (1, 1))
 
+    def test_external_imports_in_a_home_batch_are_not_home(self) -> None:
+        rows = [{**x, "batch": "ameer_house_batch_2"} for x in self.rows()]
+        rows[0]["clip_id"] = "external_1772301235_import"       # a1, caught
+        s = ev.summarize(rows)
+        self.assertEqual((s["home"]["alerts_caught"], s["home"]["alerts_total"]), (1, 2))   # a2 missed, u1 caught
+        self.assertEqual((s["external"]["alerts_caught"], s["external"]["alerts_total"]), (1, 1))
+
+    def test_day_night_field_wins_and_misses_split(self) -> None:
+        rows = self.rows()
+        rows[-1].update({"day_night": "night", "subset": "misses"})            # u1: no time, night by its frames
+        rows[1].update({"subset": "misses"})                                    # a2, missed
+        s = ev.summarize(rows)
+        self.assertEqual((s["night"]["alerts_caught"], s["night"]["alerts_total"]), (2, 2))
+        self.assertEqual(s["unknown_time"], 1)
+        self.assertEqual((s["misses_set"]["alerts_caught"], s["misses_set"]["alerts_total"]), (1, 2))
+        self.assertIn("misses set", ev.format_summary(s))
+        self.assertNotIn("misses set", ev.format_summary(ev.summarize(self.rows())))
+
     def test_cost_includes_errored_calls_and_projects_a_month(self) -> None:
         s = ev.summarize(self.rows())
         self.assertAlmostEqual(s["cost_per_call"], 0.0002)
@@ -1035,8 +1401,8 @@ class CostAndTimeTest(unittest.TestCase):
 
 class ProviderRunTest(PreparedDirMixin, unittest.TestCase):
     def setUp(self) -> None:
-        self.s3 = self.make_bucket()
-        ev.prepare(self.out, client=self.s3, batches=["ameer_house_batch_1", "ameer_house_batch_2", "uca_dataset_batch"])
+        self.dataset = self.make_dataset()
+        ev.prepare(self.out, self.dataset)
 
     def tearDown(self) -> None:
         self.cleanup()
@@ -1136,12 +1502,13 @@ class ChoosePairTest(unittest.TestCase):
         self.assertIn(f"primary: {VL}", text)
         self.assertIn(f"fallback: {Q35}", text)
         self.assertIn(f"{big} beats both 4B models", text)
+        self.assertIn("(2 alerts, 0 of them from our home cameras", text)
 
 
 class CompareCliTest(PreparedDirMixin, unittest.TestCase):
     def setUp(self) -> None:
-        self.s3 = self.make_bucket()
-        ev.prepare(self.out, client=self.s3, batches=["ameer_house_batch_1", "ameer_house_batch_2", "uca_dataset_batch"])
+        self.dataset = self.make_dataset()
+        ev.prepare(self.out, self.dataset)
         for tag, model in (("vl", VL), ("q35", Q35)):
             ev.run_eval(self.out, ev.FakeBackend(), model=model, tag=tag)
 

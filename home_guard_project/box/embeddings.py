@@ -29,12 +29,13 @@ import os
 import ssl
 from typing import Dict, List, Optional, Sequence
 
+from . import providers
+
 log = logging.getLogger("box.embeddings")
 
 EMBED_MODEL = "text-embedding-3-small"
 EMBED_DIMENSIONS = 256          # shortened vectors: plenty for one-sentence summaries, small on disk
 MAX_CACHE = 5000                # bounded; the live alert corpus only spans the retention window
-_URL = "https://api.openai.com/v1/embeddings"
 
 
 def _key(text: str) -> str:
@@ -97,7 +98,7 @@ class Embedder:
         payload = {"model": self._model, "input": texts, "dimensions": self._dim}
         try:
             resp = httpx.post(
-                _URL, json=payload, timeout=self._timeout,
+                providers.openai_url("/embeddings"), json=payload, timeout=self._timeout,
                 headers={"Authorization": f"Bearer {self._api_key}"},
                 verify=ssl.create_default_context(),
             )

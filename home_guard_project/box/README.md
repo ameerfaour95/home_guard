@@ -347,13 +347,15 @@ On the box itself, without network: `uv run python -m home_guard_project.box sta
 
 ## Scoring the AI's prompt against our tags
 
-`eval_prompt.py` gives one repeatable score for the prompt the box sends to the AI, over every tagged home clip (about 220). It runs in two steps, because only the laptop can read `tagging/` on S3 and only the box needs the OpenAI key.
+`eval_prompt.py` gives one repeatable score for the prompt the box sends to the AI, over a frozen set of clips with our human labels. The current set is `home_guard_eval/eval_set_v2` on the laptop (see "The frozen eval set" below).
 
-**1. On the laptop: fetch the clips' frames.** This lists the `ameer_house*` tagging batches, finds each clip's video, and saves 5 frames spaced evenly across it. Re-running it fetches only what is missing; `--limit N` fetches at most N new clips, and `--batches` picks other batches.
+**1. On the laptop: build the set.** `prepare` reads `home_guard_dataset` (its `annotations/clips.jsonl` and `clips/`; a local folder, or `s3://security-camera-project-v1/home_guard_dataset` with the same paths; taken from `--dataset`, else `$HOMEGUARD_DATASET_DIR`, else `C:\Users\ameer\Ameer\home_guard_data\dataset`) and saves 5 frames spaced evenly across every reviewed clip. Only `dataset_row()` in `eval_prompt.py` reads the dataset's fields, so a renamed field is fixed in one place. Re-running it reads only what is missing and keeps what the eval added on a clip (`category`, `subset`, `day_night`, `hard`); `--sources` and `--batches` narrow the clips, `--limit N` reads at most N new ones. `add --picks picks.jsonl` adds clips from outside the dataset, with 5 frames evenly spaced inside an annotated `segment` (the same sampling and size). `freeze` writes `FROZEN.json` (sha256 of the manifest and every frame, one set hash and the set's make-up); after that, `prepare` and `add` refuse the folder.
 
 ```bash
+.venv/Scripts/python.exe -m home_guard_project.box.eval_prompt prepare --out eval_set   # or --dataset <root>
 env -u SSLKEYLOGFILE -u PYTHONSTARTUP AWS_CA_BUNDLE=<bundle.pem> \
-  .venv/Scripts/python.exe -m home_guard_project.box.eval_prompt prepare --out eval_set
+  .venv/Scripts/python.exe -m home_guard_project.box.eval_prompt add --dir eval_set --picks picks.jsonl
+.venv/Scripts/python.exe -m home_guard_project.box.eval_prompt freeze --dir eval_set
 ```
 
 Python can only reach S3 from this laptop with that prefix. The antivirus sets `SSLKEYLOGFILE`, which crashes Python's TLS ("no OPENSSL_Applink"), and it intercepts TLS with a root certificate that is in the Windows store but not in Python's own list ("CERTIFICATE_VERIFY_FAILED"). Build `bundle.pem` once from certifi's bundle plus the Windows `ROOT` and `CA` stores (`ssl.enum_certificates`, converted with `ssl.DER_cert_to_PEM_cert`) and point `AWS_CA_BUNDLE` at it. Never turn certificate checks off. The box does not need any of this.
@@ -371,6 +373,8 @@ scp -i ~/.ssh/homeguard_box -r eval_set <user>@<box-ip>:C:/home_guard/eval_set
 .venv\Scripts\python.exe -m home_guard_project.box.eval_prompt run --dir eval_set --prompt-file new_prompt.txt
 .venv\Scripts\python.exe -m home_guard_project.box.eval_prompt summary --dir eval_set --tag <tag>
 ```
+
+If the folder is frozen, `run` first checks every hash: a changed set prints a loud warning (its scores do not compare with the frozen ones), and `--strict-frozen` refuses with exit code 4, before any call, when the set changed or was never frozen. The summary names the set (`eval set  frozen <sha12>`).
 
 `--prompt-file` tries a new wording without touching `inference.py`; `{camera_name}`, `{local_time_str}` and `{owner_language}` (default `en`) in the file are filled in. Results go to `eval_set/results/<tag>.jsonl`, `.csv` and `.summary.json`, named by the tag. A stopped run continues where it left off, and a clip that failed is asked again. `--fake` checks the setup without calling the AI.
 
@@ -394,13 +398,14 @@ What the score means:
 | words per summary | The AI's length against ours |
 | errors | Clips the AI could not answer; they are left out of the other lines |
 | outdated | Shown only when some saved answers were for other frames, camera or time (not yet asked again); they are left out |
-| day / night, home / external | The same counts split by the clip's time (night 19:00-05:59) and by where it comes from (our cameras vs the UCA and SmartHome-Bench batches) |
+| day / night, home / external | The same counts split by the clip's time (night 19:00-05:59; the manifest's `day_night` for clips without a time) and by where it comes from (our own cameras vs everything else, including the web videos imported into a home batch) |
+| misses set | The same counts on the hard cases only (`subset: misses`: night, partial occlusion, subtle attempts, loitering) |
 | missed alerts, false alarms | The clip names, to look at |
 | tokens per call, cost | What the provider billed, and $ per box per month at 150 and 300 calls a day (hosted models only) |
 
 ### Comparing vision models
 
-Every tagged batch can go into one eval set: `prepare --batches ameer_house_batch_1 ameer_house_batch_2 uca_dataset_batch smarthome_dataset_batch` (292 clips, 54 alerts on 2026-10-06).
+Run every model on the frozen set (`eval_set_v2`, see below) with `--strict-frozen`, so all the results in one table were made on the same frames.
 
 Small models run on the laptop GPU through Ollama (no key; `ollama pull <model>` first, and start the server with `OLLAMA_CONTEXT_LENGTH=8192`, because 5 frames are about 6,000 tokens); hosted ones through OpenRouter (`OPENROUTER_API_KEY` in `api_key.env`). On the laptop, Python's TLS needs the antivirus workaround: `env -u SSLKEYLOGFILE -u PYTHONSTARTUP SSL_CERT_FILE=<bundle.pem>`.
 
@@ -410,6 +415,14 @@ Small models run on the laptop GPU through Ollama (no key; `ollama pull <model>`
 
 `compare` prints one table and names the box's primary and fallback: Qwen3-VL-4B-Instruct primary and Qwen3.5-4B fallback, swapped only if Qwen3.5-4B catches more alerts (or as many with fewer false alarms) without newly missing a break-in and without more errors.
 
+### The frozen eval set
+
+`home_guard_eval/eval_set_v2` on the laptop, frozen 2026-10-06: 489 clips, 181 alerts (4 from our own cameras), 281 normal, 27 empty; a misses set of 108 hard alerts (night, partial occlusion, subtle attempts, loitering). Set sha256 `2054eca82da2...`. How it was built, the fields, the category mapping for the public datasets and the known limits are in `docs/eval/eval-set-v2.md`; what to film at home for the next set is in `docs/eval/staged-clips-shot-list.md`. The clips added in v2 (`picks_v2.jsonl`, batches `uca_eval_v2` and `smarthome_eval_v2`) are test data: keep them out of training.
+
+### The owner's verdicts (eval_set_owner)
+
+`prepare-owner --dir <folder>` builds a separate small set from the alerts the owner judged on Telegram (`owner_feedback/feedback_index.jsonl` in the dataset; `--dataset`, else `$HOMEGUARD_DATASET_DIR`, else the default). Each judged alert with a saved clip becomes one row. Its truth comes from the owner's latest verdict: a tag of suspicious or escalation is an alert, normal or empty is normal, `true_alert` is an alert, and `expected` or `false_alarm` is normal. `false_alarm` counts as normal rather than empty, so it shows up in "normal flagged". A `real_but_wrong` tagged `other` says the description was wrong, not the label: an earlier verdict on the same alert decides, otherwise the box's own label is kept (`truth_from` records which). The frames are the box's own 1-a-second sampling of the crop the AI saw (`vlm_input: crop`), otherwise of the alert clip, so a row has as many frames as the box sent (7 to 12). Each row also keeps the camera, the clip time, the box's label at the time and the owner's words. Freeze it like the main set. The first build (2026-10-06): 10 clips, 1 alert and 9 normal (all 9 are false alarms the box raised), set sha256 `f1c841bb78d7...`. It is too small to score on its own; read it next to `eval_set_v2`.
+
 ### The box's vision model settings (box.yaml)
 
     vlm_provider: vllm                     # openai | openrouter | ollama | vllm | dashscope-intl
@@ -418,6 +431,30 @@ Small models run on the laptop GPU through Ollama (no key; `ollama pull <model>`
     vlm_fallback_model: Qwen/Qwen3.5-4B
 
 `vllm` needs `VLLM_BASE_URL` (and `VLLM_API_KEY` if the server has one) in `api_key.env`. If the main model fails, the same alert goes to the fallback once (`VLM fallback` in the log). Without these settings the box keeps gpt-4o.
+
+### Alerts in Hebrew (box.yaml)
+
+    owner_language: he
+    owner_translation: translator          # the default; model: the vision model writes the Hebrew itself
+    messenger_provider: openrouter         # openrouter | openai | google (GEMINI_API_KEY) | ...
+    messenger_model: google/gemini-3.1-flash-lite
+    messenger_timeout_sec: 4
+
+With `translator`, a cheap text model (`messenger.py`; Gemini 3.1 Flash Lite, about $0.0003 an alert) translates the alert's summary and "why" in one call, keeping camera names, numbers and times. It never holds an alert longer than the timeout: on any failure the owner reads the vision model's own Hebrew when it wrote one, else the English (`Translation to he failed` in the log). Read at start. To judge the translation, `python -m home_guard_project.box.eval_translation <meta folder or eval results .jsonl> --limit 50` writes `translation_eval.csv` with Gemini Flash Lite and gpt-6-luna side by side (`--fake` checks the setup without calling anyone).
+
+### The situational Eye (box.yaml)
+
+    eye_prompt: situational                # the default; legacy: the 2026-10-03 prompt
+    camera_roles: {front_side: street, left_side_1: private}   # optional; else guessed from the name
+    camera_zones: {main_door: [entrance, gate]}                # optional
+
+With `situational` the guard loop asks the vision model with `eye_prompt.py`: the fixed categories (`taxonomy.py`), one `SITUATION:` line (time, day/evening/late_night/dawn, dark, house state, camera role, what the owner expects) and what that situation means. The model names what it sees; code turns it into the label (a visitor at 02:30 is suspicious, at 14:00 normal), never below the model's own label and never softening escalation. The house state (awake / asleep / away / vacation, and "expecting" notes) lives in `production_multi/.registry/house_state.jsonl` (`house_state.py`); without commands the house is asleep 00:00-06:00. Restart after changing these. Score it first with `run --prompt eye` (each clip in its own situation, scored per category and per situation).
+
+### Case memory (box.yaml)
+
+    case_memory: on                        # the default; off: every alert goes out as before
+
+With `on`, an alert about to go out is checked against the situations the owner explained before ("the neighbour leaves through the gate on weekday mornings"), kept in `production_multi/.registry/cases.jsonl`. A case the owner confirmed may lower the delivery one step: `quiet` is sent without a sound with a line saying why ("Normal (per your explanation from 5.10): ..."); `digest` is sent the same way for now, because the box has no daily digest yet. A case in shadow, a suspicious scene that matches, or a "similar but different" match still alerts, with one context line. Escalation and calls never reach memory, and neither do the risk signs listed in `case_memory/INTEGRATION.md`. Any failure means the alert goes out as before. Each alert's meta records `delivery_level`, `case_memory` and `case_signature`. The case buttons aren't sent yet (they're recorded as `case_buttons`). Read at start; restart after changing it.
 
 ## Troubleshooting
 

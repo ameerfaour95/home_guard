@@ -5,6 +5,7 @@ Every provider here speaks the OpenAI ``chat.completions`` API, so one client
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Any, Dict, Mapping, Optional, Tuple
 
@@ -32,18 +33,33 @@ PROVIDERS: Dict[str, Provider] = {
     "vllm": Provider("vllm", None, "VLLM_API_KEY", base_url_env="VLLM_BASE_URL", key_required=False),
     "dashscope-intl": Provider("dashscope-intl", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
                                "DASHSCOPE_API_KEY", {"enable_thinking": False}),
+    # Google AI Studio's OpenAI-compatible endpoint (the translator, without OpenRouter in between).
+    "google": Provider("google", "https://generativelanguage.googleapis.com/v1beta/openai/", "GEMINI_API_KEY"),
+    # Our API gateway (home_guard_project/gateway): the provider keys stay on our server, the box
+    # holds only its own token, and the model is an alias (e.g. ``eye``) the server maps to a provider.
+    "gateway": Provider("gateway", None, "HOMEGUARD_BOX_TOKEN", base_url_env="HOMEGUARD_GATEWAY_URL"),
 }
 
-# $ per million tokens (input, output). OpenRouter list prices on 2026-10-06; OpenAI's own for gpt-4o.
-# Only for reports: a model missing here (every local model) is shown with tokens and no dollars.
+OPENAI_URL = "https://api.openai.com/v1"
+
+# $ per million tokens (input, output). OpenRouter list prices on 2026-10-06; OpenAI's own for gpt-4o,
+# gpt-4o-mini and the embeddings model. The eval reports and the gateway's per-box metering both read
+# this table: a model missing here (every local model) is shown with tokens and no dollars, and the
+# gateway refuses to route to it unless its config names a price.
 PRICES: Dict[str, Tuple[float, float]] = {
     "gpt-4o": (2.50, 10.00),
     "openai/gpt-4o": (2.50, 10.00),
+    "gpt-4o-mini": (0.15, 0.60),
+    "text-embedding-3-small": (0.02, 0.0),
     "qwen/qwen3.5-9b": (0.10, 0.15),
     "qwen/qwen3-vl-8b-instruct": (0.117, 0.455),
     "qwen/qwen3-vl-8b-thinking": (0.18, 2.10),
     "qwen/qwen3-vl-32b-instruct": (0.104, 0.416),
     "qwen/qwen2.5-vl-72b-instruct": (0.80, 1.00),
+    # The owner's translator (messenger.py) and the model it is compared with.
+    "google/gemini-3.1-flash-lite": (0.25, 1.50),
+    "google/gemini-3.5-flash-lite": (0.30, 2.50),
+    "openai/gpt-6-luna": (0.10, 0.50),
 }
 
 
@@ -73,6 +89,13 @@ def resolve(name: str, env: Mapping[str, str],
         key = "ollama" if p.name == "ollama" else "none"   # the SDK wants some key; these servers ignore it
     extra = dict(p.extra_body) if p.extra_body and "thinking" not in model.lower() else None
     return key, url, extra
+
+
+def openai_url(path: str, env: Optional[Mapping[str, str]] = None) -> str:
+    """The OpenAI endpoint *path* (e.g. ``/embeddings``) for callers that post to it directly:
+    ``OPENAI_BASE_URL`` when set (the gateway, like the OpenAI SDK itself does), else OpenAI."""
+    base = str((os.environ if env is None else env).get("OPENAI_BASE_URL") or "").strip() or OPENAI_URL
+    return base.rstrip("/") + "/" + path.lstrip("/")
 
 
 def model_key(provider: str, model: str) -> str:

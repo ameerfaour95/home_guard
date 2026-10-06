@@ -1,0 +1,52 @@
+# Home Guard API gateway config. Copy to gateway.yaml on the server and edit.
+# Provider keys are NOT here: they come from the server's environment (OPENAI_API_KEY,
+# OPENROUTER_API_KEY, ...), the variable names in home_guard_project/box/providers.py.
+
+listen:
+  host: 0.0.0.0
+  port: 8080
+
+db_path: /data/gateway.sqlite3        # or HOMEGUARD_GATEWAY_DB
+
+# sha256 of the admin token (make one with: python -m home_guard_project.gateway new-admin-token),
+# or HOMEGUARD_ADMIN_TOKEN_SHA256 in the environment. Empty: /admin/* is off.
+admin_token_sha256: ""
+
+caps:
+  box_daily_usd: 1.00       # a box's own cap (add-box --cap / set-cap) wins over this; null = no cap
+  fleet_daily_usd: 200.00   # every box together, per UTC day; null = no cap
+
+box_rpm: 60                 # requests a minute per box (a typical home sends one per ten minutes)
+max_body_bytes: 8000000     # six camera frames in base64 are about 3 MB
+upstream_timeout_sec: 20    # one attempt
+deadline_sec: 27            # the whole request, retries and fallback included; keep it under the box's 30 s
+max_concurrent: 256         # requests in flight; more get 503 + Retry-After
+
+# What a box may ask for. `model:` in the box's request is the alias name; the upstreams
+# are tried in order (retry once on 429/5xx/timeout, then the next one). Every upstream
+# needs a price: box/providers.py PRICES, or price_per_m: [input, output] $ per million tokens.
+aliases:
+  # The camera reports (box.yaml: vlm_provider: gateway, vlm_model: eye).
+  eye:
+    kind: chat
+    upstreams:
+      - {provider: openai, model: gpt-4o}
+      - {provider: openrouter, model: openai/gpt-4o}
+      # Our own GPU server, later (VLLM_BASE_URL in the environment):
+      # - {provider: vllm, model: Qwen/Qwen3-VL-4B-Instruct, price_per_m: [0, 0]}
+
+  # The names the box's assistant, live view and brain already ask for, so they can go
+  # through the gateway with OPENAI_BASE_URL alone.
+  gpt-4o:
+    - {provider: openai, model: gpt-4o}
+    - {provider: openrouter, model: openai/gpt-4o}
+  gpt-4o-mini:
+    - {provider: openai, model: gpt-4o-mini}
+  text-embedding-3-small:
+    kind: embeddings
+    upstreams:
+      - {provider: openai, model: text-embedding-3-small}
+
+  # A second OpenAI key for one alias (e.g. a separate project for billing):
+  # eye-b:
+  #   - {provider: openai, model: gpt-4o, key_env: OPENAI_API_KEY_EYE}

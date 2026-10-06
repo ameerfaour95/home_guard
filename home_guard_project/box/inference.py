@@ -22,6 +22,7 @@ relies on cleanup handlers for correctness.
 from __future__ import annotations
 
 import base64
+import inspect
 import json
 import logging
 import os
@@ -34,7 +35,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
-from . import providers
+from . import messenger, providers
 
 log = logging.getLogger("box.inference")
 
@@ -438,6 +439,7 @@ class AlertSettings:
     conf_person: Optional[float] = None
     conf_vehicle: Optional[float] = None
     conf_animal: Optional[float] = None
+    eye_prompt: str = "situational"  # situational (default): eye_prompt.py with the situation; legacy: build_prompt
 
     def thresholds(self) -> Dict[str, float]:
         """The house's certainty per type (person / vehicle / animal)."""
@@ -472,7 +474,21 @@ class AlertSettings:
             conf_person=_optional_float(g("conf_person")),
             conf_vehicle=_optional_float(g("conf_vehicle")),
             conf_animal=_optional_float(g("conf_animal")),
+            eye_prompt=_eye_prompt_mode(g("eye_prompt", "situational")),
         )
+
+
+EYE_PROMPT_MODES = ("legacy", "situational")
+
+
+def _eye_prompt_mode(value: Any) -> str:
+    """box.yaml ``eye_prompt``: ``situational`` (the default, eye_prompt.py) or ``legacy`` (the 2026-10-03 prompt);
+    anything else is the default."""
+    mode = str(value or "situational").strip().lower()
+    if mode not in EYE_PROMPT_MODES:
+        log.warning("Unknown eye_prompt '%s'; using situational.", value)
+        return "situational"
+    return mode
 
 
 def _optional_float(value: Any) -> Optional[float]:
@@ -510,7 +526,8 @@ class NullBackend:
 
     def analyze(self, frames_bgr: List[Any], camera_name: str, t_sec: int,
                 start_hour: int, end_hour: int, owner_language: str = "en",
-                facts: Sequence[Dict[str, Any]] = (), alert_ts: Optional[float] = None) -> Tuple[str, Optional[Dict[str, Any]]]:
+                facts: Sequence[Dict[str, Any]] = (), alert_ts: Optional[float] = None,
+                situation: Any = None) -> Tuple[str, Optional[Dict[str, Any]]]:
         parsed = {"summary": ""}
         return json.dumps(parsed), parsed
 
@@ -548,6 +565,7 @@ class GptBackend:
         self._client = OpenAI(**kwargs)
         self._model = model
         self.model_name = model
+        self.last_model = model         # who answered the last call (the gateway names its upstream)
         self._extra_body = dict(extra_body) if extra_body else None
         self.last_usage = {"prompt_tokens": 0, "completion_tokens": 0}
         self.last_prompt = ""           # what the last call asked, kept for the training record
@@ -555,10 +573,19 @@ class GptBackend:
 
     def analyze(self, frames_bgr: List[Any], camera_name: str, t_sec: int,
                 start_hour: int, end_hour: int, owner_language: str = "en",
-                facts: Sequence[Dict[str, Any]] = (), alert_ts: Optional[float] = None) -> Tuple[str, Optional[Dict[str, Any]]]:
-        moment = datetime.now() if alert_ts is None else datetime.fromtimestamp(alert_ts)
-        prompt = build_prompt(camera_name, t_sec, moment.strftime("%H:%M:%S"), start_hour, end_hour,
-                              owner_language=owner_language, facts=facts, alert_ts=alert_ts)
+                facts: Sequence[Dict[str, Any]] = (), alert_ts: Optional[float] = None,
+                situation: Any = None) -> Tuple[str, Optional[Dict[str, Any]]]:
+        if situation is None:
+            moment = datetime.now() if alert_ts is None else datetime.fromtimestamp(alert_ts)
+            prompt = build_prompt(camera_name, t_sec, moment.strftime("%H:%M:%S"), start_hour, end_hour,
+                                  owner_language=owner_language, facts=facts, alert_ts=alert_ts)
+            schema_format = VLM_RESPONSE_FORMAT
+        else:
+            # eye_prompt: situational. The Eye answers in English; its schema follows the situation's intent.
+            from . import eye_prompt  # noqa: PLC0415
+
+            prompt = eye_prompt.build_prompt(situation, facts=facts)
+            schema_format = eye_prompt.response_format(situation.intent)
         self.last_prompt = prompt
         content: List[Dict[str, Any]] = [{"type": "text", "text": prompt}]
         self.last_frame_jpegs = []
@@ -568,11 +595,13 @@ class GptBackend:
                 self.last_frame_jpegs.append(data)
                 b64 = base64.b64encode(data).decode("utf-8")
                 content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
+        # A model that refused schemas once gets plain JSON from then on, whichever prompt is asked.
+        fmt = schema_format if self._response_format.get("type") == "json_schema" else self._response_format
         try:
-            resp = self._complete(content, self._response_format)
+            resp = self._complete(content, fmt)
         except Exception as exc:  # noqa: BLE001
             # A model without structured output refuses the schema: ask for plain JSON from now on.
-            if self._response_format.get("type") == "json_schema" and "response_format" in str(exc):
+            if fmt.get("type") == "json_schema" and "response_format" in str(exc):
                 log.warning("%s does not take a JSON schema (%s); asking for a JSON object instead.", self._model, exc)
                 self._response_format = {"type": "json_object"}
                 resp = self._complete(content, self._response_format)
@@ -580,6 +609,8 @@ class GptBackend:
                 raise
         raw = resp.choices[0].message.content or ""
         self.last_usage = usage_of(resp)
+        answered = getattr(resp, "model", None)
+        self.last_model = answered.strip() if isinstance(answered, str) and answered.strip() else getattr(self, "_model", "")
         return raw, parse_vlm_json(raw)
 
     def _complete(self, content: List[Dict[str, Any]], response_format: Dict[str, Any]) -> Any:
@@ -610,6 +641,10 @@ class FallbackBackend:
     @property
     def last_frame_jpegs(self) -> List[bytes]:
         return list(getattr(self._last, "last_frame_jpegs", None) or [])
+
+    @property
+    def last_model(self) -> str:
+        return str(getattr(self._last, "last_model", "") or self.model_name)
 
     @property
     def last_usage(self) -> Dict[str, int]:
@@ -1371,6 +1406,106 @@ def _jpegs(frames: List[Any]) -> List[bytes]:
     return out
 
 
+def _takes_situation(backend: Any) -> bool:
+    """Whether *backend*.analyze accepts ``situation=``: a backend that does not keeps today's prompt, and its
+    answer keeps its description, instead of failing on an unexpected argument."""
+    try:
+        params = inspect.signature(backend.analyze).parameters.values()
+    except (AttributeError, TypeError, ValueError):
+        return False
+    return any(p.name == "situation" or p.kind is inspect.Parameter.VAR_KEYWORD for p in params)
+
+
+def _eye_situation(settings: AlertSettings, box_settings: Dict[str, Any], camera: str, alert_ts: float,
+                   facts: Sequence[Dict[str, Any]], labels: Sequence[str], backend: Any = None) -> Any:
+    """The look's situation with ``eye_prompt: situational`` (else None). A failure falls back to the legacy prompt."""
+    if settings.eye_prompt != "situational":
+        return None
+    if backend is not None and not _takes_situation(backend):
+        log.debug("[%s] %s takes no situation; using the legacy prompt", camera, type(backend).__name__)
+        return None
+    try:
+        from .situation import build_situation  # noqa: PLC0415
+
+        kinds = detected_fact_kinds(labels)
+        return build_situation(camera, alert_ts, "alert_triage", settings=box_settings,
+                               facts=[f for f in facts if f.get("kind") in kinds])
+    except Exception as exc:  # noqa: BLE001 - the alert goes on with today's prompt
+        log.warning("[%s] no situation for the Eye (%s); using the legacy prompt", camera, exc)
+        return None
+
+
+def _eye_answer(parsed: Any, situation: Any) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
+    """The Eye's answer with the situation's judgement applied, and the records for the teacher and meta."""
+    from . import eye_prompt  # noqa: PLC0415
+
+    processed = eye_prompt.postprocess(parsed, situation)
+    return processed, eye_prompt.records(processed, situation)
+
+
+def case_memory_on(box_settings: Mapping[str, Any]) -> bool:
+    """box.yaml ``case_memory: on|off``. On by default; anything unknown is on."""
+    value = box_settings.get("case_memory", True)
+    if isinstance(value, bool):   # YAML reads on/off as booleans
+        return value
+    text = str(value).strip().lower()
+    if text in ("off", "false", "no", "0"):
+        return False
+    if text not in ("on", "true", "yes", "1", ""):
+        log.warning("Unknown case_memory '%s'; using on.", value)
+    return True
+
+
+def start_case_memory(box_settings: Mapping[str, Any], env: Mapping[str, str]) -> bool:
+    """Install the investigator's case memory (case_memory/INTEGRATION.md section 1) once at start. Any failure
+    leaves it off: every alert then goes out exactly as before."""
+    try:
+        from .case_memory import configure, make_default  # noqa: PLC0415
+    except Exception as exc:  # noqa: BLE001 - without memory every alert goes out as before
+        log.warning("Case memory not started (%s); alerts go out as before", exc)
+        return False
+    if not case_memory_on(box_settings):
+        configure(None)
+        log.info("Case memory is off (box.yaml case_memory: off)")
+        return False
+    try:
+        configure(make_default(env=env))
+    except Exception as exc:  # noqa: BLE001 - without memory every alert goes out as before
+        configure(None)
+        log.warning("Case memory not started (%s); alerts go out as before", exc)
+        return False
+    log.info("Case memory on")
+    return True
+
+
+def _case_memory(job: Optional[AlertJob], camera: str, alert_ts: float, parsed: Optional[Dict[str, Any]],
+                 label: str, cmd: str, decision: Dict[str, Any], backend: Any,
+                 prompt_version: str) -> Tuple[str, Any, Optional[Dict[str, Any]]]:
+    """``(delivery_level, note, signature)`` for an alert about to go out. Escalation and calls never reach
+    memory; without a configured memory, or on any failure, ``("alert", None, None)``: today's path."""
+    if label == "escalation" or cmd == "[call_owner]":
+        return "alert", None, None
+    try:
+        from .case_memory import CaseEvent, apply_case_memory, current  # noqa: PLC0415
+
+        if current() is None:
+            return "alert", None, None
+        event = CaseEvent.build(
+            event_id=job.stem if job is not None else f"{camera}_{int(alert_ts)}", camera=camera, ts=alert_ts,
+            observation=parsed, tracker=getattr(job, "tracker_facts", None) or None, label=label,
+            cameras_in_incident=getattr(job, "incident_cameras", 0) or 1,
+            eye_model=getattr(backend, "last_model", "") or getattr(backend, "model_name", ""),
+            prompt_version=prompt_version)
+        level, note = apply_case_memory(event, {"final_label": label, "alert_command": cmd,
+                                                "serious_behaviour": decision["serious_behaviour"]})
+        if level not in ("alert", "quiet", "digest"):
+            level = "alert"
+        return level, note, event.signature.to_dict()
+    except Exception as exc:  # noqa: BLE001 - memory must never stop or soften an alert by failing
+        log.warning("[%s] case memory failed; alerting as usual: %s", camera, exc)
+        return "alert", None, None
+
+
 def _worker(backend, box_settings, env, settings: AlertSettings,
             camera_name: str, frames: List[Any],
             assistant: Any = None, job: Optional[AlertJob] = None, status: Any = None,
@@ -1406,8 +1541,20 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
         facts = facts_for_alert(camera_name, alert_ts)
         # Keep legacy/evaluation backends callable when no facts are available.
         context = {"facts": facts, "alert_ts": alert_ts} if facts else {}
-        raw, parsed = backend.analyze(frames, camera_name, int(time.time()),
-                                      settings.alert_start_hour, settings.alert_end_hour, owner_language=lang, **context)
+        situation = _eye_situation(settings, box_settings, camera_name, alert_ts, facts, labels, backend)
+        if situation is not None:
+            context["situation"] = situation
+        try:
+            raw, parsed = backend.analyze(frames, camera_name, int(time.time()),
+                                          settings.alert_start_hour, settings.alert_end_hour, owner_language=lang, **context)
+        except Exception as exc:  # noqa: BLE001 - an outage or the gateway's daily cap: the detector's alert still goes out
+            log.warning("[%s] VLM call failed: %s", camera_name, exc)
+            raw, parsed = "", None
+        answer, eye_record = parsed, {}
+        if situation is not None:
+            parsed, eye_record = _eye_answer(parsed, situation)
+            if job is not None:
+                job.input_meta.update(eye_record)
         model_label = str((parsed or {}).get("label") or "").strip().lower()
         # Older answers have only label. They retain their original meaning when no notes were shown.
         raw_label = str((parsed or {}).get("raw_label", model_label if not facts else "") or "").strip().lower()
@@ -1423,13 +1570,14 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
             # Everything a student model needs to learn this answer: the exact pictures,
             # the question, and the answer word for word.
             job.teacher = {
-                "model": getattr(backend, "model_name", settings.vlm_model),
-                "prompt_version": PROMPT_VERSION,
+                "model": getattr(backend, "last_model", "") or getattr(backend, "model_name", settings.vlm_model),
+                "prompt_version": eye_record.get("prompt_version", PROMPT_VERSION),
                 "prompt": getattr(backend, "last_prompt", ""),
                 "frames": (list(backend.last_frame_jpegs) if isinstance(backend, (GptBackend, FallbackBackend))
                            else _jpegs(frames)),
                 "raw": raw,
-                "parsed": dict(parsed, label=decision["raw_label"]) if parsed else parsed,
+                "parsed": dict(answer, label=decision["raw_label"]) if answer else answer,
+                **eye_record,
             }
         summary = ""
         if parsed:
@@ -1473,6 +1621,16 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
         except Exception as exc:  # noqa: BLE001
             log.warning("[%s] could not encode snapshot: %s", camera_name, exc)
         muted = bool(assistant is not None and assistant.is_muted(camera_name))
+        # Case memory (case_memory/INTEGRATION.md section 1): a precedent the owner explained may lower this
+        # delivery one step, and adds a line saying why. Outside the softened lock: the judge may take seconds.
+        level, case_note, case_signature = "alert", None, None
+        if not muted:
+            level, case_note, case_signature = _case_memory(
+                job, camera_name, alert_ts, parsed, label, cmd, decision, backend,
+                eye_record.get("prompt_version", PROMPT_VERSION))
+        if level == "digest":
+            log.info("[%s] case memory chose the digest, which the box doesn't have yet; sending quietly", camera_name)
+        case_line = case_note.text(lang) if case_note is not None else ""
         # Serialize softened deliveries so concurrent workers cannot both claim the first sound.
         with _SOFTENED_LOCK if softened else nullcontext():
             sound_key = (fact["id"], datetime.fromtimestamp(alert_ts).date().isoformat()) if softened else None
@@ -1483,6 +1641,8 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                     if key[1] < sound_key[1]:
                         del _SOFTENED_DAYS[key]
             silent = is_silent(shown_label) and (not softened or sound_key in _SOFTENED_DAYS)
+            if level in ("quiet", "digest"):
+                silent = True
             if muted:
                 res: Dict[str, Any] = {"sent": False, "reason": "paused by the owner"}
                 log.info("[%s] alert not sent: the owner paused alerts", camera_name)
@@ -1495,11 +1655,19 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                                  "ts": job.ts}
                     if fact:
                         alert_ref.update(softened=softened, applied_fact_id=fact["id"])
-                graded = graded_alert_text(shown_label, camera_name, owner_summary(summary, summary_owner, lang),
-                                           why, lang)
+                owner_text, owner_why = owner_summary(summary, summary_owner, lang), why
+                if messenger.uses_translator(box_settings, lang):
+                    # A house note's reason is already in the box language; only the model's own why is translated.
+                    told = messenger.messenger_for(box_settings, env).to_owner(
+                        {"summary": summary, "why": "" if fact else why, "summary_owner": summary_owner},
+                        lang, keep=(camera_name,))
+                    owner_text, owner_why = told["summary"], why if fact else told["why"]
+                graded = graded_alert_text(shown_label, camera_name, owner_text, owner_why, lang)
                 if softened:
-                    sentence = owner_summary(summary, summary_owner, lang).rstrip(". ")
+                    sentence = owner_text.rstrip(". ")
                     graded = f"🟢 {camera_name}: {sentence}. {why}"
+                if case_line:
+                    graded = f"{graded}\n{case_line}"
                 res = dispatch_alert(box_settings, env, cmd, f"{camera_name}: {alert_summary(label, summary)}", reason,
                                      image=image or None, assistant=assistant, alert=alert_ref, graded=graded,
                                      silent=silent, lang=lang)
@@ -1520,7 +1688,11 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
         if job is not None:
             job.alert = {**decision, "summary": summary, "alert_command": cmd, "alert_reason": reason,
                          "labels": job.labels, "muted": muted, "dispatch": res,
-                         "why": why, "summary_owner": summary_owner, "silent": silent, "people": people}
+                         "why": why, "summary_owner": summary_owner, "silent": silent, "people": people,
+                         # Buttons wait for the assistant's callbacks; they are recorded, not sent.
+                         "delivery_level": level, "case_memory": case_note.record() if case_note is not None else None,
+                         "case_buttons": list(case_note.buttons) if case_note is not None else [],
+                         "case_signature": case_signature}
     except Exception as exc:  # noqa: BLE001
         log.warning("[%s] worker error: %s", camera_name, exc)
     finally:
@@ -1662,6 +1834,7 @@ def run() -> int:
              + (f" -> {settings.vlm_fallback_model}" if settings.vlm_fallback_model else ""), settings.dry_run)
 
     backend = make_backend(settings, env)
+    start_case_memory(box_settings, env)
     model, device = load_detector(settings.model, settings.device)
     predict_args = {"device": device} if device else {}
 
