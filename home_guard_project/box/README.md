@@ -419,6 +419,14 @@ Small models run on the laptop GPU through Ollama (no key; `ollama pull <model>`
 
 `vllm` needs `VLLM_BASE_URL` (and `VLLM_API_KEY` if the server has one) in `api_key.env`. If the main model fails, the same alert goes to the fallback once (`VLM fallback` in the log). Without these settings the box keeps gpt-4o.
 
+### The situational Eye (box.yaml)
+
+    eye_prompt: situational                # legacy (default): today's prompt, unchanged
+    camera_roles: {front_side: street, left_side_1: private}   # optional; else guessed from the name
+    camera_zones: {main_door: [entrance, gate]}                # optional
+
+With `situational` the guard loop asks the vision model with `eye_prompt.py`: the fixed categories (`taxonomy.py`), one `SITUATION:` line (time, day/evening/late_night/dawn, dark, house state, camera role, what the owner expects) and what that situation means. The model names what it sees; code turns it into the label (a visitor at 02:30 is suspicious, at 14:00 normal), never below the model's own label and never softening escalation. The house state (awake / asleep / away / vacation, and "expecting" notes) lives in `production_multi/.registry/house_state.jsonl` (`house_state.py`); without commands the house is asleep 00:00-06:00. Restart after changing these. Score it first with `run --prompt eye` (each clip in its own situation, scored per category and per situation).
+
 ## Troubleshooting
 
 | Problem | What to do |
