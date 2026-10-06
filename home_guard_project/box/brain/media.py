@@ -112,12 +112,13 @@ def _record(camera: str, url: str, seconds: float, out_dir: str, zones_path: Opt
     import cv2  # noqa: PLC0415
 
     from ...data_collection.zones import ZoneMask  # noqa: PLC0415
-    from ..live_view import strict_zone  # noqa: PLC0415
+    from ..live_view import strict_black, strict_zone  # noqa: PLC0415
 
     polygon, readable = strict_zone(camera, zones_path)
-    if not readable:
+    black, black_readable = strict_black(camera, zones_path)
+    if not (readable and black_readable):
         return {"ok": False, "error": "error"}       # a configured zone we cannot read: never record unmasked
-    mask = ZoneMask(polygon) if polygon else None
+    mask = ZoneMask(polygon, black) if (polygon or black) else None
     last_kept = -1.0
     os.makedirs(out_dir, exist_ok=True)
     cap = (open_capture or (lambda u: cv2.VideoCapture(u, cv2.CAP_FFMPEG)))(url)

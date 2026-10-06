@@ -281,3 +281,89 @@ class ZonesImportFailsLoudlyTest(unittest.TestCase):
             else:
                 sys.modules[key] = saved
         self.assertNotIn("No module named 'zones'", str(cm.exception))
+
+
+RIGHT_QUARTER = [(0.75, 0.0), (1.0, 0.0), (1.0, 1.0), (0.75, 1.0)]
+TOP_LEFT = [(0.0, 0.0), (0.25, 0.0), (0.25, 0.5), (0.0, 0.5)]
+
+
+class BlackAreasTest(unittest.TestCase):
+    """Scene-map black areas (a neighbour's window) are blacked out by the same mask, inside the picture."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.zones = os.path.join(self.tmp.name, "zones.yaml")
+        self.scenes = z.scene_maps_path_for(self.zones)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def write_scenes(self, text: str) -> None:
+        with open(self.scenes, "w", encoding="utf-8") as f:
+            f.write(text)
+
+    def test_a_black_area_alone_hides_only_itself(self) -> None:
+        mask = z.ZoneMask(None, black=[RIGHT_QUARTER])
+        self.assertTrue(mask.active)
+        out = mask.apply(white(8, 40))
+        self.assertEqual(int(out[:, :29].min()), 255)
+        self.assertEqual(int(out[:, 31:].max()), 0)
+
+    def test_a_black_area_inside_the_zone_is_black_too(self) -> None:
+        out = z.ZoneMask(LEFT_HALF, black=[TOP_LEFT]).apply(white(20, 40))
+        self.assertEqual(int(out[:9, :9].max()), 0)       # black area
+        self.assertEqual(int(out[12:, :19].min()), 255)   # rest of the zone
+        self.assertEqual(int(out[:, 21:].max()), 0)       # outside the zone
+
+    def test_the_scene_map_file_sits_next_to_the_zone_file(self) -> None:
+        self.assertEqual(os.path.dirname(self.scenes), os.path.dirname(os.path.abspath(self.zones)))
+        self.assertEqual(os.path.basename(self.scenes), "scene_maps.yaml")
+        self.assertEqual(z.scene_maps_path_for(z.ZONES_PATH), z.SCENE_MAPS_PATH)
+
+    def test_load_black_reads_only_black_areas(self) -> None:
+        z.write_scene_maps({"front": {"areas": [
+            {"name": "window", "kind": "black", "points": [list(p) for p in RIGHT_QUARTER]},
+            {"name": "yard", "kind": "mine", "points": [list(p) for p in LEFT_HALF]}]}}, self.scenes)
+        self.assertEqual(z.load_black(self.scenes), {"front": [RIGHT_QUARTER]})
+        mask = z.mask_for({}, "front", z.load_black(self.scenes))
+        self.assertTrue(mask.active)
+        self.assertFalse(z.mask_for({}, "back", z.load_black(self.scenes)).active)
+
+    def test_a_damaged_file_is_no_black_for_readers_and_unreadable_for_captures(self) -> None:
+        self.write_scenes("scene_maps: [oops\n")
+        self.assertEqual(z.load_black(self.scenes), {})
+        self.assertEqual(z.strict_black("front", self.scenes), ([], False))
+
+    def test_a_damaged_black_area_fails_closed_for_captures(self) -> None:
+        self.write_scenes("scene_maps:\n  front:\n    areas:\n      - {name: w, kind: black, points: [[0, 0], [2, 0], [1, 1]]}\n")
+        self.assertEqual(z.load_black(self.scenes), {})
+        self.assertEqual(z.strict_black("front", self.scenes), ([], False))
+        self.assertEqual(z.strict_black("back", self.scenes), ([], True))
+
+    def test_no_file_is_no_black_and_readable(self) -> None:
+        self.assertEqual(z.load_black(self.scenes), {})
+        self.assertEqual(z.strict_black("front", self.scenes), ([], True))
+
+    def test_a_rename_carries_the_scene_map_with_the_zone(self) -> None:
+        z.save_zones({"front": LEFT_HALF}, self.zones)
+        z.write_scene_maps({"front": {"areas": [{"name": "w", "kind": "black",
+                                                 "points": [list(p) for p in RIGHT_QUARTER]}]}}, self.scenes)
+        seen = {}
+
+        def between() -> None:
+            seen["during"] = set(z.read_scene_maps(self.scenes))
+
+        z.remap_zones({"front": "gate"}, self.zones, between=between)
+        self.assertEqual(seen["during"], {"front", "gate"})        # both names while cameras.yaml is written
+        self.assertEqual(set(z.read_scene_maps(self.scenes)), {"gate"})
+        self.assertEqual(z.load_black(self.scenes), {"gate": [RIGHT_QUARTER]})
+
+    def test_a_failed_rename_puts_the_scene_maps_back(self) -> None:
+        z.write_scene_maps({"front": {"areas": []}}, self.scenes)
+
+        def between() -> None:
+            raise OSError("disk full")
+
+        with self.assertRaises(OSError):
+            z.remap_zones({"front": "gate"}, self.zones, between=between)
+        self.assertEqual(set(z.read_scene_maps(self.scenes)), {"front"})

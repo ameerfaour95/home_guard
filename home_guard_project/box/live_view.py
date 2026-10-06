@@ -20,7 +20,7 @@ import ssl
 import time
 import uuid
 from collections.abc import Mapping
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from . import providers
 
@@ -78,8 +78,9 @@ def _describe(image_path: str, api_key: str, model: str = VISION_MODEL, timeout:
         return None
 
 
-def _mask_in_place(image_path: str, polygon: Any) -> bool:
-    """Black out everything outside *polygon* in the saved picture. False on any failure."""
+def _mask_in_place(image_path: str, polygon: Any, black: Any = None) -> bool:
+    """Black out everything outside *polygon*, and the scene map's *black* areas, in the saved picture.
+    False on any failure."""
     try:
         import cv2  # noqa: PLC0415
 
@@ -88,7 +89,7 @@ def _mask_in_place(image_path: str, polygon: Any) -> bool:
         img = cv2.imread(image_path)
         if img is None:
             return False
-        masked = ZoneMask(polygon).apply(img)
+        masked = ZoneMask(polygon, black).apply(img)
         return bool(cv2.imwrite(image_path, masked, [cv2.IMWRITE_JPEG_QUALITY, 90]))
     except Exception as exc:  # noqa: BLE001 - fail closed: the caller drops the picture
         log.warning("Live-view mask failed: %s", exc)
@@ -125,11 +126,12 @@ def grab_masked(camera: str, cameras_path: str, out_dir: str, now: Callable[[], 
         image_path = os.path.join(out_dir, f"{camera}_{int(now())}_{uuid.uuid4().hex[:8]}.jpg")
         temp_path = image_path + ".tmp.jpg"
         polygon, readable = strict_zone(camera, zones_path)
-        if not readable:
+        black, black_readable = strict_black(camera, zones_path)
+        if not (readable and black_readable):
             return {"error": f"could not prepare the picture from {camera} right now"}
         if not grab(url, temp_path):
             return {"error": f"could not get a picture from {camera} right now (is it online?)"}
-        if polygon and not _mask_in_place(temp_path, polygon):
+        if (polygon or black) and not _mask_in_place(temp_path, polygon, black=black):
             return {"error": f"could not prepare the picture from {camera} right now"}
         os.replace(temp_path, image_path)
         return {"camera": camera, "image": image_path}
@@ -170,6 +172,19 @@ def strict_zone(camera: str, zones_path: Optional[str] = None) -> Tuple[Optional
     except Exception as exc:  # noqa: BLE001 - imports, encoding, types and I/O all fail closed
         log.warning("Live-view zone handling failed: %s", exc)
         return None, False
+
+
+def strict_black(camera: str, zones_path: Optional[str] = None) -> Tuple[List[Any], bool]:
+    """``(black areas, readable)`` for *camera* from the scene map next to the zone file; like
+    ``strict_zone``, anything that cannot be read fails closed."""
+    try:
+        from ..data_collection.zones import ZONES_PATH, scene_maps_path_for  # noqa: PLC0415
+        from ..data_collection.zones import strict_black as _strict_black  # noqa: PLC0415
+
+        return _strict_black(camera, scene_maps_path_for(ZONES_PATH if zones_path is None else zones_path))
+    except Exception as exc:  # noqa: BLE001 - imports and I/O fail closed
+        log.warning("Live-view black areas failed: %s", exc)
+        return [], False
 
 
 def look_now(camera: str, cameras_path: str, env: Dict[str, str], out_dir: str,

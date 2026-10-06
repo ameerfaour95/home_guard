@@ -312,6 +312,19 @@ class TimingAndFallbackTest(unittest.TestCase):
 
 
 class SharedReadersTest(unittest.TestCase):
+    def test_scene_map_black_areas_mask_both_readers(self):
+        cfg = config.Config()
+        cfg.CAMERAS = {"cam": "synthetic-sub"}
+        cfg.CAMERAS_MAIN = {"cam": "synthetic-main"}
+        cfg.ROI_BLACK = {"cam": [[(.5, 0.), (1., 0.), (1., 1.), (.5, 1.)]]}
+        with mock.patch("cv2.VideoCapture"), mock.patch.object(streams.threading, "Thread"):
+            subs, mains = inf._camera_streams(cfg)
+        frame = np.full((48, 64, 3), 255, np.uint8)
+        for reader in (subs["cam"].sub_cap, mains["cam"]):
+            masked = reader.mask.apply(frame)
+            self.assertEqual(masked[:, 40:].max(), 0)
+            self.assertEqual(masked[:, :20].min(), 255)
+
     def test_two_connections_per_camera_with_same_cfg_and_masks(self):
         cfg = config.Config()
         cfg.CAMERAS = {"cam": "synthetic-sub", "yard": "synthetic-yard-sub"}

@@ -1273,10 +1273,11 @@ def _camera_streams(cfg: Any) -> Tuple[Dict[str, Any], Dict[str, Any]]:
 
     streams, main_caps = {}, {}
     for name, url in cfg.CAMERAS.items():
-        sub = SubStreamThread(cfg, url, mask=mask_for(cfg.ROI_ZONES, name), name=name)
+        black = getattr(cfg, "ROI_BLACK", None)
+        sub = SubStreamThread(cfg, url, mask=mask_for(cfg.ROI_ZONES, name, black), name=name)
         streams[name] = _Stream(name, url, sub_cap=sub)
         main_url = cfg.CAMERAS_MAIN.get(name)
-        main_caps[name] = (MainStreamThread(cfg, main_url, mask=mask_for(cfg.ROI_ZONES, name), name=name)
+        main_caps[name] = (MainStreamThread(cfg, main_url, mask=mask_for(cfg.ROI_ZONES, name, black), name=name)
                            if cfg.MAIN_STREAM_ENABLED and main_url else None)
     return streams, main_caps
 

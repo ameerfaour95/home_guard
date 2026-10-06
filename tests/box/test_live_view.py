@@ -103,6 +103,29 @@ class LookNowZoneMaskTest(unittest.TestCase):
         self.assertNotIn("error", r)
         self.assertGreater(int(self.seen[0].min()), 220)
 
+    def test_scene_map_black_areas_are_masked_for_the_model_and_for_the_owner(self) -> None:
+        import cv2
+
+        from home_guard_project.data_collection import zones
+
+        zones.write_scene_maps({"front_door": {"areas": [
+            {"name": "neighbour window", "kind": "black", "points": [[0.5, 0], [1, 0], [1, 1], [0.5, 1]]}]}},
+            zones.scene_maps_path_for(self.zones))
+        r = self._look()
+        sent = cv2.imread(r["image"])
+        for img in (self.seen[0], sent):
+            self.assertLess(int(img[:, 34:].max()), 30)
+            self.assertGreater(int(img[:, :30].min()), 220)
+
+    def test_an_unreadable_scene_map_fails_closed(self) -> None:
+        from home_guard_project.data_collection import zones
+
+        with open(zones.scene_maps_path_for(self.zones), "w", encoding="utf-8") as f:
+            f.write("scene_maps: [unclosed")
+        r = self._look()
+        self.assertIn("error", r)
+        self.assertEqual(self.describe_calls, 0)
+
     def test_fails_closed_when_the_masked_picture_cannot_be_written(self) -> None:
         from home_guard_project.data_collection import zones
 
@@ -123,7 +146,7 @@ class LookNowZoneMaskTest(unittest.TestCase):
             grabbed.append(path)
             return self._grab(url, path)
 
-        def mask(path, polygon) -> bool:
+        def mask(path, polygon, black=None) -> bool:
             final = [p for p in os.listdir(self.out) if not p.endswith(".tmp.jpg")]
             self.assertEqual(final, [])       # nothing unmasked at the final name yet
             return False

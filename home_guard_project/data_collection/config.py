@@ -145,6 +145,8 @@ class Config:
 
     # ── ROI zones (normalised polygons per camera) ─────────────────────────
     ROI_ZONES: Dict[str, List[Tuple[float, float]]] = field(default_factory=dict)
+    # Scene-map black areas (scene_maps.yaml next to zones.yaml), blacked out by the same mask.
+    ROI_BLACK: Dict[str, List[List[Tuple[float, float]]]] = field(default_factory=dict)
 
     # ── Detection & display ───────────────────────────────────────────────
     TRIGGER_CLASS_IDS: List[int] = field(default_factory=lambda: [0])
@@ -182,6 +184,16 @@ def _load_zones(path: str) -> Dict[str, List[Tuple[float, float]]]:
     return load_zones(path)
 
 
+def _load_black(zones_path: str) -> Dict[str, List[List[Tuple[float, float]]]]:
+    """The scene maps' black areas, from the scene-map file next to *zones_path*; see zones.py."""
+    if __package__:
+        from .zones import load_black, scene_maps_path_for  # noqa: PLC0415
+    else:
+        from zones import load_black, scene_maps_path_for  # noqa: PLC0415
+
+    return load_black(scene_maps_path_for(zones_path))
+
+
 def load_config(
     config_path: str = _CONFIG_PATH,
     cameras_path: str = _CAMERAS_PATH,
@@ -214,6 +226,9 @@ def load_config(
     roi_zones = _load_zones(zones_path)
     if roi_zones:
         log.info("Loaded ROI zones for %d camera(s)", len(roi_zones))
+    roi_black = _load_black(zones_path)
+    if roi_black:
+        log.info("Loaded scene-map black areas for %d camera(s)", len(roi_black))
 
     cameras_raw = cam_data.get("cameras", {})
     cameras_main = {str(k): str(v) for k, v in cameras_raw.items()} if cameras_raw else {}
@@ -276,6 +291,7 @@ def load_config(
         DISCOVERY_PROBE_TIMEOUT=float(_deep_get(cfg_data, "discovery", "probe_timeout_sec", default=5.0)),
 
         ROI_ZONES=roi_zones,
+        ROI_BLACK=roi_black,
 
         TRIGGER_CLASS_IDS=_resolve_class_names(
             _deep_get(cfg_data, "detection", "trigger_classes", default=["person"]) or ["person"]
