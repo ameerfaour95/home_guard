@@ -150,5 +150,53 @@ class ContextualLabelTest(unittest.TestCase):
         self.assertFalse(any(line.startswith("N1 ") for line in lines))
 
 
+
+class GroundTest(unittest.TestCase):
+    """The "whose ground" column: the scene map says where (code), the Eye says what."""
+
+    def test_grounds_and_the_default_is_unknown(self) -> None:
+        self.assertEqual(tx.GROUNDS, ("mine", "neighbour", "public"))
+        self.assertEqual(tx.Context().ground, "")
+        self.assertIn("grounds", tx.as_table())
+
+    def test_ordinary_life_on_ground_that_is_not_the_owners_is_expected_at_any_hour(self) -> None:
+        for ground in ("neighbour", "public"):
+            for base in (DAY, NIGHT, AWAY):
+                ctx = tx.Context(**{**base.__dict__, "ground": ground})
+                for cid in ("N2", "N4", "N6", "N7", "N9"):
+                    with self.subTest(ground=ground, ctx=base, cid=cid):
+                        self.assertEqual(tx.expectation(cid, ctx), tx.EXPECTED)
+
+    def test_on_the_owners_ground_the_usual_table_applies(self) -> None:
+        mine_night = tx.Context(**{**NIGHT.__dict__, "ground": "mine"})
+        self.assertEqual(tx.expectation("N4", mine_night), tx.expectation("N4", NIGHT))
+        self.assertEqual(tx.expectation("N4", mine_night), tx.UNUSUAL)
+
+    def test_a_ground_never_cancels_a_suspicious_or_serious_sign(self) -> None:
+        for ground in ("neighbour", "public"):
+            ctx = tx.Context(**{**NIGHT.__dict__, "ground": ground})
+            self.assertEqual(tx.expectation("S2", ctx), tx.SERIOUS)
+            self.assertEqual(tx.expectation("E4", ctx), tx.ESCALATION)
+            self.assertEqual(tx.expectation("S4", tx.Context(ground=ground)), tx.UNUSUAL)
+            self.assertEqual(tx.contextual_label("E4", "escalation", ctx).label, "escalation")
+
+    def test_crossing_onto_the_owners_ground_at_night_opens_a_case(self) -> None:
+        ctx = tx.Context(**{**NIGHT.__dict__, "ground": "mine", "crossed_in": True})
+        self.assertEqual(tx.expectation("N1", ctx), tx.UNUSUAL)
+        j = tx.contextual_label("N1", "normal", ctx)
+        self.assertEqual(j.label, "suspicious")
+        self.assertTrue(j.open_case)
+        self.assertIn("crossed onto the owner's ground night", j.reasons)
+        # Coming home with a key is still expected; animals and nothing stay expected.
+        keyed = tx.Context(**{**ctx.__dict__, "flags": ("key_or_door_opened_from_inside",)})
+        self.assertEqual(tx.expectation("N2", keyed), tx.EXPECTED)
+        self.assertEqual(tx.expectation("N8", ctx), tx.EXPECTED)
+
+    def test_crossing_in_by_day_is_the_usual_table(self) -> None:
+        ctx = tx.Context(ground="mine", crossed_in=True)
+        self.assertEqual(tx.expectation("N1", ctx), tx.EXPECTED)
+        self.assertFalse(tx.contextual_label("N1", "normal", ctx).open_case)
+
+
 if __name__ == "__main__":
     unittest.main()
