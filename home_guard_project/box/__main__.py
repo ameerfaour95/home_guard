@@ -16,6 +16,7 @@ Usage:
     python -m home_guard_project.box start
     python -m home_guard_project.box restart          # restart it once, to pick up changed settings
     python -m home_guard_project.box paths --json     # where this box keeps its config, data and logs (paths.py)
+    python -m home_guard_project.box migrate-layout --dry-run   # move them out of the code folder; see layout_migration.py
 
 A changed setting that the running program reads at start-up restarts it by itself.
 """
@@ -267,6 +268,10 @@ def main() -> None:
         from .paths import main as paths_main  # noqa: PLC0415
 
         sys.exit(paths_main(sys.argv[2:]))
+    if len(sys.argv) > 1 and sys.argv[1] == "migrate-layout":
+        from .layout_migration import main as migrate_main  # noqa: PLC0415
+
+        sys.exit(migrate_main(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "register":
         logging.basicConfig(level=logging.INFO, format="%(levelname)-8s %(message)s")
         sys.exit(run_register(sys.argv[2:]))  # publish failure is best effort; invalid input fails
