@@ -1,7 +1,7 @@
-"""fleet_contract/taxonomy.py is a verbatim copy of home_guard_project/box/taxonomy.py (branch week1-2).
+"""fleet_contract/taxonomy.py is a verbatim copy of home_guard_project/box/taxonomy.py (branch beelink-collector-box).
 
 The Admin Center checkout has no box/ package, so the categories are vendored. This test fails when the two
-drift: copy the box file again (`git show week1-2:home_guard_project/box/taxonomy.py`).
+drift: copy the box file again (`git show beelink-collector-box:home_guard_project/box/taxonomy.py`).
 """
 import pathlib
 import subprocess
@@ -11,7 +11,8 @@ import pytest
 from home_guard_project.fleet_contract import taxonomy
 
 VENDORED = pathlib.Path(taxonomy.__file__)
-SOURCES = ("week1-2:home_guard_project/box/taxonomy.py", "origin/week1-2:home_guard_project/box/taxonomy.py")
+SOURCES = ("beelink-collector-box:home_guard_project/box/taxonomy.py",
+           "origin/beelink-collector-box:home_guard_project/box/taxonomy.py")
 
 
 def _box_copy():
@@ -32,7 +33,7 @@ def _normal(text):
 def test_vendored_copy_matches_the_box_taxonomy():
     box = _box_copy()
     if box is None:
-        pytest.skip("branch week1-2 is not available in this checkout")
+        pytest.skip("branch beelink-collector-box is not available in this checkout")
     assert _normal(VENDORED.read_text(encoding="utf-8")) == _normal(box)
 
 
