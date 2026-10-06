@@ -32,6 +32,14 @@ alerts.
 
 **In `_worker`, after `final_label` and `vlm_confirms`, before `dispatch_alert`:**
 
+Pass `parsed`, the processed answer from `eye_prompt.postprocess`, unchanged as `observation`:
+
+- The cleaned values in its nested `observation` (zone, movement, flags, visibility, appearance, vehicles) win
+  over the model's raw top-level copies.
+- Its nested `situation` (phase, house_state) is used, so don't pass `situation=` unless you mean to override it.
+- The veto checks the union of the top-level and nested flags.
+- A legacy answer with no nested dicts still works, and its missing fields fail closed.
+
 Skip this when the camera is muted, out of window or a false positive. Those paths return earlier and must stay
 untouched.
 
@@ -39,9 +47,8 @@ untouched.
 from .case_memory import CaseEvent, apply_case_memory
 event = CaseEvent.build(
     event_id=job.stem, camera=camera_name, ts=alert_ts,
-    observation=parsed,                       # the Eye's answer, as is
+    observation=parsed,                       # the processed Eye answer (eye_prompt.postprocess), as is
     tracker=job.tracker_facts or None,        # tracker.py: time_in_view_s, path, entry_edge, exit_edge
-    situation=situation or None,              # situation.py: phase, house_state
     label=label, cameras_in_incident=incident_cameras or 1,
     eye_model=backend.model_name, prompt_version=PROMPT_VERSION)
 level, note = apply_case_memory(event, {"final_label": label, "alert_command": cmd,
