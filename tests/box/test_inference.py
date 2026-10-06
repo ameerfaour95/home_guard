@@ -201,15 +201,19 @@ class WorkerWithAssistantTest(unittest.TestCase):
         self.assertTrue(job.alert["muted"] and job.paused)
         self.assertEqual((job.alert["summary"], job.alert["alert_command"]), ("", "[none]"))   # the AI was not asked
 
-    def test_the_job_is_released_even_when_the_backend_fails(self) -> None:
-        class Broken:
+    def test_a_failed_vision_call_still_alerts_the_owner(self) -> None:
+        class Broken:   # an outage, or the gateway's 402 when the box is over its daily cap
             def analyze(self, *args, **kwargs):
-                raise RuntimeError("boom")
+                raise RuntimeError("Error code: 402 - box_daily_cap")
 
-        job = inf.AlertJob(camera="front_door", stem="s", ts=1.0)
-        inf._worker(Broken(), self.BOX, {}, self.SETTINGS, "front_door", [], _FakeAssistant(), job)
+        assistant = _FakeAssistant()
+        job = inf.AlertJob(camera="front_door", stem="s", ts=1.0, labels=["person"])
+        with mock.patch.object(inf, "owner_language", return_value="en"):
+            inf._worker(Broken(), self.BOX, {}, self.SETTINGS, "front_door", [], assistant, job)
         self.assertTrue(job.ready.is_set())
-        self.assertEqual(job.alert, {})
+        self.assertEqual(len(assistant.sent), 1)
+        self.assertEqual(job.alert["alert_command"], "[send_message]")
+        self.assertEqual(job.alert["summary"], "a person or vehicle was detected")
 
     def test_without_an_assistant_the_old_path_is_used(self) -> None:
         with mock.patch("home_guard_project.box.telegram_notify.notify", return_value={"sent": True}) as notify, \

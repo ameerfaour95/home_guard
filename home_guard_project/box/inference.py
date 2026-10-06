@@ -1406,8 +1406,12 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
         facts = facts_for_alert(camera_name, alert_ts)
         # Keep legacy/evaluation backends callable when no facts are available.
         context = {"facts": facts, "alert_ts": alert_ts} if facts else {}
-        raw, parsed = backend.analyze(frames, camera_name, int(time.time()),
-                                      settings.alert_start_hour, settings.alert_end_hour, owner_language=lang, **context)
+        try:
+            raw, parsed = backend.analyze(frames, camera_name, int(time.time()),
+                                          settings.alert_start_hour, settings.alert_end_hour, owner_language=lang, **context)
+        except Exception as exc:  # noqa: BLE001 - an outage or the gateway's daily cap: the detector's alert still goes out
+            log.warning("[%s] VLM call failed: %s", camera_name, exc)
+            raw, parsed = "", None
         model_label = str((parsed or {}).get("label") or "").strip().lower()
         # Older answers have only label. They retain their original meaning when no notes were shown.
         raw_label = str((parsed or {}).get("raw_label", model_label if not facts else "") or "").strip().lower()

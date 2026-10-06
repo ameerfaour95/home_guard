@@ -22,6 +22,8 @@ import uuid
 from collections.abc import Mapping
 from typing import Any, Callable, Dict, Optional, Tuple
 
+from . import providers
+
 log = logging.getLogger("box.live_view")
 
 VISION_MODEL = "gpt-4o"      # vision-capable; the text agent stays on gpt-4o-mini
@@ -66,7 +68,7 @@ def _describe(image_path: str, api_key: str, model: str = VISION_MODEL, timeout:
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
             ]}],
         }
-        resp = httpx.post("https://api.openai.com/v1/chat/completions", json=payload, timeout=timeout,
+        resp = httpx.post(providers.openai_url("/chat/completions"), json=payload, timeout=timeout,
                           headers={"Authorization": f"Bearer {api_key}"}, verify=ssl.create_default_context())
         resp.raise_for_status()
         text = (resp.json()["choices"][0]["message"]["content"] or "").strip()

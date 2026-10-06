@@ -60,6 +60,28 @@ class ProvidersTest(unittest.TestCase):
         self.assertAlmostEqual(pv.cost_usd("gpt-4o", 1_000_000, 100_000), 2.50 + 1.00)
         self.assertIsNone(pv.cost_usd("ollama:qwen3.5:4b-bf16", 10, 10))   # local: not billed
 
+    def test_gateway_needs_its_url_and_the_box_token(self) -> None:
+        env = {"HOMEGUARD_GATEWAY_URL": " https://gw.example.com/v1 ", "HOMEGUARD_BOX_TOKEN": "hgb_t"}
+        self.assertEqual(pv.resolve("gateway", env, "eye"), ("hgb_t", "https://gw.example.com/v1", None))
+        with self.assertRaises(pv.ProviderError) as cm:
+            pv.resolve("gateway", {"HOMEGUARD_BOX_TOKEN": "hgb_t"})
+        self.assertIn("HOMEGUARD_GATEWAY_URL", str(cm.exception))
+        with self.assertRaises(pv.ProviderError) as cm:
+            pv.resolve("gateway", {"HOMEGUARD_GATEWAY_URL": "https://gw.example.com/v1",
+                                   "OPENAI_API_KEY": "sk-not-used"})
+        self.assertIn("HOMEGUARD_BOX_TOKEN", str(cm.exception))
+        self.assertEqual(pv.model_key("gateway", "eye"), "gateway:eye")
+        self.assertIsNone(pv.cost_usd("gateway:eye", 10, 10))     # the gateway meters it, not the box
+
+    def test_the_default_is_still_openai(self) -> None:
+        env = {"OPENAI_API_KEY": "sk-1", "HOMEGUARD_GATEWAY_URL": "https://gw/v1", "HOMEGUARD_BOX_TOKEN": "t"}
+        self.assertEqual(pv.resolve("openai", env), ("sk-1", None, None))
+
+    def test_openai_url_follows_openai_base_url(self) -> None:
+        self.assertEqual(pv.openai_url("/embeddings", {}), "https://api.openai.com/v1/embeddings")
+        self.assertEqual(pv.openai_url("chat/completions", {"OPENAI_BASE_URL": "https://gw.example.com/v1/"}),
+                         "https://gw.example.com/v1/chat/completions")
+
 
 if __name__ == "__main__":
     unittest.main()
