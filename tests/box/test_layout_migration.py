@@ -167,7 +167,7 @@ class MigrationTest(unittest.TestCase):
     def test_dry_run_prints_the_plan_and_changes_nothing(self) -> None:
         self.assertEqual(lm.main(["--dry-run", "--home", self.home, "--code-dir", self.code], box=self.box), 0)
         self.assertFalse(os.path.exists(self.home))
-        self.assertEqual(self.fake.calls, [])
+        self.assertEqual([c[0] for c in self.fake.calls], ["git"])     # only asks which commit the code is at
         text = "\n".join(self.said)
         for name in ("box.yaml", "cameras.yaml", "api_key.env", "live_dir", "production_dir", "state/house_state.jsonl",
                      "assistant/.conversations", "logs_dir", "models/yolo11s.pt", "models/yolo11s_openvino_model"):
@@ -340,7 +340,7 @@ class MigrationTest(unittest.TestCase):
         with mock.patch.object(lm.shutil, "disk_usage", return_value=SimpleNamespace(free=10)):
             with self.assertRaises(lm.MigrationError):
                 self.migrate()
-        self.assertEqual(self.fake.calls, [])
+        self.assertEqual([c[0] for c in self.fake.calls], ["git"])
 
     # -- rollback ------------------------------------------------------------------------------------
     def test_rollback_copies_back_what_changed_and_switches_back(self) -> None:
@@ -398,6 +398,19 @@ class MigrationTest(unittest.TestCase):
         self.git("add", *CODE_FILES, "scene_interview/README.txt")
         self.git("commit", "-q", "-m", "code")
         self.git("checkout", "-q", "--detach")
+
+    def test_runs_from_a_detached_head_and_records_the_starting_commit(self) -> None:
+        self.detached_checkout()
+        head = subprocess.run(["git", "-C", self.code, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+        self.assertEqual(self.migrate(), 0)
+        manifest = json.loads(read(self.dst(lm.MANIFEST_NAME)))
+        self.assertEqual(manifest["code_commit"], head)
+        self.assertTrue(any(head in line for line in self.said))
+        self.assertEqual(self.layout().mode, paths.HOME)
+
+    def test_without_git_the_commit_is_unknown_and_the_run_still_works(self) -> None:
+        self.assertEqual(self.migrate(), 0)
+        self.assertIsNone(json.loads(read(self.dst(lm.MANIFEST_NAME)))["code_commit"])
 
     def test_finalize_before_migrating_refuses(self) -> None:
         self.detached_checkout()

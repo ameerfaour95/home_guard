@@ -16,7 +16,7 @@ A run:
      and the auto sign-in account that runs the window);
   3. copies (a file already there with the same size and time is not copied again, so a second run
      resumes), then checks every file's size, and config and secrets byte for byte;
-  4. writes migration_manifest.json (every file copied) and then layout.json;
+  4. writes migration_manifest.json (every file copied, and the commit the code was at) and then layout.json;
   5. turns the upload and heartbeat tasks back on and starts the collector task.
 
 ``--rollback`` stops the box the same way, copies back whatever changed in the new place since (and
@@ -338,6 +338,8 @@ def migrate(code_dir: str, home: str, box: Box, dry_run: bool = False, set_acl: 
     items = plan(old, new)
     listed = [item.files() for item in items]
     total = sum(sum(files.values()) for files in listed)
+    commit = code_commit(code_dir, box.run)
+    box.say(f"Code: {code_dir} at {commit or 'an unknown commit (not a git checkout?)'}")
     box.say(f"Copy {len(items)} item(s), {_size(total)}, from {code_dir} into {home}:")
     for line in describe(items, listed):
         box.say(line)
@@ -372,7 +374,7 @@ def migrate(code_dir: str, home: str, box: Box, dry_run: bool = False, set_acl: 
         box.say(f"Copied and checked {sum(len(f) for _, f in copied)} file(s).")
         manifest = {
             "layout_version": paths.LAYOUT_VERSION, "created": dt.datetime.now().isoformat(timespec="seconds"),
-            "code_dir": code_dir, "home": home,
+            "code_dir": code_dir, "code_commit": commit, "home": home,
             "items": [{"name": i.name, "source": i.source, "dest": i.dest, "is_dir": i.is_dir,
                        "skip": sorted(i.skip), "files": files} for i, files in copied],
         }
@@ -426,6 +428,16 @@ def rollback(code_dir: str, home: str, box: Box) -> int:
         box.start()
     box.say("Restart the Home Guard window (or the box) so it reads the old places too.")
     return 0
+
+
+def code_commit(code_dir: str, run: Runner) -> Optional[str]:
+    """The commit the code folder is at (a detached HEAD is fine); None when git cannot say."""
+    try:
+        out = run(["git", "-C", code_dir, "rev-parse", "HEAD"])
+    except OSError:
+        return None
+    sha = (getattr(out, "stdout", "") or "").strip()
+    return sha if getattr(out, "returncode", 1) == 0 and re.fullmatch(r"[0-9a-f]{40,64}", sha) else None
 
 
 def _tracked(code_dir: str, run: Runner) -> Optional[FrozenSet[str]]:
