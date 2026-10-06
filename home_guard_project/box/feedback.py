@@ -814,6 +814,9 @@ def training_record(
             "prompt_version": teacher.get("prompt_version") or meta.get("prompt_version") or "",
         },
         "situation": dict(_dict(meta.get("situation")), camera=camera, time_local=time_local),
+        # The situational Eye's records, as inference saved them; None for a clip saved without them.
+        "observation": meta.get("observation"),
+        "judgement": meta.get("judgement"),
     }
 
 

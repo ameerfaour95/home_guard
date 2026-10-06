@@ -104,6 +104,30 @@ class DurableAnswerTest(unittest.TestCase):
         self.assertEqual(record["situation"]["camera"], "door")
         self.assertTrue(record["situation"]["time_local"].startswith("2027-01-15 "))
 
+    def test_the_eye_records_are_copied_when_present_and_none_when_absent(self) -> None:
+        self._save(Feedback(verdict="expected", owner_label="normal", source="button"))
+        (durable,) = _files(self.training, "feedback/**/*.feedback.json")
+        with open(durable, encoding="utf-8") as f:
+            record = json.load(f)["training"]
+        self.assertEqual((record["observation"], record["judgement"]), ({"category": "S2"}, None))
+        # A clip saved by the legacy prompt has no situation, observation or judgement.
+        with open(self.meta_path, encoding="utf-8") as f:
+            meta = json.load(f)
+        for key in ("situation", "observation", "judgement", "prompt_version"):
+            meta.pop(key, None)
+        meta.pop("teacher", None)
+        with open(self.meta_path, "w", encoding="utf-8") as f:
+            json.dump(meta, f)
+        shutil.rmtree(self.training)
+        self._save(Feedback(verdict="expected", owner_label="normal", source="button"), now=NOW + 90)
+        (durable,) = _files(self.training, "feedback/**/*.feedback.json")
+        with open(durable, encoding="utf-8") as f:
+            record = json.load(f)["training"]
+        self.assertEqual((record["observation"], record["judgement"]), (None, None))
+        self.assertEqual(record["model"]["category"], "S2")             # still from the model's own answer
+        self.assertEqual(set(record["situation"]), {"camera", "time_local"})
+        self.assertEqual(record["model"]["prompt_version"], "")
+
     def test_a_late_answer_copies_the_crop_and_the_teacher_pictures_with_the_clip(self) -> None:
         # The training copy inference wrote has long been uploaded and removed from the box.
         self._save(Feedback(verdict="expected", owner_label="normal", source="button"))
