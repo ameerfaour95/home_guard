@@ -142,9 +142,11 @@ def parse_export(
 
         annotator_ids = set()
         lead_times = []
-        for ann in annotations:
-            if ann.get("was_cancelled"):
-                continue
+        # A re-tagged task keeps every submitted annotation; merging them
+        # duplicates each box, so only the newest non-cancelled one counts.
+        live = [a for a in annotations if not a.get("was_cancelled")]
+        live = sorted(live, key=lambda a: a.get("updated_at") or a.get("created_at") or "")[-1:]
+        for ann in live:
             cby = ann.get("completed_by")
             if cby is not None:
                 annotator_ids.add(cby)
@@ -318,6 +320,7 @@ def filter_deleted_tasks(
     tasks: List[ParsedTask],
     cfg: AnalysisConfig,
     dataset_dir: Optional[str] = None,
+    purge: bool = False,
 ) -> Tuple[List[ParsedTask], List[ParsedTask], List[ParsedTask]]:
     """
     Partition *tasks* into (keep, deleted, untagged):
@@ -325,8 +328,9 @@ def filter_deleted_tasks(
       - untagged : no annotator touched the task
       - keep     : everything else
 
-    For dropped tasks (deleted + untagged): removes associated files from S3
-    and local disk.
+    Only with *purge* are the dropped tasks' files removed from S3 and local
+    disk.  Off by default: a dropped clip is often a false trigger, which is a
+    hard negative worth keeping for detector training.
     """
     keep: List[ParsedTask] = []
     deleted: List[ParsedTask] = []
@@ -349,6 +353,8 @@ def filter_deleted_tasks(
         "Dropping %d tasks (%d marked %s, %d untagged); keeping %d.",
         len(dropped), len(deleted), DELETE_MARKER, len(untagged), len(keep),
     )
+    if not purge:
+        return keep, deleted, untagged
 
     s3_deleted = _delete_s3_objects(cfg.s3_bucket, cfg.s3_prefix, dropped)
     log.info("Deleted %d S3 objects for %d dropped tasks.", s3_deleted, len(dropped))
@@ -706,6 +712,10 @@ def _frame_map(
     return out, ls_fps
 
 
+# Boxes thinner than this (fraction of the frame) are dropped from YOLO labels.
+MIN_BOX_SIDE = 0.004
+
+
 def write_yolo_labels(
     tasks: List[ParsedTask], cfg: AnalysisConfig, output_dir: str,
     dataset_dir: Optional[str] = None,
@@ -777,8 +787,8 @@ def write_yolo_labels(
                 xc, yc, w, h = ls_rect_to_yolo(
                     box["x"], box["y"], box["width"], box["height"],
                 )
-                if w <= 0 or h <= 0:
-                    continue
+                if w < MIN_BOX_SIDE or h < MIN_BOX_SIDE:
+                    continue  # a sliver from a mis-drag, not an object
                 frame_boxes[native].append(f"{seq_id} {xc:.6f} {yc:.6f} {w:.6f} {h:.6f}")
                 total_boxes += 1
 
@@ -864,6 +874,7 @@ def run(
     skip_excel: bool = False,
     skip_yolo: bool = False,
     skip_vlm: bool = False,
+    purge_dropped: bool = False,
 ) -> None:
     """Run the full analysis pipeline."""
     check_admin_center_ready(export_path)
@@ -874,7 +885,7 @@ def run(
         return
 
     tasks, deleted_tasks, untagged_tasks = filter_deleted_tasks(
-        tasks, cfg, dataset_dir,
+        tasks, cfg, dataset_dir, purge=purge_dropped,
     )
 
     if not tasks:

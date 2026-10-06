@@ -50,7 +50,8 @@ def box_at(
     Center's ``fleet_contract.tracks.box_at``:
 
     * linear interpolation by TIME when every keyframe carries ``time`` (and
-      ``fps`` is known; the query time is ``(frame - 1) / fps``), else by frame;
+      ``fps`` is known; the query time is ``(frame + offset) / fps``, where
+      ``offset = time * fps - frame`` of the first keyframe), else by frame;
     * a segment starting at an enabled keyframe moves to the next keyframe's
       position even when that next keyframe is disabled;
     * a disabled keyframe hides the box until the next keyframe;
@@ -61,7 +62,12 @@ def box_at(
     by_time = bool(fps) and _has_times(sequence)
     if by_time:
         kfs = sorted(sequence, key=lambda kf: float(kf["time"]))
-        q = (frame - 1) / float(fps)
+        # Label Studio writes time = frame / fps for the keyframe it shows at
+        # (frame - 1) / fps; other writers use (frame - 1) / fps.  Query on the
+        # sequence's own clock (taken from its first keyframe) so a box is
+        # never one frame late.
+        offset = round(float(kfs[0]["time"]) * float(fps) - kfs[0].get("frame", 0))
+        q = (frame + offset) / float(fps)
         pos = lambda kf: float(kf["time"])
         eps = _TIME_EPS
     else:

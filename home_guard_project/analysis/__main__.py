@@ -57,8 +57,17 @@ def main() -> None:
         "--dataset-dir",
         default=None,
         help=(
-            "Path to the dataset directory (for local file deletion of "
-            "[delete]-marked tasks). If omitted, only S3 objects are removed."
+            "Path to the dataset directory (clips' meta for native fps; with "
+            "--purge-dropped, its files of dropped tasks are deleted too)."
+        ),
+    )
+    parser.add_argument(
+        "--purge-dropped",
+        action="store_true",
+        help=(
+            "Delete the S3 objects (and --dataset-dir files) of [delete]-marked "
+            "and untagged tasks. Off by default: false-trigger clips are hard "
+            "negatives for YOLO training."
         ),
     )
 
@@ -79,6 +88,7 @@ def main() -> None:
         skip_excel=args.no_excel,
         skip_yolo=args.no_yolo,
         skip_vlm=args.no_vlm,
+        purge_dropped=args.purge_dropped,
     )
 
 
