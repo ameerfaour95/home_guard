@@ -207,6 +207,11 @@ class PostprocessTest(unittest.TestCase):
         self.assertTrue(inference.vlm_confirms(out, ("person",)))
         json.dumps(out)
 
+    def test_an_answer_without_a_category_is_not_judged(self) -> None:
+        out = eye.postprocess({"summary": ""}, sit(NIGHT_TS))
+        self.assertEqual(out, {"summary": "", "situation": sit(NIGHT_TS).record()})
+        self.assertNotIn("observation", eye.records(out, sit(NIGHT_TS)))
+
     def test_other_intents_pass_through_with_the_situation(self) -> None:
         out = eye.postprocess({"description": "A cat on the wall.", "safety_note": ""}, sit(DAY_TS, intent="snapshot"))
         self.assertEqual(out["description"], "A cat on the wall.")

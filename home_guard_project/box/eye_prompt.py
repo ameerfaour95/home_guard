@@ -361,7 +361,8 @@ def postprocess(parsed: Any, situation: Situation) -> Optional[Dict[str, Any]]:
     """
     if not isinstance(parsed, dict):
         return None
-    if situation.intent != "alert_triage":
+    if situation.intent != "alert_triage" or "category" not in parsed:
+        # Another intent, or an answer that is not the Eye's (NullBackend's {"summary": ""}): passed through as is.
         return dict(parsed, situation=situation.record())
     obs = observation_of(parsed)
     cat = tx.get(obs["category"])
