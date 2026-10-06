@@ -11,6 +11,7 @@ import shutil
 import tempfile
 import unittest
 from typing import Dict, List
+from unittest import mock
 
 import numpy as np
 
@@ -503,7 +504,7 @@ class RunTest(PreparedDirMixin, unittest.TestCase):
 
         ev.time.sleep = slept.append
         ev.CONFIRM_OVER = 2
-        ev._make_gpt = lambda model: Stub()
+        ev._make_gpt = lambda provider, model: Stub()
         try:
             self.assertEqual(ev.main(["run", "--dir", self.out, "--tag", "big1"]), 0)
             self.assertEqual(slept, [5])
@@ -979,6 +980,102 @@ class FakeBackendTest(unittest.TestCase):
         self.assertEqual(json.loads(raw), parsed)
         self.assertEqual(set(parsed), {"summary", "label", "people", "animals", "vehicle_moving"})
         self.assertEqual((parsed["summary"], parsed["people"], parsed["label"]), ("No special activity.", 0, "normal"))
+
+
+class CostAndTimeTest(unittest.TestCase):
+    def rows(self):
+        def r(cid, ours, ai, t, pin=2000, pout=80, cost=0.0002, lat=1.5, error=""):
+            return {"clip_id": cid, "ours_label": ours, "ai_label": ai, "ai_summary": "x", "ours_text": "y",
+                    "local_time": t, "prompt_tokens": pin, "completion_tokens": pout, "cost_usd": cost,
+                    "latency_s": lat, "error": error}
+        return [r("a1", "alert", "suspicious", "02:10:00"), r("a2", "alert", "normal", "14:00:00"),
+                r("n1", "normal", "suspicious", "21:30:00"), r("n2", "normal", "normal", "09:00:00"),
+                r("n3", "normal", "normal", None, cost=None, pin=None, pout=None, lat=None),
+                r("e1", "normal", "", "10:00:00", error="boom"),
+                {**r("u1", "alert", "escalation", None), "batch": "uca_dataset_batch"}]
+
+    def test_is_night(self) -> None:
+        self.assertTrue(ev.is_night("02:10:00"))
+        self.assertTrue(ev.is_night("19:00:00"))
+        self.assertFalse(ev.is_night("06:00:00"))
+        self.assertIsNone(ev.is_night(None))
+
+    def test_summary_lists_misses_and_false_alarms(self) -> None:
+        s = ev.summarize(self.rows())
+        self.assertEqual(s["missed_alerts"], ["a2"])   # u1 (escalation) is caught
+        self.assertEqual(s["false_alarms"], ["n1"])
+
+    def test_day_night_split(self) -> None:
+        s = ev.summarize(self.rows())
+        self.assertEqual((s["night"]["alerts_caught"], s["night"]["alerts_total"]), (1, 1))
+        self.assertEqual((s["night"]["normal_flagged"], s["night"]["normal_total"]), (1, 1))
+        self.assertEqual((s["day"]["alerts_caught"], s["day"]["alerts_total"]), (0, 1))
+        self.assertEqual(s["day"]["errors"], 1)
+        self.assertEqual(s["unknown_time"], 2)   # n3 and u1 have no time
+
+    def test_home_external_split(self) -> None:
+        rows = [{**x, "batch": x.get("batch", "ameer_house_batch_1")} for x in self.rows()]
+        s = ev.summarize(rows)
+        self.assertEqual((s["home"]["alerts_caught"], s["home"]["alerts_total"]), (1, 2))
+        self.assertEqual((s["external"]["alerts_caught"], s["external"]["alerts_total"]), (1, 1))
+
+    def test_cost_includes_errored_calls_and_projects_a_month(self) -> None:
+        s = ev.summarize(self.rows())
+        self.assertAlmostEqual(s["cost_per_call"], 0.0002)
+        self.assertAlmostEqual(s["per_month_150"], 0.0002 * 150 * 30)
+        self.assertAlmostEqual(s["tokens_in_mean"], 2000)
+        self.assertIn("per box per month", ev.format_summary(s))
+        self.assertIn("night", ev.format_summary(s))
+
+    def test_old_rows_without_tokens(self) -> None:
+        s = ev.summarize([{"clip_id": "a", "ours_label": "normal", "ai_label": "normal", "error": ""}])
+        self.assertIsNone(s["cost_per_call"])
+        self.assertIn("cost              unknown", ev.format_summary(s))
+
+
+class ProviderRunTest(PreparedDirMixin, unittest.TestCase):
+    def setUp(self) -> None:
+        self.s3 = self.make_bucket()
+        ev.prepare(self.out, client=self.s3, batches=["ameer_house_batch_1", "ameer_house_batch_2", "uca_dataset_batch"])
+
+    def tearDown(self) -> None:
+        self.cleanup()
+
+    def test_usage_cost_and_latency_recorded(self) -> None:
+        backend = ev.FakeBackend()
+        backend.model_name = "openrouter:qwen/qwen3.5-9b"   # a priced model, so cost is filled in
+        ev.run_eval(self.out, backend, model="openrouter:qwen/qwen3.5-9b", tag="q", limit=2)
+        rows = read_jsonl(os.path.join(self.out, "results", "q.jsonl"))
+        self.assertEqual((rows[0]["prompt_tokens"], rows[0]["completion_tokens"]), (1000, 50))
+        self.assertAlmostEqual(rows[0]["cost_usd"], (1000 * 0.10 + 50 * 0.15) / 1e6)
+        self.assertGreaterEqual(rows[0]["latency_s"], 0)
+
+    def test_local_model_has_tokens_but_no_cost(self) -> None:
+        ev.run_eval(self.out, ev.FakeBackend(), model="ollama:qwen3-vl:4b-instruct-bf16", tag="l", limit=1)
+        rows = read_jsonl(os.path.join(self.out, "results", "l.jsonl"))
+        self.assertEqual(rows[0]["prompt_tokens"], 1000)
+        self.assertIsNone(rows[0]["cost_usd"])
+
+    def test_summary_splits_home_and_external(self) -> None:
+        s = ev.run_eval(self.out, ev.FakeBackend(), model="ollama:x", tag="split")
+        self.assertEqual(s["external"]["alerts_total"], 1)    # Burglary001 from the UCA batch
+        self.assertEqual(s["home"]["alerts_total"], 1)        # cam_b break-in
+
+    def test_main_provider_needs_its_key(self) -> None:
+        with mock.patch.dict(os.environ, {"OPENROUTER_API_KEY": ""}),                 mock.patch("dotenv.load_dotenv", return_value=False):
+            with self.assertRaises(SystemExit) as cm:
+                ev.main(["run", "--dir", self.out, "--provider", "openrouter", "--model", "qwen/qwen3.5-9b"])
+        self.assertIn("OPENROUTER_API_KEY", str(cm.exception))
+
+    def test_main_provider_tag_names_provider(self) -> None:
+        with mock.patch.object(ev, "_make_gpt", return_value=ev.FakeBackend()) as make:
+            code = ev.main(["run", "--dir", self.out, "--provider", "ollama", "--model", "qwen3-vl:4b-instruct-bf16",
+                            "--limit", "1", "--yes"])
+        self.assertEqual(code, 0)
+        make.assert_called_once_with("ollama", "qwen3-vl:4b-instruct-bf16")
+        tag = ev.default_tag(None, "ollama:qwen3-vl:4b-instruct-bf16")
+        rows = read_jsonl(os.path.join(self.out, "results", f"{tag}.jsonl"))
+        self.assertEqual(rows[0]["model"], "ollama:qwen3-vl:4b-instruct-bf16")
 
 
 if __name__ == "__main__":

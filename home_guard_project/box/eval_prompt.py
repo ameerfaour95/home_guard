@@ -54,7 +54,7 @@ import time
 from datetime import datetime
 from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
 
-from . import inference
+from . import inference, providers
 
 log = logging.getLogger("box.eval_prompt")
 
@@ -76,11 +76,15 @@ FRAMES_DIR = "frames"
 RESULTS_DIR = "results"
 # What a results .jsonl line holds: the model's answer and what it answered (prompt, model,
 # input fingerprint). Our truth is not stored: it is read from the current manifest when scoring.
+USAGE_COLUMNS = ("prompt_tokens", "completion_tokens", "cost_usd", "latency_s")
 ANSWER_COLUMNS = ("clip_id", "ai_label", "ai_summary", "ai_people", "ai_animals", "ai_vehicle_moving",
-                  "raw", "error", "prompt_id", "prompt_sha12", "model", "input_sha12")
+                  "raw", "error", "prompt_id", "prompt_sha12", "model", "input_sha12") + USAGE_COLUMNS
 # The scored table (.csv): the answer next to the manifest's current camera and truth.
 RESULT_COLUMNS = ("clip_id", "camera", "ours_label", "ours_text", "ai_label", "ai_summary", "ai_people", "ai_animals",
-                  "ai_vehicle_moving", "raw", "error", "prompt_id", "prompt_sha12", "model", "input_sha12")
+                  "ai_vehicle_moving", "raw", "error", "prompt_id", "prompt_sha12", "model", "input_sha12"
+                  ) + USAGE_COLUMNS + ("local_time", "batch")
+NIGHT_FROM, NIGHT_UNTIL = 19, 6          # local hours: 19:00-05:59 is night
+CALLS_PER_DAY = (150, 300)               # a typical and a busy house (plan page section 2)
 
 NO_ACTIVITY = "No special activity."
 PADDING_WORDS = ("without", "no one", "visible", "background", "parked")
@@ -208,6 +212,34 @@ def _ratio(count: int, total: int) -> Optional[float]:
     return count / total if total else None
 
 
+def is_night(local_time: Optional[str]) -> Optional[bool]:
+    if not local_time:
+        return None
+    try:
+        hour = int(str(local_time).split(":")[0])
+    except ValueError:
+        return None
+    return hour >= NIGHT_FROM or hour < NIGHT_UNTIL
+
+
+def _counts(rows: Sequence[Dict[str, Any]]) -> Dict[str, int]:
+    ok = [r for r in rows if not r.get("error")]
+    alerts = [r for r in ok if r.get("ours_label") == "alert"]
+    normals = [r for r in ok if r.get("ours_label") == "normal"]
+    return {"alerts_caught": sum(r.get("ai_label") in CAUGHT_LABELS for r in alerts), "alerts_total": len(alerts),
+            "normal_flagged": sum(r.get("ai_label") != "normal" for r in normals), "normal_total": len(normals),
+            "errors": len(rows) - len(ok)}
+
+
+def _mean(values: Iterable[Any]) -> Optional[float]:
+    nums = [float(v) for v in values if v is not None]
+    return sum(nums) / len(nums) if nums else None
+
+
+def _is_home(row: Dict[str, Any]) -> bool:
+    return str(row.get("batch") or "").startswith(HOME_BATCH_PREFIX)
+
+
 def summarize(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     """The score. Rows with an error are counted in ``errors`` and left out of everything else."""
     ok = [r for r in rows if not r.get("error")]
@@ -220,7 +252,23 @@ def summarize(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     exact = [r for r in empties if str(r.get("ai_summary") or "").strip() == NO_ACTIVITY]
     padded = [r for r in ok if any(w in str(r.get("ai_summary") or "").lower() for w in PADDING_WORDS)]
     both = [r for r in ok if str(r.get("ai_summary") or "").strip() and str(r.get("ours_text") or "").strip()]
-    return {
+    cost = _mean(r.get("cost_usd") for r in rows)          # errored calls were paid for too
+    extra = {
+        "missed_alerts": sorted(str(r.get("clip_id")) for r in alerts if r not in caught),
+        "false_alarms": sorted(str(r.get("clip_id")) for r in flagged),
+        "tokens_in_mean": _mean(r.get("prompt_tokens") for r in rows),
+        "tokens_out_mean": _mean(r.get("completion_tokens") for r in rows),
+        "cost_per_call": cost,
+        "latency_mean": _mean(r.get("latency_s") for r in rows),
+        "per_month_150": None if cost is None else cost * CALLS_PER_DAY[0] * 30,
+        "per_month_300": None if cost is None else cost * CALLS_PER_DAY[1] * 30,
+        "day": _counts([r for r in rows if is_night(r.get("local_time")) is False]),
+        "night": _counts([r for r in rows if is_night(r.get("local_time")) is True]),
+        "unknown_time": sum(is_night(r.get("local_time")) is None for r in rows),
+        "home": _counts([r for r in rows if _is_home(r)]),
+        "external": _counts([r for r in rows if not _is_home(r)]),
+    }
+    return {**extra, **{
         "rows": len(rows),
         "alerts_caught": len(caught),
         "alerts_total": len(alerts),
@@ -236,7 +284,7 @@ def summarize(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         "words_ai_mean": (sum(_words(r["ai_summary"]) for r in both) / len(both)) if both else None,
         "words_ours_mean": (sum(_words(r["ours_text"]) for r in both) / len(both)) if both else None,
         "errors": len(rows) - len(ok),
-    }
+    }}
 
 
 def _pct(value: Optional[float]) -> str:
@@ -247,11 +295,18 @@ def _num(value: Optional[float]) -> str:
     return "-" if value is None else f"{value:.1f}"
 
 
+def _split_line(name: str, c: Optional[Dict[str, int]]) -> str:
+    if not c:
+        return ""
+    return (f"{name:<18}alerts {c['alerts_caught']}/{c['alerts_total']}, "
+            f"normal flagged {c['normal_flagged']}/{c['normal_total']}, errors {c['errors']}")
+
+
 def format_summary(s: Dict[str, Any]) -> str:
     head = []
     if s.get("tag"):
         head.append(f"tag {s['tag']}  prompt {s.get('prompt_id', '?')}  model {s.get('model', '?')}")
-    return "\n".join(head + [
+    lines = head + [
         f"alerts caught     {s['alerts_caught']}/{s['alerts_total']} ({_pct(s['alerts_caught_ratio'])})"
         "   ours [alert] -> AI suspicious or escalation",
         f"escalation share  {_pct(s['escalation_share'])}   of the caught alerts, labelled escalation",
@@ -262,8 +317,20 @@ def format_summary(s: Dict[str, Any]) -> str:
         f"padding           {s['padding']}/{s['padding_total']}   AI summary mentions {', '.join(PADDING_WORDS)}",
         f"words per summary AI {_num(s['words_ai_mean'])} vs ours {_num(s['words_ours_mean'])}",
         f"errors            {s['errors']} of {s['rows']} rows",
+        _split_line("day", s.get("day")),
+        _split_line("night", s.get("night")),
+        _split_line("home clips", s.get("home")),
+        _split_line("external clips", s.get("external")),
+        f"missed alerts     {', '.join(s['missed_alerts']) or '-'}" if "missed_alerts" in s else "",
+        f"false alarms      {', '.join(s['false_alarms']) or '-'}" if "false_alarms" in s else "",
+        (f"tokens per call   in {_num(s.get('tokens_in_mean'))} out {_num(s.get('tokens_out_mean'))}   "
+         f"latency {_num(s.get('latency_mean'))} s"),
+        ("cost              unknown (local or unpriced model)" if s.get("cost_per_call") is None else
+         f"cost              ${s['cost_per_call']:.5f} per call; per box per month "
+         f"${s['per_month_150']:.2f} at 150 calls/day, ${s['per_month_300']:.2f} at 300"),
     ] + ([f"outdated          {s['outdated']} answers were for other frames, camera or time; left out "
-          "(run again to ask)"] if s.get("outdated") else []))
+          "(run again to ask)"] if s.get("outdated") else [])
+    return "\n".join(line for line in lines if line)
 
 
 # ----------------------------------------------------------------------------
@@ -528,6 +595,7 @@ class FakeBackend:
     def __init__(self, fail_ids: Iterable[str] = ()) -> None:
         self.fail_ids = set(fail_ids)
         self.calls = 0
+        self.last_usage = {"prompt_tokens": 1000, "completion_tokens": 50}
         self.prompts: List[str] = []
 
     def ask(self, row: Dict[str, Any], frames: List[Any]) -> Tuple[str, Optional[Dict[str, Any]]]:
@@ -556,6 +624,10 @@ class GptAsker:
     def __init__(self, backend: Any) -> None:
         self.backend = backend
         self.model_name = getattr(backend, "model_name", "gpt")
+
+    @property
+    def last_usage(self) -> Dict[str, int]:
+        return dict(getattr(self.backend, "last_usage", None) or {})
 
     def ask(self, row: Dict[str, Any], frames: List[Any]) -> Tuple[str, Optional[Dict[str, Any]]]:
         # Hours 0,0 = always inside the alert window; the prompt does not use them.
@@ -630,7 +702,8 @@ def input_fingerprint(out_dir: str, row: Dict[str, Any]) -> str:
 
 
 def _answer_row(clip_id: str, raw: Any, parsed: Any, error: str, prompt_id: str, model: str,
-                prompt_sha12: str, input_sha12: str) -> Dict[str, Any]:
+                prompt_sha12: str, input_sha12: str, usage: Optional[Dict[str, int]] = None,
+                latency_s: Optional[float] = None) -> Dict[str, Any]:
     """One results line: the model's answer to one clip. An answer that is not JSON, or not a JSON
     object, is an error with the raw text kept; an object is labelled exactly as the box labels it."""
     if not error and parsed is None:
@@ -639,6 +712,8 @@ def _answer_row(clip_id: str, raw: Any, parsed: Any, error: str, prompt_id: str,
         error = "answer is not a JSON object"
     p: Dict[str, Any] = parsed if isinstance(parsed, dict) and not error else {}
     summary = p.get("summary")
+    pin = (usage or {}).get("prompt_tokens")
+    pout = (usage or {}).get("completion_tokens")
     return {
         "clip_id": clip_id,
         "ai_label": "" if error else inference.label_of(p),
@@ -647,6 +722,9 @@ def _answer_row(clip_id: str, raw: Any, parsed: Any, error: str, prompt_id: str,
         "raw": raw if isinstance(raw, str) else ("" if raw is None else str(raw)),
         "error": error, "prompt_id": prompt_id, "prompt_sha12": prompt_sha12, "model": model,
         "input_sha12": input_sha12,
+        "prompt_tokens": pin, "completion_tokens": pout,
+        "cost_usd": providers.cost_usd(model, pin or 0, pout or 0) if usage else None,
+        "latency_s": None if latency_s is None else round(latency_s, 3),
     }
 
 
@@ -751,7 +829,8 @@ def score_rows(manifest: Sequence[Dict[str, Any]], latest: Dict[str, Dict[str, A
             continue
         scored.append({**{k: r.get(k) for k in ANSWER_COLUMNS}, "clip_id": m["clip_id"],
                        "camera": m.get("camera", ""), "ours_label": m.get("ours_label", ""),
-                       "ours_text": m.get("ours_text", "")})
+                       "ours_text": m.get("ours_text", ""), "local_time": _clip_time(m),
+                       "batch": m.get("batch", "")})
     return scored, outdated
 
 
@@ -861,8 +940,11 @@ def run_eval(out_dir: str, backend: Any, prompt_text: Optional[str] = None, mode
                 raw: Any = ""
                 try:
                     frames = _load_frames(out_dir, m["frames"])
+                    started = time.monotonic()
                     raw, parsed = backend.ask(m, frames)
-                    result = _answer_row(clip_id, raw, parsed, "", prompt_id, model, sha12, fingerprints[clip_id])
+                    took = time.monotonic() - started
+                    result = _answer_row(clip_id, raw, parsed, "", prompt_id, model, sha12, fingerprints[clip_id],
+                                         usage=getattr(backend, "last_usage", None), latency_s=took)
                 except Exception as exc:  # noqa: BLE001 - recorded, the run goes on
                     result = _answer_row(clip_id, raw, None, f"{type(exc).__name__}: {exc}", prompt_id, model,
                                          sha12, fingerprints[clip_id])
@@ -910,7 +992,7 @@ def load_summary(out_dir: str, tag: str) -> Dict[str, Any]:
 # ----------------------------------------------------------------------------
 # Command line
 # ----------------------------------------------------------------------------
-def _make_gpt(model: str) -> Any:
+def _make_gpt(provider: str, model: str) -> Any:
     try:
         import truststore  # noqa: PLC0415
 
@@ -924,10 +1006,12 @@ def _make_gpt(model: str) -> Any:
         load_dotenv(os.path.join(PROJECT_ROOT, "api_key.env"))
     except Exception:  # noqa: BLE001
         pass
-    key = os.environ.get("OPENAI_API_KEY", "").strip()
-    if not key:
-        raise SystemExit("OPENAI_API_KEY is not set (put it in api_key.env at the repo root), or use --fake.")
-    return GptAsker(inference.GptBackend(key, model=model))
+    try:
+        backend = inference.build_gpt(provider, model, os.environ, timeout=120.0)
+    except providers.ProviderError as exc:
+        raise SystemExit(f"{exc}, or use --fake.") from None
+    backend.model_name = providers.model_key(provider, model)
+    return GptAsker(backend)
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -942,7 +1026,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     prep.add_argument("--limit", type=int, default=None, help="Download at most N new clips this time.")
     prep.add_argument("--bucket", default=BUCKET)
 
-    runp = sub.add_parser("run", help="Box: ask the model about every prepared clip and print the score.",
+    runp = sub.add_parser("run", help="Ask the model about every prepared clip and print the score (laptop or "
+                                      "box, wherever the provider is reachable).",
                           description="Caveat: the eval sees the whole clip (5 frames evenly across it, unmasked), "
                                       "the box only the last 5 buffered frames before the trigger, zone-masked, "
                                       "so alert recall reads somewhat optimistic compared with the box.")
@@ -950,6 +1035,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     runp.add_argument("--prompt-file", default=None,
                       help="Use this text as the prompt; {camera_name} and {local_time_str} are filled in.")
     runp.add_argument("--model", default="gpt-4o")
+    runp.add_argument("--provider", default="openai", choices=sorted(providers.PROVIDERS),
+                      help="Where the model is asked: openai, openrouter (OPENROUTER_API_KEY), ollama (the laptop "
+                           "GPU, no key), vllm (VLLM_BASE_URL), dashscope-intl (DASHSCOPE_API_KEY).")
     runp.add_argument("--fake", action="store_true", help="No network: a stand-in model, for checking the setup.")
     runp.add_argument("--limit", type=int, default=None, help="Only the first N clips of the manifest.")
     runp.add_argument("--tag", default=None,
@@ -991,9 +1079,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if args.prompt_file:
             with open(args.prompt_file, encoding="utf-8") as f:
                 prompt_text = f.read()
-        backend = FakeBackend() if args.fake else _make_gpt(args.model)
-        model = None if args.fake else args.model
-        tag = args.tag or default_tag(prompt_text, "fake" if args.fake else args.model, fake=args.fake)
+        model_id = providers.model_key(args.provider, args.model)
+        backend = FakeBackend() if args.fake else _make_gpt(args.provider, args.model)
+        model = None if args.fake else model_id
+        tag = args.tag or default_tag(prompt_text, "fake" if args.fake else model_id, fake=args.fake)
         try:
             summary = run_eval(args.dir, backend, prompt_text=prompt_text, model=model, tag=tag,
                                limit=args.limit, overwrite=args.overwrite, wait=not (args.fake or args.yes))
