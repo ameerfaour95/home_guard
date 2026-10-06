@@ -22,6 +22,9 @@ would mix them up.
   standing still (the foot point within STATIONARY_DISTANCE of where it stopped) is measured too.
 - Dwell, paths and returns are facts, never a verdict: nothing here labels or alerts.
 
+Vehicle tracks that crossed a line, entered another area or ended are handed over with
+``drain_vehicle_events()`` (pure data, for the owner-car feature: plates, "car left / came back").
+
 Readers (the alert workers) ask ``facts(t0, t1)`` and ``tracks_between(t0, t1)``; the loop writes. One lock per
 camera keeps them apart; every call is pure Python and well under a millisecond for a few tracks.
 
@@ -135,6 +138,14 @@ class _Track:
     @property
     def confirmed(self) -> bool:
         return self.hits >= CONFIRM_HITS
+
+    @property
+    def first_foot(self) -> Tuple[float, float]:
+        return (self.points[0][1], self.points[0][2])        # thinning always keeps the first point
+
+    @property
+    def last_foot(self) -> Tuple[float, float]:
+        return (self.points[-1][1], self.points[-1][2])
 
     def add(self, ts: float, box: Box) -> None:
         self.box, self.last_seen, self.hits = box, ts, self.hits + 1
@@ -304,37 +315,46 @@ def _area_runs(kind: str, points: Sequence[Point3], scene: Any) -> List[List[Any
     return runs
 
 
-def _crossings(kind: str, points: Sequence[Point3], scene: Any) -> List[Tuple[str, str]]:
-    """``(line, in | out)`` in time order. The track's side of each line changes only after ENTRY_LOOKS looks in a
-    row on the other side, and it counts as a crossing only when a step crossed the drawn segment itself (not
-    around its end): a person who wobbles on the gate has not crossed it."""
+def _timed_crossings(kind: str, points: Sequence[Point3], scene: Any) -> List[Tuple[str, str, float]]:
+    """``(line, in | out, ts)`` in time order, *ts* the first look on the new side. The track's side of each line
+    changes only after ENTRY_LOOKS looks in a row on the other side, and it counts as a crossing only when the
+    track went across the drawn segment itself (not around its end): a person who wobbles on the gate has not
+    crossed it. Looks exactly on the line are skipped."""
     need = ENTRY_LOOKS.get(kind, 1)
-    found: List[Tuple[int, str, str]] = []
+    found: List[Tuple[float, str, str]] = []
     for line in scene.lines:
-        committed, cand, count, crossed = "", "", 0, False
-        for i, (ts, x, y) in enumerate(points):
+        committed, cand, count, crossed, cand_ts = "", "", 0, False, 0.0
+        last: Optional[Tuple[float, float]] = None      # the last look that was on one side of the line
+        for ts, x, y in points:
             side = sm._side(line.a, line.b, (x, y))
-            if i and line.crossing(points[i - 1][1:], (x, y)):
-                crossed = True
             if not side:
                 continue
+            if last is not None and line.crossing(last, (x, y)):
+                crossed = True
+            last = (x, y)
             if not committed:
                 committed = side
                 continue
             if side == committed:
                 cand, count, crossed = "", 0, False
                 continue
-            count = count + 1 if side == cand else 1
-            cand = side
+            if side != cand:
+                cand, count, cand_ts = side, 0, ts
+            count += 1
             if count >= need:
                 if crossed:
-                    found.append((i, line.name, sm.IN if side == line.inward else sm.OUT))
+                    found.append((cand_ts, line.name, sm.IN if side == line.inward else sm.OUT))
                 committed, cand, count, crossed = side, "", 0, False
-    out: List[Tuple[str, str]] = []
-    for _, name, way in sorted(found):
-        if not out or out[-1] != (name, way):
-            out.append((name, way))
+    out: List[Tuple[str, str, float]] = []
+    for ts, name, way in sorted(found):
+        if not out or out[-1][:2] != (name, way):
+            out.append((name, way, ts))
     return out
+
+
+def _crossings(kind: str, points: Sequence[Point3], scene: Any) -> List[Tuple[str, str]]:
+    """``(line, in | out)`` in time order (``_timed_crossings`` without the times)."""
+    return [(name, way) for name, way, _ in _timed_crossings(kind, points, scene)]
 
 
 def _stationary(points: Sequence[Point3]) -> float:
@@ -391,6 +411,8 @@ class CameraTracker:
         self._active: List[_Track] = []
         self._history: List[_Track] = []
         self._looks: Deque[Tuple[float, Tuple[int, ...]]] = deque(maxlen=MAX_LOOKS)
+        self._ended: Deque[_Track] = deque(maxlen=MAX_HISTORY)   # confirmed vehicles lost since the last drain
+        self._reported: Dict[int, Dict[str, Any]] = {}           # per vehicle: what drain already handed over
         self._next_id = 1
         self._last_ts: Optional[float] = None
 
@@ -477,6 +499,8 @@ class CameraTracker:
             if ts - t.last_seen > LOST_SEC[t.kind]:
                 if t.confirmed:
                     self._history.append(t)
+                    if t.kind == "vehicle":
+                        self._ended.append(t)
             else:
                 still.append(t)
         self._active = still
@@ -513,6 +537,54 @@ class CameraTracker:
                     cur = self._by_id(cur.prev_id)
                 track.returns = count
                 return
+
+    # -- vehicle events (the owner-car feature) -------------------------------
+    def _vehicle_event(self, t: _Track, scene: Any, state: Dict[str, Any], ended: bool) -> Optional[Dict[str, Any]]:
+        timed = _timed_crossings(t.kind, t.points, scene) if scene is not None else []
+        path = _collapse(a.name for a, _, _ in _area_runs(t.kind, t.points, scene)) if scene is not None else ()
+        new = timed[state["crossings"]:]
+        if not ended and not new and path == state["path"]:
+            return None
+        state["crossings"], state["path"] = len(timed), path
+        whole = sm.Track(t.kind, t.points)
+        return {"track_id": t.id, "camera": self.camera, "kind": "vehicle", "cls": t.cls,
+                "first_ts": t.first_seen, "last_ts": t.last_seen, "first_foot": list(t.first_foot),
+                "last_foot": list(t.last_foot), "last_box": list(t.box),
+                "crossings": [(name, way, round(ts, 3)) for name, way, ts in new], "area_path": list(path),
+                "moved": round(whole.moved, 4), "ended": ended,
+                "reason": "ended" if ended else "crossed" if new else "area"}
+
+    def drain_vehicle_events(self, scene_map: Any = None) -> List[Dict[str, Any]]:
+        """Confirmed vehicle tracks that crossed a scene-map line, entered another area or ended (were lost) since
+        the last call, as small dicts: ``track_id, camera, kind, cls, first_ts, last_ts, first_foot, last_foot,
+        last_box`` (normalised x1, y1, x2, y2), ``crossings`` (only the new ``(line, in | out, ts)``),
+        ``area_path`` (the owner's area names so far), ``moved`` (picture widths from the first foot point; parked
+        is below ``scene_map.PARKED_DISTANCE``), ``ended`` and ``reason`` (crossed | area | ended).
+
+        Pure data, no I/O; cheap enough for every look: a vehicle whose foot point has not moved since it was last
+        checked (a parked car) is not looked at again."""
+        scene = self._map(scene_map)
+        events: List[Dict[str, Any]] = []
+        with self._lock:
+            for t in self._active:
+                if t.kind != "vehicle" or not t.confirmed:
+                    continue
+                state = self._reported.setdefault(t.id, {"crossings": 0, "path": (), "at": None})
+                at = state["at"]
+                if at is not None and math.hypot(t.last_foot[0] - at[0], t.last_foot[1] - at[1]) <= STATIONARY_DISTANCE:
+                    continue
+                state["at"] = t.last_foot
+                event = self._vehicle_event(t, scene, state, ended=False)
+                if event:
+                    events.append(event)
+            while self._ended:
+                t = self._ended.popleft()
+                state = self._reported.pop(t.id, None) or {"crossings": 0, "path": (), "at": None}
+                events.append(self._vehicle_event(t, scene, state, ended=True))
+            live = {t.id for t in self._active}
+            for track_id in [i for i in self._reported if i not in live]:
+                del self._reported[track_id]
+        return events
 
     # -- reading (the alert workers) ----------------------------------------
     def _overlapping(self, t0: float, t1: float) -> List[_Track]:
@@ -604,3 +676,7 @@ class TrackerRegistry:
 
     def tracks_between(self, camera: str, t0: float, t1: float) -> List[sm.Track]:
         return self.get(camera).tracks_between(t0, t1)
+
+    def drain_vehicle_events(self, camera: str) -> List[Dict[str, Any]]:
+        """``CameraTracker.drain_vehicle_events`` for *camera*, with its cached scene map."""
+        return self.get(camera).drain_vehicle_events(self.scene_map(camera))

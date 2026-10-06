@@ -367,6 +367,64 @@ class InertiaTest(unittest.TestCase):
         self.assertEqual(walker.facts(T0, end).people[0].stationary_s, 0)
 
 
+class VehicleEventsTest(unittest.TestCase):
+    """drain_vehicle_events(): vehicle tracks that crossed a line, changed area or ended, since the last call."""
+
+    def test_a_car_driving_through_the_gate_and_away(self) -> None:
+        t = tr.CameraTracker("front")
+        scene = house_map()
+        events = []
+        ts = T0
+        for x, y in line_points((0.5, 0.45), (0.5, 0.75), 11):          # parking -> through the gate -> entrance
+            t.update(ts, [car(x, y)], scene_map=scene)
+            events += t.drain_vehicle_events(scene)
+            ts += 0.5
+        crossed = [e for e in events if e["reason"] == "crossed"]
+        self.assertEqual(len(crossed), 1)
+        ev = crossed[0]
+        self.assertEqual((ev["camera"], ev["kind"], ev["cls"]), ("front", "vehicle", 2))
+        self.assertEqual([c[:2] for c in ev["crossings"]], [("gate", "in")])
+        self.assertTrue(T0 < ev["crossings"][0][2] <= ts)
+        self.assertEqual(ev["area_path"], ["parking", "entrance"])
+        self.assertEqual(ev["first_foot"], [0.5, 0.45])
+        self.assertEqual(len(ev["last_box"]), 4)
+        self.assertGreater(ev["moved"], 0.1)                  # 0.18 by the time it crossed
+        self.assertFalse(ev["ended"])
+        self.assertEqual(events[0]["reason"], "area")                  # confirmed in the parking
+        self.assertEqual(t.drain_vehicle_events(scene), [])            # nothing new since
+        t.update(ts + 7, [], scene_map=scene)                          # lost after 6 s
+        (ended,) = t.drain_vehicle_events(scene)
+        self.assertEqual((ended["reason"], ended["ended"], ended["crossings"]), ("ended", True, []))
+        self.assertEqual(ended["last_foot"], [0.5, 0.75])
+        self.assertEqual(t.drain_vehicle_events(scene), [])
+
+    def test_a_parked_car_is_quiet_until_it_leaves(self) -> None:
+        t = tr.CameraTracker("front")
+        for i in range(20):
+            t.update(T0 + i, [car(0.5, 0.5)])
+        first = t.drain_vehicle_events()
+        self.assertEqual(first, [])                                    # unmapped: no area, no line, not ended
+        t.update(T0 + 30, [])
+        (ended,) = t.drain_vehicle_events()
+        self.assertTrue(ended["ended"])
+        self.assertLess(ended["moved"], sm.PARKED_DISTANCE)
+
+    def test_people_and_unconfirmed_vehicles_are_not_events(self) -> None:
+        t = tr.CameraTracker("front")
+        scene = house_map()
+        walk(t, T0, line_points((0.5, 0.45), (0.5, 0.75), 11), scene=scene)
+        t.update(T0 + 6, [car(0.2, 0.5)], scene_map=scene)
+        t.update(T0 + 20, [], scene_map=scene)
+        self.assertEqual(t.drain_vehicle_events(scene), [])
+
+    def test_the_registry_drains_per_camera(self) -> None:
+        reg = tr.TrackerRegistry(scene_map_loader=lambda c: house_map())
+        for i in range(4):
+            reg.update("a", T0 + i * 0.5, [car(0.5, 0.45 + 0.02 * i)])
+        self.assertEqual([e["camera"] for e in reg.drain_vehicle_events("a")], ["a"])
+        self.assertEqual(reg.drain_vehicle_events("b"), [])
+
+
 class RegistryTest(unittest.TestCase):
     def test_one_tracker_per_camera_and_cached_maps(self) -> None:
         loads = []
