@@ -77,8 +77,9 @@ class SceneSetupStep(QFrame):
 
     def show_camera(self, index, start=True):
         if self.editor is not None:
-            self.editor.close_jobs()
-            self.editor.setParent(None); self.editor.deleteLater()
+            # Often called from inside the old editor's own button: it is deleted later, never under its feet.
+            old, self.editor = self.editor, None
+            old.close_jobs(); old.hide(); self.body.removeWidget(old); old.deleteLater()
         self.index = index
         camera = self.cameras[index]
         self.editor = SceneMapEditor(self.backend, camera, self.lang, setup=(index + 1, len(self.cameras)),

@@ -140,6 +140,7 @@ class MapStage(QWidget):
         self.pointer = None
         self.dragging = None               # (hand index, corner index)
         self.loading = ("", "")
+        self.waiting = False
         self.text_direction = Qt.LayoutDirection.LeftToRight
         self.veil = 0.
         self.spin = 0.
@@ -168,6 +169,7 @@ class MapStage(QWidget):
             self.spinner.stop()
 
     def set_loading(self, title="", hint="", instant=False):
+        self.waiting = bool(title)
         if title:
             self.loading = (title, hint)
             self.spinner.start()
@@ -179,8 +181,8 @@ class MapStage(QWidget):
         self.fade.setStartValue(self.veil); self.fade.setEndValue(target); self.fade.start()
 
     def is_loading(self):
-        return bool(self.loading[0]) and self.veil > 0 and (self.fade.state() != QVariantAnimation.State.Running
-                                                            or self.fade.endValue() == 1.)
+        """The box is working: clicks wait (the veil may still be fading out after it answered)."""
+        return self.waiting
 
     def set_picture(self, pix):
         self.pix = QPixmap(pix) if pix is not None else QPixmap()
@@ -277,7 +279,7 @@ class MapStage(QWidget):
 
     # --- mouse -------------------------------------------------------------
     def mousePressEvent(self, event):
-        if not self.isEnabled() or self.veil > 0 or self.pix.isNull():
+        if not self.isEnabled() or self.waiting or self.pix.isNull():
             return
         self.setFocus()
         point = event.position()
@@ -340,7 +342,7 @@ class MapStage(QWidget):
             self.update()
             return
         cursor = Qt.CursorShape.ArrowCursor
-        if self.veil == 0 and not self.pix.isNull():
+        if not self.waiting and not self.pix.isNull():
             if self.mode == "regions" and self.region_at(point):
                 cursor = Qt.CursorShape.PointingHandCursor
             elif self.mode == "draw":
