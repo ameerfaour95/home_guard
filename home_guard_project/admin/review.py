@@ -5,7 +5,7 @@ from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter, QComboBox,
     QApplication, QLineEdit, QPlainTextEdit, QAbstractSpinBox, QSizePolicy)
 from .timeline import TimelineScreen
-from .timeline_model import TimelineDelegate, status_chip_width
+from .timeline_model import TimelineDelegate, status_chip_width, MEMBER
 from .event_view import EventView
 from .event_logic import KINDS, VERDICTS
 from .formatting import local_time
@@ -38,7 +38,7 @@ class ReviewDelegate(TimelineDelegate):
         rect = option.rect.adjusted(8, 10, -10, -8)
         model, row = index.model(), index.row()
         head = (model.session_line(row) if model.lead(row) else
-                ('↳  ' if model.member(row) else '') + f'{local_time(e.start_utc, e.timezone)[13:18]}  ·  {camera_name(e)}')
+                (MEMBER if model.member(row) else '') + f'{local_time(e.start_utc, e.timezone)[13:18]}  ·  {camera_name(e)}')
         lines = [head, e.summary or 'No summary saved',
                  e.outcome or (f'{KINDS.get(e.kind, "Unknown")} · '+{'real':'AI answer saved','failed':'AI failed','fallback':'Fallback AI','none':'No AI answer'}.get(e.completeness.ai, 'Unknown AI state')),
                  ('Reviewed' if e.reviewed else 'Unreviewed') + ('  ·  Flagged' if e.flagged else '') +

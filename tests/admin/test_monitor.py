@@ -315,7 +315,7 @@ class SessionBackend(DemoBackend):
 
 def test_clips_of_one_event_are_one_expandable_row(widgets, wait):
     from home_guard_project.admin.timeline import TimelineScreen
-    from home_guard_project.admin.timeline_model import HEADERS
+    from home_guard_project.admin.timeline_model import HEADERS, MEMBER
     screen = TimelineScreen(SessionBackend()); widgets.append(screen); screen.resize(1120, 600); screen.show()
     screen.open(1, 'Asia/Jerusalem')
     wait(lambda: bool(screen.model.rows) and ('cedar_house', 'door-session') in screen.model.sessions)
@@ -332,7 +332,7 @@ def test_clips_of_one_event_are_one_expandable_row(widgets, wait):
     assert nxt not in members and not table.isRowHidden(nxt)
     screen.toggle_group(lead)
     assert not any(table.isRowHidden(i) for i in members) and model.index(lead, 1).data().startswith('−')
-    assert model.index(members[0], 1).data().startswith('↳')
+    assert model.index(members[0], 1).data().startswith(MEMBER)
     header = table.verticalHeader()  # an open event's clips sit right under it, newest first
     assert [header.visualIndex(i) for i in members] == [header.visualIndex(lead) + 1 + n for n in range(len(members))]
     assert screen.next_row(lead, 1) == members[0] and screen.next_row(members[0], -1) == lead

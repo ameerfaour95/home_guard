@@ -7,6 +7,7 @@ from .formatting import local_time, age
 from .theme import PALETTES
 from .widgets.icons import draw_icon
 
+MEMBER = '      ·  '  # a clip of an open event: indented under it (no arrow glyph: not every UI font has one)
 HEADERS = ['Recording', 'Time / camera', 'Kind', 'AI decision', 'Owner verdict', 'Record', 'Review']
 
 
@@ -111,7 +112,7 @@ class TimelineModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.DisplayRole:
             when = local_time(e.start_utc, e.timezone)[13:18]+'  ·  '+age(e.start_utc, self.now())
             first = (self.session_line(index.row()) if self.lead(index.row()) else
-                     '↳  '+when if self.member(index.row()) else when)
+                     MEMBER+when if self.member(index.row()) else when)
             return ['', first+'\n'+camera_name(e)+'  ·  '+e.summary,
                     KINDS.get(e.kind, "Unknown"), e.outcome or decision(e.alert_command), ', '.join(VERDICTS.get(v, v.replace('_', ' ')) for v in e.owner_verdicts) or 'No feedback',
                     '', ''][col]
