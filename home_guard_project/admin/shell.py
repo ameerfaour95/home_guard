@@ -16,6 +16,19 @@ from .widgets.palette import CommandPalette
 from .widgets.icons import icon
 from .workers import TaskRunner
 from .backend import AuthError
+from .nav import NAV, ACCESS, SCREEN_OF
+
+
+def inbox_screen(backend, role, theme):
+    """The Studio's InboxScreen (admin/inbox.py) once it exists; until then a placeholder in its slot."""
+    try:
+        from .inbox import InboxScreen
+    except ModuleNotFoundError as error:
+        if error.name != f'{__package__}.inbox':
+            raise
+        return EmptyState('Inbox arrives with the Studio update',
+                          'Owner answers from Telegram that wait for confirmation will be listed here.', eyebrow='INBOX')
+    return InboxScreen(backend, role, theme)
 
 
 class SearchField(QLineEdit):
@@ -51,62 +64,35 @@ class Shell(QWidget):
         nav_layout.setSpacing(8)
         nav_layout.addWidget(label('HOME GUARD', 'section'))
         nav_layout.addWidget(label('ADMIN CENTER', 'eyebrow'))
-        nav_layout.addSpacing(40)
+        nav_layout.addSpacing(16)
         self.navigation = {}
         self.pages = QStackedWidget()
         self.screens = {}
-        allowed = ['Label', 'Review', 'Studio'] if staff.role == 'labeler' else ['Fleet', 'Review', 'Studio'] + (['Tag', 'Label', 'Audit'] if staff.role == 'admin' else [])
-        for title in allowed:
-            nav = button(title, lambda checked=False, name=title: self.navigate(name), 'nav')
-            nav.setIcon(icon(title, theme))
-            if title == 'Review':
-                self.review_badge = label('…', 'countBadge')
-                self.review_badge.setParent(nav)
-                self.review_badge.setGeometry(112, 12, 28, 22)
-                self.review_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                self.review_badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-                nav.setToolTip('Unreviewed events in the last 24 hours')
-            nav.setCheckable(True)
-            nav_layout.addWidget(nav)
-            self.navigation[title] = nav
-            if title == 'Fleet':
-                page = FleetScreen(backend, theme)
-                self.fleet = page
-                page.customer_requested.connect(self.open_customer)
-                page.loaded.connect(self.fleet_loaded)
-                page.session_expired.connect(self.session_expired)
-            elif title == 'Tag':
-                page = TagView(backend, staff.role, theme)
-                self.tag_page = page
-                page.session_expired.connect(self.session_expired)
-                page.customer_requested.connect(self.open_customer)
-                page.label_requested.connect(self.open_label)
-            elif title == 'Label':
-                page = LabelView(backend, staff.role, theme)
-                self.label_page = page
-                page.session_expired.connect(self.session_expired)
-                page.annotation_saved.connect(self.annotation_saved)
-            elif title == 'Review':
-                page = ReviewScreen(backend, theme, staff.role)
-                self.review_page = page
-                page.session_expired.connect(self.session_expired)
-            elif title == 'Studio':
-                page = StudioScreen(backend, staff.role, theme)
-                page.filter_requested.connect(self.open_filter)
-                page.event_requested.connect(self.open_event)
-                page.tagging_requested.connect(lambda: self.navigate('Tag'))
-                page.session_expired.connect(self.session_expired)
-            else:
-                page = AuditScreen(backend, theme)
-                page.session_expired.connect(self.session_expired)
-            self.screens[title] = page
-            self.pages.addWidget(page)
+        allowed = ACCESS[staff.role]
+        for section, items in NAV:
+            items = [(name, text) for name, text in items if name in allowed]
+            if not items:
+                continue
+            nav_layout.addSpacing(8)
+            nav_layout.addWidget(label(section, 'eyebrowMuted'))
+            for title, text in items:
+                nav = button(text, lambda checked=False, name=title: self.navigate(name), 'nav')
+                nav.setIcon(icon(title, theme))
+                nav.setAccessibleName(text)
+                if title == 'Review':
+                    self.review_badge = label('…', 'countBadge')
+                    self.review_badge.setParent(nav)
+                    self.review_badge.setGeometry(112, 12, 28, 22)
+                    self.review_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                    self.review_badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+                    nav.setToolTip('Unreviewed events in the last 24 hours')
+                nav.setCheckable(True)
+                nav_layout.addWidget(nav)
+                self.navigation[title] = nav
+                page = self.make_screen(title, backend, staff, theme)
+                self.screens[title] = page
+                self.pages.addWidget(page)
         nav_layout.addStretch()
-        if staff.role == 'admin':
-            from .index_problems import IndexProblems
-            problems = IndexProblems(backend); problems.session_expired.connect(self.session_expired)
-            self.screens['Index problems'] = problems; self.pages.addWidget(problems)
-            nav_layout.addWidget(button('Index problems', lambda:self.navigate('Index problems'), 'link'))
         nav_layout.addWidget(label('Home Guard Cloud\nStaff workspace', 'muted'))
         nav_layout.addWidget(button('Sign out', self.signed_out.emit, 'link'))
         layout.addWidget(rail)
@@ -156,6 +142,40 @@ class Shell(QWidget):
         if self.customer_page:
             self.customer_page.timeline.review_runner.finished.connect(lambda *_: self.update_badge())
             self.customer_page.event_view.review_changed.connect(lambda *_: self.update_badge())
+
+    def make_screen(self, title, backend, staff, theme):
+        if title == 'Fleet':
+            page = FleetScreen(backend, theme)
+            self.fleet = page
+            page.customer_requested.connect(self.open_customer)
+            page.loaded.connect(self.fleet_loaded)
+        elif title == 'Tag':
+            page = TagView(backend, staff.role, theme)
+            self.tag_page = page
+            page.customer_requested.connect(self.open_customer)
+            page.label_requested.connect(self.open_label)
+        elif title == 'Label':
+            page = LabelView(backend, staff.role, theme)
+            self.label_page = page
+            page.annotation_saved.connect(self.annotation_saved)
+        elif title == 'Review':
+            page = ReviewScreen(backend, theme, staff.role)
+            self.review_page = page
+        elif title == 'Studio':
+            page = StudioScreen(backend, staff.role, theme)
+            page.filter_requested.connect(self.open_filter)
+            page.event_requested.connect(self.open_event)
+            page.tagging_requested.connect(lambda: self.navigate('Tag'))
+        elif title == 'Inbox':
+            page = inbox_screen(backend, staff.role, theme)
+        elif title == 'Index problems':
+            from .index_problems import IndexProblems
+            page = IndexProblems(backend)
+        else:
+            page = AuditScreen(backend, theme)
+        if hasattr(page, 'session_expired'):
+            page.session_expired.connect(self.session_expired)
+        return page
 
     def update_badge(self):
         if self.badge_runner.busy:
@@ -249,7 +269,7 @@ class Shell(QWidget):
         elif value == 'Sign out': self.signed_out.emit()
         elif value == 'Export collection…':
             self.navigate('Studio'); self.screens['Studio'].open_export()
-        elif value.startswith('Go to '): self.navigate(value[6:])
+        elif value.startswith('Go to '): self.navigate(SCREEN_OF.get(value[6:], value[6:]))
 
 
 class AdminWindow(QMainWindow):
