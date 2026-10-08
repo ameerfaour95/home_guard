@@ -2212,7 +2212,9 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
             return
         # Appearance alone is never suspicious (owner, 2026-10-08): a "suspicious" whose reason names only looks is
         # a normal. A house note's verdict is the owner's own and is left alone; escalation is never touched here.
-        if label == "suspicious" and not fact and appearance_only(f"{why} {reason}"):
+        # The why, the reason AND the summary: the action is often only in the summary (home-guard-32, eval_set_v2:
+        # "hidden face" + "...moving a bicycle near the house" is a bicycle theft).
+        if label == "suspicious" and not fact and appearance_only(f"{why} {reason} {summary}"):
             log.info("[%s] suspicious only for appearance (%s); normal", camera_name, why or reason)
             label = shown_label = "normal"
             cmd = LABEL_COMMANDS[label]

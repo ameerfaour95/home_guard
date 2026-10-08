@@ -236,10 +236,18 @@ class AppearanceTest(GuardCase):
     book_on = False
 
     def test_a_mask_alone_is_normal(self):
-        job = self.work(Backend(answer("suspicious", why="wearing a mask and a hoodie")), T0)
+        job = self.work(Backend(answer("suspicious", why="wearing a mask and a hoodie",
+                                       summary="A person stands near the wall.")), T0)
         self.assertEqual((job.alert["label"], job.alert["final_label"]), ("normal", "normal"))
         self.assertEqual(job.alert["downgraded"], "appearance only")
         self.assertTrue(self.assistant.sent[0]["text"].startswith("🟢"))
+
+    def test_the_action_in_the_summary_keeps_it_suspicious(self):
+        # eval_set_v2 smartbench_0248: why "hooded sweatshirt", summary "moving a bicycle near the house" = a theft.
+        job = self.work(Backend(answer("suspicious", why="Person wearing a hooded sweatshirt",
+                                       summary="A person appears to be moving a bicycle near the house.")), T0)
+        self.assertEqual(job.alert["label"], "suspicious")
+        self.assertNotIn("downgraded", job.alert)
 
     def test_a_mask_with_an_action_stays_suspicious(self):
         job = self.work(Backend(answer("suspicious", why="a masked man tries the door handle")), T0)
