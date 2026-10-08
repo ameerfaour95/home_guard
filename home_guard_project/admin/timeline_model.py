@@ -2,7 +2,7 @@ from .formatting import camera_name
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, QRectF
 from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QPixmap
 from PySide6.QtWidgets import QStyledItemDelegate, QStyle
-from .event_logic import KINDS, VERDICTS, decision, ai_status, provenance
+from .event_logic import VERDICTS, decision, ai_status, provenance, kind_label, two_lines
 from .formatting import local_time, age
 from .theme import PALETTES
 from .widgets.icons import draw_icon
@@ -114,7 +114,7 @@ class TimelineModel(QAbstractTableModel):
             first = (self.session_line(index.row()) if self.lead(index.row()) else
                      MEMBER+when if self.member(index.row()) else when)
             return ['', first+'\n'+camera_name(e)+'  ·  '+e.summary,
-                    KINDS.get(e.kind, "Unknown"), e.outcome or decision(e.alert_command), ', '.join(VERDICTS.get(v, v.replace('_', ' ')) for v in e.owner_verdicts) or 'No feedback',
+                    kind_label(e), e.outcome or decision(e.alert_command), ', '.join(VERDICTS.get(v, v.replace('_', ' ')) for v in e.owner_verdicts) or 'No feedback',
                     '', ''][col]
 
 
@@ -160,8 +160,15 @@ class TimelineDelegate(QStyledItemDelegate):
         else:
             lines = str(index.data()).split('\n')
             p.setFont(QFont('Segoe UI', 9))
-            color = t['error'] if col == 2 and e.kind == 'alert' else t['secondary']
-            if col in (2, 4) and (col == 2 or e.owner_verdicts):
+            color = t['error'] if col == 2 and lines[0] == 'Alert' else t['secondary']
+            if col == 3:  # the outcome is the point of the row: two lines, never cut to "Kept in the event, no..."
+                p.setPen(QColor(color))
+                shown = two_lines(p.fontMetrics(), lines[0], rect.width())
+                height = p.fontMetrics().height()
+                top = rect.center().y() - height*len(shown)/2
+                for i, text in enumerate(shown):
+                    p.drawText(QRectF(rect.x(), top+i*height, rect.width(), height), Qt.AlignmentFlag.AlignVCenter, text)
+            elif col in (2, 4) and (col == 2 or e.owner_verdicts):
                 text = p.fontMetrics().elidedText(lines[0], Qt.TextElideMode.ElideRight, rect.width()-14)
                 chip = QRectF(rect.x(), rect.center().y()-13, min(rect.width(), p.fontMetrics().horizontalAdvance(text)+14), 26)
                 p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor(t['raised'])); p.drawRoundedRect(chip, 4, 4)

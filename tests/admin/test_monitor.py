@@ -381,3 +381,26 @@ def test_every_chat_line_kind_renders(widgets, wait):
                      'Not delivered to the owner: Bad Request', 'ALERT · כניסה ראשית'):
         assert expected in texts, expected
     assert '(no text)' not in texts
+
+
+def test_kind_and_decision_agree_and_the_outcome_reads_in_full(widgets, wait):
+    from dataclasses import replace as copy
+    from PySide6.QtGui import QFont, QFontMetrics
+    from home_guard_project.admin.event_logic import kind_label, two_lines
+    from home_guard_project.admin.timeline_model import HEADERS
+    base = DemoBackend().events(limit=1).items[0]
+    assert kind_label(copy(base, kind='false_positive', outcome_code='held')) == 'Event'   # not "Dismissed by AI"
+    assert kind_label(copy(base, kind='alert', outcome_code='known')) == 'Event'
+    assert kind_label(copy(base, kind='alert', outcome_code='sent')) == 'Alert'
+    assert kind_label(copy(base, kind='trigger', outcome_code='held')) == 'Collected'
+    assert kind_label(copy(base, kind='false_positive', outcome_code=None)) == 'Dismissed by AI'  # before events
+    metrics = QFontMetrics(QFont('Segoe UI', 9))
+    text = 'Kept in the event, not sent (normal)'
+    assert ' '.join(two_lines(metrics, text, 210)) == text  # the decision column at 1366x768: whole, on two lines
+    long = 'Lowered: appearance only  ·  Not sent: owner said known (the workers on the pergola until five)'
+    shown = two_lines(metrics, long, 210)
+    assert len(shown) == 2 and shown[1].endswith('…')
+    from home_guard_project.admin.timeline import TimelineScreen
+    screen = TimelineScreen(SessionBackend()); widgets.append(screen); screen.resize(1100, 600); screen.show()
+    screen.open(1, 'Asia/Jerusalem'); wait(lambda: bool(screen.model.rows))
+    assert screen.table.columnWidth(HEADERS.index('AI decision')) >= 200

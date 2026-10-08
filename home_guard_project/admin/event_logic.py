@@ -2,6 +2,7 @@
 from bisect import bisect_left
 from statistics import median
 from datetime import timedelta
+from PySide6.QtCore import Qt
 
 KINDS = {'alert': 'Alert', 'false_positive': 'Dismissed by AI', 'paused': 'Paused',
          'owner_feedback': 'Owner feedback', 'trigger': 'Collected', 'random': 'Collected', 'unknown': 'Unknown'}
@@ -10,6 +11,36 @@ DECISIONS = {'[none]': 'No alert', '[send_message]': 'Message sent', '[call_owne
 # owner saying it was normal (family, a delivery, a pet); 'none' is a reply that judges no alert.
 VERDICTS = {'true_alert': 'Real alert', 'false_alarm': 'False alarm', 'expected': 'Normal (expected)',
             'real_but_wrong': 'Real, wrong decision', 'missed_event': 'Missed event', 'none': 'Reply, no verdict'}
+
+
+def kind_label(event):
+    """The Kind column, agreeing with the decision column. With the box's event layer a clip is an Alert (it reached
+    the owner, or was meant to) or part of an Event (kept, not sent: the decision column says why, e.g. "Kept in the
+    event, not sent (normal)"); collections stay Collected. Clips from before events keep their recorded kind."""
+    code = getattr(event, 'outcome_code', None)
+    if event.kind in ('trigger', 'random'):
+        return 'Collected'
+    if code in ('sent', 'undelivered'):
+        return 'Alert'
+    if code:
+        return 'Event'
+    return KINDS.get(event.kind, 'Unknown')
+
+
+def two_lines(metrics, text, width):
+    """*text* word-wrapped into at most two lines that fit *width* (the second elided), for a 64-pixel row."""
+    words, lines, line = str(text).split(), [], ''
+    for i, word in enumerate(words):
+        trial = f'{line} {word}'.strip()
+        if metrics.horizontalAdvance(trial) <= width or not line:
+            line = trial
+            continue
+        lines.append(line)
+        if len(lines) == 1:
+            line = ' '.join(words[i:])
+            break
+    lines.append(line)
+    return [lines[0]] + ([metrics.elidedText(lines[1], Qt.TextElideMode.ElideRight, int(width))] if len(lines) > 1 else [])
 
 
 def decision(command):

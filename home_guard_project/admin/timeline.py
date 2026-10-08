@@ -100,7 +100,7 @@ class TimelineScreen(QWidget):
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setShowGrid(False); self.table.verticalHeader().hide(); self.table.verticalHeader().setDefaultSectionSize(64)
-        for i, width in enumerate((108, 188, 140, 142, 164, 112, 72)):
+        for i, width in enumerate((108, 188, 96, 220, 140, 112, 72)):  # the decision column gets the room
             self.table.setColumnWidth(i, width)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
