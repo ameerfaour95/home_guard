@@ -102,6 +102,16 @@ class AnswersTest(unittest.TestCase):
         answers = si.parse_answers("7 the neighbour's car, 8 the neighbour's gate")
         self.assertEqual([(a.number, a.zone) for a in answers], [(7, "car"), (8, "gate")])
 
+    def test_the_words_may_come_before_the_number(self) -> None:
+        self.assertEqual([(a.number, a.kind) for a in si.parse_answers("להסתיר את 9")], [(9, "black")])
+        self.assertEqual([(a.number, a.kind, a.owner) for a in si.parse_answers("4 של השכן, להסתיר את 9")],
+                         [(4, "watch_no_alert", "neighbour"), (9, "black", "")])
+        self.assertEqual([a.number for a in si.parse_answers("תסתיר את 3 ו-5")], [3, 5])
+
+    def test_a_sentence_that_only_contains_a_number_is_no_answer(self) -> None:
+        for text in ("יש 2 אנשים בחוץ?", "מה קרה ב-3?", "תראה לי את מצלמה 3", "מה המצב?"):
+            self.assertEqual(si.parse_answers(text), [], text)
+
     def test_a_comma_list_is_one_answer_per_number(self) -> None:
         answers = si.parse_answers("1 שלי, 2 של השכן, 3 רחוב, המעקה בין 2 ל-1")
         self.assertEqual([(a.number, a.kind, a.owner) for a in answers],

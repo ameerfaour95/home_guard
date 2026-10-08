@@ -49,6 +49,7 @@ import logging
 import os
 import re
 import sys
+import time
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
@@ -286,10 +287,13 @@ def questions(regions: Sequence[Region], limit: int = MAX_QUESTIONS) -> List[Dic
 @dataclass(frozen=True)
 class Answer:
     number: int
-    kind: str
+    kind: str                      # a scene-map kind, or BOUNDARY: the region IS the wall between us and them
     owner: str = ""
     name: str = ""
     zone: str = "other"
+
+
+BOUNDARY = "boundary"
 
 
 def _words(*words: str) -> re.Pattern:
@@ -301,7 +305,7 @@ def _words(*words: str) -> re.Pattern:
 
 # Checked in this order: "my neighbour's" is the neighbour's, not mine.
 _SKIP = _words("skip", "don't know", "dont know", "not sure", "דלג", "לא יודע", "לא יודעת", "לא בטוח")
-_BLACK = _words("black", "hide", "hidden", "privacy", "blur", "don't look", "שחור", "להסתיר", "הסתר", "פרטיות")
+_BLACK = _words("black", "hide", "hidden", "privacy", "blur", "don't look", "שחור", "להסתיר", "הסתר", "תסתיר", "תסתירו", "פרטיות")
 _NEIGHBOUR = _words("neighbou?r'?s?", "next door", "שכן", "שכנה", "שכנים")
 _PUBLIC = _words("street", "road", "sidewalk", "pavement", "public", "כביש", "רחוב", "מדרכה", "ציבורי")
 _MINE = _words("mine", "my", "ours", "our", "שלי", "שלנו")
@@ -316,8 +320,13 @@ _ZONE_WORDS = (
     ("roof", _words("roof", "גג")),
     ("yard", _words("yard", "garden", "lawn", "grass", "pergola", "patio", "חצר", "גינה", "דשא", "פרגולה")),
 )
+# "4 המעקה ביני לבין השכן": the region is the railing between us (owner, 2026-10-08): ours, and a boundary along it.
+_BOUNDARY_WORD = re.compile(r"\S*(?:מעקה|גדר|קיר|חומה)\S*|\b(?:railing|fence|wall)\b", re.IGNORECASE)
+_BETWEEN = re.compile(r"בין|\bbetween\b", re.IGNORECASE)
+# "7 גם": the same as the answer before it.
+_SAME = re.compile(r"^(?:גם|גם כן|גם הוא|גם היא|גם זה|כנ\"?ל|אותו דבר|also|too|the same|same)$", re.IGNORECASE)
 _FILLER = {"is", "are", "it", "the", "a", "an", "and", "of", "זה", "זאת", "הם", "הן", "הוא", "היא", "את"}
-_KIND_ONLY = {"mine", "ours", "black", "hide", "skip", "public", "שלי", "שלנו", "שחור", "להסתיר", "דלג"}
+_KIND_ONLY = {"mine", "ours", "black", "hide", "skip", "public", "שלי", "שלנו", "שחור", "להסתיר", "תסתיר", "דלג"}
 _CLAUSES = re.compile(r"[;\n.]|\band\b", re.IGNORECASE)
 # A quoted name starts after a space and ends before one, so an apostrophe ("neighbour's") never opens one.
 _QUOTED = re.compile(r"(?:^|(?<=\s))['\"“”׳]([^'\"“”׳]{1,40})['\"“”׳]"
@@ -359,6 +368,8 @@ def _name_of(clause: str) -> str:
     return sm.plain_name(name) if name.lower() not in _KIND_ONLY else ""
 
 
+# Clauses end at ; . a line break, or a comma / "and" that is not followed by another number ("3,5" stays one group).
+_CLAUSE_SPLIT = re.compile(r"[;\n.]|,(?!\s*\d)|\band\b(?!\s*\d)", re.IGNORECASE)
 _GROUP = re.compile(r"\d+(?:\s*(?:,|ו-?|\band\b|&)\s*\d+)*", re.IGNORECASE)
 # "המעקה בין 2 ל-1", "the railing between 2 and 1": a boundary line where two numbered regions meet.
 _LINE_CLAUSE = re.compile(r"(?P<name>[^\d,;.\n]{1,40}?)\s*(?:\bbetween\b|בין)\s*(?P<a>\d+)\s*(?:ל-?|ו-?|\band\b|&|,|-)\s*"
@@ -384,23 +395,59 @@ def parse_lines(text: str) -> List[Tuple[str, int, int]]:
 def parse_answers(text: str) -> List[Answer]:
     """The owner's answers: each number (or group, "3,5" / "3 ו-5") with the words after it, up to the next number
     ("1 שלי, 2 של השכן, 3 רחוב"). Boundary lines ("X בין 2 ל-1") are left to ``parse_lines``; skips and words with
-    no ownership in them are left out."""
+    no ownership in them are left out. "4 המעקה ביני לבין השכן" (a wall word with "between") makes 4 a BOUNDARY:
+    ours, with a line along it; "7 גם" is the same as the answer before it."""
     text = str(text or "")
     hidden = _hide_quotes(text)
     for m in _LINE_CLAUSE.finditer(hidden):                    # the line clauses' numbers are not answers
         text = text[:m.start()] + " " * (m.end() - m.start()) + text[m.end():]
         hidden = hidden[:m.start()] + " " * (m.end() - m.start()) + hidden[m.end():]
-    groups = list(_GROUP.finditer(hidden))
     out: List[Answer] = []
-    for i, m in enumerate(groups):
-        end = groups[i + 1].start() if i + 1 < len(groups) else len(text)
-        words = text[m.end():end]
-        kind = _kind_of(words)
-        if kind is None:
-            continue
-        name, zone = _name_of(words), _zone_of(words)
-        out.extend(Answer(int(n), kind[0], kind[1], name, zone) for n in re.findall(r"\d+", m.group(0)))
+    start = 0
+    for cut in list(_CLAUSE_SPLIT.finditer(hidden)) + [None]:
+        end = cut.start() if cut is not None else len(text)
+        clause, shown = text[start:end], hidden[start:end]
+        start = cut.end() if cut is not None else len(text)
+        groups = list(_GROUP.finditer(shown))
+        for i, m in enumerate(groups):
+            numbers = [int(n) for n in re.findall(r"\d+", m.group(0))]
+            words = clause[m.end():groups[i + 1].start() if i + 1 < len(groups) else len(clause)]
+            if _SAME.match(words.strip(" " + _PUNCT)) and out:
+                last = out[-1]                                 # "7 גם": like the answer before it
+                out.extend(Answer(n, last.kind, last.owner, last.name, last.zone) for n in numbers)
+                continue
+            fence = _BOUNDARY_WORD.search(words)
+            if fence and _BETWEEN.search(words):
+                name = sm.plain_name(fence.group(0))
+                out.extend(Answer(n, BOUNDARY, "", name, "fence") for n in numbers)
+                continue
+            kind = _kind_of(words)
+            if kind is None and i == 0:
+                words = clause[:m.start()]                     # "להסתיר את 9": the words come first
+                kind = _kind_of(words)
+            if kind is None:
+                continue
+            name, zone = _name_of(words), _zone_of(words)
+            out.extend(Answer(n, kind[0], kind[1], name, zone) for n in numbers)
     return out
+
+
+def mentioned_numbers(text: str) -> List[int]:
+    """Every number the owner wrote (outside quoted names), in order, once each."""
+    seen: List[int] = []
+    for m in _GROUP.finditer(_hide_quotes(str(text or ""))):
+        for n in re.findall(r"\d+", m.group(0)):
+            if int(n) not in seen:
+                seen.append(int(n))
+    return seen
+
+
+def _mostly_inside(inner: Sequence[sm.Point], outer: Sequence[sm.Point], share: float = 0.8) -> bool:
+    """At least *share* of polygon *inner* lies inside polygon *outer*."""
+    size = 200
+    a, b = _fill((size, size), inner) > 0, _fill((size, size), outer) > 0
+    total = int(a.sum())
+    return total > 0 and int((a & b).sum()) >= share * total
 
 
 def _work_mask(region: Region, size: int = 200) -> np.ndarray:
@@ -440,26 +487,117 @@ def line_between(name: str, a: Region, b: Region, ours: Optional[Region] = None)
     return sm.Line.toward(name, p, q, (norm(x), norm(y)))
 
 
+def _axis(region: Region) -> Tuple[sm.Point, sm.Point]:
+    """The long axis of a region (a wall, a railing seen from above), end to end."""
+    import cv2  # noqa: PLC0415
+
+    size = 200
+    ys, xs = np.nonzero(_work_mask(region, size))
+    pts = np.column_stack([xs, ys]).astype(np.float32)
+    vx, vy, x0, y0 = (float(v) for v in cv2.fitLine(pts, cv2.DIST_L2, 0, 0.01, 0.01).reshape(-1))
+    t = (pts[:, 0] - x0) * vx + (pts[:, 1] - y0) * vy
+
+    def norm(v: float) -> float:
+        return round(min(1.0, max(0.0, v / (size - 1))), 4)
+
+    return ((norm(x0 + vx * float(t.min())), norm(y0 + vy * float(t.min()))),
+            (norm(x0 + vx * float(t.max())), norm(y0 + vy * float(t.max()))))
+
+
+def _inside_point(points: Sequence[sm.Point]) -> sm.Point:
+    x, y = _label_point(_fill((200, 200), points))
+    return (x / 199.0, y / 199.0)
+
+
+def side_words(a: sm.Point, b: sm.Point, lang: str = "he") -> Dict[str, str]:
+    """The two sides of the line a -> b as the owner sees them on the picture: ``{"left": "הצד הימני", ...}``."""
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    nx, ny = dy, -dx                       # towards "left" of travel on the picture (y grows downwards)
+    he = str(lang).startswith("he")
+    if abs(nx) >= abs(ny):
+        towards = ("הצד הימני", "הצד השמאלי") if he else ("the right side", "the left side")
+        left, right = towards if nx > 0 else towards[::-1]
+    else:
+        towards = ("הצד התחתון", "הצד העליון") if he else ("the lower side", "the upper side")
+        left, right = towards if ny > 0 else towards[::-1]
+    return {"left": left, "right": right}
+
+
+def boundary_line(name: str, region: Region, areas: Sequence[sm.Area], side: str = "",
+                  walls: Sequence[Sequence[sm.Point]] = ()) -> Tuple[sm.Line, bool]:
+    """The boundary along a wall region, inward towards our ground. ``(line, sure)``: *side* (the owner's own
+    "left"/"right") is sure; otherwise the side every area of ours is on, when every neighbour's or public area
+    is on the other side (other *walls* do not vote: a wall is on both sides). Unclear: ``sure`` False and the
+    line points nowhere in particular (ask the owner)."""
+    a, b = _axis(region)
+    if a == b:
+        raise ValueError(f"{region.number} is too small to be a line")
+    if side in sm.SIDES:
+        return sm.Line(name, a, b, side), True
+    votes: Dict[str, set] = {"mine": set(), "theirs": set()}
+    for area in areas:
+        if area.kind == sm.BLACK or area.points == region.points or any(area.points == tuple(w) for w in walls):
+            continue
+        where = sm._side(a, b, _inside_point(area.points))
+        if where:
+            votes["mine" if area.ground == sm.MINE else "theirs"].add(where)
+    mine, theirs = votes["mine"], votes["theirs"]
+    if len(mine) == 1 and not (theirs & mine):
+        return sm.Line(name, a, b, next(iter(mine))), True
+    if not mine and len(theirs) == 1:
+        return sm.Line(name, a, b, "right" if theirs == {"left"} else "left"), True
+    return sm.Line(name, a, b, "right"), False
+
+
 def apply_answers(scene: sm.SceneMap, regions: Sequence[Region], answers: Sequence[Answer],
-                  lines: Sequence[Tuple[str, int, int]] = ()) -> Tuple[sm.SceneMap, List[str]]:
-    """The map with an area for each answered region (an area answered again is replaced) and a boundary for
-    each "X between 2 and 1", and notes for the owner about what could not be used."""
+                  lines: Sequence[Tuple[str, int, int]] = (),
+                  sides: Optional[Dict[int, str]] = None) -> Tuple[sm.SceneMap, List[str]]:
+    """The map with an area for each answered region (an area answered again is replaced), a boundary for each
+    "X between 2 and 1", and for a region the owner called the wall between us ("4 המעקה ביני לבין השכן") that
+    region as ours plus a boundary along it, inward towards our ground (*sides*: the owner's own answer per
+    region; when unclear the note says "which side of ... is yours?" and no line is drawn). Notes for the owner
+    about what could not be used."""
     by_number = {r.number: r for r in regions}
     areas = list(scene.areas)
     notes: List[str] = []
     ours: set = set()
+    walls: List[Answer] = []
+    said: List[sm.Area] = []
     for ans in answers:
         region = by_number.get(ans.number)
         if region is None:
             notes.append(f"there is no {ans.number} in the picture")
             continue
+        if ans.kind == BOUNDARY:
+            walls.append(ans)
+        kind = sm.MINE if ans.kind == BOUNDARY else ans.kind
         name = ans.name or (ans.zone if ans.zone != "other" else f"area {ans.number}")
-        area = sm.Area(name, ans.kind, ans.zone if ans.zone in tx.ZONES else "other", region.points,
-                       owner=ans.owner if ans.kind == sm.WATCH else "")
-        areas = [a for a in areas if a.points != area.points] + [area]
-        if ans.kind == sm.MINE:
+        area = sm.Area(name, kind, ans.zone if ans.zone in tx.ZONES else "other", region.points,
+                       owner=ans.owner if kind == sm.WATCH else "")
+        # The newest word wins where it was said: an area of the map that lies (mostly) inside the answered region
+        # is replaced; the others keep their kind (the change merges, it never resets the map). A black area is
+        # never lifted by a word about something else: privacy goes only when the owner removes it.
+        # Areas named in this same answer never replace each other (SAM's big region 1 may hold region 2).
+        areas = [a for a in areas if a.points != area.points
+                 and (a.kind == sm.BLACK or a in said or not _mostly_inside(a.points, area.points))] + [area]
+        said.append(area)
+        if kind == sm.MINE:
             ours.add(ans.number)
     found = list(scene.lines)
+    for ans in walls:
+        try:
+            line, sure = boundary_line(ans.name or "line", by_number[ans.number], areas,
+                                       (sides or {}).get(ans.number, ""),
+                                       [by_number[w.number].points for w in walls])
+        except ValueError as exc:
+            notes.append(str(exc))
+            continue
+        if not sure:
+            notes.append(f"which side of {line.name} ({ans.number}) is yours?")
+            continue
+        line = sm.Line(f"{line.name} {ans.number}" if sum(w.name == ans.name for w in walls) > 1 else line.name,
+                       line.a, line.b, line.inward)
+        found = [ln for ln in found if ln.name != line.name] + [line]
     for name, n1, n2 in lines:
         if n1 not in by_number or n2 not in by_number:
             notes.append(f"there is no {n1 if n1 not in by_number else n2} in the picture")
@@ -521,14 +659,29 @@ def draft_path(camera: str, out_dir: str = INTERVIEW_DIR) -> str:
 
 
 def answer(camera: str, text: str, regions_path: str, picture: Optional[np.ndarray] = None,
-           out_dir: str = INTERVIEW_DIR, zones_path: Optional[str] = None) -> Dict[str, Any]:
+           out_dir: str = INTERVIEW_DIR, zones_path: Optional[str] = None,
+           sides: Optional[Dict[int, str]] = None) -> Dict[str, Any]:
     """Step 2: the owner's answers into a DRAFT of the camera's map (nothing is saved: the owner confirms it with
-    ``confirm``), and the ownership picture when *picture* is given."""
+    ``confirm``), and the ownership picture when *picture* is given. ``sides_needed``: the walls whose inward side
+    is unclear (ask the owner, then call again with *sides*); ``not_understood``: the numbers of this picture the
+    owner wrote that made nothing ("7 גם" before 2026-10-08: say "לא הבנתי את 7")."""
     import cv2  # noqa: PLC0415
 
     regions = load_regions(regions_path, camera)
     before = sm.load_scene_map(camera, zones_path)
-    scene, notes = apply_answers(before, regions, parse_answers(text), parse_lines(text))
+    answers, lines = parse_answers(text), parse_lines(text)
+    scene, notes = apply_answers(before, regions, answers, lines, sides)
+    known = {r.number for r in regions}
+    used = {a.number for a in answers} | {n for _, a, b in lines for n in (a, b)}
+    not_understood = [n for n in mentioned_numbers(text) if n in known and n not in used]
+    notes += [f"I did not understand {n}" for n in not_understood]
+    by_number = {r.number: r for r in regions}
+    sides_needed = []
+    for note in notes:
+        m = re.match(r"which side of (.+) \((\d+)\) is yours\?", note)
+        if m and int(m.group(2)) in by_number:
+            a, b = _axis(by_number[int(m.group(2))])
+            sides_needed.append({"number": int(m.group(2)), "name": m.group(1), "line": [list(a), list(b)]})
     if not scene.areas and not scene.lines:
         notes.append("nothing to save yet: say whose each number is")
     # What the confirmed map will look like: today's zone as ours, the rest the neighbour's.
@@ -542,7 +695,7 @@ def answer(camera: str, text: str, regions_path: str, picture: Optional[np.ndarr
         if not cv2.imwrite(image_path, ownership_overlay(picture, preview), [cv2.IMWRITE_JPEG_QUALITY, 90]):
             raise OSError(f"could not write {image_path}")
     return {"camera": camera, "map": preview.to_dict(), "image": image_path, "notes": notes,
-            "draft": draft_path(camera, out_dir)}
+            "draft": draft_path(camera, out_dir), "sides_needed": sides_needed, "not_understood": not_understood}
 
 
 def confirmed_preview(scene: sm.SceneMap) -> sm.SceneMap:
@@ -561,7 +714,8 @@ def confirm(camera: str, out_dir: str = INTERVIEW_DIR, zones_path: Optional[str]
             known_cameras: Sequence[str] = ()) -> Dict[str, Any]:
     """Step 3, the owner's [save]: the draft becomes the camera's confirmed map (``scene_map.confirm_scene_map``).
     Stale keys of the same channel (an old site name, not among *known_cameras*) are dropped with it.
-    ``restart_needed`` when the frame mask changed."""
+    ``restart_needed`` when the frame mask changed. The map it replaces (its scene-map entry and its drawn zone)
+    is kept as the camera's backup: ``restore_previous`` brings it back (owner, 2026-10-08)."""
     path = draft_path(camera, out_dir)
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
@@ -569,12 +723,94 @@ def confirm(camera: str, out_dir: str = INTERVIEW_DIR, zones_path: Optional[str]
         raise ValueError(f"that draft belongs to camera {data.get('camera')!r}, not {camera!r}")
     draft = sm.SceneMap.from_dict(camera, data, data.get("watched") or None)
     stale = stale_keys(camera, known_cameras, zones_path) if known_cameras else []
+    _keep_backup(camera, zones_path)
     saved, changed = sm.confirm_scene_map(draft, zones_path, stale=stale)
     try:
         os.remove(path)
     except OSError:
         pass
     return {"camera": camera, "map": saved.to_dict(), "restart_needed": changed, "stale_removed": stale}
+
+
+# ---------- the previous map ----------
+BACKUP_NAME = "scene_maps_backup.json"
+
+
+def _backup_path(zones_path: Optional[str]) -> str:
+    from ..data_collection.zones import ZONES_PATH, scene_maps_path_for  # noqa: PLC0415
+
+    return os.path.join(os.path.dirname(scene_maps_path_for(zones_path or ZONES_PATH)), BACKUP_NAME)
+
+
+def _snapshot(camera: str, zones_path: Optional[str]) -> Dict[str, Any]:
+    """The camera's live map as stored: its scene-map entry and its drawn zone (either may be None)."""
+    from ..data_collection.zones import ZONES_PATH, _read_raw, read_scene_maps, scene_maps_path_for  # noqa: PLC0415
+
+    zp = zones_path or ZONES_PATH
+    return {"scene": read_scene_maps(scene_maps_path_for(zp)).get(str(camera)),
+            "zone": _read_raw(zp).get(str(camera)), "saved_at": time.time()}
+
+
+def _read_backups(zones_path: Optional[str]) -> Dict[str, Any]:
+    try:
+        with open(_backup_path(zones_path), encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _write_backups(data: Dict[str, Any], zones_path: Optional[str]) -> None:
+    path = _backup_path(zones_path)
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=1)
+    os.replace(tmp, path)
+
+
+def _keep_backup(camera: str, zones_path: Optional[str]) -> None:
+    data = _read_backups(zones_path)
+    data[str(camera)] = _snapshot(camera, zones_path)
+    _write_backups(data, zones_path)
+
+
+def previous_map(camera: str, zones_path: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """The map *camera* had before its last confirm (``{"scene", "zone", "saved_at"}``), or None."""
+    entry = _read_backups(zones_path).get(str(camera))
+    return entry if isinstance(entry, dict) else None
+
+
+def restore_previous(camera: str, zones_path: Optional[str] = None) -> Dict[str, Any]:
+    """Bring back the map *camera* had before its last confirm; the map it replaces becomes the backup (so a
+    restore can be undone the same way). ``restart_needed`` when the frame mask changed. LookupError without one."""
+    from ..data_collection.zones import (  # noqa: PLC0415
+        ZONES_PATH, _read_raw, black_polygons, read_scene_maps, save_zones, scene_maps_path_for, write_scene_maps)
+
+    backup = previous_map(camera, zones_path)
+    if backup is None:
+        raise LookupError(f"no previous map of {camera}")
+    zp = zones_path or ZONES_PATH
+    sp = scene_maps_path_for(zp)
+    current = _snapshot(camera, zones_path)
+    scenes = read_scene_maps(sp)
+    if backup.get("scene") is None:
+        scenes.pop(str(camera), None)
+    else:
+        scenes[str(camera)] = backup["scene"]
+    write_scene_maps(scenes, sp)
+    zones = dict(_read_raw(zp))
+    if backup.get("zone") is None:
+        zones.pop(str(camera), None)
+    else:
+        zones[str(camera)] = backup["zone"]
+    save_zones(zones, zp)
+    data = _read_backups(zones_path)
+    data[str(camera)] = current
+    _write_backups(data, zones_path)
+    changed = (current.get("zone") != backup.get("zone")
+               or black_polygons(current.get("scene")) != black_polygons(backup.get("scene")))
+    return {"camera": camera, "restart_needed": bool(changed), "saved_at": backup.get("saved_at")}
 
 
 def stale_keys(camera: str, known_cameras: Sequence[str], zones_path: Optional[str] = None) -> List[str]:
