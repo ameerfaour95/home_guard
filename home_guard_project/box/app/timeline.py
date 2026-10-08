@@ -45,7 +45,8 @@ def merge_timeline(data,feed):
 def thinking_camera(data,now):
     thinking=data.get('thinking')
     if not isinstance(thinking,dict) or not fresh(thinking.get('ts'),now,60) or now-timestamp(thinking.get('ts'))>=60: return ''
-    return str(thinking.get('camera') or '').replace('_',' ').title()
+    from .camera_display import shown
+    return shown(thinking.get('camera')) if thinking.get('camera') else ''
 
 @dataclass(frozen=True)
 class QuietGroup:

@@ -1,10 +1,21 @@
 from concurrent.futures import ThreadPoolExecutor
-from PySide6.QtCore import QTimer, QRegularExpression, Qt
-from PySide6.QtGui import QPixmap, QRegularExpressionValidator
+from PySide6.QtCore import QTimer, Qt
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QScrollArea, QPushButton, QLineEdit, QCheckBox, QLabel, QProgressBar, QTextEdit
 from .strings import tr
 from .theme import OK, ERROR, MUTED
 from .camera_controls import changes_payload
+from .scene_editor import fallback_name
+
+
+def box_names(controls):
+    """``{camera id: name}`` from the box (``names --json``), in the app's language; {} when it cannot say."""
+    try:
+        from .scene_backend import scene_backend_for
+        from .scene_strings import language
+        return {k: v for k, v in scene_backend_for(controls).names(language()).items() if v}
+    except Exception:  # noqa: BLE001 - an older box or no answer: the cards say "Camera 2 of 5"
+        return {}
 
 class CameraPage:
     def __init__(self, controls, changed, wizard=False, check_state=None, skip=None):
@@ -84,6 +95,7 @@ class CameraPage:
         self.row_busy={}
         self.loaded = False
         self.zone_values = {}
+        self.camera_names = {}           # camera id -> the box's name for it (names --json); ids are never shown
         self.zones_loaded = False
         self.zone_load_failed = False
         self.zone_widgets = {}
@@ -126,6 +138,9 @@ class CameraPage:
 
     def read_zones(self, records):
         # One zone request after snapshots, never one request per card or UI tick.
+        self.camera_names = box_names(self.controls)
+        from . import camera_display
+        camera_display.set_names(self.camera_names, [r.name for r in records])
         try:
             self.zone_values = self.controls.zones()
             self.zones_loaded = True
@@ -261,10 +276,12 @@ class CameraPage:
             alert_button.clicked.connect(lambda checked=False,n=camera.name:self.open_alerts(n))
             actions.addWidget(alert_button,1);self.alert_widgets[camera.name]=alert_button
             line = QHBoxLayout()
-            name = QLineEdit(camera.name)
-            name.setAccessibleName(tr("camera_name"))
-            name.setValidator(QRegularExpressionValidator(QRegularExpression("[a-z0-9_]+"), name))
-            name.textChanged.connect(self.validate)
+            # The camera's name as the family reads it, from the box. The id (cameras.yaml) is never shown, and
+            # the name cannot be edited here until the box has a command that sets it (owner rule 2026-10-08).
+            name = QLabel(self.camera_names.get(camera.name) or fallback_name((i + 1, len(records))))
+            name.setObjectName('cameraName'); name.setTextFormat(Qt.TextFormat.PlainText)
+            name.setStyleSheet('font-size: 12pt; font-weight: 600; padding: 6px 2px;')
+            name.setAccessibleName(tr("camera_name") + ": " + name.text())
             from .motion import Switch
             enabled = Switch(tr("camera_enabled" if camera.enabled else "camera_off"))
             enabled.setChecked(camera.enabled)
@@ -323,7 +340,7 @@ class CameraPage:
     def open_scene(self, name, demo_state=None):
         if self.future is not None: return
         from .scene_editor import open_map_dialog
-        return open_map_dialog(self, name, demo_state)
+        return open_map_dialog(self, name, demo_state, self.camera_names.get(name, ''))
 
     def open_zone(self, name, photo):
         if self.future is not None or self.zone_load_failed or not self.zones_loaded: return
@@ -375,17 +392,14 @@ class CameraPage:
             toast(self.widget.window(),tr('camera_error'))
         self.controls.toggle_pending=False
         self.toggle_before=None
-        edits={old:field.text() for old,field,_ in self.rows}
         self.render(records)
-        for old,field,_ in self.rows:
-            if old in edits: field.setText(edits[old])
         self.changed()
 
     def validate(self):
         self.saved = False
         try:
             changes_payload(self.changes())
-            valid = bool(self.rows) and all(field.hasAcceptableInput() for _, field, _ in self.rows)
+            valid = bool(self.rows)
         except ValueError:
             valid = False
         self.save.setEnabled(valid and self.future is None)
@@ -394,7 +408,8 @@ class CameraPage:
             self.note.setText(tr("camera_names_invalid"))
 
     def changes(self):
-        return [(old, field.text(), enabled.isChecked()) for old, field, enabled in self.rows]
+        """(id, id, enabled) per camera: the page switches cameras on and off; it never renames an id."""
+        return [(old, old, enabled.isChecked()) for old, _name, enabled in self.rows]
 
     def save_clicked(self):
         changes = self.changes()

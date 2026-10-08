@@ -56,7 +56,8 @@ def parse_activity(line, source=""):
     detail = redact(line)
     match = re.search(r"\[([^\]]+)\] (?:trigger|random) saved:", line)
     if match:
-        return Activity(tr("saved", camera=match[1].replace("_", " ")), detail)
+        from .camera_display import shown
+        return Activity(tr("saved", camera=shown(match[1])), detail)
     match = re.search(r"Done\. Uploaded: (\d+).*Failed: (\d+)", line)
     if match:
         return Activity(

@@ -259,7 +259,10 @@ DEMO_REGIONS = (
 
 
 DEMO_NAMES = {"front_door": {"he": "דלת הכניסה", "en": "Front door"}, "garden": {"he": "הגינה", "en": "Garden"},
-              "driveway": {"he": "החניה", "en": "Driveway"}}
+              "driveway": {"he": "החניה", "en": "Driveway"}, "side_gate": {"he": "השער הצדדי", "en": "Side gate"},
+              "patio": {"he": "המרפסת", "en": "Patio"}, "garage": {"he": "המוסך", "en": "Garage"},
+              "back_door": {"he": "הדלת האחורית", "en": "Back door"}, "porch": {"he": "המבואה", "en": "Porch"},
+              "courtyard": {"he": "החצר", "en": "Courtyard"}}
 
 
 class DemoSceneBackend:

@@ -103,7 +103,8 @@ class CameraTile(QFrame):
         self.detector_note.hide()
         self.status = label(tr("offline"), "muted")
         self.status.hide()
-        self.caption = label(name.replace("_", " ").title())
+        from .camera_display import shown
+        self.caption = label(shown(name))          # the box's name for it, never the id
         self.caption.setObjectName("cameraCaption");self.caption.hide()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 8, 16, 8)
@@ -644,6 +645,10 @@ class Window(QMainWindow):
             self.update_detector()
             return
         now = time.monotonic()
+        if getattr(self, "names_future", None) is not None and self.names_future.done():
+            future, self.names_future = self.names_future, None
+            try: self.camera_names_loaded(future.result())
+            except Exception: pass
         if self.future and self.future.done():
             try:
                 self.apply_state(*self.future.result())
@@ -886,6 +891,9 @@ class Window(QMainWindow):
         self.camera_stack.setCurrentIndex(0)
         if self.names != state.cameras:
             self.names = list(state.cameras)
+            from . import camera_display
+            camera_display.set_order(self.names)
+            self.load_camera_names()
             while self.grid.count():
                 self.grid.takeAt(0).widget().deleteLater()
             self.tiles = [CameraTile(name) for name in state.cameras]
@@ -1069,6 +1077,26 @@ class Window(QMainWindow):
             self.grid.activate()
             from .motion import Transition
             self.rail_transition=Transition(self.grid_widget,before,self.grid_widget.grab(),self.grid_widget.rect())
+
+    def load_camera_names(self):
+        """Ask the box for its cameras' names (once per camera list); the tiles and the feed then show them."""
+        from .camera_ui import box_names
+        if self.args.demo:
+            self.camera_names_loaded(box_names(self.camera_controls))
+            return
+        if getattr(self, "names_future", None) is not None and not self.names_future.done():
+            return
+        if not hasattr(self, "names_pool"):
+            self.names_pool = ThreadPoolExecutor(max_workers=1)
+        self.names_future = self.names_pool.submit(box_names, self.camera_controls)
+
+    def camera_names_loaded(self, names):
+        from . import camera_display
+        camera_display.set_names(names, self.names)
+        for tile in getattr(self, "tiles", []):
+            tile.caption.setText(camera_display.shown(tile.name))
+        if getattr(self, "events", None) is not None and hasattr(self, "activity_layout"):
+            self.render_activity()
 
     def render_activity(self):
         while self.activity_layout.count():

@@ -1999,15 +1999,16 @@ def map_button(lang=None):
     return button
 
 
-def open_map_dialog(page, name, demo_state=None):
-    """Open the map editor for camera *name* from a camera page (camera_ui.CameraPage)."""
+def open_map_dialog(page, name, demo_state=None, display=''):
+    """Open the map editor for camera *name* (an id) from a camera page (camera_ui.CameraPage); *display* is the
+    box's name for it, when the page has it."""
     from .scene_backend import scene_backend_for
     photo = page.zone_widgets.get(name, (None, None, None))[2]
     ids = [c.name for c in getattr(page.controls, 'records', [])]
     position = (ids.index(name) + 1, len(ids)) if name in ids else None
     # The card knows only ids; the box names the camera in its first answer (propose), "מצלמה 2 מתוך 5" till then.
     dialog = SceneMapDialog(scene_backend_for(page.controls), name, parent=page.widget, start=demo_state is None,
-                            placeholder=getattr(photo, 'pix', None), position=position)
+                            placeholder=getattr(photo, 'pix', None), position=position, name=display)
     page.zone_dialog = dialog            # the camera page pauses its polling while a dialog is open
     dialog.saved.connect(lambda saved: page.zone_saved(name, []))     # confirm removes today's zone: whole picture
     if demo_state:

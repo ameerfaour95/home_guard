@@ -5,6 +5,7 @@ from PySide6.QtGui import QPixmap,QPainter,QPainterPath,QIcon,QImage
 from PySide6.QtWidgets import QWidget,QHBoxLayout,QScrollArea,QGraphicsOpacityEffect,QLabel,QPushButton,QVBoxLayout
 from .ai_view import status_note
 from .timeline import merge_timeline,thinking_camera,image_path,group_quiet,QuietGroup,text_direction
+from .camera_display import shown
 from .strings import tr
 from .theme import WARNING, ERROR
 
@@ -140,7 +141,7 @@ class AiActivity(QWidget):
             if isinstance(entry,QuietGroup):
                 group=QWidget();group.setProperty('feedDay',date);group.setObjectName('quietGroup');group_layout=layout_for(group,8);group_layout.setSpacing(8)
                 heading=QHBoxLayout();glyph=QLabel();glyph.setPixmap(icon('bell-off' if record.muted else 'bot').pixmap(18,18));heading.addWidget(glyph)
-                first=time.strftime('%H:%M',time.localtime(entry.records[0].ts));name=record.camera.replace('_',' ').title();count_=len(entry.records)
+                first=time.strftime('%H:%M',time.localtime(entry.records[0].ts));name=shown(record.camera);count_=len(entry.records)
                 if record.muted and record.text==tr('demo_pause_summary'):
                     text=tr('quiet_paused_group' if count_>1 else 'quiet_paused_once',camera=name,count=count_,time=first)
                 else:
@@ -171,7 +172,7 @@ class AiActivity(QWidget):
                 glyph=QLabel();glyph.setPixmap(icon('user' if record.who=='owner' else 'bot' if record.who=='assistant' else 'camera').pixmap(18,18))
                 if record.who=='assistant': glyph.setObjectName('botAvatar');glyph.setFixedSize(30,30);glyph.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 meta.addWidget(glyph)
-                name=record.name if record.who=='owner' else tr('ai_assistant') if record.who=='assistant' else record.camera.replace('_',' ').title()
+                name=record.name if record.who=='owner' else tr('ai_assistant') if record.who=='assistant' else shown(record.camera)
                 meta.addWidget(label(name,'muted'),1)
             else: meta.addStretch()
             if record.label in ('suspicious','escalation'):

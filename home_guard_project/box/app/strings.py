@@ -177,7 +177,7 @@ TEXT = {
     "resume_alerts": "Resume alerts",
 
     "cameras_title": "Your cameras",
-    "cameras_hint": "Choose which cameras protect your home. Use lowercase letters, numbers and underscores for names. Refreshing photos may take a few moments per camera.",
+    "cameras_hint": "Choose which cameras protect your home. Refreshing photos may take a few moments per camera.",
     "refresh_photos": "Refresh photos",
     "save_cameras": "Save cameras",
     "camera_working": "Working on your cameras...",
