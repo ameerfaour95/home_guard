@@ -35,7 +35,7 @@ from .aliases import normalize
 from .profiles import asks_about_now, needs_big, system_prompt, tool_names, tools_for
 from .receipts import ACTING_TOOLS, DONE, FAILED, REQUESTED, UNDONE, Receipt, ReceiptBook
 from .mode import hhmm
-from .registry import mentioned_cameras, render_block, resolve_camera
+from .registry import current_camera, mentioned_cameras, render_block, resolve_camera
 from .render import receipt_line, render_reply, undo_what
 from .tools import DEFAULTS, TOOLS, KEYS, Services, ToolContext, _issue, settings_line
 from .tools import _alert_state, _alert_target, _alert_types, _alert_values
@@ -169,7 +169,7 @@ def context_block(snapshot: Any, settings_text: str, now: float, lang: str, aler
     lines.append(f"[NOW] {when} · mode: {'Guard' if snapshot.mode == 'guard' else 'Assistant'}")
     if alert_handle and alert:
         alert_time = dt.datetime.fromtimestamp(float(alert.get("ts") or now)).strftime("%a %d %b %H:%M")
-        lines.append(f"[ALERT THIS MESSAGE ANSWERS] {alert_handle} {alert.get('camera')} {alert_time}: "
+        lines.append(f"[ALERT THIS MESSAGE ANSWERS] {alert_handle} {_alert_camera(snapshot, alert)} {alert_time}: "
                      f"{alert.get('summary') or 'no description'}")
     else:
         lines.append("[ALERT THIS MESSAGE ANSWERS] none - if the owner judges an alert, ask which one")
@@ -184,11 +184,33 @@ def context_block(snapshot: Any, settings_text: str, now: float, lang: str, aler
     return "\n".join(lines)
 
 
+def _alert_camera(snapshot: Any, alert: Dict[str, Any]) -> str:
+    """An alert's camera as the model should read it: renamed since, or gone."""
+    raw = str(alert.get("camera") or "")
+    now_called = current_camera(snapshot, raw)
+    if now_called == raw or not raw:
+        return raw
+    return f"{raw} (now {now_called})" if now_called else f"{raw} (no longer a camera of this house)"
+
+
+def _keep_topic_current(state: ChatState, snapshot: Any, now: float) -> None:
+    """A topic camera saved before a rename follows the rename, or is dropped when no camera has its name."""
+    topic = state.topic_camera(now)
+    if topic and snapshot.camera(topic[0]) is None:
+        mapped = current_camera(snapshot, topic[0])
+        if mapped:
+            state.set_topic_camera(mapped, topic[1], float(state.topic.get("ts") or now))
+        else:
+            state.topic = {}
+
+
 def focus_lines(state: ChatState, snapshot: Any, text: str, now: float, alert_handle: Optional[str] = None,
                 alert: Optional[Dict[str, Any]] = None) -> List[str]:
     """What this message is about, worked out in code before the model reads it (the pergola bug, 2026-10-05):
     the cameras it names by the owner's own words, the camera and the event being talked about (kept in the chat
-    state across turns), and whether it asks about right now. Updates the state's topics."""
+    state across turns), and whether it asks about right now. Updates the state's topics. Only cameras of the
+    house today become the topic."""
+    _keep_topic_current(state, snapshot, now)
     mentions = mentioned_cameras(snapshot, text)
     named = list(dict.fromkeys(camera for _, camera in mentions))
     if len(named) == 1:
@@ -201,8 +223,8 @@ def focus_lines(state: ChatState, snapshot: Any, text: str, now: float, alert_ha
                                str(alert.get("visibility") or ""), str(alert.get("label") or ""))
         state.set_topic_event(alert_handle, now)
         old = state.topic_camera(now)
-        if not named and alert.get("camera"):
-            camera = str(alert["camera"])
+        camera = current_camera(snapshot, str(alert.get("camera") or ""))
+        if not named and camera:
             state.set_topic_camera(camera, old[1] if old and old[0] == camera else "", now)
     lines = []
     said = [f"{w} = {c}" for w, c in mentions if normalize(w) != normalize(c)]
@@ -401,6 +423,11 @@ class OwnerAgentV2:
                 if not noted:                                      # a reminder of the same alert is not a new one
                     state.add_event_turn(handle, now)
                 state.set_topic_event(handle, now)
+                try:
+                    camera = current_camera(self.registry.snapshot(), camera) or ""
+                except Exception as exc:  # noqa: BLE001 - no camera list: no topic camera rather than a stale one
+                    log.warning("Camera list unavailable for an alert: %s", exc)
+                    camera = ""
                 if camera:
                     old = state.topic_camera(now)
                     state.set_topic_camera(camera, old[1] if old and old[0] == camera else "", now)

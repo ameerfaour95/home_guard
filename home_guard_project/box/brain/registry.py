@@ -138,6 +138,20 @@ def resolve_camera(snapshot: HouseSnapshot, words: str) -> Resolution:
     return _result(prefix) if prefix else Resolution(None)
 
 
+def current_camera(snapshot: HouseSnapshot, name: str) -> Optional[str]:
+    """*name* as a camera of the house today: itself, or the camera that has it as an alias - a renamed camera keeps
+    its old name as one (find_cameras.alias_old_names) - or None when no camera has it any more. Exact matches
+    only: an old alert's camera is never guessed (2026-10-06: a stale alert's ameer_tes2_ch6 got the owner's name
+    after every camera had been renamed)."""
+    key = normalize(name)
+    if not key:
+        return None
+    if snapshot.camera(str(name)) is not None:
+        return str(name)
+    hits = [c.name for c in snapshot.cameras if key in [normalize(c.name)] + [normalize(a) for a in c.aliases]]
+    return hits[0] if len(hits) == 1 else None
+
+
 def mentioned_cameras(snapshot: HouseSnapshot, text: str) -> List[Tuple[str, str]]:
     """``(word, camera)`` for every camera a message names - by its name, one of the owner's names for it, or
     "camera 3" - as whole words (Hebrew prefixes allowed: "בפרגולה"), in the order they appear. Where two names
