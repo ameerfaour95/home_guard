@@ -427,6 +427,36 @@ class AnnotationOut:
 
 
 @dataclass
+class InboxItem:
+    """One owner answer from Telegram waiting in (or handled from) the Inbox (cloud /v1/inbox)."""
+    feedback_id: int
+    event_id: int
+    clip_key: str
+    customer_id: int
+    customer: str
+    site: str
+    camera: str
+    camera_name: str | None
+    received_utc: datetime | None
+    owner_label: str
+    owner_text: str
+    transcript: str
+    raw_text: str
+    note: str
+    verdict: str
+    source: str
+    tagged_by: str
+    model_label: str | None
+    model_summary: str
+    model: str | None
+    consent_training: bool
+    decision: str | None
+    decided_by: str | None
+    decided_utc: datetime | None
+    decision_note: str = ''
+
+
+@dataclass
 class ReviewDecision:
     decision: Literal['accept', 'reject']
     note: str = ''

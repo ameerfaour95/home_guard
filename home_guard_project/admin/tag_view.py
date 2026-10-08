@@ -48,6 +48,7 @@ class TagView(QWidget):
         self.state, self.detail, self.key, self.wanted = None, None, None, None
         self.form, self.saved_form, self.drafts = None, None, {}
         self.suggested = {}   # clip key -> (model, the fields as suggested, the form before the suggestion)
+        self.owner_start = None   # (clip key, fields) from the Inbox: the owner's answer starts that clip's tag
         self.view, self.raw_manual, self.chord = 'crop', False, None
         self.categories = {}
         self.state_runner, self.queue_runner, self.clip_runner, self.media_runner, self.save_runner, self.side_runner = \
@@ -424,6 +425,28 @@ class TagView(QWidget):
             b.setToolTip(reasons.get(kind) or 'Crop: what the AI sees · Full frame: the whole camera  (V)')
         self.load_media()
         self.load_boxes()
+        if self.owner_start and self.owner_start[0] == key:
+            _, fields = self.owner_start
+            self.owner_start = None
+            if fields:
+                self.apply_owner(fields)
+
+    def open_from_owner(self, key, fields=None):
+        """Open `key` from the Inbox. With `fields` (Accept as tag), the owner's Telegram answer fills the form as a
+        draft: the admin checks it, picks the category and saves; nothing is saved for them."""
+        self.owner_start = (key, dict(fields) if fields else None)
+        self.open(key)
+
+    def apply_owner(self, fields):
+        for name, value in fields.items():
+            if name == 'notes' and self.form.get('notes'):
+                value = self.form['notes'] + '\n' + value
+            self.form[name] = value
+        self.raw_manual = bool(self.form.get('raw_label'))
+        self.render_form(); self.update_save_state()
+        self.started_from.setText('from Owner · Telegram')
+        self.show_banner("Started from the owner's answer (Owner · Telegram). Check it, pick the category and save: "
+                         'only the saved tag trains the model.')
 
     # ------------------------------------------------------------------ boxes (Tag · AI)
     def load_boxes(self):

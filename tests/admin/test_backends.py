@@ -20,7 +20,8 @@ def test_every_fixture_parses_and_keeps_contract_fields(path):
              else DetectionsOut if name.startswith('detections_') else CustomerOut if name.startswith('customer_') else EventPage if name == 'events.json' else EventDetail)
     model = {'audit.json': AuditPage, 'fleet_activity.json': DensityOut, 'studio_collections.json': list[CollectionOut],
              'studio_filters.json': list[SavedFilter], 'studio_exports.json': list[ExportOut],
-             'review_count.json': ReviewCount, 'events_density.json': DensityOut}.get(name,model)
+             'review_count.json': ReviewCount, 'events_density.json': DensityOut,
+             'inbox.json': list[InboxItem]}.get(name,model)
     source = json.loads(path.read_text(encoding='utf-8'))
     parsed = decode(model, source)
     def shape(wire, actual):
