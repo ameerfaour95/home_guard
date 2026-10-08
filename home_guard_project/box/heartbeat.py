@@ -12,7 +12,7 @@ import os
 import shutil
 import socket
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from .outbox import META_SUFFIX
 
@@ -65,6 +65,32 @@ def _disk_free_gb(path: str) -> float:
     return round(shutil.disk_usage(path).free / 1e9, 1)
 
 
+def camera_list(cameras_path: str, lang: str = "en", aliases_path: Optional[str] = None) -> List[Dict[str, Any]]:
+    """The cameras in *cameras_path* (cameras.yaml) as ``{"id", "name", "channel", "enabled"}``, active ones first:
+    *name* is what the owner reads (camera_names.display_name in *lang*, from the family's names in *aliases_path*,
+    default brain/aliases' file), *channel* the ``_chN`` number as text or None. Never the stream URL (it holds the
+    camera's login). [] when the file is missing or cannot be read."""
+    from .camera_names import channel_of, display_name  # noqa: PLC0415
+
+    try:
+        import yaml  # noqa: PLC0415
+
+        with open(cameras_path, encoding="utf-8") as f:
+            raw = yaml.safe_load(f) or {}
+        active = list((raw.get("cameras") or {}).keys())
+        disabled = [c for c in (raw.get("disabled") or {}).keys() if c not in active]
+        aliases = None
+        if aliases_path is not None:
+            from .brain.aliases import load_aliases  # noqa: PLC0415
+
+            aliases = load_aliases(aliases_path)
+        return [{"id": str(cam), "name": display_name(str(cam), lang, aliases), "channel": channel_of(str(cam)),
+                 "enabled": on}
+                for cams, on in ((active, True), (disabled, False)) for cam in cams]
+    except Exception:  # noqa: BLE001 - the heartbeat goes out without the list
+        return []
+
+
 def build_heartbeat(
     site: str,
     live_dir: str,
@@ -72,7 +98,12 @@ def build_heartbeat(
     alive_path: str,
     now: Optional[float] = None,
     mode: Optional[str] = None,
+    cameras_path: Optional[str] = None,
+    lang: str = "en",
+    aliases_path: Optional[str] = None,
 ) -> Dict[str, Any]:
+    """The status payload. With *cameras_path* it also carries ``camera_list`` (see camera_list): ``cameras`` was
+    already the per-camera clip counts, so the configured cameras with their owner-facing names go beside it."""
     now = time.time() if now is None else now
     live = _clip_times(live_dir)
     # The outbox has one dataset folder per site.
@@ -100,6 +131,7 @@ def build_heartbeat(
         "clips_outbox": sum(len(t) for t in outbox.values()),
         "newest_clip_utc": _iso_utc(max(all_times)) if all_times else None,
         "cameras": cameras,
+        **({"camera_list": camera_list(cameras_path, lang, aliases_path)} if cameras_path else {}),
     }
 
 

@@ -261,7 +261,16 @@ def publish_registration_for_site(site: str) -> None:
 
 def _status(cfg: BoxConfig) -> dict:
     """The status report: the heartbeat, plus whether the box was stopped on purpose."""
-    status = build_heartbeat(cfg.site, *_clip_dirs(cfg.mode), ALIVE_FILE, mode=cfg.mode)
+    from . import paths  # noqa: PLC0415
+
+    try:
+        from .boxconfig import load_box_settings  # noqa: PLC0415
+
+        lang = str(load_box_settings().get("owner_language") or "en")
+    except Exception:  # noqa: BLE001 - the names then read in English
+        lang = "en"
+    status = build_heartbeat(cfg.site, *_clip_dirs(cfg.mode), ALIVE_FILE, mode=cfg.mode,
+                             cameras_path=paths.cameras_yaml(), lang=lang, aliases_path=paths.camera_aliases_yaml())
     status["stopped"] = control.is_stopped()
     status["registration"] = registration_status(load_registration())
     if status["stopped"]:
