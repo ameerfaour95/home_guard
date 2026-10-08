@@ -15,7 +15,7 @@ https://claude.ai/artifact/9Fh6q2W5XbndKSkNgVJa4M (section 3).
   - "escalation" is always sent unless the same session already reported an escalation with the same people
     in the last ``ESCALATION_REPEAT_SEC``.
   - What the owner marked as known ("these are my workers", until a time) silences "suspicious" for that camera
-    while the head-count stays within what was known; never an escalation.
+    while the head-count stays within what was known (plus KNOWN_EXTRA_PEOPLE); never an escalation.
 - **Known** (``mark_known``) is written only from the owner's own words, through the assistant, with a receipt.
   It covers the camera until ``until`` and the session it was said in.
 
@@ -40,6 +40,9 @@ log = logging.getLogger("box.events")
 IDLE_SEC = 60.0                  # no person or vehicle seen this long: the activity is over
 ROLL_SEC = 1800.0                # a session this old closes and a linked one continues
 ESCALATION_REPEAT_SEC = 600.0
+# The owner's "these are my workers" still covers a head-count this much above what was there when it was said:
+# the Eye's count of a working group jumps around (3, 5, 2...). A real new person is the entity layer's job (stage 2).
+KNOWN_EXTRA_PEOPLE = 2
 KEEP_OBSERVATIONS = 40           # per session, newest kept
 LEVELS = {"none": 0, "normal": 1, "suspicious": 2, "escalation": 3}
 
@@ -280,7 +283,8 @@ class EventBook:
                     return no("escalation already reported in this event, same people")
                 return Decision(True, s.id, "escalation", reply_to, new_people)
             # suspicious
-            if known is not None and (known.people == 0 or count <= max(known.people, s.people_when_said(known.id))):
+            covered = max(known.people, s.people_when_said(known.id)) + KNOWN_EXTRA_PEOPLE if known else 0
+            if known is not None and (known.people == 0 or count <= covered):
                 return no("suspicious, but the owner said who is here", known.text)
             if reported >= lvl and new_people == 0:
                 return no("suspicious already reported in this event, nobody new")

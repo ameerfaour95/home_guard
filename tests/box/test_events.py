@@ -68,7 +68,8 @@ class EventBookTest(unittest.TestCase):
     def test_known_does_not_cover_more_people(self):
         self.book.decide(CAM, T0, "normal", 2)
         self.book.mark_known(CAM, "workers", "owner", until=T0 + 3600, now=T0 + 5)
-        self.assertTrue(self.book.decide(CAM, T0 + 50, "suspicious", 4).notify)
+        self.assertFalse(self.book.decide(CAM, T0 + 50, "suspicious", 4).notify)
+        self.assertTrue(self.book.decide(CAM, T0 + 60, "suspicious", 5).notify)
 
     def test_known_is_per_camera(self):
         self.book.mark_known(CAM, "workers", "owner", until=T0 + 3600, now=T0, people=3)
