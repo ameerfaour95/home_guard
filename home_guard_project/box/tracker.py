@@ -10,13 +10,21 @@ would mix them up.
 
 - **Matching** is greedy: by box overlap first (IoU >= IOU_MATCH), then by foot-point distance, with a gate that
   grows with the gap between looks (GATE_PER_SEC picture widths a second, at most MAX_GATE, at least MIN_GATE so
-  back-to-back looks still match). People and vehicles never share a track.
+  back-to-back looks still match). People and vehicles never share a track. A person box still left over then
+  **joins** a person track seen within JOIN_SEC, if their boxes overlap at all (IoU >= JOIN_IOU) or its foot point
+  is within JOIN_GATE: the replay of the Oct 7-8 clips (``analysis/replay_tracks.py``) found one walk split in two
+  after a gap of 0.16-0.78 s, because a shrinking or growing box moves the foot point more than the tight gate.
 - A track is **confirmed** after CONFIRM_HITS looks and **lost** after LOST_SEC unseen; confirmed lost tracks stay
   HISTORY_SEC as history. Memory is capped (MAX_ACTIVE tracks, MAX_HISTORY lost ones, MAX_POINTS foot points each,
   thinned evenly).
 - A new person track that starts within RETURN_SEC of a lost one, in the same scene-map area (or within
   RETURN_DISTANCE of its last foot point when the map cannot place them), **came back**: it links to it.
-- **Parked vehicles** (moved less than ``scene_map.PARKED_DISTANCE`` in the window) never enter the facts.
+- **Vehicles that never moved** (less than ``scene_map.PARKED_DISTANCE`` from where they were first seen - a
+  parked car, a trailer read as a vehicle) are followed inside but are not tracks to anyone outside: no facts, no
+  snapshot (so no entity), no vehicle event. The moment one drives off it is handed over whole, from its start.
+- Each track keeps the best detector score it had (``max_conf``). The loop feeds people from a lower score than
+  the alert needs (box.yaml ``tracker_person_conf``), so a reader that must know a person was seen at the alert's
+  own certainty checks ``max_conf`` (``inference.investigate_lingering``).
 - **Areas and lines** use the foot point with inertia: a person enters an area (or is across a line) only after
   ENTRY_LOOKS looks in a row there, a vehicle after one; a stay outlives EXIT_GRACE_SEC outside the area. Time
   standing still (the foot point within STATIONARY_DISTANCE of where it stopped) is measured too.
@@ -56,6 +64,9 @@ IOU_MATCH = 0.3
 GATE_PER_SEC = 0.12          # picture widths a foot point may move per second between looks
 MAX_GATE = 0.25
 MIN_GATE = 0.05              # back-to-back looks (a few hundredths of a second) must still match
+JOIN_SEC = 1.0               # a left-over person box joins a person track seen this recently ...
+JOIN_IOU = 0.1               # ... whose box it overlaps at all ...
+JOIN_GATE = 0.2              # ... or whose last foot point is this close (picture widths)
 CONFIRM_HITS = 2
 LOST_SEC = {"person": 4.0, "vehicle": 6.0}
 HISTORY_SEC = 600.0          # lost tracks kept this long, for returns and for an alert's pre-roll
@@ -134,10 +145,17 @@ class _Track:
     prev_id: Optional[int] = None       # the lost track this one is a return of
     returns: int = 0                    # earlier visits in the chain within RETURN_SEC
     followed: bool = False              # a later track already counts as this one coming back
+    max_conf: float = 0.0               # the best detector score of any of its looks
+    moved: float = 0.0                  # farthest its foot point got from the first one (picture widths)
 
     @property
     def confirmed(self) -> bool:
         return self.hits >= CONFIRM_HITS
+
+    @property
+    def shown(self) -> bool:
+        """A person always; a vehicle only once it has moved (a parked one is no track to anyone outside)."""
+        return self.kind != "vehicle" or self.moved >= sm.PARKED_DISTANCE
 
     @property
     def first_foot(self) -> Tuple[float, float]:
@@ -147,9 +165,12 @@ class _Track:
     def last_foot(self) -> Tuple[float, float]:
         return (self.points[-1][1], self.points[-1][2])
 
-    def add(self, ts: float, box: Box) -> None:
+    def add(self, ts: float, box: Box, conf: float = 0.0) -> None:
         self.box, self.last_seen, self.hits = box, ts, self.hits + 1
-        self.points.append((ts,) + sm.foot_point(box))
+        self.max_conf = max(self.max_conf, float(conf))
+        foot = sm.foot_point(box)
+        self.moved = max(self.moved, math.hypot(foot[0] - self.points[0][1], foot[1] - self.points[0][2]))
+        self.points.append((ts,) + foot)
         if len(self.points) > MAX_POINTS:
             # Every other point, keeping the first and the latest: the shape and the times survive.
             self.points = self.points[:-1:2] + [self.points[-1]]
@@ -176,6 +197,7 @@ class TrackFacts:
     prev_id: Optional[int] = None
     entry_edge: str = ""
     exit_edge: str = ""
+    max_conf: float = 0.0                                  # the best detector score of any of its looks
 
     @property
     def useful(self) -> bool:
@@ -207,7 +229,7 @@ class TrackFacts:
                 "stationary_s": self.stationary_s, "seconds_per_area": dict(self.seconds_per_area), "path": list(self.path),
                 "zones": list(self.zone_path), "crossings": [list(c) for c in self.crossings],
                 "returns": self.returns, "prev_id": self.prev_id, "entry_edge": self.entry_edge,
-                "exit_edge": self.exit_edge}
+                "exit_edge": self.exit_edge, "max_conf": round(self.max_conf, 3)}
 
 
 @dataclass(frozen=True)
@@ -391,7 +413,7 @@ def _track_facts(track: _Track, points: Sequence[Point3], scene: Any) -> TrackFa
         stationary_s=int(round(_stationary(points))), crossings=tuple(crossings),
         returns=track.returns, prev_id=track.prev_id,
         entry_edge=zone_path[0] if zone_path else _edge(first_pt[1], first_pt[2]),
-        exit_edge=zone_path[-1] if zone_path else _edge(last_pt[1], last_pt[2]))
+        exit_edge=zone_path[-1] if zone_path else _edge(last_pt[1], last_pt[2]), max_conf=track.max_conf)
 
 
 # ----------------------------------------------------------------------------
@@ -435,10 +457,12 @@ class CameraTracker:
         ignored). *scene_map* is only read when a new person is confirmed (to judge a return)."""
         ts = float(ts)
         dets: List[Tuple[str, int, Box]] = []
+        confs: List[float] = []
         for d in detections or ():
             kind = _kind(int(d[0]))
             if kind:
                 dets.append((kind, int(d[0]), (float(d[2]), float(d[3]), float(d[4]), float(d[5]))))
+                confs.append(float(d[1]))
         confirmed_now: List[_Track] = []
         with self._lock:
             if self._last_ts is not None and ts < self._last_ts - CLOCK_BACK_SEC:
@@ -470,18 +494,31 @@ class CameraTracker:
                 used_t.add(ti)
                 used_d.add(di)
                 matches.append((ti, di))
+            # A person box still left over joins a person seen within JOIN_SEC whose box it overlaps, or whose foot
+            # point is near: the same walk, not a new person (most overlap first, then the nearest).
+            joins = sorted((-_iou(t.box, dets[di][2]), math.hypot(feet[di][0] - t.points[-1][1],
+                                                                  feet[di][1] - t.points[-1][2]), ti, di)
+                           for di, (kind, _, _) in enumerate(dets) if kind == "person" and di not in used_d
+                           for ti, t in enumerate(candidates)
+                           if ti not in used_t and t.kind == "person" and ts - t.last_seen <= JOIN_SEC)
+            for neg_iou, dist, ti, di in joins:
+                if ti in used_t or di in used_d or (-neg_iou < JOIN_IOU and dist > JOIN_GATE):
+                    continue
+                used_t.add(ti)
+                used_d.add(di)
+                matches.append((ti, di))
             seen: List[int] = []
             for ti, di in matches:
                 track = candidates[ti]
                 was = track.confirmed
-                track.add(ts, dets[di][2])
+                track.add(ts, dets[di][2], confs[di])
                 seen.append(track.id)
                 if not was and track.confirmed:
                     confirmed_now.append(track)
             for di, (kind, cls_id, box) in enumerate(dets):
                 if di in used_d or len(self._active) >= MAX_ACTIVE:
                     continue
-                track = _Track(self._next_id, kind, cls_id, box, ts, ts, [(ts,) + feet[di]])
+                track = _Track(self._next_id, kind, cls_id, box, ts, ts, [(ts,) + feet[di]], max_conf=confs[di])
                 self._next_id += 1
                 self._active.append(track)
                 seen.append(track.id)
@@ -499,7 +536,7 @@ class CameraTracker:
             if ts - t.last_seen > LOST_SEC[t.kind]:
                 if t.confirmed:
                     self._history.append(t)
-                    if t.kind == "vehicle":
+                    if t.kind == "vehicle" and t.shown:
                         self._ended.append(t)
             else:
                 still.append(t)
@@ -567,7 +604,7 @@ class CameraTracker:
         events: List[Dict[str, Any]] = []
         with self._lock:
             for t in self._active:
-                if t.kind != "vehicle" or not t.confirmed:
+                if t.kind != "vehicle" or not t.confirmed or not t.shown:
                     continue
                 state = self._reported.setdefault(t.id, {"crossings": 0, "path": (), "at": None})
                 at = state["at"]
@@ -589,7 +626,8 @@ class CameraTracker:
     # -- reading (the alert workers) ----------------------------------------
     def _overlapping(self, t0: float, t1: float) -> List[_Track]:
         return sorted((t for t in self._history + self._active
-                       if t.confirmed and t.first_seen <= t1 and t.last_seen >= t0), key=lambda t: t.first_seen)
+                       if t.confirmed and t.shown and t.first_seen <= t1 and t.last_seen >= t0),
+                      key=lambda t: t.first_seen)
 
     def tracks_between(self, t0: float, t1: float) -> List[sm.Track]:
         """The confirmed tracks seen in ``[t0, t1]``, with their foot points in that window, as
@@ -651,7 +689,8 @@ class CameraTracker:
                             "prev_id": t.prev_id, "first_foot": (first[1], first[2]), "last_foot": (last[1], last[2]),
                             "moved": sm.Track(t.kind, list(points)).moved, "active": t.id in live,
                             "path": list(_collapse(area.name for area, _, _ in runs)),
-                            "entry_edge": _edge(first[1], first[2]), "exit_edge": _edge(last[1], last[2])})
+                            "entry_edge": _edge(first[1], first[2]), "exit_edge": _edge(last[1], last[2]),
+                            "max_conf": round(t.max_conf, 3)})
             return out
 
 
