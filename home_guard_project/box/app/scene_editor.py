@@ -1180,14 +1180,17 @@ class SceneMapEditor(QWidget):
         eyebrow = st('setup_eyebrow', self.lang, number=setup[0], total=setup[1]) if setup else st('eyebrow', self.lang)
         self.eyebrow = words(eyebrow.upper() if self.lang == 'en' else eyebrow, 'eyebrow'); side.addWidget(self.eyebrow)
         self.eyebrow.setVisible(not setup)              # setup says "camera 2 of 5" above, for the whole step
-        self.title = words(display_title(camera, self.lang), 'title'); side.addWidget(self.title)
-        restore = QHBoxLayout(); restore.setSpacing(8)
+        # The camera's name, and at the end of its line "restore the previous map" with when it was replaced.
+        heading = QHBoxLayout(); heading.setSpacing(12)
+        self.title = words(display_title(camera, self.lang), 'title'); heading.addWidget(self.title, 1)
+        restore = QVBoxLayout(); restore.setSpacing(0); restore.setContentsMargins(0, 0, 0, 0)
         self.restore_button = TextAction(st('restore_button', self.lang))
         self.restore_button.clicked.connect(self.restore_previous)
         self.restore_when = words('', 'muted', wrap=False)
-        restore.addWidget(self.restore_button); restore.addWidget(self.restore_when); restore.addStretch(1)
-        self.restore_row = clear(QWidget()); self.restore_row.setLayout(restore); restore.setContentsMargins(0, 0, 0, 0)
-        side.addWidget(self.restore_row)
+        restore.addWidget(self.restore_button); restore.addWidget(self.restore_when)
+        self.restore_row = clear(QWidget()); self.restore_row.setLayout(restore)
+        heading.addWidget(self.restore_row, 0, Qt.AlignmentFlag.AlignVCenter)
+        side.addLayout(heading)
         self.pages = QStackedWidget(); self.pages.setObjectName('sceneClear'); side.addWidget(self.pages, 1)
         # The pages take the room there is (setup is short at 1366x768); the quiet ones scroll when it is not enough.
         self.pages.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Ignored)
