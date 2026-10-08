@@ -256,7 +256,17 @@ class ZoneTileTests(unittest.TestCase):
         self.assertLessEqual(button.height(), 36)
         self.assertEqual(status.text(), tr('camera_zone_whole'))
         raw_key = photo.pix.cacheKey()
+        # The card's button opens the camera map now (the card's photo shows until the box's picture comes); the
+        # watch-zone dialog stays in code, reachable as open_zone.
+        from home_guard_project.box.app.scene_editor import SceneMapDialog
+        from home_guard_project.box.app.scene_strings import st
+        self.assertEqual(button.text(), st('map_button'))
         button.click()
+        scene = self.page.zone_dialog
+        self.assertIsInstance(scene, SceneMapDialog)
+        self.assertEqual(scene.editor.stage.pix.cacheKey(), raw_key)
+        scene.reject(); self.assertTrue(wait_until(lambda: self.page.zone_dialog is None))
+        self.page.open_zone('yard', photo)
         dialog = self.page.zone_dialog
         self.assertEqual(dialog.stage.pix.cacheKey(), raw_key)
         points = [[.1, .2], [.9, .2], [.5, .9]]
@@ -269,7 +279,7 @@ class ZoneTileTests(unittest.TestCase):
         # The close animation ends on an event-loop tick; wait for it, not a fixed time.
         self.assertTrue(wait_until(lambda: self.page.zone_dialog is None))
         # Reopening restores the saved polygon, clearing restores the whole image.
-        button.click(); dialog = self.page.zone_dialog
+        self.page.open_zone('yard', photo); dialog = self.page.zone_dialog
         self.assertEqual(dialog.stage.points, points)
         dialog.stage.clear(); dialog.save(); dialog.future.result(timeout=3); dialog.poll()
         self.assertEqual(status.text(), tr('camera_zone_whole'))
@@ -280,7 +290,7 @@ class ZoneTileTests(unittest.TestCase):
         self.controls.zones = Mock(side_effect=RuntimeError('offline'))
         self.page.render(self.page.load_photos())
         button, status, photo = self.page.zone_widgets['yard']
-        self.assertFalse(button.isEnabled())
+        self.assertTrue(button.isEnabled())                 # the camera map needs no zones from here
         self.assertFalse(photo.pix.isNull())
         self.controls.zones = zones
         self.page.render(self.page.load_photos())

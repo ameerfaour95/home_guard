@@ -74,8 +74,12 @@ def main():
             "validation",
             "review",
             "camera-check",
+            "scene-map",
         ),
     )
+    parser.add_argument("--scene", choices=("card", "loading", "regions", "grid", "drawing", "line", "summary", "saved", "error"),
+                        help="Demo: open the camera map editor in this state (with --panel cameras or --page scene-map)")
+    parser.add_argument("--lang", choices=("he", "en"), default="he", help="The camera map editor's language")
     parser.add_argument("--size", default="1366x768")
     parser.add_argument("--screenshot")
     args = parser.parse_args()
@@ -85,6 +89,8 @@ def main():
         try: target_user(args.remote_box)
         except ValueError: parser.error("Invalid remote box address")
     args.details = args.details or args.technical_log
+    from .scene_strings import set_language
+    set_language(args.lang)
     if args.screenshot:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtWidgets import QApplication
@@ -108,7 +114,8 @@ def main():
         def capture():
             path = Path(args.screenshot)
             path.parent.mkdir(parents=True, exist_ok=True)
-            if not window.grab().save(str(path)):
+            from .scene_editor import grab_with_dialogs
+            if not (grab_with_dialogs(window) if args.scene else window.grab()).save(str(path)):
                 app.exit(2)
                 return
             window.close()

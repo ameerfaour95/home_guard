@@ -558,6 +558,9 @@ class Window(QMainWindow):
             self.open_cameras()
         if getattr(self.args, "panel", None) == "settings":
             self.open_settings()
+        if getattr(self.args, "scene", None) and self.args.demo and getattr(self.args, "panel", None) == "cameras":
+            from .scene_editor import open_demo_dialog
+            open_demo_dialog(self.cameras_page, self.args.scene)
         if self.remote_target:
             for button in (cameras_button,settings_button,self.run_button,self.resume_button):
                 button.setEnabled(False);button.setToolTip("Change settings on the box")
@@ -1428,11 +1431,14 @@ class Window(QMainWindow):
                 "validation": Page.ADDRESS,
                 "review": Page.REVIEW,
                 "camera-check": Page.CAMERA_CHECK,
+                "scene-map": Page.CAMERA_CHECK,
             }[self.args.page]
             if index == Page.CAMERA_CHECK:
                 self.run_answers=self.collect_answers()
                 self.engine_cameras=[]
                 self.open_camera_check()
+                if self.args.page == "scene-map":
+                    self.open_scene_step(getattr(self.args,"scene",None) or "regions")
             else:
                 self.set_page(index)
             if self.args.page == "validation":
@@ -1576,7 +1582,7 @@ class Window(QMainWindow):
                 self.validation.setText(tr("camera_check_unsaved"))
                 return
             if getattr(self,"camera_check_only",False): self.close()
-            else: self.set_page(Page.SUMMARY)
+            else: self.open_scene_step()
             return
         if index == Page.REVIEW:
             self.begin_setup()
@@ -1844,6 +1850,11 @@ class Window(QMainWindow):
         self.pages.addWidget(self.wizard_cameras.widget)
         self.set_page(Page.CAMERA_CHECK)
         self.wizard_cameras.open()
+
+    def open_scene_step(self, demo_state=None):
+        """"The map of each camera", after the camera check. Skippable; it ends on the summary."""
+        from .scene_setup_step import open_scene_step
+        open_scene_step(self, demo_state)
 
     def replay_setup(self):
         self.next.clicked.disconnect();self.next.clicked.connect(self.next_page)
