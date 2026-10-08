@@ -529,6 +529,25 @@ def vlm_confirms(parsed: Optional[Dict[str, Any]],
             or ("animal" in alert_on and animals > 0))
 
 
+# The tracker follows people from this detector score, below the alert's (conf_person, 0.8 on the box): the replay of
+# the Oct 7-8 clips (analysis/replay_tracks.py) found that at 0.8 most of the small pergola workers are never boxed
+# (35 of 203 clips had no person track while the Eye saw 1-4 people); at 0.5 every ch3 clip had people and the count
+# agreed with the Eye's in 51 clips instead of 38 (0.3 over-counted). Alerts are still gated at their own scores.
+TRACKER_PERSON_CONF = 0.5
+
+
+def _tracker_person_conf(value: Any) -> float:
+    """box.yaml ``tracker_person_conf`` (0.05-0.95); anything else is the default."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        number = float("nan")
+    if not 0.05 <= number <= 0.95:
+        log.warning("Unusable tracker_person_conf %r; using %.2f.", value, TRACKER_PERSON_CONF)
+        return TRACKER_PERSON_CONF
+    return number
+
+
 @dataclass(frozen=True)
 class AlertSettings:
     alert_start_hour: int = 0
@@ -552,6 +571,8 @@ class AlertSettings:
     conf_animal: Optional[float] = None
     eye_prompt: str = "legacy"       # legacy (default until a situational version beats it on the eval); situational: eye_prompt.py
     eye_tracker_facts: bool = False  # the tracker's TRACKER FACTS line in the Eye's prompt (off until the eval shows no loss)
+    # The tracker (and so the event's entities) sees people from this score; alerts keep their own (conf_person).
+    tracker_person_conf: float = TRACKER_PERSON_CONF
     eye_entities: bool = False       # the P1/P2 roster line + per_entity in the legacy prompt (off until the stage-3 benchmark)
 
     def thresholds(self) -> Dict[str, float]:
@@ -589,6 +610,7 @@ class AlertSettings:
             conf_animal=_optional_float(g("conf_animal")),
             eye_prompt=_eye_prompt_mode(g("eye_prompt", "legacy")),
             eye_tracker_facts=_on_off(g("eye_tracker_facts", False), "eye_tracker_facts"),
+            tracker_person_conf=_tracker_person_conf(g("tracker_person_conf", TRACKER_PERSON_CONF)),
             eye_entities=_on_off(g("eye_entities", False), "eye_entities"),
         )
 
@@ -1033,6 +1055,13 @@ def detector_floor(thresholds: Dict[str, float], other: float) -> float:
     return min([other, *thresholds.values()])
 
 
+def tracker_thresholds(thresholds: Dict[str, float], person: float) -> Dict[str, float]:
+    """What the tracker is fed: the alert's scores, with people from *person* when that is lower."""
+    out = dict(thresholds)
+    out["person"] = min(float(thresholds.get("person", person)), float(person))
+    return out
+
+
 def vehicle_boxes(result) -> List[Box]:
     """Normalised xyxy boxes of the vehicles in a YOLO result, in detection order."""
     boxes = getattr(result, "boxes", None)
@@ -1470,6 +1499,9 @@ class AlertJob:
     crop_settings: Any = None
     crop_fps: Optional[float] = None
     input_meta: Dict[str, Any] = field(default_factory=dict)
+    # The person score that triggered this alert (the camera's conf_person): the investigator counts only people the
+    # tracker saw at least once at this score, as the tracker is fed from a lower one (tracker_person_conf).
+    person_conf: Optional[float] = None
     # (ts, detections) of the crop's own YOLO looks, normalised: the scene map's tracks (scene_map.py).
     scene_looks: List[Any] = field(default_factory=list)
     # The live tracker over [trigger - PRE_SECONDS, post-roll end] (tracker.py), taken when the job is prepared:
@@ -1879,10 +1911,15 @@ def about_lingering(text: str) -> bool:
     return lingering(text)
 
 
-def _presence(trackers: Any, camera: str, since: float, now: float) -> Tuple[bool, float, bool]:
+def _presence(trackers: Any, camera: str, since: float, now: float,
+              strong_conf: Optional[float] = None) -> Tuple[bool, float, bool]:
     """``(seen, seconds in view, still in view)`` of the people the camera's tracker saw since *since*. The time in
-    view spans the first to the last sighting of anyone (a track that broke and came back counts whole)."""
+    view spans the first to the last sighting of anyone (a track that broke and came back counts whole). With
+    *strong_conf*, only people the detector was that sure of at least once count (the tracker is fed weaker people
+    too, ``tracker_person_conf``); their weaker looks still count for how long they stayed."""
     people = list(getattr(trackers.facts(camera, since, now), "people", ()) or ())
+    if strong_conf is not None:
+        people = [p for p in people if float(getattr(p, "max_conf", 1.0) or 0.0) >= strong_conf]
     if not people:
         return False, 0.0, False
     first = min(float(p.first_seen) for p in people)
@@ -1892,7 +1929,8 @@ def _presence(trackers: Any, camera: str, since: float, now: float) -> Tuple[boo
 
 
 def investigate_lingering(camera: str, since: float, loiter_min: float = LOITER_MIN_SEC,
-                          wait_sec: float = INVESTIGATOR_WAIT_SEC, trackers: Any = None) -> Dict[str, Any]:
+                          wait_sec: float = INVESTIGATOR_WAIT_SEC, trackers: Any = None,
+                          strong_conf: Optional[float] = None) -> Dict[str, Any]:
     """The investigator's wait-and-watch for a "suspicious" only for lingering. Reads the camera's tracker (live,
     *trackers* or TRACKERS) for the people seen since *since*:
 
@@ -1928,7 +1966,7 @@ def investigate_lingering(camera: str, since: float, loiter_min: float = LOITER_
         for _ in range(int(INVESTIGATOR_MAX_WAIT_SEC / INVESTIGATOR_POLL_SEC) + 5):
             now = _now()
             try:
-                seen, in_view, still = _presence(trackers, camera, since, now)
+                seen, in_view, still = _presence(trackers, camera, since, now, strong_conf)
             except Exception as exc:  # noqa: BLE001 - the tracker only adds facts
                 record["verdict"] = f"tracker failed: {exc}"[:200]
                 return record
@@ -2229,7 +2267,8 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
             wait = _optional_float(box_settings.get("investigator_wait_sec"))
             found = investigate_lingering(camera_name, alert_ts - PRE_SECONDS,
                                           LOITER_MIN_SEC if loiter_min is None else max(0.0, loiter_min),
-                                          INVESTIGATOR_WAIT_SEC if wait is None else wait)
+                                          INVESTIGATOR_WAIT_SEC if wait is None else wait,
+                                          strong_conf=getattr(job, "person_conf", None))
             decision["investigation"] = found
             log.info("[%s] investigator: %s (in view %d s, waited %.0f s)%s", camera_name, found["verdict"],
                      found["in_view_s"], found["waited_s"], "; normal" if found["lowered"] else "")
@@ -2750,9 +2789,13 @@ def run() -> int:
                 # the detector runs at the lowest of them and the rest are filtered here.
                 try:
                     thresholds = camera_alerts.thresholds_for(name, settings.thresholds())
-                    raw = model.predict(frame, conf=detector_floor(thresholds, settings.conf), verbose=False,
+                    # The tracker sees people from a lower score than alerts need; the detector runs at the lowest
+                    # in use, and the alert's own finds are filtered at the alert's scores exactly as before.
+                    fed = tracker_thresholds(thresholds, settings.tracker_person_conf) if trackers is not None else thresholds
+                    raw = model.predict(frame, conf=detector_floor(fed, settings.conf), verbose=False,
                                         **predict_args)
                     results = [filter_by_thresholds(raw[0], thresholds, settings.conf)] if raw else []
+                    tracked = [filter_by_thresholds(raw[0], fed, settings.conf)] if raw and fed is not thresholds else results
                 except Exception as exc:  # noqa: BLE001
                     log.warning("[%s] detector look failed: %s", name, exc)
                     continue
@@ -2769,7 +2812,7 @@ def run() -> int:
 
                         height, width = frame.shape[:2]
                         trackers.update(name, seen_ts,
-                                        detections_from_result(results[0], width, height) if results else [])
+                                        detections_from_result(tracked[0], width, height) if tracked else [])
                     except Exception as exc:  # noqa: BLE001 - the tracker only adds facts; it must never stop the alerts
                         # Loud once per camera, then quiet: a broken tracker must not flood the log every look.
                         (log.debug if name in tracker_failed else log.warning)("[%s] tracker not updated: %s", name, exc)
@@ -2829,7 +2872,7 @@ def run() -> int:
                 log.info("[%s] escalating (labels=%s), waiting for the complete crop window", name, labels)
                 status.thinking(name, labels, now=trigger_ts)
                 job = AlertJob(camera=name, stem=alert_stem(name, trigger_ts), ts=trigger_ts, labels=labels,
-                               snapshot=frame, alert_on=tuple(alert_on))
+                               snapshot=frame, alert_on=tuple(alert_on), person_conf=thresholds.get("person"))
                 pending.append(job)   # reserves the single VLM slot throughout post-roll
             time.sleep(0.05)
     finally:

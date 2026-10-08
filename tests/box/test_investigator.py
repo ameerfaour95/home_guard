@@ -32,8 +32,8 @@ class Clock:
 class Trackers:
     """One person visible from *first* to *last* (None: still there until *leaves*, if given)."""
 
-    def __init__(self, first, last=None, leaves=None, people=1):
-        self.first, self.last, self.leaves, self.n = first, last, leaves, people
+    def __init__(self, first, last=None, leaves=None, people=1, max_conf=None):
+        self.first, self.last, self.leaves, self.n, self.max_conf = first, last, leaves, people, max_conf
         self.reads = 0
 
     def facts(self, camera, t0, t1):
@@ -42,6 +42,8 @@ class Trackers:
             return SimpleNamespace(people=())
         last = self.last if self.last is not None else (min(t1, self.leaves) if self.leaves else t1)
         person = SimpleNamespace(first_seen=self.first, last_seen=last, time_in_view_s=int(last - self.first))
+        if self.max_conf is not None:
+            person.max_conf = self.max_conf
         return SimpleNamespace(people=(person,) * self.n)
 
 
@@ -69,6 +71,15 @@ class InvestigateTest(unittest.TestCase):
         self.assertTrue(found["lowered"])
         self.assertEqual((found["verdict"], found["in_view_s"], found["waited_s"]), ("short visit", 5, 0.0))
         self.assertEqual(self.clock.slept, [])
+
+    def test_only_people_seen_at_the_alert_score_count(self):
+        # The tracker is fed people from 0.5; a weak one alone (a statue, a coat) must not decide "short visit".
+        weak = inf.investigate_lingering(CAM, T0 - 5, trackers=Trackers(T0 - 3, last=T0 + 2, max_conf=0.55),
+                                         strong_conf=0.8)
+        self.assertEqual((weak["verdict"], weak["lowered"]), ("the tracker saw nobody", False))
+        strong = inf.investigate_lingering(CAM, T0 - 5, trackers=Trackers(T0 - 3, last=T0 + 2, max_conf=0.85),
+                                           strong_conf=0.8)
+        self.assertEqual((strong["verdict"], strong["lowered"]), ("short visit", True))
 
     def test_a_long_stay_stays_suspicious(self):
         found = inf.investigate_lingering(CAM, T0 - 5, trackers=Trackers(T0 - 60, last=T0 + 8))

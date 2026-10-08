@@ -128,7 +128,7 @@ class RunLoopTest(unittest.TestCase):
     """inference.run() with synthetic cameras: every look feeds the camera's tracker, and a tracker that raises
     never stops the loop."""
 
-    def run_loop(self, update_side_effect=None):
+    def run_loop(self, update_side_effect=None, result=None, box_settings=None, real_filter=False):
         from home_guard_project.box import ai_status, boxconfig, camera_alerts, telegram_agent
         from home_guard_project.box.brain import mode
 
@@ -140,7 +140,7 @@ class RunLoopTest(unittest.TestCase):
                                            last_ts=1000., sub_cap=sub)}
         adapters["cam"].last_ts = 10_000.0      # never frozen
         detector = mock.Mock()
-        detector.predict.return_value = [golden._Result([golden._Box(0, (16, 8, 32, 40))])]
+        detector.predict.return_value = [result or golden._Result([golden._Box(0, (16, 8, 32, 40))])]
         registry = mock.Mock()
         if update_side_effect is not None:
             registry.update.side_effect = update_side_effect
@@ -156,13 +156,12 @@ class RunLoopTest(unittest.TestCase):
         with ExitStack() as stack:
             for patch in [
                 mock.patch("dotenv.load_dotenv"),
-                mock.patch.object(boxconfig, "load_box_settings", return_value={}),
+                mock.patch.object(boxconfig, "load_box_settings", return_value=dict(box_settings or {})),
                 mock.patch.object(config, "load_config", return_value=cfg),
                 mock.patch.object(inf, "make_backend", return_value=mock.Mock()),
                 mock.patch.object(inf, "load_detector", return_value=(detector, None)),
                 mock.patch.object(inf, "_camera_streams", return_value=(adapters, {"cam": None})),
                 mock.patch.object(inf, "LiveSettings"),
-                mock.patch.object(inf, "filter_by_thresholds", side_effect=lambda r, *a: r),
                 mock.patch.object(inf, "detect_trigger", return_value=(False, False, [])),
                 mock.patch.object(inf, "vehicle_boxes", return_value=[]),
                 mock.patch.object(inf, "start_case_memory", return_value=False),
@@ -179,6 +178,9 @@ class RunLoopTest(unittest.TestCase):
                 mock.patch.object(inf.time, "sleep", side_effect=sleep),
             ]:
                 stack.enter_context(patch)
+            if not real_filter:
+                stack.enter_context(mock.patch.object(inf, "filter_by_thresholds", side_effect=lambda r, *a: r))
+            self.objects = stack.enter_context(mock.patch.object(ai_status, "objects_from_result", return_value=[]))
             with self.assertRaises(StopLoop):
                 inf.run()
         return registry, detector
@@ -190,6 +192,36 @@ class RunLoopTest(unittest.TestCase):
         camera, ts, dets = registry.update.call_args.args
         self.assertEqual(camera, "cam")
         self.assertEqual(dets, [(0, 0.0, 0.25, 0.1667, 0.5, 0.8333)])
+
+    def test_the_tracker_sees_people_from_0_5_and_the_alert_path_still_from_0_8(self) -> None:
+        # The replay of the Oct 7-8 clips: at 0.8 most pergola workers were never boxed. The tracker now gets people
+        # from tracker_person_conf; what alerts, the window and the quiet log see is filtered exactly as before.
+        class Box:
+            def __init__(self, cls_id, conf, xyxy):
+                self.cls, self.conf, self.xyxy = np.array([cls_id]), np.array([conf]), np.array([xyxy], float)
+
+        class Result:
+            names = {0: "person", 2: "car"}
+
+            def __init__(self, boxes):
+                self.boxes = boxes
+
+        sure, unsure = Box(0, 0.9, (16, 8, 32, 40)), Box(0, 0.6, (40, 8, 56, 40))
+        registry, detector = self.run_loop(result=Result([sure, unsure]), real_filter=True,
+                                           box_settings={"conf_person": 0.8, "inference_conf": 0.7})
+        self.assertEqual(detector.predict.call_args.kwargs["conf"], 0.5)        # the lowest score in use
+        camera, ts, dets = registry.update.call_args.args
+        self.assertEqual(sorted(d[1] for d in dets), [0.6, 0.9])               # the tracker gets both
+        shown = self.objects.call_args.args[0]                                 # the alert path's own finds
+        self.assertEqual([float(b.conf[0]) for b in shown.boxes], [0.9])
+
+    def test_tracker_person_conf_never_raises_the_alert_scores(self) -> None:
+        self.assertEqual(inf.tracker_thresholds({"person": 0.4, "vehicle": 0.7}, 0.5), {"person": 0.4, "vehicle": 0.7})
+        self.assertEqual(inf.tracker_thresholds({"person": 0.8, "vehicle": 0.7}, 0.5), {"person": 0.5, "vehicle": 0.7})
+        self.assertEqual(inf.AlertSettings.from_box_settings({}).tracker_person_conf, 0.5)
+        self.assertEqual(inf.AlertSettings.from_box_settings({"tracker_person_conf": 0.6}).tracker_person_conf, 0.6)
+        with self.assertLogs("box.inference", level="WARNING"):
+            self.assertEqual(inf.AlertSettings.from_box_settings({"tracker_person_conf": 2}).tracker_person_conf, 0.5)
 
     def test_a_tracker_that_raises_never_stops_the_looks(self) -> None:
         registry, detector = self.run_loop(update_side_effect=RuntimeError("boom"))
