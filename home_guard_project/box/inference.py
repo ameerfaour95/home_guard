@@ -1758,15 +1758,16 @@ def appearance_only(text: str) -> bool:
 
 
 def second_look(backend: Any, frames: List[Any], classes: Sequence[str], lang: str,
-                timeout: float = VERIFY_TIMEOUT_SEC) -> Dict[str, Any]:
+                timeout: Optional[float] = None) -> Dict[str, Any]:
     """Ask *backend* once, on the alert's own frames, whether the red's reason (*classes*: weapon / vehicle /
-    violence) is really there; never longer than *timeout* seconds. Never raises.
+    violence) is really there; never longer than *timeout* seconds (VERIFY_TIMEOUT_SEC). Never raises.
 
     The record (the clip's ``second_look``): ``answered`` (a usable yes/no came back), ``confirmed``,
     ``verified`` (answered AND confirmed: only then is the red's reminder scheduled), ``what_it_is``,
     ``evidence_frame``, and ``reason`` when there was no answer (the red then goes out as it is)."""
     from .alert_guards import verify_question  # noqa: PLC0415
 
+    timeout = VERIFY_TIMEOUT_SEC if timeout is None else timeout
     question = verify_question(classes)
     record: Dict[str, Any] = {"class": classes[0] if classes else "", "classes": list(classes), "question": question,
                               "answered": False, "confirmed": None, "verified": False, "what_it_is": "",
