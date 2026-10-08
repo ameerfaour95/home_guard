@@ -3,7 +3,7 @@ the right. Laid out like CVAT / Label Studio / Encord / V7 video tools: the pict
 the right with one-key hotkeys, and next/previous walks a slim queue.
 
 Keys (also in the help): Ctrl+Enter save and next · n/s/e then a digit picks a category (s3 = S3, n0 = N10) · o other
-· Shift+N/S/E raw label · Space play · , . one frame · ← → one second · v crop/full · f evidence frame · a use the
+· Shift+N/S/E raw label · Space play · , . one frame · ← → one second · v crop/full · b boxes · f evidence frame · a use the
 teacher · g suggest the whole tag · c needs check · x delete · j/k next/previous clip · d description · ? help.
 """
 from copy import deepcopy
@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, Q
                                QLineEdit, QPlainTextEdit, QCheckBox, QScrollArea, QFrame, QSizePolicy, QDialog,
                                QAbstractItemView)
 from .backend import AuthError
-from .player import VideoCanvas
+from .player import VideoCanvas, TrackOverlay, SESSION
 from .tag_widgets import (QueueModel, QueueDelegate, CategoryButton, ChipGroup, OpinionCard, Pill, TIER_TOKENS,
                           TIER_TITLES)
 from .workers import TaskRunner
@@ -27,7 +27,8 @@ ORIGINS = [('', 'All sources'), ('dataset', 'Old tags (dataset)'), ('customer', 
 HELP = [('Ctrl + Enter', 'Save and open the next clip'), ('n / s / e, then 1–9 or 0', 'Category (s 3 = S3, n 0 = N10)'),
         ('o', 'Category: other'), ('Shift + N / S / E', 'Raw label: normal / suspicious / escalation'),
         ('Space', 'Play / pause'), (', / .', 'One frame back / forward'), ('← / →', 'One second back / forward'),
-        ('v', 'Crop / full frame'), ('f', 'Evidence frame = this moment'), ('a', "Use the teacher's suggestion"),
+        ('v', 'Crop / full frame'), ('b', 'Boxes on / off (YOLO and tracker boxes, full frame)'),
+        ('f', 'Evidence frame = this moment'), ('a', "Use the teacher's suggestion"),
         ('g', 'Suggest the whole tag (a model fills the form in as a draft)'),
         ('c / x', 'Needs check / delete'), ('j / k', 'Next / previous clip'), ('d', 'Write the description'),
         ('Esc', 'Leave a text field'), ('?', 'This help')]
@@ -51,6 +52,7 @@ class TagView(QWidget):
         self.categories = {}
         self.state_runner, self.queue_runner, self.clip_runner, self.media_runner, self.save_runner, self.side_runner = \
             [TaskRunner(self) for _ in range(6)]
+        self.boxes_runner = TaskRunner(self); self.boxes_runner.finished.connect(self.boxes_loaded)
         self.state_runner.finished.connect(self.state_loaded); self.queue_runner.finished.connect(self.queue_loaded)
         self.clip_runner.finished.connect(self.clip_loaded); self.media_runner.finished.connect(self.media_loaded)
         self.save_runner.finished.connect(self.saved); self.side_runner.finished.connect(self.side_done)
@@ -137,8 +139,12 @@ class TagView(QWidget):
         reasons.addWidget(self.reasons, 1)
         self.open_label = button('Edit boxes', self.edit_boxes, 'link')
         self.open_label.hide(); reasons.addWidget(self.open_label)
+        self.boxes = button('Boxes  B', self.toggle_boxes, 'compact'); self.boxes.setCheckable(True)
+        self.boxes.setChecked(SESSION['boxes'])
+        self.boxes.setToolTip('Show / hide the YOLO and tracker boxes on the full frame (B). The AI never sees them.')
+        reasons.addWidget(self.boxes)
         col.addLayout(reasons)
-        self.canvas = VideoCanvas(self.theme); self.canvas.overlay.hide(); self.canvas.message = 'Select a clip'
+        self.canvas = VideoCanvas(self.theme, TrackOverlay); self.canvas.message = 'Select a clip'
         self.canvas.setMinimumHeight(220)
         col.addWidget(self.canvas, 3)
         bar = QHBoxLayout(); bar.setSpacing(0)
@@ -295,6 +301,7 @@ class TagView(QWidget):
         keys = {'Ctrl+Return': self.save, 'Ctrl+Enter': self.save, 'Ctrl+S': self.save, 'Space': self.toggle_play,
                 ',': lambda: self.step(-1), '.': lambda: self.step(1), 'Left': lambda: self.seek_by(-1000),
                 'Right': lambda: self.seek_by(1000), 'V': lambda: self.switch_view('clip' if self.view == 'crop' else 'crop'),
+                'B': self.toggle_boxes,
                 'F': self.mark_evidence, 'A': self.accept_teacher, 'G': self.suggest,
                 'C': lambda: self.needs_check.toggle(),
                 'X': lambda: self.delete.toggle(), 'J': lambda: self.move(1), 'K': lambda: self.move(-1),
@@ -416,6 +423,36 @@ class TagView(QWidget):
             b.setEnabled(bool(detail['media'].get(kind))); b.setChecked(kind == self.view)
             b.setToolTip(reasons.get(kind) or 'Crop: what the AI sees · Full frame: the whole camera  (V)')
         self.load_media()
+        self.load_boxes()
+
+    # ------------------------------------------------------------------ boxes (Tag · AI)
+    def load_boxes(self):
+        """The clip's boxes, as Tag · YOLO has them (saved, else preloaded from the tracker / YOLO labels)."""
+        self.canvas.overlay.set_tracks([])
+        item = (self.detail or {}).get('item') or {}
+        key, eid = self.key, item.get('event_id')
+        if eid or item.get('origin') == 'dataset':
+            fetch = (lambda: self.backend.annotation(eid)) if eid else (lambda: self.backend.clip_boxes(key))
+            if not self.boxes_runner.start(lambda: (key, fetch())):
+                self.pending_boxes = True
+        self.render_boxes()
+
+    def boxes_loaded(self, result, error):
+        if getattr(self, 'pending_boxes', None):
+            self.pending_boxes = None; self.load_boxes(); return
+        if not error and result and result[0] == self.key:
+            self.canvas.overlay.set_tracks(result[1].tracks, getattr(result[1], 'preload_source', None))
+        self.render_boxes()
+
+    def render_boxes(self):
+        overlay = self.canvas.overlay
+        overlay.message = ('Boxes show on the full frame  ·  V  (the AI sees the crop without them)'
+                           if self.view == 'crop' and SESSION['boxes'] else None)
+        self.boxes.setChecked(SESSION['boxes']); overlay.update()
+
+    def toggle_boxes(self):
+        SESSION['boxes'] = not SESSION['boxes']
+        self.render_boxes()
 
     def load_media(self):
         self.player.stop(); self.player.setSource(QUrl())
@@ -602,6 +639,7 @@ class TagView(QWidget):
         self.view = kind
         for k, b in self.segments.items():
             b.setChecked(k == kind)
+        self.render_boxes()
         position = self.player.position()
         self.load_media()
         self._resume_at = position

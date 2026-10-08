@@ -164,7 +164,7 @@ def test_labeler_privacy_and_keyboard(widgets, wait):
     e = v.backend.event(101)
     assert e.customer_id == 0 and not e.raw_meta and all(r.prompt is None and r.raw_text_artifact_id is None for r in e.ai_runs)
     assert v.doc.annotation.ai_prompt_version is None
-    expected = {'Left', 'Right', 'Shift+Left', 'Shift+Right', 'Space', '.', ',', 'K', 'H', 'C', 'Del', 'Shift+Del', 'Ctrl+Z', 'Ctrl+Shift+Z', 'Ctrl+S', 'Ctrl+Return', 'Esc', '?', *map(str, range(1, 10))}
+    expected = {'Left', 'Right', 'Shift+Left', 'Shift+Right', 'Space', '.', ',', 'K', 'O', 'B', 'H', 'M', 'Alt+M', 'C', 'Del', 'Shift+Del', 'Ctrl+Z', 'Ctrl+Shift+Z', 'Ctrl+S', 'Ctrl+Return', 'Esc', '?', *map(str, range(1, 10))}
     assert set(v.shortcuts) == expected
     v.player.setSource(__import__('PySide6.QtCore', fromlist=['QUrl']).QUrl())
     v.doc.seek(0); v.canvas.setFocus(); QTest.keyClick(v.canvas, Qt.Key.Key_Right, Qt.KeyboardModifier.ShiftModifier)
@@ -237,8 +237,8 @@ def test_readable_track_names_per_class_in_order_of_appearance(app):
     d.tracks = [Track('t-7', 'person', [Keyframe(3, .25, [.1, .1, .2, .2])], 'yolo'),
                 Track('966163d3', 'person', [Keyframe(0, 0., [.3, .1, .4, .2])]),
                 Track('t-2', 'car', [Keyframe(5, .4, [.5, .5, .7, .7])], 'yolo')]
-    assert d.display_names() == {'966163d3': 'person #1', 't-7': 'person #2', 't-2': 'car #1'}
-    assert d.display_name(d.tracks[0]) == 'person #2' and [t.track_id for t in d.unchecked] == ['t-7', 't-2']
+    assert d.display_names() == {'966163d3': 'person P1', 't-7': 'person P2', 't-2': 'car CAR1'}
+    assert d.display_name(d.tracks[0]) == 'person P2' and [t.track_id for t in d.unchecked] == ['t-7', 't-2']
 
 
 def test_delete_removes_the_selected_track_at_once_and_undo_brings_it_back(widgets, wait):

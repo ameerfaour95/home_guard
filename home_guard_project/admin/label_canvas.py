@@ -3,7 +3,7 @@ from PySide6.QtCore import Qt, QRectF, QPointF, Signal
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QWidget, QMenu
 from home_guard_project.fleet_contract.tracks import box_at
-from .player import VideoCanvas
+from .player import VideoCanvas, SESSION
 from .event_logic import map_box
 from .theme import PALETTES
 from .label_document import CLASSES
@@ -14,6 +14,11 @@ def class_color(name, theme):
     base = QColor(PALETTES[theme][('action', 'warning', 'ok')[CLASSES.index(name) % 3]])
     h, s, v, a = base.getHsvF()
     return QColor.fromHsvF((h + .065*(CLASSES.index(name)//3)) % 1, s, v, a)
+
+
+def machine_tag(doc):
+    """The caption suffix of a preloaded box nobody checked yet: who drew it."""
+    return '  ·  Tracker' if doc.preload_source == 'tracker' else '  ·  YOLO'
 
 
 class LabelCanvas(VideoCanvas):
@@ -53,13 +58,15 @@ class LabelCanvas(VideoCanvas):
             if box_at(tr, self.doc.t_sec) is None:
                 continue
             _, xyxy = next(visible)
+            if not SESSION['boxes'] or tr.track_id in self.doc.hidden:
+                continue  # Boxes off (B) or this track hidden (H): the video alone
             if self.drag and tr.track_id == self.doc.selected and self.drag[0] != 'draw':
                 xyxy = self.preview or xyxy
             r, color = self.rect_for(xyxy), class_color(tr.label, self.theme)
             pen = QPen(color, 2.5 if tr.track_id == self.doc.selected else 2)
             if tr.source in ('yolo', 'suggestion'): pen.setStyle(Qt.PenStyle.DashLine)
             p.setPen(pen); p.setBrush(Qt.BrushStyle.NoBrush); p.drawRect(r)
-            caption = names.get(tr.track_id, tr.label) + ('  ·  YOLO' if tr.source in ('yolo', 'suggestion') else '')
+            caption = names.get(tr.track_id, tr.label) + (machine_tag(self.doc) if tr.source in ('yolo', 'suggestion') else '')
             tag = QRectF(r.x(), max(self.display_rect()[1], r.y()-25), p.fontMetrics().horizontalAdvance(caption)+16, 25)
             p.fillRect(tag, color); p.setPen(QColor('#07181b')); p.drawText(tag, Qt.AlignmentFlag.AlignCenter, caption)
             if tr.track_id == self.doc.selected:
@@ -68,10 +75,17 @@ class LabelCanvas(VideoCanvas):
         if self.drag and self.drag[0] == 'draw' and self.preview:
             p.setPen(QPen(class_color(self.doc.current_class, self.theme), 2)); p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawRect(self.rect_for(self.preview))
+        if not SESSION['boxes'] or self.doc.hidden:
+            text = 'Boxes hidden  ·  B shows them' if not SESSION['boxes'] else f'{len(self.doc.hidden)} track(s) hidden  ·  H on a track shows it'
+            bg = QRectF(12, 12, p.fontMetrics().horizontalAdvance(text)+20, 28)
+            p.fillRect(bg, QColor(12, 18, 24, 220)); p.setPen(QColor('#edf4f6'))
+            p.drawText(bg, Qt.AlignmentFlag.AlignCenter, text)
 
     def mousePressEvent(self, event):
         if not self.doc or event.button() != Qt.MouseButton.LeftButton or not QRectF(*self.display_rect()).contains(event.position()):
             return
+        if not SESSION['boxes']:
+            return  # nothing to edit on a picture without its boxes
         self.setFocus(); self.interaction_started.emit()
         point = event.position(); normal = self.normal(point)
         if self.doc.track:
@@ -81,7 +95,7 @@ class LabelCanvas(VideoCanvas):
                     if (handle-point).manhattanLength() <= 12:
                         self.drag = ('resize', normal, box, i); self.preview = box; return
         for tr in reversed(self.doc.tracks):
-            box = box_at(tr, self.doc.t_sec)
+            box = box_at(tr, self.doc.t_sec) if tr.track_id not in self.doc.hidden else None
             if box and self.rect_for(box).contains(point):
                 self.doc.selected = tr.track_id
                 self.drag = ('move', normal, box, None); self.preview = box
@@ -151,8 +165,10 @@ class TrackTimeline(QWidget):
             y = 48+row*self.row_height
             if tr.track_id == self.doc.selected: p.fillRect(QRectF(0, y-16, self.width(), 34), QColor(t['raised']))
             color = class_color(tr.label, self.theme)
-            unchecked = '  · YOLO' if tr.source in ('yolo', 'suggestion') else ''
-            p.setPen(color); p.drawText(14, y+5, names.get(tr.track_id, tr.label) + unchecked)
+            unchecked = machine_tag(self.doc).replace('  ·  ', '  · ') if tr.source in ('yolo', 'suggestion') else ''
+            hidden = '  · hidden' if tr.track_id in self.doc.hidden else ''
+            p.setPen(QColor(t['muted']) if hidden else color)
+            p.drawText(14, y+5, names.get(tr.track_id, tr.label) + unchecked + hidden)
             for i, k in enumerate(tr.keyframes):
                 end = tr.keyframes[i+1].frame if i+1 < len(tr.keyframes) else self.doc.frame_count-1
                 pen = QPen(color, 5 if k.enabled else 1.5)
@@ -180,6 +196,11 @@ class TrackTimeline(QWidget):
                         previous.enabled = enabled; tr.source = 'human'; self.doc.checkpoint()
                     menu.addAction('Keep segment', lambda: set_segment(True))
                     menu.addAction('Hide segment', lambda: set_segment(False))
+                    menu.addSeparator()
+                    names = self.doc.display_names()
+                    for other in self.doc.merge_candidates(tr):
+                        menu.addAction(f'Merge with {names.get(other.track_id, other.label)}',
+                                       lambda other=other: self.doc.merge(other) and self.selected.emit())
                     menu.exec(event.globalPosition().toPoint())
                 return
             dot = next((k for k in tr.keyframes if abs(self.x(k.frame)-event.position().x()) < 9), None)

@@ -9,6 +9,9 @@ from .formatting import local_time
 from .theme import PALETTES
 from .widgets.common import label, button
 
+# Remembered for the whole app session (not saved): the Boxes toggle (B) of Tag · YOLO and Tag · AI.
+SESSION = {'boxes': True}
+
 
 class BoxOverlay(QWidget):
     def __init__(self, canvas, theme):
@@ -51,13 +54,64 @@ class BoxOverlay(QWidget):
                    p.fontMetrics().elidedText(text, Qt.TextElideMode.ElideRight, int(bg.width()-14)))
 
 
+class TrackOverlay(QWidget):
+    """Box tracks (fleet_contract tracks, normalised full-frame boxes) drawn over the playing video with their
+    readable names ("person P1", "car CAR1", "dog #1"), shown or hidden by the session's Boxes toggle (B)."""
+
+    def __init__(self, canvas, theme):
+        super().__init__(canvas)
+        self.canvas, self.t = canvas, PALETTES[theme]
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.tracks, self.names, self.source = [], {}, None
+        self.position_ms, self.message = 0, None
+
+    def set_tracks(self, tracks, source=None):
+        from .label_document import track_names
+        self.tracks, self.source, self.message = list(tracks or []), source, None
+        self.names = track_names(self.tracks)
+        self.update()
+
+    def visible(self, t_sec):
+        from home_guard_project.fleet_contract.tracks import box_at
+        return [(tr, box) for tr in self.tracks for box in [box_at(tr, t_sec)] if box is not None]
+
+    def paintEvent(self, event):
+        p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        machine = {'tracker': 'Tracker'}.get(self.source, 'YOLO')
+        if self.message:
+            text = self.message
+        elif not SESSION['boxes']:
+            text = 'Boxes hidden  ·  B shows them'
+        elif not self.tracks:
+            text = 'No boxes for this clip'
+        else:
+            text = f'Boxes  ·  {len(self.tracks)} track{"s" if len(self.tracks) != 1 else ""}  ·  B hides them'
+        if SESSION['boxes'] and not self.message and not self.canvas.image.isNull():
+            for tr, xyxy in self.visible(self.position_ms / 1000):
+                token = 'action' if tr.label == 'person' else 'warning' if tr.label in ('bicycle', 'car', 'motorcycle', 'bus', 'truck') else 'ok'
+                color = QColor(self.t[token])
+                rect = QRectF(*map_box(xyxy, self.canvas.display_rect()))
+                pen = QPen(color, 2)
+                if tr.source in ('yolo', 'suggestion'):
+                    pen.setStyle(Qt.PenStyle.DashLine)
+                p.setPen(pen); p.setBrush(Qt.BrushStyle.NoBrush); p.drawRect(rect)
+                caption = self.names.get(tr.track_id, tr.label) + (f'  ·  {machine}' if tr.source in ('yolo', 'suggestion') else '')
+                tag = QRectF(rect.x(), max(0, rect.y()-24), p.fontMetrics().horizontalAdvance(caption)+12, 24)
+                p.fillRect(tag, color); p.setPen(QColor(self.t['bg'])); p.drawText(tag, Qt.AlignmentFlag.AlignCenter, caption)
+        bg = QRectF(12, 12, min(self.width()-24, p.fontMetrics().horizontalAdvance(text)+20), 28)
+        p.fillRect(bg, QColor(12, 18, 24, 220)); p.setPen(QColor('#edf4f6'))
+        p.drawText(bg.adjusted(10, 0, -4, 0), Qt.AlignmentFlag.AlignVCenter,
+                   p.fontMetrics().elidedText(text, Qt.TextElideMode.ElideRight, int(bg.width()-14)))
+
+
 class VideoCanvas(QWidget):
-    def __init__(self, theme):
+    def __init__(self, theme, overlay=BoxOverlay):
         super().__init__()
         self.image = QImage(); self.frame_size = (640, 360)
         self.message = 'Loading recording…'
         self.setMinimumSize(320, 180)
-        self.overlay = BoxOverlay(self, theme)
+        self.overlay = overlay(self, theme)
 
     def display_rect(self):
         size = (self.image.width(), self.image.height()) if not self.image.isNull() else self.frame_size

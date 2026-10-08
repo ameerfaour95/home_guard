@@ -6,6 +6,34 @@ from home_guard_project.fleet_contract.tracks import box_at, boxes_at, frame_tim
 from .models import Track, Keyframe, AnnotationIn
 
 CLASSES = ('person', 'bicycle', 'car', 'motorcycle', 'bus', 'truck', 'bird', 'cat', 'dog')
+# The box's own entity names (box/entities.py): people P1, P2 and moving vehicles CAR1, numbered per kind.
+KIND_PREFIX = {'person': 'P', 'car': 'CAR', 'motorcycle': 'CAR', 'bus': 'CAR', 'truck': 'CAR'}
+EPS = 1e-6
+
+
+def track_names(tracks):
+    """track id -> "person P1", "truck CAR2", "dog #1": people and vehicles numbered per kind like the box names
+    them, other classes per class; in order of first appearance in the clip. The internal id stays in the data (and
+    in tooltips) only."""
+    names, counts = {}, {}
+    first = lambda t: min((k.t_sec for k in t.keyframes), default=float('inf'))  # noqa: E731
+    for tr in sorted(tracks, key=lambda t: (first(t), t.track_id)):
+        prefix = KIND_PREFIX.get(tr.label)
+        group = prefix or tr.label
+        counts[group] = counts.get(group, 0) + 1
+        names[tr.track_id] = f'{tr.label} {prefix}{counts[group]}' if prefix else f'{tr.label} #{counts[group]}'
+    return names
+
+
+def visible_spans(track):
+    """[(start, end)] times the track's box is shown: from each enabled keyframe to the next one (a box held after
+    the last keyframe counts only at that keyframe)."""
+    kfs = track.keyframes
+    return [(k.t_sec, kfs[i+1].t_sec if i+1 < len(kfs) else k.t_sec + EPS) for i, k in enumerate(kfs) if k.enabled]
+
+
+def overlap_in_time(a, b):
+    return any(s0 < t1 - EPS and t0 < s1 - EPS for s0, s1 in visible_spans(a) for t0, t1 in visible_spans(b))
 
 
 class LabelDocument(QObject):
@@ -22,6 +50,8 @@ class LabelDocument(QObject):
         self.frame, self.t_sec = 0, 0.
         self.timestamps = {k.frame: k.t_sec for t in annotation.tracks for k in t.keyframes}
         self.selected, self.current_class = None, CLASSES[0]
+        self.hidden = set()   # track ids hidden from view (H): display only, never saved
+        self.preload_source = getattr(annotation, 'preload_source', None)  # 'tracker' / 'yolo': who drew the unchecked boxes
         self.tracks = deepcopy(annotation.tracks)
         self.description, self.drop_clip, self.needs_review = annotation.description, annotation.drop_clip, annotation.needs_review
         self.history = [self.snapshot()]
@@ -40,14 +70,7 @@ class LabelDocument(QObject):
         return next((t for t in self.tracks if t.track_id == self.selected), None)
 
     def display_names(self):
-        """track id -> "person #1", "car #2": per class, numbered in order of first appearance in the clip. The
-        internal id stays in the data (and in tooltips) only."""
-        names, counts = {}, {}
-        first = lambda t: min((k.t_sec for k in t.keyframes), default=float('inf'))  # noqa: E731
-        for tr in sorted(self.tracks, key=lambda t: (first(t), t.track_id)):
-            counts[tr.label] = counts.get(tr.label, 0) + 1
-            names[tr.track_id] = f'{tr.label} #{counts[tr.label]}'
-        return names
+        return track_names(self.tracks)
 
     def display_name(self, track):
         return self.display_names().get(track.track_id, track.label)
@@ -155,9 +178,60 @@ class LabelDocument(QObject):
     def delete_track(self):
         """Remove the selected box's whole track at once (Undo brings it back); the next save leaves it out."""
         if self.track:
+            self.hidden.discard(self.selected)
             self.tracks.remove(self.track); self.selected = None; self.checkpoint()
             return True
         return False
+
+    def split(self):
+        """Cut the selected track at the current frame: it ends here (hidden from this frame) and a new track with
+        the same class carries on from this frame's box. Returns the new track, or None."""
+        tr = self.track
+        box = box_at(tr, self.t_sec) if tr else None
+        before = [k for k in tr.keyframes if k.t_sec < self.t_sec - EPS] if tr else []
+        if box is None or not before:
+            return None
+        after = [k for k in tr.keyframes if k.t_sec > self.t_sec + EPS]
+        new = Track(uuid4().hex[:8], tr.label, [Keyframe(self.frame, self.t_sec, list(box), True)] + after, 'human')
+        tr.keyframes = before + [Keyframe(self.frame, self.t_sec, list(box), False)]
+        tr.source = 'human'
+        self.tracks.append(new); self.selected = new.track_id
+        self.checkpoint()
+        return new
+
+    def merge_candidates(self, track=None):
+        """Tracks the selected one can merge with: the same kind of object (people with people, vehicles with
+        vehicles, else the same class), never visible at the same time; nearest in time first."""
+        track = track or self.track
+        if not track or not track.keyframes:
+            return []
+        kind = lambda t: KIND_PREFIX.get(t.label, t.label)  # noqa: E731
+        def gap(other):
+            a0, a1 = track.keyframes[0].t_sec, track.keyframes[-1].t_sec
+            b0, b1 = other.keyframes[0].t_sec, other.keyframes[-1].t_sec
+            return max(b0 - a1, a0 - b1, 0.)
+        return sorted((t for t in self.tracks if t is not track and t.keyframes and kind(t) == kind(track)
+                       and not overlap_in_time(t, track)), key=gap)
+
+    def merge(self, other=None):
+        """Join the selected track and `other` (default: the nearest candidate) into one: the one that appears
+        first keeps its id and class, so P1 stays P1 across an occlusion. Refused (False) when the two are ever
+        visible at the same time."""
+        track = self.track
+        candidates = self.merge_candidates(track)
+        other = other if other is not None else (candidates[0] if candidates else None)
+        if not track or other is None or other not in candidates:
+            return False
+        keep, gone = sorted((track, other), key=lambda t: (t.keyframes[0].t_sec, t.track_id))
+        by_frame = {}
+        for k in keep.keyframes + gone.keyframes:
+            if k.frame not in by_frame or (k.enabled and not by_frame[k.frame].enabled):
+                by_frame[k.frame] = k
+        keep.keyframes = sorted(by_frame.values(), key=lambda k: k.t_sec)
+        keep.source = 'human'
+        self.tracks.remove(gone); self.hidden.discard(gone.track_id); self.selected = keep.track_id
+        self.checkpoint()
+        return True
 
     def change_class(self, name):
         self.current_class = name

@@ -12,13 +12,19 @@ from .workers import TaskRunner, closing
 from .widgets.common import label, button
 from .label_document import LabelDocument, CLASSES
 from .label_canvas import LabelCanvas, TrackTimeline
+from .player import SESSION
+from .tag_widgets import ProvenanceChip
 from .models import ReviewDecision
 
 STALE_REVIEW = 'This clip changed since you opened it — reload'
 
 HELP = [('← / →', 'One frame'), ('Shift + ← / →', 'Five frames'), ('Space', 'Play / pause in real time'),
         ('. / ,', 'Next / previous keyframe'), ('1–9', 'Class: person, bicycle, car, motorcycle, bus, truck, bird, cat, dog'),
-        ('K', 'Add / remove keyframe'), ('H', 'Hide / keep segment'), ('C', 'Copy box to next frame'),
+        ('K', 'Add / remove keyframe'), ('O', 'Hide / keep segment (the object is out of view from here)'),
+        ('B', 'Boxes on / off (all of them, also while playing)'), ('H', 'Hide / show the selected track (view only)'),
+        ('Alt + M', 'Split the selected track at this frame (a new object from here)'),
+        ('M', 'Merge the selected track with the nearest one it never overlaps (P1 stays P1)'),
+        ('C', 'Copy box to next frame'),
         ('Del / Shift + Del', 'Delete the selected box (its whole track) / only this keyframe'), ('Ctrl + Z / Ctrl + Shift + Z', 'Undo / redo (including text)'),
         ('Ctrl + S', 'Save draft'), ('Ctrl + Enter', 'Submit and open next clip'), ('Esc', 'Deselect'), ('?', 'Keyboard help')]
 
@@ -73,18 +79,36 @@ class LabelView(QWidget):
         self.classes.activated.connect(lambda: self.doc and self.doc.change_class(self.classes.currentData()))
         tools.addWidget(self.classes)
         # The YOLO boxes open as normal, editable tracks: fix them in place; nothing to accept first.
-        self.boxes_note = label('', 'muted'); tools.addWidget(self.boxes_note); tools.addStretch()
-        tools.addWidget(label('Drag to draw · 8 resize handles', 'muted')); column.addLayout(tools)
+        self.boxes_source = ProvenanceChip(theme); tools.addWidget(self.boxes_source)
+        self.boxes_note = label('', 'muted'); self.boxes_note.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        tools.addWidget(self.boxes_note, 1)
+        self.boxes_toggle = button('Boxes  B', self.toggle_boxes, 'compact'); self.boxes_toggle.setCheckable(True)
+        self.boxes_toggle.setChecked(SESSION['boxes']); self.boxes_toggle.setToolTip('Show / hide every box, also while playing (B)')
+        tools.addWidget(self.boxes_toggle)
+        self.hide_track = button('Hide track  H', self.toggle_track_hidden, 'compact')
+        self.hide_track.setToolTip('Hide / show the selected track on the picture (view only, nothing is deleted)')
+        tools.addWidget(self.hide_track)
+        hint = label('Drag to draw · 8 resize handles', 'muted'); hint.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        hint.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter); tools.addWidget(hint, 1)
+        column.addLayout(tools)
         self.canvas = LabelCanvas(theme); self.canvas.selected.connect(self.selection_changed)
         self.canvas.interaction_started.connect(self.player.pause); column.addWidget(self.canvas, 1)
         transport = QHBoxLayout(); self.play = button('Play', self.toggle_play); transport.addWidget(self.play)
         transport.addWidget(button('‹', lambda: self.step(-1))); transport.addWidget(button('›', lambda: self.step(1)))
-        self.position = label('Frame 1 · 0.000 s', 'muted'); transport.addWidget(self.position, 1)
-        transport.addWidget(button('Keyframe K', lambda: self.doc and self.doc.toggle_keyframe()))
-        transport.addWidget(button('Hide / keep H', lambda: self.doc and self.doc.set_enabled()))
-        self.delete_box = button('Delete box  Del', self.delete_selected)
+        self.position = label('Frame 1 · 0.000 s', 'muted'); self.position.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        transport.addWidget(self.position, 1)
+        transport.addWidget(button('Keyframe  K', lambda: self.doc and self.doc.toggle_keyframe(), 'compact'))
+        transport.addWidget(button('Hide / keep  O', lambda: self.doc and self.doc.set_enabled(), 'compact'))
+        self.delete_box = button('Delete  Del', self.delete_selected, 'compact')
         self.delete_box.setToolTip('Remove the selected box and its whole track (Ctrl+Z brings it back)')
         transport.addWidget(self.delete_box)
+        self.split_button = button('Split  Alt+M', self.split_track, 'compact')
+        self.split_button.setToolTip('The selected track ends here and a new one starts from this frame')
+        transport.addWidget(self.split_button)
+        self.merge_button = button('Merge  M', self.merge_track, 'compact')
+        self.merge_button.setToolTip('Join the selected track with the nearest one of its kind that is never on screen '
+                                     'at the same time: the first one keeps its name (P1 stays P1)')
+        transport.addWidget(self.merge_button)
         column.addLayout(transport)
         self.timeline = TrackTimeline(theme); self.timeline.seek_requested.connect(self.seek); self.timeline.selected.connect(self.selection_changed)
         scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setWidget(self.timeline)
@@ -119,7 +143,8 @@ class LabelView(QWidget):
         callbacks = {'Left': lambda: self.step(-1), 'Right': lambda: self.step(1),
             'Shift+Left': lambda: self.step(-5), 'Shift+Right': lambda: self.step(5), 'Space': self.toggle_play,
             '.': lambda: self.jump_keyframe(1), ',': lambda: self.jump_keyframe(-1),
-            'K': lambda: self.doc.toggle_keyframe(), 'H': lambda: self.doc.set_enabled(), 'C': self.copy_next,
+            'K': lambda: self.doc.toggle_keyframe(), 'O': lambda: self.doc.set_enabled(), 'C': self.copy_next,
+            'B': self.toggle_boxes, 'H': self.toggle_track_hidden, 'Alt+M': self.split_track, 'M': self.merge_track,
             'Del': self.delete_selected, 'Shift+Del': lambda: self.doc.delete_keyframe(),
             'Ctrl+Z': lambda: self.doc.undo(), 'Ctrl+Shift+Z': lambda: self.doc.redo(),
             'Ctrl+S': self.save, 'Ctrl+Return': self.submit, 'Esc': self.deselect, '?': self.help}
@@ -136,6 +161,8 @@ class LabelView(QWidget):
             shortcut.setEnabled(not typing or key.startswith('Ctrl+'))
 
     def run_shortcut(self, key, fn):
+        if key == 'B':
+            fn(); return  # the view toggle works with or without a clip, also while seeking
         if self.doc and (self.pending_frame is None or key in ('Left', 'Right', 'Shift+Left', 'Shift+Right', '?', 'Esc')):
             fn()
 
@@ -312,6 +339,25 @@ class LabelView(QWidget):
         frames = [k.frame for k in self.doc.track.keyframes if (k.frame-self.doc.frame)*direction > 0]
         if frames: self.seek(min(frames) if direction > 0 else max(frames))
 
+    def toggle_boxes(self):
+        SESSION['boxes'] = not SESSION['boxes']
+        self.boxes_toggle.setChecked(SESSION['boxes']); self.canvas.update()
+
+    def toggle_track_hidden(self):
+        if self.doc and self.doc.track:
+            self.doc.hidden ^= {self.doc.selected}
+            self.canvas.update(); self.timeline.update(); self.selection_changed()
+
+    def split_track(self):
+        if self.doc and self.doc.split():
+            self.save_state.setText('Split: a new track starts at this frame')
+
+    def merge_track(self):
+        if not self.doc or not self.doc.track:
+            return
+        if not self.doc.merge():
+            self.show_error('Nothing to merge with: no other track of this kind that is never on screen at the same time.')
+
     def delete_selected(self):
         if self.doc and self.doc.delete_track():
             self.canvas.update(); self.timeline.update()
@@ -324,6 +370,10 @@ class LabelView(QWidget):
             name = self.doc.track.label if self.doc.track else self.doc.current_class
             self.classes.setCurrentIndex(CLASSES.index(name)); self.canvas.update(); self.timeline.update()
             self.delete_box.setEnabled(self.doc.track is not None)
+            for b in (self.split_button, self.merge_button, self.hide_track):
+                b.setEnabled(self.doc.track is not None)
+            self.hide_track.setText('Show track  H' if self.doc.selected in self.doc.hidden else 'Hide track  H')
+            self.boxes_toggle.setChecked(SESSION['boxes'])
 
     def text_changed(self, *_):
         if self.doc: self.doc.set_text(self.description.toPlainText(), self.drop.isChecked(), self.needs_review.isChecked())
@@ -344,8 +394,11 @@ class LabelView(QWidget):
         self.status.setText(self.doc.annotation.status.upper()); self.version.setText(f'v{self.doc.annotation.version} · Versions')
         self.diff.setText('Changed' if self.doc.description != self.doc.annotation.ai_description else 'AI draft')
         unchecked = len(self.doc.unchecked)
+        tracker = self.doc.preload_source == 'tracker'
+        self.boxes_source.show_source(('tracker' if tracker else 'yolo') if unchecked else '')
+        machine = 'tracker' if tracker else 'YOLO'
         self.boxes_note.setText('No YOLO boxes for this clip' if not self.doc.tracks and not self.doc.annotation.version
-                                else f'{unchecked} YOLO box track{"s" if unchecked != 1 else ""} not checked yet'
+                                else f'{unchecked} {machine} box track{"s" if unchecked != 1 else ""} not checked yet'
                                 if unchecked else '')
         self.delete_box.setEnabled(self.doc.track is not None)
         self.review_panel.setVisible(self.role == 'admin' and self.doc.annotation.status == 'submitted')
