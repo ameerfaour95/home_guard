@@ -291,3 +291,54 @@ def test_customer_page_never_warns_about_an_old_site_name(widgets, wait):
     assert 'Cedar Guest House' not in screen.health.text() and screen.health.text().startswith('Cedar House')
     assert not any('Cedar Guest House' in w for w in screen.overview.warnings)
     assert not screen.overview.status.text().startswith('Cedar Guest House')
+
+
+class SessionBackend(DemoBackend):
+    """Demo 'Front door' clips are one box session; the newest was sent, the rest kept in the event."""
+    def events(self, **filters):
+        page = super().events(**{k: v for k, v in filters.items() if k != 'would_raise'})
+        door = sorted((e for e in page.items if e.camera == 'Front door'), key=lambda e: e.start_utc, reverse=True)
+        for i, e in enumerate(door):
+            e.session_id = 'door-session'
+            e.outcome_code, e.outcome = ('sent', 'Sent') if i == 0 else ('held', 'Kept in the event, not sent (normal)')
+            e.would_raise = i == 1
+        if filters.get('would_raise'):
+            page.items = [e for e in page.items if e.would_raise]
+        return page
+
+    def event_sessions(self, session_ids):
+        from home_guard_project.admin.models import EventSession
+        door = [e for e in DemoBackend.events(self, limit=500).items if e.camera == 'Front door']
+        return [EventSession('door-session', 'cedar_house', 'Front door', min(e.start_utc for e in door),
+                             max(e.start_utc for e in door), 32, 1)]
+
+
+def test_clips_of_one_event_are_one_expandable_row(widgets, wait):
+    from home_guard_project.admin.timeline import TimelineScreen
+    from home_guard_project.admin.timeline_model import HEADERS
+    screen = TimelineScreen(SessionBackend()); widgets.append(screen); screen.resize(1120, 600); screen.show()
+    screen.open(1, 'Asia/Jerusalem')
+    wait(lambda: bool(screen.model.rows) and ('cedar_house', 'door-session') in screen.model.sessions)
+    model, table = screen.model, screen.table
+    rows = [i for i, e in enumerate(model.rows) if e.session_id]
+    lead, members = rows[0], rows[1:]
+    assert model.lead(lead) and all(table.isRowHidden(i) for i in members) and not table.isRowHidden(lead)
+    text = model.index(lead, 1).data().split('\n')[0]
+    assert text.startswith('▸ Front door') and '32 clips' in text and '1 message sent' in text
+    assert model.index(lead, HEADERS.index('AI decision')).data() == 'Sent'
+    # j / k skip the hidden clips of a collapsed event
+    table.setCurrentIndex(model.index(lead, 0))
+    nxt = screen.next_row(lead, 1)
+    assert nxt not in members and not table.isRowHidden(nxt)
+    screen.toggle_group(lead)
+    assert not any(table.isRowHidden(i) for i in members) and model.index(lead, 1).data().startswith('▾')
+    assert model.index(members[0], 1).data().startswith('↳')
+    assert model.index(members[0], HEADERS.index('AI decision')).data() == 'Kept in the event, not sent (normal)'
+    screen.group_toggle.setChecked(False)
+    assert not any(table.isRowHidden(i) for i in range(len(model.rows)))
+    screen.group_toggle.setChecked(True); screen.toggle_group(lead, False)
+    screen.reveal(members[-1])
+    assert not table.isRowHidden(members[-1])
+    combo = screen.filters['would_raise']
+    combo.setCurrentIndex(combo.findData(True)); wait(lambda: not screen.runner.busy)
+    assert [e.would_raise for e in model.rows] == [True]

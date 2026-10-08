@@ -147,6 +147,8 @@ class DemoBackend(DemoTagging, DemoAnnotations, DemoStudio):
             items = [e for e in items if e.completeness.ai == filters['ai']]
         if filters.get('verdict'):
             items = [e for e in items if filters['verdict'] in e.owner_verdicts]
+        if filters.get('would_raise') is not None:
+            items = [e for e in items if bool(e.would_raise) == bool(filters['would_raise'])]
         for key, lower in [('from_utc', True), ('to_utc', False)]:
             if filters.get(key):
                 boundary = datetime.fromisoformat(str(filters[key]).replace('Z', '+00:00'))
@@ -164,6 +166,17 @@ class DemoBackend(DemoTagging, DemoAnnotations, DemoStudio):
         selected = items[:limit]
         cursor = base64.urlsafe_b64encode(json.dumps([selected[-1].start_utc.isoformat(), selected[-1].id]).encode()).decode() if len(items) > limit else None
         return EventPage(selected, cursor, total, False)
+
+    def event_sessions(self, session_ids):
+        """The events (box sessions) over every clip events() returns."""
+        from .models import EventSession
+        wanted, groups = set(session_ids), {}
+        for e in self.events(limit=500).items:
+            if e.session_id in wanted:
+                groups.setdefault((e.site, e.session_id, e.camera), []).append(e)
+        return [EventSession(sid, site, camera, min(e.start_utc for e in clips), max(e.start_utc for e in clips),
+                             len(clips), sum(e.outcome_code == 'sent' for e in clips))
+                for (site, sid, camera), clips in groups.items()]
 
     def _apply_review(self, event):
         with self._lock:

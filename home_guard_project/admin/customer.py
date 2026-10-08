@@ -223,6 +223,7 @@ class CustomerScreen(QWidget):
         rows = self.timeline.model.rows
         for i, event in enumerate(rows):
             if event.id == event_id:
+                self.timeline.reveal(i)
                 self.timeline.table.setCurrentIndex(self.timeline.model.index(i, 0))
                 self.event_view.prev.setEnabled(i > 0)
                 self.event_view.next.setEnabled(i < len(rows)-1 or bool(self.timeline.cursor))

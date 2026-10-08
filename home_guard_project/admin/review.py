@@ -36,8 +36,11 @@ class ReviewDelegate(TimelineDelegate):
         p.fillRect(option.rect, QColor(t['raised' if option.state & QStyle.StateFlag.State_Selected else 'surface']))
         p.setPen(QColor(t['border'])); p.drawLine(option.rect.bottomLeft(), option.rect.bottomRight())
         rect = option.rect.adjusted(8, 10, -10, -8)
-        lines = [f'{local_time(e.start_utc, e.timezone)[13:18]}  ·  {camera_name(e)}', e.summary or 'No summary saved',
-                 f'{KINDS.get(e.kind, "Unknown")} · '+{'real':'AI answer saved','failed':'AI failed','fallback':'Fallback AI','none':'No AI answer'}.get(e.completeness.ai, 'Unknown AI state'),
+        model, row = index.model(), index.row()
+        head = (model.session_line(row) if model.lead(row) else
+                ('↳  ' if model.member(row) else '') + f'{local_time(e.start_utc, e.timezone)[13:18]}  ·  {camera_name(e)}')
+        lines = [head, e.summary or 'No summary saved',
+                 e.outcome or (f'{KINDS.get(e.kind, "Unknown")} · '+{'real':'AI answer saved','failed':'AI failed','fallback':'Fallback AI','none':'No AI answer'}.get(e.completeness.ai, 'Unknown AI state')),
                  ('Reviewed' if e.reviewed else 'Unreviewed') + ('  ·  Flagged' if e.flagged else '') +
                  ('  ·  '+', '.join(VERDICTS.get(v,v.replace('_',' ').capitalize()) for v in e.owner_verdicts) if e.owner_verdicts else '')]
         for i, text in enumerate(lines):
@@ -221,7 +224,10 @@ class ReviewScreen(QWidget):
         self.update_progress()
 
     def move(self, delta):
-        row = self.timeline.table.currentIndex().row()+delta
+        current = self.timeline.table.currentIndex().row()
+        row = self.timeline.next_row(current, delta)
+        if row == current:
+            row = current + delta  # past the end: load older below
         if 0 <= row < len(self.timeline.model.rows):
             self.timeline.table.setCurrentIndex(self.timeline.model.index(row, 0))
         elif delta > 0 and self.timeline.cursor:

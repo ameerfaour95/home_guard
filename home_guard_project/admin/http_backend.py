@@ -8,7 +8,7 @@ import certifi
 import httpx
 from .backend import (AuthError, LoginError, ForbiddenError, OfflineError, ServerError,
                       RateLimitError, TlsError, ConfigurationError, UnsupportedError, BackendError)
-from .models import ExportPreview, IndexProblem, CameraOut, ChatDay
+from .models import ExportPreview, IndexProblem, CameraOut, ChatDay, EventSession
 from .backend import ValidationError
 from .backend import ConflictError
 from .models import AnnotationOut, AnnotationVersion, PublishOut
@@ -247,6 +247,9 @@ class HttpBackend(HttpTagging):
         if self.tokens and self.tokens.staff.role == 'labeler':
             filters.pop('customer_id', None); filters.pop('q', None)
         return self._get('events/density', DensityOut, **{k: v for k, v in filters.items() if v is not None})
+
+    def event_sessions(self, session_ids):
+        return self._get('events/sessions', list[EventSession], session_id=list(session_ids))
 
     def review_count(self):
         return self._get('events/review-count', ReviewCount)

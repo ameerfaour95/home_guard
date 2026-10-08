@@ -146,6 +146,24 @@ class EventSummary:
     timezone: str = field(default='UTC', kw_only=True)
     display_name: str | None = field(default=None, kw_only=True)
     annotation_status: str | None = field(default=None, kw_only=True)
+    # the box's event layer: its session, what happened to the clip ("Kept in the event, not sent (normal)") and
+    # whether the baseline in shadow mode would have raised it
+    session_id: str | None = field(default=None, kw_only=True)
+    outcome: str | None = field(default=None, kw_only=True)
+    outcome_code: str | None = field(default=None, kw_only=True)
+    would_raise: bool | None = field(default=None, kw_only=True)
+
+
+@dataclass
+class EventSession:
+    """One event (the box's session at one camera) over all its clips."""
+    session_id: str
+    site: str
+    camera: str
+    first_utc: datetime
+    last_utc: datetime
+    clips: int
+    sent: int
 
 
 @dataclass

@@ -32,6 +32,7 @@ class TimelineScreen(QWidget):
         self.saved_filter = None
         self.generation = 0
         self.runner, self.density_runner = [TaskRunner(self) for _ in range(2)]
+        self.sessions_runner = TaskRunner(self); self.sessions_runner.finished.connect(self.sessions_loaded)
         self.review_runner = ReviewController(backend, self)
         self.runner.finished.connect(self.completed)
         self.density_runner.finished.connect(self.density_loaded)
@@ -68,7 +69,9 @@ class TimelineScreen(QWidget):
                    'ai': [('All AI states', None)]+[(s.title(), s) for s in ('real', 'failed', 'fallback', 'none')],
                    'verdict': [('All owner answers', None)]+[(v, k) for k, v in VERDICTS.items()],
                    'reviewed': [('Any review', None), ('Unreviewed', False), ('Reviewed', True)],
-                   'flagged': [('Any flag', None), ('Flagged', True), ('Unflagged', False)]}
+                   'flagged': [('Any flag', None), ('Flagged', True), ('Unflagged', False)],
+                   # the baseline in shadow mode records what it would do: these clips it would have raised
+                   'would_raise': [('Any decision', None), ('Would raise: rare for this camera', True)]}
         for key, values in choices.items():
             combo = QComboBox(); combo.setAccessibleName(key)
             combo.setMinimumWidth(96)  # sized to its text, but may narrow so the row fits the 1200-pixel minimum window
@@ -76,9 +79,14 @@ class TimelineScreen(QWidget):
                 combo.addItem(text, data)
             combo.currentIndexChanged.connect(self.reload)
             self.filters[key] = combo; filters.addWidget(combo)
+        self.group_toggle = QCheckBox('Group by event'); self.group_toggle.setChecked(True)
+        self.group_toggle.setToolTip("One row per event (the box's session at a camera); click it to see its clips")
+        self.group_toggle.toggled.connect(lambda _: self.apply_groups())
+        ranges.insertWidget(ranges.indexOf(self.range_text), self.group_toggle)  # beside the range: the filter row is full
         self.retired_toggle = QCheckBox('Retired cameras'); self.retired_toggle.hide()
         self.retired_toggle.setToolTip('Also list cameras this house no longer has (old ids after a rename, removed cameras)')
-        self.retired_toggle.toggled.connect(lambda _: self.apply_density()); filters.addWidget(self.retired_toggle)
+        self.retired_toggle.toggled.connect(lambda _: self.apply_density())
+        ranges.insertWidget(ranges.indexOf(self.range_text), self.retired_toggle)
         self.search = QLineEdit(); self.search.setPlaceholderText('Search events…'); self.search.setMinimumWidth(120)
         self.debounce = QTimer(self); self.debounce.setSingleShot(True); self.debounce.setInterval(250); self.debounce.timeout.connect(self.reload)
         self.search.textChanged.connect(lambda: self.debounce.start())
@@ -98,6 +106,7 @@ class TimelineScreen(QWidget):
         self.table.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.table.installEventFilter(self)
         self.table.doubleClicked.connect(lambda _: self.open_current())
+        self.table.clicked.connect(lambda index: index.column() in (0, 1) and self.toggle_group(index.row()))
         self.table.verticalScrollBar().valueChanged.connect(self.scroll_end)
         self.stack.addWidget(self.table)
         self.loading = Skeleton(theme); self.stack.addWidget(self.loading)
@@ -206,9 +215,56 @@ class TimelineScreen(QWidget):
         self.older.setText('Load older' if self.cursor else 'End of range')
         self.stack.setCurrentWidget(self.table if self.model.rows else self.empty)
         self.count.setText(f'{len(self.model.rows)} events loaded' + (' · More available' if self.cursor else ' · All in view'))
+        self.apply_groups()
         if self.model.rows and not append:
             self.table.setCurrentIndex(self.model.index(0, 0))
         self.load_thumbnails()
+        self.load_sessions()
+
+    # ------------------------------------------------------------ events (box sessions)
+
+    def apply_groups(self):
+        self.model.grouping = self.group_toggle.isChecked()
+        for row in range(len(self.model.rows)):
+            self.table.setRowHidden(row, self.model.hidden(row))
+        if self.model.rows:
+            self.model.dataChanged.emit(self.model.index(0, 1), self.model.index(len(self.model.rows)-1, 3))
+
+    def toggle_group(self, row, expand=None):
+        if not self.model.lead(row):
+            return
+        key = self.model.key(row)
+        if expand is None:
+            expand = key not in self.model.expanded
+        self.model.expanded = (self.model.expanded | {key}) if expand else (self.model.expanded - {key})
+        self.apply_groups()
+
+    def reveal(self, row):
+        """Open the event a clip row belongs to, so selecting it never lands on a hidden row."""
+        if 0 <= row < len(self.model.rows) and self.model.hidden(row):
+            self.toggle_group(self.model.members[self.model.key(row)][0], True)
+
+    def next_row(self, row, step):
+        """The next visible row from *row* (step +1 / -1), or *row* itself at the end."""
+        target = row + step
+        while 0 <= target < len(self.model.rows) and self.table.isRowHidden(target):
+            target += step
+        return target if 0 <= target < len(self.model.rows) else row
+
+    def load_sessions(self):
+        wanted = sorted({e.session_id for e in self.model.rows if e.session_id}
+                        - {sid for _, sid in self.model.sessions})
+        if wanted and hasattr(self.backend, 'event_sessions'):
+            self.sessions_runner.start(lambda: self.backend.event_sessions(wanted))
+
+    def sessions_loaded(self, sessions, error):
+        if error:
+            if isinstance(error, AuthError):
+                self.session_expired.emit()
+            return  # an older server: groups count the loaded clips only
+        self.model.sessions.update({(s.site, s.session_id): s for s in sessions})
+        self.apply_groups()
+        self.load_sessions()  # ids that arrived with a later page
 
     def load_thumbnails(self):
         if not hasattr(self, 'thumbnails'):
@@ -337,8 +393,10 @@ class TimelineScreen(QWidget):
         if watched is self.table and event.type() == QEvent.Type.KeyPress:
             key = event.key()
             if key in (Qt.Key.Key_J, Qt.Key.Key_K):
-                row = self.table.currentIndex().row()+(1 if key == Qt.Key.Key_J else -1)
+                row = self.next_row(self.table.currentIndex().row(), 1 if key == Qt.Key.Key_J else -1)
                 self.table.setCurrentIndex(self.model.index(max(0, min(len(self.model.rows)-1, row)), 0)); return True
+            if key in (Qt.Key.Key_Right, Qt.Key.Key_Left) and self.model.lead(self.table.currentIndex().row()):
+                self.toggle_group(self.table.currentIndex().row(), key == Qt.Key.Key_Right); return True
             if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
                 self.open_current(); return True
             if key in (Qt.Key.Key_R, Qt.Key.Key_F):
