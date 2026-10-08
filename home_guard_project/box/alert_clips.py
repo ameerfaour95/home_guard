@@ -140,8 +140,8 @@ def teacher_record(root_dir: str, camera: str, day: str, stem: str, teacher: Dic
     """Save the VLM's inputs and answer next to the clip; return the meta fields that point at them.
 
     *teacher* holds ``model``, ``prompt_version``, ``prompt``, ``frames``
-    (the JPEG bytes sent, in order), ``raw`` (the answer verbatim) and
-    ``parsed``. The pictures become ``vlm_crops/<camera>/<day>/<stem>_f<i>.jpg``
+    (the JPEG bytes sent, in order), ``raw`` (the answer verbatim),
+    ``parsed`` and optionally ``tracker`` (kept in the meta's ``teacher``). The pictures become ``vlm_crops/<camera>/<day>/<stem>_f<i>.jpg``
     and the raw answer ``responses/<camera>/<day>/<stem>.model_raw.txt``, the
     layout the collector already uses, so the uploader and the tagging tools
     take them as they are.
@@ -162,7 +162,7 @@ def teacher_record(root_dir: str, camera: str, day: str, stem: str, teacher: Dic
         with open(path, "w", encoding="utf-8") as f:
             f.write(str(teacher["raw"]))
         raw_rel = raw_rel.replace("/", "\\")
-    return {
+    out = {
         "model_response": teacher.get("parsed"),
         "teacher": {
             "model": teacher.get("model"),
@@ -173,6 +173,10 @@ def teacher_record(root_dir: str, camera: str, day: str, stem: str, teacher: Dic
             "temperature": 0,
         },
     }
+    if teacher.get("tracker"):
+        # What the tracker measured over the visit (tracker.TrackerFacts.record), whether or not the prompt had it.
+        out["teacher"]["tracker"] = teacher["tracker"]
+    return out
 
 
 def _write_crop(root_dir: str, camera: str, day: str, stem: str,

@@ -10,7 +10,8 @@ Modules, in prompt order:
    English only (the owner's Hebrew comes from the messenger), and the taxonomy (``taxonomy.prompt_list``).
 2. The situation header (``Situation.header()``), identical at training and inference, and right under it the
    scene map's ZONE FACTS line when the camera has a map (``zone_facts_block``; never inside the header, and
-   kept in the training record's ``situation.scene`` so training prompts carry the same line).
+   kept in the training record's ``situation.scene`` so training prompts carry the same line), then the tracker's
+   TRACKER FACTS line when ``eye_tracker_facts`` is on (``tracker.prompt_block``; the version gets ``+tf1``).
 3. The expectations block: plain sentences built from the priors table, only what differs from a plain day.
 4. The attention list: what to look for now (night: flashlights, hands on handles and windows, crouching,
    carrying things out; day: the act, not the clothes).
@@ -33,6 +34,7 @@ from typing import Any, Dict, List, Optional, Sequence
 from . import inference
 from . import taxonomy as tx
 from .situation import Situation
+from .tracker import TRACKER_FACTS_VERSION, prompt_block
 
 # Bumped whenever the wording or a schema changes, so training records and eval results can be told apart.
 EYE_PROMPT_VERSION = "2026-10-06.eye-v3"
@@ -309,8 +311,8 @@ def build_prompt(situation: Situation, facts: Sequence[Dict[str, Any]] = (), que
     """The Eye's prompt for *situation* (its intent picks the module and schema)."""
     intent = situation.intent
     schema(intent)                      # unknown intents fail here
-    zone_facts = zone_facts_block(situation)
-    parts = [_base(situation), situation.header() + ("\n" + zone_facts if zone_facts else "")]
+    under = [block for block in (zone_facts_block(situation), prompt_block(situation.tracker_facts)) if block]
+    parts = [_base(situation), "\n".join([situation.header()] + under)]
     if intent != "snapshot":
         parts += [expectations_block(situation), attention_block(situation)]
     if intent == "alert_triage":
@@ -434,7 +436,8 @@ def postprocess(parsed: Any, situation: Situation) -> Optional[Dict[str, Any]]:
 def records(processed: Optional[Dict[str, Any]], situation: Situation) -> Dict[str, Any]:
     """The fields the training record and .meta.json gain (situation always; observation and judgement when the
     Eye answered)."""
-    out: Dict[str, Any] = {"situation": situation.record(), "prompt_version": EYE_PROMPT_VERSION}
+    version = EYE_PROMPT_VERSION + (f"+{TRACKER_FACTS_VERSION}" if situation.tracker_facts else "")
+    out: Dict[str, Any] = {"situation": situation.record(), "prompt_version": version}
     for key in ("observation", "judgement"):
         if processed and isinstance(processed.get(key), dict):
             out[key] = processed[key]
