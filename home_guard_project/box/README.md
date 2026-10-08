@@ -12,7 +12,51 @@ Turns a Windows mini PC (built for a Beelink Mini S13, Intel N150) into an unatt
 
 The collector uses `config.box.yaml` on top of `data_collection/config.yaml`: no preview windows, no VLM, one random background clip per hour.
 
-Logs are in `logs/` at the project root: `runner.log`, `collector-<date>.log`, `upload-<date>.log`, `heartbeat.log`.
+Logs are in `logs/` of the box folder (below): `runner.log`, `collector-<date>.log`, `upload-<date>.log`, `heartbeat.log`.
+
+## Box layout
+
+The code stays in `C:\home_guard` (a git checkout). Everything that belongs to one box lives apart from it, in `C:\ProgramData\HomeGuard`:
+
+```
+C:\ProgramData\HomeGuard\
+  layout.json            marker: this box uses this layout (written last by the migration, or by setup_box.ps1)
+  migration_manifest.json  what the migration copied (rollback and finalize read it)
+  config\                box.yaml, cameras.yaml, camera_alerts.yaml, camera_aliases.yaml, zones.yaml,
+                         scene_maps.yaml, registration.json, registration.published, network.json
+  secrets\               api_key.env (Administrators, SYSTEM and the box's account only)
+  data\  live\           the collector's clips (was dataset_multi)
+         outbox\         clips waiting for S3 (was dataset_outbox)
+         production\     alert clips (was production_multi)
+         archive\        answered alerts, 14 days (was production_archive)
+         state\          house_state.jsonl, cases.jsonl, quiet_since.json, ... and the assistant's
+                         .conversations, .receipts, .desc, .live, .alert_embeddings.json
+                         (was production_multi\.registry and production_multi\.*)
+         scene_interview\
+  logs\                  runner/collector/upload/heartbeat logs, pid and flag files, ai_status.json,
+                         alert_mute.json, telegram_*.json(l), chat_images\, preview\, app_snapshots\
+  models\                yolo11s.pt, its OpenVINO copy, FastSAM-s.pt
+```
+
+`paths.py` is the only code that knows these places (`_common.sh` and `box_paths.ps1` follow the same rule). The rule: `HOMEGUARD_HOME` if set (a folder, or `legacy`), else `C:\ProgramData\HomeGuard` when its `layout.json` is there, else the old places inside the code folder. A box that has not been migrated, and a developer laptop, keep working unchanged. The AWS key stays in the box account's `%USERPROFILE%\.aws\credentials` for now.
+
+```bat
+:: where this box keeps everything
+cd /d C:\home_guard && .venv\Scripts\python.exe -m home_guard_project.box paths
+```
+
+Move an existing box (elevated PowerShell on the box, or over SSH). It copies, never moves; the old files stay until `-Finalize -Yes`:
+
+```powershell
+cd C:\home_guard\home_guard_project\box
+powershell -ExecutionPolicy Bypass -File migrate_layout.ps1 -DryRun     # the plan: what goes where, sizes
+powershell -ExecutionPolicy Bypass -File migrate_layout.ps1             # stop, copy, check, lock down, switch, start
+powershell -ExecutionPolicy Bypass -File migrate_layout.ps1 -Rollback   # copy changes back, switch back, start
+powershell -ExecutionPolicy Bypass -File migrate_layout.ps1 -Finalize   # list the old copies
+powershell -ExecutionPolicy Bypass -File migrate_layout.ps1 -Finalize -Yes   # delete them (never code or .git)
+```
+
+The same is `python -m home_guard_project.box migrate-layout [--dry-run|--rollback|--finalize [--yes]]`. After a run or a rollback, restart the Home Guard window (or reboot) so it reads the new places. A new box set up with `setup_box.ps1` gets this layout from the start.
 
 ## Desktop screen
 

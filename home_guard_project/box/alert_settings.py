@@ -17,10 +17,10 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
-from . import boxconfig, camera_alerts
+from . import boxconfig, camera_alerts, paths
 from .camera_alerts import CAMERA_ALERTS_PATH, TYPES
 
-CAMERAS_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data_collection", "cameras.yaml"))
+CAMERAS_PATH = paths.cameras_yaml()
 
 # Words that mean "go back to the house default" for a camera's alert types.
 DEFAULT_WORDS = ("default", "house", "house_default")

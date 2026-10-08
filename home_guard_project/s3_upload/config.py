@@ -8,6 +8,8 @@ from typing import Any, Dict, FrozenSet
 
 import yaml
 
+from home_guard_project.box import paths
+
 _DIR = os.path.dirname(os.path.abspath(__file__))
 _CONFIG_PATH = os.path.join(_DIR, "config.yaml")
 
@@ -31,9 +33,13 @@ def load_config(path: str = _CONFIG_PATH) -> S3Config:
 
     s3 = raw.get("s3", {})
 
-    project_root = os.path.abspath(os.path.join(_DIR, "..", ".."))
+    project_root = paths.CODE_DIR
     ds_rel = raw.get("dataset_dir", "./dataset_multi")
-    dataset_dir = os.path.normpath(os.path.join(project_root, ds_rel))
+    # The default is the box's live folder, wherever its layout keeps it (paths.py).
+    if os.path.normpath(ds_rel) == "dataset_multi":
+        dataset_dir = paths.live_dir()
+    else:
+        dataset_dir = os.path.normpath(os.path.join(project_root, ds_rel))
 
     coco_raw = raw.get("coco_labels", {})
     allowed_labels = frozenset(str(v) for v in coco_raw.values()) if coco_raw else frozenset()

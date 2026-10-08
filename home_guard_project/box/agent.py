@@ -30,6 +30,7 @@ import time
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
+from . import paths
 from .archive import AlertRecord, load_records, record_doc, search, window
 from .conversation import ConversationStore
 from .embeddings import make_embedder
@@ -54,7 +55,7 @@ EMBED_CACHE_NAME = ".alert_embeddings.json"
 CONVERSATIONS_DIR_NAME = ".conversations"
 LIVE_DIR_NAME = ".live"
 TOOLS_PATH = os.path.join(os.path.dirname(__file__), "agent_tools.json")
-CAMERAS_PATH = os.path.join(os.path.dirname(__file__), "..", "data_collection", "cameras.yaml")
+CAMERAS_PATH = paths.cameras_yaml()
 UNAVAILABLE_REPLY = "I could not work on that right now, but your message was saved."
 
 SYSTEM_PROMPT = """
@@ -276,12 +277,13 @@ class OwnerAgent:
         self._turn: Optional[_Turn] = None
         self._tools = load_tool_schemas()
         self._system = SYSTEM_PROMPT.format(retention_days=int(ctx.retention_days))
-        cache_path = os.path.join(ctx.feedback_dir, EMBED_CACHE_NAME)
+        _, own_dir = paths.state_paths_for(ctx.feedback_dir)   # data\state on a migrated box (paths.py)
+        cache_path = os.path.join(own_dir, EMBED_CACHE_NAME)
         self._embedder = ctx.embedder if ctx.embedder is not None else make_embedder(os.environ, cache_path)
         self._conversations = ConversationStore(
-            ctx.conversations_dir or os.path.join(ctx.feedback_dir, CONVERSATIONS_DIR_NAME))
+            ctx.conversations_dir or os.path.join(own_dir, CONVERSATIONS_DIR_NAME))
         self._look_now = ctx.look_now if ctx.look_now is not None else make_look_now(
-            CAMERAS_PATH, os.environ, os.path.join(ctx.feedback_dir, LIVE_DIR_NAME))
+            CAMERAS_PATH, os.environ, os.path.join(own_dir, LIVE_DIR_NAME))
         self._set_camera = ctx.set_camera if ctx.set_camera is not None else _apply_camera_default
         self._handlers: Dict[str, Callable[[Dict[str, Any]], Dict[str, Any]]] = {
             "record_verdict": self._record_verdict,

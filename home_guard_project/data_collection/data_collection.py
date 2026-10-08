@@ -693,8 +693,9 @@ def main() -> None:
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         if project_root not in sys.path:
             sys.path.insert(0, project_root)
+        from home_guard_project.box import paths
         from home_guard_project.box.preview import PreviewWriter
-        preview = PreviewWriter(os.path.join(project_root, "logs", "preview"), enabled=True)
+        preview = PreviewWriter(os.path.join(paths.logs_dir(), "preview"), enabled=True)
         preview.set_cameras(cfg.CAMERAS)
     _ensure_dirs(cfg)
 

@@ -11,6 +11,7 @@ import time
 from .camera_controls import Camera,changes_payload,zone_operation,zone_points
 from .engine_backend import ProcessRunner
 from .alert_types import CameraAlertsBackend
+from .box_layout import box_command
 
 def target_user(target):
     match=re.fullmatch(r'([A-Za-z0-9_][A-Za-z0-9_.-]*)@([A-Za-z0-9][A-Za-z0-9_.:-]*|\[[A-Fa-f0-9:]+\])',target)
@@ -79,7 +80,7 @@ class RemoteCameras(CameraAlertsBackend):
         if result.returncode and not allow_failed: raise RuntimeError('Camera command failed')
         return result
     def ssh(self,operation):
-        command=r'cd /d C:\home_guard && .venv\Scripts\python.exe -m home_guard_project.box.find_cameras --json '+operation
+        command=box_command('-m home_guard_project.box.find_cameras --json '+operation)
         if '"' in command or "'" in command: raise ValueError('Quotes are not allowed in the remote command')
         return ['ssh.exe','-i',str(self.key),'-o','LogLevel=ERROR',self.target,command]
     def scp(self,source,destination):

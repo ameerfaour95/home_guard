@@ -5,18 +5,25 @@ from __future__ import annotations
 import logging
 import os
 import re
+import sys
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 import yaml
 
+try:
+    from home_guard_project.box import paths as _paths
+except ImportError:  # run as a script (run_collector.sh): the repo root is not on sys.path yet
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")))
+    from home_guard_project.box import paths as _paths
+
 log = logging.getLogger(__name__)
 
 _DIR = os.path.dirname(os.path.abspath(__file__))
-_CONFIG_PATH = os.path.join(_DIR, "config.yaml")
-_CAMERAS_PATH = os.path.join(_DIR, "cameras.yaml")
-_ZONES_PATH = os.path.join(_DIR, "zones.yaml")
+_CONFIG_PATH = os.path.join(_DIR, "config.yaml")     # code defaults, in the repo
+_CAMERAS_PATH = _paths.cameras_yaml()                 # per-box config: where the layout keeps it (paths.py)
+_ZONES_PATH = _paths.zones_yaml()
 
 # Optional YAML merged over config.yaml (e.g. box/config.box.yaml for unattended runs).
 _OVERLAY_ENV = "HOME_GUARD_CONFIG_OVERLAY"
@@ -194,6 +201,13 @@ def _load_black(zones_path: str) -> Dict[str, List[List[Tuple[float, float]]]]:
     return load_black(scene_maps_path_for(zones_path))
 
 
+def _out_dir(value: str) -> str:
+    """The clip folder. The default, ./dataset_multi, is the box's live folder wherever its layout keeps it."""
+    if os.path.normpath(str(value)) == "dataset_multi":
+        return _paths.live_dir()
+    return value
+
+
 def load_config(
     config_path: str = _CONFIG_PATH,
     cameras_path: str = _CAMERAS_PATH,
@@ -237,11 +251,11 @@ def load_config(
     store_size = _parse_size(_deep_get(cfg_data, "clip", "store_size"))
 
     return Config(
-        OUT_DIR=cfg_data.get("output_dir", "./dataset_multi"),
+        OUT_DIR=_out_dir(cfg_data.get("output_dir", "./dataset_multi")),
         CAMERAS=cameras_sub,
         CAMERAS_MAIN=cameras_main,
 
-        YOLO_MODEL=_deep_get(cfg_data, "models", "yolo", default="yolov8n.pt"),
+        YOLO_MODEL=_paths.resolve_model(str(_deep_get(cfg_data, "models", "yolo", default="yolov8n.pt"))),
         YOLO_DEVICE=str(_deep_get(cfg_data, "models", "yolo_device", default="auto")),
         VLM_MODEL_ID=_deep_get(cfg_data, "models", "vlm", default="HuggingFaceTB/SmolVLM2-500M-Video-Instruct"),
 

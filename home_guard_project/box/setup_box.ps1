@@ -8,7 +8,10 @@
 #    1. Installs Git (for bash), uv, ffmpeg and Tailscale if missing
 #    2. Stops the PC from sleeping or hibernating, and from waiting at a recovery screen after a power cut
 #    3. Enables Remote Desktop (Windows Pro only)
-#    4. Writes box.yaml with the site name
+#    4. Creates C:\ProgramData\HomeGuard (config, secrets, data, logs, models;
+#       Administrators, SYSTEM and this account only) and writes box.yaml with the
+#       site name in its config folder. A box already using the old places in the
+#       code folder keeps them (move them with migrate_layout.ps1)
 #    5. Installs the Python environment (uv sync)
 #    6. Registers three scheduled tasks: collector (at boot), upload (every 15 minutes), heartbeat (hourly)
 #    7. Windows signs in by itself at boot (enable_autologon.ps1, asks for the
@@ -140,7 +143,24 @@ if ($edition -match 'Home') {
 }
 
 # ----------------------------------------------------------------------------
-Step '4/7 box.yaml'
+Step '4/7 Box folder + box.yaml'
+
+# Where the box keeps its config, secrets, data and logs (box_paths.ps1, the same rule as paths.py).
+. (Join-Path $BoxDir 'box_paths.ps1')
+$hg = Get-HomeGuardPaths -CodeDir $Root
+$oldPlaces = (Test-Path (Join-Path $BoxDir 'box.yaml')) -or
+             (Test-Path (Join-Path $Root 'home_guard_project\data_collection\cameras.yaml'))
+if ($hg.Mode -eq 'legacy' -and -not $env:HOMEGUARD_HOME -and -not $oldPlaces) {
+    # A new box: its files go to C:\ProgramData\HomeGuard from the start.
+    $taskAccount = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+    Initialize-HomeGuardHome (Get-HomeGuardDefaultHome) $taskAccount
+    $hg = Get-HomeGuardPaths -CodeDir $Root
+    Ok "Box folder: $($hg.Home) (Administrators, SYSTEM and $taskAccount only)"
+} elseif ($hg.Mode -eq 'legacy') {
+    Warn "This box keeps its files in the code folder (the old layout). Move them with: $BoxDir\migrate_layout.ps1"
+} else {
+    Ok "Box folder: $($hg.Home)"
+}
 
 # Replace "key: ..." in the lines of a YAML file, or append it. Other lines are kept as they are.
 function Set-YamlValue([string[]]$lines, [string]$key, [string]$value) {
@@ -152,7 +172,7 @@ function Set-YamlValue([string[]]$lines, [string]$key, [string]$value) {
     return $out
 }
 
-$boxYaml = Join-Path $BoxDir 'box.yaml'
+$boxYaml = $hg.BoxYaml
 if (Test-Path $boxYaml) {
     # Keep everything already in the file (alert settings and so on); only set what was asked.
     $lines = @(Get-Content $boxYaml)
@@ -161,7 +181,7 @@ if (Test-Path $boxYaml) {
 } else {
     $newMode = if ($Mode) { $Mode } else { 'data_collection' }
     $lines = @(
-        '# Per-box settings. Created by setup_box.ps1 - not committed.',
+        '# Per-box settings. Created by setup_box.ps1 - kept outside the code (box_paths.ps1).',
         "site: `"$Site`"",
         "mode: $newMode",
         'min_age_minutes: 10'
@@ -243,5 +263,5 @@ Write-Host ''
 Write-Host 'Setup finished. Still to do by hand (details in box\README.md):' -ForegroundColor Green
 Write-Host '  1. BIOS: set "State After G3" / "restore on AC power loss" to Power On (S0).'
 Write-Host '  2. Tailscale: run  tailscale up  and approve the login link.'
-Write-Host "  3. AWS: put the box's own access key in $env:USERPROFILE\.aws\credentials."
+Write-Host "  3. AWS: put the box's own access key in $env:USERPROFILE\.aws\credentials (API keys go in $($hg.SecretsEnv))."
 Write-Host '  4. Cameras: run camera discovery once to create cameras.yaml.'

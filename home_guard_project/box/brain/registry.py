@@ -21,14 +21,14 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import yaml
 
+from .. import paths
 from ..ai_status import read_status
 from .aliases import ALIASES_PATH, load_aliases, normalize
 from .mode import GUARD, hhmm, mode_ends_at, mode_started_at, resolve_mode
 
 _log = logging.getLogger(__name__)
-_BOX = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CAMERAS_PATH = os.path.normpath(os.path.join(_BOX, "..", "data_collection", "cameras.yaml"))
-STATUS_PATH = os.path.normpath(os.path.join(_BOX, "..", "..", "logs", "ai_status.json"))
+CAMERAS_PATH = paths.cameras_yaml()
+STATUS_PATH = os.path.join(paths.logs_dir(), "ai_status.json")
 
 
 @dataclass(frozen=True)

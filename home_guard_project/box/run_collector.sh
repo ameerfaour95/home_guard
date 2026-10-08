@@ -10,7 +10,8 @@
 #    2. Reads the mode from box.yaml and runs, headless (config.box.yaml overlay):
 #         data_collection -> data_collection.py          (clips for tagging)
 #         inference       -> home_guard_project.box.inference   (alerts)
-#       logging to logs/collector-<date>.log
+#       logging to logs/collector-<date>.log (logs\ is in C:\ProgramData\HomeGuard
+#       on a migrated box, in the code folder before; _common.sh decides)
 #    3. Touches logs/collector.alive while it runs (read by the heartbeat)
 #    4. Restarts it 15 s after it exits, forever
 #    5. Stops, starts or restarts it when asked through the flag files of
@@ -32,7 +33,7 @@ export MKL_NUM_THREADS="${MKL_NUM_THREADS:-$OMP_NUM_THREADS}"
 # Lines such as "[h264 @ 000001f0] error while decoding MB 59 17" from the video decoder.
 DECODER_NOISE='^\[[A-Za-z0-9_]+ @ [0-9a-fA-Fx]+\]'
 
-CAMERAS_YAML="$PROJECT_ROOT/home_guard_project/data_collection/cameras.yaml"
+# CAMERAS_YAML and LOG_DIR come from _common.sh (the box's layout, see paths.py).
 ALIVE_FILE="$LOG_DIR/collector.alive"
 PID_FILE="$LOG_DIR/collector.winpid"
 RUNNER_LOG="$LOG_DIR/runner.log"
@@ -130,7 +131,7 @@ while true; do
     esac
 
     collector_log="$LOG_DIR/collector-$(date +%F).log"
-    log "Starting $mode (overlay: $HOME_GUARD_CONFIG_OVERLAY)" >> "$RUNNER_LOG"
+    log "Starting $mode (overlay: $HOME_GUARD_CONFIG_OVERLAY, layout: $HG_LAYOUT)" >> "$RUNNER_LOG"
     # The video decoder prints a line for every damaged frame, which would bury
     # the real log lines and grow the file without limit. Drop those lines.
     "$PY" -u "${entry[@]}" \

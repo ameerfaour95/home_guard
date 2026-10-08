@@ -18,13 +18,13 @@ import subprocess
 import tempfile
 from typing import Any, Dict, Optional
 
-from .boxconfig import BOX_YAML, LOG_DIR, PROJECT_ROOT, load_box_config
+from . import paths
+from .boxconfig import BOX_YAML, PROJECT_ROOT, load_box_config
 
 log = logging.getLogger("box.registration")
 
-_DIR = os.path.dirname(os.path.abspath(__file__))
-REGISTRATION_PATH = os.path.join(_DIR, "registration.json")
-PUBLISHED_PATH = os.path.join(LOG_DIR, "registration.published")
+REGISTRATION_PATH = paths.registration_json()
+PUBLISHED_PATH = paths.registration_published()
 STATUS_KEY = "_status/registration.json"
 SCHEMA_VERSION = 1
 

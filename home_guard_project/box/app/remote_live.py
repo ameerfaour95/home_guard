@@ -10,6 +10,7 @@ import http.client
 from urllib.parse import quote, urlsplit
 from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot, Qt
 from PySide6.QtGui import QImage
+from .box_layout import box_command
 from .remote_cameras import target_user
 
 BASE_URL="http://127.0.0.1:8765/"
@@ -20,7 +21,7 @@ def tunnel_command(target):
     return ["ssh.exe", "-T", "-i", str(Path.home()/".ssh"/"homeguard_box"),
             "-o", "BatchMode=yes", "-o", "ExitOnForwardFailure=yes", "-o", "ConnectTimeout=5",
             "-L", "127.0.0.1:8765:127.0.0.1:8765", target,
-            r"cd /d C:\home_guard && .venv\Scripts\python.exe -m home_guard_project.box.app.live_server"]
+            box_command("-m home_guard_project.box.app.live_server")]
 
 
 class _RemoteReader(QObject):

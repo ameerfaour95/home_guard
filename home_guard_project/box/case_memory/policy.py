@@ -282,11 +282,12 @@ def apply_case_memory(event: Union[CaseEvent, Mapping[str, Any]], decision: Mapp
 def make_default(store_path: Optional[str] = None, env: Optional[Mapping[str, str]] = None,
                  embed_cache_path: Optional[str] = None, judge_model: str = "gpt-6-luna",
                  judge_provider: str = "openai", config: CaseMemoryConfig = CaseMemoryConfig()) -> CaseMemory:
-    """The memory a real box runs: the journal under the live dir (``.registry/cases.jsonl``), the existing
-    embedder with the alerts' cache (``<live_dir>/.alert_embeddings.json``) and the gpt-6-luna judge. Without an
+    """The memory a real box runs: the journal in the state folder (``cases.jsonl``), the existing
+    embedder with the alerts' cache (``.alert_embeddings.json``, the assistant's) and the gpt-6-luna judge. Without an
     OpenAI key there is no embedder and no judge: high-band matches still work, the middle band alerts."""
     import os  # noqa: PLC0415
 
+    from .. import paths  # noqa: PLC0415
     from ..embeddings import make_embedder  # noqa: PLC0415
     from .judge import OpenAICompatibleJudge  # noqa: PLC0415
     from .store import default_path  # noqa: PLC0415
@@ -295,7 +296,9 @@ def make_default(store_path: Optional[str] = None, env: Optional[Mapping[str, st
     path = store_path or default_path()
     store = CaseStore.at(path, now=time.time, ladder=config.ladder)
     if embed_cache_path is None:
-        embed_cache_path = os.path.join(os.path.dirname(os.path.dirname(path)), ".alert_embeddings.json")
+        # Next to the assistant's state: <live_dir> for a journal at <live_dir>/.registry/cases.jsonl.
+        assistant_dir = paths.assistant_dir() if store_path is None else os.path.dirname(os.path.dirname(path))
+        embed_cache_path = os.path.join(assistant_dir, ".alert_embeddings.json")
     embedder = make_embedder(env, embed_cache_path) if embed_cache_path else None
     judge = None
     try:

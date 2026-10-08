@@ -16,7 +16,7 @@ ensure_venv >> "$HEARTBEAT_LOG" 2>&1 || exit 1
 # If it is stale, nothing is collecting (the runner died, or a live view window
 # was closed without restarting the background collector): start the task again.
 # Starting a task that is already running does nothing. A box that was stopped
-# on purpose (logs/collector.stop) is left alone.
+# on purpose (logs/collector.stop) is left alone. LOG_DIR is the box's (see _common.sh).
 if [[ ! -f "$LOG_DIR/collector.stop" && -z "$(find "$LOG_DIR/collector.alive" -mmin -5 2>/dev/null)" ]]; then
     log "Collector not alive - starting the HomeGuard-Collector task" >> "$HEARTBEAT_LOG"
     schtasks //Run //TN HomeGuard-Collector >> "$HEARTBEAT_LOG" 2>&1 || true

@@ -24,6 +24,8 @@ from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 import yaml
 
+from . import paths
+
 log = logging.getLogger(__name__)
 
 # The types, in the fixed order they are stored and shown. boxconfig.SET_OPTIONS["alert_on"] matches.
@@ -32,8 +34,7 @@ DEFAULT = ("person",)
 # The detector's certainty, as fractions (boxconfig.DECIMAL_OPTIONS uses the same range).
 CONF_MIN, CONF_MAX = 0.05, 0.95
 
-CAMERA_ALERTS_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "data_collection", "camera_alerts.yaml"))
+CAMERA_ALERTS_PATH = paths.camera_alerts_yaml()
 POLL_SEC = 2.0
 
 _HEADER = (

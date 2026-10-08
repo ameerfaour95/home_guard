@@ -117,9 +117,9 @@ def _messenger(provider: str, model: str, timeout: float, fake: bool) -> messeng
         return messenger.Messenger(_FakeClient(), model, timeout, cache_size=0)
     try:
         from dotenv import load_dotenv  # noqa: PLC0415
-        from .boxconfig import PROJECT_ROOT  # noqa: PLC0415
+        from . import paths  # noqa: PLC0415
 
-        load_dotenv(os.path.join(PROJECT_ROOT, "api_key.env"))
+        load_dotenv(paths.secrets_env())
     except Exception:  # noqa: BLE001
         pass
     try:

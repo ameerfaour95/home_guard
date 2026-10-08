@@ -16,19 +16,25 @@ from __future__ import annotations
 import logging
 import os
 import re
+import sys
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import yaml
 
+try:
+    from home_guard_project.box import paths as _paths
+except ImportError:  # run as a script (run_collector.sh): the repo root is not on sys.path yet
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")))
+    from home_guard_project.box import paths as _paths
+
 log = logging.getLogger(__name__)
 
 Point = Tuple[float, float]
 
-_DIR = os.path.dirname(os.path.abspath(__file__))
-ZONES_PATH = os.path.join(_DIR, "zones.yaml")
+ZONES_PATH = _paths.zones_yaml()            # per-box config, next to cameras.yaml (paths.py)
 SCENE_MAPS_FILE = "scene_maps.yaml"
-SCENE_MAPS_PATH = os.path.join(_DIR, SCENE_MAPS_FILE)
+SCENE_MAPS_PATH = os.path.join(os.path.dirname(ZONES_PATH), SCENE_MAPS_FILE)
 BLACK = "black"            # the scene-map area kind that is blacked out like the outside of a zone
 
 MIN_POINTS = 3

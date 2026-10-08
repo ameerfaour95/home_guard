@@ -35,7 +35,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
-from . import messenger, providers
+from . import messenger, paths, providers
 
 log = logging.getLogger("box.inference")
 
@@ -1859,10 +1859,9 @@ def run() -> int:
         pass
     try:
         from dotenv import load_dotenv  # noqa: PLC0415
-        from .boxconfig import PROJECT_ROOT  # noqa: PLC0415
 
-        # Secrets live in api_key.env (NOT .env), at the repo root.
-        load_dotenv(os.path.join(PROJECT_ROOT, "api_key.env"))
+        # Secrets live in api_key.env (NOT .env): secrets\ on a migrated box, the repo root before (paths.py).
+        load_dotenv(paths.secrets_env())
     except Exception:  # noqa: BLE001
         pass
     env = dict(os.environ)
@@ -1880,7 +1879,8 @@ def run() -> int:
 
     backend = make_backend(settings, env)
     start_case_memory(box_settings, env)
-    model, device = load_detector(settings.model, settings.device)
+    # A bare model name ("yolo11s.pt") is a file in the box's models folder; its OpenVINO copy is made next to it.
+    model, device = load_detector(paths.resolve_model(settings.model), settings.device)
     predict_args = {"device": device} if device else {}
 
     # Camera sub-stream URLs from the data_collection config.
@@ -1918,7 +1918,8 @@ def run() -> int:
     quiet_vehicles: Optional[Dict[str, VehicleMemory]] = None
     quiet: Optional[Dict[str, QuietTracker]] = None
     saver: Optional[QuietSaver] = None
-    quiet_since_path = os.path.join(PRODUCTION_LIVE_DIR, ".registry", "quiet_since.json")
+    # The assistant reads it from the same place (brain.agent.build_owner_agent, paths.state_paths_for).
+    quiet_since_path = os.path.join(paths.state_paths_for(PRODUCTION_LIVE_DIR)[0], "quiet_since.json")
     quiet_retention = PRE_SECONDS + QUIET_MAX_SEC + max(QUIET_GAP_SEC, POST_SECONDS) + 5
     default_retention: Optional[Dict[str, float]] = None
     last_memory_log = 0.0

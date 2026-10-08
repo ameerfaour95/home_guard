@@ -4,6 +4,9 @@
 #      powershell -ExecutionPolicy Bypass -File check_box.ps1
 # ============================================================================
 $ErrorActionPreference = 'SilentlyContinue'
+# Where the box keeps its files (box_paths.ps1: C:\ProgramData\HomeGuard, or the code folder on the old layout).
+. (Join-Path $PSScriptRoot 'box_paths.ps1')
+$hg = Get-HomeGuardPaths
 $script:fails = 0
 function Pass($m) { Write-Host "[PASS] $m" -ForegroundColor Green }
 function Warn($m) { Write-Host "[WARN] $m" -ForegroundColor Yellow }
@@ -31,8 +34,11 @@ foreach ($t in 'HomeGuard-Collector', 'HomeGuard-Upload', 'HomeGuard-Heartbeat')
     if (Get-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue) { Pass "Task present: $t" } else { Fail "Task missing: $t" }
 }
 
+# --- Box files ---
+if ($hg.Mode -eq 'home') { Pass "Box files in $($hg.Home)" } else { Pass "Box files in the code folder $($hg.CodeDir) (old layout)" }
+
 # --- Network config ---
-$netJson = Join-Path $PSScriptRoot 'network.json'
+$netJson = $hg.NetworkJson
 if (Test-Path $netJson) {
     $n = Get-Content $netJson -Raw | ConvertFrom-Json
     Pass "network.json: mode=$($n.mode)"
@@ -48,15 +54,15 @@ if (Test-Path $netJson) {
 # --- Link + cameras ---
 $link = Get-NetIPConfiguration | Where-Object { $_.IPv4DefaultGateway -and $_.InterfaceAlias -ne 'Tailscale' }
 if ($link) { Pass "Network link up ($($link[0].InterfaceAlias))" } else { Warn 'No non-Tailscale default route (box may be offline to the LAN)' }
-if (Test-Path 'C:\home_guard\home_guard_project\data_collection\cameras.yaml') { Pass 'cameras.yaml present' } else { Warn 'cameras.yaml missing (run camera discovery)' }
+if (Test-Path $hg.CamerasYaml) { Pass 'cameras.yaml present' } else { Warn 'cameras.yaml missing (run camera discovery)' }
 
 # --- AWS upload key ---
 if (Test-Path (Join-Path $env:USERPROFILE '.aws\credentials')) { Pass 'AWS credentials present' } else { Warn 'AWS credentials missing (uploads fail; run make_box_key <site> and copy to .aws\credentials)' }
 
 # --- Telegram assistant can hear the owner (inference mode) ---
-$py = 'C:\home_guard\.venv\Scripts\python.exe'
+$py = Join-Path $hg.CodeDir '.venv\Scripts\python.exe'
 if (Test-Path $py) {
-    Push-Location 'C:\home_guard'
+    Push-Location $hg.CodeDir
     $tg = (& $py -m home_guard_project.box.telegram_check 2>$null | Out-String).Trim()
     Pop-Location
     if ($tg -match '^READY' -or $tg -match '^SKIP') { Pass "Telegram: $tg" }

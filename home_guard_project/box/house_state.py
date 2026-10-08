@@ -19,7 +19,7 @@ Who may change what:
   ``away``, which lasts until the owner says otherwise. ``vacation`` needs ``until``; ``since`` sets its start.
   A newer state ends any older one that was running when it started.
 
-Storage: one append-only JSON-lines change log, ``<PRODUCTION_LIVE_DIR>/.registry/house_state.jsonl`` (next to
+Storage: one append-only JSON-lines change log, ``<paths.state_dir()>/house_state.jsonl`` (next to
 the brain's facts.jsonl). One writer: a module-level lock covers read-compare-append, every change is a single
 appended line, and the state is folded from the log on every read. Damaged lines are skipped with one warning
 per read. Today's temporary mutes are a read-only view of the pause file that ``feedback.MuteState`` writes
@@ -519,15 +519,15 @@ class HouseStateStore:
 # Module API (the box's own file)
 # ----------------------------------------------------------------------------
 def default_path() -> str:
-    from . import boxconfig  # noqa: PLC0415
+    from . import paths  # noqa: PLC0415
 
-    return os.path.join(boxconfig.PRODUCTION_LIVE_DIR, ".registry", FILE_NAME)
+    return os.path.join(paths.state_dir(), FILE_NAME)
 
 
 def default_mute_path() -> str:
-    from . import boxconfig  # noqa: PLC0415
+    from . import paths  # noqa: PLC0415
 
-    return os.path.join(boxconfig.LOG_DIR, "alert_mute.json")
+    return os.path.join(paths.logs_dir(), "alert_mute.json")
 
 
 def _store(path: Optional[str] = None, mute_path: Optional[str] = None, now: Optional[float] = None

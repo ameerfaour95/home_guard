@@ -173,7 +173,8 @@ class AlertUiTests(unittest.TestCase):
         self.assertEqual(runner.house, ['person', 'vehicle'])
         self.assertEqual(dialog.note.text(), 'Applied')
         self.assertTrue(any(args[-1].endswith('set-option alert_on=person,vehicle') for args in runner.calls))
-        self.assertTrue(any(args[-1].endswith(r'type logs\ai_status.json') for args in runner.calls))
+        # The fake box does not answer paths --json, like an old one: its logs are in its code folder.
+        self.assertTrue(any(args[-1] == r'type "C:\home_guard\logs\ai_status.json"' for args in runner.calls))
 
     def test_read_failure_prevents_overwriting_unknown_choice(self):
         controls = CameraControls(BoxControls(demo=True), ['driveway'])

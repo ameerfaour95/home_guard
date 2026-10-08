@@ -997,7 +997,7 @@ def _budgeted(vision: Any, limit: int, path: str, wrapper: Any) -> Any:
 def build_owner_agent(box_settings: Dict[str, Any], env: Dict[str, str], mute: Any, cfg: Any, live_dir: str,
                       archive_dir: str, log_dir: str, feed: Any = None) -> Tuple[Optional[OwnerAgentV2], Any]:
     """The production agent and its Telegram deliverer (the agent is None when no model key is set)."""
-    from .. import alert_settings, boxconfig  # noqa: PLC0415
+    from .. import alert_settings, boxconfig, paths  # noqa: PLC0415
     from ..embeddings import make_embedder  # noqa: PLC0415
     from ..find_cameras import _restart_running_mode, apply_changes  # noqa: PLC0415
     from ..telegram_agent import alert_roots  # noqa: PLC0415
@@ -1017,7 +1017,9 @@ def build_owner_agent(box_settings: Dict[str, Any], env: Dict[str, str], mute: A
         big, fast = fast, None
     if big is None:
         return None, deliverer
-    work_dir = os.path.join(live_dir, ".live")
+    # The assistant's own files: data\state on a migrated box, inside live_dir before (paths.state_paths_for).
+    state_dir, own_dir = paths.state_paths_for(live_dir)
+    work_dir = os.path.join(own_dir, ".live")
 
     def set_camera(camera: str, active: bool) -> Dict[str, Any]:
         apply_changes({"cameras": [{"name": camera, "new_name": camera, "enabled": active}]}, CAMERAS_PATH,
@@ -1036,16 +1038,16 @@ def build_owner_agent(box_settings: Dict[str, Any], env: Dict[str, str], mute: A
                          fallback_provider=str(box_settings.get("vlm_fallback_provider") or "").strip().lower(),
                          fallback_model=str(box_settings.get("vlm_fallback_model") or "").strip())
     services = Services(
-        roots=lambda: alert_roots(live_dir, archive_dir), desc_dir=os.path.join(live_dir, ".desc"),
+        roots=lambda: alert_roots(live_dir, archive_dir), desc_dir=os.path.join(own_dir, ".desc"),
         feedback_dir=live_dir, work_dir=work_dir, mute=mute, deliver=deliverer,
         vision=_budgeted(vision, vision_budget,
-                         os.path.join(live_dir, ".registry", "vision_budget.json"), BudgetedVision),
+                         os.path.join(state_dir, "vision_budget.json"), BudgetedVision),
         grab_photo=lambda camera: media.grab_photo(camera, work_dir, CAMERAS_PATH),
         record_live=lambda camera, seconds: media.record_live(camera, seconds, work_dir, CAMERAS_PATH),
         cut_segment=media.cut_segment, set_camera=set_camera, add_alias=aliases.add_alias,
         remove_alias=aliases.remove_alias,
         request_restart=_restart_running_mode,
-        embedder=make_embedder(env, os.path.join(live_dir, ".alert_embeddings.json")),
+        embedder=make_embedder(env, os.path.join(own_dir, ".alert_embeddings.json")),
         retention_days=retention, set_option=boxconfig.set_option, read_settings=boxconfig.load_box_settings,
         alert_settings=alert_settings, house=_house_store(mute),
     )
@@ -1053,11 +1055,11 @@ def build_owner_agent(box_settings: Dict[str, Any], env: Dict[str, str], mute: A
         return bool(boxconfig.load_box_settings().get("quiet_log", False))
 
     registry = HouseRegistry(mute, hours_from_box_yaml(), CAMERAS_PATH, aliases.ALIASES_PATH, STATUS_PATH,
-                             os.path.join(live_dir, ".registry", "sees.json"), retention_days=retention,
+                             os.path.join(state_dir, "sees.json"), retention_days=retention,
                              quiet_log=quiet_log_on,
-                             quiet_since_path=os.path.join(live_dir, ".registry", "quiet_since.json"))
+                             quiet_since_path=os.path.join(state_dir, "quiet_since.json"))
     # vision_daily_budget (box.yaml, default 300): the most vision calls the assistant may make per day.
-    agent = OwnerAgentV2(big, registry, ChatMemory(os.path.join(live_dir, ".conversations")),
-                         ReceiptBook(os.path.join(live_dir, ".receipts")), services, fast_model=fast,
+    agent = OwnerAgentV2(big, registry, ChatMemory(os.path.join(own_dir, ".conversations")),
+                         ReceiptBook(os.path.join(own_dir, ".receipts")), services, fast_model=fast,
                          retention_days=retention)
     return agent, deliverer
