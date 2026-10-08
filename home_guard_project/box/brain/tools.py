@@ -1589,6 +1589,164 @@ def recent_activity(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
                     "For what is happening at this moment, also look live with check_camera."}
 
 
+# -- the event memory (event_memory.py): "what happened at the pergola at noon?", "were the workers here yesterday?" --
+def _memory(ctx: ToolContext) -> Any:
+    book = ctx.services.events
+    if book is None or not getattr(book, "directory", ""):
+        return None
+    from ..event_memory import memory_for  # noqa: PLC0415
+
+    return memory_for(book.directory)
+
+
+def _day_text(ts: float, now: float, lang: str) -> str:
+    """"today", "yesterday" (היום / אתמול), else "Tue 06.10"."""
+    day = dt.datetime.fromtimestamp(ts).date()
+    today = dt.datetime.fromtimestamp(now).date()
+    if day == today:
+        return "היום" if lang == "he" else "today"
+    if day == today - dt.timedelta(days=1):
+        return "אתמול" if lang == "he" else "yesterday"
+    return dt.datetime.fromtimestamp(ts).strftime("%a %d.%m")
+
+
+def _memory_range(args: Dict[str, Any], now: float) -> Tuple[Optional[float], Optional[float]]:
+    """``(since, until)`` from day / time_from / time_to / last_hours; (None, None) when none is given (the query's
+    own day words, "אתמול", then decide)."""
+    hours = args.get("last_hours")
+    if hours not in (None, ""):
+        return now - min(24.0 * 30, max(0.1, _finite(hours))) * 3600.0, now
+    day_arg = str(args.get("day") or "").strip().lower()
+    t_from, t_to = str(args.get("time_from") or "").strip(), str(args.get("time_to") or "").strip()
+    if not (day_arg or t_from or t_to):
+        return None, None
+    base = dt.datetime.fromtimestamp(now).replace(hour=0, minute=0, second=0, microsecond=0)
+    if day_arg in ("yesterday", "אתמול"):
+        base -= dt.timedelta(days=1)
+    elif re.fullmatch(r"\d{4}-\d{2}-\d{2}", day_arg):
+        base = dt.datetime.strptime(day_arg, "%Y-%m-%d")
+    since, until = base.timestamp(), (base + dt.timedelta(days=1)).timestamp()
+    for value, which in ((t_from, "from"), (t_to, "to")):
+        m = re.fullmatch(r"(\d{1,2}):(\d{2})", value)
+        if m and int(m.group(1)) < 24 and int(m.group(2)) < 60:
+            ts = (base + dt.timedelta(hours=int(m.group(1)), minutes=int(m.group(2)))).timestamp()
+            if which == "from":
+                since = ts
+            else:
+                until = ts
+    return since, until
+
+
+def memory_event_text(record: Dict[str, Any], snapshot: Any, lang: str, now: float, full: bool = False) -> Dict[str, Any]:
+    """One archived event as the model reads it: the camera's name, the day and HH:MM, never ids or epoch seconds."""
+    camera = str(record.get("camera") or "")
+    name = display(snapshot, camera, lang)
+    caption = str(record.get("caption") or "")
+    stored = str(record.get("camera_name") or "")
+    if stored and stored != name:
+        caption = caption.replace(f" at {stored}.", f" at {name}.", 1)     # renamed since: today's name
+    start = float(record.get("start") or now)
+    end = float(record.get("end") or start)
+    out: Dict[str, Any] = {
+        "camera": name,
+        "day": _day_text(start, now, lang),
+        "from": hhmm(start),
+        "to": hhmm(end) if record.get("outcome") != "open" else f"{hhmm(end)} (still going on)",
+        "what": caption,
+        "most_people": int(record.get("people_max") or 0),
+        "told_the_owner": bool(record.get("reported")),
+        "owner_said": list(record.get("owner_known") or []),
+        "change_from_previous": str(record.get("change_from_previous") or ""),
+    }
+    if full:
+        out["change_to_next"] = str(record.get("change_to_next") or "")
+        out["seen"] = [{"at": hhmm(float(o.get("ts") or start)), "label": str(o.get("label") or ""),
+                        "people": int(o.get("people") or 0), "what": str(o.get("summary") or "")[:300]}
+                       for o in record.get("observations") or [] if isinstance(o, dict)]
+        out["continues_an_earlier_event"] = bool(record.get("parent"))
+    return out
+
+
+@_safe_tool
+def search_events(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+    """The box's memory of past events (EventMemAgent-style): the best 3 for the owner's words, a time, a camera."""
+    memory = _memory(ctx)
+    if memory is None:
+        return _err("the box's event memory is not available; use find_events")
+    query = " ".join(str(args.get("query") or "").split())[:300] or ctx.text
+    now = _finite(ctx.services.now())
+    camera: Optional[str] = None
+    if str(args.get("camera") or "").strip():
+        camera, bad = _one_camera(ctx, args["camera"])
+        if bad:
+            return bad
+    from .registry import mentioned_cameras  # noqa: PLC0415
+
+    named = [cam for _, cam in mentioned_cameras(ctx.snapshot, query)]
+    names = {c.name: [c.name, *c.aliases, display(ctx.snapshot, c.name, ctx.lang)] for c in ctx.snapshot.cameras}
+    since, until = _memory_range(args, now)
+    k = int(min(5, max(1, _finite(args.get("k") if args.get("k") not in (None, "") else 3))))
+    live: List[Dict[str, Any]] = []
+    try:
+        live = [memory.live_record(s) for s in ctx.services.events.recent(now - 86400.0, camera or "")
+                if not s.get("closed")]
+    except Exception as exc:  # noqa: BLE001 - the archive alone still answers
+        log.debug("open events not searched: %s", exc)
+    hits = memory.search(query, since=since, until=until, camera=camera or None, k=k,
+                         embedder=ctx.services.embedder, names=names, boost=named, extra=live, now=now)
+    rows = []
+    for hit in hits:
+        handle = ctx.state.add_handle("memory", str(hit["event_id"]), str(hit.get("camera") or ""),
+                                      float(hit.get("start") or 0.0), str(hit.get("caption") or "")[:200])
+        rows.append(dict(memory_event_text(hit, ctx.snapshot, ctx.lang, now), handle=handle))
+    if not rows:
+        return {"ok": True, "found": 0, "events": [],
+                "note": "Nothing in the box's memory matches. Say that nothing matching was recorded (not that "
+                        "nothing happened). The memory keeps 30 days of events."}
+    return {"ok": True, "found": len(rows), "events": rows,
+            "note": "Past events from the box's memory, best match first. Answer from 'what'; get_event gives the "
+                    "details, its picture and its video."}
+
+
+@_safe_tool
+def get_event(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+    """One event of the memory in full, with its picture (a photo handle) and its first alert's video (an event
+    handle) when they are still on the box."""
+    memory = _memory(ctx)
+    if memory is None:
+        return _err("the box's event memory is not available")
+    handle = str(args.get("handle") or "").strip().upper()
+    entry = ctx.state.resolve(handle)
+    if not entry or entry.get("kind") != "memory":
+        return _err(f"unknown handle {handle!r}; use a handle from search_events")
+    now = _finite(ctx.services.now())
+    record = memory.get(str(entry["ref"]))
+    if record is None and ctx.services.events is not None:
+        record = next((memory.live_record(s) for s in ctx.services.events.recent(now - 86400.0)
+                       if s.get("id") == entry["ref"]), None)
+    if record is None:
+        return _err("that event is no longer in the box's memory")
+    out: Dict[str, Any] = {"ok": True, **memory_event_text(record, ctx.snapshot, ctx.lang, now, full=True)}
+    camera = str(record.get("camera") or "")
+    from ..event_memory import keyframe_path  # noqa: PLC0415
+
+    picture = str(record.get("keyframe") or "") or keyframe_path(memory.directory, str(record.get("event_id") or ""))
+    if os.path.isfile(picture):
+        photo = ctx.state.add_handle("photo", picture, camera, float(record.get("start") or now))
+        ctx.state.note_observation(photo, str(record.get("caption") or "")[:300])
+        out["picture"] = photo
+    alert_ids = [a for a in record.get("alert_ids") or [] if a]
+    if alert_ids:
+        saved = {r.alert_id: r for r in load_events(ctx.services.roots(), ctx.services.desc_dir)
+                 if r.alert_id in set(alert_ids)}
+        first = next((saved[a] for a in alert_ids if a in saved), None)
+        if first is not None:
+            out["video"] = _show(ctx, first)
+    out["note"] = ("To show it: send_media with 'picture' (its first picture) or 'video' (its first alert's video). "
+                   "Without them the picture or video is no longer on the box.")
+    return out
+
+
 TOOLS: Dict[str, Callable[[ToolContext, Dict[str, Any]], Dict[str, Any]]] = {
     "find_events": find_events,
     "summarize_period": summarize_period,
@@ -1615,4 +1773,6 @@ TOOLS: Dict[str, Callable[[ToolContext, Dict[str, Any]], Dict[str, Any]]] = {
     "house_status": house_status,
     "mark_known": mark_known,
     "recent_activity": recent_activity,
+    "search_events": search_events,
+    "get_event": get_event,
 }

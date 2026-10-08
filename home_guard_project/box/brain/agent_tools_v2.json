@@ -722,5 +722,63 @@
         "properties": {}
       }
     }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "search_events",
+      "description": "The box's memory of past events (30 days; one event per camera activity, with what was seen, how many people, whether the owner was told, what the owner said about them, and what changed from the event before). Finds the best 3 by the owner's words, a time or a camera, also in Hebrew (\"what happened at the pergola at noon?\", \"did the white car leave?\", \"were the workers here yesterday?\"). Use it only when the conversation and the context block do not already answer; for right now use check_camera, for the last hour recent_activity.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "What the owner is looking for, in their own words (Hebrew is fine): who, what, a colour, a vehicle."
+          },
+          "camera": {
+            "type": "string",
+            "description": "The camera, by name or the owner's word; omit for all cameras."
+          },
+          "day": {
+            "type": "string",
+            "description": "\"today\", \"yesterday\" or \"YYYY-MM-DD\"; omit to search the whole memory."
+          },
+          "time_from": {
+            "type": "string",
+            "description": "Start of a time range on that day, \"HH:MM\"."
+          },
+          "time_to": {
+            "type": "string",
+            "description": "End of a time range on that day, \"HH:MM\"."
+          },
+          "last_hours": {
+            "type": "number",
+            "description": "Or: look back this many hours."
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_event",
+      "description": "One event from search_events in full: every observation with its time, what changed from the event before and to the next one, and handles for its first picture ('picture') and its first alert's video ('video') to send with send_media.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "handle": {
+            "type": "string",
+            "description": "The event's handle from search_events, e.g. \"E4\"."
+          }
+        },
+        "required": [
+          "handle"
+        ]
+      }
+    }
   }
 ]

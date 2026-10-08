@@ -82,6 +82,7 @@ class GuardCase(unittest.TestCase):
         self.stack = ExitStack()
         for patch in (mock.patch.object(inf, "EVENTS", self.book),
                       mock.patch.object(inf, "KNOWN_CAMERAS", (CAM, DOOR)),
+                      mock.patch.object(inf, "TRACKERS", None),     # a run() test may leave its registry behind
                       mock.patch.object(inf, "FACTS_PROVIDER", mock.Mock(return_value=[])),
                       mock.patch.object(inf, "owner_language", side_effect=lambda: self.lang),
                       mock.patch.object(inf, "frame_to_jpeg_bytes", return_value=b"jpg"),
