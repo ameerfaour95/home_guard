@@ -72,6 +72,18 @@ class CopyTest(Hebrew):
         strings.set_language('en')
         self.assertEqual(strings.tr('summary_house', house='cedar_house'), 'Home: cedar_house')
 
+    def test_dates_and_times_inside_hebrew_keep_their_order(self):
+        # "מ-08.10 20:20" showed as "00:20 08.10-מ": a digits-only run reorders unless it is isolated.
+        from home_guard_project.box.app import scene_strings
+        self.assertEqual(scene_strings.st('restore_from', 'he', when='08.10 20:20'), 'מ-⁨08.10 20:20⁩')
+        self.assertEqual(scene_strings.st('restore_from', 'en', when='08.10 20:20'), 'from 08.10 20:20')
+        strings.set_language('he')
+        self.assertIn('⁨14:32⁩', strings.tr('event_line', time='14:32', text='נשמר קטע'))
+        self.assertEqual(strings.isolate('הגינה'), 'הגינה')                       # plain Hebrew: untouched
+        self.assertEqual(strings.isolate(3), 3)                                  # numbers for format specs: untouched
+        strings.set_language('en')
+        self.assertEqual(strings.isolate('14:32'), '14:32')
+
     def test_relative_times_and_live_badges_follow_the_language(self):
         from home_guard_project.box.app.liveness import frame_health, relative_time
         strings.set_language('he')

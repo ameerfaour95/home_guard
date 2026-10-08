@@ -476,10 +476,11 @@ TEXT.update(
     alert_read_error="Alert choices could not be read. Open to try again.",
 )
 
-def isolate(value):
-    """In Hebrew, text with Latin letters in it (a camera's name, an address) is isolated (FSI ... PDI), so it
-    never reorders the sentence around it."""
-    if LANG == "he" and isinstance(value, str) and any("A" <= c <= "z" for c in value):
+def isolate(value, lang=None):
+    """In Hebrew, a value with Latin letters or digits in it (a camera's name, an address, a date and time such as
+    "08.10 20:20") is isolated (FSI ... PDI), so it keeps its own order and never reorders the sentence around it.
+    With no letter inside, FSI lays the run out left to right, which is what dates and times need."""
+    if (lang or LANG) == "he" and isinstance(value, str) and any(c.isascii() and c.isalnum() for c in value):
         return "\u2068" + value + "\u2069"
     return value
 

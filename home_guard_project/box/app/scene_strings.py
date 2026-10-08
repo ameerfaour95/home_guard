@@ -305,4 +305,6 @@ def language():
 
 
 def st(key, lang=None, **values):
-    return TEXT[lang if lang in LANGS else language()][key].format(**values)
+    from .strings import isolate
+    lang = lang if lang in LANGS else language()
+    return TEXT[lang][key].format(**{k: isolate(v, lang) for k, v in values.items()})
