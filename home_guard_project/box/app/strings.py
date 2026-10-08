@@ -1,8 +1,12 @@
-"""All visible application copy; keys remain stable for translation."""
+"""All visible application copy; keys remain stable for translation.
 
-# The language TEXT is written in: every screen speaks it (the camera map editor's copy follows it too,
-# scene_strings.language). Hebrew copy exists only for the map editor so far.
+TEXT holds the app's language: English here, Hebrew in strings_he.TEXT_HE laid over it by ``set_language("he")``
+(the box: box.yaml ``owner_language``; setup and the laptop's viewer: the installer's choice, remembered). Every
+screen, the camera map editor included (scene_strings.language), speaks LANG; Hebrew runs right to left.
+"""
+
 LANG = "en"
+LANGS = ("en", "he")
 
 TEXT = {
     "chat_image_unavailable": "Picture unavailable",
@@ -472,8 +476,19 @@ TEXT.update(
     alert_read_error="Alert choices could not be read. Open to try again.",
 )
 
+def isolate(value):
+    """In Hebrew, text with Latin letters in it (a camera's name, an address) is isolated (FSI ... PDI), so it
+    never reorders the sentence around it."""
+    if LANG == "he" and isinstance(value, str) and any("A" <= c <= "z" for c in value):
+        return "\u2068" + value + "\u2069"
+    return value
+
+
 def tr(key, **values):
-    return TEXT[key].format(**values)
+    text = TEXT[key].format(**{k: isolate(v) for k, v in values.items()})
+    if LANG == "he" and text and not ("\u05d0" <= text[0] <= "\u05ea") and any("\u05d0" <= c <= "\u05ea" for c in text):
+        text = "\u200f" + text      # a Hebrew line that starts with Latin or a number still reads right to left
+    return text
 
 TEXT.update(catches_more="Catches more", reset_sensitivity="Reset to recommended",
             sensitivity_house="Use the house values", sensitivity_camera="Set for this camera",
@@ -503,3 +518,27 @@ TEXT.update(
     step_register="Adding the customer to Home Guard",
     demo_setup_register="Saving the owner's details and permissions.",
 )
+
+TEXT.update(language_label="Language", language_he="עברית", language_en="English", camera_unnamed="Camera")
+TEXT.update(rel_unknown="Unknown", rel_now="now", rel_seconds="{n} s ago", rel_minutes="{n} min ago", rel_hours="{n} h ago",
+            rel_days="{n} d ago", tile_connecting="Connecting…", tile_reconnecting="Reconnecting… {seconds} s",
+            tile_last_frame="Last frame {when}")
+TEXT.update(tile_turn_on="Turn on", remote_read_only="Change settings on the box", detections_need_running="Detections appear when Home Guard is running.")
+
+TEXT_EN = dict(TEXT)          # every key, in English: the base the other languages are laid over
+
+
+def set_language(lang):
+    """Speak *lang* ("en" or "he") from now on: TEXT is rewritten in place, so every module's TEXT sees it."""
+    global LANG
+    LANG = lang if lang in LANGS else "en"
+    TEXT.clear()
+    TEXT.update(TEXT_EN)
+    if LANG == "he":
+        from .strings_he import TEXT_HE
+        TEXT.update(TEXT_HE)
+    return LANG
+
+
+def is_rtl():
+    return LANG == "he"

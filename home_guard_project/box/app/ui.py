@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
     QDialog,
 )
 
-from .strings import tr, TEXT
+from .strings import is_rtl, tr, TEXT
 from .setup_pages import Page
 from .model import State, Activity, ActivityFeed
 from .backend import Answers, SimulatedBackend, Sequence, STEPS
@@ -109,7 +109,7 @@ class CameraTile(QFrame):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 8, 16, 8)
         layout.addStretch()
-        self.turn_on=QPushButton('Turn on');self.turn_on.setMaximumWidth(140);self.turn_on.hide();layout.addWidget(self.turn_on,0,Qt.AlignmentFlag.AlignCenter)
+        self.turn_on=QPushButton(tr('tile_turn_on'));self.turn_on.setMaximumWidth(140);self.turn_on.hide();layout.addWidget(self.turn_on,0,Qt.AlignmentFlag.AlignCenter)
         footer=QHBoxLayout()
         footer.addWidget(self.caption)
         footer.addStretch()
@@ -142,7 +142,7 @@ class CameraTile(QFrame):
         self.picture = pix if pix and not pix.isNull() else None
         if self.picture or self.stopped or self.off: self.skeleton_timer.stop()
         elif not self.skeleton_timer.isActive(): self.skeleton_timer.start()
-        self.status.setText("Off" if self.off else tr("stopped") if self.stopped else tr("premium_live") if self.picture else tr("offline"))
+        self.status.setText(tr("camera_off") if self.off else tr("stopped") if self.stopped else tr("premium_live") if self.picture else tr("offline"))
         self.status.setObjectName("ok" if self.picture else "muted")
         self.status.setStyleSheet("")
         self.update()
@@ -164,10 +164,12 @@ class CameraTile(QFrame):
         """Shared paint/test geometry, including the 80 px thumbnail rail floor."""
         area = QRectF(self.rect().adjusted(1, 1, -1, -1))
         width = max(0, area.width() - 16)
+        badge = min(width, badge_width)
         return {
             "name": QRectF(area.left()+8, area.bottom()-62, width, 24),
             "caption": QRectF(area.left()+8, area.bottom()-34, width, 24),
-            "badge": QRectF(area.left()+8, area.top()+8, min(width, badge_width), 28),
+            # Right to left, the badge sits in the top right corner (the start of the line).
+            "badge": QRectF(area.right()-8-badge if is_rtl() else area.left()+8, area.top()+8, badge, 28),
         }
 
     def thumbnail_scrim(self):
@@ -181,8 +183,9 @@ class CameraTile(QFrame):
     def hero_caption_rect(self, visible, obstacles):
         """Keep the chosen corner until obstructed; never paint over a box."""
         width=min(visible.width()-32,340)
-        left=QRectF(visible.left()+16,visible.bottom()-76,width,60)
-        travel=max(0,visible.width()-32-width)
+        rtl=is_rtl()
+        left=QRectF(visible.right()-16-width if rtl else visible.left()+16,visible.bottom()-76,width,60)
+        travel=max(0,visible.width()-32-width)*(-1 if rtl else 1)
         def at(position): return left.translated(travel*position,0)
         def blocked(rect): return any(rect.intersects(box.adjusted(-4,-4,4,4)) for box in obstacles)
         other=1-self.caption_corner
@@ -250,7 +253,7 @@ class CameraTile(QFrame):
                 p.restore()
             if self.off:
                 p.fillRect(area,QColor(0,0,0,155))
-                p.save();p.translate(area.right()-35,35);p.rotate(45);p.fillRect(QRectF(-80,-15,160,30),QColor('#293945'));p.setPen(QColor('#edf4f6'));p.drawText(QRectF(-60,-15,120,30),Qt.AlignmentFlag.AlignCenter,'Off');p.restore()
+                p.save();p.translate(area.left()+35 if is_rtl() else area.right()-35,35);p.rotate(-45 if is_rtl() else 45);p.fillRect(QRectF(-80,-15,160,30),QColor('#293945'));p.setPen(QColor('#edf4f6'));p.drawText(QRectF(-60,-15,120,30),Qt.AlignmentFlag.AlignCenter,tr('camera_off'));p.restore()
             p.setFont(QFont("Segoe UI",11))
             visible=QRectF(x,y,w,h).intersected(QRectF(area))
             p.save()
@@ -270,14 +273,16 @@ class CameraTile(QFrame):
             if caption_visible:
                 self.painted_label_rects.update({key: labels[key] for key in ("name", "caption")})
             name = p.fontMetrics().elidedText(self.caption.text(), Qt.TextElideMode.ElideRight, int(labels["name"].width()))
-            p.setPen(QColor('#edf4f6'));p.drawText(labels["name"],Qt.AlignmentFlag.AlignVCenter,name)
+            start=Qt.AlignmentFlag.AlignRight if is_rtl() else Qt.AlignmentFlag.AlignLeft
+            p.setLayoutDirection(Qt.LayoutDirection.RightToLeft if is_rtl() else Qt.LayoutDirection.LeftToRight)
+            p.setPen(QColor('#edf4f6'));p.drawText(labels["name"],start|Qt.AlignmentFlag.AlignVCenter,name)
             p.setFont(QFont('Segoe UI',10));p.setPen(QColor('#bfccd3'))
             note=self.detector_note.text()
             if reconnecting:
                 from .liveness import relative_time
-                note="Last frame "+relative_time(self.frame_stamp,time.time())
+                note=tr("tile_last_frame",when=relative_time(self.frame_stamp,time.time()))
             note=p.fontMetrics().elidedText(note,Qt.TextElideMode.ElideRight,int(labels["caption"].width()))
-            p.drawText(labels["caption"],Qt.AlignmentFlag.AlignVCenter,note)
+            p.drawText(labels["caption"],start|Qt.AlignmentFlag.AlignVCenter,note)
             p.restore()
         else:
             if not self.off and not self.stopped:
@@ -285,20 +290,22 @@ class CameraTile(QFrame):
                 gradient.setColorAt(0,QColor('#14212b'));gradient.setColorAt(max(.01,min(.99,phase)),QColor('#20333e'));gradient.setColorAt(1,QColor('#14212b'));p.fillRect(area,gradient)
             p.setPen(QColor("#98a6ba"))
             p.setFont(QFont("Segoe UI", 14))
-            p.drawText(area, Qt.AlignmentFlag.AlignCenter, "Off" if self.off else tr("stopped") if self.stopped else tr("offline_hint"))
+            p.drawText(area, Qt.AlignmentFlag.AlignCenter, tr("camera_off") if self.off else tr("stopped") if self.stopped else tr("offline_hint"))
         if not self.off and not self.stopped:
             p.setClipping(False)
             p.setFont(QFont("Segoe UI", 10))
             width = p.fontMetrics().horizontalAdvance(live_text)+38
-            badge = QRectF(area.left()+12, area.top()+12, width, 28)
+            badge = QRectF(area.right()-12-width if is_rtl() else area.left()+12, area.top()+12, width, 28)
             if not self.hero: badge = self.thumbnail_labels(width)["badge"]
             self.painted_label_rects["badge"] = badge
             live_text = p.fontMetrics().elidedText(live_text, Qt.TextElideMode.ElideRight, max(0, int(badge.width()-30)))
             p.setPen(Qt.PenStyle.NoPen);p.setBrush(QColor(12,22,28,225));p.drawRoundedRect(badge,7,7)
             color = QColor(WARNING if reconnecting else OK)
             color.setAlphaF(1 if reconnecting else .65+.35*(math.sin(time.monotonic()*3)+1)/2)
-            p.setBrush(color);p.drawEllipse(QRectF(badge.left()+10,badge.top()+11,6,6))
-            p.setPen(QColor('#edf4f6'));p.drawText(badge.adjusted(23,0,-7,0),Qt.AlignmentFlag.AlignVCenter,live_text)
+            rtl=is_rtl()
+            p.setBrush(color);p.drawEllipse(QRectF(badge.right()-16 if rtl else badge.left()+10,badge.top()+11,6,6))
+            p.setLayoutDirection(Qt.LayoutDirection.RightToLeft if rtl else Qt.LayoutDirection.LeftToRight)
+            p.setPen(QColor('#edf4f6'));p.drawText(badge.adjusted(7,0,-23,0) if rtl else badge.adjusted(23,0,-7,0),(Qt.AlignmentFlag.AlignRight if rtl else Qt.AlignmentFlag.AlignLeft)|Qt.AlignmentFlag.AlignVCenter,live_text)
         p.end()
 
 
@@ -367,6 +374,9 @@ class Window(QMainWindow):
             self.alert_status=ElidedLabel();self.alert_status.setObjectName("muted");titles.addWidget(self.alert_status)
         header.addLayout(titles, 1)
         if args.setup: header.addStretch()
+        if args.setup:
+            # The installer's language, chosen on the first page (set_page shows it there only).
+            self.language_widget = self.language_row(); header.addWidget(self.language_widget)
         if args.demo and args.setup:
             header.addWidget(label(tr("demo"), "muted"))
         self.top_header=header
@@ -567,7 +577,7 @@ class Window(QMainWindow):
             open_demo_dialog(self.cameras_page, self.args.scene)
         if self.remote_target:
             for button in (cameras_button,settings_button,self.run_button,self.resume_button):
-                button.setEnabled(False);button.setToolTip("Change settings on the box")
+                button.setEnabled(False);button.setToolTip(tr("remote_read_only"))
 
     def fetch(self):
         from ..heartbeat import build_heartbeat
@@ -779,7 +789,7 @@ class Window(QMainWindow):
             observations,text=camera_view(self.ai_data,tile.name,now,stopped or tile.off)
             if not observations or self.args.demo or not hasattr(tile,"tracked_stamp"):
                 tile.detections=observations
-            if tile.off: text="Off"
+            if tile.off: text=tr("camera_off")
             tile.detector_note.setToolTip(text)
             if not tile.hero: text=tile.detector_note.fontMetrics().elidedText(text,Qt.TextElideMode.ElideRight,max(120,tile.width()-48))
             tile.detector_note.setText(text)
@@ -930,7 +940,7 @@ class Window(QMainWindow):
         self.detection_toggle.blockSignals(True);self.detection_toggle.setChecked(self.viewer_settings.detections);self.detection_toggle.blockSignals(False)
         if hasattr(self,"settings_page"): self.settings_page.sync_viewer(self.viewer_settings)
         if changes.get('detections') and self.box_controls.is_stopped() and not getattr(self,'detection_hint_seen',False):
-            self.detection_hint_seen=True;self.detection_hint.setText('Detections appear when Home Guard is running.');self.detection_hint.show()
+            self.detection_hint_seen=True;self.detection_hint.setText(tr('detections_need_running'));self.detection_hint.show()
         self.update_detector()
         for tile in self.tiles:
             tile.show_detections=self.viewer_settings.detections;tile.detection_labels=self.viewer_settings.detection_labels;tile.update()
@@ -1191,7 +1201,7 @@ class Window(QMainWindow):
             if hint=="summary_hint": self.summary_hint=hint_widget
             if hint == "progress_hint": self.progress_hint = hint_widget
             self.page_layouts.append(lay)
-            if title in ("summary_title", "owner_title"):
+            if title in ("summary_title", "owner_title", "address_title"):    # long pages scroll, never overlap
                 summary_scroll = QScrollArea()
                 summary_scroll.setWidgetResizable(True)
                 summary_scroll.setWidget(panel)
@@ -1487,6 +1497,42 @@ class Window(QMainWindow):
         if getattr(self.args,"technical_log",False):
             (self.summary_details if self.pages.currentIndex()==Page.SUMMARY else self.setup_details).technical.setChecked(True)
 
+    def language_row(self):
+        """עברית / English for setup (and this laptop's viewer), remembered on the laptop. Choosing one reopens
+        setup in it, right to left for Hebrew."""
+        from .strings import LANG
+        row = QWidget(); row.setObjectName("quietGroup")
+        layout = QHBoxLayout(row); layout.setContentsMargins(0, 0, 0, 0); layout.setSpacing(8)
+        layout.addWidget(label(tr("language_label"), "muted"))
+        self.language_buttons = {}
+        for lang in ("he", "en"):
+            button = QPushButton(tr("language_" + lang)); button.setCheckable(True); button.setChecked(lang == LANG)
+            button.setObjectName("secondary"); button.setMinimumHeight(36)
+            from .theme import ACTION
+            button.setStyleSheet(f"QPushButton {{ padding: 4px 16px; min-height: 0; }} QPushButton:checked {{ border: 2px solid {ACTION}; }}")
+            button.clicked.connect(lambda checked=False, lang=lang: self.switch_language(lang))
+            layout.addWidget(button); self.language_buttons[lang] = button
+        layout.addStretch(1)
+        return row
+
+    def switch_language(self, lang):
+        from .strings import LANG, set_language
+        if lang == LANG:
+            self.language_buttons[lang].setChecked(True)
+            return
+        if not self.args.demo:
+            from .preferences import LanguagePreference
+            try: LanguagePreference().save(lang)
+            except OSError: pass
+        set_language(lang)
+        from PySide6.QtWidgets import QApplication
+        QApplication.instance().setLayoutDirection(Qt.LayoutDirection.RightToLeft if lang == "he" else Qt.LayoutDirection.LeftToRight)
+        from types import SimpleNamespace
+        values = vars(self.args).copy(); values.update(lang=lang)
+        self.language_window = Window(SimpleNamespace(**values))
+        self.language_window.show()
+        self.close()
+
     def add_input(self, page, key, caption, secret=False):
         caption_widget = label(caption)
         self.page_layouts[page].addWidget(caption_widget)
@@ -1527,6 +1573,7 @@ class Window(QMainWindow):
 
     def set_page(self, index):
         self.pages.setCurrentIndex(index)
+        if hasattr(self, "language_widget"): self.language_widget.setVisible(index == Page.ADDRESS)
         if index == Page.SUMMARY:
             self.summary_house.setText(tr("summary_house", house=self.inputs["house"].text()))
             from .availability import network_description
@@ -1830,7 +1877,7 @@ class Window(QMainWindow):
             if i>=len(self.check_labels):
                 item=label("");self.check_labels.append(item)
                 self.check_labels[0].parentWidget().layout().insertWidget(i+1,item)
-            item=self.check_labels[i];item.setText(event.status+tr("separator")+event.text)
+            item=self.check_labels[i];item.setText((tr(event.status) if event.status in TEXT else event.status)+tr("separator")+event.text)
             item.setStyleSheet("color: "+(ERROR if event.status=="FAIL" else WARNING if event.status=="WARN" else OK))
         self.camera_retry.clear()
         if not self.args.demo:

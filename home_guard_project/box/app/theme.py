@@ -75,6 +75,11 @@ QProgressBar { background: @raised; border: none; border-radius: 4px; height: 8p
 QProgressBar::chunk { background: @action; border-radius: 4px; }
 QToolTip { background: @raised; color: @text; border: 1px solid @border; padding: 8px; }
 """
+    from .strings import is_rtl
+    if is_rtl():
+        # Right to left a slider runs from the right: its filled part is the add-page.
+        sheet+=("QSlider::sub-page:horizontal { background: @border; border-radius: 2px; }\n"
+                "QSlider::add-page:horizontal { background: @action; border-radius: 2px; }\n")
     for name,value in dict(t,check=check,upArrow=(Path(__file__).parent/'assets/icons/chevron-up.svg').as_posix(),downArrow=(Path(__file__).parent/'assets/icons/chevron-down.svg').as_posix()).items(): sheet=sheet.replace('@'+name,value)
     # A pixel-sized QFont has pointSize() == -1. Qt's native/rich-text paths
     # sometimes copy that sentinel into setPointSize(), producing a warning.

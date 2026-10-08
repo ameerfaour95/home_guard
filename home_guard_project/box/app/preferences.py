@@ -29,6 +29,39 @@ class ViewerPreference:
             os.replace(temporary,self.path)
         finally: temporary.unlink(missing_ok=True)
 
+class LanguagePreference:
+    """The installer's language for setup and the laptop's viewer ("en" or "he"), remembered on this laptop."""
+    def __init__(self,path=None):
+        self.path=Path(path) if path else Path.home()/'.homeguard'/'language.json'
+    def load(self,default='en'):
+        try:
+            value=json.loads(self.path.read_text(encoding='utf-8'))['language']
+            return value if value in ('en','he') else default
+        except (OSError,ValueError,KeyError,TypeError): return default
+    def save(self,language):
+        if language not in ('en','he'): raise ValueError('Invalid language')
+        self.path.parent.mkdir(parents=True,exist_ok=True)
+        descriptor,name=tempfile.mkstemp(prefix='language-',suffix='.tmp',dir=self.path.parent)
+        temporary=Path(name)
+        try:
+            with os.fdopen(descriptor,'w',encoding='utf-8') as stream: json.dump({'language':language},stream)
+            os.replace(temporary,self.path)
+        finally: temporary.unlink(missing_ok=True)
+
+
+def app_language(args):
+    """The language the app opens in: --lang, else on the box its owner's (box.yaml owner_language), else (setup
+    and the viewer on a laptop) the installer's remembered choice; English when nothing says."""
+    if getattr(args,'lang',None) in ('en','he'): return args.lang
+    if getattr(args,'demo',False): return 'en'
+    if getattr(args,'setup',False) or getattr(args,'remote_box',None): return LanguagePreference().load()
+    try:
+        from .. import boxconfig
+        value=str(boxconfig.load_box_settings().get('owner_language') or 'en')
+        return value if value in ('en','he') else 'en'
+    except Exception: return 'en'
+
+
 class AddressPreference:
     def __init__(self,path=None):
         self.path=Path(path) if path else Path.home()/'.homeguard'/'last_box.json'

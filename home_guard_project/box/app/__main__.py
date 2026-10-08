@@ -79,7 +79,7 @@ def main():
     )
     parser.add_argument("--scene", choices=("card", "loading", "regions", "grid", "wall", "drawing", "line", "summary", "saved", "restored", "error"),
                         help="Demo: open the camera map editor in this state (with --panel cameras or --page scene-map)")
-    parser.add_argument("--lang", choices=("he", "en"), help="Preview the camera map editor in this language (it follows the app's otherwise)")
+    parser.add_argument("--lang", choices=("he", "en"), help="The app's language (otherwise: the box's owner_language, or the installer's choice for setup)")
     parser.add_argument("--size", default="1366x768")
     parser.add_argument("--screenshot")
     args = parser.parse_args()
@@ -89,8 +89,9 @@ def main():
         try: target_user(args.remote_box)
         except ValueError: parser.error("Invalid remote box address")
     args.details = args.details or args.technical_log
-    from .scene_strings import set_language
-    set_language(args.lang)
+    from .preferences import app_language
+    from .strings import set_language
+    args.lang = set_language(app_language(args))
     if args.screenshot:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtWidgets import QApplication
@@ -98,6 +99,8 @@ def main():
     from .ui import Window
 
     app = QApplication(sys.argv[:1])
+    from PySide6.QtCore import Qt
+    app.setLayoutDirection(Qt.LayoutDirection.RightToLeft if args.lang == "he" else Qt.LayoutDirection.LeftToRight)
     from PySide6.QtGui import QFontDatabase, QFont
 
     # Explicit loading also fixes Windows offscreen font discovery.
