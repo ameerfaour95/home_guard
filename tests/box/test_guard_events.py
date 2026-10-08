@@ -377,7 +377,7 @@ class VerifyBackendTest(unittest.TestCase):
         fallback = mock.Mock()
         fallback.verify.return_value = {"confirmed": True, "what_it_is": "gun", "evidence_frame": 1}
         self.assertTrue(inf.FallbackBackend(primary, fallback).verify([], "q", language="English")["confirmed"])
-        fallback.verify.assert_called_once_with([], "q", language="English")
+        fallback.verify.assert_called_once_with([], "q", language="English", timeout=15.0)
 
 
 class StartEventsTest(unittest.TestCase):
