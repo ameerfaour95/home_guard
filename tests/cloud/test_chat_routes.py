@@ -77,7 +77,8 @@ def test_a_day_of_chat_with_owner_names_and_states(client, staff_factory, s3clie
         notices = s.scalars(select(m.OwnerNotice).where(m.OwnerNotice.kind == "chat")).all()
         assert len(notices) == 1 and notices[0].s3_key.startswith(f"fleet/{device_id}/notices/")
     notice = json.loads(s3client.get_object(Bucket=b.BUCKET, Key=notices[0].s3_key)["Body"].read())
-    assert notice["kind"] == "chat" and notice["message"].startswith("Home Guard support viewed your chat")
+    from home_guard_project.fleet_contract.notices import NOTICE_KINDS
+    assert notice["kind"] == "chat" in NOTICE_KINDS and notice["message"].startswith("Home Guard support viewed your chat")
 
 
 def test_chat_pictures_are_presigned_and_audited(client, staff_factory, s3client):

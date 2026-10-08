@@ -9,6 +9,8 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
+from home_guard_project.fleet_contract import notices
+
 from .models import AuditLog, Camera, Customer, Device, OwnerNotice, Staff
 
 log = logging.getLogger(__name__)
@@ -41,12 +43,6 @@ def camera_label(session: Session, device_pk: int, camera: str) -> str:
     return plain[:1].upper() + plain[1:]
 
 
-def _join(names: list[str]) -> str:
-    if not names:
-        return ""
-    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
-
-
 def _notice_body(session: Session, row: OwnerNotice, device: Device, staff_name: str) -> dict[str, Any]:
     tz_name = session.scalar(select(Customer.timezone).where(Customer.id == device.customer_id)) or "UTC"
     try:
@@ -58,9 +54,7 @@ def _notice_body(session: Session, row: OwnerNotice, device: Device, staff_name:
     cameras = list(row.cameras or [])
     t1, t2 = f"{first.astimezone(tz):%H:%M}", f"{last.astimezone(tz):%H:%M}"
     when = t1 if t1 == t2 else f"{t1}–{t2}"
-    where = f" from {_join(cameras)}" if cameras else ""
-    message = (f"Home Guard support viewed your chat with the assistant ({when})" if row.kind == "chat"
-               else f"Home Guard support viewed recordings{where} ({when})")
+    message = notices.notice_message(row.kind, cameras, when)
     return {"schema_version": 1, "id": row.id, "kind": row.kind, "staff_name": staff_name, "cameras": cameras,
             "from_utc": first.strftime("%Y-%m-%dT%H:%M:%SZ"), "to_utc": last.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "message": message}
@@ -87,6 +81,7 @@ def owner_notice(session: Session, s3, device: Device, staff: Staff, kind: str, 
     surrounding transaction still rolls back after a successful put, that is harmless: the object only names the
     time window, and the next view rewrites it from DB state (same key while the window is open, a new key after).
     """
+    notices.check_kind(kind)  # fleet_contract.notices.NOTICE_KINDS: kinds are data the owner's side branches on
     now = now or datetime.now(timezone.utc)
     ts = now.timestamp()
     session.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:k, 0))"),
