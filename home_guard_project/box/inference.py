@@ -375,6 +375,23 @@ VLM_RESPONSE_FORMAT: Dict[str, Any] = {
     "json_schema": {"name": "camera_report", "strict": True, "schema": VLM_SCHEMA},
 }
 
+# box.yaml eye_entities: on (stage 2a): the same answer plus what each entity of the roster line does.
+VLM_SCHEMA_ENTITIES: Dict[str, Any] = {
+    **VLM_SCHEMA,
+    "properties": {**VLM_SCHEMA["properties"], "per_entity": {
+        "type": "array",
+        "items": {"type": "object", "properties": {"id": {"type": "string"}, "action": {"type": "string"}},
+                  "required": ["id", "action"], "additionalProperties": False}}},
+    "required": list(VLM_SCHEMA["required"]) + ["per_entity"],
+}
+VLM_RESPONSE_FORMAT_ENTITIES: Dict[str, Any] = {
+    "type": "json_schema",
+    "json_schema": {"name": "camera_report", "strict": True, "schema": VLM_SCHEMA_ENTITIES},
+}
+ENTITIES_JSON_RULE = ('Also add "per_entity" to the JSON object: [{{"id": "<an id from the list above>", "action": '
+                      '"<what this one does in the frames, one short clause in {language}>"}}] for each listed id you '
+                      'can tell apart in the frames; [] when you cannot.')
+
 
 # The tagging rules for the three labels, shared by the guard loop's prompt and the
 # assistant's guard-mode look at a saved clip, so both judge a scene the same way.
@@ -398,9 +415,11 @@ LABEL_RULES = """
 
 def build_prompt(camera_name: str, t_sec: int, local_time_str: str, start_hour: int, end_hour: int,
                  owner_language: str = "en", facts: Sequence[Dict[str, Any]] = (),
-                 alert_ts: Optional[float] = None, tracker_facts: str = "") -> str:
+                 alert_ts: Optional[float] = None, tracker_facts: str = "", entities_line: str = "") -> str:
     """The guard loop's legacy prompt. *tracker_facts* (``tracker.TrackerFacts.line``, box.yaml
-    ``eye_tracker_facts: on``) goes at the very end with its one rule; "" leaves the prompt byte-identical."""
+    ``eye_tracker_facts: on``) goes at the very end with its one rule; "" leaves the prompt byte-identical.
+    *entities_line* (``entities.roster_line``, box.yaml ``eye_entities: on``) comes after it, with its rule and the
+    ``per_entity`` field; "" leaves the prompt byte-identical too."""
     language = "Hebrew" if owner_language == "he" else "English"
     owner_rule = "the same summary, translated into Hebrew" if owner_language == "he" else "an empty string"
     # The summary follows the rules our taggers wrote by (tagging/*/analysis_output/
@@ -459,6 +478,11 @@ Reply with EXACTLY ONE strict JSON object and nothing else:
         from .tracker import prompt_block  # noqa: PLC0415
 
         prompt += "\n\n" + prompt_block(" ".join(str(tracker_facts).split()))
+    if entities_line:
+        from .entities import prompt_block as roster_block  # noqa: PLC0415
+
+        prompt += ("\n\n" + roster_block(" ".join(str(entities_line).split())) + "\n"
+                   + ENTITIES_JSON_RULE.format(language=language))
     return prompt
 
 
@@ -508,6 +532,7 @@ class AlertSettings:
     conf_animal: Optional[float] = None
     eye_prompt: str = "legacy"       # legacy (default until a situational version beats it on the eval); situational: eye_prompt.py
     eye_tracker_facts: bool = False  # the tracker's TRACKER FACTS line in the Eye's prompt (off until the eval shows no loss)
+    eye_entities: bool = False       # the P1/P2 roster line + per_entity in the legacy prompt (off until the stage-3 benchmark)
 
     def thresholds(self) -> Dict[str, float]:
         """The house's certainty per type (person / vehicle / animal)."""
@@ -544,6 +569,7 @@ class AlertSettings:
             conf_animal=_optional_float(g("conf_animal")),
             eye_prompt=_eye_prompt_mode(g("eye_prompt", "legacy")),
             eye_tracker_facts=_on_off(g("eye_tracker_facts", False), "eye_tracker_facts"),
+            eye_entities=_on_off(g("eye_entities", False), "eye_entities"),
         )
 
 
@@ -611,7 +637,8 @@ class NullBackend:
     def analyze(self, frames_bgr: List[Any], camera_name: str, t_sec: int,
                 start_hour: int, end_hour: int, owner_language: str = "en",
                 facts: Sequence[Dict[str, Any]] = (), alert_ts: Optional[float] = None,
-                situation: Any = None, tracker_facts: str = "") -> Tuple[str, Optional[Dict[str, Any]]]:
+                situation: Any = None, tracker_facts: str = "",
+                entities_line: str = "") -> Tuple[str, Optional[Dict[str, Any]]]:
         parsed = {"summary": ""}
         return json.dumps(parsed), parsed
 
@@ -663,14 +690,17 @@ class GptBackend:
     def analyze(self, frames_bgr: List[Any], camera_name: str, t_sec: int,
                 start_hour: int, end_hour: int, owner_language: str = "en",
                 facts: Sequence[Dict[str, Any]] = (), alert_ts: Optional[float] = None,
-                situation: Any = None, tracker_facts: str = "") -> Tuple[str, Optional[Dict[str, Any]]]:
+                situation: Any = None, tracker_facts: str = "",
+                entities_line: str = "") -> Tuple[str, Optional[Dict[str, Any]]]:
         if situation is None:
             moment = datetime.now() if alert_ts is None else datetime.fromtimestamp(alert_ts)
             # Only passed when there is a line, so a swapped-in build_prompt without the argument keeps working.
             extra = {"tracker_facts": tracker_facts} if tracker_facts else {}
+            if entities_line:
+                extra["entities_line"] = entities_line
             prompt = build_prompt(camera_name, t_sec, moment.strftime("%H:%M:%S"), start_hour, end_hour,
                                   owner_language=owner_language, facts=facts, alert_ts=alert_ts, **extra)
-            schema_format = VLM_RESPONSE_FORMAT
+            schema_format = VLM_RESPONSE_FORMAT_ENTITIES if entities_line else VLM_RESPONSE_FORMAT
         else:
             # eye_prompt: situational. The Eye answers in English; its schema follows the situation's intent.
             from . import eye_prompt  # noqa: PLC0415
@@ -1427,6 +1457,10 @@ class AlertJob:
     tracker: Dict[str, Any] = field(default_factory=dict)   # TrackerFacts.record(): .meta.json and teacher "tracker"
     tracker_line: str = ""                           # the TRACKER FACTS line ("" when nothing useful)
     tracker_tracks: List[Any] = field(default_factory=list)   # scene_map.Track over the window, for ZONE FACTS
+    # Stage 2a: the tracker's tracks with their ids (CameraTracker.snapshot) for the event's entities (P1, CAR1), and
+    # where this alert's own window starts. None: no tracker data, the event counts people from the Eye's answer.
+    tracker_entities: Optional[List[Dict[str, Any]]] = None
+    tracker_since: Optional[float] = None
 
 
 def _camera_streams(cfg: Any) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -1545,6 +1579,15 @@ def _attach_tracker(job: AlertJob, trackers: Any, now: float) -> None:
     job.tracker_line = record["line"]
     job.tracker_tracks = list(tracks)
     job.input_meta["tracker"] = record
+    snapshot = getattr(trackers, "snapshot", None)
+    if snapshot is not None:
+        try:
+            from .tracker import HISTORY_SEC  # noqa: PLC0415
+
+            job.tracker_entities = list(snapshot(job.camera, now - HISTORY_SEC, now))
+            job.tracker_since = t0
+        except Exception as exc:  # noqa: BLE001 - without them the event counts heads as before
+            log.warning("[%s] tracker tracks for the event not taken: %s", job.camera, exc)
 
 
 def _start_due_alerts(pending: List[AlertJob], now: float, cfg: Any, detector: Any,
@@ -1810,9 +1853,10 @@ def second_look(backend: Any, frames: List[Any], classes: Sequence[str], lang: s
 
 
 def _event_decision(camera: str, alert_ts: float, label: str, people: Optional[int], summary: str,
-                    alert_id: str) -> Any:
+                    alert_id: str, entity_args: Optional[Dict[str, Any]] = None) -> Any:
     """The event book's say on this alert (events.Decision), or None without a book or on its failure (the alert
-    then goes out as before).
+    then goes out as before). *entity_args* (``tracks``, ``since``, ``note``, ``per_entity``) give the event its
+    entities when the tracker had data (stage 2a).
 
     A clip without a label (the AI did not answer: an outage, the daily cap) is still the detector's alert: it goes
     out once per event, as the first message of the event, and is recorded as a normal."""
@@ -1821,7 +1865,7 @@ def _event_decision(camera: str, alert_ts: float, label: str, people: Optional[i
         return None
     try:
         decision = book.decide(camera, alert_ts, label if label in LABELS else "normal", people or 0, summary,
-                               alert_id)
+                               alert_id, **(entity_args or {}))
         if label not in LABELS and not decision.notify:
             session = book.session_of_alert(alert_id) or {}
             if session.get("reported_level", "none") == "none":
@@ -1833,6 +1877,25 @@ def _event_decision(camera: str, alert_ts: float, label: str, people: Optional[i
     except Exception as exc:  # noqa: BLE001 - the book must never lose an alert
         log.warning("[%s] event book failed; sending as before: %s", camera, exc)
         return None
+
+
+def _event_story(event: Any, alert_id: str, alert_ts: float, lang: str) -> str:
+    """The first lines of an UPDATE in an event's thread when the tracker gave the event its entities (stage 2a): who
+    is new (``story.new_people_line``), then the story so far (``story.story_line``); the new observation follows
+    under them. "" for an event's first message or without entities: then the update reads as before. Never raises."""
+    if (EVENTS is None or event is None or event.reply_to is None
+            or getattr(event, "counted_by", "") != "entities"):
+        return ""
+    try:
+        from .story import new_people_line, story_line  # noqa: PLC0415
+
+        session = EVENTS.session_of_alert(alert_id) or {}
+        head = new_people_line(event.fresh, event.unmarked, event.known_text if event.unmarked else "", lang)
+        line = story_line(session, lang, now=alert_ts, in_view=event.entities, announced=event.fresh)
+        return "\n".join(x for x in (head, line) if x)
+    except Exception as exc:  # noqa: BLE001 - the update goes out as before
+        log.warning("event story not written: %s", exc)
+        return ""
 
 
 def _first_message(res: Any) -> Optional[Tuple[str, int]]:
@@ -1866,9 +1929,10 @@ def _record_event_sent(event_sent: Optional[Dict[str, Any]], message: Optional[T
     if EVENTS is None or not event_sent:
         return
     chat_id, message_id = message if message else (None, None)
+    extra = {"entities": list(event_sent["entities"])} if event_sent.get("entities") else {}
     try:
         EVENTS.record_sent(event_sent["session_id"], event_sent["label"], event_sent["people"], event_sent["ts"],
-                           alert_id=event_sent["alert_id"], chat_id=chat_id, message_id=message_id)
+                           alert_id=event_sent["alert_id"], chat_id=chat_id, message_id=message_id, **extra)
     except Exception as exc:  # noqa: BLE001
         log.warning("event not marked as sent: %s", exc)
 
@@ -1938,6 +2002,22 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
             from .tracker import TRACKER_FACTS_VERSION  # noqa: PLC0415
 
             legacy_version = f"{PROMPT_VERSION}+{TRACKER_FACTS_VERSION}"
+        # Stage 2a: the tracker's tracks become the event's entities (P1, CAR1). The Eye sees their roster only with
+        # eye_entities: on, in the legacy prompt (the situational prompt has no per_entity field).
+        entity_tracks = getattr(job, "tracker_entities", None) if EVENTS is not None else None
+        entity_since = getattr(job, "tracker_since", None)
+        if (settings.eye_entities and situation is None and entity_tracks
+                and _takes_kwarg(backend, "entities_line")):
+            try:
+                roster = EVENTS.roster(camera_name, alert_ts, entity_tracks, since=entity_since)
+            except Exception as exc:  # noqa: BLE001 - no roster: today's prompt
+                log.warning("[%s] entity roster not made: %s", camera_name, exc)
+                roster = {}
+            if roster.get("line"):
+                from .entities import ENTITIES_VERSION  # noqa: PLC0415
+
+                context["entities_line"] = roster["line"]
+                legacy_version = f"{legacy_version}+{ENTITIES_VERSION}"
         try:
             raw, parsed = backend.analyze(frames, camera_name, int(time.time()),
                                           settings.alert_start_hour, settings.alert_end_hour, owner_language=lang, **context)
@@ -2042,7 +2122,13 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
         alert_id = job.stem if job is not None else f"{camera_name}_{int(alert_ts)}"
         # One ongoing activity per camera is one event; only a change reaches the owner (events.py). Code decides,
         # never the model. Without a book (tests, tools) every alert goes out as before.
-        event = None if muted else _event_decision(camera_name, alert_ts, label, people, summary, alert_id)
+        entity_args: Optional[Dict[str, Any]] = None
+        if entity_tracks is not None:
+            entity_args = {"tracks": entity_tracks, "since": entity_since,
+                           "note": owner_summary(summary, summary_owner, lang) if parsed and parsed.get("summary") else "",
+                           "per_entity": parsed.get("per_entity") if parsed and "entities_line" in context else None}
+        event = None if muted else _event_decision(camera_name, alert_ts, label, people, summary, alert_id,
+                                                   entity_args)
         if event is not None and not event.notify:
             log.info("[%s] not sent (%s): %s", camera_name, event.reason, summary)
             if status is not None:
@@ -2113,7 +2199,10 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                     graded = f"{graded}\n{look_line}"
                 if case_line:
                     graded = f"{graded}\n{case_line}"
-                if event is not None and event.new_people > 0 and event.reply_to is not None:
+                story = _event_story(event, alert_id, alert_ts, lang) if event is not None else ""
+                if story:
+                    graded = f"{story}\n{graded}"
+                elif event is not None and event.new_people > 0 and event.reply_to is not None:
                     from .alert_texts import more_people  # noqa: PLC0415
 
                     graded = f"{more_people(event.new_people, lang)}\n{graded}"
@@ -2135,7 +2224,8 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                     first = _first_message(res)
                     event_sent = {"session_id": event.session_id, "label": label if label in LABELS else "normal",
                                   "people": people or 0, "ts": alert_ts, "alert_id": alert_id,
-                                  "message_recorded": first is not None}
+                                  "message_recorded": first is not None,
+                                  "entities": list(getattr(event, "entities", None) or [])}
                     _record_event_sent(event_sent, first)
                 if remind and assistant is not None and alert_ref and delivery(res)[0]:
                     try:

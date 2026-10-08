@@ -494,6 +494,12 @@ With `translator`, a cheap text model (`messenger.py`; Gemini 3.1 Flash Lite, ab
 
 With `situational` the guard loop asks the vision model with `eye_prompt.py`: the fixed categories (`taxonomy.py`), one `SITUATION:` line (time, day/evening/late_night/dawn, dark, house state, camera role, what the owner expects) and what that situation means. The model names what it sees; code turns it into the label (a visitor at 02:30 is suspicious, at 14:00 normal), never below the model's own label and never softening escalation. The house state (awake / asleep / away / vacation, and "expecting" notes) lives in `production_multi/.registry/house_state.jsonl` (`house_state.py`); without commands the house is asleep 00:00-06:00. Restart after changing these. Score it first with `run --prompt eye` (each clip in its own situation, scored per category and per situation).
 
+### Event entities and the story (box.yaml)
+
+    eye_entities: off                      # the default; on: the legacy prompt gets the P1/P2 roster + per_entity
+
+Every event (`events.py`, one ongoing activity per camera) keeps who is who (`entities.py`): the live tracker's tracks become `P1`, `P2` for people and `CAR1` for moving vehicles (parked ones never). A person the tracker saw come back, or a lone new track within 2 minutes near where a lost one was last seen, keeps the same id; with two possible candidates it is a new id marked "maybe P1 or P2", never merged. Ids restart at P1 in a new event and carry over when a long event rolls over. With tracker data, "N more people arrived" and the owner's "these are my workers" count these entities instead of the vision model's head-count: a person who arrives after the owner marked the group is "not one of those you marked" (still only sent when suspicious or worse). An update in an event's thread starts with the story so far (`story.py`: who is new, "both moved toward the pergola" only when the scene map shows it, "P2 (earlier: cleaning the floor): ..."); the event's first message is unchanged. `eye_entities: on` also shows the vision model the roster and asks what each id does (prompt version `+ent1`); keep it off until the stage-3 benchmark, because the roster names how many people the box follows.
+
 ### Case memory (box.yaml)
 
     case_memory: on                        # the default; off: every alert goes out as before
