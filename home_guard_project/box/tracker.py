@@ -631,6 +631,29 @@ class CameraTracker:
         return TrackerFacts(t0=float(t0), t1=float(t1), people=tuple(people), vehicles=tuple(vehicles),
                             people_together=together_p, vehicles_together=together_v, mapped=scene is not None)
 
+    def snapshot(self, t0: float, t1: float, scene_map: Any = None) -> List[Dict[str, Any]]:
+        """The confirmed tracks seen in ``[t0, t1]`` as small dicts with their ids, for the event's entities
+        (entities.py): ``id, kind, first_seen, last_seen, prev_id, first_foot, last_foot, moved`` (picture widths
+        from the first foot point over the whole visit; a vehicle below ``scene_map.PARKED_DISTANCE`` is parked),
+        ``active`` (still in view, not lost), ``path`` (the owner's area names in order, () without a map),
+        ``entry_edge`` and ``exit_edge``. Pure data, oldest first."""
+        scene = self._map(scene_map)
+        with self._lock:
+            live = {t.id for t in self._active}
+            out: List[Dict[str, Any]] = []
+            for t in self._overlapping(t0, t1):
+                points = [p for p in t.points if p[0] <= t1]
+                if not points:
+                    continue
+                runs = _area_runs(t.kind, points, scene) if scene is not None else []
+                first, last = points[0], points[-1]
+                out.append({"id": t.id, "kind": t.kind, "first_seen": first[0], "last_seen": last[0],
+                            "prev_id": t.prev_id, "first_foot": (first[1], first[2]), "last_foot": (last[1], last[2]),
+                            "moved": sm.Track(t.kind, list(points)).moved, "active": t.id in live,
+                            "path": list(_collapse(area.name for area, _, _ in runs)),
+                            "entry_edge": _edge(first[1], first[2]), "exit_edge": _edge(last[1], last[2])})
+            return out
+
 
 class TrackerRegistry:
     """One tracker per camera, and each camera's scene map re-read at most every *refresh_sec* (the owner may
@@ -676,6 +699,10 @@ class TrackerRegistry:
 
     def tracks_between(self, camera: str, t0: float, t1: float) -> List[sm.Track]:
         return self.get(camera).tracks_between(t0, t1)
+
+    def snapshot(self, camera: str, t0: float, t1: float) -> List[Dict[str, Any]]:
+        """``CameraTracker.snapshot`` for *camera*, with its cached scene map."""
+        return self.get(camera).snapshot(t0, t1, self.scene_map(camera))
 
     def drain_vehicle_events(self, camera: str) -> List[Dict[str, Any]]:
         """``CameraTracker.drain_vehicle_events`` for *camera*, with its cached scene map."""

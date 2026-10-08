@@ -25,6 +25,7 @@ The book keeps open sessions in memory and appends every closed one to ``events.
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import os
@@ -35,6 +36,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from . import entities as ent
+
 log = logging.getLogger("box.events")
 
 IDLE_SEC = 60.0                  # no person or vehicle seen this long: the activity is over
@@ -44,6 +47,7 @@ ESCALATION_REPEAT_SEC = 600.0
 # the Eye's count of a working group jumps around (3, 5, 2...). A real new person is the entity layer's job (stage 2).
 KNOWN_EXTRA_PEOPLE = 2
 KEEP_OBSERVATIONS = 40           # per session, newest kept
+ENTITY_LOOKBACK_SEC = 10.0       # tracks that ended this long before the session opened are not its entities
 LEVELS = {"none": 0, "normal": 1, "suspicious": 2, "escalation": 3}
 
 
@@ -78,6 +82,9 @@ class Session:
     reported_at: float = 0.0
     messages: List[Dict[str, Any]] = field(default_factory=list)   # {alert_id, chat_id, message_id, ts}
     known: List[Dict[str, Any]] = field(default_factory=list)
+    # Stage 2a (entities.py): who is who in this event (P1, P2, CAR1) and which of them the owner was told about.
+    entities: List[Dict[str, Any]] = field(default_factory=list)
+    reported_entities: List[str] = field(default_factory=list)
 
     def people_when_said(self, known_id: str) -> int:
         """People present in this session when the owner's words *known_id* were said here (0 when said elsewhere)."""
@@ -102,6 +109,12 @@ class Decision:
     reply_to: Optional[Dict[str, Any]] = None   # the session's first message: updates go in its thread
     new_people: int = 0            # people beyond what the owner was already told about
     known_text: str = ""           # the owner's own words that covered this (when silenced by them)
+    # Stage 2a, with the tracker's data (``tracks``): who is in view, who of them is new to the owner, and whether a
+    # new one arrived although the owner marked the others as known ("not one of the workers you marked").
+    entities: List[str] = field(default_factory=list)
+    fresh: List[str] = field(default_factory=list)
+    unmarked: bool = False
+    counted_by: str = "head-count"   # head-count (the Eye's people) | entities (the tracker's)
 
     def record(self) -> Dict[str, Any]:
         return asdict(self)
@@ -182,7 +195,9 @@ class EventBook:
                         reported_level=old.reported_level if old else "none",
                         reported_people=old.reported_people if old else 0,
                         reported_at=old.reported_at if old else 0.0,
-                        messages=list(old.messages[:1]) if old else [], known=list(old.known) if old else [])
+                        messages=list(old.messages[:1]) if old else [], known=list(old.known) if old else [],
+                        entities=copy.deepcopy(old.entities) if old else [],
+                        reported_entities=list(old.reported_entities) if old else [])
             self._open[camera] = s
             return s
         if s is None:
@@ -232,6 +247,8 @@ class EventBook:
             self._save_known()
             if s is not None:
                 s.known.append(asdict(k))
+                if s.entities and now - s.last_active <= self.idle_sec:
+                    ent.label_present(s.entities, now, k.text, k.id)
             log.info("known: %s on %s until %s (%d people)", k.text, camera or "all cameras",
                      datetime.fromtimestamp(until).strftime("%Y-%m-%d %H:%M"), count)
             return {"store": "events.known", "id": k.id, "camera": camera, "text": k.text, "until": until,
@@ -252,48 +269,109 @@ class EventBook:
             return [asdict(k) for k in self._known if k.live(now)]
 
     # ---------- the policy ----------
+    def _base_entities(self, camera: str, ts: float) -> List[Dict[str, Any]]:
+        """A copy of the entities the session at *ts* starts from: the open one's (kept across a roll-over), none
+        when it is idle and a new session would open."""
+        s = self._open.get(camera)
+        if s is None or ts - s.last_active > self.idle_sec:
+            return []
+        return copy.deepcopy(s.entities)
+
+    def _not_before(self, camera: str, ts: float) -> float:
+        s = self._open.get(camera)
+        opened = ts if s is None or ts - s.last_active > self.idle_sec else s.opened
+        return opened - ENTITY_LOOKBACK_SEC
+
+    def roster(self, camera: str, ts: float, tracks: Any, since: Optional[float] = None) -> Dict[str, Any]:
+        """What the entities will be when *tracks* are handed to ``decide`` at *ts*, without changing the book: the
+        ids in view since *since* and the Eye's roster line (box.yaml ``eye_entities: on``)."""
+        with self._lock:
+            rows = self._base_entities(camera, ts)
+            in_view = ent.ingest(rows, tracks or (), ts, since=since, not_before=self._not_before(camera, ts))
+            return {"in_view": in_view, "line": ent.roster_line(rows, in_view, ts, since)}
+
     def decide(self, camera: str, ts: float, label: str, people: Any = None, summary: str = "",
-               alert_id: str = "") -> Decision:
-        """Should this alert job reach the owner? Records the observation in the camera's session either way."""
+               alert_id: str = "", tracks: Any = None, since: Optional[float] = None, note: str = "",
+               per_entity: Any = None) -> Decision:
+        """Should this alert job reach the owner? Records the observation in the camera's session either way.
+
+        With *tracks* (the tracker's ``snapshot`` around the alert, stage 2a) the session's entities are brought up to
+        date first; the people seen since *since* are this alert's people, and when the tracker saw at least one of
+        them "more people" and the owner's known group are judged by those entities instead of the Eye's head-count
+        *people*. *note* (the owner-language summary) and *per_entity* (the Eye's ``per_entity`` answer) are what the
+        entities in view did (entities.attribute)."""
         label = label if label in LEVELS else "normal"
         count = _int(people)
         with self._lock:
+            in_view: List[str] = []
+            not_before = self._not_before(camera, ts)
             s = self._session(camera, ts)
+            if tracks is not None:
+                in_view = ent.ingest(s.entities, tracks, ts, since=since, not_before=not_before)
             s.last_active = max(s.last_active, ts)
             s.people_max = max(s.people_max, count)
-            s.observations = (s.observations + [{"ts": ts, "alert_id": alert_id, "label": label,
-                                                 "summary": str(summary or "")[:400], "people": count}])[-KEEP_OBSERVATIONS:]
+            observation = {"ts": ts, "alert_id": alert_id, "label": label,
+                           "summary": str(summary or "")[:400], "people": count}
+            if tracks is not None:
+                observation["entities"] = list(in_view)
+                if note:
+                    observation["note"] = str(note)[:400]
+                observation["noted"] = ent.attribute(s.entities, in_view, ts, note, label, per_entity)
+            s.observations = (s.observations + [observation])[-KEEP_OBSERVATIONS:]
             if alert_id:
                 self._by_alert[alert_id] = s.id
             known = self.known_for(camera, ts)
             new_people = max(0, count - s.reported_people)
             reply_to = s.first_message()
             lvl, reported = LEVELS[label], LEVELS[s.reported_level]
+            persons = ent.people(s.entities, in_view) if in_view else []
+            by_entities = bool(persons)
+            fresh: List[str] = []
+            said_here = False
+            if by_entities:
+                live = {k.id for k in self._known if k.live(ts) and (not k.camera or k.camera == camera)}
+                fresh = ent.fresh_people(s.entities, in_view, s.reported_entities, live)
+                new_people = len(fresh)
+                said_here = known is not None and any(known.id in e.get("known_ids", ()) for e in s.entities)
+
+            def make(notify: bool, reason: str, known_text: str = "", unmarked: bool = False) -> Decision:
+                return Decision(notify, s.id, reason, reply_to, new_people, known_text, list(in_view), list(fresh),
+                                unmarked, "entities" if by_entities else "head-count")
 
             def no(reason: str, known_text: str = "") -> Decision:
-                return Decision(False, s.id, reason, reply_to, new_people, known_text)
+                return make(False, reason, known_text)
 
             if label == "normal":
                 if self.notify_normal and reported == 0:
-                    return Decision(True, s.id, "normal (notify_normal on), first in this event", reply_to, new_people)
+                    return make(True, "normal (notify_normal on), first in this event")
                 return no("normal: kept in the event, not sent")
             if label == "escalation":
                 if (s.reported_level == "escalation" and new_people == 0
                         and ts - s.reported_at < ESCALATION_REPEAT_SEC):
                     return no("escalation already reported in this event, same people")
-                return Decision(True, s.id, "escalation", reply_to, new_people)
+                return make(True, "escalation")
             # suspicious
+            if said_here:
+                # The owner marked the people of this event; only someone the tracker saw arrive since is not theirs.
+                if fresh:
+                    return make(True, f"suspicious, {len(fresh)} new not among those the owner marked", known.text,
+                                unmarked=True)
+                if all(ent.covered(e, live) for e in persons):
+                    return no("suspicious, but the owner said who is here", known.text)
+                return no("suspicious, the one the owner did not mark was already reported")
+            head = len(persons) if by_entities else count
             covered = max(known.people, s.people_when_said(known.id)) + KNOWN_EXTRA_PEOPLE if known else 0
-            if known is not None and (known.people == 0 or count <= covered):
+            if known is not None and (known.people == 0 or head <= covered):
                 return no("suspicious, but the owner said who is here", known.text)
             if reported >= lvl and new_people == 0:
                 return no("suspicious already reported in this event, nobody new")
             why = "suspicious, first in this event" if reported < lvl else f"suspicious, {new_people} more people"
-            return Decision(True, s.id, why, reply_to, new_people)
+            return make(True, why)
 
     def record_sent(self, session_id: str, label: str, people: Any, ts: float, alert_id: str = "",
-                    chat_id: Any = None, message_id: Any = None) -> None:
-        """The alert of *session_id* reached the owner (call only after a successful delivery)."""
+                    chat_id: Any = None, message_id: Any = None, entities: Optional[List[str]] = None) -> None:
+        """The alert of *session_id* reached the owner (call only after a successful delivery). *entities* are the
+        ids that were in view (``Decision.entities``): the owner now knows about them."""
         with self._lock:
             s = next((x for x in self._open.values() if x.id == session_id), None)
             if s is None:
@@ -302,6 +380,9 @@ class EventBook:
                 s.reported_level = label
             s.reported_people = max(s.reported_people, _int(people))
             s.reported_at = ts
+            if entities:
+                ent.told(s.entities, entities, s.reported_entities, ts)
+                s.reported_entities = s.reported_entities + [i for i in entities if i not in s.reported_entities]
             if message_id is not None:
                 s.messages.append({"alert_id": alert_id, "chat_id": str(chat_id), "message_id": int(message_id),
                                    "ts": ts})
