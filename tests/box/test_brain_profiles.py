@@ -248,6 +248,16 @@ class AsksAboutNowTest(unittest.TestCase):
                      "are there people at the gate?", "is anyone at the door now?", "what's happening right now"):
             self.assertTrue(asks_about_now(text), text)
 
+    def test_anything_outside_is_about_right_now(self):
+        # 2026-10-06 23:5x on the box: answered from the 23:14 history instead of a live look.
+        for text in ("יש משהו מעניין בחוץ?", "קורה משהו?", "קורה משהו בחצר", "מה יש בחוץ?", "מה קורה בחוץ",
+                     "הכל שקט בחוץ?", "anything outside?", "Anything going on out there?",
+                     "anything interesting happening?", "what's outside?", "all quiet outside?"):
+            self.assertTrue(asks_about_now(text), text)
+        for text in ("היה משהו מעניין בחוץ?", "קרה משהו בלילה?", "was there anything outside?",
+                     "anything happened yesterday?"):
+            self.assertFalse(asks_about_now(text), text)
+
     def test_questions_about_the_past_or_no_question(self):
         for text in ("היו אנשים היום?", "מה קרה אתמול בלילה?", "was anyone at the gate?", "what happened today",
                      "יש לך את הסרטון מאתמול?", "יש התראות חדשות?", "send me the video", "", None, 5):

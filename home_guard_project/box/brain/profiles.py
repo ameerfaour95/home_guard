@@ -91,8 +91,13 @@ _PRESENCE = re.compile(
     r"\b(?:is|are)\s+there\s+(?:any(?:one|body)?|some(?:one|body)|people|a\s+\w+|\w+s)\b|"
     r"\b(?:is|are)\s+(?:any(?:one|body)|some(?:one|body)|people)\b|"
     r"\bany(?:one|body)\s+(?:there|around|outside|at|near|in)\b|"
-    r"(?<!\w)[וה]?יש\s+(?:\S+\s+)?(?:אנשים|מישהו|אדם|רכב|רכבים|ילדים|עובדים|פועלים|חיות|כלב|חתול)(?!\w)|"
-    r"(?<!\w)[וה]?מישהו(?!\w)", re.IGNORECASE)
+    r"(?<!\w)[וה]?יש\s+(?:\S+\s+)?(?:אנשים|מישהו|משהו|אדם|רכב|רכבים|ילדים|עובדים|פועלים|חיות|כלב|חתול)(?!\w)|"
+    r"(?<!\w)[וה]?מישהו(?!\w)|"
+    # "anything outside?" (2026-10-06: answered from the 23:14 history instead of a live look)
+    r"(?<!\w)[וה]?קורה\s+משהו(?!\w)|(?<!\w)מה\s+(?:יש|קורה|רואים)\s+[בל]?חוץ(?!\w)|(?<!\w)משהו\s+מעניין(?!\w)|"
+    r"(?<!\w)הכל\s+(?:שקט|בסדר)(?!\w)|"
+    r"\bany(?:thing|one)\s+(?:outside|out there|going on|happening|interesting|unusual|new)\b|"
+    r"\bwhat" + _APOS + r"?s\s+(?:outside|out there|going on)\b|\ball\s+(?:quiet|good|ok|clear)\b", re.IGNORECASE)
 _PAST = re.compile(
     r"\b(?:was|were|did|had|happened|came|yesterday|earlier|last night|today|this morning|ago|before)\b|"
     r"(?<!\w)[וש]?(?:היה|היו|היתה|הייתה|קרה|הגיע|הגיעו|אתמול|קודם|הבוקר|הלילה|היום|לפני|מאתמול)(?!\w)",
