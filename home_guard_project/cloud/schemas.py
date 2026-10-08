@@ -453,7 +453,8 @@ class AnnotationOut(BaseModel):
     frame_size: Optional[list[int]]
     suggestions_used: bool
     # what a never-saved clip's boxes were preloaded from: "tracker" (the box tracker's <stem>.tracks.json, P1 stays
-    # P1), "yolo" (YOLO labels linked by IoU); None when nothing was preloaded or the clip was saved since
+    # P1), "dataset" (the unified dataset's labels), "yolo" (the box's weak YOLO labels linked by IoU); None when
+    # nothing was preloaded or the clip was saved since
     preload_source: Optional[str] = None
 
 

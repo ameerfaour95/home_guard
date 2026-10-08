@@ -104,6 +104,8 @@ class InboxScreen(QWidget):
         header = self.table.horizontalHeader()
         for c in range(len(COLUMNS)):
             header.setSectionResizeMode(c, QHeaderView.ResizeMode.Stretch if c in (5, 6) else QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+        header.resizeSection(3, ProvenanceChip(self.theme, 'owner').sizeHint().width() + 16)
         self.table.itemSelectionChanged.connect(self.show_selected)
         split.addWidget(self.table)
         split.addWidget(self._detail_panel())
@@ -236,7 +238,7 @@ class InboxScreen(QWidget):
             self.consent.hide()
             return
         when = i.received_utc.astimezone().strftime('%Y-%m-%d %H:%M') if i.received_utc else ''
-        self.clip.setText(f'{camera_title(i)}  ·  {i.customer}')
+        self.clip.setText(f'{i.customer}  ·  {camera_title(i)}')
         self.clip_meta.setText(f'Answered {when} by {i.tagged_by or "the owner"}  ·  clip {i.clip_key}')
         self.owner_pill.show_label(i.owner_label or 'no tag', LABEL_TOKENS.get(i.owner_label, 'muted'))
         words = owner_words(i)

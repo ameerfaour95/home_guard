@@ -423,7 +423,7 @@ class AnnotationOut:
     suggestions_used: bool
     review_note: str = ''
     review_frame: int | None = None
-    preload_source: str | None = None  # 'tracker' / 'yolo': what the unsaved boxes came from
+    preload_source: str | None = None  # 'tracker' / 'dataset' / 'yolo': what the unsaved boxes came from
 
 
 @dataclass

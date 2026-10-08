@@ -84,18 +84,20 @@ def _out(session: Session, request: Request, viewer: _Viewer, ev: Event) -> Anno
 def preloaded_tracks(session: Session, request: Request, ev: Event, fps) -> tuple:
     """(tracks, source) a never-saved clip opens with, editable at once (source "yolo" until a person edits them):
     the box tracker's own tracks (``<stem>.tracks.json`` next to the clip's meta or video, P1 stays P1: "tracker"),
-    else the unified dataset's YOLO labels for this clip, else the event's own weak labels linked by IoU ("yolo")."""
+    else the unified dataset's labels for this clip ("dataset"), else the event's own weak labels linked by IoU
+    ("yolo")."""
     from .tagging import studio_of  # noqa: PLC0415
     from ..tagstudio.boxes import dataset_tracks  # noqa: PLC0415
 
     tracks, source = labeling.tracker_tracks(session, request.app.state.s3, ev, fps), "tracker"
     if not tracks:
-        source = "yolo"
+        source = "dataset"
         try:
             tracks = dataset_tracks(str(studio_of(request).paths.dataset), ev.stem, fps)
         except Exception:  # noqa: BLE001 - an unreadable dataset never blocks the clip
             tracks = []
     if not tracks:
+        source = "yolo"
         tracks = labeling.suggestions(session, request.app.state.s3, ev, fps, _now(request))
     for tr in tracks:
         tr.source = "yolo"

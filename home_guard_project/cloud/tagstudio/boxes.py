@@ -157,11 +157,12 @@ def dataset_tracks(dataset: str, clip_id: str, fps: Optional[float]) -> List[ft.
 def preload_tracks(dataset: str, clip_id: str, fps: Optional[float],
                    paths: Iterable[str] = ()) -> Tuple[List[ft.Track], Optional[str]]:
     """(tracks, source) a never-saved dataset clip opens with: the box tracker's tracks.json next to its meta or video
-    (`paths`) when there is one ("tracker"), else its YOLO label files linked by IoU ("yolo"); ([], None) if none."""
+    (`paths`) when there is one ("tracker"), else its YOLO label files linked by IoU ("dataset": the unified
+    dataset's labels, human or auto-tagger); ([], None) if none."""
     from .tracks_file import local_tracks  # noqa: PLC0415
 
     tracks = local_tracks(paths, fps)
     if tracks:
         return tracks, "tracker"
     tracks = dataset_tracks(dataset, clip_id, fps)
-    return tracks, ("yolo" if tracks else None)
+    return tracks, ("dataset" if tracks else None)

@@ -4,6 +4,7 @@ from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QWidget, QMenu
 from home_guard_project.fleet_contract.tracks import box_at
 from .player import VideoCanvas, SESSION
+from .tag_widgets import machine_name
 from .event_logic import map_box
 from .theme import PALETTES
 from .label_document import CLASSES
@@ -18,7 +19,7 @@ def class_color(name, theme):
 
 def machine_tag(doc):
     """The caption suffix of a preloaded box nobody checked yet: who drew it."""
-    return '  ·  Tracker' if doc.preload_source == 'tracker' else '  ·  YOLO'
+    return '  ·  ' + machine_name(doc.preload_source)
 
 
 class LabelCanvas(VideoCanvas):

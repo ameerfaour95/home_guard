@@ -115,15 +115,18 @@ def test_label_view_keys_b_h_m(widgets, wait):
     assert len(v.doc.tracks) == before and v.doc.selected == first
 
 
-def test_tracker_preload_is_named_on_the_label_view(widgets, wait):
+@pytest.mark.parametrize('source, chip, note', [('tracker', 'Tracker', 'tracker box track'),
+                                                ('dataset', 'Dataset labels', 'dataset box track'),
+                                                (None, 'YOLO weak', 'YOLO box track')])
+def test_preload_source_is_named_on_the_label_view(widgets, wait, source, chip, note):
     b = DemoBackend()
     real = b.annotation
     def annotation(eid):
-        a = real(eid); a.preload_source = 'tracker'; return a
+        a = real(eid); a.preload_source = source; return a
     b.annotation = annotation
     v = LabelView(b, b.role); widgets.append(v); v.resize(1366, 768); v.show(); v.open_event(101)
     wait(lambda: v.doc is not None and not v.media.busy)
-    assert v.boxes_source.text() == 'Tracker' and 'tracker box track' in v.boxes_note.text()
+    assert v.boxes_source.text() == chip and note in v.boxes_note.text()
 
 
 def test_tag_view_boxes_overlay_and_toggle(widgets, wait):

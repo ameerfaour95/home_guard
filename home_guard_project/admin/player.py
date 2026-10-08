@@ -78,7 +78,8 @@ class TrackOverlay(QWidget):
 
     def paintEvent(self, event):
         p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        machine = {'tracker': 'Tracker'}.get(self.source, 'YOLO')
+        from .tag_widgets import machine_name
+        machine = machine_name(self.source)
         if self.message:
             text = self.message
         elif not SESSION['boxes']:
@@ -99,7 +100,7 @@ class TrackOverlay(QWidget):
                 caption = self.names.get(tr.track_id, tr.label) + (f'  ·  {machine}' if tr.source in ('yolo', 'suggestion') else '')
                 tag = QRectF(rect.x(), max(0, rect.y()-24), p.fontMetrics().horizontalAdvance(caption)+12, 24)
                 p.fillRect(tag, color); p.setPen(QColor(self.t['bg'])); p.drawText(tag, Qt.AlignmentFlag.AlignCenter, caption)
-        bg = QRectF(12, 12, min(self.width()-24, p.fontMetrics().horizontalAdvance(text)+20), 28)
+        bg = QRectF(12, self.height()-40, min(self.width()-24, p.fontMetrics().horizontalAdvance(text)+20), 28)
         p.fillRect(bg, QColor(12, 18, 24, 220)); p.setPen(QColor('#edf4f6'))
         p.drawText(bg.adjusted(10, 0, -4, 0), Qt.AlignmentFlag.AlignVCenter,
                    p.fontMetrics().elidedText(text, Qt.TextElideMode.ElideRight, int(bg.width()-14)))

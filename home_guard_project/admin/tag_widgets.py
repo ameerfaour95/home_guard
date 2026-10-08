@@ -299,12 +299,19 @@ class Pill(QLabel):
 
 # Where a label came from (design principle 4): one chip vocabulary on every screen.
 PROVENANCE = {'owner': ('Owner · Telegram', 'warning'), 'admin': ('Admin · {who}', 'ok'),
-              'model': ('Model · {who}', 'action'), 'yolo': ('YOLO weak', 'muted'), 'tracker': ('Tracker', 'muted')}
+              'model': ('Model · {who}', 'action'), 'yolo': ('YOLO weak', 'muted'), 'tracker': ('Tracker', 'muted'),
+              'dataset': ('Dataset labels', 'muted')}
+# The short caption of a machine box nobody checked yet, by what it was preloaded from (AnnotationOut.preload_source).
+MACHINE_NAMES = {'tracker': 'Tracker', 'dataset': 'Dataset', 'yolo': 'YOLO'}
+
+
+def machine_name(source):
+    return MACHINE_NAMES.get(source or 'yolo', 'YOLO')
 
 
 def provenance_text(kind, who=''):
     """The chip text of a label's source: 'Owner · Telegram', 'Admin · Dana', 'Model · gpt-4o', 'YOLO weak',
-    'Tracker'; '' for an unknown kind."""
+    'Tracker', 'Dataset labels'; '' for an unknown kind."""
     text, _ = PROVENANCE.get(kind, ('', ''))
     return text.format(who=who or 'unknown') if text else ''
 

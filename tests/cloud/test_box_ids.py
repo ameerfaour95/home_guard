@@ -71,7 +71,7 @@ def test_preload_prefers_the_tracker_file_then_the_label_files(tmp_path):
     dataset, _ = _dataset(tmp_path, "house", {0: [0], 1: [0], 2: [0]})
     meta = tmp_path / "meta" / "house" / "clip_a.meta.json"
     tracks, source = boxes.preload_tracks(dataset, "clip_a", 7.0, (str(meta), ""))
-    assert source == "yolo" and [t.label for t in tracks] == ["person"]
+    assert source == "dataset" and [t.label for t in tracks] == ["person"]
     meta.parent.mkdir(parents=True)
     shutil.copy(Path(__file__).parent / "fixtures" / "tracks" / "ameer_week_0_1_ch2_1791439138_alert.tracks.json",
                 meta.parent / "clip_a.tracks.json")

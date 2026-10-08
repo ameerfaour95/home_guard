@@ -13,7 +13,7 @@ from .widgets.common import label, button
 from .label_document import LabelDocument, CLASSES
 from .label_canvas import LabelCanvas, TrackTimeline
 from .player import SESSION
-from .tag_widgets import ProvenanceChip
+from .tag_widgets import ProvenanceChip, machine_name
 from .models import ReviewDecision
 
 STALE_REVIEW = 'This clip changed since you opened it — reload'
@@ -394,9 +394,9 @@ class LabelView(QWidget):
         self.status.setText(self.doc.annotation.status.upper()); self.version.setText(f'v{self.doc.annotation.version} · Versions')
         self.diff.setText('Changed' if self.doc.description != self.doc.annotation.ai_description else 'AI draft')
         unchecked = len(self.doc.unchecked)
-        tracker = self.doc.preload_source == 'tracker'
-        self.boxes_source.show_source(('tracker' if tracker else 'yolo') if unchecked else '')
-        machine = 'tracker' if tracker else 'YOLO'
+        source = self.doc.preload_source if self.doc.preload_source in ('tracker', 'dataset') else 'yolo'
+        self.boxes_source.show_source(source if unchecked else '')
+        machine = machine_name(source).lower() if source != 'yolo' else 'YOLO'
         self.boxes_note.setText('No YOLO boxes for this clip' if not self.doc.tracks and not self.doc.annotation.version
                                 else f'{unchecked} {machine} box track{"s" if unchecked != 1 else ""} not checked yet'
                                 if unchecked else '')
