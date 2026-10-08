@@ -258,7 +258,7 @@ DEMO_REGIONS = (
 )
 
 
-DEMO_NAMES = {"front_door": {"he": "הכניסה", "en": "Front door"}, "garden": {"he": "הגינה", "en": "Garden"},
+DEMO_NAMES = {"front_door": {"he": "דלת הכניסה", "en": "Front door"}, "garden": {"he": "הגינה", "en": "Garden"},
               "driveway": {"he": "החניה", "en": "Driveway"}}
 
 

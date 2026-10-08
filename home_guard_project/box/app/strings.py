@@ -1,5 +1,9 @@
 """All visible application copy; keys remain stable for translation."""
 
+# The language TEXT is written in: every screen speaks it (the camera map editor's copy follows it too,
+# scene_strings.language). Hebrew copy exists only for the map editor so far.
+LANG = "en"
+
 TEXT = {
     "chat_image_unavailable": "Picture unavailable",
     "premium_security": "Security & notifications",
@@ -152,7 +156,7 @@ TEXT = {
     "house_error": "Use lowercase letters, numbers and underscores, like cedar_house.",
     "camera_user_error": "Enter the login name used by the cameras.",
     "camera_password_error": "Enter the password used by the cameras.",
-    "step_names": ["Connect", "Network", "Home", "Owner", "Cameras", "Ready"],
+    "step_names": ["Connect", "Network", "Home", "Owner", "Cameras", "Map", "Ready"],
     "step_number": "{number}. {name}",
     "step_done": "\u2713 {name}",
     "event_line": "{time}  {text}",

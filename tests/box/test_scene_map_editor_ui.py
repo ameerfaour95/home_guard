@@ -308,7 +308,14 @@ class EditorTest(Base):
         self.assertFalse(editor.restart_label.isHidden())
 
 
-class SetupStepTest(Base):
+class HebrewApp(Base):
+    """The app speaking Hebrew (strings.LANG): the map step follows it, right to left."""
+    def setUp(self):
+        patcher = mock.patch('home_guard_project.box.app.strings.LANG', 'he')
+        patcher.start(); self.addCleanup(patcher.stop)
+
+
+class SetupStepTest(HebrewApp):
     def window(self, cameras):
         from PySide6.QtWidgets import QPushButton
         from home_guard_project.box.app.camera_controls import Camera
@@ -388,7 +395,67 @@ class SetupStepTest(Base):
         self.assertEqual(window.pages_set, [Page.SUMMARY])
 
 
-class CameraCardTest(Base):
+class LanguageAndRoomTest(Base):
+    def test_the_map_step_speaks_the_apps_language(self) -> None:
+        from home_guard_project.box.app import strings
+        from home_guard_project.box.app.scene_setup_step import SceneSetupStep
+        self.assertEqual(strings.LANG, 'en')                               # setup and every screen are English
+        step = SceneSetupStep(DemoSceneBackend(), ['front_door'])
+        self.addCleanup(lambda: (step.editor.close_jobs(), step.deleteLater()))
+        self.assertEqual((step.lang, step.editor.lang), ('en', 'en'))
+        self.assertEqual(step.layoutDirection(), Qt.LayoutDirection.LeftToRight)
+        self.assertEqual(step.editor.primary.text(), 'Save & next')
+        with mock.patch.object(strings, 'LANG', 'he'):
+            hebrew = SceneSetupStep(DemoSceneBackend(), ['front_door'])
+            self.addCleanup(lambda: (hebrew.editor.close_jobs(), hebrew.deleteLater()))
+            self.assertEqual(hebrew.layoutDirection(), Qt.LayoutDirection.RightToLeft)
+            self.assertEqual(hebrew.editor.primary.text(), 'שמירה והמשך')
+
+    def test_the_map_has_its_own_step_in_setups_bar(self) -> None:
+        from home_guard_project.box.app import ui
+        from home_guard_project.box.app.setup_pages import Page
+        from home_guard_project.box.app.strings import TEXT
+        names = TEXT['step_names']
+        self.assertEqual(names[ui.MAP_STEP], 'Map')
+        self.assertEqual(names[-1], 'Ready')
+        fake = SimpleNamespace(step_labels=[QLabel() for _ in names], step_icons=[QLabel() for _ in names])
+        self.addCleanup(lambda: [w.deleteLater() for w in fake.step_labels + fake.step_icons])
+
+        def bar(index):
+            ui.Window.update_step_bar(fake, index)
+            return [(label.text(), not icon.isHidden()) for label, icon in zip(fake.step_labels, fake.step_icons)]
+        on_map = bar('map')
+        self.assertEqual(on_map[ui.MAP_STEP], ('6. Map', False))           # the current step
+        self.assertTrue(all(done for _text, done in on_map[:ui.MAP_STEP]))
+        self.assertEqual(on_map[-1], ('7. Ready', False))
+        self.assertEqual(bar(Page.CAMERA_CHECK)[Page.CAMERAS], ('5. Cameras', False))
+        self.assertTrue(all(done for _text, done in bar(Page.SUMMARY)))
+
+    def test_at_1366x768_the_open_card_fits_without_scrolling(self) -> None:
+        from home_guard_project.box.app.scene_setup_step import SceneSetupStep
+        for lang in ('en', 'he'):
+            with mock.patch('home_guard_project.box.app.strings.LANG', lang):
+                step = SceneSetupStep(DemoSceneBackend(), ['front_door', 'garden'])
+            from home_guard_project.box.app.theme import stylesheet
+            holder = QWidget(); holder.setStyleSheet(stylesheet()); step.setParent(holder)   # the app's look
+            holder.resize(1318, 561); step.resize(1318, 561); holder.show()    # the setup card at 1366x768
+            self.addCleanup(holder.deleteLater)
+            self.addCleanup(lambda step=step: (step.editor.close_jobs(), step.deleteLater()))
+            step.show_camera(0, start=False)                                 # as the demo does: no box job
+            editor = step.editor
+            se.drive(editor, 'wall')
+            self.assertTrue(wait_until(lambda: editor.compact), lang)       # laid out: a short screen
+            row = editor.region_rows[6]
+            self.assertTrue(wait_until(lambda: not row.side.isHidden()))
+            QTest.qWait(400)                                                 # the card settles, then scrolls into view
+            view = editor.region_scroll.viewport()
+            top = row.mapTo(view, row.rect().topLeft()).y()
+            bottom = row.side.mapTo(view, row.side.rect().bottomLeft()).y()
+            self.assertGreaterEqual(top, 0, lang)                           # the whole open card, header to the
+            self.assertLessEqual(bottom, view.height(), lang)               # side question, is in view
+
+
+class CameraCardTest(HebrewApp):
     def test_the_card_button_is_the_map(self) -> None:
         from home_guard_project.box.app.box_controls import BoxControls
         from home_guard_project.box.app.camera_controls import CameraControls

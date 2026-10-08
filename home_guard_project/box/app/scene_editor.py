@@ -32,6 +32,7 @@ from .scene_strings import language, st
 from .zone_editor import ZonePill, alpha, colors, polygon_path
 
 PANEL_WIDTH = 420
+COMPACT_BELOW = 700             # px of editor height: below it the answer cards go compact
 LOADING, EDIT, SUMMARY, SAVED, ERROR = range(5)
 REGIONS, DRAW, LINES = range(3)
 HANDLE = 12                      # px: how close a click must be to a corner or a line
@@ -636,13 +637,21 @@ class ChoiceButton(QAbstractButton):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setProperty('handlesMotion', True)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.compact = False
         self.setFixedHeight(52)
 
+    def set_compact(self, compact):
+        """One line, the hint as a tooltip: a short screen (setup at 1366x768) keeps the open card in view."""
+        self.compact = compact
+        self.setFixedHeight(40 if compact else 52)
+        self.setToolTip(self.hint if compact else '')
+        self.update()
+
     def sizeHint(self):
-        return QSize(170, 52)
+        return QSize(170, self.height())
 
     def minimumSizeHint(self):
-        return QSize(120, 52)
+        return QSize(80, self.height())
 
     def keyPressEvent(self, event):
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
@@ -661,6 +670,16 @@ class ChoiceButton(QAbstractButton):
         p.setPen(QPen(ring if on else QColor(t['action'] if keyboard_focus(self) else t['border']), 2 if on else 1))
         p.drawRoundedRect(rect, 14, 14)
         rtl = self.layoutDirection() == Qt.LayoutDirection.RightToLeft
+        if self.compact:
+            font = QFont(self.font()); font.setPixelSize(12 if self.width() < 100 else 13)
+            font.setWeight(QFont.Weight.DemiBold); p.setFont(font)
+            p.setPen(QColor(t['text']))
+            p.drawText(rect.adjusted(4, 0, -4, -3), Qt.AlignmentFlag.AlignCenter,
+                       p.fontMetrics().elidedText(self.text(), Qt.TextElideMode.ElideRight, int(rect.width() - 8)))
+            bar = QRectF(rect.left() + 12, rect.bottom() - 6, rect.width() - 24, 3)
+            p.setPen(QPen(alpha('#ffffff', .6), 1) if self.choice == "hide" else Qt.PenStyle.NoPen)
+            p.setBrush(swatch); p.drawRoundedRect(bar, 1.5, 1.5)
+            return
         dot = QRectF(rect.right() - 30 if rtl else rect.left() + 14, rect.center().y() - 8, 16, 16)
         p.setBrush(swatch); p.setPen(QPen(alpha('#ffffff', .7), 1.2) if self.choice == "hide" else Qt.PenStyle.NoPen)
         p.drawEllipse(dot)
@@ -813,18 +832,25 @@ class ItemRow(QFrame):
 
 
 class ChoiceGrid(QWidget):
-    """The four big answers, two by two."""
+    """The four big answers, two by two; on a short screen, four in a row."""
     picked = Signal(str)
 
-    def __init__(self, lang, parent=None):
+    def __init__(self, lang, parent=None, compact=False):
         super().__init__(parent)
-        grid = QGridLayout(self); grid.setContentsMargins(0, 0, 0, 0); grid.setSpacing(8)
+        self.grid = QGridLayout(self); self.grid.setContentsMargins(0, 0, 0, 0); self.grid.setSpacing(8)
         self.buttons = {}
-        for i, choice in enumerate(CHOICES):
+        for choice in CHOICES:
             button = ChoiceButton(choice, lang)
             button.clicked.connect(lambda checked=False, c=choice: self.picked.emit(c))
-            grid.addWidget(button, i // 2, i % 2)
             self.buttons[choice] = button
+        self.set_compact(compact)
+
+    def set_compact(self, compact):
+        for i, button in enumerate(self.buttons.values()):
+            self.grid.removeWidget(button)
+            button.set_compact(compact)
+            self.grid.addWidget(button, 0 if compact else i // 2, i if compact else i % 2)
+        self.grid.setSpacing(6 if compact else 8)
 
     def show_choice(self, choice):
         for c, button in self.buttons.items():
@@ -851,6 +877,8 @@ class WideChoice(ChoiceButton):
         rtl = self.layoutDirection() == Qt.LayoutDirection.RightToLeft
         x = rect.right() - 34 if rtl else rect.left() + 12
         y = rect.center().y()
+        if self.compact:
+            y = rect.center().y()
         for pen_colour, width in ((QColor(t['bg']), 6), (QColor('#ffffff'), 2.6)):
             p.setPen(QPen(pen_colour, width, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
             p.drawLine(QPointF(x, y + 7), QPointF(x + 22, y - 7))
@@ -858,6 +886,11 @@ class WideChoice(ChoiceButton):
         align = Qt.AlignmentFlag.AlignRight if rtl else Qt.AlignmentFlag.AlignLeft
         font = QFont(self.font()); font.setPixelSize(14); font.setWeight(QFont.Weight.DemiBold); p.setFont(font)
         p.setPen(QColor(t['text']))
+        if self.compact:
+            text = rect.adjusted(14, 0, -44, 0) if rtl else rect.adjusted(44, 0, -14, 0)
+            p.drawText(text, align | Qt.AlignmentFlag.AlignVCenter,
+                       p.fontMetrics().elidedText(self.text(), Qt.TextElideMode.ElideRight, int(text.width())))
+            return
         p.drawText(QRectF(text.left(), text.top(), text.width(), 22), align | Qt.AlignmentFlag.AlignVCenter,
                    p.fontMetrics().elidedText(self.text(), Qt.TextElideMode.ElideRight, int(text.width())))
         font.setPixelSize(12); font.setWeight(QFont.Weight.Normal); p.setFont(font)
@@ -878,7 +911,7 @@ class SideQuestion(QFrame):
         self.setStyleSheet(f'QFrame#sceneSide {{ background: {rgba(t["warning"], .08)}; border: 1px solid '
                            f'{rgba(t["warning"], .45)}; border-radius: 12px; }}'
                            f'QFrame#sceneSide QLabel {{ background: transparent; }}')
-        lay = QVBoxLayout(self); lay.setContentsMargins(12, 10, 12, 12); lay.setSpacing(8)
+        self.lay = lay = QVBoxLayout(self); lay.setContentsMargins(12, 10, 12, 12); lay.setSpacing(8)
         self.question = words('', 'body'); self.question.setStyleSheet(f'color: {t["text"]}; font-size: 11pt; font-weight: 600;')
         lay.addWidget(self.question)
         self.hint = words(st('side_hint', lang), 'muted'); lay.addWidget(self.hint)
@@ -887,11 +920,19 @@ class SideQuestion(QFrame):
         for side in ('left', 'right'):
             button = QPushButton(''); button.setCheckable(True); button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.setStyleSheet(f'QPushButton {{ background: {t["raised"]}; color: {t["text"]}; border: 1px solid {t["border"]}; '
-                                 f'border-radius: 12px; padding: 8px 10px; min-height: 20px; font-size: 10.5pt; font-weight: 600; }}'
+                                 f'border-radius: 12px; padding: 0 10px; min-height: 0; font-size: 10.5pt; font-weight: 600; }}'
                                  f'QPushButton:checked {{ border: 2px solid {t["action"]}; background: {rgba(t["action"], .14)}; }}')
             button.clicked.connect(lambda checked=False, side=side: self.picked.emit(side))
+            button.setFixedHeight(38)
             row.addWidget(button, 1); self.buttons[side] = button
         lay.addLayout(row)
+
+    def set_compact(self, compact):
+        self.hint.setVisible(not compact)
+        self.lay.setContentsMargins(*((10, 6, 10, 8) if compact else (12, 10, 12, 12)))
+        self.lay.setSpacing(6 if compact else 8)
+        for button in self.buttons.values():
+            button.setFixedHeight(32 if compact else 38)
 
     def ask(self, name, sides, chosen=''):
         self.question.setText(st('side_question', self.lang, name=name))
@@ -903,6 +944,15 @@ class RegionRow(ItemRow):
     answered = Signal(int, str)
     renamed = Signal(int, str)
     side_picked = Signal(int, str)
+
+    def set_compact(self, compact):
+        self.choices.set_compact(compact)
+        self.boundary.set_compact(compact)
+        self.side.set_compact(compact)
+        self.body_layout.setSpacing(6 if compact else 10)
+        self.root.setContentsMargins(*((10, 8, 10, 8) if compact else (12, 10, 12, 10)))
+        self.root.setSpacing(6 if compact else 10)
+        self.name.setFixedHeight(32 if compact else self.name.sizeHint().height())
 
     def __init__(self, number, lang, parent=None):
         self.number, self.lang = number, lang
@@ -957,6 +1007,9 @@ class HandRow(ItemRow):
     answered = Signal(int, str)
     renamed = Signal(int, str)
     deleted = Signal(int)
+
+    def set_compact(self, compact):
+        self.choices.set_compact(compact)
 
     def __init__(self, index, hand, lang, parent=None):
         self.index, self.lang, self.hand = index, lang, hand
@@ -1191,7 +1244,8 @@ class SceneMapEditor(QWidget):
         self.eyebrow = words(eyebrow.upper() if self.lang == 'en' else eyebrow, 'eyebrow'); side.addWidget(self.eyebrow)
         self.eyebrow.setVisible(not setup)              # setup says "camera 2 of 5" above, for the whole step
         # The camera's name, and at the end of its line "restore the previous map" with when it was replaced.
-        heading = QHBoxLayout(); heading.setSpacing(12)
+        self.heading = clear(QWidget()); heading = QHBoxLayout(self.heading)
+        heading.setContentsMargins(0, 0, 0, 0); heading.setSpacing(12)
         self.title = words(self.name, 'title'); heading.addWidget(self.title, 1)
         restore = QVBoxLayout(); restore.setSpacing(0); restore.setContentsMargins(0, 0, 0, 0)
         self.restore_button = TextAction(st('restore_button', self.lang))
@@ -1199,8 +1253,14 @@ class SceneMapEditor(QWidget):
         self.restore_when = words('', 'muted', wrap=False)
         restore.addWidget(self.restore_button); restore.addWidget(self.restore_when)
         self.restore_row = clear(QWidget()); self.restore_row.setLayout(restore)
+        self.restore_row.setStyleSheet(f'QWidget#sceneClear {{ background: transparent; }}'
+                                       f'QLabel {{ color: {t["muted"]}; font-size: 10pt; background: transparent; }}')
         heading.addWidget(self.restore_row, 0, Qt.AlignmentFlag.AlignVCenter)
-        side.addLayout(heading)
+        side.addWidget(self.heading)
+        # In setup the step's own header says which camera this is (and holds the restore action): more room
+        # for the open answer card.
+        self.heading.setVisible(not setup)
+        self.compact = False
         self.pages = QStackedWidget(); self.pages.setObjectName('sceneClear'); side.addWidget(self.pages, 1)
         # The pages take the room there is (setup is short at 1366x768); the quiet ones scroll when it is not enough.
         self.pages.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Ignored)
@@ -1238,6 +1298,19 @@ class SceneMapEditor(QWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self.panel.setFixedWidth(PANEL_WIDTH + (60 if self.width() >= 1500 else 0))
+        self.set_compact(self.height() < COMPACT_BELOW)
+
+    def set_compact(self, compact):
+        """A short screen (1366x768): answers on one line each, hints as tooltips, so the open card fits."""
+        if compact == self.compact:
+            return
+        self.compact = compact
+        self.regions_hint.setVisible(not compact)
+        for row in list(getattr(self, 'region_rows', {}).values()) + list(getattr(self, 'hand_rows', [])):
+            row.set_compact(compact)
+        lit = next((row for row in getattr(self, 'region_rows', {}).values() if row.lit), None)
+        if lit is not None:                     # the open card changed height: bring it back into view
+            self.reveal(lit)
 
     # --- building the panel ------------------------------------------------
     def build_loading(self, t):
@@ -1645,6 +1718,7 @@ class SceneMapEditor(QWidget):
         self.region_rows = {}
         for region in self.regions:
             row = RegionRow(region.number, self.lang)
+            row.set_compact(self.compact)
             row.selected.connect(lambda n=region.number: self.select_region(n))
             row.answered.connect(self.answer_region)
             row.renamed.connect(self.rename_region)
@@ -1653,6 +1727,7 @@ class SceneMapEditor(QWidget):
             self.region_rows[region.number] = row
         align_labels(self.region_scroll.widget())
         self.regions_hint.setText(st('regions_hint' if self.regions else 'regions_empty', self.lang))
+        self.regions_hint.setVisible(not self.compact or not self.regions)
         self.refresh_counts()
 
     def select_region(self, number):
@@ -1665,12 +1740,19 @@ class SceneMapEditor(QWidget):
             row.set_lit(n == number)
         row = self.region_rows.get(number)
         if row is not None:
-            QTimer.singleShot(0, lambda: self.show_region_row(row))
+            self.reveal(row)
+
+    def reveal(self, row):
+        """Show the open card once the layout has settled (now, and again after a resize or a new answer)."""
+        for delay in (0, motion.PANE_MS):
+            QTimer.singleShot(delay, row, lambda: self.show_region_row(row))     # dropped if the row is gone
 
     def show_region_row(self, row):
+        """The open card in view (its top first); "which side is ours?" with its two answers too."""
+        row.layout().activate(); self.region_scroll.widget().layout().activate()     # heights after any change
         show_row(self.region_scroll, row)
-        if row.side.isVisible():                 # "which side is ours?" must be in view, with its two answers
-            self.region_scroll.ensureWidgetVisible(row.side, 0, 8)
+        if row.side.isVisible():
+            self.region_scroll.ensureWidgetVisible(row.side, 0, 4)
 
     def answer_region(self, number, choice):
         if self.answers.get(number) == choice:
@@ -1683,12 +1765,12 @@ class SceneMapEditor(QWidget):
         walls = self.refresh_walls(); self.refresh_counts()
         if any(n == number and not sure for n, _line, sure, _w in walls):
             row = self.region_rows[number]       # stay: the row asks which side is ours
-            QTimer.singleShot(0, lambda: self.show_region_row(row))
+            self.reveal(row)
             return
         if number in self.answers:
             following = [r.number for r in self.regions if r.number > number and not self.answers.get(r.number)]
             if following:
-                QTimer.singleShot(motion.TOGGLE_MS, lambda n=following[0]: self.select_region(n))
+                QTimer.singleShot(motion.TOGGLE_MS, self, lambda n=following[0]: self.select_region(n))
 
     def rename_region(self, number, text):
         self.names[number] = text
@@ -1705,6 +1787,7 @@ class SceneMapEditor(QWidget):
         self.hand_rows = []
         for i, hand in enumerate(self.hands):
             row = HandRow(i, hand, self.lang)
+            row.set_compact(self.compact)
             row.selected.connect(lambda i=i: self.select_hand(i))
             row.answered.connect(self.answer_hand)
             row.renamed.connect(self.rename_hand)
@@ -1726,7 +1809,7 @@ class SceneMapEditor(QWidget):
             row.set_lit(i == index)
         if 0 <= index < len(self.hand_rows):
             row = self.hand_rows[index]
-            QTimer.singleShot(0, lambda: show_row(self.hand_scroll, row))
+            QTimer.singleShot(0, row, lambda: show_row(self.hand_scroll, row))
 
     def answer_hand(self, index, choice):
         self.hands[index].choice = choice
@@ -1954,7 +2037,7 @@ def point_at(stage, fraction):
         stage.pointer = stage.to_stage(fraction); stage.update()
     place()
     for delay in (100, 300, 600):
-        QTimer.singleShot(delay, place)
+        QTimer.singleShot(delay, stage, place)
 
 
 def drive(editor, state):

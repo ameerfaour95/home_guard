@@ -1,10 +1,9 @@
-"""Copy for the scene map editor, in Hebrew (the default) and English; keys stay stable, like strings.TEXT.
+"""Copy for the scene map editor, in Hebrew and English; keys stay stable, like strings.TEXT.
 
-The editor is the owner's: it speaks Hebrew unless the app is started with ``--lang en``. Read with
-``st(key, lang, **values)``.
+The editor speaks the app's language (``strings.LANG``, what setup and every other screen show), Hebrew right to
+left. ``--lang`` previews the other language of this editor only. Read with ``st(key, lang, **values)``.
 """
 
-DEFAULT_LANG = "he"
 LANGS = ("he", "en")
 
 TEXT = {
@@ -290,18 +289,20 @@ TEXT = {
 
 assert set(TEXT["en"]) == set(TEXT["he"]), "every key in both languages"
 
-_current = DEFAULT_LANG
+_preview = None
 
 
 def set_language(lang):
-    """The editor's language for this run (``--lang``); anything else keeps Hebrew."""
-    global _current
-    _current = lang if lang in LANGS else DEFAULT_LANG
+    """Preview the editor in *lang* for this run (``--lang``); None follows the app's language again."""
+    global _preview
+    _preview = lang if lang in LANGS else None
 
 
 def language():
-    return _current
+    """The app's language (strings.LANG), unless a preview asked for the other one."""
+    from .strings import LANG
+    return _preview or (LANG if LANG in LANGS else "en")
 
 
 def st(key, lang=None, **values):
-    return TEXT[lang if lang in LANGS else _current][key].format(**values)
+    return TEXT[lang if lang in LANGS else language()][key].format(**values)

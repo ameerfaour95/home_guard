@@ -68,6 +68,8 @@ class SceneSetupStep(QFrame):
         titles.addLayout(top)
         titles.addWidget(words(st('setup_hint', self.lang), 'body'))
         head.addLayout(titles, 1)
+        self.restore_slot = QHBoxLayout(); self.restore_slot.setContentsMargins(0, 0, 0, 0)
+        head.addLayout(self.restore_slot)
         self.dots = CameraDots(len(self.cameras)); head.addWidget(self.dots, 0, Qt.AlignmentFlag.AlignVCenter)
         self.skip_all = TextAction(st('setup_skip_all', self.lang)); head.addWidget(self.skip_all, 0, Qt.AlignmentFlag.AlignVCenter)
         self.skip_all.clicked.connect(self.skip_everything)
@@ -77,6 +79,13 @@ class SceneSetupStep(QFrame):
         if self.cameras:
             self.show_camera(0)
             self.jobs.submit(lambda: self.backend.names(self.lang), self.named, lambda exc: None)
+
+    def show_progress(self):
+        """"Camera 2 of 5 · the garden": where we are, and the box's name for the camera (never its id)."""
+        text = st('setup_eyebrow', self.lang, number=self.index + 1, total=len(self.cameras))
+        if self.editor is not None and self.editor.named_by_box:
+            text += '  ·  ' + self.editor.name
+        self.progress.setText(text)
 
     def named(self, names):
         """The box's names for its cameras: the one on screen takes its name unless the box already gave it."""
@@ -88,14 +97,18 @@ class SceneSetupStep(QFrame):
         if self.editor is not None:
             # Often called from inside the old editor's own button: it is deleted later, never under its feet.
             old, self.editor = self.editor, None
-            old.close_jobs(); old.hide(); self.body.removeWidget(old); old.deleteLater()
+            old.close_jobs(); old.hide(); self.body.removeWidget(old)
+            self.restore_slot.removeWidget(old.restore_row); old.restore_row.hide(); old.restore_row.deleteLater()
+            old.deleteLater()
         self.index = index
         camera = self.cameras[index]
         self.editor = SceneMapEditor(self.backend, camera, self.lang, setup=(index + 1, len(self.cameras)),
                                      placeholder=self.pictures.get(camera), name=self.names.get(camera, ''))
-        self.progress.setText(st('setup_eyebrow', self.lang, number=index + 1, total=len(self.cameras)))
         self.editor.finished.connect(self.camera_finished)
+        self.editor.name_changed.connect(lambda name: self.show_progress())
         self.body.addWidget(self.editor)
+        self.restore_slot.addWidget(self.editor.restore_row, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.show_progress()
         self.dots.states = [self.states.get(c) for c in self.cameras]; self.dots.current = index; self.dots.update()
         if start:
             self.editor.start()
@@ -171,7 +184,7 @@ def open_scene_step(window, demo_state=None):
     window.pages.setCurrentWidget(step)
     window.validation.setText('')
     window.back.hide(); window.next.hide()
-    window.update_step_bar(Page.CAMERA_CHECK)
+    window.update_step_bar("map")
 
     def leave(states):
         window.scene_states = states

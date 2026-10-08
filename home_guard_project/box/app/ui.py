@@ -40,6 +40,9 @@ from .theme import stylesheet
 STYLE = stylesheet()
 
 
+MAP_STEP = 5                # "Map" in TEXT["step_names"]
+
+
 def label(text, role=None):
     widget = QLabel(text)
     widget.setTextFormat(Qt.TextFormat.PlainText)
@@ -1517,7 +1520,9 @@ class Window(QMainWindow):
         )
 
     def update_step_bar(self,index):
-        current = Page.CAMERAS if index == Page.REVIEW else Page.PROGRESS if index == Page.CAMERA_CHECK else min(index,Page.PROGRESS)
+        # Steps: Connect..Cameras (the pages), Map (the map of each camera), Ready (the summary). The review, the
+        # setup run and the camera check finish the Cameras step; "map" is the map step (scene_setup_step).
+        current = MAP_STEP if index == "map" else Page.CAMERAS if index in (Page.REVIEW,Page.PROGRESS,Page.CAMERA_CHECK) else min(index,Page.CAMERAS)
         for i,(item,name) in enumerate(zip(self.step_labels,TEXT["step_names"])):
             done = i < current or index == Page.SUMMARY
             self.step_icons[i].setVisible(done)
