@@ -318,7 +318,8 @@ class AgentTest(unittest.TestCase):
             with self.subTest(settings=settings), \
                     patch("home_guard_project.box.brain.models.make_model", return_value=Scripted([])), \
                     patch("home_guard_project.box.brain.vision.make_vision", return_value=None), \
-                    patch("home_guard_project.box.embeddings.make_embedder", return_value=None):
+                    patch("home_guard_project.box.embeddings.make_embedder", return_value=None), \
+                    patch("home_guard_project.box.brain.agent._event_book", return_value=None):
                 agent, deliverer = build_owner_agent(settings, {}, None, Mock(), self.root, self.root, self.root)
                 self.assertIsNotNone(agent)
                 self.assertIsNotNone(deliverer)
@@ -451,7 +452,8 @@ class AgentTest(unittest.TestCase):
 
         with patch("home_guard_project.box.brain.models.make_model", return_value=Scripted([])), \
                 patch("home_guard_project.box.brain.vision.make_vision", return_value=Mock()), \
-                patch("home_guard_project.box.embeddings.make_embedder", return_value=None):
+                patch("home_guard_project.box.embeddings.make_embedder", return_value=None), \
+                patch("home_guard_project.box.brain.agent._event_book", return_value=None):
             with patch.object(find_cameras, "apply_changes") as apply:
                 agent, _ = build_owner_agent({}, {"OPENAI_API_KEY": "k"}, None, Mock(), self.root, self.root,
                                              self.root)

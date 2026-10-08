@@ -92,7 +92,7 @@ class ActToolsTest(unittest.TestCase):
                            book=ReceiptBook(os.path.join(self.root, ".receipts"), now=lambda: NOW))
 
     def test_every_tool_is_registered(self) -> None:
-        self.assertEqual(len(TOOLS), 22)
+        self.assertEqual(len(TOOLS), 24)        # + mark_known, recent_activity (2026-10-08)
 
     def test_quoted_from(self) -> None:
         self.assertTrue(quoted_from("stop until six", "it's me, stop until six please"))

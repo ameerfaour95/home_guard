@@ -21,14 +21,14 @@ _DIR = os.path.dirname(os.path.abspath(__file__))
 TOOLS_PATH = os.path.join(_DIR, "agent_tools_v2.json")
 PROMPTS_DIR = os.path.join(_DIR, "prompts")
 
-COMMON_TOOLS = ("find_events", "summarize_period", "ask_vision", "check_camera", "record_clip", "send_media",
-                "pause_alerts", "resume_alerts", "set_camera_active", "set_alias", "change_setting", "record_verdict",
-                "ask_clarification", "get_alert_settings", "set_alert_types", "set_sensitivity", "house_status",
+COMMON_TOOLS = ("find_events", "summarize_period", "ask_vision", "recent_activity", "check_camera", "record_clip",
+                "send_media", "pause_alerts", "resume_alerts", "set_camera_active", "set_alias", "change_setting",
+                "record_verdict", "mark_known", "ask_clarification", "get_alert_settings", "set_alert_types", "set_sensitivity", "house_status",
                 "house_state", "house_expect", "house_cancel", "reply")
 GUARD_TOOLS = COMMON_TOOLS[:2] + ("assess_event",) + COMMON_TOOLS[2:]
 ASSISTANT_TOOLS = COMMON_TOOLS[:2] + ("describe_event",) + COMMON_TOOLS[2:]
 STATE_TOOLS = ("pause_alerts", "resume_alerts", "set_camera_active", "set_alias", "change_setting", "record_verdict",
-               "set_alert_types", "set_sensitivity", "house_state", "house_expect", "house_cancel")
+               "mark_known", "set_alert_types", "set_sensitivity", "house_state", "house_expect", "house_cancel")
 PROMPT_VERSIONS = {"guard": "2026-10-03.guard.v1", "assistant": "2026-10-03.assistant.v1"}
 
 # Messages that go straight to the big model, decided in code (the fast model would have to judge its own
@@ -43,7 +43,10 @@ _BIG_WORDS_EN = re.compile(
     r"alert me about|alerts for|cars too|also vehicles|animals|sensitivity|sensitive|remember|"
     r"vacation|holiday|asleep|going to (?:bed|sleep)|we left|we" + _APOS + r"?(?:re| are) (?:back|up|home|leaving|away)|"
     r"expecting|"
-    r"(?:less|fewer|more) alerts)\b",
+    r"(?:less|fewer|more) alerts|"
+    # the owner says who is there (the Memory Keeper's mark_known: only the big model may save it)
+    r"(?:it|that)" + _APOS + r"?s (?:fine|ok|okay)|"
+    r"(?:those|these) are (?:my|our|the)|(?:they|those|these)" + _APOS + r"?re (?:my|our|the))\b",
     re.IGNORECASE)
 _BIG_WORDS_HE = ("תכבה", "תדליק", "תשתיק", "תפסיק", "עצור", "תמשיך", "תחזיר", "תשנה", "שנה", "תקרא", "טעות",
                  "שגוי", "לא נכון", "זה אני", "זה אנחנו", "אין אף אחד", "למה", "מעצבן", "לא עובד", "שפה",
@@ -54,7 +57,9 @@ _BIG_WORDS_HE = ("תכבה", "תדליק", "תשתיק", "תפסיק", "עצור
                  "תזכור", "תזכרי", "זכור", "תרשום", "תרשמי", "תקראי",
                  # house state the code did not parse ("we're off to Eilat till the weekend"): only the big model
                  # may change it
-                 "לישון", "ישנים", "יצאנו", "יוצאים", "חזרנו", "קמנו", "חופשה", "מצפים", "מחכים")
+                 "לישון", "ישנים", "יצאנו", "יוצאים", "חזרנו", "קמנו", "חופשה", "מצפים", "מחכים",
+                 # "זה בסדר" (the owner says who is there is says_known below: questions about workers stay fast)
+                 "זה בסדר")
 
 
 def hebrew_words(phrases: Sequence[str]) -> "re.Pattern[str]":
@@ -80,7 +85,7 @@ def needs_big(text: str, threaded: bool = False) -> bool:
         log.warning("Invalid message text; routing to the big model")
         return True
     return (bool(_BIG_WORDS_EN.search(text or "")) or bool(_CANCEL_HE.search(text or ""))
-            or bool(_BIG_HE.search(text or "")))
+            or bool(_BIG_HE.search(text or "")) or says_known(text or ""))
 
 
 # "Are there people near the pergola?" is about right now: a live look, not a search of the saved events
@@ -189,3 +194,35 @@ def system_prompt(mode: str, retention_days: float, tier: str = "big") -> str:
         return "\n\n".join(parts)
     except (OSError, ValueError, TypeError) as exc:
         raise RuntimeError(f"Cannot read system prompt from {PROMPTS_DIR}: {exc}") from exc
+
+
+# The owner says who the people are ("זה בסדר זה עובדים אצלי", "it's me", "זה הגנן"): the Memory Keeper's
+# mark_known, not a verdict (2026-10-07: "רשמתי את זה כהתרעה צפויה" and 142 more alerts about the same workers).
+_KNOWN_HE = re.compile(
+    r"(?<!\w)(?:זה|זאת|זו|אלה|אלו|הם|הן)\s+(?:\S+\s+){0,2}?ה?(?:עובדים|פועלים|גנן|שכן|שכנה|שכנים|"
+    r"מנקה|מנקים|ילדים|אשתי|בעלי|אמא|אבא|אני|אנחנו|משפחה|חברים|אורחים|שליח|מוכרים|מוכר)(?!\w)|"
+    r"(?<!\w)(?:עובדים|פועלים)\s+(?:אצלי|אצלנו|שלי|שלנו)(?!\w)|(?<!\w)אני\s+(?:\(\S+\)\s+)?יוצא(?!\w)")
+_KNOWN_EN = re.compile(
+    r"\b(?:it|that)" + _APOS + r"?s\s+(?:just\s+)?(?:me|us|my|our|the\s+(?:gardener|neighbou?rs?|workers|cleaner|kids))\b|"
+    r"\b(?:those|these|they)\s+(?:are|" + _APOS + r"re)\s+(?:just\s+)?(?:my|our|the)\s+"
+    r"(?:workers|gardener|neighbou?rs?|cleaners?|kids|family|guests|builders)\b|\bmy\s+workers\b", re.IGNORECASE)
+
+
+def says_known(text: str) -> bool:
+    """True when the message says who the people at a camera are (for mark_known); a question ("זה הגנן?") is not."""
+    return (isinstance(text, str) and "?" not in text
+            and bool(_KNOWN_HE.search(text) or _KNOWN_EN.search(text)))
+
+
+# "על איזה סרטון אתה מדבר?" (2026-10-07: answered twice with the same video and once as a verdict). The box answers
+# with the event being discussed, in code.
+_WHICH_EVENT = re.compile(
+    r"(?<!\w)(?:איזה|איזו|אילו)\s+(?:\S+\s+)?(?:סרטון|סירטון|וידאו|התרעה|התראה|הודעה|תזכורת|אירוע|תמונה)(?!\w)|"
+    r"(?<!\w)על\s+מה\s+(?:אתה\s+|את\s+)?(?:מדבר|מדברת|דיברת)(?!\w)|"
+    r"\b(?:which|what)\s+(?:\w+\s+)?(?:video|clip|alert|event|message|reminder)\b|"
+    r"\bwhat\s+are\s+you\s+talking\s+about\b", re.IGNORECASE)
+
+
+def asks_which_event(text: str) -> bool:
+    """True when the owner asks which video / alert the assistant means."""
+    return isinstance(text, str) and bool(_WHICH_EVENT.search(text))

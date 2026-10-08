@@ -26,7 +26,8 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 from ..alert_clips import PRE_SECONDS
 from ..archive import AlertRecord
-from ..feedback import MAX_MUTE_HOURS, VERDICTS, Feedback, MuteState, feedback_from_fields, save_feedback
+from ..feedback import (MAX_MUTE_HOURS, VERDICTS, Feedback, MuteState, feedback_from_fields, is_insult,
+                        is_question, not_a_judgement, save_feedback)
 from . import house, media
 from .aliases import normalize
 from .events import (
@@ -45,7 +46,7 @@ from .memory import ChatState
 from .media import bounds_text
 from .mode import GUARD, hhmm
 from .receipts import DONE, FAILED, REQUESTED, Receipt, ReceiptBook
-from .registry import HouseSnapshot, Resolution, resolve_camera
+from .registry import HouseSnapshot, Resolution, current_camera, display, resolve_camera
 from .vision import QUALITIES, VISION_VERSION
 
 log = logging.getLogger("box.brain.tools")
@@ -85,6 +86,7 @@ class Services:
     read_settings: Optional[Callable[[], Dict[str, Any]]] = None
     alert_settings: Any = None
     house: Any = None          # house_state.HouseStateStore: the one writer of the house state (brain/house.py)
+    events: Any = None         # events.EventBook: sessions per camera and the owner's "these are my workers"
 
 
 @dataclass
@@ -791,6 +793,12 @@ def record_verdict(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     if not quoted_from(str(args.get("owner_words") or ""), ctx.text):
         return _err("Not saved: owner_words must quote the owner's judgement from this message (two words or "
                     "more). If the message only points at an event, ask what they want to say about it.")
+    if (not_a_judgement(str(args.get("owner_words") or "")) or is_insult(ctx.text)
+            or (is_question(ctx.text) and not ctx.threaded)):
+        # 2026-10-07: "על איזה סרטון דיברת", "יא מטומטם" and "די עם ההודעה" were each filed as a verdict.
+        return _err("Not saved: a question, a complaint or a command is not a judgement of the alert. Answer what "
+                    "the owner asked or said; if they ask which alert you meant, name it (time, camera, what was "
+                    "seen).")
     feedback = Feedback(verdict=verdict, note=str(args.get("note") or "")[:300])
     save_feedback(ctx.services.feedback_dir, _alert_of(entry), feedback, ctx.text, ctx.speaker, ctx.chat_id,
                   ctx.services.now())
@@ -857,7 +865,10 @@ def _alias_photo(ctx: ToolContext, camera: str, alias: str) -> bool:
         shot = ctx.services.grab_photo(camera)
         if not isinstance(shot, dict) or shot.get("error") or not isinstance(shot.get("image"), str):
             return False
-        sent = _service_result(ctx.services.deliver.photo(ctx.chat_id, shot["image"], caption=f"{camera} = {alias}"))
+        from .render import _name_before  # noqa: PLC0415 - the camera by its other name, never its id
+
+        label = _name_before(ctx.snapshot, camera, alias, ctx.lang)
+        sent = _service_result(ctx.services.deliver.photo(ctx.chat_id, shot["image"], caption=f"{label} = {alias}"))
         return bool(sent.get("ok"))
     except Exception as exc:  # noqa: BLE001
         log.warning("Alias photo of %s not sent: %s", camera, exc)
@@ -1310,6 +1321,189 @@ def house_status(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
                                                   "type status to see them."}
 
 
+# -- the Memory Keeper: "these are my workers" (events.EventBook.mark_known) ------------------------------------
+# 2026-10-07: "זה בסדר זה עובדים אצלי שעובדים על הפרגולה" was answered "רשמתי את זה כהתרעה צפויה" and 142 more
+# alerts about the same workers followed. The owner's words about who is there now silence that camera's
+# "suspicious" alerts (never an escalation) until a time, with a receipt the code writes and a Cancel button.
+KNOWN_NOW_SEC = 3600.0
+KNOWN_WEEK_SEC = 7 * 86400.0
+_KNOWN_NOW = ("now", "only now", "just now", "hour", "an hour", "1h", "עכשיו", "רק עכשיו", "רק כרגע", "כרגע", "שעה")
+_KNOWN_WEEK = ("week", "all week", "this week", "7d", "שבוע", "כל השבוע", "השבוע")
+_KNOWN_TODAY = ("today", "all day", "end of day", "היום", "כל היום")
+_KNOWN_TOMORROW = ("tomorrow", "מחר", "עד מחר")
+
+
+def end_of_day(now: float, days: int = 0) -> float:
+    day = dt.datetime.fromtimestamp(now) + dt.timedelta(days=days)
+    return day.replace(hour=23, minute=59, second=0, microsecond=0).timestamp()
+
+
+def known_until(value: Any, now: float) -> float:
+    """When the owner's "they are known" ends: what they said ("only now" = an hour, "all week" = 7 days, a time or
+    a date), by default the end of today (23:59 local; an hour when today is already over). Raises ValueError."""
+    text = " ".join(str(value or "").strip().lower().split())
+    if text in _KNOWN_NOW:
+        return now + KNOWN_NOW_SEC
+    if text in _KNOWN_WEEK:
+        return now + KNOWN_WEEK_SEC
+    if text in _KNOWN_TOMORROW:
+        return end_of_day(now, 1)
+    if not text or text in _KNOWN_TODAY:
+        until = end_of_day(now)
+        return until if until > now + 60 else now + KNOWN_NOW_SEC
+    until = _until_arg(text, now)
+    if until is None or until <= now:
+        raise ValueError("until must be in the future")
+    return until
+
+
+def until_text(until: float, now: float, lang: str) -> str:
+    """"23:59" today, "יום ה' 15.10 18:00" / "Thu 15.10 18:00" on another day."""
+    day = dt.datetime.fromtimestamp(until)
+    if day.date() == dt.datetime.fromtimestamp(now).date():
+        return day.strftime("%H:%M")
+    if str(lang).startswith("he"):
+        names = ("ב'", "ג'", "ד'", "ה'", "ו'", "שבת", "א'")   # Monday first, as datetime.weekday()
+        head = names[day.weekday()]
+        head = head if head == "שבת" else f"יום {head}"
+        return f"{head} {day.strftime('%d.%m %H:%M')}"
+    return day.strftime("%a %d.%m %H:%M")
+
+
+def in_place(name: str, lang: str) -> str:
+    """*name* after the Hebrew "ב" ("ב" + "הפרגולה" is "בפרגולה")."""
+    name = str(name or "").strip()
+    if str(lang).startswith("he") and len(name) > 2 and name.startswith("ה"):
+        return name[1:]
+    return name
+
+
+def _said(quote: Any, text: str) -> bool:
+    """*quote* is a run of whole words of *text* (one word is enough: "it's me" is all filler words)."""
+    q, words = _words(quote), _words(text)
+    return bool(q) and any(words[i:i + len(q)] == q for i in range(len(words) - len(q) + 1))
+
+
+def _known_camera(ctx: ToolContext, words: Any) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+    """The camera the owner's "they are known" is about: the one named, else the replied-to alert's camera (after a
+    rename too), else the camera being discussed, else the owner is asked with a button per camera."""
+    if words is not None and str(words).strip():
+        return _one_camera(ctx, words)
+    entry = ctx.state.resolve(str(ctx.alert_handle or "")) if ctx.alert_handle else None
+    if isinstance(entry, dict) and entry.get("camera"):
+        camera = current_camera(ctx.snapshot, str(entry["camera"]))
+        if camera:
+            return camera, None
+    return _camera_or_topic(ctx, None)
+
+
+def known_line(receipt: Receipt, lang: str, snapshot: Any = None) -> str:
+    """The keeper's receipt, written by code (never by the model)."""
+    d = receipt.detail
+    camera = in_place(display(snapshot, str(d.get("camera") or receipt.target), lang), lang)
+    until = until_text(_finite(d["until_ts"]), _finite(d.get("at") or receipt.ts or time.time()), lang)
+    return t("known_saved", lang, camera=camera, who=str(d.get("who") or ""), until=until)
+
+
+def known_rows(receipts: Sequence[Receipt], lang: str) -> Tuple[Tuple[Tuple[str, str], ...], ...]:
+    """[ביטול] [כל השבוע] under each saved "they are known" (callbacks ``kn:x:<id>`` / ``kn:w:<id>``)."""
+    rows = []
+    for r in receipts:
+        known_id = str(r.detail.get("known_id") or "") if isinstance(r.detail, dict) else ""
+        if r.tool == "mark_known" and r.status == DONE and known_id:
+            rows.append(((t("known_cancel_button", lang), f"kn:x:{known_id}"),
+                         (t("known_week_button", lang), f"kn:w:{known_id}")))
+    return tuple(rows)
+
+
+@_safe_tool
+def mark_known(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+    book = ctx.services.events
+    if book is None:
+        return _err("the box's event book is not available; tell the owner it was not saved")
+    who = " ".join(str(args.get("who") or "").split())[:120]
+    if not who:
+        return _err("who: who the people are, in the owner's words (\"the workers\", \"Ameer\")")
+    if not _said(args.get("owner_words"), ctx.text):
+        return _err("Not saved: owner_words must be copied exactly from this message.")
+    camera, bad = _known_camera(ctx, args.get("camera"))
+    if bad:
+        return bad
+    now = _finite(ctx.services.now())
+    try:
+        until = known_until(args.get("until"), now)
+    except ValueError as exc:
+        return _err(str(exc))
+    detail: Dict[str, Any] = {"camera": camera, "who": who, "until_ts": until, "at": now}
+    try:
+        saved = book.mark_known(camera, who, by=str(ctx.speaker.get("name") or "owner"), until=until, now=now)
+    except ValueError as exc:
+        log.warning("mark_known refused: %s", exc)
+        return _result(_issue(ctx, "mark_known", FAILED, camera, detail, "error"))
+    detail.update(known_id=str(saved.get("id") or ""), people=int(saved.get("people") or 0))
+    entry = ctx.state.resolve(str(ctx.alert_handle or "")) if ctx.alert_handle else None
+    if isinstance(entry, dict) and entry.get("kind") == "event":
+        # Said in reply to an alert: that alert was expected activity too (the owner's verdict, for training).
+        try:
+            save_feedback(ctx.services.feedback_dir, _alert_of(entry), Feedback(verdict="expected", note=who),
+                          ctx.text, ctx.speaker, ctx.chat_id, now)
+            ctx.saved += 1
+            detail["verdict_filed"] = str(ctx.alert_handle)
+        except Exception as exc:  # noqa: BLE001 - the keeper's note is saved; the verdict is extra
+            log.warning("Expected verdict not saved with the keeper's note: %s", exc)
+    receipt = _issue(ctx, "mark_known", DONE, camera, detail)
+    return _result(receipt, until=dt.datetime.fromtimestamp(until).isoformat(timespec="minutes"),
+                   note="The box writes the confirmation; reply with an empty answer.")
+
+
+def session_text(session: Dict[str, Any], snapshot: Any, lang: str, now: float) -> Dict[str, Any]:
+    """One event (a camera's session) as the model reads it: names and HH:MM, never ids or epoch seconds."""
+    observations = [o for o in session.get("observations") or [] if isinstance(o, dict)]
+    closed = float(session.get("closed") or 0.0)
+    end = closed or float(session.get("last_active") or session.get("opened") or now)
+    return {
+        "camera": display(snapshot, str(session.get("camera") or ""), lang),
+        "from": hhmm(float(session.get("opened") or now)),
+        "to": hhmm(end) if closed else f"{hhmm(end)} (still going on)",
+        "most_people": int(session.get("people_max") or 0),
+        "told_the_owner": str(session.get("reported_level") or "none") != "none",
+        "seen": [{"at": hhmm(float(o.get("ts") or 0)), "label": str(o.get("label") or ""),
+                  "people": int(o.get("people") or 0), "what": str(o.get("summary") or "")[:300]}
+                 for o in observations[-5:]],
+        "owner_said": [{"who": str(k.get("text") or ""), "until": hhmm(float(k.get("until") or 0))}
+                       for k in session.get("known") or [] if isinstance(k, dict)],
+    }
+
+
+@_safe_tool
+def recent_activity(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+    book = ctx.services.events
+    if book is None:
+        return _err("the box's event history is not available; use find_events")
+    now = _finite(ctx.services.now())
+    camera = ""
+    if str(args.get("camera") or "").strip():
+        camera, bad = _one_camera(ctx, args["camera"])
+        if bad:
+            return bad
+    start = str(args.get("time_from") or "").strip()
+    if re.fullmatch(r"\d{1,2}:\d{2}", start):
+        since = house.next_at(now, start.zfill(5)) - 86400.0       # the last time the clock read that
+    else:
+        minutes = args.get("minutes")
+        minutes = 60.0 if minutes in (None, "") else min(1440.0, max(1.0, _finite(minutes)))
+        since = now - minutes * 60.0
+    rows = book.recent(since, camera)
+    known = [{"camera": display(ctx.snapshot, str(k["camera"]), ctx.lang) if k.get("camera") else "all cameras",
+              "who": str(k.get("text") or ""), "until": hhmm(float(k.get("until") or now))}
+             for k in book.list_known(now) if not camera or not k.get("camera") or k.get("camera") == camera]
+    return {"ok": True, "since": hhmm(since), "events": [session_text(r, ctx.snapshot, ctx.lang, now)
+                                                        for r in rows[-10:]],
+            "owner_said": known,
+            "note": "Events are per camera: who was there, from when to when, what the vision model saw. "
+                    "For what is happening at this moment, also look live with check_camera."}
+
+
 TOOLS: Dict[str, Callable[[ToolContext, Dict[str, Any]], Dict[str, Any]]] = {
     "find_events": find_events,
     "summarize_period": summarize_period,
@@ -1333,4 +1527,6 @@ TOOLS: Dict[str, Callable[[ToolContext, Dict[str, Any]], Dict[str, Any]]] = {
     "house_expect": house_expect,
     "house_cancel": house_cancel,
     "house_status": house_status,
+    "mark_known": mark_known,
+    "recent_activity": recent_activity,
 }
