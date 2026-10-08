@@ -95,6 +95,7 @@ class Event(Base):
         Index("ix_events_completeness", "completeness", postgresql_using="gin"),
         Index("ix_events_search", "search", postgresql_using="gin"),
         Index("ix_events_search_redacted", "search_redacted", postgresql_using="gin"),
+        Index("ix_events_device_session", "device_pk", "session_id"),
     )
     id: Mapped[int] = mapped_column(primary_key=True)
     device_pk: Mapped[int] = mapped_column(ForeignKey("devices.id", ondelete="CASCADE"))
@@ -130,6 +131,11 @@ class Event(Base):
     search_redacted: Mapped[Optional[Any]] = mapped_column(
         postgresql.TSVECTOR, Computed("to_tsvector('simple', coalesce(summary_redacted,''))", persisted=True),
         nullable=True)
+    # the box's event layer (fleet_contract.event_outcome): its session, what it did with the clip and why, and
+    # whether the baseline in shadow mode would have raised it; decision NULL = not parsed yet (indexer backfills)
+    session_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    decision: Mapped[Optional[Any]] = mapped_column(JSONType, nullable=True)
+    would_raise: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
 
 
 class Artifact(Base):

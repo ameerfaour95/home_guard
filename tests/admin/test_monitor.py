@@ -60,7 +60,7 @@ def test_camera_names_follow_the_box_rule_never_the_raw_id():
     assert camera_name('front_door') == 'Front door' and camera_name('cam-abcdef') == 'cam-abcdef'
     try:
         remember_names({'ameer_week_0_1_ch1': 'כניסה ראשית', 'ameer_week_0_1_ch2': ''})
-        assert camera_name('ameer_week_0_1_ch1') == 'כניסה ראשית'
+        assert camera_name('ameer_week_0_1_ch1') == '\u2068כניסה ראשית\u2069'  # isolated: never flips a line
         assert camera_name('ameer_week_0_1_ch2') == 'Camera 2'
         # exact ids only: another house's (or an old site's) ch1 never borrows this name
         assert camera_name('other_house_ch1') == 'Camera 1'
@@ -93,7 +93,7 @@ def test_customer_page_lists_current_cameras_and_hides_retired_behind_a_toggle(w
         screen.tabs.setCurrentWidget(timeline)
         combo = timeline.filters['camera']
         assert list(timeline.density.rows) == ['Driveway', 'Front door']
-        assert [combo.itemText(i) for i in range(combo.count())] == ['All cameras', 'Driveway', 'כניסה ראשית']
+        assert [combo.itemText(i).strip('\u2068\u2069') for i in range(combo.count())] == ['All cameras', 'Driveway', 'כניסה ראשית']
         assert timeline.retired_toggle.isVisibleTo(screen)
         timeline.retired_toggle.setChecked(True)
         assert list(timeline.density.rows) == ['Driveway', 'Front door', 'Garden']
@@ -169,8 +169,6 @@ def test_overview_says_how_the_house_is_its_cameras_and_retired_ids(widgets, wai
     assert any('Last heard 3 h ago  —  Check the box has power and internet.' in w for w in overview.warnings)
     assert [name for name, _ in overview.camera_rows] == ['Driveway', 'כניסה ראשית']
     assert overview.retired_rows and overview.retired_rows[0].startswith('Garden')
-    chat = screen.tabs.widget([screen.tabs.tabText(i) for i in range(screen.tabs.count())].index('Chat'))
-    assert any('arrives when the box uploads its chat log' in w.text() for w in chat.findChildren(type(overview.status)))
 
 
 def test_overview_status_and_old_site_names():
@@ -186,3 +184,223 @@ def test_overview_status_and_old_site_names():
     assert status_sentence([warned], [cam], now) == 'Ameer Week 0 1: No clip for 30 h from Camera 2 — check it has power and network'
     assert status_sentence([], None, now) == 'No box is enrolled for this customer yet.'
     assert old_site('ameer_tes2_ch6') == 'Ameer tes2' and old_site('front_door') == ''
+
+
+def test_chat_tab_loads_only_when_opened_and_shows_the_conversation(widgets, wait):
+    from PySide6.QtWidgets import QLabel
+    from home_guard_project.admin.customer import CustomerScreen
+    calls = []
+
+    class Counting(DemoBackend):
+        def chat(self, customer_id, day=None, q=None):
+            calls.append((customer_id, day, q)); return super().chat(customer_id, day, q)
+    screen = CustomerScreen(Counting()); widgets.append(screen)
+    screen.resize(1182, 688); screen.show(); screen.open(1)
+    wait(lambda: screen.customer is not None)
+    assert calls == []  # opening a customer never reads (or audits) the chat
+    screen.tabs.setCurrentWidget(screen.chat)
+    chat = screen.chat
+    wait(lambda: bool(chat.bubbles) and not chat.image_runner.busy and not chat.pending_images)
+    assert calls == [(1, None, None)] and chat.day.currentText() == chat.result.day
+    lines = [b.line for b in chat.bubbles]
+    assert [line.kind for line in lines] == ['alert', 'button', 'answer', 'alert']
+    texts = [w.text() for w in chat.list.findChildren(QLabel)]
+    assert 'Pressed: It was expected' in texts and any(t.startswith('Not delivered to the owner') for t in texts)
+    assert any(w.pixmap() and not w.pixmap().isNull() for w in chat.list.findChildren(QLabel))  # the alert pictures
+    chat.search.setText('gate'); chat.search.returnPressed.emit()
+    wait(lambda: not chat.runner.busy and calls[-1] == (1, None, 'gate'))
+    wait(lambda: [b.line.who for b in chat.bubbles] == ['owner'])
+    assert chat.clear_search.isVisibleTo(chat) and 'match' in chat.status.text()
+    screen.tabs.setCurrentIndex(0); screen.tabs.setCurrentWidget(chat)
+    assert len(calls) == 2  # coming back to the tab does not read it again
+
+
+def test_launcher_starts_the_app_with_a_windowless_interpreter(tmp_path):
+    """uv's .venv\Scripts\pythonw.exe is a console launcher (a terminal opened behind the app); the launcher runs the
+    base interpreter's real pythonw.exe on admin/windowless.py, which must start the app with the venv's packages."""
+    import os
+    import struct
+    import subprocess
+    import sys
+    from pathlib import Path
+    repo = Path(__file__).resolve().parents[2]
+    script = (repo / 'home_guard_project' / 'cloud' / 'launch_admin.ps1').read_text(encoding='utf-8')
+    assert 'windowless.py' in script and '"-I"' in script and '.venv\Scripts\pythonw.exe"' not in script
+    if sys.platform != 'win32':
+        pytest.skip('Windows launcher')
+    home = Path(sys._base_executable).parent
+    data = (home / 'pythonw.exe').read_bytes()
+    pe = struct.unpack_from('<I', data, 0x3C)[0]
+    assert struct.unpack_from('<H', data, pe + 0x5C)[0] == 2  # IMAGE_SUBSYSTEM_WINDOWS_GUI: no console
+    env = {k: v for k, v in os.environ.items() if k not in ('SSLKEYLOGFILE', 'PYTHONSTARTUP', 'PYTHONPATH')}
+    env['HG_ADMIN_VENV'] = sys.prefix
+    result = subprocess.run([str(home / 'python.exe'), '-I', str(repo / 'home_guard_project' / 'admin' / 'windowless.py'),
+                             '--demo', '--smoke-test'], cwd=tmp_path, env=env, capture_output=True, timeout=60)
+    assert result.returncode == 0, result.stderr.decode(errors='replace')[-2000:]
+
+
+def test_a_camera_the_owner_switched_off_reads_off_by_the_owner(widgets, wait):
+    from home_guard_project.admin.customer import CustomerScreen
+    from home_guard_project.admin.formatting import camera_name
+
+    class OffBackend(DemoBackend):
+        def cameras(self, customer_id=None):
+            return [replace(c, current=False, enabled=False, name='Pool') if c.camera == 'Garden' else c
+                    for c in super().cameras(customer_id)]
+    screen = CustomerScreen(OffBackend()); widgets.append(screen); screen.show(); screen.open(1)
+    wait(lambda: screen.camera_list is not None)
+    assert ('Pool', 'switched off') in screen.overview.camera_rows
+    assert not any(row.startswith('Pool') for row in screen.overview.retired_rows)
+    assert camera_name('Garden') == 'Pool (off by the owner)'
+
+
+class RenamedSiteBackend(DemoBackend):
+    """Demo customer 1's 'cedar_guest_house' box is an old site name of 'cedar_house' (one box, renamed)."""
+    def _mark(self, device):
+        if device.site == 'cedar_guest_house':
+            device.replaced_by, device.replaced_by_site = 'dev-cedar', 'cedar_house'
+        if device.site == 'cedar_house':
+            device.old_sites = ['cedar_guest_house']
+        return device
+
+    def fleet(self):
+        result = super().fleet(); result.devices = [self._mark(d) for d in result.devices]; return result
+
+    def customer(self, id):
+        result = super().customer(id); result.devices = [self._mark(d) for d in result.devices]; return result
+
+
+def test_fleet_shows_one_row_per_box_with_its_old_site_names(widgets, wait):
+    from home_guard_project.admin.fleet import FleetScreen
+    from PySide6.QtCore import Qt
+    screen = FleetScreen(RenamedSiteBackend()); widgets.append(screen); screen.show()
+    wait(lambda: screen.snapshot is not None)
+    sites = [d.site for d in screen.model.rows]
+    assert 'cedar_guest_house' not in sites and len(sites) == len(screen.snapshot.devices) - 1
+    assert screen.summary.text().startswith(f'{len(sites)} boxes')
+    row = sites.index('cedar_house')
+    assert screen.model.index(row, 0).data().endswith('·  was Cedar Guest House')
+    screen.filter(query='guest house')
+    assert [d.site for d in screen.model.rows] == ['cedar_house']
+
+
+def test_customer_page_never_warns_about_an_old_site_name(widgets, wait):
+    from home_guard_project.admin.customer import CustomerScreen
+    screen = CustomerScreen(RenamedSiteBackend()); widgets.append(screen); screen.show(); screen.open(1)
+    wait(lambda: screen.camera_list is not None)
+    assert 'Cedar Guest House' not in screen.health.text() and screen.health.text().startswith('Cedar House')
+    assert not any('Cedar Guest House' in w for w in screen.overview.warnings)
+    assert not screen.overview.status.text().startswith('Cedar Guest House')
+
+
+class SessionBackend(DemoBackend):
+    """Demo 'Front door' clips are one box session; the newest was sent, the rest kept in the event."""
+    def events(self, **filters):
+        page = super().events(**{k: v for k, v in filters.items() if k != 'would_raise'})
+        door = sorted((e for e in page.items if e.camera == 'Front door'), key=lambda e: e.start_utc, reverse=True)
+        for i, e in enumerate(door):
+            e.session_id = 'door-session'
+            e.outcome_code, e.outcome = ('sent', 'Sent') if i == 0 else ('held', 'Kept in the event, not sent (normal)')
+            e.would_raise = i == 1
+        if filters.get('would_raise'):
+            page.items = [e for e in page.items if e.would_raise]
+        return page
+
+    def event_sessions(self, session_ids):
+        from home_guard_project.admin.models import EventSession
+        door = [e for e in DemoBackend.events(self, limit=500).items if e.camera == 'Front door']
+        return [EventSession('door-session', 'cedar_house', 'Front door', min(e.start_utc for e in door),
+                             max(e.start_utc for e in door), 32, 1)]
+
+
+def test_clips_of_one_event_are_one_expandable_row(widgets, wait):
+    from home_guard_project.admin.timeline import TimelineScreen
+    from home_guard_project.admin.timeline_model import HEADERS, MEMBER
+    screen = TimelineScreen(SessionBackend()); widgets.append(screen); screen.resize(1120, 600); screen.show()
+    screen.open(1, 'Asia/Jerusalem')
+    wait(lambda: bool(screen.model.rows) and ('cedar_house', 'door-session') in screen.model.sessions)
+    model, table = screen.model, screen.table
+    rows = [i for i, e in enumerate(model.rows) if e.session_id]
+    lead, members = rows[0], rows[1:]
+    assert model.lead(lead) and all(table.isRowHidden(i) for i in members) and not table.isRowHidden(lead)
+    text = model.index(lead, 1).data().split('\n')[0]
+    assert text.startswith('+ 32 clips  ·  Front door') and '1 message sent' in text
+    assert model.index(lead, HEADERS.index('AI decision')).data() == 'Sent'
+    # j / k skip the hidden clips of a collapsed event
+    table.setCurrentIndex(model.index(lead, 0))
+    nxt = screen.next_row(lead, 1)
+    assert nxt not in members and not table.isRowHidden(nxt)
+    screen.toggle_group(lead)
+    assert not any(table.isRowHidden(i) for i in members) and model.index(lead, 1).data().startswith('−')
+    assert model.index(members[0], 1).data().startswith(MEMBER)
+    header = table.verticalHeader()  # an open event's clips sit right under it, newest first
+    assert [header.visualIndex(i) for i in members] == [header.visualIndex(lead) + 1 + n for n in range(len(members))]
+    assert screen.next_row(lead, 1) == members[0] and screen.next_row(members[0], -1) == lead
+    assert model.index(members[0], HEADERS.index('AI decision')).data() == 'Kept in the event, not sent (normal)'
+    screen.group_toggle.setChecked(False)
+    assert not any(table.isRowHidden(i) for i in range(len(model.rows)))
+    assert all(header.visualIndex(i) == i for i in range(len(model.rows)))  # back to time order
+    screen.group_toggle.setChecked(True); screen.toggle_group(lead, False)
+    screen.reveal(members[-1])
+    assert not table.isRowHidden(members[-1])
+    combo = screen.filters['would_raise']
+    combo.setCurrentIndex(combo.findData(True)); wait(lambda: not screen.runner.busy)
+    assert [e.would_raise for e in model.rows] == [True]
+
+
+def test_every_chat_line_kind_renders(widgets, wait):
+    """The kinds in the live chat files: alert, the box's video, owner message and button, assistant answer, photo,
+    video (plus voice, should the box mark it): each says what it is, never a raw file name."""
+    from datetime import datetime, timezone
+    from PySide6.QtWidgets import QLabel
+    from home_guard_project.admin.chat_view import ChatView
+    from home_guard_project.admin.models import ChatDay, ChatLine
+
+    at = datetime(2026, 10, 7, 8, 32, tzinfo=timezone.utc)
+
+    def line(who, kind, text='', camera_name='', **kw):
+        return ChatLine(at, 'ameer_week_0_1', who, kw.get('name', ''), kind, text, 'x' if camera_name else '',
+                        camera_name, '', kw.get('image', ''), kw.get('delivered', True), kw.get('error', ''))
+
+    class Lines(DemoBackend):
+        def chat(self, customer_id, day=None, q=None):
+            return ChatDay('2026-10-07', ['2026-10-07'], [
+                line('box', 'alert', 'Looks normal · כניסה ראשית', 'כניסה ראשית'),
+                line('box', 'video', 'Video of the alert', 'כניסה ראשית'),
+                line('owner', 'button', '✏️ Other…', 'כניסה ראשית', name='Hello_24'),
+                line('owner', 'voice', 'a man in black', name='Hello_24'),
+                line('assistant', 'answer', 'Write the correct tag for this clip.'),
+                line('assistant', 'photo', '', 'Camera 2'),
+                line('assistant', 'video', '', 'כניסה ראשית', delivered=False, error='Bad Request')])
+    view = ChatView(Lines()); widgets.append(view); view.resize(1000, 700); view.show()
+    view.open(1, 'Asia/Jerusalem'); view.ensure_loaded()
+    wait(lambda: len(view.bubbles) == 7)
+    texts = [w.text() for w in view.list.findChildren(QLabel)]
+    for expected in ('Video of the alert', 'Pressed: ✏️ Other…', 'Voice message, transcribed: a man in black',
+                     'Sent a photo from Camera 2', 'Sent a video from כניסה ראשית',
+                     'Not delivered to the owner: Bad Request', 'ALERT · כניסה ראשית'):
+        assert expected in texts, expected
+    assert '(no text)' not in texts
+
+
+def test_kind_and_decision_agree_and_the_outcome_reads_in_full(widgets, wait):
+    from dataclasses import replace as copy
+    from PySide6.QtGui import QFont, QFontMetrics
+    from home_guard_project.admin.event_logic import kind_label, two_lines
+    from home_guard_project.admin.timeline_model import HEADERS
+    base = DemoBackend().events(limit=1).items[0]
+    assert kind_label(copy(base, kind='false_positive', outcome_code='held')) == 'Event'   # not "Dismissed by AI"
+    assert kind_label(copy(base, kind='alert', outcome_code='known')) == 'Event'
+    assert kind_label(copy(base, kind='alert', outcome_code='sent')) == 'Alert'
+    assert kind_label(copy(base, kind='trigger', outcome_code='held')) == 'Collected'
+    assert kind_label(copy(base, kind='false_positive', outcome_code=None)) == 'Dismissed by AI'  # before events
+    metrics = QFontMetrics(QFont('Segoe UI', 9))
+    text = 'Kept in the event, not sent (normal)'
+    assert ' '.join(two_lines(metrics, text, 210)) == text  # the decision column at 1366x768: whole, on two lines
+    long = 'Lowered: appearance only  ·  Not sent: owner said known (the workers on the pergola until five)'
+    shown = two_lines(metrics, long, 210)
+    assert len(shown) == 2 and shown[1].endswith('…')
+    from home_guard_project.admin.timeline import TimelineScreen
+    screen = TimelineScreen(SessionBackend()); widgets.append(screen); screen.resize(1100, 600); screen.show()
+    screen.open(1, 'Asia/Jerusalem'); wait(lambda: bool(screen.model.rows))
+    assert screen.table.columnWidth(HEADERS.index('AI decision')) >= 200

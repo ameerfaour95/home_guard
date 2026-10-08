@@ -17,8 +17,13 @@ NEXT_STEP = {'no_heartbeat': 'The box has never reported: check it was set up an
 
 def status_sentence(devices, cameras, now):
     """One plain sentence for the header of the Overview."""
-    if not devices:
+    boxes = [d for d in devices if not d.replaced_by]
+    if not boxes and devices:
+        return ('These are old site names of the box now reporting as '
+                + ', '.join(sorted({site_name(d.replaced_by_site) for d in devices})) + ': open that customer.')
+    if not boxes:
         return 'No box is enrolled for this customer yet.'
+    devices = boxes
     worst = min(devices, key=lambda d: SEVERITY[d.verdict])
     if worst.reasons:
         reason = worst.reasons[0]
@@ -66,7 +71,7 @@ class CustomerOverview(QWidget):
         self.content.addWidget(self.status)
         self.warnings = []
         box = self.card('WARNINGS')
-        for device in sorted(customer.devices, key=lambda d: SEVERITY[d.verdict]):
+        for device in sorted((d for d in customer.devices if not d.replaced_by), key=lambda d: SEVERITY[d.verdict]):
             for reason in (r for r in device.reasons if r.severity != 'healthy'):
                 step = '' if '—' in reason.message else NEXT_STEP.get(reason.code, '')
                 text = f'{site_name(device.site)}  ·  {reason.message}' + (f'  —  {step}' if step else '')
@@ -76,8 +81,13 @@ class CustomerOverview(QWidget):
             box.addWidget(label('No warnings. Every box and current camera is reporting.', 'muted', True))
         box = self.card('BOXES')
         for device in customer.devices:
+            if device.replaced_by:
+                box.addWidget(label(f'{site_name(device.site)}  ·  old site name of {site_name(device.replaced_by_site)}',
+                                    'muted', True))
+                continue
             line = (f'{site_name(device.site)}  ·  {device.verdict.title()}  ·  last heard {age(device.last_seen_utc, now).lower()}'
-                    f'  ·  {mode_name(device.mode)}')
+                    f'  ·  {mode_name(device.mode)}'
+                    + (f'  ·  was {", ".join(map(site_name, device.old_sites))}' if device.old_sites else ''))
             row = label(line, '', True); row.setStyleSheet(f'color: {verdict_color(device.verdict, self.theme)};')
             box.addWidget(row)
         if not customer.devices:
@@ -100,7 +110,10 @@ class CustomerOverview(QWidget):
             grid.setColumnStretch(3, 1)
             if not current:
                 box.addWidget(label('No current cameras known.', 'muted'))
-            retired = [c for c in cameras if not c.current]
+            for camera in (c for c in cameras if not c.enabled):
+                row = label(f'{camera.name}  ·  off by the owner', 'muted'); box.addWidget(row)
+                self.camera_rows.append((camera.name, 'switched off'))
+            retired = [c for c in cameras if not c.current and c.enabled]
             if retired:
                 box = self.card('RETIRED CAMERAS')
                 box.addWidget(label('Ids the box still lists from its 14-day archive (an old site name, a removed camera). '

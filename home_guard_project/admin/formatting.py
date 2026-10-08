@@ -69,17 +69,24 @@ def owner_camera_name(camera, aliases=None):
     return humanise(camera)
 
 
+def isolate(text):
+    """*text* inside Unicode isolates (FSI ... PDI) when it holds right-to-left letters, so a Hebrew camera name in an
+    English line ("כניסה ראשית  ·  A person at the door", "#102 · פרגולה") neither flips the line nor reorders
+    the numbers around it. Plain text is returned as it is."""
+    return f'\u2068{text}\u2069' if any('\u0590' <= ch <= '\u08ff' for ch in str(text)) else text
+
+
 def camera_name(value, display_name=None):
     raw = value if isinstance(value, str) else value.camera
     if raw.startswith('cam-'):
         return raw
     name = display_name or getattr(value, 'display_name', None)
     if name:
-        return name
+        return isolate(name)
     if '/' in raw:
         site, camera = raw.split('/', 1)
-        return f'{humanise(site)} / {owner_camera_name(camera)}'
-    return owner_camera_name(raw)
+        return f'{humanise(site)} / {isolate(owner_camera_name(camera))}'
+    return isolate(owner_camera_name(raw))
 
 
 def delivery_text(dispatch):

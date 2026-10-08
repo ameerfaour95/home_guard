@@ -30,7 +30,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/86/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": "Dismissed: the AI saw nothing to alert on",
+      "outcome_code": "dismissed",
+      "would_raise": false
     },
     {
       "id": 72,
@@ -62,7 +66,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/72/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 71,
@@ -94,7 +102,11 @@
       "flagged": false,
       "thumbnail_url": null,
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 85,
@@ -126,7 +138,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/85/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 70,
@@ -161,7 +177,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/70/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": "Dismissed: the AI saw nothing to alert on",
+      "outcome_code": "dismissed",
+      "would_raise": false
     },
     {
       "id": 69,
@@ -196,7 +216,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/69/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": "Dismissed: the AI saw nothing to alert on",
+      "outcome_code": "dismissed",
+      "would_raise": false
     },
     {
       "id": 68,
@@ -228,7 +252,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/68/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": "Dismissed: the AI saw nothing to alert on",
+      "outcome_code": "dismissed",
+      "would_raise": false
     },
     {
       "id": 67,
@@ -260,7 +288,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/67/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 84,
@@ -292,7 +324,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/84/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 83,
@@ -327,7 +363,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/83/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 66,
@@ -359,7 +399,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/66/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 65,
@@ -394,7 +438,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/65/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 82,
@@ -426,7 +474,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/82/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 81,
@@ -458,7 +510,11 @@
       "flagged": true,
       "thumbnail_url": "/v1/events/81/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 64,
@@ -490,7 +546,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/64/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": "Not sent: camera muted by the owner",
+      "outcome_code": "muted",
+      "would_raise": false
     },
     {
       "id": 80,
@@ -523,7 +583,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/80/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 63,
@@ -558,7 +622,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/63/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 62,
@@ -590,7 +658,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/62/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 61,
@@ -622,7 +694,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/61/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": "Not sent: camera muted by the owner",
+      "outcome_code": "muted",
+      "would_raise": false
     },
     {
       "id": 79,
@@ -654,7 +730,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/79/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 78,
@@ -686,7 +766,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/78/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": "Not sent: camera muted by the owner",
+      "outcome_code": "muted",
+      "would_raise": false
     },
     {
       "id": 60,
@@ -718,7 +802,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/60/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 59,
@@ -750,7 +838,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/59/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 58,
@@ -785,7 +877,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/58/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": "submitted"
+      "annotation_status": "submitted",
+      "session_id": null,
+      "outcome": "Dismissed: the AI saw nothing to alert on",
+      "outcome_code": "dismissed",
+      "would_raise": false
     },
     {
       "id": 57,
@@ -820,7 +916,11 @@
       "flagged": true,
       "thumbnail_url": "/v1/events/57/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": "rejected"
+      "annotation_status": "rejected",
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 56,
@@ -852,7 +952,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/56/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 55,
@@ -887,7 +991,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/55/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 77,
@@ -919,7 +1027,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/77/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": "Not sent: camera muted by the owner",
+      "outcome_code": "muted",
+      "would_raise": false
     },
     {
       "id": 54,
@@ -949,7 +1061,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/54/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 76,
@@ -984,7 +1100,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/76/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": "Dismissed: the AI saw nothing to alert on",
+      "outcome_code": "dismissed",
+      "would_raise": false
     },
     {
       "id": 75,
@@ -1016,7 +1136,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/75/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 74,
@@ -1048,7 +1172,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/74/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 53,
@@ -1080,7 +1208,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/53/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": "Not sent: camera muted by the owner",
+      "outcome_code": "muted",
+      "would_raise": false
     },
     {
       "id": 52,
@@ -1112,7 +1244,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/52/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 73,
@@ -1142,7 +1278,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/73/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 51,
@@ -1174,7 +1314,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/51/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": "Not sent: camera muted by the owner",
+      "outcome_code": "muted",
+      "would_raise": false
     }
   ],
   "next_cursor": null,

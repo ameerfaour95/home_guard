@@ -159,10 +159,50 @@ def test_the_box_camera_list_decides_and_names_when_present(client, staff_factor
     _, _, _, h = staff_factory("admin")
     with session_scope(client.app.state.engine) as s:
         dev = b.enroll(s, "home", "Home")
-        dev.last_heartbeat = _hb("home", NOW - timedelta(minutes=5), cameras=[
-            {"id": "home_ch1", "name": "כניסה ראשית", "newest_clip_utc": _iso(NOW - timedelta(hours=40))},
-            {"id": "home_ch2", "name": "", "newest_clip_utc": _iso(NOW - timedelta(minutes=1))}])
+        dev.last_heartbeat = _hb("home", NOW - timedelta(minutes=5), cameras={
+            "home_ch1": {"newest_clip_utc": _iso(NOW - timedelta(hours=40))},
+            "home_ch2": {"newest_clip_utc": _iso(NOW - timedelta(minutes=1))},
+            "home_ch5": {"newest_clip_utc": _iso(NOW - timedelta(hours=50))},
+            "old_ch9": {"newest_clip_utc": _iso(NOW - timedelta(minutes=30))}},
+            camera_list=[{"id": "home_ch1", "name": "כניסה ראשית", "channel": "1", "enabled": True},
+                         {"id": "home_ch2", "name": "Camera 2", "channel": "2", "enabled": True},
+                         {"id": "home_ch3", "name": "Camera 3", "channel": "3", "enabled": True},
+                         {"id": "home_ch5", "name": "Pool", "channel": "5", "enabled": False}])
     dev = client.get("/v1/fleet", headers=h).json()["devices"][0]
-    assert [r["message"] for r in dev["reasons"]] == ["No clip for 40 h from כניסה ראשית — check it has power and network"]
+    # the list decides: old_ch9 (fresh clip, not configured) is retired; the switched-off Pool never warns;
+    # a configured camera with no clip yet does
+    assert [r["message"] for r in dev["reasons"]] == [
+        "No clip for 40 h from כניסה ראשית — check it has power and network",
+        "No clip recorded yet from Camera 3 — check its login and stream on the box"]
+    assert dev["cameras_total"] == 3
     cams = client.get("/v1/cameras", headers=h).json()
-    assert [(c["name"], c["owner_named"], c["current"]) for c in cams] == [("כניסה ראשית", True, True), ("Camera 2", False, True)]
+    assert [(c["camera"], c["name"], c["current"], c["enabled"]) for c in cams] == [
+        ("home_ch1", "כניסה ראשית", True, True), ("home_ch2", "Camera 2", True, True),
+        ("home_ch3", "Camera 3", True, True), ("home_ch5", "Pool", False, False), ("old_ch9", "Camera 9", False, True)]
+
+
+def test_old_site_names_of_one_box_are_one_house(client, staff_factory):
+    """Live 2026-10-09: ameer_test, ameer_tes2 and ameer_week_0_1 (same box DESKTOP-43DP1TI) were three Fleet rows,
+    two of them offline. The box heard from last is the house; the others are its old site names."""
+    _setup(client)
+    _, _, _, h = staff_factory("admin")
+    with session_scope(client.app.state.engine) as s:
+        rows = {}
+        for site, age, host in (("ameer_test", timedelta(hours=114), "DESKTOP-43DP1TI"),
+                                ("ameer_tes2", timedelta(hours=49), "desktop-43dp1ti"),
+                                ("ameer_week_0_1", timedelta(minutes=3), "DESKTOP-43DP1TI"),
+                                ("other_house", timedelta(minutes=3), "other-box")):
+            dev = b.enroll(s, site, site.title())
+            dev.last_heartbeat = _hb(site, NOW - age, host=host)
+            rows[site] = dev.device_id
+        quiet = b.enroll(s, "never_heard", "Never")  # no heartbeat and no host: its own row
+    devs = {d["site"]: d for d in client.get("/v1/fleet", headers=h).json()["devices"]}
+    assert devs["ameer_week_0_1"]["old_sites"] == ["ameer_tes2", "ameer_test"]
+    assert devs["ameer_week_0_1"]["replaced_by"] is None
+    for old in ("ameer_tes2", "ameer_test"):
+        assert devs[old]["replaced_by"] == rows["ameer_week_0_1"] and devs[old]["replaced_by_site"] == "ameer_week_0_1"
+    assert devs["other_house"]["replaced_by"] is None and devs["other_house"]["old_sites"] == []
+    assert devs["never_heard"]["replaced_by"] is None
+    cid = client.get("/v1/customers", headers=h).json()
+    old_customer = next(c for c in cid if c["name"] == "Ameer_Tes2")
+    assert client.get(f"/v1/customers/{old_customer['id']}", headers=h).json()["devices"][0]["replaced_by_site"] == "ameer_week_0_1"

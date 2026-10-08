@@ -8,6 +8,7 @@ from .workers import TaskRunner
 from .timeline import TimelineScreen
 from .event_view import EventView
 from .overview import CustomerOverview
+from .chat_view import ChatView
 from .widgets.icons import icon
 from .widgets.common import label, button, EmptyState, Skeleton
 
@@ -61,11 +62,12 @@ class CustomerScreen(QWidget):
             self.tabs.addTab(self.overview, icon('Fleet', theme), 'Overview')
         self.tabs.addTab(self.timeline, icon('Timeline', theme), 'Events')
         self.tabs.addTab(self.event_view, icon('Event', theme), 'Event'); self.set_event_tab(False)
+        self.chat = None
         if role != 'labeler':
-            self.tabs.addTab(EmptyState('Chat arrives when the box uploads its chat log',
-                                        'The owner and bot conversation from Telegram will show here, read-only: alert cards, '
-                                        'photos and the buttons the owner pressed. Opening it will be audit-logged like any '
-                                        'staff view.', eyebrow='CHAT'), icon('Conversation', theme), 'Chat')
+            self.chat = ChatView(backend, theme); self.chat.session_expired.connect(self.session_expired)
+            self.tabs.addTab(self.chat, icon('Conversation', theme), 'Chat')
+            # fetched only when staff open the tab: every view is audited and the owner is told
+            self.tabs.currentChanged.connect(lambda _: self.tabs.currentWidget() is self.chat and self.chat.ensure_loaded())
         for title, description in [
                                    ('Config', 'Box settings and change history will appear here.'),
                                    ('Access', 'Staff recording access and owner notices will appear here.')]:
@@ -119,12 +121,17 @@ class CustomerScreen(QWidget):
             self.consent_note.show()
         else:
             self.consent_note.hide()
-        devices = [d for d in customer.devices if d.device_id == self.device_id] or customer.devices
+        boxes = [d for d in customer.devices if not d.replaced_by]  # old site names of a box are not boxes
+        devices = [d for d in boxes if d.device_id == self.device_id] or boxes
         if devices:
             device = min(devices, key=lambda d: SEVERITY[d.verdict])
             reason = device.reasons[0].message if device.reasons else 'No health details reported'
             now = getattr(self.backend, 'now', None) or utcnow()
             self.health.setText(f'{site_name(device.site)}  ·  {device.verdict.title()} — {reason}')
+        elif customer.devices:
+            now = getattr(self.backend, 'now', None) or utcnow()
+            self.health.setText('Old site names of the box now reporting as '
+                                + ', '.join(sorted({site_name(d.replaced_by_site) for d in customer.devices})))
         else:
             self.health.setText('No boxes enrolled')
         self.consent.setText('Consent  ·  '+ '  /  '.join(f'{text}: {"yes" if allowed else "no"}' for text, allowed in
@@ -134,6 +141,8 @@ class CustomerScreen(QWidget):
         self.tabs.setCurrentIndex(0); self.set_event_tab(False)
         self.camera_list, self.cameras_failed = None, False
         self.show_overview()
+        if self.chat is not None:
+            self.chat.open(customer.id, customer.timezone)
         self.timeline.open(customer.id, customer.timezone)
         if hasattr(self.backend, 'cameras'):
             cid = customer.id
@@ -214,6 +223,7 @@ class CustomerScreen(QWidget):
         rows = self.timeline.model.rows
         for i, event in enumerate(rows):
             if event.id == event_id:
+                self.timeline.reveal(i)
                 self.timeline.table.setCurrentIndex(self.timeline.model.index(i, 0))
                 self.event_view.prev.setEnabled(i > 0)
                 self.event_view.next.setEnabled(i < len(rows)-1 or bool(self.timeline.cursor))

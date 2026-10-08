@@ -14,9 +14,13 @@ from ._time import normalize_utc
 
 
 def camera_label(camera: str, names: Optional[dict] = None) -> str:
-    """The camera as staff read it: the owner's name when known (``names``: id -> name), else "Camera N" from the
-    channel by the box's rule (camera_names.display_name), else the id in words. Never the raw id."""
-    aliases = {camera: [names[camera]]} if names and names.get(camera) else {}
+    """The camera as staff read it: the owner's name when known, else "Camera N" from the channel by the box's rule
+    (camera_names.display_name), else the id in words. Never the raw id.
+
+    ``names`` is ONE house's id -> name (its camera_list). An id the box no longer has (a site rename:
+    ameer_tes2_ch6 after ameer_week_0_1_ch6) takes the name of the one current camera on its channel, the box's own
+    rule; never pass names from several houses, or one house's ch6 would borrow another's name."""
+    aliases = {cam: [name] for cam, name in (names or {}).items() if name}
     if family_names(camera, aliases) or channel_of(camera):
         return display_name(camera, "en", aliases)
     text = camera.replace("_", " ")
@@ -26,32 +30,27 @@ def camera_label(camera: str, names: Optional[dict] = None) -> str:
 CURRENT_WINDOW = timedelta(hours=48)
 
 
-def listed_cameras(body) -> Optional[dict[str, str]]:
-    """The box's own list of its cameras now, ``{id: owner name}``, from an additive heartbeat field
-    ``cameras: [{"id", "name"}]`` (or ``current_cameras``); None while the box does not send one (it does not yet)."""
-    if not isinstance(body, dict):
-        return None
-    for key in ("current_cameras", "cameras"):
-        value = body.get(key)
-        if isinstance(value, list):
-            out = {}
-            for item in value:
-                if isinstance(item, dict) and isinstance(item.get("id"), str) and item["id"]:
-                    name = item.get("name")
-                    out[item["id"]] = name.strip() if isinstance(name, str) else ""
-            return out
-    return None
-
-
-def listed_newest(body) -> dict[str, Optional[datetime]]:
-    """Newest clip per camera from the list form of ``cameras`` (items may carry ``newest_clip_utc``)."""
-    from ._time import parse_utc
-
-    value = body.get("cameras") if isinstance(body, dict) else None
+def camera_list(body) -> Optional[list[dict]]:
+    """The box's configured cameras from the heartbeat's ``camera_list: [{"id", "name", "channel", "enabled"}]``
+    (box heartbeat.camera_list: cameras.yaml with the family's names via camera_names.display_name), each as
+    ``{"id", "name", "enabled"}``; None from a box that does not send it (older boxes: the 48 h rule decides).
+    ``cameras`` stays the per-camera clip times."""
+    value = body.get("camera_list") if isinstance(body, dict) else None
     if not isinstance(value, list):
-        return {}
-    return {item["id"]: parse_utc(item.get("newest_clip_utc")) for item in value
-            if isinstance(item, dict) and isinstance(item.get("id"), str) and item["id"]}
+        return None
+    out = []
+    for item in value:
+        if isinstance(item, dict) and isinstance(item.get("id"), str) and item["id"]:
+            name = item.get("name")
+            out.append({"id": item["id"], "name": name.strip() if isinstance(name, str) else "",
+                        "enabled": item.get("enabled") is not False})
+    return out
+
+
+def listed_cameras(body) -> Optional[dict[str, str]]:
+    """``{id: owner name}`` of the cameras the box has switched on now; None without a ``camera_list``."""
+    cams = camera_list(body)
+    return None if cams is None else {c["id"]: c["name"] for c in cams if c["enabled"]}
 
 
 def split_cameras(cameras: dict[str, Optional[datetime]], now: datetime, site: str = "",
@@ -86,6 +85,12 @@ def split_cameras(cameras: dict[str, Optional[datetime]], now: datetime, site: s
 
 def _names(names: list[str]) -> str:
     return ", ".join(names)
+
+
+def owner_name(camera: str, names: Optional[dict] = None) -> str:
+    """The family's name for *camera* from one house's ``names`` (exact id, else its channel), or ""."""
+    found = family_names(camera, {cam: [name] for cam, name in (names or {}).items() if name})
+    return found[-1].strip() if found else ""
 
 
 def camera_stale(newest: Optional[datetime], now) -> bool:

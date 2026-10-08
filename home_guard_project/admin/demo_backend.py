@@ -73,6 +73,43 @@ class DemoBackend(DemoTagging, DemoAnnotations, DemoStudio):
                                  entry.get('current', True), max(times) if times else None))
         return sorted(out, key=lambda c: (c.customer_id, not c.current, c.camera))
 
+    def chat(self, customer_id, day=None, q=None):
+        """Two days of a made-up conversation for customer 1 (the box's ChatFeed shape)."""
+        self._identity_access()
+        from .models import ChatDay, ChatLine
+        if not self.customer(customer_id).consent_recordings:
+            raise ForbiddenError()
+        base = self.now.replace(minute=0, second=0, microsecond=0)
+        lines = [] if int(customer_id) != 1 else [
+            ChatLine(base-timedelta(hours=21), 'cedar_house', 'owner', 'Daniel', 'message', 'Who was at the gate last night?',
+                     '', '', '', '', True, ''),
+            ChatLine(base-timedelta(hours=21)+timedelta(minutes=1), 'cedar_house', 'assistant', '', 'answer',
+                     'At 23:40 a delivery driver left a parcel at Front door and drove off.', '', '', '', '', True, ''),
+            ChatLine(base-timedelta(minutes=5), 'cedar_house', 'box', '', 'alert',
+                     'Front door: a person approached the entrance and left a parcel.', 'Front door', 'Front door',
+                     'front_door_1791027300_alert', 'person-36.jpg', True, ''),
+            ChatLine(base-timedelta(minutes=4), 'cedar_house', 'owner', 'Daniel', 'button', 'It was expected', '', '', '', '',
+                     True, ''),
+            ChatLine(base-timedelta(minutes=4)+timedelta(seconds=20), 'cedar_house', 'assistant', '', 'answer',
+                     'Thanks - noted as expected activity.', '', '', '', '', True, ''),
+            ChatLine(base-timedelta(minutes=2), 'cedar_house', 'box', '', 'alert', 'Driveway: a vehicle pulled into the driveway.',
+                     'Driveway', 'Driveway', 'driveway_1791027480_alert', 'car-36.jpg', False, 'Telegram: Forbidden'),
+        ]
+        days = sorted({line.ts.strftime('%Y-%m-%d') for line in lines}, reverse=True)
+        if q:
+            needle = q.casefold()
+            found = [line for line in lines if needle in (line.text+' '+line.name+' '+line.camera_name).casefold()]
+            return ChatDay(None, days, sorted(found, key=lambda line: line.ts, reverse=True))
+        shown = day or (days[0] if days else None)
+        return ChatDay(shown, days, [line for line in lines if line.ts.strftime('%Y-%m-%d') == shown])
+
+    def chat_image(self, customer_id, site, image):
+        self._identity_access()
+        from .models import MediaAccess
+        if image not in ('person-36.jpg', 'car-36.jpg'):
+            raise ServerError()
+        return MediaAccess(f'media/{image}', self.now+timedelta(minutes=5), 'image/jpeg')
+
     def update_customer(self, customer):
         self._identity_access()
         changes = {k: getattr(customer, k) for k in ('name', 'timezone', 'consent_live', 'consent_recordings',
@@ -110,6 +147,8 @@ class DemoBackend(DemoTagging, DemoAnnotations, DemoStudio):
             items = [e for e in items if e.completeness.ai == filters['ai']]
         if filters.get('verdict'):
             items = [e for e in items if filters['verdict'] in e.owner_verdicts]
+        if filters.get('would_raise') is not None:
+            items = [e for e in items if bool(e.would_raise) == bool(filters['would_raise'])]
         for key, lower in [('from_utc', True), ('to_utc', False)]:
             if filters.get(key):
                 boundary = datetime.fromisoformat(str(filters[key]).replace('Z', '+00:00'))
@@ -127,6 +166,17 @@ class DemoBackend(DemoTagging, DemoAnnotations, DemoStudio):
         selected = items[:limit]
         cursor = base64.urlsafe_b64encode(json.dumps([selected[-1].start_utc.isoformat(), selected[-1].id]).encode()).decode() if len(items) > limit else None
         return EventPage(selected, cursor, total, False)
+
+    def event_sessions(self, session_ids):
+        """The events (box sessions) over every clip events() returns."""
+        from .models import EventSession
+        wanted, groups = set(session_ids), {}
+        for e in self.events(limit=500).items:
+            if e.session_id in wanted:
+                groups.setdefault((e.site, e.session_id, e.camera), []).append(e)
+        return [EventSession(sid, site, camera, min(e.start_utc for e in clips), max(e.start_utc for e in clips),
+                             len(clips), sum(e.outcome_code == 'sent' for e in clips))
+                for (site, sid, camera), clips in groups.items()]
 
     def _apply_review(self, event):
         with self._lock:

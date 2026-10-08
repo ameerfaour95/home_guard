@@ -57,6 +57,7 @@ class CameraOut:
     owner_named: bool
     current: bool
     newest_clip_utc: datetime | None
+    enabled: bool = True  # false: the box lists it but the owner switched it off
 
 
 @dataclass
@@ -87,6 +88,10 @@ class DeviceSummary:
     events_24h: int
     alerts_24h: int
     false_alarms_7d: int
+    # one box, many site names: an old site's row names the device (and site) it became; the current row its old names
+    replaced_by: str | None = None
+    replaced_by_site: str | None = None
+    old_sites: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -141,6 +146,24 @@ class EventSummary:
     timezone: str = field(default='UTC', kw_only=True)
     display_name: str | None = field(default=None, kw_only=True)
     annotation_status: str | None = field(default=None, kw_only=True)
+    # the box's event layer: its session, what happened to the clip ("Kept in the event, not sent (normal)") and
+    # whether the baseline in shadow mode would have raised it
+    session_id: str | None = field(default=None, kw_only=True)
+    outcome: str | None = field(default=None, kw_only=True)
+    outcome_code: str | None = field(default=None, kw_only=True)
+    would_raise: bool | None = field(default=None, kw_only=True)
+
+
+@dataclass
+class EventSession:
+    """One event (the box's session at one camera) over all its clips."""
+    session_id: str
+    site: str
+    camera: str
+    first_utc: datetime
+    last_utc: datetime
+    clips: int
+    sent: int
 
 
 @dataclass
@@ -228,6 +251,30 @@ class DetectionsOut:
     provenance: BoxesStatus
     model: str | None
     frames: list[FrameBoxes]
+
+
+@dataclass
+class ChatLine:
+    """One line of the owner's Telegram conversation; ``text`` already names cameras by the owner's names."""
+    ts: datetime
+    site: str
+    who: str
+    name: str
+    kind: str
+    text: str
+    camera: str
+    camera_name: str
+    alert_id: str
+    image: str
+    delivered: bool
+    error: str
+
+
+@dataclass
+class ChatDay:
+    day: str | None
+    days: list[str]
+    messages: list[ChatLine]
 
 
 @dataclass

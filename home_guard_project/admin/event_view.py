@@ -7,7 +7,7 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QSplitter, QTab
 from .backend import AuthError, BackendError, UnsupportedError
 from .workers import TaskRunner, closing
 from .review_controller import ReviewController
-from .event_logic import KINDS
+from .event_logic import kind_label
 from .formatting import local_time
 from .player import EventPlayer
 from .ai_record import AiRecord, TextDisclosure
@@ -117,7 +117,7 @@ class EventView(QWidget):
         self.recording = event
         self.zone = event.timezone
         self.title.setToolTip(camera_name(event))
-        self.title.setText(f'{camera_name(event)}  ·  {KINDS.get(event.kind, "Unknown")}  ·  {local_time(event.start_utc, self.zone)}')
+        self.title.setText(f'{camera_name(event)}  ·  {kind_label(event)}  ·  {local_time(event.start_utc, self.zone)}')
         self.title.setToolTip(camera_name(event)+' · '+local_time(event.start_utc, self.zone))
         self.review.setEnabled(True); self.flag.setEnabled(True)
         self.review.setChecked(event.reviewed); self.flag.setChecked(event.flagged)

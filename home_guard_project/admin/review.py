@@ -5,9 +5,9 @@ from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter, QComboBox,
     QApplication, QLineEdit, QPlainTextEdit, QAbstractSpinBox, QSizePolicy)
 from .timeline import TimelineScreen
-from .timeline_model import TimelineDelegate, status_chip_width
+from .timeline_model import TimelineDelegate, status_chip_width, MEMBER
 from .event_view import EventView
-from .event_logic import KINDS, VERDICTS
+from .event_logic import VERDICTS, kind_label, two_lines
 from .formatting import local_time
 from .workers import TaskRunner
 from .review_controller import ReviewController
@@ -36,13 +36,19 @@ class ReviewDelegate(TimelineDelegate):
         p.fillRect(option.rect, QColor(t['raised' if option.state & QStyle.StateFlag.State_Selected else 'surface']))
         p.setPen(QColor(t['border'])); p.drawLine(option.rect.bottomLeft(), option.rect.bottomRight())
         rect = option.rect.adjusted(8, 10, -10, -8)
-        lines = [f'{local_time(e.start_utc, e.timezone)[13:18]}  ·  {camera_name(e)}', e.summary or 'No summary saved',
-                 f'{KINDS.get(e.kind, "Unknown")} · '+{'real':'AI answer saved','failed':'AI failed','fallback':'Fallback AI','none':'No AI answer'}.get(e.completeness.ai, 'Unknown AI state'),
+        model, row = index.model(), index.row()
+        head = (model.session_line(row) if model.lead(row) else
+                (MEMBER if model.member(row) else '') + f'{local_time(e.start_utc, e.timezone)[13:18]}  ·  {camera_name(e)}')
+        outcome = e.outcome or (f'{kind_label(e)} · '+{'real':'AI answer saved','failed':'AI failed','fallback':'Fallback AI','none':'No AI answer'}.get(e.completeness.ai, 'Unknown AI state'))
+        p.setFont(QFont('Segoe UI', 8))
+        wrapped = two_lines(p.fontMetrics(), outcome, rect.width())  # the outcome reads in full: up to two lines
+        lines = [head, e.summary or 'No summary saved', *wrapped,
                  ('Reviewed' if e.reviewed else 'Unreviewed') + ('  ·  Flagged' if e.flagged else '') +
                  ('  ·  '+', '.join(VERDICTS.get(v,v.replace('_',' ').capitalize()) for v in e.owner_verdicts) if e.owner_verdicts else '')]
+        last = len(lines) - 1
         for i, text in enumerate(lines):
             p.setFont(QFont('Segoe UI', 9 if i < 2 else 8))
-            p.setPen(QColor(t['text' if i == 0 else 'action' if i == 3 and e.reviewed else 'muted']))
+            p.setPen(QColor(t['text' if i == 0 else 'action' if i == last and e.reviewed else 'muted']))
             p.drawText(QRectF(rect.x(), rect.y()+i*20, rect.width(), 20), Qt.AlignmentFlag.AlignVCenter,
                        p.fontMetrics().elidedText(text, Qt.TextElideMode.ElideRight, rect.width()))
         p.restore()
@@ -100,7 +106,7 @@ class ReviewScreen(QWidget):
         self.timeline.range_text.hide()
         layout.insertWidget(1, self.timeline.range_bar)  # date range across houses, above the list
         self.timeline.table.setItemDelegate(ReviewDelegate(theme, self.timeline.table))
-        self.timeline.table.horizontalHeader().hide(); self.timeline.table.verticalHeader().setDefaultSectionSize(102)
+        self.timeline.table.horizontalHeader().hide(); self.timeline.table.verticalHeader().setDefaultSectionSize(116)
         self.timeline.table.setColumnWidth(0, 102)
         for col in range(2, 7):
             self.timeline.table.hideColumn(col)
@@ -221,7 +227,10 @@ class ReviewScreen(QWidget):
         self.update_progress()
 
     def move(self, delta):
-        row = self.timeline.table.currentIndex().row()+delta
+        current = self.timeline.table.currentIndex().row()
+        row = self.timeline.next_row(current, delta)
+        if row == current:
+            row = current + delta  # past the end: load older below
         if 0 <= row < len(self.timeline.model.rows):
             self.timeline.table.setCurrentIndex(self.timeline.model.index(row, 0))
         elif delta > 0 and self.timeline.cursor:

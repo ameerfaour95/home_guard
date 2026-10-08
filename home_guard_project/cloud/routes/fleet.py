@@ -37,6 +37,7 @@ class KnownCamera:
     in_heartbeat: bool
     heartbeat_newest: Optional[datetime]
     last_event_utc: Optional[datetime]
+    enabled: bool = True                # false: in the box's camera_list but switched off (never warned about)
 
     @property
     def newest_clip_utc(self) -> Optional[datetime]:
@@ -46,8 +47,8 @@ class KnownCamera:
 
 def camera_inventory(session: Session, now: datetime, devices: list[Device]) -> dict[int, list[KnownCamera]]:
     """Every camera ever known per device pk (heartbeat, Camera rows, events), split into current and retired by
-    fleet_contract.health.split_cameras: a clip in the last 48 h, or the box's own list when its heartbeat carries one.
-    Owner names come from that list or from Camera.display_name; aliases are otherwise not in the cloud."""
+    fleet_contract.health.split_cameras: the box's camera_list when its heartbeat carries one (switched-on cameras are
+    current), else a clip in the last 48 h. Owner names come from camera_list or Camera.display_name."""
     pks = [d.id for d in devices]
     out: dict[int, list[KnownCamera]] = {pk: [] for pk in pks}
     if not pks:
@@ -68,14 +69,13 @@ def camera_inventory(session: Session, now: datetime, devices: list[Device]) -> 
         body = dev.last_heartbeat if isinstance(dev.last_heartbeat, dict) else None
         hb = parse_heartbeat(body) if body is not None else None
         newest = dict(hb.cameras) if hb else {}
-        for cam, when in health.listed_newest(body).items():
-            if when is not None or cam not in newest:
-                newest[cam] = when
-        listed = health.listed_cameras(body)
-        for cam, name in (listed or {}).items():
-            if name:
-                names[(dev.id, cam)] = name
-        ids = {cam for pk, cam in known if pk == dev.id} | set(newest) | set(listed or ())
+        configured = health.camera_list(body)
+        listed = health.listed_cameras(body)  # switched-on cameras; the box's list decides when it sends one
+        switched_off = {c["id"] for c in configured or () if not c["enabled"]}
+        for cam in configured or ():
+            if cam["name"]:
+                names[(dev.id, cam["id"])] = cam["name"]
+        ids = {cam for pk, cam in known if pk == dev.id} | set(newest) | {c["id"] for c in configured or ()}
         events = {cam: datetime.fromtimestamp(ts, timezone.utc) for (pk, cam), ts in last_event.items()
                   if pk == dev.id and ts is not None}
         recent = [cam for (pk, cam), ts in last_event.items() if pk == dev.id and ts is not None and ts >= since48]
@@ -83,10 +83,38 @@ def camera_inventory(session: Session, now: datetime, devices: list[Device]) -> 
                                           site=(hb.site if hb and hb.site else dev.site), recent=recent,
                                           listed=list(listed) if listed is not None else None)
         current = set(current)
-        out[dev.id] = sorted((KnownCamera(cam, names.get((dev.id, cam), ""), cam in current, cam in newest,
-                                          newest.get(cam), events.get(cam)) for cam in ids),
+        reported = set(newest) | {c["id"] for c in configured or ()}  # the box judges these (no clip yet: None)
+        own = {cam: name for (pk, cam), name in names.items() if pk == dev.id}  # this house only
+        out[dev.id] = sorted((KnownCamera(cam, health.owner_name(cam, own), cam in current, cam in reported,
+                                          newest.get(cam), events.get(cam), cam not in switched_off) for cam in ids),
                              key=lambda c: (not c.current, c.camera))
     return out
+
+
+def box_lineage(session: Session) -> tuple[dict[int, tuple[str, str]], dict[int, list[str]]]:
+    """One physical box, many site names: a box renamed its site (ameer_tes2 -> ameer_week_0_1) or was re-registered,
+    and each site became its own device row. Devices whose heartbeat names the same host (else the registration's
+    tailscale host) are one box; the one heard from last is it, the others are its old site names.
+
+    Returns ({old device pk: (current device_id, current site)}, {current device pk: [old sites, newest first]})."""
+    boxes: dict[str, list[tuple[datetime, Device]]] = {}
+    oldest = datetime.min.replace(tzinfo=timezone.utc)
+    for dev in session.scalars(select(Device)):
+        hb = parse_heartbeat(dev.last_heartbeat) if isinstance(dev.last_heartbeat, dict) else None
+        key = ((hb.host if hb else None) or dev.tailscale_host or "").strip().lower()
+        if key:
+            boxes.setdefault(key, []).append((hb.time_utc if hb and hb.time_utc else oldest, dev))
+    replaced: dict[int, tuple[str, str]] = {}
+    old_sites: dict[int, list[str]] = {}
+    for members in boxes.values():
+        if len(members) < 2:
+            continue
+        members.sort(key=lambda m: (m[0], m[1].id), reverse=True)
+        current = members[0][1]
+        for _, dev in members[1:]:
+            replaced[dev.id] = (current.device_id, current.site)
+        old_sites[current.id] = [dev.site for _, dev in members[1:]]
+    return replaced, old_sites
 
 
 def build_summaries(session: Session, now: datetime, customer_id: Optional[int] = None,
@@ -110,6 +138,7 @@ def build_summaries(session: Session, now: datetime, customer_id: Optional[int] 
         Feedback.device_pk.in_(pks), Feedback.verdict == "false_alarm",
         Feedback.received_at >= now - timedelta(days=7)).group_by(Feedback.device_pk)).all())
     inventory = camera_inventory(session, now, [r[0] for r in rows])
+    replaced, old_sites = box_lineage(session)
 
     out: list[DeviceSummary] = []
     for dev, cust_name, name_source in rows:
@@ -136,7 +165,9 @@ def build_summaries(session: Session, now: datetime, customer_id: Optional[int] 
             events_24h=events.get(dev.id, 0), alerts_24h=alerts.get(dev.id, 0),
             false_alarms_7d=false_alarms.get(dev.id, 0),
             needs_details=(dev.enrolled_by == "discovered" and name_source != "admin"),
-            enrolled_by=dev.enrolled_by, app_version=dev.app_version))
+            enrolled_by=dev.enrolled_by, app_version=dev.app_version,
+            replaced_by=replaced.get(dev.id, (None, None))[0], replaced_by_site=replaced.get(dev.id, (None, None))[1],
+            old_sites=old_sites.get(dev.id, [])))
     out.sort(key=lambda d: (_SEVERITY_RANK[d.verdict], d.customer_name, d.site))
     return out
 
@@ -165,7 +196,8 @@ def cameras(request: Request, customer_id: Optional[int] = None, session: Sessio
     inventory = camera_inventory(session, now_of(request), devices)
     return [CameraOut(customer_id=dev.customer_id, device_id=dev.device_id, site=dev.site, camera=c.camera,
                       name=health.camera_label(c.camera, {c.camera: c.owner_name} if c.owner_name else None),
-                      owner_named=bool(c.owner_name), current=c.current, newest_clip_utc=c.newest_clip_utc)
+                      owner_named=bool(c.owner_name), current=c.current, newest_clip_utc=c.newest_clip_utc,
+                      enabled=c.enabled)
             for dev in devices for c in inventory[dev.id]]
 
 

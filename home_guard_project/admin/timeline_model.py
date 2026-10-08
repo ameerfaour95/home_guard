@@ -2,11 +2,12 @@ from .formatting import camera_name
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, QRectF
 from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QPixmap
 from PySide6.QtWidgets import QStyledItemDelegate, QStyle
-from .event_logic import KINDS, VERDICTS, decision, ai_status, provenance
+from .event_logic import VERDICTS, decision, ai_status, provenance, kind_label, two_lines
 from .formatting import local_time, age
 from .theme import PALETTES
 from .widgets.icons import draw_icon
 
+MEMBER = '      ·  '  # a clip of an open event: indented under it (no arrow glyph: not every UI font has one)
 HEADERS = ['Recording', 'Time / camera', 'Kind', 'AI decision', 'Owner verdict', 'Record', 'Review']
 
 
@@ -15,6 +16,49 @@ class TimelineModel(QAbstractTableModel):
         super().__init__()
         self.rows, self.images = [], {}
         self.now, self.zone = now, zone
+        # Events, not only clips: the clips of one box session (one ongoing activity at one camera) collapse into
+        # their newest clip's row, which reads "Pergola 09:42-17:05 · 23 clips · 1 message sent".
+        self.grouping = True
+        self.members = {}    # (site, session_id) -> loaded rows, newest first
+        self.sessions = {}   # (site, session_id) -> EventSession from the server (all clips, not only loaded)
+        self.expanded = set()
+
+    def regroup(self):
+        self.members = {}
+        for i, e in enumerate(self.rows):
+            if e.session_id:
+                self.members.setdefault((e.site, e.session_id), []).append(i)
+
+    def key(self, row):
+        e = self.rows[row]
+        return (e.site, e.session_id) if e.session_id else None
+
+    def size(self, key):
+        known = self.sessions.get(key)
+        return max(len(self.members.get(key, ())), known.clips if known else 0)
+
+    def lead(self, row):
+        """The row standing for its whole event (the newest loaded clip of a session with more than one clip)."""
+        key = self.key(row)
+        return bool(self.grouping and key and self.members[key][0] == row and self.size(key) > 1)
+
+    def member(self, row):
+        key = self.key(row)
+        return bool(self.grouping and key and self.members[key][0] != row)
+
+    def hidden(self, row):
+        return self.member(row) and self.key(row) not in self.expanded
+
+    def session_line(self, row):
+        key, e = self.key(row), self.rows[row]
+        known, clips = self.sessions.get(key), [self.rows[i] for i in self.members[key]]
+        first = known.first_utc if known else min(c.start_utc for c in clips)
+        last = known.last_utc if known else max(c.start_utc for c in clips)
+        sent = known.sent if known else sum(c.outcome_code == 'sent' for c in clips)
+        sign = '−' if key in self.expanded else '+'  # open / closed (glyphs every UI font has)
+        return (f'{sign} {self.size(key)} clips  ·  {camera_name(e)}  ·  '
+                f'{local_time(first, e.timezone)[13:18]}–{local_time(last, e.timezone)[13:18]}'
+                f'  ·  {sent} message{"" if sent == 1 else "s"} sent')
 
     def rowCount(self, parent=QModelIndex()):
         return 0 if parent.isValid() else len(self.rows)
@@ -28,14 +72,15 @@ class TimelineModel(QAbstractTableModel):
 
     def set_page(self, items, append=False, images=None):
         if not append:
-            self.beginResetModel(); self.rows = items; self.images = {}; self.endResetModel()
+            self.beginResetModel(); self.rows = items; self.images = {}; self.expanded = set(); self.regroup()
+            self.endResetModel()
         else:
             known = {e.id for e in self.rows}
             items = [e for e in items if e.id not in known]
             if items:
                 start = len(self.rows)
                 self.beginInsertRows(QModelIndex(), start, start+len(items)-1)
-                self.rows.extend(items); self.endInsertRows()
+                self.rows.extend(items); self.regroup(); self.endInsertRows()
         for url, data in (images or {}).items():
             pix = QPixmap(); pix.loadFromData(data); self.images[url] = pix
 
@@ -48,7 +93,7 @@ class TimelineModel(QAbstractTableModel):
     def remove_event(self, event_id):
         for i,row in enumerate(self.rows):
             if row.id == event_id:
-                self.beginRemoveRows(QModelIndex(),i,i); self.rows.pop(i); self.endRemoveRows(); return
+                self.beginRemoveRows(QModelIndex(),i,i); self.rows.pop(i); self.regroup(); self.endRemoveRows(); return
 
     def data(self, index, role=Qt.ItemDataRole.DisplayRole):
         if not index.isValid():
@@ -65,8 +110,11 @@ class TimelineModel(QAbstractTableModel):
                                    'No video copy remains' if c.expired else 'Video retention active'])
             return f'{camera_name(e)}\n{local_time(e.start_utc, e.timezone)}\n{e.summary}'
         if role == Qt.ItemDataRole.DisplayRole:
-            return ['', local_time(e.start_utc, e.timezone)[13:18]+'  ·  '+age(e.start_utc, self.now())+'\n'+camera_name(e)+'  ·  '+e.summary,
-                    KINDS.get(e.kind, "Unknown"), decision(e.alert_command), ', '.join(VERDICTS.get(v, v.replace('_', ' ')) for v in e.owner_verdicts) or 'No feedback',
+            when = local_time(e.start_utc, e.timezone)[13:18]+'  ·  '+age(e.start_utc, self.now())
+            first = (self.session_line(index.row()) if self.lead(index.row()) else
+                     MEMBER+when if self.member(index.row()) else when)
+            return ['', first+'\n'+camera_name(e)+'  ·  '+e.summary,
+                    kind_label(e), e.outcome or decision(e.alert_command), ', '.join(VERDICTS.get(v, v.replace('_', ' ')) for v in e.owner_verdicts) or 'No feedback',
                     '', ''][col]
 
 
@@ -112,8 +160,15 @@ class TimelineDelegate(QStyledItemDelegate):
         else:
             lines = str(index.data()).split('\n')
             p.setFont(QFont('Segoe UI', 9))
-            color = t['error'] if col == 2 and e.kind == 'alert' else t['secondary']
-            if col in (2, 4) and (col == 2 or e.owner_verdicts):
+            color = t['error'] if col == 2 and lines[0] == 'Alert' else t['secondary']
+            if col == 3:  # the outcome is the point of the row: two lines, never cut to "Kept in the event, no..."
+                p.setPen(QColor(color))
+                shown = two_lines(p.fontMetrics(), lines[0], rect.width())
+                height = p.fontMetrics().height()
+                top = rect.center().y() - height*len(shown)/2
+                for i, text in enumerate(shown):
+                    p.drawText(QRectF(rect.x(), top+i*height, rect.width(), height), Qt.AlignmentFlag.AlignVCenter, text)
+            elif col in (2, 4) and (col == 2 or e.owner_verdicts):
                 text = p.fontMetrics().elidedText(lines[0], Qt.TextElideMode.ElideRight, rect.width()-14)
                 chip = QRectF(rect.x(), rect.center().y()-13, min(rect.width(), p.fontMetrics().horizontalAdvance(text)+14), 26)
                 p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor(t['raised'])); p.drawRoundedRect(chip, 4, 4)

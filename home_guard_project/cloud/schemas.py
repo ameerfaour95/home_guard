@@ -62,6 +62,7 @@ class CameraOut(BaseModel):
     owner_named: bool
     current: bool
     newest_clip_utc: Optional[datetime]
+    enabled: bool = True  # false: the box lists it but the owner switched it off
 
 
 class DeviceSummary(BaseModel):
@@ -86,6 +87,11 @@ class DeviceSummary(BaseModel):
     needs_details: bool = False
     enrolled_by: Literal["admin", "setup", "discovered"] = "admin"
     app_version: Optional[str] = None
+    # One box, many site names (routes/fleet.box_lineage): an old site's row names the device it became; the current
+    # row lists its old site names. The Fleet shows one row per box.
+    replaced_by: Optional[str] = None
+    replaced_by_site: Optional[str] = None
+    old_sites: list[str] = []
 
 
 class FleetResponse(BaseModel):
@@ -153,6 +159,25 @@ class EventSummary(BaseModel):
     thumbnail_url: Optional[str]
     timezone: str = "UTC"
     annotation_status: Optional[str] = None  # new|edited|submitted|reviewed|rejected (None = never opened)
+    # The box's event layer (fleet_contract.event_outcome): the session the clip belongs to, what happened to it
+    # ("Sent", "Kept in the event, not sent (normal)", "Not sent: owner said known (...)", ...; null for a clip that
+    # predates events) with its code (sent|undelivered|held|known|not_ours|muted|dismissed|none), and whether the
+    # baseline in shadow mode would have raised it ("rare for this camera").
+    session_id: Optional[str] = None
+    outcome: Optional[str] = None
+    outcome_code: Optional[str] = None
+    would_raise: Optional[bool] = None
+
+
+class EventSession(BaseModel):
+    """One event (the box's session: one ongoing activity at one camera) over its clips."""
+    session_id: str
+    site: str
+    camera: str
+    first_utc: datetime
+    last_utc: datetime
+    clips: int
+    sent: int
 
 
 class EventPage(BaseModel):
@@ -235,6 +260,33 @@ class DetectionsOut(BaseModel):
 
 class MediaAccessRequest(BaseModel):
     purpose: Literal["review", "support", "training"]
+
+
+class ChatLine(BaseModel):
+    """One line of the owner's Telegram conversation (the box's ChatFeed), camera ids replaced by owner names."""
+    ts: datetime
+    site: str
+    who: str            # "box" | "owner" | "assistant"
+    name: str
+    kind: str           # "alert" | "video" | "message" | "button" | "answer"
+    text: str
+    camera: str
+    camera_name: str
+    alert_id: str
+    image: str          # a picture's file name under production_<site>/chat/images/, or ""
+    delivered: bool
+    error: str
+
+
+class ChatDay(BaseModel):
+    day: Optional[str]  # the day shown; null for a search across days
+    days: list[str]     # days uploaded, newest first
+    messages: list[ChatLine]
+
+
+class ChatImageRequest(BaseModel):
+    site: str
+    image: str
 
 
 class MediaAccess(BaseModel):

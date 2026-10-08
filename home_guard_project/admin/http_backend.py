@@ -8,7 +8,7 @@ import certifi
 import httpx
 from .backend import (AuthError, LoginError, ForbiddenError, OfflineError, ServerError,
                       RateLimitError, TlsError, ConfigurationError, UnsupportedError, BackendError)
-from .models import ExportPreview, IndexProblem, CameraOut
+from .models import ExportPreview, IndexProblem, CameraOut, ChatDay, EventSession
 from .backend import ValidationError
 from .backend import ConflictError
 from .models import AnnotationOut, AnnotationVersion, PublishOut
@@ -192,6 +192,13 @@ class HttpBackend(HttpTagging):
     def customer(self, id):
         return self._get(f'customers/{int(id)}', CustomerOut)
 
+    def chat(self, customer_id, day=None, q=None):
+        return self._get(f'customers/{int(customer_id)}/chat', ChatDay, **{k: v for k, v in dict(day=day, q=q).items() if v})
+
+    def chat_image(self, customer_id, site, image):
+        return self._request('POST', f'customers/{int(customer_id)}/chat/images/access', MediaAccess,
+                             json={'site': site, 'image': image})
+
     def cameras(self, customer_id=None):
         return self._get('cameras', list[CameraOut], **({'customer_id': int(customer_id)} if customer_id is not None else {}))
 
@@ -240,6 +247,9 @@ class HttpBackend(HttpTagging):
         if self.tokens and self.tokens.staff.role == 'labeler':
             filters.pop('customer_id', None); filters.pop('q', None)
         return self._get('events/density', DensityOut, **{k: v for k, v in filters.items() if v is not None})
+
+    def event_sessions(self, session_ids):
+        return self._get('events/sessions', list[EventSession], session_id=list(session_ids))
 
     def review_count(self):
         return self._get('events/review-count', ReviewCount)
