@@ -193,7 +193,7 @@ class EditorTest(Base):
         self.assertEqual(editor.page, se.EDIT)
         editor.primary.click(); editor.primary.click()
         self.assertTrue(wait_until(lambda: editor.page == se.SAVED))
-        self.assertEqual(backend.calls, ['propose', 'confirm'])
+        self.assertEqual(backend.calls, ['previous', 'propose', 'confirm'])
         self.assertFalse(editor.saved_restart.isHidden())
         self.assertEqual([a['kind'] for a in editor.saved.map['areas']], ['mine', 'watch_no_alert', 'black'])
         editor.primary.click()
@@ -214,6 +214,64 @@ class EditorTest(Base):
         self.assertTrue(wait_until(lambda: editor.page == se.ERROR))
         editor.primary.click()                                          # try the save again
         self.assertTrue(wait_until(lambda: editor.page == se.SAVED))
+
+    def test_a_boundary_place_asks_which_side_is_ours_when_nothing_says(self) -> None:
+        editor = self.loaded()
+        editor.select_region(6)
+        row = editor.region_rows[6]                                     # the right hedge: tall and thin
+        row.name.setText('הגדר'); row.name.textEdited.emit('הגדר')
+        row.boundary.click()
+        self.assertEqual(editor.answers[6], 'boundary')
+        self.assertFalse(row.side.isHidden())
+        self.assertEqual(row.side.question.text(), st('side_question', 'he', name='הגדר'))
+        self.assertEqual({b.text() for b in row.side.buttons.values()}, {'הצד הימני', 'הצד השמאלי'})
+        self.assertTrue(row.lit)                                         # stays on the question
+        scene = editor.build_map()
+        self.assertEqual([(a['name'], a['kind']) for a in scene['areas']], [('הגדר', 'mine')])
+        self.assertEqual(scene['lines'], [])                             # no line until the side is said
+        self.assertEqual([sure for _line, sure in editor.stage.walls], [False])
+        editor.primary.click()
+        self.assertFalse(editor.walls_label.isHidden())
+        self.assertIn('הגדר', editor.walls_label.text())
+        editor.back_button.click()
+        row.side.buttons['left'].click()
+        self.assertEqual([(ln['name'], ln['inward']) for ln in editor.build_map()['lines']], [('הגדר', 'left')])
+        self.assertTrue(row.side.buttons['left'].isChecked())
+        self.assertEqual([sure for _line, sure in editor.stage.walls], [True])
+        row.choices.buttons['mine'].click()                              # another answer: no line any more
+        self.assertTrue(row.side.isHidden())
+        self.assertEqual(editor.build_map()['lines'], [])
+
+    def test_a_boundary_place_takes_our_side_from_the_areas_around_it(self) -> None:
+        editor = self.loaded()
+        editor.region_rows[2].choices.buttons['mine'].click()            # the house, left of the right hedge
+        editor.region_rows[6].boundary.click()
+        self.assertTrue(editor.region_rows[6].side.isHidden())          # nothing to ask
+        lines = editor.build_map()['lines']
+        self.assertEqual(len(lines), 1)
+        line = sm.Line('x', lines[0]['a'], lines[0]['b'], lines[0]['inward'])
+        self.assertEqual(line.crossing((.95, .5), (.8, .5)), 'in')       # towards the house is inward
+
+    def test_restore_the_previous_map(self) -> None:
+        backend = DemoSceneBackend()
+        editor = self.loaded(backend=backend)
+        self.assertFalse(editor.restore_row.isHidden())
+        self.assertFalse(editor.restore_button.isEnabled())             # nothing saved yet: nothing to restore
+        self.assertEqual(editor.restore_button.toolTip(), st('restore_none', 'he'))
+        editor.region_rows[5].choices.buttons['hide'].click()
+        editor.primary.click(); editor.primary.click()
+        self.assertTrue(wait_until(lambda: editor.page == se.SAVED))
+        self.assertTrue(editor.restore_row.isHidden())                   # only while editing
+        again = self.loaded(backend=backend)                            # the box keeps what the save replaced
+        self.assertTrue(again.restore_button.isEnabled())
+        self.assertTrue(again.restore_when.text().startswith('מ-'))
+        again.restore_button.click()
+        self.assertTrue(wait_until(lambda: again.page == se.SAVED))
+        self.assertEqual(again.saved_title.text(), st('restored_title', 'he'))
+        self.assertEqual(again.saved_hint.text(), 'החזרתי את המפה הקודמת של מצלמה 2. היא פועלת עכשיו.')
+        self.assertTrue(again.saved.restored)
+        self.assertTrue(again.saved_restart.isVisibleTo(again))          # the hidden area went away
+        self.assertEqual(backend.calls[-1], 'restore')
 
     def test_the_grid_is_explained(self) -> None:
         editor = self.editor(backend=DemoSceneBackend(method='grid'))

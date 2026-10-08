@@ -77,7 +77,7 @@ def main():
             "scene-map",
         ),
     )
-    parser.add_argument("--scene", choices=("card", "loading", "regions", "grid", "drawing", "line", "summary", "saved", "error"),
+    parser.add_argument("--scene", choices=("card", "loading", "regions", "grid", "wall", "drawing", "line", "summary", "saved", "restored", "error"),
                         help="Demo: open the camera map editor in this state (with --panel cameras or --page scene-map)")
     parser.add_argument("--lang", choices=("he", "en"), default="he", help="The camera map editor's language")
     parser.add_argument("--size", default="1366x768")

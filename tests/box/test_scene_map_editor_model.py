@@ -34,6 +34,13 @@ class BuildMapTest(unittest.TestCase):
         self.assertEqual(parsed.lines[0].crossing((.75, .5), (.25, .5)), "in")       # towards the lawn: ours
         self.assertEqual(model.counts(scene), {"mine": 1, "neighbour": 1, "public": 0, "hide": 1, "lines": 1})
 
+    def test_a_boundary_place_is_ours_and_its_line_comes_with_it(self) -> None:
+        line = model.Boundary((.5, .1), (.5, .5), "left", "המעקה")
+        scene = model.build_map("front", REGIONS, {2: model.BOUNDARY}, {2: "המעקה"}, lines=[line])
+        self.assertEqual([(a["name"], a["kind"], a["zone"]) for a in scene["areas"]], [("המעקה", "mine", "fence")])
+        self.assertEqual(scene["lines"][0]["inward"], "left")
+        self.assertEqual(model.counts(scene)["mine"], 1)
+
     def test_unanswered_and_unknown_regions_are_left_out(self) -> None:
         scene = model.build_map("front", REGIONS, {2: model.UNKNOWN})
         self.assertEqual(scene, {"camera": "front", "areas": [], "lines": []})
@@ -145,11 +152,40 @@ class BackendTest(unittest.TestCase):
         import random
         rnd = random.Random(1)
         hands = [model.HandArea([[rnd.random(), rnd.random()] for _ in range(32)], "mine", f"area {i}")
-                 for i in range(40)]
+                 for i in range(150)]
         scene = model.build_map("front", (), {}, {}, hands)
         with self.assertRaises(sb.SceneError) as caught:
             sb.SceneBackend("admin@box").command_line(sb.operation("confirm", "front", scene=scene))
         self.assertEqual(caught.exception.kind, "too_detailed")
+
+    def test_a_detailed_map_is_simplified_until_it_fits_the_command_line(self) -> None:
+        import math
+        count, scene = 0, None
+        while scene is None or len(model.encode_map(scene)) <= sb.MAP_LIMIT:      # just over the limit
+            count += 4
+            hands = [model.HandArea([[round(.5 + .3 * math.cos(k / 32 * 6.2832) + i / 1000, 4),
+                                      round(.5 + .3 * math.sin(k / 32 * 6.2832), 4)] for k in range(32)], "mine")
+                     for i in range(count)]
+            scene = model.build_map("front", (), {}, {}, hands)
+        argument = sb.map_argument(scene)
+        self.assertLessEqual(len(argument), sb.MAP_LIMIT)
+        shrunk = si.decode_map_b64(argument)
+        self.assertEqual(len(shrunk["areas"]), count)                      # every area kept, with fewer corners
+        self.assertTrue(all(3 <= len(a["points"]) < 32 for a in shrunk["areas"]))
+        sm.SceneMap.from_dict("front", shrunk)                              # and still a valid map
+        remote = sb.SceneBackend("admin@box").command_line(sb.operation("confirm", "front", scene=scene))[6]
+        self.assertLess(len(remote), sb.REMOTE_LIMIT)
+
+    def test_simplify_keeps_the_shape_within_the_engines_corner_limit(self) -> None:
+        import math
+        ring = [[.5 + .4 * math.cos(k / 50 * 6.2832), .5 + .4 * math.sin(k / 50 * 6.2832)] for k in range(50)]
+        out = model.simplify(ring)
+        self.assertLessEqual(len(out), model.MAX_CORNERS)
+        self.assertGreater(len(out), 8)
+        self.assertLess(len(model.simplify(ring, tolerance=.02)), len(out))
+        self.assertEqual(model.simplify([[0, 0], [1, 0], [1, 1], [0, 1]]), [[0, 0], [1, 0], [1, 1], [0, 1]])
+        self.assertEqual(len(model.simplify([[0, 0], [1, 0], [.5, 1]], tolerance=.5)), 3)
+        self.assertAlmostEqual(model.polygon_area(out), model.polygon_area(ring), delta=.02)
 
     def test_twelve_detailed_places_still_fit(self) -> None:
         import math
@@ -199,6 +235,27 @@ class BackendTest(unittest.TestCase):
         with self.assertRaises(sb.SceneError) as caught:
             sb.SceneBackend(runner=failing({"error": "unknown camera: 'front'"}, 1), python="py").propose("front")
         self.assertEqual(caught.exception.detail, "unknown camera: 'front'")
+
+    def test_the_previous_map_check_and_restore(self) -> None:
+        self.assertEqual(sb.operation("restore", "front", check=True), ["restore", "--camera", "front", "--json", "--check"])
+        self.assertEqual(sb.operation("restore", "front"), ["restore", "--camera", "front", "--json"])
+        self.assertEqual(sb.operation("restore", "front", restart=False)[-1], "--no-restart")
+        calls = []
+        replies = [{"camera": "front", "has_previous": True, "saved_at": 1791480000.5},
+                   {"camera": "front", "restart_needed": True, "saved_at": 1791480000.5,
+                    "map": {"camera": "front", "areas": [], "lines": [], "watched": [[0, 0], [1, 0], [1, 1]]}}]
+
+        def run(line, **kwargs):
+            calls.append(line)
+            return answer(replies[len(calls) - 1])
+        backend = sb.SceneBackend(runner=run, python="py")
+        self.assertEqual(backend.previous("front"), sb.Previous(True, 1791480000.5))
+        restored = backend.restore("front")
+        self.assertEqual(calls[1][3:], ["restore", "--camera", "front", "--json"])
+        self.assertTrue(restored.restored and restored.restart_needed)
+        self.assertEqual(restored.map["watched"], [[0, 0], [1, 0], [1, 1]])
+        with self.assertRaises(sb.SceneError):
+            sb.previous_from("front", {"camera": "front"})
 
     def test_leaving_a_camera_cancels_its_command_and_the_next_one_runs(self) -> None:
         backend = sb.SceneBackend("admin@box")

@@ -5,7 +5,9 @@ Every command is ``python -m home_guard_project.box.scene_interview <command> --
 - ``propose --embed`` numbers the camera's picture (FastSAM on the box) and answers with the clean picture, the
   numbered one, every region's polygon and the camera's map now, all in one line of JSON;
 - ``confirm --map-b64 <map>`` saves the map built in the app as the camera's whole truth, and restarts the running
-  mode once when its frame mask changed (``--no-restart`` leaves that to the caller).
+  mode once when its frame mask changed (``--no-restart`` leaves that to the caller);
+- ``restore --check`` says whether the camera has a previous map (the one its last save replaced), ``restore``
+  brings it back.
 
 Nothing is ever written on the laptop: from the laptop these run over ssh on the box. The map travels zlib-compressed
 as base64, because the remote command line carries no spaces or quotes in a value. Only the injected runner
@@ -20,10 +22,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .box_layout import box_command
-from .scene_model import Region, encode_map
+from .scene_model import Region, encode_map, shrink_map
 
 MODULE = "home_guard_project.box.scene_interview"
 REMOTE_LIMIT = 8000            # cmd.exe runs the remote command: its line stops at 8191 characters
+MAP_LIMIT = 7500               # the --map-b64 value, leaving room for the rest of the line
+SHRINK_STEPS = (.002, .004, .008, .015)       # outline tolerances tried, in picture fractions, before refusing
 _CAMERA = re.compile(r"[a-z0-9_]+")
 
 
@@ -53,6 +57,13 @@ class Saved:
     camera: str
     map: dict
     restart_needed: bool = False
+    restored: bool = False         # the previous map came back (restore), not a new one saved
+
+
+@dataclass(frozen=True)
+class Previous:
+    exists: bool
+    saved_at: float = None         # when the map it holds was replaced (epoch seconds)
 
 
 def camera_name(name):
@@ -61,7 +72,20 @@ def camera_name(name):
     return name
 
 
-def operation(command, camera, grid=False, scene=None, restart=True):
+def map_argument(scene):
+    """The map for ``--map-b64``, its outlines simplified step by step until it fits the command line;
+    SceneError ``too_detailed`` when even the plainest outlines do not."""
+    encoded = encode_map(scene)
+    for tolerance in SHRINK_STEPS:
+        if len(encoded) <= MAP_LIMIT:
+            return encoded
+        encoded = encode_map(shrink_map(scene, tolerance))
+    if len(encoded) > MAP_LIMIT:
+        raise SceneError("too_detailed")
+    return encoded
+
+
+def operation(command, camera, grid=False, scene=None, restart=True, check=False):
     """The scene_interview arguments for one step (no interpreter, no ssh)."""
     args = [command, "--camera", camera_name(camera), "--json"]
     if command == "propose":
@@ -69,7 +93,9 @@ def operation(command, camera, grid=False, scene=None, restart=True):
     if command == "confirm":
         if not isinstance(scene, dict):
             raise ValueError("A map is needed to save")
-        return args + ["--map-b64", encode_map(scene)] + ([] if restart else ["--no-restart"])
+        return args + ["--map-b64", map_argument(scene)] + ([] if restart else ["--no-restart"])
+    if command == "restore":
+        return args + (["--check"] if check else [] if restart else ["--no-restart"])
     raise ValueError("Unknown scene map step")
 
 
@@ -113,10 +139,17 @@ def proposal_from(camera, data):
     return Proposal(camera, "grid" if data.get("method") == "grid" else "sam", picture, regions, current)
 
 
-def saved_from(camera, data):
+def saved_from(camera, data, restored=False):
     if data.get("camera") != camera or not isinstance(data.get("map"), dict):
         raise SceneError("bad_answer")
-    return Saved(camera, data["map"], data.get("restart_needed") is True)
+    return Saved(camera, data["map"], data.get("restart_needed") is True, restored)
+
+
+def previous_from(camera, data):
+    if data.get("camera") != camera or not isinstance(data.get("has_previous"), bool):
+        raise SceneError("bad_answer")
+    saved_at = data.get("saved_at")
+    return Previous(data["has_previous"], float(saved_at) if isinstance(saved_at, (int, float)) else None)
 
 
 class SceneBackend:
@@ -165,6 +198,12 @@ class SceneBackend:
     def confirm(self, camera, scene, restart=True):
         return saved_from(camera, self.run(operation("confirm", camera, scene=scene, restart=restart)))
 
+    def previous(self, camera):
+        return previous_from(camera, self.run(operation("restore", camera, check=True)))
+
+    def restore(self, camera, restart=True):
+        return saved_from(camera, self.run(operation("restore", camera, restart=restart)), restored=True)
+
     def cancel(self):
         """Stop the command in flight (leaving a camera while the box works). The setup step goes on to the next
         camera with the same backend, so a runner of ours is replaced, never left cancelled."""
@@ -205,6 +244,7 @@ class DemoSceneBackend:
         self.method = method
         self.current = dict(current or {})          # the first camera's map now; each camera keeps its own after
         self.maps = {}
+        self.backups = {}                            # camera -> (the map a save replaced, when)
         self.calls = []
 
     def _check(self, step, camera):
@@ -243,8 +283,25 @@ class DemoSceneBackend:
         current = self.maps.get(camera, self.current)
         draft = sm.SceneMap.from_dict(camera, scene, current.get("watched") or None)
         saved = confirmed_preview(draft).to_dict()
+        self.backups[camera] = (current, __import__("time").time())
         self.maps[camera] = saved
         return Saved(camera, saved, restart_expected(current, scene))
+
+    def previous(self, camera):
+        self._check("previous", camera)
+        backup = self.backups.get(camera)
+        return Previous(backup is not None, backup[1] if backup else None)
+
+    def restore(self, camera, restart=True):
+        self._check("restore", camera)
+        from .scene_model import restart_expected
+        if camera not in self.backups:
+            raise SceneError("box_refused", "there is no previous map of this camera")
+        now = self.maps.get(camera, self.current)
+        back, _when = self.backups[camera]
+        self.backups[camera] = (now, __import__("time").time())
+        self.maps[camera] = back
+        return Saved(camera, dict(back), restart_expected(now, back) or bool(back.get("watched")), restored=True)
 
     def cancel(self):
         pass

@@ -15,6 +15,9 @@ from .. import scene_map as sm
 
 CHOICES = ("mine", "neighbour", "public", "hide")
 SKIP, UNKNOWN = "skip", "unknown"
+# A place that IS the boundary between us and them (the railing, the wall): ours, with a line along it whose
+# inward side the engine works out from the areas around it, or the owner says (scene_interview.boundary_line).
+BOUNDARY = "boundary"
 # choice -> (kind, owner) in scene_map's words
 KINDS = {"mine": (sm.MINE, ""), "neighbour": (sm.WATCH, sm.NEIGHBOUR), "public": (sm.WATCH, sm.PUBLIC),
          "hide": (sm.BLACK, "")}
@@ -23,7 +26,7 @@ COLOURS = {"mine": "#0078ff", "neighbour": "#ff8c00", "public": "#a0a0a0", "hide
 # The engine's number colours (scene_interview._PALETTE, BGR there).
 _PALETTE_BGR = ((66, 135, 245), (245, 66, 230), (66, 245, 135), (245, 200, 66), (66, 230, 245), (180, 66, 245),
                 (245, 105, 66), (120, 245, 66), (66, 66, 245), (245, 66, 120), (66, 180, 180), (200, 200, 66))
-MAX_CORNERS = 32
+MAX_CORNERS = 32               # data_collection.zones.validate_points: 3 to 32 corners
 DECIMALS = 4
 
 
@@ -57,6 +60,57 @@ def zone_for(name):
 def clean_points(points):
     return [[round(min(1., max(0., float(x))), DECIMALS), round(min(1., max(0., float(y))), DECIMALS)]
             for x, y in points]
+
+
+def _distance_to_segment(p, a, b):
+    (px, py), (ax, ay), (bx, by) = p, a, b
+    dx, dy = bx - ax, by - ay
+    if dx == dy == 0:
+        return math.hypot(px - ax, py - ay)
+    t = max(0., min(1., ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)))
+    return math.hypot(px - (ax + t * dx), py - (ay + t * dy))
+
+
+def _douglas_peucker(points, tolerance):
+    if len(points) < 3:
+        return list(points)
+    far, index = 0., 0
+    for i in range(1, len(points) - 1):
+        d = _distance_to_segment(points[i], points[0], points[-1])
+        if d > far:
+            far, index = d, i
+    if far <= tolerance:
+        return [points[0], points[-1]]
+    return _douglas_peucker(points[:index + 1], tolerance)[:-1] + _douglas_peucker(points[index:], tolerance)
+
+
+def simplify(points, max_points=MAX_CORNERS, tolerance=0.):
+    """A closed polygon with corners closer than *tolerance* (picture fractions) to the outline dropped, and at
+    most *max_points* corners (the tolerance grows until it fits); never fewer than 3 corners."""
+    points = [tuple(p) for p in points]
+    if len(points) <= 3 or (tolerance <= 0 and len(points) <= max_points):
+        return [list(p) for p in points]
+    # Split the ring at its two farthest-apart corners so both halves simplify as open lines.
+    start = 0
+    far = max(range(len(points)), key=lambda i: math.hypot(points[i][0] - points[0][0], points[i][1] - points[0][1]))
+    ring = points[start:] + points[:start]
+    step = max(tolerance, .001)
+    while True:
+        out = _douglas_peucker(ring[:far + 1], step)[:-1] + _douglas_peucker(ring[far:] + [ring[0]], step)[:-1]
+        if len(out) <= max_points or step > 1:
+            break
+        step *= 1.5
+    if len(out) < 3:
+        out = [ring[0], ring[far // 2] if far > 1 else ring[1], ring[far]]
+    return [list(p) for p in out]
+
+
+def shrink_map(scene, tolerance):
+    """*scene* with every area's outline simplified by *tolerance* (to fit a command line)."""
+    out = dict(scene)
+    out["areas"] = [dict(a, points=clean_points(simplify(a["points"], MAX_CORNERS, tolerance)))
+                    for a in scene.get("areas") or ()]
+    return out
 
 
 def polygon_area(points):
@@ -163,9 +217,10 @@ def inward_vector(boundary):
 
 
 def _area_dict(choice, name, points, zone=""):
-    kind, owner = KINDS[choice]
+    kind, owner = KINDS["mine" if choice == BOUNDARY else choice]
+    zone = zone or ("fence" if choice == BOUNDARY and zone_for(name) == "other" else "")
     out = {"name": sm.plain_name(name) or (zone if zone and zone != "other" else ""), "kind": kind,
-           "zone": zone or zone_for(name), "points": clean_points(points)}
+           "zone": zone or zone_for(name), "points": clean_points(simplify(points))}
     if owner:
         out["owner"] = owner
     return out
@@ -173,13 +228,14 @@ def _area_dict(choice, name, points, zone=""):
 
 def build_map(camera, regions=(), answers=None, names=None, hand_areas=(), lines=(), rest="", rest_owner=""):
     """The SceneMap dict for ``confirm --map-b64``: an area for each region answered with one of the four choices
-    (skipped, unknown and unanswered regions are left out), each hand-drawn area with a choice, and each line.
+    or as a boundary (ours; its line comes in *lines*), skipped, unknown and unanswered regions left out; each
+    hand-drawn area with a choice (outlines simplified to MAX_CORNERS), and each line.
     *rest* / *rest_owner* carry the camera's current "rest of the picture" over (confirm would otherwise unmap it)."""
     answers, names = dict(answers or {}), dict(names or {})
     areas = []
     for region in regions:
         choice = answers.get(region.number)
-        if choice in CHOICES:
+        if choice in CHOICES or choice == BOUNDARY:
             area = _area_dict(choice, names.get(region.number, ""), region.points)
             area["name"] = area["name"] or f"area {region.number}"
             areas.append(area)

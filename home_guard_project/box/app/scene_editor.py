@@ -24,7 +24,8 @@ from PySide6.QtWidgets import (QAbstractButton, QApplication, QDialog, QFrame, Q
 from . import motion
 from .camera_presentation import ambient_picture
 from .scene_backend import SceneError
-from .scene_model import (CHOICES, COLOURS, SKIP, UNKNOWN, HandArea, boundary_from_areas, boundary_toward,
+from .scene_model import (BOUNDARY, CHOICES, COLOURS, SKIP, UNKNOWN, Boundary, HandArea, boundary_from_areas,
+                          boundary_toward,
                           build_map, counts, from_current, inward_vector, label_point, number_colour,
                           polygon_area, rest_after, restart_expected, MAX_CORNERS)
 from .scene_strings import language, st
@@ -129,6 +130,7 @@ class MapStage(QWidget):
         self.answers = {}
         self.hands = []
         self.lines = []
+        self.walls = []                    # (Boundary, sure) along the places answered "it is the boundary"
         self.rest = None
         self.muted = False                 # the card's old photo behind an error: not the box's own picture
         self.mode = "view"
@@ -394,6 +396,7 @@ class MapStage(QWidget):
             self.paint_hands(p, rect, t)
             self.paint_draft(p, rect, t)
             self.paint_lines(p, rect, t)
+            self.paint_walls(p, rect, t)
             self.paint_line_draft(p, rect, t)
             p.restore()
             self.paint_numbers(p, t)
@@ -407,6 +410,7 @@ class MapStage(QWidget):
         for region in self.regions:                    # largest first: a small place stays on top
             shape = polygon_path(region.points, rect)
             choice = self.answers.get(region.number)
+            choice = "mine" if choice == BOUNDARY else choice
             p.setOpacity(1. if active or self.mode == "view" else .4)
             if choice in CHOICES:
                 p.fillPath(shape, alpha(COLOURS[choice], .82 if choice == "hide" else .42))
@@ -518,6 +522,22 @@ class MapStage(QWidget):
                 p.setPen(QColor(t['text'])); p.drawText(box, Qt.AlignmentFlag.AlignCenter, line.name)
         p.setOpacity(1.)
 
+    def paint_walls(self, p, rect, t):
+        """A boundary place's line: with its arrow when the side is known, dashed with a "?" while it is not."""
+        for line, sure in self.walls:
+            a, b = self.to_stage(line.a), self.to_stage(line.b)
+            colour = QColor('#ffffff') if sure else QColor(t['warning'])
+            style = Qt.PenStyle.SolidLine if sure else Qt.PenStyle.DashLine
+            for pen_colour, width in ((alpha('#000000', .55), 8), (colour, 3.5)):
+                p.setPen(QPen(pen_colour, width, style, Qt.PenCapStyle.RoundCap)); p.drawLine(a, b)
+            if sure:
+                self.arrow(p, line, colour, rect)
+                continue
+            centre = (a + b) / 2
+            p.setPen(Qt.PenStyle.NoPen); p.setBrush(colour); p.drawEllipse(centre, 12, 12)
+            font = QFont(self.font()); font.setPixelSize(15); font.setWeight(QFont.Weight.Bold); p.setFont(font)
+            p.setPen(QColor(t['bg'])); p.drawText(QRectF(centre.x() - 12, centre.y() - 12, 24, 24), Qt.AlignmentFlag.AlignCenter, '?')
+
     def paint_line_draft(self, p, rect, t):
         if self.line_draft is None:
             return
@@ -565,6 +585,7 @@ class MapStage(QWidget):
             p.setOpacity(.45 if dim else 1.)
             if selected:
                 p.setPen(Qt.PenStyle.NoPen); p.setBrush(alpha(t['action'], .35)); p.drawEllipse(centre, radius + 6, radius + 6)
+            choice = "mine" if choice == BOUNDARY else choice
             fill = QColor(COLOURS[choice]) if choice in CHOICES else QColor('#ffffff')
             if choice == "hide":
                 fill = QColor('#16191c')
@@ -704,7 +725,7 @@ class Badge(QWidget):
             p.setPen(QPen(QColor(t['action']), 2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
             p.drawLine(QPointF(14, 14), QPointF(19, 20))
             return
-        choice = self.choice
+        choice = "mine" if self.choice == BOUNDARY else self.choice
         if self.number:
             fill = QColor(COLOURS[choice]) if choice in CHOICES else QColor('#ffffff')
             if choice == "hide":
@@ -809,9 +830,78 @@ class ChoiceGrid(QWidget):
             button.setChecked(c == choice)
 
 
+class WideChoice(ChoiceButton):
+    """"It is the boundary": the region's fifth answer, as wide as the grid."""
+    def __init__(self, lang, parent=None):
+        super().__init__("mine", lang, parent)
+        self.choice = BOUNDARY
+        self.setText(st('choice_boundary', lang)); self.hint = st('hint_boundary', lang)
+        self.setAccessibleName(self.text()); self.setAccessibleDescription(self.hint)
+
+    def paintEvent(self, event):
+        t = colors(self)
+        p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setOpacity(1. if self.isEnabled() else .45)
+        on = self.isChecked()
+        rect = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+        p.setBrush(alpha('#ffffff', .1) if on else QColor(t['raised']))
+        p.setPen(QPen(QColor('#ffffff') if on else QColor(t['action'] if keyboard_focus(self) else t['border']), 2 if on else 1))
+        p.drawRoundedRect(rect, 14, 14)
+        rtl = self.layoutDirection() == Qt.LayoutDirection.RightToLeft
+        x = rect.right() - 34 if rtl else rect.left() + 12
+        y = rect.center().y()
+        for pen_colour, width in ((QColor(t['bg']), 6), (QColor('#ffffff'), 2.6)):
+            p.setPen(QPen(pen_colour, width, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+            p.drawLine(QPointF(x, y + 7), QPointF(x + 22, y - 7))
+        text = rect.adjusted(14, 5, -44, -5) if rtl else rect.adjusted(44, 5, -14, -5)
+        align = Qt.AlignmentFlag.AlignRight if rtl else Qt.AlignmentFlag.AlignLeft
+        font = QFont(self.font()); font.setPixelSize(14); font.setWeight(QFont.Weight.DemiBold); p.setFont(font)
+        p.setPen(QColor(t['text']))
+        p.drawText(QRectF(text.left(), text.top(), text.width(), 22), align | Qt.AlignmentFlag.AlignVCenter,
+                   p.fontMetrics().elidedText(self.text(), Qt.TextElideMode.ElideRight, int(text.width())))
+        font.setPixelSize(12); font.setWeight(QFont.Weight.Normal); p.setFont(font)
+        p.setPen(QColor(t['secondary'] if on else t['muted']))
+        p.drawText(QRectF(text.left(), text.top() + 21, text.width(), 18), align | Qt.AlignmentFlag.AlignVCenter,
+                   p.fontMetrics().elidedText(self.hint, Qt.TextElideMode.ElideRight, int(text.width())))
+
+
+class SideQuestion(QFrame):
+    """"Which side of the railing is ours?", with the picture's own words for the two sides."""
+    picked = Signal(str)
+
+    def __init__(self, lang, parent=None):
+        super().__init__(parent)
+        self.lang = lang
+        self.setObjectName('sceneSide'); self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        t = colors(self)
+        self.setStyleSheet(f'QFrame#sceneSide {{ background: {rgba(t["warning"], .08)}; border: 1px solid '
+                           f'{rgba(t["warning"], .45)}; border-radius: 12px; }}'
+                           f'QFrame#sceneSide QLabel {{ background: transparent; }}')
+        lay = QVBoxLayout(self); lay.setContentsMargins(12, 10, 12, 12); lay.setSpacing(8)
+        self.question = words('', 'body'); self.question.setStyleSheet(f'color: {t["text"]}; font-size: 11pt; font-weight: 600;')
+        lay.addWidget(self.question)
+        self.hint = words(st('side_hint', lang), 'muted'); lay.addWidget(self.hint)
+        row = QHBoxLayout(); row.setSpacing(8)
+        self.buttons = {}
+        for side in ('left', 'right'):
+            button = QPushButton(''); button.setCheckable(True); button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setStyleSheet(f'QPushButton {{ background: {t["raised"]}; color: {t["text"]}; border: 1px solid {t["border"]}; '
+                                 f'border-radius: 12px; padding: 8px 10px; min-height: 20px; font-size: 10.5pt; font-weight: 600; }}'
+                                 f'QPushButton:checked {{ border: 2px solid {t["action"]}; background: {rgba(t["action"], .14)}; }}')
+            button.clicked.connect(lambda checked=False, side=side: self.picked.emit(side))
+            row.addWidget(button, 1); self.buttons[side] = button
+        lay.addLayout(row)
+
+    def ask(self, name, sides, chosen=''):
+        self.question.setText(st('side_question', self.lang, name=name))
+        for side, button in self.buttons.items():
+            button.setText(sides[side]); button.setChecked(side == chosen)
+
+
 class RegionRow(ItemRow):
     answered = Signal(int, str)
     renamed = Signal(int, str)
+    side_picked = Signal(int, str)
 
     def __init__(self, number, lang, parent=None):
         self.number, self.lang = number, lang
@@ -822,6 +912,10 @@ class RegionRow(ItemRow):
         self.body_layout.addWidget(self.name)
         self.choices = ChoiceGrid(lang); self.body_layout.addWidget(self.choices)
         self.choices.picked.connect(lambda c: self.answered.emit(self.number, c))
+        self.boundary = WideChoice(lang); self.body_layout.addWidget(self.boundary)
+        self.boundary.clicked.connect(lambda: self.answered.emit(self.number, BOUNDARY))
+        self.side = SideQuestion(lang); self.side.hide(); self.body_layout.addWidget(self.side)
+        self.side.picked.connect(lambda side: self.side_picked.emit(self.number, side))
         self.skip = QuietToggle(st('choice_skip', lang)); self.unknown = QuietToggle(st('choice_unknown', lang))
         self.skip.clicked.connect(lambda: self.answered.emit(self.number, SKIP))
         self.unknown.clicked.connect(lambda: self.answered.emit(self.number, UNKNOWN))
@@ -836,15 +930,24 @@ class RegionRow(ItemRow):
             self.name.setText(name)
         self.refresh()
 
+    def ask_side(self, sides=None, chosen=''):
+        """Show "which side is ours?" (*sides*: the picture's words for left / right), or hide it (None)."""
+        if sides is None:
+            self.side.hide()
+            return
+        name = self.name.text().strip() or st('boundary_name', self.lang, number=self.number)
+        self.side.ask(name, sides, chosen); self.side.show()
+
     def refresh(self):
         self.choices.show_choice(self.choice)
+        self.boundary.setChecked(self.choice == BOUNDARY)
         self.skip.setChecked(self.choice == SKIP); self.unknown.setChecked(self.choice == UNKNOWN)
         self.badge.choice = self.choice; self.badge.update()
         name = self.name.text().strip()
         self.title.setText(name or st('region_title', self.lang, number=self.number))
         self.tag.setText(st('choice_' + self.choice, self.lang) if self.choice in CHOICES else
                          st('tag_' + (self.choice or 'none'), self.lang))
-        colour = COLOURS.get(self.choice)
+        colour = COLOURS.get('mine' if self.choice == BOUNDARY else self.choice)
         self.tag.setStyleSheet(f'color: {colour if colour and self.choice != "hide" else colors(self)["muted"]}; '
                                f'font-size: 10pt; font-weight: {600 if self.choice in CHOICES else 400};')
 
@@ -1036,7 +1139,9 @@ class SceneMapEditor(QWidget):
         self.current = {}
         self.regions = ()
         self.answers, self.names = {}, {}
+        self.sides = {}                   # region -> left | right, the owner's answer to "which side is ours?"
         self.hands, self.lines = [], []
+        self.previous = None              # scene_backend.Previous: the map the last save replaced
         self.saved = None
         self.pending_map = None
         self.retry = None
@@ -1076,6 +1181,13 @@ class SceneMapEditor(QWidget):
         self.eyebrow = words(eyebrow.upper() if self.lang == 'en' else eyebrow, 'eyebrow'); side.addWidget(self.eyebrow)
         self.eyebrow.setVisible(not setup)              # setup says "camera 2 of 5" above, for the whole step
         self.title = words(display_title(camera, self.lang), 'title'); side.addWidget(self.title)
+        restore = QHBoxLayout(); restore.setSpacing(8)
+        self.restore_button = TextAction(st('restore_button', self.lang))
+        self.restore_button.clicked.connect(self.restore_previous)
+        self.restore_when = words('', 'muted', wrap=False)
+        restore.addWidget(self.restore_button); restore.addWidget(self.restore_when); restore.addStretch(1)
+        self.restore_row = clear(QWidget()); self.restore_row.setLayout(restore); restore.setContentsMargins(0, 0, 0, 0)
+        side.addWidget(self.restore_row)
         self.pages = QStackedWidget(); self.pages.setObjectName('sceneClear'); side.addWidget(self.pages, 1)
         # The pages take the room there is (setup is short at 1366x768); the quiet ones scroll when it is not enough.
         self.pages.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Ignored)
@@ -1186,6 +1298,7 @@ class SceneMapEditor(QWidget):
         lay.addLayout(grid)
         self.rest_label = words('', 'body'); lay.addWidget(self.rest_label)
         self.left_out_label = words('', 'note'); lay.addWidget(self.left_out_label)
+        self.walls_label = words('', 'note'); lay.addWidget(self.walls_label)
         self.restart_label = words(st('restart_note', self.lang), 'note'); lay.addWidget(self.restart_label)
         lay.addStretch(1)
         return page
@@ -1193,9 +1306,10 @@ class SceneMapEditor(QWidget):
     def build_saved(self, t):
         page = QWidget(); lay = QVBoxLayout(page); lay.setContentsMargins(0, 8, 0, 0); lay.setSpacing(12)
         head = QHBoxLayout(); head.setSpacing(10)
-        head.addWidget(Tick()); head.addWidget(words(st('saved_title', self.lang), 'heading'), 1)
+        self.saved_title = words(st('saved_title', self.lang), 'heading')
+        head.addWidget(Tick()); head.addWidget(self.saved_title, 1)
         lay.addLayout(head)
-        lay.addWidget(words(st('saved_hint', self.lang), 'body'))
+        self.saved_hint = words(st('saved_hint', self.lang), 'body'); lay.addWidget(self.saved_hint)
         self.saved_counts = words('', 'body'); lay.addWidget(self.saved_counts)
         self.saved_rest = words('', 'body'); lay.addWidget(self.saved_rest)
         self.saved_restart = words(st('saved_restart', self.lang), 'note'); lay.addWidget(self.saved_restart)
@@ -1223,6 +1337,10 @@ class SceneMapEditor(QWidget):
         self.retry = self.start
 
         def task():
+            try:
+                previous = self.backend.previous(self.camera)
+            except Exception:  # noqa: BLE001 - an older box, or no answer: simply no restore offered
+                previous = None
             proposal = self.backend.propose(self.camera)
             aspect = 16 / 9
             pix = picture_pixmap(proposal.picture)
@@ -1233,17 +1351,18 @@ class SceneMapEditor(QWidget):
             for i, region in enumerate(regions):
                 covered = [r.points for r in regions[i + 1:]]
                 labels[region.number] = label_point(region.points, covered, aspect, steps=18)
-            return proposal, labels
+            return proposal, labels, previous
         self.jobs.submit(task, lambda result: self.loaded(*result), self.failed)
 
-    def loaded(self, proposal, labels=None):
+    def loaded(self, proposal, labels=None, previous=None):
         if labels is None:
             labels = {r.number: label_point(r.points, [o.points for o in proposal.regions[i + 1:]])
                       for i, r in enumerate(proposal.regions)}
         self.proposal = proposal
         self.current = dict(proposal.current or {})
         self.regions = tuple(proposal.regions)
-        self.answers, self.names = {}, {}
+        self.answers, self.names, self.sides = {}, {}, {}
+        self.previous = previous
         self.hands, self.lines = from_current(self.current)
         self.stage.set_picture(picture_pixmap(proposal.picture)); self.stage.muted = False
         self.stage.set_regions(self.regions, labels)
@@ -1253,6 +1372,7 @@ class SceneMapEditor(QWidget):
         self.build_region_rows()
         self.build_hand_rows()
         self.build_line_rows()
+        self.refresh_walls()
         self.show_page(EDIT)
         self.tabs.select(REGIONS if self.regions else DRAW)
         self.tab_changed(REGIONS if self.regions else DRAW)
@@ -1294,6 +1414,7 @@ class SceneMapEditor(QWidget):
             self.back_button.setText(st('setup_back' if setup else 'cancel', self.lang))
         self.back_button.setVisible(page != SAVED and (setup and self.setup[0] > 1 or not setup or page == SUMMARY))
         self.skip_button.setVisible(setup and page in (LOADING, EDIT, ERROR))
+        self.show_previous()
         self.stage.set_mode({EDIT: ('regions', 'draw', 'line')[self.tabs.index]}.get(page, 'view'))
         self.refresh_counts()
 
@@ -1333,11 +1454,75 @@ class SceneMapEditor(QWidget):
         except Exception:  # noqa: BLE001
             pass
 
+    # --- the previous map --------------------------------------------------
+    def show_previous(self):
+        """"Restore the previous map", while editing; greyed out until a save has replaced a map."""
+        has = bool(self.previous and self.previous.exists)
+        self.restore_row.setVisible(self.page == EDIT)
+        self.restore_button.setEnabled(has and not self.jobs.busy())
+        self.restore_button.setToolTip('' if has else st('restore_none', self.lang))
+        when = ''
+        if has and self.previous.saved_at:
+            from datetime import datetime
+            when = st('restore_from', self.lang, when=datetime.fromtimestamp(self.previous.saved_at).strftime('%d.%m %H:%M'))
+        self.restore_when.setText(when)
+
+    def restore_previous(self):
+        if self.jobs.busy() or not (self.previous and self.previous.exists):
+            return
+        self.restore_button.setText(st('restoring', self.lang)); self.restore_button.setEnabled(False)
+        self.primary.setEnabled(False)
+        self.retry = self.restore_previous
+
+        def done(saved):
+            self.restore_button.setText(st('restore_button', self.lang))
+            self.show_saved(saved)
+
+        def failed(exc):
+            self.restore_button.setText(st('restore_button', self.lang))
+            self.failed(exc)
+        self.jobs.submit(lambda: self.backend.restore(self.camera), done, failed)
+
     # --- the map -----------------------------------------------------------
+    def walls(self):
+        """``[(region number, Boundary, sure, side words)]`` for the places answered "it is the boundary": the line
+        along each, its inward side from the owner's answer or from the areas around it (the engine's own
+        ``boundary_line``); not sure when nothing says which side is ours."""
+        numbers = [r for r in self.regions if self.answers.get(r.number) == BOUNDARY]
+        if not numbers:
+            return []
+        from .. import scene_interview as si
+        from .. import scene_map as sm
+        scene = build_map(self.camera, self.regions, self.answers, self.names, self.hands, ())
+        areas = [sm.Area(a['name'], a['kind'], a['zone'], a['points'], owner=a.get('owner', '')) for a in scene['areas']]
+        others = [r.points for r in numbers]
+        out = []
+        for region in numbers:
+            name = self.names.get(region.number, '').strip() or st('boundary_name', self.lang, number=region.number)
+            try:
+                line, sure = si.boundary_line(name, si.Region(region.number, region.points, region.area), areas,
+                                              self.sides.get(region.number, ''), others)
+            except ValueError:
+                continue
+            words_for = si.side_words(line.a, line.b, self.lang)
+            out.append((region.number, Boundary(line.a, line.b, line.inward, name), sure, words_for))
+        return out
+
     def build_map(self):
         rest = self.current.get('rest') or ''
-        return build_map(self.camera, self.regions, self.answers, self.names, self.hands, self.lines,
+        walls = [line for _n, line, sure, _w in self.walls() if sure]
+        return build_map(self.camera, self.regions, self.answers, self.names, self.hands, self.lines + walls,
                          rest=rest, rest_owner=self.current.get('rest_owner') or '')
+
+    def refresh_walls(self):
+        """The boundary places' lines on the picture, and "which side is ours?" in each row that needs it."""
+        walls = self.walls()
+        self.stage.walls = [(line, sure) for _n, line, sure, _w in walls]
+        asking = {n: w for n, _line, sure, w in walls if not sure or n in self.sides}
+        for number, row in getattr(self, 'region_rows', {}).items():
+            row.ask_side(asking.get(number), self.sides.get(number, ''))
+        self.stage.update()
+        return walls
 
     def count_text(self, scene):
         c = counts(scene)
@@ -1369,6 +1554,9 @@ class SceneMapEditor(QWidget):
         left_out = sum(1 for h in self.hands if h.closed and h.choice not in CHOICES)
         self.left_out_label.setText(st('left_out', self.lang, count=left_out)); self.left_out_label.setVisible(bool(left_out))
         self.restart_label.setVisible(restart_expected(self.current, scene))
+        unclear = [line.name for _n, line, sure, _w in self.walls() if not sure]
+        self.walls_label.setText(st('walls_unclear', self.lang, names=', '.join(unclear)))
+        self.walls_label.setVisible(bool(unclear))
         self.pending_map = scene
         self.show_page(SUMMARY)
 
@@ -1397,10 +1585,18 @@ class SceneMapEditor(QWidget):
     def show_saved(self, saved):
         self.saved = saved
         self.current = dict(saved.map)
-        hands, lines = from_current({k: v for k, v in saved.map.items() if k != 'watched'})
+        restored = getattr(saved, 'restored', False)
+        self.saved_title.setText(st('restored_title' if restored else 'saved_title', self.lang))
+        self.saved_hint.setText(st('restored_receipt', self.lang, camera=display_title(self.camera, self.lang))
+                                if restored else st('saved_hint', self.lang))
+        self.stage.walls = []
+        hands, lines = from_current(saved.map)     # a restored drawn zone shows as ours, its outside hidden
         self.stage.regions = (); self.stage.labels = {}
         self.stage.hands = hands; self.stage.lines = lines
-        rest = rest_after({}, saved.map)
+        from .scene_backend import Previous
+        import time
+        self.previous = Previous(True, time.time())           # the box keeps what this replaced: it can come back
+        rest = 'hide' if saved.map.get('watched') else rest_after({}, saved.map)
         self.stage.rest = rest if rest in COLOURS else None
         self.saved_counts.setText(self.count_text(saved.map))
         self.saved_rest.setText(st('rest_' + rest, self.lang))
@@ -1427,6 +1623,7 @@ class SceneMapEditor(QWidget):
             row.selected.connect(lambda n=region.number: self.select_region(n))
             row.answered.connect(self.answer_region)
             row.renamed.connect(self.rename_region)
+            row.side_picked.connect(self.pick_side)
             self.region_column.insertWidget(self.region_column.count() - 1, row)
             self.region_rows[region.number] = row
         align_labels(self.region_scroll.widget())
@@ -1443,15 +1640,26 @@ class SceneMapEditor(QWidget):
             row.set_lit(n == number)
         row = self.region_rows.get(number)
         if row is not None:
-            QTimer.singleShot(0, lambda: show_row(self.region_scroll, row))
+            QTimer.singleShot(0, lambda: self.show_region_row(row))
+
+    def show_region_row(self, row):
+        show_row(self.region_scroll, row)
+        if row.side.isVisible():                 # "which side is ours?" must be in view, with its two answers
+            self.region_scroll.ensureWidgetVisible(row.side, 0, 8)
 
     def answer_region(self, number, choice):
         if self.answers.get(number) == choice:
             self.answers.pop(number, None)      # a second tap on the same answer takes it back
         else:
             self.answers[number] = choice
+        if self.answers.get(number) != BOUNDARY:
+            self.sides.pop(number, None)
         self.region_rows[number].set_answer(self.answers.get(number))
-        self.stage.update(); self.refresh_counts()
+        walls = self.refresh_walls(); self.refresh_counts()
+        if any(n == number and not sure for n, _line, sure, _w in walls):
+            row = self.region_rows[number]       # stay: the row asks which side is ours
+            QTimer.singleShot(0, lambda: self.show_region_row(row))
+            return
         if number in self.answers:
             following = [r.number for r in self.regions if r.number > number and not self.answers.get(r.number)]
             if following:
@@ -1459,7 +1667,13 @@ class SceneMapEditor(QWidget):
 
     def rename_region(self, number, text):
         self.names[number] = text
+        if self.answers.get(number) == BOUNDARY:
+            self.refresh_walls()
         self.refresh_counts()
+
+    def pick_side(self, number, side):
+        self.sides[number] = side
+        self.refresh_walls(); self.refresh_counts()
 
     def build_hand_rows(self):
         self.clear_column(self.hand_column)
@@ -1698,7 +1912,7 @@ def open_map_dialog(page, name, demo_state=None):
 # ----------------------------------------------------------------------------
 # Demo states, for screenshots and tests (``--scene STATE``)
 # ----------------------------------------------------------------------------
-DEMO_STATES = ('loading', 'regions', 'grid', 'drawing', 'line', 'summary', 'saved', 'error')
+DEMO_STATES = ('loading', 'regions', 'grid', 'wall', 'drawing', 'line', 'summary', 'saved', 'restored', 'error')
 DEMO_ANSWERS = {1: ('mine', {'he': 'הדשא', 'en': 'the lawn'}), 2: ('neighbour', {'he': 'הבית של השכן', 'en': 'the house across'}),
                 3: ('mine', {'he': 'השביל', 'en': 'the driveway'}), 4: ('mine', {'he': '', 'en': ''}),
                 5: ('hide', {'he': '', 'en': ''})}
@@ -1725,8 +1939,23 @@ def drive(editor, state):
         editor.retry = editor.start
         editor.failed(SceneError('box_refused', f'could not get a picture from {editor.camera} right now (is it online?)'))
         return
-    editor.loaded(backend.propose(editor.camera, grid=state == 'grid'))
+    if state == 'restored':
+        from .scene_backend import Previous
+        editor.loaded(backend.propose(editor.camera), previous=Previous(True, 1791480000.))
+        backend.backups[editor.camera] = ({'camera': editor.camera, 'watched': [[0, .3], [1, .3], [1, 1], [0, 1]],
+                                           'areas': [], 'lines': []}, 1791480000.)
+        editor.show_saved(backend.restore(editor.camera))
+        return
+    from .scene_backend import Previous
+    editor.loaded(backend.propose(editor.camera, grid=state == 'grid'), previous=Previous(True, 1791480000.))
     if state == 'grid':
+        editor.select_region(6)
+        return
+    if state == 'wall':
+        # The house front (2) is the wall between us and the neighbour: nothing around it says which side is ours.
+        editor.names[6] = {'he': 'הגדר הימנית', 'en': 'the right hedge'}[editor.lang]
+        editor.region_rows[6].set_answer(None, editor.names[6])
+        editor.answer_region(6, BOUNDARY)
         editor.select_region(6)
         return
     for number, (choice, names) in DEMO_ANSWERS.items():
