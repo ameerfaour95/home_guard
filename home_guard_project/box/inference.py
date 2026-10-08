@@ -651,11 +651,10 @@ def _optional_float(value: Any) -> Optional[float]:
 
 
 def frame_to_jpeg_bytes(frame_bgr: Any) -> bytes:
-    """JPEG-encode a BGR frame to raw bytes. Imports cv2 lazily."""
-    import cv2  # noqa: PLC0415
+    """JPEG-encode a BGR frame to raw bytes, as the model is sent it (model_input.encode_jpeg). Imports cv2 lazily."""
+    from ..data_collection.model_input import encode_jpeg  # noqa: PLC0415
 
-    ok, buf = cv2.imencode(".jpg", frame_bgr, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
-    return buf.tobytes() if ok else b""
+    return encode_jpeg(frame_bgr)
 
 
 def frame_to_jpeg_b64(frame_bgr: Any) -> str:
@@ -1496,6 +1495,7 @@ class AlertJob:
     crop_settings: Any = None
     crop_fps: Optional[float] = None
     input_meta: Dict[str, Any] = field(default_factory=dict)
+    model_input: Any = None          # model_input.ModelInput: the frames sent and how they were made (not saved yet)
     # The person score that triggered this alert (the camera's conf_person): the investigator counts only people the
     # tracker saw at least once at this score, as the tracker is fed from a lower one (tracker_person_conf).
     person_conf: Optional[float] = None
@@ -1535,7 +1535,7 @@ def _prepare_alert(job: AlertJob, cfg: Any, detector: Any, sub_cap: Any, main_ca
     Called on the detection loop so the shared YOLO model is never used concurrently.
     Reader threads keep buffering while this per-alert work runs.
     """
-    from ..data_collection import vlm_crop
+    from ..data_collection import model_input, vlm_crop
 
     reason = ""
     try:
@@ -1584,14 +1584,18 @@ def _prepare_alert(job: AlertJob, cfg: Any, detector: Any, sub_cap: Any, main_ca
             except Exception:
                 log.exception("[%s] crop failed; using the whole sub-stream window", job.camera)
                 reason = "crop_error"
+    # What the model sees comes from model_input alone: the crop's own boxes on the main stream, else whole sub frames.
     if job.crop is not None:
-        job.input_meta = {"vlm_input": "crop"}
-        frames = vlm_crop.sample_for_vlm(job.crop.frames, fps=job.crop_fps, sample_fps=cfg.VLM_SAMPLE_FPS)
+        job.input_meta = {"vlm_input": model_input.VLM_INPUT_CROP}
+        job.model_input = model_input.render_model_input(
+            main[0], {"vlm_input": model_input.VLM_INPUT_CROP, "fps": job.crop_fps, "crops": job.crop.crops,
+                      "crop_size": (job.crop.width, job.crop.height)}, model_input.config_from(cfg))
     else:
-        job.input_meta = {"vlm_input": "whole_frame_fallback", "vlm_fallback_reason": reason}
+        job.input_meta = {"vlm_input": model_input.VLM_INPUT_WHOLE, "vlm_fallback_reason": reason}
         log.warning("[%s] VLM whole_frame_fallback: %s", job.camera, reason)
-        frames = vlm_crop.sample_for_vlm(sub_frames, fps=sub_fps, sample_fps=cfg.VLM_SAMPLE_FPS)
-    return frames, clip
+        job.model_input = model_input.render_model_input(
+            sub_frames, {"vlm_input": model_input.VLM_INPUT_WHOLE, "fps": sub_fps}, model_input.config_from(cfg))
+    return job.model_input.frames, clip
 
 
 def _scene_look(job: AlertJob, ts: Optional[float], frame: Any, results: Any) -> None:
