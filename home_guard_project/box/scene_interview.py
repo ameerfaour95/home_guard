@@ -49,6 +49,7 @@ import logging
 import os
 import re
 import sys
+import time
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
@@ -713,7 +714,8 @@ def confirm(camera: str, out_dir: str = INTERVIEW_DIR, zones_path: Optional[str]
             known_cameras: Sequence[str] = ()) -> Dict[str, Any]:
     """Step 3, the owner's [save]: the draft becomes the camera's confirmed map (``scene_map.confirm_scene_map``).
     Stale keys of the same channel (an old site name, not among *known_cameras*) are dropped with it.
-    ``restart_needed`` when the frame mask changed."""
+    ``restart_needed`` when the frame mask changed. The map it replaces (its scene-map entry and its drawn zone)
+    is kept as the camera's backup: ``restore_previous`` brings it back (owner, 2026-10-08)."""
     path = draft_path(camera, out_dir)
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
@@ -721,12 +723,94 @@ def confirm(camera: str, out_dir: str = INTERVIEW_DIR, zones_path: Optional[str]
         raise ValueError(f"that draft belongs to camera {data.get('camera')!r}, not {camera!r}")
     draft = sm.SceneMap.from_dict(camera, data, data.get("watched") or None)
     stale = stale_keys(camera, known_cameras, zones_path) if known_cameras else []
+    _keep_backup(camera, zones_path)
     saved, changed = sm.confirm_scene_map(draft, zones_path, stale=stale)
     try:
         os.remove(path)
     except OSError:
         pass
     return {"camera": camera, "map": saved.to_dict(), "restart_needed": changed, "stale_removed": stale}
+
+
+# ---------- the previous map ----------
+BACKUP_NAME = "scene_maps_backup.json"
+
+
+def _backup_path(zones_path: Optional[str]) -> str:
+    from ..data_collection.zones import ZONES_PATH, scene_maps_path_for  # noqa: PLC0415
+
+    return os.path.join(os.path.dirname(scene_maps_path_for(zones_path or ZONES_PATH)), BACKUP_NAME)
+
+
+def _snapshot(camera: str, zones_path: Optional[str]) -> Dict[str, Any]:
+    """The camera's live map as stored: its scene-map entry and its drawn zone (either may be None)."""
+    from ..data_collection.zones import ZONES_PATH, _read_raw, read_scene_maps, scene_maps_path_for  # noqa: PLC0415
+
+    zp = zones_path or ZONES_PATH
+    return {"scene": read_scene_maps(scene_maps_path_for(zp)).get(str(camera)),
+            "zone": _read_raw(zp).get(str(camera)), "saved_at": time.time()}
+
+
+def _read_backups(zones_path: Optional[str]) -> Dict[str, Any]:
+    try:
+        with open(_backup_path(zones_path), encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _write_backups(data: Dict[str, Any], zones_path: Optional[str]) -> None:
+    path = _backup_path(zones_path)
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=1)
+    os.replace(tmp, path)
+
+
+def _keep_backup(camera: str, zones_path: Optional[str]) -> None:
+    data = _read_backups(zones_path)
+    data[str(camera)] = _snapshot(camera, zones_path)
+    _write_backups(data, zones_path)
+
+
+def previous_map(camera: str, zones_path: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """The map *camera* had before its last confirm (``{"scene", "zone", "saved_at"}``), or None."""
+    entry = _read_backups(zones_path).get(str(camera))
+    return entry if isinstance(entry, dict) else None
+
+
+def restore_previous(camera: str, zones_path: Optional[str] = None) -> Dict[str, Any]:
+    """Bring back the map *camera* had before its last confirm; the map it replaces becomes the backup (so a
+    restore can be undone the same way). ``restart_needed`` when the frame mask changed. LookupError without one."""
+    from ..data_collection.zones import (  # noqa: PLC0415
+        ZONES_PATH, _read_raw, black_polygons, read_scene_maps, save_zones, scene_maps_path_for, write_scene_maps)
+
+    backup = previous_map(camera, zones_path)
+    if backup is None:
+        raise LookupError(f"no previous map of {camera}")
+    zp = zones_path or ZONES_PATH
+    sp = scene_maps_path_for(zp)
+    current = _snapshot(camera, zones_path)
+    scenes = read_scene_maps(sp)
+    if backup.get("scene") is None:
+        scenes.pop(str(camera), None)
+    else:
+        scenes[str(camera)] = backup["scene"]
+    write_scene_maps(scenes, sp)
+    zones = dict(_read_raw(zp))
+    if backup.get("zone") is None:
+        zones.pop(str(camera), None)
+    else:
+        zones[str(camera)] = backup["zone"]
+    save_zones(zones, zp)
+    data = _read_backups(zones_path)
+    data[str(camera)] = current
+    _write_backups(data, zones_path)
+    changed = (current.get("zone") != backup.get("zone")
+               or black_polygons(current.get("scene")) != black_polygons(backup.get("scene")))
+    return {"camera": camera, "restart_needed": bool(changed), "saved_at": backup.get("saved_at")}
 
 
 def stale_keys(camera: str, known_cameras: Sequence[str], zones_path: Optional[str] = None) -> List[str]:
