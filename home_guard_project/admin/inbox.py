@@ -58,9 +58,9 @@ class InboxScreen(QWidget):
     session_expired = Signal()
     tag_requested = Signal(str, object)   # a clip key, and the owner's answer as Tag · AI fields (None: from scratch)
 
-    def __init__(self, backend, theme='dark'):
+    def __init__(self, backend, role='admin', theme='dark'):
         super().__init__()
-        self.backend, self.theme = backend, theme
+        self.backend, self.role, self.theme = backend, role, theme
         self.items, self.customers, self.cameras = [], {}, {}
         self.loader, self.writer = TaskRunner(self), TaskRunner(self)
         self.loader.finished.connect(self.loaded); self.writer.finished.connect(self.decided)
@@ -192,8 +192,10 @@ class InboxScreen(QWidget):
         self.table.setRowCount(len(items))
         for r, i in enumerate(items):
             when = i.received_utc.astimezone().strftime('%Y-%m-%d %H:%M') if i.received_utc else '—'
+            status = DECISION_TITLES.get(i.decision) or ('Waiting · probably not a label' if i.probably_not_label
+                                                         else 'Waiting')
             values = (when, i.customer, camera_title(i), '', i.owner_label or '—', owner_words(i) or '—',
-                      i.model_label or '—', DECISION_TITLES.get(i.decision, 'Waiting'))
+                      i.model_label or '—', status)
             for c, value in enumerate(values):
                 cell = QTableWidgetItem(value); cell.setToolTip(value)
                 self.table.setItem(r, c, cell)
@@ -248,9 +250,12 @@ class InboxScreen(QWidget):
             how.append('voice answer, transcribed')
         if i.verdict and i.verdict != 'none':
             how.append('verdict: ' + i.verdict.replace('_', ' '))
+        if i.probably_not_label and not i.decision:
+            how.append("probably not a label: a question, a complaint or a command (the box's own rule)")
         self.owner_how.setText('  ·  '.join(how))
         self.model_pill.show_label(i.model_label or 'no label', LABEL_TOKENS.get(i.model_label or '', 'action'))
         self.model_chip.show_source('model', i.model)
+        self.model_chip.setToolTip(f'Prompt version: {i.prompt_version}' if i.prompt_version else '')
         self.model_said.setText(i.model_summary or '(no summary)')
         self.decision_chip.show_source('admin' if i.decision else '', i.decided_by)
         self.decision_text.setText(DECISION_TITLES.get(i.decision, '') + (f': {i.decision_note}' if i.decision_note else ''))

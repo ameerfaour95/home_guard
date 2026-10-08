@@ -57,7 +57,9 @@ COPY_NAME = {"production": "production", "dataset": "training"}
 INDEXED_AREAS = {"meta", "clips", "feedback", "status", "responses", "vlm_crops", "yolo_images", "yolo_labels"}
 # Second key segment of the indexed areas: a key there that parse_key rejects is an "invalid key layout".
 INDEXED_DIRS = {"meta", "clips", "feedback", "_status", "responses", "vlm_crops", "yolo"}
-EVENT_ROLES = ("original_video", "meta", "raw_answer", "teacher_frame", "crop_video", "yolo_image", "yolo_label")
+EVENT_ROLES = ("original_video", "meta", "raw_answer", "teacher_frame", "crop_video", "yolo_image", "yolo_label",
+               "tracks")
+TRACKS_SUFFIX = ".tracks.json"  # the box tracker's tracks of a clip (box clip_tracks.py), in responses/
 AI_RANK = {"none": 0, "fallback": 1, "failed": 2, "real": 3}
 DECISION_BACKFILL = 500  # events without a parsed event-layer decision rebuilt per pass (from stored revisions)
 FULL_SCAN_EVERY = timedelta(minutes=30)
@@ -102,7 +104,7 @@ def artifact_role(info: KeyInfo) -> Optional[str]:
     if area == "meta":
         return "meta" if key.endswith(".meta.json") else None
     if area == "responses":
-        return "raw_answer"
+        return "tracks" if key.endswith(TRACKS_SUFFIX) else "raw_answer"
     if area == "vlm_crops":
         return {".jpg": "teacher_frame", ".jpeg": "teacher_frame", ".mp4": "crop_video"}.get(info.ext.lower())
     if area == "yolo_images":
@@ -326,7 +328,12 @@ class _Run:
                 continue
             seen.add(obj.key)
             camera, stem = info.camera, info.stem
+            if role == "tracks":  # "<stem>.tracks.json": the key layout reads its stem as "<stem>.tracks"
+                stem = stem[:-len(".tracks")] if stem and stem.endswith(".tracks") else stem
             art = self.arts.get(obj.key)
+            if art is not None and art.role != role:  # indexed as a raw answer before the tracks role existed
+                art.role, art.stem, art.event_id = role, stem, None
+                art.etag = ""                         # a changed revision: re-linked to its event below
             if art is None:  # inserted (conflict-safe) once both prefixes are listed
                 art = Artifact(role=role, s3_key=obj.key, etag=obj.etag, bytes=obj.size,
                                mime=MIME.get(info.ext.lower()), available=True, provenance="box",

@@ -74,7 +74,10 @@
       "note": "Just the neighbour.",
       "raw_text": "Just the neighbour.",
       "source": "text",
-      "received_utc": "2026-10-02T22:48:28Z"
+      "received_utc": "2026-10-02T22:48:28Z",
+      "owner_label": "",
+      "owner_text": "",
+      "transcript": ""
     }
   ],
   "artifacts": [

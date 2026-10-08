@@ -26,6 +26,7 @@ def upgrade() -> None:
         sa.Column('staff_id', sa.Integer(), sa.ForeignKey('staff.id', ondelete='SET NULL'), nullable=True),
         sa.Column('staff_name', sa.Text(), nullable=True),
         sa.Column('decided_at', sa.DateTime(timezone=True), nullable=False),
+        sa.Column('prompt_version', sa.String(length=128), nullable=True),
     )
     # answers indexed before 0017: their fields from the stored body of the newest revision (the indexer re-applies a
     # feedback file only when it changes)

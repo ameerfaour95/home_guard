@@ -17,7 +17,7 @@ from home_guard_project.admin.tag_widgets import ProvenanceChip
 
 def inbox(widgets, wait, backend=None):
     b = backend or DemoBackend()
-    s = InboxScreen(b); widgets.append(s); s.resize(1366, 700); s.show(); s.open()
+    s = InboxScreen(b, 'admin', 'dark'); widgets.append(s); s.resize(1366, 700); s.show(); s.open()  # the shell's signature
     wait(lambda: not s.loader.busy and s.table.rowCount() > 0)
     return s, b
 
@@ -72,6 +72,9 @@ def test_fix_not_a_label_and_consent(widgets, wait):
     s.tag_requested.connect(lambda key, fields: asked.append((key, fields)))
     s.table.selectRow(row_of(s, 902))
     assert not s.accept_button.isEnabled() and s.consent.isVisible()             # no training consent
+    assert s.table.item(row_of(s, 902), 7).text() == 'Waiting · probably not a label'
+    assert 'probably not a label' in s.owner_how.text()
+    assert s.model_chip.toolTip() == 'Prompt version: 2026-10-03.tagged-rules-label-animals-why-owner-facts'
     s.accept(); assert not s.writer.busy and not asked
     s.note.setText('asks why there are so many alerts'); s.not_label()
     wait(lambda: not s.writer.busy and not s.loader.busy and 902 not in [i.feedback_id for i in s.items])

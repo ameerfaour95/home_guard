@@ -2570,6 +2570,21 @@
             "title": "Owner Text",
             "type": "string"
           },
+          "probably_not_label": {
+            "title": "Probably Not Label",
+            "type": "boolean"
+          },
+          "prompt_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Version"
+          },
           "raw_text": {
             "title": "Raw Text",
             "type": "string"
@@ -2628,6 +2643,8 @@
           "model_label",
           "model_summary",
           "model",
+          "prompt_version",
+          "probably_not_label",
           "consent_training",
           "decision",
           "decided_by",

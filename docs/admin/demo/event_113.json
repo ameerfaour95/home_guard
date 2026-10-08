@@ -84,7 +84,10 @@
       "note": "That is the cleaner.",
       "raw_text": "That is the cleaner.",
       "source": "text",
-      "received_utc": "2026-10-01T15:47:06Z"
+      "received_utc": "2026-10-01T15:47:06Z",
+      "owner_label": "",
+      "owner_text": "",
+      "transcript": ""
     }
   ],
   "artifacts": [

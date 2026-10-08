@@ -15,6 +15,7 @@ from .test_studio import _seed
 
 TAG_FEEDBACK = b.FEEDBACK.replace("_1791020300000.", "_1791020400000.")
 MUTE_FEEDBACK = b.FEEDBACK.replace("_1791020300000.", "_1791020500000.")
+QUESTION_FEEDBACK = b.FEEDBACK.replace("_1791020300000.", "_1791020600000.")
 
 
 def _answers():
@@ -23,7 +24,10 @@ def _answers():
                raw_text="")
     mute = b.feedback_body(verdict="none", time_utc="2026-10-03T09:55:00Z")
     mute.update(action="mute", raw_text="")
-    return {TAG_FEEDBACK: json.dumps(tag).encode(), MUTE_FEEDBACK: json.dumps(mute).encode()}
+    question = b.feedback_body(verdict="none", time_utc="2026-10-03T09:58:00Z")
+    question.update(raw_text="למה המצלמה שולחת לי כל כך הרבה התראות?")
+    return {TAG_FEEDBACK: json.dumps(tag).encode(), MUTE_FEEDBACK: json.dumps(mute).encode(),
+            QUESTION_FEEDBACK: json.dumps(question).encode()}
 
 
 def _seeded(client, s3client, consent=True):
@@ -54,8 +58,11 @@ def test_inbox_lists_answers_once_with_filters(client, staff_factory, s3client):
     _seeded(client, s3client)
     _, _, _, h = staff_factory("admin")
     items = client.get("/v1/inbox", headers=h).json()
-    # the verdict button answer and the tag; the pause alone is not an answer; the orphan has no clip
-    assert [i["owner_label"] for i in items] == ["other", ""]
+    # the question, the tag and the verdict button answer; the pause alone is not an answer; the orphan has no clip
+    assert [(i["owner_label"], i["probably_not_label"]) for i in items] == [("", True), ("other", False), ("", False)]
+    assert items[0]["raw_text"].startswith("למה")              # the box's own rule: a question is not a label
+    assert {i["prompt_version"] for i in items} == {items[0]["prompt_version"]} and items[0]["prompt_version"]
+    items = items[1:]
     tag = items[0]
     assert tag["clip_key"] == f"ev:{tag['event_id']}" and tag["customer"] == "Acme" and tag["camera"] == "front_side"
     assert tag["owner_text"] == "זה הגנן שלנו" and tag["tagged_by"] == "Dana" and tag["decision"] is None
@@ -63,35 +70,40 @@ def test_inbox_lists_answers_once_with_filters(client, staff_factory, s3client):
     assert [i["owner_label"] for i in client.get("/v1/inbox", headers=h, params={"owner_label": "other"}).json()] == ["other"]
     assert client.get("/v1/inbox", headers=h, params={"camera": "nope"}).json() == []
     assert client.get("/v1/inbox", headers=h, params={"customer_id": tag["customer_id"] + 99}).json() == []
-    assert len(client.get("/v1/inbox", headers=h, params={"from_utc": "2026-10-03T09:45:00Z"}).json()) == 1
+    assert len(client.get("/v1/inbox", headers=h, params={"from_utc": "2026-10-03T09:45:00Z"}).json()) == 2
     assert len(client.get("/v1/inbox", headers=h, params={"to_utc": "2026-10-03T09:45:00Z"}).json()) == 1
+    everything = client.get("/v1/inbox", headers=h).json()
     page = client.get("/v1/inbox", headers=h, params={"limit": 1}).json()
     rest = client.get("/v1/inbox", headers=h, params={"before_id": page[0]["feedback_id"]}).json()
-    assert [i["feedback_id"] for i in page + rest] == [i["feedback_id"] for i in items]
+    assert [i["feedback_id"] for i in page + rest] == [i["feedback_id"] for i in everything]
 
 
 def test_decisions_are_audited_and_move_answers_out_of_the_waiting_list(client, staff_factory, s3client):
     _seeded(client, s3client)
     _, _, _, h = staff_factory("admin")
-    tag, button = client.get("/v1/inbox", headers=h).json()
+    question, tag, button = client.get("/v1/inbox", headers=h).json()
     r = client.post(f"/v1/inbox/{tag['feedback_id']}/decision", headers=h, json={"decision": "accepted"})
     assert r.status_code == 200, r.text
     assert r.json()["decision"] == "accepted" and r.json()["decided_by"] == "Admin 1"
     r = client.post(f"/v1/inbox/{button['feedback_id']}/decision", headers=h,
                     json={"decision": "not_label", "note": "a question about the bill"})
     assert r.json()["decision"] == "not_label" and r.json()["decision_note"] == "a question about the bill"
-    assert client.get("/v1/inbox", headers=h).json() == []
+    assert [i["feedback_id"] for i in client.get("/v1/inbox", headers=h).json()] == [question["feedback_id"]]
     assert len(client.get("/v1/inbox", headers=h, params={"handled": "handled"}).json()) == 2
     r = client.delete(f"/v1/inbox/{button['feedback_id']}/decision", headers=h)
     assert r.json()["decision"] is None
-    assert [i["feedback_id"] for i in client.get("/v1/inbox", headers=h).json()] == [button["feedback_id"]]
+    assert [i["feedback_id"] for i in client.get("/v1/inbox", headers=h).json()] == [
+        question["feedback_id"], button["feedback_id"]]
     with session_scope(client.app.state.engine) as s:
         rows = s.execute(select(m.AuditLog.action, m.AuditLog.target, m.AuditLog.detail)
                          .where(m.AuditLog.action.like("inbox_%")).order_by(m.AuditLog.id)).all()
     actions = [a for a, _, _ in rows]
     assert actions.count("inbox_decision") == 2 and actions.count("inbox_reopen") == 1 and "inbox_view" in actions
     decision = next(d for a, t, d in rows if a == "inbox_decision")
-    assert decision == {"decision": "accepted", "event_id": tag["event_id"], "owner_label": "other"}
+    assert decision == {"decision": "accepted", "event_id": tag["event_id"], "owner_label": "other",
+                        "prompt_version": tag["prompt_version"], "probably_not_label": False}
+    with session_scope(client.app.state.engine) as s:
+        assert s.get(m.InboxDecision, tag["feedback_id"]).prompt_version == tag["prompt_version"]
     assert client.post("/v1/inbox/999999/decision", headers=h, json={"decision": "fixed"}).status_code == 404
     assert client.post(f"/v1/inbox/{tag['feedback_id']}/decision", headers=h,
                        json={"decision": "maybe"}).status_code == 422
@@ -102,7 +114,7 @@ def test_no_training_label_without_consent_and_admins_only(client, staff_factory
     _, _, _, h = staff_factory("admin")
     _, _, _, labeler = staff_factory("labeler")
     _, _, _, support = staff_factory("support")
-    tag = client.get("/v1/inbox", headers=h).json()[0]
+    tag = client.get("/v1/inbox", headers=h).json()[1]
     r = client.post(f"/v1/inbox/{tag['feedback_id']}/decision", headers=h, json={"decision": "accepted"})
     assert r.status_code == 409 and "consent" in r.json()["detail"]
     assert client.post(f"/v1/inbox/{tag['feedback_id']}/decision", headers=h,

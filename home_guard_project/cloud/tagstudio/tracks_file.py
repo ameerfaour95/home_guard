@@ -1,13 +1,18 @@
 """The box tracker's own tracks of a clip (``<stem>.tracks.json``), as editable tracks.
 
-The file is written next to an alert clip (or its meta) in the format of ``analysis/replay_tracks.py`` (home_guard,
-branch w23-replay): ``{"frames": n, "looks": [{"frame", "ts", ...}], "tracks": [{"id", "kind", "cls" (COCO id),
-"first_seen", "last_seen", "hits", "confirmed", "prev_id", "returns", "boxes": [{"frame", "ts", "box": xyxy}]}]}``,
-boxes normalised, ``ts`` epoch seconds.
+Two writers, one format: the box writes the live tracker's tracks of every alert clip to
+``responses/<camera>/<day>/<stem>.tracks.json`` (box clip_tracks.py, ``"source": "live"``), and the offline replay
+(``analysis/replay_tracks.py``) writes them next to a clip. ``{"frames": n, "looks": [{"frame", "ts", ...}],
+"tracks": [{"id", "kind", "cls" (COCO id), "first_seen", "last_seen", "hits", "confirmed", "prev_id", "returns",
+"boxes": [{"frame", "ts", "box": xyxy}]}]}``, boxes normalised, ``ts`` epoch seconds. The live file adds
+``source``, ``params``, ``clip_start_ts`` / ``clip_end_ts``, per track ``shown`` (False: a parked vehicle),
+``max_conf`` and ``entity`` (the event's P1 / CAR1), and a box's ``frame`` is the clip frame nearest its look (the
+live tracker looks 1-3 times a second, so its boxes are sparse).
 
 Read here the way the box's entity layer reads it (box/entities.py): a track the tracker linked as a return
-(``prev_id``) continues the one it returned from, so one person stays one track ("P1 stays P1"); tracks that never
-got confirmed are flicker the entity layer ignores and are left out. Each kept track's boxes become keyframes where
+(``prev_id``) continues the one it returned from, and tracks the event book mapped to the same entity are one
+object, so one person stays one track ("P1 stays P1"); tracks that never got confirmed are flicker the entity layer
+ignores and are left out. A parked vehicle is still a vehicle in the picture: it is kept. Each kept track's boxes become keyframes where
 linear interpolation would be off by more than TOLERANCE, and the box is hidden (an ``enabled=False`` keyframe)
 from the first look it was missing for more than MAX_GAP looks, and after its last look. Tracks are ``t-1``,
 ``t-2``, ... in order of first appearance, ``source="yolo"``: machine boxes nobody has checked yet.
@@ -45,21 +50,29 @@ def _boxes(track: Dict[str, Any]) -> List[tuple]:
 
 
 def _chains(tracks: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
-    """Tracks joined along ``prev_id`` (a return continues the track it returned from), oldest first."""
-    by_id = {t["id"]: t for t in tracks}
-    root: Dict[Any, Any] = {}
+    """Tracks joined along ``prev_id`` (a return continues the track it returned from) and by a shared ``entity``
+    (the event book's P1 over several tracker tracks)."""
+    parent = {t["id"]: t["id"] for t in tracks}
 
     def find(tid):
-        seen = []
-        while tid in by_id and by_id[tid].get("prev_id") in by_id and tid not in seen:
-            seen.append(tid)
-            tid = by_id[tid]["prev_id"]
+        while parent[tid] != tid:
+            parent[tid] = parent[parent[tid]]
+            tid = parent[tid]
         return tid
 
+    first_of_entity: Dict[str, Any] = {}
+    for t in tracks:
+        if t.get("prev_id") in parent:
+            parent[find(t["id"])] = find(t["prev_id"])
+        entity = t.get("entity")
+        if isinstance(entity, str) and entity:
+            if entity in first_of_entity:
+                parent[find(t["id"])] = find(first_of_entity[entity])
+            else:
+                first_of_entity[entity] = t["id"]
     groups: Dict[Any, List[Dict[str, Any]]] = {}
     for t in tracks:
-        root[t["id"]] = find(t["id"])
-        groups.setdefault(root[t["id"]], []).append(t)
+        groups.setdefault(find(t["id"]), []).append(t)
     return list(groups.values())
 
 

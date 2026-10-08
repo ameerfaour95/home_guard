@@ -21,12 +21,14 @@ NOT_FOUND = "Answer not found"
 # Route functions carry no docstrings on purpose (they would become the OpenAPI description).
 
 
-def _item(fb, ev, cu, dec, camera_name, model) -> InboxItem:
+def _item(fb, ev, cu, dec, camera_name, run) -> InboxItem:
     return InboxItem(feedback_id=fb.id, event_id=ev.id, clip_key=f"ev:{ev.id}", customer_id=cu.id, customer=cu.name,
                      site=ev.site, camera=ev.camera, camera_name=camera_name, received_utc=fb.received_at,
                      owner_label=fb.owner_label, owner_text=fb.owner_text, transcript=fb.transcript,
                      raw_text=fb.raw_text, note=fb.note, verdict=fb.verdict, source=fb.source, tagged_by=fb.tagged_by,
-                     model_label=ev.label, model_summary=ev.summary or "", model=model,
+                     model_label=ev.label, model_summary=ev.summary or "", model=run.model if run else None,
+                     prompt_version=run.prompt_version if run else None,
+                     probably_not_label=inbox.probably_not_label(fb),
                      consent_training=bool(cu.consent_training),
                      decision=dec.decision if dec is not None else None,
                      decided_by=dec.staff_name if dec is not None else None,
@@ -66,14 +68,18 @@ def decide(feedback_id: int, body: InboxDecisionIn, request: Request, staff: Sta
     check_length("note", body.note, NOTES_MAX)
     if not id_in_range(feedback_id):
         raise HTTPException(status_code=404, detail=NOT_FOUND)
-    fb, ev, cu, _, _, _ = _one(session, feedback_id)
+    fb, ev, cu, _, _, run = _one(session, feedback_id)
     if body.decision == "accepted" and not cu.consent_training:
         raise HTTPException(status_code=409, detail=f"{cu.name} has withdrawn consent to training use: this answer "
                                                     "cannot become a training label")
     now = request.app.state.clock()
-    inbox.decide(session, session.get(Feedback, fb.id), body.decision, body.note, staff.id, staff.name, now)
+    prompt_version = run.prompt_version if run else None
+    inbox.decide(session, session.get(Feedback, fb.id), body.decision, body.note, staff.id, staff.name, now,
+                 prompt_version)
     audit.record(session, staff.id, "inbox_decision", target=f"feedback/{fb.id}", customer_id=cu.id, ts=now,
-                 detail={"decision": body.decision, "event_id": ev.id, "owner_label": fb.owner_label})
+                 detail={"decision": body.decision, "event_id": ev.id, "owner_label": fb.owner_label,
+                         "prompt_version": prompt_version,
+                         "probably_not_label": inbox.probably_not_label(fb)})
     return _item(*_one(session, feedback_id))
 
 

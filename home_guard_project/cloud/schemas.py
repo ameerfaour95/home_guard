@@ -626,6 +626,8 @@ class InboxItem(BaseModel):
     model_label: Optional[str]         # what the model said (the event's label) and its summary
     model_summary: str
     model: Optional[str]
+    prompt_version: Optional[str]      # the prompt the clip's AI answer came from (meta teacher.prompt_version)
+    probably_not_label: bool           # no tag, and the box's rule calls the words a question / complaint / command
     consent_training: bool
     decision: Optional[Literal["accepted", "fixed", "not_label"]]
     decided_by: Optional[str]

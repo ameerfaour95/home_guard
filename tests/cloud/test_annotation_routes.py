@@ -8,7 +8,7 @@ from home_guard_project.cloud import models as m
 from home_guard_project.cloud.db import session_scope
 
 from . import builders as b
-from .test_event_routes import _event_id, s3client  # noqa: F401
+from .test_event_routes import NOW, _event_id, s3client  # noqa: F401
 from .test_studio import _seed
 
 
@@ -370,10 +370,14 @@ def fresh_tracks():
 
 
 def test_new_annotation_prefers_the_tracker_tracks(client, staff_factory, s3client, fresh_tracks):
-    tracks_key = b.COLLECT_META[:-len(".meta.json")] + ".tracks.json"
+    # the box writes it to responses/<camera>/<day>/<stem>.tracks.json (box clip_tracks.py)
+    tracks_key = b.COLLECT_META.replace("/meta/", "/responses/")[:-len(".meta.json")] + ".tracks.json"
     _seed(client, s3client, all_frames=False, overrides={tracks_key: _tracks_doc()})
     _, _, _, h = staff_factory("admin")
     eid = _event_id(client, b.COLLECT_STEM)
+    with session_scope(client.app.state.engine) as s:     # indexed as the clip's tracks, not as a raw AI answer
+        art = s.scalar(select(m.Artifact).where(m.Artifact.s3_key == tracks_key))
+        assert (art.role, art.stem, art.event_id) == ("tracks", b.COLLECT_STEM, eid)
     body = client.get(_url(eid), headers=h).json()
     assert body["preload_source"] == "tracker" and body["suggestions_used"] is True
     assert [(t["track_id"], t["label"], t["source"]) for t in body["tracks"]] == [
@@ -388,6 +392,21 @@ def test_new_annotation_prefers_the_tracker_tracks(client, staff_factory, s3clie
     assert again["version"] == 1 and again["preload_source"] is None
     assert [(t["label"], t["source"]) for t in again["tracks"]] == [("person", "human")]
     assert again["tracks"][0]["keyframes"][0]["xyxy"] == [0.1, 0.1, 0.2, 0.3]
+
+
+def test_a_tracks_file_indexed_as_a_raw_answer_before_gets_its_role(client, staff_factory, s3client, fresh_tracks):
+    from home_guard_project.cloud.indexer import index_device
+    tracks_key = b.COLLECT_META.replace("/meta/", "/responses/")[:-len(".meta.json")] + ".tracks.json"
+    _seed(client, s3client, all_frames=False, overrides={tracks_key: _tracks_doc()})
+    with session_scope(client.app.state.engine) as s:
+        art = s.scalar(select(m.Artifact).where(m.Artifact.s3_key == tracks_key))
+        art.role, art.stem, art.event_id = "raw_answer", b.COLLECT_STEM + ".tracks", None   # the older indexer
+        dev_id = s.scalar(select(m.Device.id))
+    with session_scope(client.app.state.engine) as s:
+        index_device(s, client.app.state.s3, s.get(m.Device, dev_id), full_scan=True, now=NOW)
+    with session_scope(client.app.state.engine) as s:
+        art = s.scalar(select(m.Artifact).where(m.Artifact.s3_key == tracks_key))
+        assert (art.role, art.stem, art.event_id) == ("tracks", b.COLLECT_STEM, _event_id(client, b.COLLECT_STEM))
 
 
 def test_weak_labels_are_the_fallback_without_a_tracks_file(client, staff_factory, fresh_tracks, seeded_sparse):

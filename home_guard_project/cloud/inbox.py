@@ -11,8 +11,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
+
+from home_guard_project.fleet_contract.judgement import not_a_judgement
 
 from .models import AiRun, Camera, Customer, Device, Event, Feedback, InboxDecision
 
@@ -22,17 +24,19 @@ MAX_LIMIT = 500
 
 
 def answers_filter():
-    """Feedback rows that are an owner's answer about an alert: a tag, words or a voice answer, or a verdict button
-    (a pause or a search alone is not)."""
+    """Feedback rows that are an owner's answer about an alert: a tag, words or a voice answer, a verdict button, or
+    a typed reply the box took no action on (a question or a complaint, for "Not a label"); a pause or a search
+    alone is not."""
     return (Feedback.event_id.is_not(None),
             or_(Feedback.owner_label != "", Feedback.owner_text != "", Feedback.transcript != "",
-                Feedback.verdict.not_in(("", "none"))))
+                Feedback.verdict.not_in(("", "none")),
+                and_(Feedback.raw_text != "", Feedback.action.in_(("", "none")))))
 
 
 def query(session: Session, *, from_utc: Optional[datetime] = None, to_utc: Optional[datetime] = None,
           customer_id: Optional[int] = None, camera: Optional[str] = None, owner_label: Optional[str] = None,
           handled: Optional[bool] = None, before_id: Optional[int] = None, limit: int = 200) -> list[tuple]:
-    """[(feedback, event, customer, decision or None, camera display name or None, model name or None)], newest
+    """[(feedback, event, customer, decision or None, camera display name or None, guard AI run or None)], newest
     first. `handled`: True = decided, False = waiting, None = both. `owner_label` "" = answers without a tag."""
     q = (select(Feedback, Event, Customer, InboxDecision, Camera.display_name)
          .join(Event, Event.id == Feedback.event_id)
@@ -59,22 +63,37 @@ def query(session: Session, *, from_utc: Optional[datetime] = None, to_utc: Opti
         q = q.where(Feedback.id < before_id)
     rows = session.execute(q.order_by(Feedback.id.desc()).limit(max(1, min(limit, MAX_LIMIT)))).all()
     ids = [ev.id for _, ev, _, _, _ in rows]
-    models = {}
+    runs = {}
     if ids:
         for run in session.scalars(select(AiRun).where(AiRun.event_id.in_(ids), AiRun.purpose == "guard")
                                    .order_by(AiRun.id)):
-            if run.status == "real" or run.event_id not in models:
-                models[run.event_id] = run.model
-    return [(fb, ev, cu, dec, name, models.get(ev.id)) for fb, ev, cu, dec, name in rows]
+            if run.status == "real" or run.event_id not in runs:
+                runs[run.event_id] = run
+    return [(fb, ev, cu, dec, name, runs.get(ev.id)) for fb, ev, cu, dec, name in rows]
+
+
+def owner_words(fb: Feedback) -> str:
+    """What the owner said in words: their text, else a voice answer's transcript, else a typed message."""
+    return fb.owner_text or fb.transcript or fb.raw_text or ""
+
+
+def probably_not_label(fb: Feedback) -> bool:
+    """An answer without a tag whose words the box's own rule (feedback.not_a_judgement, vendored) calls a
+    question, a complaint or a command: most likely not about what the clip shows. A tag button is always a
+    judgement; so is a verdict button without words."""
+    words = owner_words(fb)
+    return not fb.owner_label and bool(words.strip()) and not_a_judgement(words)
 
 
 def decide(session: Session, feedback: Feedback, decision: str, note: str, staff_id: int, staff_name: str,
-           now: datetime) -> InboxDecision:
-    """Record (or replace) the admin's decision on one answer."""
+           now: datetime, prompt_version: Optional[str] = None) -> InboxDecision:
+    """Record (or replace) the admin's decision on one answer, with the prompt version the clip's AI answer came
+    from (a tag made from it follows that prompt's schema)."""
     row = session.get(InboxDecision, feedback.id)
     if row is None:
         row = InboxDecision(feedback_id=feedback.id)
         session.add(row)
     row.decision, row.note, row.staff_id, row.staff_name, row.decided_at = decision, note, staff_id, staff_name, now
+    row.prompt_version = prompt_version
     session.flush()
     return row

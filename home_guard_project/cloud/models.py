@@ -221,6 +221,7 @@ class InboxDecision(Base):
     staff_id: Mapped[Optional[int]] = mapped_column(ForeignKey("staff.id", ondelete="SET NULL"), nullable=True)
     staff_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     decided_at: Mapped[datetime] = mapped_column(TS)
+    prompt_version: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)  # the clip's AI prompt version
 
 
 class ReviewState(Base):

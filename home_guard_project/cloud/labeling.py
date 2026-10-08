@@ -275,37 +275,30 @@ def precompute_suggestions(session: Session, s3, now: Optional[datetime] = None,
     return stored
 
 
-TRACKS_CACHE: dict = {}  # (tracks.json key, its meta's etag) -> (expires monotonic, document or None)
-TRACKS_TTL_SEC = 300
+TRACKS_CACHE: dict = {}  # (tracks.json key, etag) -> document or None
 
 
 def tracker_tracks(session: Session, s3, ev: Event, fps: Optional[float]) -> list[ft.Track]:
-    """The box tracker's tracks of the clip (``<stem>.tracks.json`` uploaded next to its meta; the format of
-    tagstudio/tracks_file.py), [] when there is none or it cannot be read. The file is not indexed: it is read on
-    demand and remembered (absent too) for TRACKS_TTL_SEC per meta revision, so reopening a clip reads nothing."""
-    import time  # noqa: PLC0415
-
+    """The box tracker's tracks of the clip: its indexed ``responses/<camera>/<day>/<stem>.tracks.json`` (artifact
+    role "tracks"; box clip_tracks.py, the format of tagstudio/tracks_file.py), the kept training copy first; []
+    when there is none or it cannot be read. Read once per revision (etag): reopening a clip reads nothing."""
     from .tagstudio import tracks_file  # noqa: PLC0415
 
     if s3 is None:
         return []
-    metas = session.execute(select(Artifact.s3_key, Artifact.etag).where(Artifact.event_id == ev.id,
-                                                                        Artifact.role == "meta")).all()
-    now = time.monotonic()
-    for meta_key, etag in sorted(metas, key=lambda r: (not r[0].startswith("production_"), r[0])):
-        key = tracks_file.candidates([meta_key])[0]
-        cached = TRACKS_CACHE.get((key, etag))
-        if cached is not None and cached[0] > now:
-            doc = cached[1]
-        else:
+    files = session.execute(select(Artifact.s3_key, Artifact.etag).where(
+        Artifact.event_id == ev.id, Artifact.role == "tracks", Artifact.available.is_(True))).all()
+    for key, etag in sorted(files, key=lambda r: (not r[0].startswith("dataset_"), r[0])):
+        if (key, etag) not in TRACKS_CACHE:
             try:
                 doc = s3.get_json(key)
-            except Exception:  # noqa: BLE001 - absent or unreadable: the weak labels are used instead
+            except Exception:  # noqa: BLE001 - unreadable: the weak labels are used instead
                 doc = None
             if len(TRACKS_CACHE) > 5000:
                 TRACKS_CACHE.clear()
-            TRACKS_CACHE[(key, etag)] = (now + TRACKS_TTL_SEC, doc if isinstance(doc, dict) else None)
-        tracks = tracks_file.read_tracks(doc, fps) if isinstance(doc, dict) else []
+            TRACKS_CACHE[(key, etag)] = doc if isinstance(doc, dict) else None
+        doc = TRACKS_CACHE[(key, etag)]
+        tracks = tracks_file.read_tracks(doc, fps) if doc else []
         if tracks:
             return tracks
     return []

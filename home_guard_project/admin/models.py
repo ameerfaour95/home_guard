@@ -454,6 +454,8 @@ class InboxItem:
     decided_by: str | None
     decided_utc: datetime | None
     decision_note: str = ''
+    prompt_version: str | None = None   # the prompt the clip's AI answer came from
+    probably_not_label: bool = False    # the box's rule (feedback.not_a_judgement): a question / complaint / command
 
 
 @dataclass
