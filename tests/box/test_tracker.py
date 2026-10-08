@@ -402,12 +402,25 @@ class VehicleEventsTest(unittest.TestCase):
         t = tr.CameraTracker("front")
         for i in range(20):
             t.update(T0 + i, [car(0.5, 0.5)])
-        first = t.drain_vehicle_events()
-        self.assertEqual(first, [])                                    # unmapped: no area, no line, not ended
-        t.update(T0 + 30, [])
-        (ended,) = t.drain_vehicle_events()
-        self.assertTrue(ended["ended"])
-        self.assertLess(ended["moved"], sm.PARKED_DISTANCE)
+        self.assertEqual(t.drain_vehicle_events(), [])
+        # It drives off: from the moment it moved it is handed over, whole, from where it stood.
+        ts = walk(t, T0 + 20, line_points((0.5, 0.5), (0.9, 0.5), 6), step=0.5, make=car)
+        t.update(ts + 7, [])
+        events = t.drain_vehicle_events()
+        self.assertTrue(events and events[-1]["ended"])
+        self.assertEqual(events[-1]["first_foot"], [0.5, 0.5])
+        self.assertGreaterEqual(events[-1]["moved"], sm.PARKED_DISTANCE)
+
+    def test_a_car_that_never_moved_is_no_track_to_anyone(self) -> None:
+        # The replay found parked cars and a trailer read as a vehicle as steady tracks in every clip.
+        t = tr.CameraTracker("front")
+        for i in range(20):
+            t.update(T0 + i, [car(0.5, 0.5)])
+        self.assertEqual(t.snapshot(T0, T0 + 20), [])
+        self.assertEqual(t.facts(T0, T0 + 20).vehicles, ())
+        self.assertEqual(t.tracks_between(T0, T0 + 20), [])
+        t.update(T0 + 30, [])                                          # its detection is lost: it did not leave
+        self.assertEqual(t.drain_vehicle_events(), [])
 
     def test_people_and_unconfirmed_vehicles_are_not_events(self) -> None:
         t = tr.CameraTracker("front")
@@ -480,3 +493,38 @@ class RegistryTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class JoinAndScoreTest(unittest.TestCase):
+    """The replay of the Oct 7-8 clips: one walk split in two after a 0.16-0.78 s gap, as the box shrank and the
+    foot point jumped more than the tight gate."""
+
+    def test_a_jumping_foot_point_after_a_short_gap_stays_one_person(self) -> None:
+        t = tr.CameraTracker("front")
+        t.update(T0, [person(0.40, 0.60)])
+        t.update(T0 + 0.15, [person(0.40, 0.60)])
+        # 0.5 s later the legs are hidden: the box is shorter, its foot point 0.15 higher (gate at 0.5 s: 0.06).
+        t.update(T0 + 0.65, [person(0.42, 0.45, h=0.06)])
+        t.update(T0 + 0.80, [person(0.42, 0.45, h=0.06)])
+        (only,) = t.snapshot(T0, T0 + 1)
+        self.assertEqual((only["first_seen"], only["last_seen"]), (T0, T0 + 0.80))
+
+    def test_a_person_far_away_after_the_join_window_is_someone_else(self) -> None:
+        t = tr.CameraTracker("front")
+        t.update(T0, [person(0.10, 0.60)])
+        t.update(T0 + 0.15, [person(0.10, 0.60)])
+        t.update(T0 + 0.5, [person(0.10, 0.60), person(0.70, 0.60)])  # a second person across the picture
+        t.update(T0 + 0.65, [person(0.10, 0.60), person(0.70, 0.60)])
+        self.assertEqual(len(t.snapshot(T0, T0 + 1)), 2)
+        t.update(T0 + 2.5, [person(0.12, 0.60)])                       # 1.85 s later: beyond JOIN_SEC ...
+        t.update(T0 + 2.65, [person(0.12, 0.60)])
+        ids = {s["id"] for s in t.snapshot(T0 + 2.4, T0 + 3)}
+        self.assertEqual(len(ids), 1)                                  # ... but near: the ordinary gate (0.24) holds
+
+    def test_the_best_score_is_kept(self) -> None:
+        t = tr.CameraTracker("front")
+        for i, conf in enumerate((0.55, 0.85, 0.6)):
+            t.update(T0 + i * 0.3, [person(0.4, 0.6, conf=conf)])
+        (only,) = t.snapshot(T0, T0 + 1)
+        self.assertEqual(only["max_conf"], 0.85)
+        self.assertEqual(t.facts(T0, T0 + 1).people[0].max_conf, 0.85)
