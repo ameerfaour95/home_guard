@@ -190,7 +190,7 @@ class UndoRobustnessTest(UndoTest):
         first = agent.handle("turn off front", "-5")
         agent.services.set_camera = lambda *a: {"ok": False}
         undone = agent.undo_turn("-5", first.undo_token)
-        self.assertEqual(undone.text, "✗ Could not undo the change to front_side: something went wrong on the box")
+        self.assertEqual(undone.text, "✗ Could not undo the change to front side: something went wrong on the box")
         self.assertEqual(undone.after, ())
         self.assertEqual(undone.receipts[0].detail.get("undo_of"), "set_camera_active")
         self.assertEqual(agent.book.turn_receipts("-5:" + first.undo_token)[0].status, "requested")
@@ -227,7 +227,7 @@ class UndoRobustnessTest(UndoTest):
             out = agent.handle("turn off front", "-5")
         saved.assert_called_once()
         self.assertTrue(out.after)
-        self.assertIn("front_side", out.text)
+        self.assertIn("front side", out.text)
         self.assertTrue(out.undo_token)
         out.after[0]()
         self.assertEqual(self.restarts, [1])
@@ -318,7 +318,7 @@ class UndoRaceTest(UndoTest):
         undone = a.undo_turn("-5", first.undo_token, {"user_id": 1})
         self.assertFalse(self.mute.is_muted(NOW, "main_entrance"))
         self.assertFalse(self.mute.is_muted(NOW, "back_door"))
-        self.assertEqual(undone.text, "Changed since - nothing to undo for the pause of alerts from back_door.")
+        self.assertEqual(undone.text, "Changed since - nothing to undo for the pause of alerts from back door.")
         self.assertEqual(a.book.turn_receipts("-5:" + first.undo_token)[0].status, "done")
 
     def test_undo_removes_only_its_own_entry(self) -> None:
@@ -329,7 +329,7 @@ class UndoRaceTest(UndoTest):
         undone = a.undo_turn("-5", first.undo_token, {"user_id": 1})
         self.assertEqual(self.mute.snapshot()["cameras"], {})
         self.assertEqual(self.mute.muted_until(NOW, "main_entrance"), START + 7200)
-        self.assertEqual(undone.text, "✓ Undone, but alerts from back_door stay paused until 01:00 by another pause.")
+        self.assertEqual(undone.text, "✓ Undone, but alerts from back door stay paused until 01:00 by another pause.")
 
     def test_undo_puts_back_an_earlier_pause_of_the_same_camera(self) -> None:
         from home_guard_project.box.feedback import Feedback  # noqa: PLC0415
@@ -338,7 +338,7 @@ class UndoRaceTest(UndoTest):
         a, first = self.pause("stop the back door until six", camera="back_door", until="06:00")
         undone = a.undo_turn("-5", first.undo_token, {"user_id": 1})
         self.assertEqual(self.mute.muted_until(NOW, "back_door"), START + 7200)
-        self.assertEqual(undone.text, "✓ Undone, but alerts from back_door stay paused until 01:00 by another pause.")
+        self.assertEqual(undone.text, "✓ Undone, but alerts from back door stay paused until 01:00 by another pause.")
 
     def test_undo_of_a_house_pause_names_what_stays_paused(self) -> None:
         from home_guard_project.box.feedback import Feedback  # noqa: PLC0415
@@ -346,7 +346,7 @@ class UndoRaceTest(UndoTest):
         self.mute.apply(Feedback(action="mute", mute_until=NOW + 7200, camera="back_door"), NOW)
         a, first = self.pause("stop everything until six", until="06:00")
         undone = a.undo_turn("-5", first.undo_token, {})
-        self.assertEqual(undone.text, "✓ Alerts are back on, except back_door until 01:00 (paused separately).")
+        self.assertEqual(undone.text, "✓ Alerts are back on, except back door until 01:00 (paused separately).")
 
     def test_the_same_pause_set_again_later_is_not_undone(self) -> None:
         a, first = self.pause("stop everything until six", until="06:00")
@@ -393,7 +393,7 @@ class UndoRaceTest(UndoTest):
         self.tick(120)
         undone = a.undo_turn("-5", first.undo_token, {})
         self.assertEqual(self.cameras, [("front_side", False), ("front_side", True)])
-        self.assertEqual(undone.text, "Changed since - nothing to undo for the change to front_side.")
+        self.assertEqual(undone.text, "Changed since - nothing to undo for the change to front side.")
         self.assertEqual(undone.after, ())
         self.tick(180)
         self.run_turn("turn off front again", off())
@@ -411,7 +411,7 @@ class UndoRaceTest(UndoTest):
         self.tick(180)
         undone = a.undo_turn("-5", first.undo_token, {})
         self.assertEqual(self.cameras[-1], ("front_side", True))
-        self.assertIn("front_side", undone.text)
+        self.assertIn("front side", undone.text)
         self.assertNotIn("Changed since", undone.text)
 
     def test_second_tap_after_a_straight_undo_does_nothing(self) -> None:

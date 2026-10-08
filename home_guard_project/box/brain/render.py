@@ -5,27 +5,50 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import Sequence
+from typing import Any, Optional, Sequence
 
+from .aliases import normalize
 from .i18n import TEMPLATES, t
 from .receipts import DONE, FAILED, REQUESTED, Receipt
+from .registry import display
 
 log = logging.getLogger("box.brain.render")
 
 
-def receipt_line(receipt: Receipt, lang: str, retention_days: float = 14.0) -> str:
+def receipt_line(receipt: Receipt, lang: str, retention_days: float = 14.0, snapshot: Any = None) -> str:
     """Render a receipt, or skip malformed input and log once; never raise into the poll loop."""
     try:
-        return _receipt_line(receipt, lang, retention_days)
+        return _receipt_line(receipt, lang, retention_days, snapshot)
     except Exception:
         log.warning("Skipped malformed receipt while rendering")
         return ""
 
 
-def undo_what(tool: str, detail: dict, target: str, lang: str) -> str:
+def _name(snapshot: Any, camera: str, lang: str) -> str:
+    """The owner's name for *camera* (never its id); "" stays "" (the whole house)."""
+    return display(snapshot, camera, lang) if camera else ""
+
+
+def _name_before(snapshot: Any, camera: str, alias: str, lang: str) -> str:
+    """The camera's name other than *alias* (the receipt of a new name says which camera got it)."""
+    cam = snapshot.camera(camera) if snapshot is not None else None
+    others = [a for a in (cam.aliases if cam is not None else ()) if normalize(a) != normalize(alias)]
+    if others:
+        return str(others[-1]).strip()
+    from ..camera_names import channel_of  # noqa: PLC0415
+
+    ch = channel_of(camera)
+    if ch is not None:
+        return f"מצלמה {ch}" if str(lang).startswith("he") else f"Camera {ch}"
+    return str(camera).replace("_", " ").strip()
+
+
+def undo_what(tool: str, detail: dict, target: str, lang: str, snapshot: Any = None) -> str:
     """What an Undo was about, for its "changed since" and "could not undo" lines."""
     detail = detail if isinstance(detail, dict) else {}
     camera = detail.get("camera") if isinstance(detail.get("camera"), str) else ""
+    camera = _name(snapshot, camera, lang)
+    target = _name(snapshot, target, lang) if tool == "set_camera_active" else target
     if tool == "pause_alerts":
         return t("undo_what_pause_camera", lang, camera=camera) if camera else t("undo_what_pause_all", lang)
     if tool == "set_camera_active":
@@ -50,7 +73,7 @@ def _nonnegative_number(value: object) -> float:
     return number
 
 
-def _receipt_line(receipt: Receipt, lang: str, retention_days: float) -> str:
+def _receipt_line(receipt: Receipt, lang: str, retention_days: float, snapshot: Any = None) -> str:
     if not isinstance(receipt, Receipt) or not isinstance(lang, str):
         raise ValueError("Invalid receipt or language")
     if not all(isinstance(value, str) for value in (receipt.tool, receipt.status, receipt.target, receipt.reason)):
@@ -72,7 +95,7 @@ def _receipt_line(receipt: Receipt, lang: str, retention_days: float) -> str:
         if undo_of:
             if not isinstance(undo_of, str):
                 raise ValueError("Invalid undo receipt")
-            return t("undo_failed", lang, what=undo_what(undo_of, d, receipt.target, lang), reason=reason)
+            return t("undo_failed", lang, what=undo_what(undo_of, d, receipt.target, lang, snapshot), reason=reason)
         what_key = f"what_{receipt.tool}"
         what = t(what_key, lang) if what_key in TEMPLATES else receipt.tool
         return t("failed", lang, what=what, reason=reason)
@@ -80,12 +103,18 @@ def _receipt_line(receipt: Receipt, lang: str, retention_days: float) -> str:
         from .house import receipt_line as house_line  # noqa: PLC0415
 
         return house_line(receipt, lang)
+    if receipt.tool == "mark_known":           # the Memory Keeper's own line (brain/tools.py)
+        from .tools import known_line  # noqa: PLC0415
+
+        return known_line(receipt, lang, snapshot)
     # Inspect only fields used by the renderer; extra detail such as `by` is ignored.
     for key in ("camera", "kind", "bounds", "until", "verdict", "alias", "aka"):
         if key in d and not isinstance(d[key], str):
             raise ValueError("Invalid receipt text")
-    camera = d.get("camera") or receipt.target
-    named = f"{camera} ({d['aka']})" if d.get("aka") else camera     # "camera_3 (פרגולה)": the owner's word too
+    # The owner reads the family's name for a camera, never its id (owner rule 2026-10-06, again 2026-10-08).
+    camera = _name(snapshot, d.get("camera") or receipt.target, lang)
+    aka = d.get("aka") or ""
+    named = f"{camera} ({aka})" if aka and normalize(aka) != normalize(camera) else camera
     if receipt.tool == "send_media":
         if d.get("kind") == "photo":
             return t("sent_photo", lang, camera=camera)
@@ -98,7 +127,7 @@ def _receipt_line(receipt: Receipt, lang: str, retention_days: float) -> str:
         return t("sent_live_clip", lang, seconds=d.get("seconds", ""), camera=named)
     if receipt.tool == "pause_alerts":
         if d.get("camera"):
-            return t("paused_camera", lang, camera=d["camera"], until=d.get("until", ""))
+            return t("paused_camera", lang, camera=camera, until=d.get("until", ""))
         return t("paused_all", lang, until=d.get("until", ""))
     if receipt.tool == "resume_alerts" and d.get("undo_of"):
         # An undone pause: say what still holds alerts back, so "back on" is only written when it is true.
@@ -107,7 +136,7 @@ def _receipt_line(receipt: Receipt, lang: str, retention_days: float) -> str:
             raise ValueError("Invalid undo receipt")
         if still:
             if d.get("camera"):
-                return t("undo_camera_still_paused", lang, camera=d["camera"], until=still)
+                return t("undo_camera_still_paused", lang, camera=camera, until=still)
             return t("undo_all_still_paused", lang, until=still)
         pauses = d.get("still_pauses") or []
         if not isinstance(pauses, list) or not all(
@@ -115,9 +144,10 @@ def _receipt_line(receipt: Receipt, lang: str, retention_days: float) -> str:
             raise ValueError("Invalid undo receipt")
         if pauses and not d.get("camera"):
             return t("undo_back_on_except", lang,
-                     pauses=", ".join(t("pause_until_item", lang, camera=c, until=u) for c, u in pauses))
+                     pauses=", ".join(t("pause_until_item", lang, camera=_name(snapshot, c, lang), until=u)
+                                      for c, u in pauses))
     if receipt.tool == "resume_alerts":
-        return t("resumed_camera", lang, camera=d["camera"]) if d.get("camera") else t("resumed_all", lang)
+        return t("resumed_camera", lang, camera=camera) if d.get("camera") else t("resumed_all", lang)
     if receipt.tool == "set_camera_active":
         if not isinstance(d.get("active"), bool):
             raise ValueError("Invalid camera state")
@@ -128,7 +158,8 @@ def _receipt_line(receipt: Receipt, lang: str, retention_days: float) -> str:
         return t("verdict_saved", lang, verdict=t(f"verdict_{d.get('verdict')}", lang))
     if receipt.tool == "set_alias":
         key = "alias_removed" if d.get("undo_of") == "set_alias" else "alias_saved"
-        return t(key, lang, alias=d.get("alias", ""), camera=camera)
+        raw = d.get("camera") or receipt.target
+        return t(key, lang, alias=d.get("alias", ""), camera=_name_before(snapshot, raw, d.get("alias", ""), lang))
     if receipt.tool == "change_setting":
         for key in ("setting", "old", "new"):
             if key in d and not isinstance(d[key], str):
@@ -140,7 +171,7 @@ def _receipt_line(receipt: Receipt, lang: str, retention_days: float) -> str:
         return t("setting_changed", lang, setting=t(f"setting_{d.get('setting')}", lang), old=old, new=new)
     if receipt.tool in ("set_alert_types", "set_sensitivity"):
         house = not d.get("camera")
-        where = t("the_house", lang) if house else d["camera"]
+        where = t("the_house", lang) if house else camera
         if house and where:
             where = where[:1].upper() + where[1:]
         name = lambda kind: t(f"type_{kind}", lang) if f"type_{kind}" in TEMPLATES else kind  # noqa: E731
@@ -168,7 +199,8 @@ def _receipt_line(receipt: Receipt, lang: str, retention_days: float) -> str:
     return f"✓ {receipt.tool}"
 
 
-def render_reply(answer: str, receipts: Sequence[Receipt], lang: str, retention_days: float = 14.0) -> str:
+def render_reply(answer: str, receipts: Sequence[Receipt], lang: str, retention_days: float = 14.0,
+                 snapshot: Optional[Any] = None) -> str:
     """Facts followed by receipt lines; skip malformed entries and log at most once per call."""
     malformed = not isinstance(answer, str)
     text = answer.strip() if isinstance(answer, str) else ""
@@ -178,7 +210,7 @@ def render_reply(answer: str, receipts: Sequence[Receipt], lang: str, retention_
         malformed = True
     for receipt in receipts:
         try:
-            lines.append(_receipt_line(receipt, lang, retention_days))
+            lines.append(_receipt_line(receipt, lang, retention_days, snapshot))
         except Exception:
             malformed = True
     if malformed:

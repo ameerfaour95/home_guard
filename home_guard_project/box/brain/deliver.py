@@ -96,7 +96,9 @@ class Deliverer:
             blocked = self._blocked()
             if blocked:
                 return blocked
-            fields: Dict[str, str] = {"chat_id": str(chat_id), "text": str(text)}
+            from .style import clean_outgoing  # noqa: PLC0415 - no closing offers, no camera ids (2026-10-08)
+
+            fields: Dict[str, str] = {"chat_id": str(chat_id), "text": clean_outgoing(str(text))}
             if reply_to is not None:
                 fields["reply_to_message_id"] = str(reply_to)
                 fields["allow_sending_without_reply"] = "true"
@@ -122,7 +124,9 @@ class Deliverer:
                 data = f.read()
             fields = {"chat_id": str(chat_id)}
             if caption:
-                fields["caption"] = str(caption)[:CAPTION_LIMIT]
+                from .style import replace_camera_ids  # noqa: PLC0415
+
+                fields["caption"] = replace_camera_ids(str(caption))[:CAPTION_LIMIT]
             if method == "sendVideo":
                 fields["supports_streaming"] = "true"
             result = self._call(lambda: self._post_multipart(
