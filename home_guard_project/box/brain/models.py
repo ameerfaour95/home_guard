@@ -311,5 +311,30 @@ def make_model(spec: str, env: Dict[str, str]) -> Optional[Any]:
         # The box injects the OS trust store at start-up (truststore), which the SDK's client uses.
         effort = None if name.startswith("claude-haiku") else env.get("ANTHROPIC_EFFORT", "low")
         return AnthropicChat(anthropic.Anthropic(api_key=key), name, effort=effort)
+    # Any other OpenAI-compatible provider of providers.PROVIDERS ("openrouter:openai/gpt-4o"). 2026-10-08: the box's
+    # OpenAI account ran out of credit while OpenRouter (already paying for the Eye) had it; the assistant can follow.
+    from ..providers import PROVIDERS  # noqa: PLC0415
+
+    known = PROVIDERS.get(provider)
+    if known is not None and provider != "openai":
+        key = env.get(known.key_env or "", "") if known.key_env else ""
+        if known.key_required and (not isinstance(key, str) or not key.strip()):
+            return None
+        base_url = (env.get(known.base_url_env) if known.base_url_env else None) or known.base_url
+        if not base_url:
+            _warn_once("Missing base URL for the %s model; disabling it" % provider)
+            return None
+        try:
+            from openai import OpenAI  # noqa: PLC0415
+        except ImportError:
+            log.warning("pip/uv: openai is not installed; the %s model is disabled", provider)
+            return None
+        http_client = _http_client()
+        try:
+            client = OpenAI(api_key=key or "none", base_url=base_url, http_client=http_client)
+        except Exception:
+            http_client.close()
+            raise
+        return OpenAIChat(client, name, temperature)
     _warn_once("Unknown model provider; disabling the model")
     return None

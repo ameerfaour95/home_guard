@@ -295,3 +295,15 @@ class FailureVisibilityTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OpenRouterModelTest(unittest.TestCase):
+    """2026-10-08: the box's OpenAI credit ran out; the assistant can run on OpenRouter like the Eye."""
+
+    def test_openrouter_model(self) -> None:
+        from home_guard_project.box.brain.models import OpenAIChat, make_model
+
+        model = make_model("openrouter:openai/gpt-4o", {"OPENROUTER_API_KEY": "k"})
+        self.assertIsInstance(model, OpenAIChat)
+        self.assertEqual(model.model_name, "openai/gpt-4o")
+        self.assertIsNone(make_model("openrouter:openai/gpt-4o", {"OPENAI_API_KEY": "k"}))
