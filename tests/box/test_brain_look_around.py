@@ -91,6 +91,8 @@ class LookAroundTest(Base):
 
     def test_no_vision_is_said_per_camera(self) -> None:
         out = look_around(self.ctx("מה קורה מסביב לבית"), {})
+        self.assertFalse(out["ok"])                                  # no picture is not "all quiet"
+        self.assertIn("never say it is quiet", out["error"])
         self.assertTrue(all("error" in row for row in out["cameras"]))
         self.assertEqual(self.deliver.photos, [])
 

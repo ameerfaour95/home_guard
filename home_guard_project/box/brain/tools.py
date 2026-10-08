@@ -633,8 +633,15 @@ def look_around(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
             ctx.shown.append(handle)
             row["photo_sent"] = bool(sent.get("ok"))
         rows.append(row)
+    seen = [row for row in rows if "error" not in row]
+    if not seen:
+        # 2026-10-08 replay: with no picture at all the model still answered "all quiet". Nothing seen is not quiet.
+        return _err("No camera gave a picture now, so nothing is known about outside. Say exactly that in one line; "
+                    "never say it is quiet.", cameras=rows)
+    blind = [row["camera"] for row in rows if "error" in row]
     return {"ok": True, "cameras": rows,
-            "note": "Answer in one or two sentences: where people are and what they do; say the rest is quiet."}
+            "note": ("Answer in one or two sentences: where people are and what they do; call quiet only the cameras "
+                     "that gave a picture." + (f" No picture from: {', '.join(blind)} - say so." if blind else ""))}
 
 
 @_safe_tool
