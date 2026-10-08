@@ -3,8 +3,19 @@
 from datetime import datetime, timedelta
 from typing import Optional
 
+from .camera_names import channel_of, display_name, family_names
 from .legacy import Heartbeat
 from ._time import normalize_utc
+
+
+def camera_label(camera: str, names: Optional[dict] = None) -> str:
+    """The camera as staff read it: the owner's name when known (``names``: id -> name), else "Camera N" from the
+    channel by the box's rule (camera_names.display_name), else the id in words. Never the raw id."""
+    aliases = {camera: [names[camera]]} if names and names.get(camera) else {}
+    if family_names(camera, aliases) or channel_of(camera):
+        return display_name(camera, "en", aliases)
+    text = camera.replace("_", " ")
+    return text[:1].upper() + text[1:]
 
 
 def camera_stale(newest: Optional[datetime], now) -> bool:
@@ -47,8 +58,7 @@ def verdict(hb: Optional[Heartbeat], now: datetime, alert_hours: Optional[tuple[
     never = []
     quietest_age = timedelta(0)
     for camera, newest in hb.cameras.items():
-        name = camera.replace("_", " ")
-        name = name[:1].upper() + name[1:]
+        name = camera_label(camera)
         if newest is None:
             never.append(name)
         elif camera_stale(newest, now):

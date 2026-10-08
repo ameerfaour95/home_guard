@@ -153,3 +153,8 @@ def test_naive_and_offset_datetimes(hb):
 
 def test_alert_hours_do_not_change_the_prescribed_rules(hb):
     assert verdict(replace(hb, collector_running=False), NOW, alert_hours=(20, 6))[0] == "critical"
+
+
+def test_camera_names_are_never_raw_ids(hb):
+    status, reasons = verdict(replace(hb, cameras={"ameer_tes2_ch6": NOW - timedelta(hours=30)}), NOW)
+    assert reasons[0]["message"] == "No clip for 30 h: Camera 6"

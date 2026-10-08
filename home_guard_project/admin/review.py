@@ -186,7 +186,7 @@ class ReviewScreen(QWidget):
         view = self.event_view
         if not error and view.recording is result:
             view.title.setText(f'#{result.id} · {camera_name(result)}')
-            view.title.setToolTip(f'{result.camera} · {local_time(result.start_utc,result.timezone)}')
+            view.title.setToolTip(f'{camera_name(result)} · {local_time(result.start_utc,result.timezone)}')
             if self.mutation.busy:
                 current = next((e for e in self.timeline.model.rows if e.id == result.id),None)
                 if current: self.sync_detail(current)

@@ -34,3 +34,19 @@ def test_customer_page_scrolls_and_the_footer_sits_under_the_table(size, widgets
     footer = timeline.older.mapTo(page.scroll.viewport(), QPoint(0, timeline.older.height())).y()
     assert footer <= page.scroll.viewport().height()
     assert window.height() == size[1]
+
+
+def test_camera_names_follow_the_box_rule_never_the_raw_id():
+    from home_guard_project.admin import formatting
+    from home_guard_project.admin.formatting import camera_name, remember_names
+    assert camera_name('ameer_tes2_ch6') == 'Camera 6'
+    assert camera_name('ameer_week_0_1/ameer_week_0_1_ch3') == 'Ameer week 0 1 / Camera 3'
+    assert camera_name('front_door') == 'Front door' and camera_name('cam-abcdef') == 'cam-abcdef'
+    try:
+        remember_names({'ameer_week_0_1_ch1': 'כניסה ראשית', 'ameer_week_0_1_ch2': ''})
+        assert camera_name('ameer_week_0_1_ch1') == 'כניסה ראשית'
+        assert camera_name('ameer_week_0_1_ch2') == 'Camera 2'
+        # exact ids only: another house's (or an old site's) ch1 never borrows this name
+        assert camera_name('other_house_ch1') == 'Camera 1'
+    finally:
+        formatting.KNOWN_NAMES.clear()
