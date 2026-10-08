@@ -16,6 +16,12 @@ The map itself is set up in the box's setup (the app). Telegram only changes it 
   (a number of it with an ownership, hide or line word) is, and only within ANSWER_WINDOW of the bot's last
   interview message (reset on each answer). Everything else goes to the assistant; while a change is open the
   owner gets one short reminder at most. "עצור" ends it. The buttons carry the session's token.
+- One exception (2026-10-08, "שכחת את 7" went to the assistant, which sent a clip twice): while the coloured
+  picture waits for [שמור] / [תקן], a message with a fix word ("שכחת", "תתקן", "לא נכון", "חסר") or a short one
+  naming a number of the picture is a correction: it is added to the answer, or the bot asks what that number is.
+- A wall the owner calls the one between us ("4 המעקה ביני לבין השכן") stays ours with a boundary along it; when
+  the side that is ours is unclear the bot asks with two buttons ("הצד הימני" / "הצד השמאלי"), never guesses.
+  A number the owner wrote that made nothing is said back: "לא הבנתי את 7".
 - State: a small JSON file in the box's state folder (version 2, one session per chat). Anything else in it (the
   multi-camera sessions of stage 2c, a damaged file) is dropped harmlessly the first time it is read.
 - A change that alters the frame mask (a black area, or a zone's black outside opened) restarts the running mode
@@ -47,13 +53,15 @@ STATE_VERSION = 2
 ANSWER_WINDOW = 600.0             # an answer counts only this long after the bot's last interview message
 SESSION_TTL = 1800.0              # the session's buttons work this long after the bot's last interview message
 CAPTION_LIMIT = 1024
-SAVE, FIX, STOP, CHOOSE = "sm:s", "sm:f", "sm:x", "sm:c"
+SAVE, FIX, STOP, CHOOSE, SIDE = "sm:s", "sm:f", "sm:x", "sm:c", "sm:d"
+FIX_WORDS_SHORT = 3               # a correction without a fix word is at most this many words ("7", "גם 7 שלי")
 
 _TRIGGER = re.compile(
     r"(?:^|\s|/)(?:מפה|map)(?=\s|$|[?!.,:])"
     r"|(?:תגדיר|להגדיר|נגדיר|תשנה|לשנות|נשנה|תעדכן|לעדכן|תסמן|לסמן)\s+(?:\S+\s+){0,3}?(?:אזור|האזור|אזורים|מפה|המפה|מפת)"
     r"|(?:set up|define|change|edit|update|mark)\s+(?:\S+\s+){0,3}?(?:area|zone|map)\b", re.IGNORECASE)
 _STOP_WORDS = re.compile(r"^\s*(?:עצור|תעצור|בטל|די|stop|cancel)\s*[.!]?\s*$", re.IGNORECASE)
+_FIX_WORDS = re.compile(r"שכחת|תתקן|לתקן|לא נכון|חסר|טעות|\b(?:forgot|fix|wrong|missing)\b", re.IGNORECASE)
 _CAMERA_NUMBER = re.compile(r"(?:מצלמה|camera|cam|ch)\s*-?\s*(\d+)", re.IGNORECASE)
 
 TEXTS = {
@@ -72,7 +80,10 @@ TEXTS = {
         "no_picture": "לא הצלחתי לקבל תמונה מ{name} עכשיו.",
         "no_cameras": "לא מצאתי מצלמות.", "reminder": "(השינוי במפה של {name} עדיין פתוח: כתבו למשל '4 של השכן', "
                                                           "או 'עצור'.)",
+        "which_side": "באיזה צד של {name} ({n}) השטח שלכם?",
+        "what_is": "מה {nums}? כתבו למשל '{n} שלי' או '{n} של השכן'.", "what_fix": "מה לתקן? כתבו למשל '7 שלי'.",
         "notes": {"no_region": "אין {n} בתמונה", "side": "איזה צד של {name} שלכם? כתבו למשל '{a} שלי'",
+                  "not_understood": "לא הבנתי את {n}",
                   "touch": "{a} ו-{b} לא נוגעים, אז אין ביניהם קו", "nothing": "עוד אין מה לשמור: כתבו מה משתנה"},
     },
     "en": {
@@ -92,7 +103,11 @@ TEXTS = {
         "no_picture": "I could not get a picture from {name} now.",
         "no_cameras": "I found no cameras.", "reminder": "(The change to {name}'s map is still open: write for "
                                                          "example '4 the neighbour's', or 'stop'.)",
-        "notes": {"no_region": "there is no {n} in the picture", "side": "which side of {name} is yours? Write "
+        "which_side": "Which side of {name} ({n}) is yours?",
+        "what_is": "What is {nums}? Write for example '{n} mine' or '{n} the neighbour's'.",
+        "what_fix": "What should change? Write for example '7 mine'.",
+        "notes": {"no_region": "there is no {n} in the picture", "not_understood": "I did not understand {n}",
+                  "side": "which side of {name} is yours? Write "
                   "for example '{a} mine'", "touch": "{a} and {b} do not touch, so there is no line between them",
                   "nothing": "nothing to save yet: say what changes"},
     },
@@ -125,6 +140,12 @@ def owner_notes(notes: Sequence[str], lang: str) -> List[str]:
         if m:
             out.append(words["touch"].format(a=m.group(1), b=m.group(2)))
             continue
+        m = re.match(r"I did not understand (\d+)", note)
+        if m:
+            out.append(words["not_understood"].format(n=m.group(1)))
+            continue
+        if re.match(r"which side of .+ \(\d+\) is yours\?", note):
+            continue                                   # asked with buttons
         out.append(words["nothing"] if note.startswith("nothing to save") else note)
     return out
 
@@ -236,16 +257,35 @@ class SceneChat:
                 else:
                     self.ask_camera(chat_id, named)
                 return True
-            if (s is not None and s.get("stage") == "answer"
-                    and self.now() - float(s.get("last_bot") or 0) <= ANSWER_WINDOW
-                    and is_answer(text, s.get("numbers") or [])):
-                self._answer(chat_id, s, text)
+            fresh = s is not None and self.now() - float(s.get("last_bot") or 0) <= ANSWER_WINDOW
+            numbers = (s or {}).get("numbers") or []
+            if fresh and s.get("stage") in ("answer", "side") and is_answer(text, numbers):
+                self._answer(chat_id, s, text, append=bool(s.get("append")) or s.get("stage") == "side")
+                return True
+            if fresh and s.get("stage") == "confirm" and self._correction(text, numbers):
+                if is_answer(text, numbers):
+                    self._answer(chat_id, s, text, append=True)
+                else:
+                    named = [n for n in si.mentioned_numbers(text) if n in numbers]
+                    s.update(stage="answer", append=True, last_bot=self.now())
+                    self._put(chat_id, s)
+                    words = _t(self.lang())
+                    self._say(chat_id, words["what_is"].format(nums=", ".join(map(str, named)), n=named[0])
+                              if named else words["what_fix"])
                 return True
             if s is not None and s.get("camera") and not s.get("reminded"):
                 s["reminded"] = True
                 self._put(chat_id, s)
                 self._say(chat_id, _t(self.lang())["reminder"].format(name=self._name(s["camera"])))
             return False
+
+    @staticmethod
+    def _correction(text: str, numbers: Sequence[int]) -> bool:
+        """While the coloured picture waits: a fix word, or a short message naming a number of the picture."""
+        if _FIX_WORDS.search(text) or is_answer(text, numbers):
+            return True
+        named = [n for n in si.mentioned_numbers(text) if n in set(numbers)]
+        return bool(named) and len(text.split()) <= FIX_WORDS_SHORT
 
     def on_button(self, chat_id: str, code: str) -> bool:
         chat_id = str(chat_id)
@@ -269,10 +309,15 @@ class SceneChat:
                 except (ValueError, IndexError):
                     return True
                 self.begin(chat_id, camera)
+            elif action == SIDE and s.get("stage") == "side" and len(parts) == 5 and parts[4] in sm.SIDES:
+                sides = dict(s.get("sides") or {})
+                sides[str(parts[3])] = parts[4]
+                s["sides"] = sides
+                self._answer(chat_id, s, "", append=True)
             elif action == SAVE and s.get("stage") == "confirm":
                 self._confirm(chat_id, s)
             elif action == FIX and s.get("stage") == "confirm":
-                s.update(stage="answer", last_bot=self.now())
+                s.update(stage="answer", last_bot=self.now(), append=False, text="", sides={})
                 self._put(chat_id, s)
                 self._say(chat_id, words["fixing"].format(name=self._name(s["camera"])))
             elif action == STOP:
@@ -333,10 +378,29 @@ class SceneChat:
         self.send_photo(chat_id, proposal["image"], caption[:CAPTION_LIMIT],
                         [[(words["stop_btn"], f"{STOP}:{s['token']}")]])
 
-    def _answer(self, chat_id: str, s: Dict[str, Any], text: str) -> None:
+    def _answer(self, chat_id: str, s: Dict[str, Any], text: str, append: bool = False) -> None:
+        """The owner's words (added to what they already said when *append*) into the draft; then the side of a
+        wall when unclear, else the coloured picture with [שמור] / [תקן]."""
         camera, words = s["camera"], _t(self.lang())
+        said = "\n".join(t for t in ((s.get("text") or "") if append else "", text) if t)
+        s.update(text=said, append=False)
+        sides = {int(k): v for k, v in (s.get("sides") or {}).items() if str(k).isdigit()}
         picture = si._read_picture(s.get("picture") or "")
-        result = si.answer(camera, text, s["regions_path"], picture, self.out_dir, self.zones_path)
+        result = si.answer(camera, said, s["regions_path"], picture, self.out_dir, self.zones_path, sides=sides)
+        if result.get("sides_needed"):
+            need = result["sides_needed"][0]
+            names = si.side_words(tuple(need["line"][0]), tuple(need["line"][1]), self.lang())
+            s.update(stage="side", last_bot=self.now())
+            self._put(chat_id, s)
+            rows = [[(names["left"], f"{SIDE}:{s['token']}:{need['number']}:left"),
+                     (names["right"], f"{SIDE}:{s['token']}:{need['number']}:right")],
+                    [(words["stop_btn"], f"{STOP}:{s['token']}")]]
+            question = words["which_side"].format(name=need["name"], n=need["number"])
+            if result["image"]:
+                self.send_photo(chat_id, result["image"], question, rows)
+            else:
+                self._say(chat_id, question, rows)
+            return
         preview = sm.SceneMap.from_dict(camera, result["map"])
         lines = [words["confirm"].format(name=self._name(camera))] + map_lines(preview, self.lang())
         lines += owner_notes(result["notes"], self.lang())
