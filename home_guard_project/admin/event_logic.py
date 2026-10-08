@@ -6,7 +6,10 @@ from datetime import timedelta
 KINDS = {'alert': 'Alert', 'false_positive': 'Dismissed by AI', 'paused': 'Paused',
          'owner_feedback': 'Owner feedback', 'trigger': 'Collected', 'random': 'Collected', 'unknown': 'Unknown'}
 DECISIONS = {'[none]': 'No alert', '[send_message]': 'Message sent', '[call_owner]': 'Call owner'}
-VERDICTS = {'real': 'Confirmed', 'false_alarm': 'False alarm', 'real_but_wrong': 'Real, wrong decision'}
+# The owner's answers, in the server's vocabulary (cloud/redact.py VERDICTS, the box's feedback.py). 'expected' is the
+# owner saying it was normal (family, a delivery, a pet); 'none' is a reply that judges no alert.
+VERDICTS = {'true_alert': 'Real alert', 'false_alarm': 'False alarm', 'expected': 'Normal (expected)',
+            'real_but_wrong': 'Real, wrong decision', 'missed_event': 'Missed event', 'none': 'Reply, no verdict'}
 
 
 def decision(command):

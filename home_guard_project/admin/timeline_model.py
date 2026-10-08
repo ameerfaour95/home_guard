@@ -63,7 +63,7 @@ class TimelineModel(QAbstractTableModel):
                 c = e.completeness
                 return '\n'.join(['Video saved' if c.video else 'No video saved', provenance(c.boxes), ai_status(c.ai),
                                    'No video copy remains' if c.expired else 'Video retention active'])
-            return f'{e.camera}\n{local_time(e.start_utc, e.timezone)}\n{e.summary}'
+            return f'{camera_name(e)}\n{local_time(e.start_utc, e.timezone)}\n{e.summary}'
         if role == Qt.ItemDataRole.DisplayRole:
             return ['', local_time(e.start_utc, e.timezone)[13:18]+'  ·  '+age(e.start_utc, self.now())+'\n'+camera_name(e)+'  ·  '+e.summary,
                     KINDS.get(e.kind, "Unknown"), decision(e.alert_command), ', '.join(VERDICTS.get(v, v.replace('_', ' ')) for v in e.owner_verdicts) or 'No feedback',

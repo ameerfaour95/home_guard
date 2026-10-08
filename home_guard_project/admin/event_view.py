@@ -116,9 +116,9 @@ class EventView(QWidget):
             return
         self.recording = event
         self.zone = event.timezone
-        self.title.setToolTip(event.camera)
+        self.title.setToolTip(camera_name(event))
         self.title.setText(f'{camera_name(event)}  ·  {KINDS.get(event.kind, "Unknown")}  ·  {local_time(event.start_utc, self.zone)}')
-        self.title.setToolTip(event.camera+' · '+local_time(event.start_utc, self.zone))
+        self.title.setToolTip(camera_name(event)+' · '+local_time(event.start_utc, self.zone))
         self.review.setEnabled(True); self.flag.setEnabled(True)
         self.review.setChecked(event.reviewed); self.flag.setChecked(event.flagged)
         self.player.reset(event, self.zone); self.record.set_event(event, self.zone)

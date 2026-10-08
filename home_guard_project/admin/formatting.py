@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from home_guard_project.fleet_contract.camera_names import channel_of, display_name as box_display_name, family_names
 
 
 def utcnow():
@@ -48,14 +49,37 @@ def export_warning(value):
     return re.sub(r'\b(?:vlm|yolo|train|val|site\+day)\b', lambda match:words[match[0]], value)
 
 
+# Owner names the cloud knows (camera id -> the family's names, oldest first), filled when a customer's cameras load.
+# Matched by exact id only: the box's channel fallback for renamed sites must not borrow another house's ch6.
+KNOWN_NAMES = {}
+
+
+def remember_names(names):
+    """Record owner names for camera ids: ``{camera_id: name}``; an empty name is ignored."""
+    for camera, name in (names or {}).items():
+        if camera and name and name.strip():
+            KNOWN_NAMES[camera] = [name.strip()]
+
+
+def owner_camera_name(camera, aliases=None):
+    """What the admin shows for a camera id: the box's display_name (owner alias, else "Camera N"), never the id."""
+    aliases = aliases if aliases is not None else ({camera: KNOWN_NAMES[camera]} if camera in KNOWN_NAMES else {})
+    if family_names(camera, aliases) or channel_of(camera):
+        return box_display_name(camera, 'en', aliases)
+    return humanise(camera)
+
+
 def camera_name(value, display_name=None):
     raw = value if isinstance(value, str) else value.camera
     if raw.startswith('cam-'):
         return raw
-    if '/' in raw and not display_name:
+    name = display_name or getattr(value, 'display_name', None)
+    if name:
+        return name
+    if '/' in raw:
         site, camera = raw.split('/', 1)
-        return f'{humanise(site)} / {humanise(camera)}'
-    return display_name or getattr(value, 'display_name', None) or humanise(raw)
+        return f'{humanise(site)} / {owner_camera_name(camera)}'
+    return owner_camera_name(raw)
 
 
 def delivery_text(dispatch):

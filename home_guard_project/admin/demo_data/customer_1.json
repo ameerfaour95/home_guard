@@ -41,7 +41,7 @@
       "verdict": "offline",
       "reasons": [
         {
-          "code": "heartbeat_missing",
+          "code": "heartbeat_old",
           "message": "Last heard 3 h ago",
           "severity": "offline"
         },

@@ -122,10 +122,11 @@ class DensityStrip(QWidget):
     def mouseMoveEvent(self, event):
         hit = self.hit(event.position())
         if hit:
+            from ..formatting import camera_name
             camera, hour, (count, alerts, false) = hit
             QToolTip.showText(event.globalPosition().toPoint(),
                 activity_tooltip(hour, (count, alerts, false), self.zone) if self.fleet else
-                f'{camera} · {local_time(hour, self.zone)}\n{count} events · {alerts} alerts · {false} false alarms', self)
+                f'{camera_name(camera)} ·{local_time(hour, self.zone)}\n{count} events · {alerts} alerts · {false} false alarms', self)
 
     def mousePressEvent(self, event):
         hit = self.hit(event.position())

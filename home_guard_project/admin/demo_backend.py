@@ -55,6 +55,24 @@ class DemoBackend(DemoTagging, DemoAnnotations, DemoStudio):
             setattr(customer, key, value)
         return customer
 
+    def cameras(self, customer_id=None):
+        """The catalog's cameras with their newest event; an entry may say ``"current": false`` (a retired id)."""
+        self._identity_access()
+        from .models import CameraOut
+        catalog = json.loads((self.data_dir/'camera_catalog.json').read_text(encoding='utf-8'))
+        events = self._load('events.json', EventPage).items
+        devices = {d.customer_id: d for d in self.fleet().devices}
+        out = []
+        for entry in catalog:
+            if customer_id not in (None, entry['customer_id']):
+                continue
+            times = [e.start_utc for e in events if e.customer_id == entry['customer_id'] and e.camera == entry['camera']]
+            device = devices.get(entry['customer_id'])
+            out.append(CameraOut(entry['customer_id'], device.device_id if device else '', device.site if device else '',
+                                 entry['camera'], entry.get('name') or entry['camera'], bool(entry.get('name')),
+                                 entry.get('current', True), max(times) if times else None))
+        return sorted(out, key=lambda c: (c.customer_id, not c.current, c.camera))
+
     def update_customer(self, customer):
         self._identity_access()
         changes = {k: getattr(customer, k) for k in ('name', 'timezone', 'consent_live', 'consent_recordings',

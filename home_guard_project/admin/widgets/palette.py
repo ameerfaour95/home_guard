@@ -3,6 +3,7 @@ from PySide6.QtCore import Qt, QStringListModel, Signal, QEvent
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QLineEdit, QListView
 from .common import label
 from ..formatting import site_name, camera_name
+from ..nav import NAV_TEXT, screens_for
 
 
 class CommandPalette(QDialog):
@@ -33,9 +34,7 @@ class CommandPalette(QDialog):
         else:
             self.search.setPlaceholderText('Find a command or saved filter…')
         self.entries += [('Filter: '+f.title, 0, 'filter:'+f.key) for f in filters]
-        commands = ['Go to Studio', 'Go to Review']
-        if role != 'labeler': commands += ['Go to Fleet']
-        if role == 'admin': commands += ['Go to Audit']
+        commands = ['Go to '+NAV_TEXT[name] for name in screens_for(role)]
         if role != 'support': commands += ['Export collection…']
         commands += ['Sign out']
         self.entries += [(name, 0, 'command:'+name) for name in commands]

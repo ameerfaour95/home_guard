@@ -50,6 +50,20 @@ class CameraHealth(BaseModel):
     stale: bool
 
 
+class CameraOut(BaseModel):
+    """One camera of a house as staff read it. `name` is the family's name when the box sent one, else "Camera N"
+    from the channel (never the raw id); `camera` is the id, for filters. `current` is false for retired ids (a site
+    rename, a removed camera): they are listed, never warned about."""
+    customer_id: int
+    device_id: str
+    site: str
+    camera: str
+    name: str
+    owner_named: bool
+    current: bool
+    newest_clip_utc: Optional[datetime]
+
+
 class DeviceSummary(BaseModel):
     device_id: str
     site: str

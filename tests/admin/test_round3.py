@@ -98,7 +98,7 @@ def test_review_paging_keyboard_at_end(widgets,wait):
 def test_palette_ranking_commands_filters_camera_and_event(widgets):
     b = DemoBackend(); palette = CommandPalette(None,b.fleet().devices,b.customers(),'admin',b.saved_filters(),[('Front door',1)])
     widgets.append(palette); results = []; palette.execute.connect(lambda *args:results.append(args))
-    for query,kind,expected in [('Go to Studio','command','Go to Studio'),('Filter: Owner said false alarm','filter','owner_false_alarm'),
+    for query,kind,expected in [('Go to Batches','command','Go to Batches'),('Filter: Owner said false alarm','filter','owner_false_alarm'),
                                 ('#1234','event',1234),('Front door','camera',(1,'Front door'))]:
         palette.filter(query); palette.activate(palette.model.index(0))
         assert results[-1] == (kind,expected)

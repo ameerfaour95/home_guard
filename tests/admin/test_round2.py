@@ -92,7 +92,7 @@ def test_demo_cursor_filters_and_review_round_trip():
     assert [e.id for e in page.items+second.items] == [e.id for e in items[:6]]
     backend.review(101, reviewed=True, flagged=True)
     assert backend.event(101).flagged
-    assert 101 in [e.id for e in backend.events(customer_id=1, kind='alert', ai='real', verdict='real',
+    assert 101 in [e.id for e in backend.events(customer_id=1, kind='alert', ai='real', verdict='true_alert',
         q='parcel', reviewed=True, flagged=True, from_utc=(backend.now-timedelta(hours=1)).isoformat(), to_utc=backend.now.isoformat()).items]
     assert not backend.events(ai='fallback', kind='alert').items
 
@@ -117,7 +117,7 @@ def timeline(widgets, wait, backend=None):
 
 def test_timeline_filters_use_exact_contract_query_names(widgets, wait):
     screen = timeline(widgets, wait)
-    values = dict(kind='alert', camera='Front door', ai='real', verdict='real', reviewed=False, flagged=True)
+    values = dict(kind='alert', camera='Front door', ai='real', verdict='true_alert', reviewed=False, flagged=True)
     for key, value in values.items():
         combo = screen.filters[key]; combo.setCurrentIndex(combo.findData(value))
     screen.search.setText('parcel'); screen.debounce.stop(); screen.reload()
@@ -190,13 +190,13 @@ def test_role_tabs_dispatch_raw_and_owner_text(role, widgets, wait):
     names = [screen.tabs.tabText(i) for i in range(screen.tabs.count())]
     disclosures = [w.toggle.text() for w in view.record.findChildren(TextDisclosure)]
     if role == 'labeler':
-        assert 'Conversation' not in names and 'Access' not in names
+        assert 'Chat' not in names and 'Access' not in names and 'Overview' not in names
         assert view.record.dispatch_label is None and view.raw is None
         assert not any('Owner raw text' in s for s in disclosures)
         assert screen.name.text().startswith('customer-') and view.recording.camera.startswith('cam-')
         assert view.record.frames and not view.record.raw_answers
     else:
-        assert 'Conversation' in names and 'Access' in names
+        assert names[:3] == ['Overview', 'Events', 'Event'] and 'Chat' in names and 'Access' in names
         assert view.record.dispatch_label is not None
         assert any('Owner raw text' in s for s in disclosures)
         assert (view.raw is not None) == (role == 'admin')

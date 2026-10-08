@@ -136,7 +136,7 @@ class CollectionGrid(QWidget):
         top = QHBoxLayout(); self.title = label('', 'section'); top.addWidget(self.title,1)
         self.remove = button('Remove selected', self.remove_selected); self.remove.setEnabled(False); top.addWidget(self.remove)
         box.addLayout(top); self.message = label('', 'muted', True); box.addWidget(self.message)
-        self.model = RowsModel([('Event',lambda e:e.camera+'\n'+e.summary)])
+        self.model = RowsModel([('Event',lambda e:camera_name(e)+'\n'+e.summary)])
         self.images = {}; self.grid = QListView(); self.grid.setModel(self.model)
         self.grid.setViewMode(QListView.ViewMode.IconMode); self.grid.setResizeMode(QListView.ResizeMode.Adjust)
         self.grid.setMovement(QListView.Movement.Static); self.grid.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)

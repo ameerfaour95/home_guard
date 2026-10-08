@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter, QCo
 from .timeline import TimelineScreen
 from .timeline_model import TimelineDelegate, status_chip_width
 from .event_view import EventView
-from .event_logic import KINDS
+from .event_logic import KINDS, VERDICTS
 from .formatting import local_time
 from .workers import TaskRunner
 from .review_controller import ReviewController
@@ -39,7 +39,7 @@ class ReviewDelegate(TimelineDelegate):
         lines = [f'{local_time(e.start_utc, e.timezone)[13:18]}  ·  {camera_name(e)}', e.summary or 'No summary saved',
                  f'{KINDS.get(e.kind, "Unknown")} · '+{'real':'AI answer saved','failed':'AI failed','fallback':'Fallback AI','none':'No AI answer'}.get(e.completeness.ai, 'Unknown AI state'),
                  ('Reviewed' if e.reviewed else 'Unreviewed') + ('  ·  Flagged' if e.flagged else '') +
-                 ('  ·  '+', '.join({'real':'Confirmed','false_alarm':'False alarm','real_but_wrong':'Wrong decision'}.get(v,v.replace('_',' ').capitalize()) for v in e.owner_verdicts) if e.owner_verdicts else '')]
+                 ('  ·  '+', '.join(VERDICTS.get(v,v.replace('_',' ').capitalize()) for v in e.owner_verdicts) if e.owner_verdicts else '')]
         for i, text in enumerate(lines):
             p.setFont(QFont('Segoe UI', 9 if i < 2 else 8))
             p.setPen(QColor(t['text' if i == 0 else 'action' if i == 3 and e.reviewed else 'muted']))
@@ -62,7 +62,7 @@ class ReviewScreen(QWidget):
         self.mutation = ReviewController(backend, self); self.mutation.finished.connect(self.mutation_done)
         self.metadata = TaskRunner(self); self.metadata.finished.connect(self.metadata_loaded)
         layout = QVBoxLayout(self); layout.setContentsMargins(24, 20, 24, 16); layout.setSpacing(12)
-        top = QHBoxLayout(); top.addWidget(label('Review', 'title')); top.addStretch()
+        top = QHBoxLayout(); top.addWidget(label('Activity', 'title')); top.addStretch()
         self.progress = label('Loading review count…', 'muted'); top.addWidget(self.progress)
         layout.addLayout(top)
         self.toast = label('', 'badge', True); self.toast.hide(); layout.addWidget(self.toast)
@@ -80,11 +80,15 @@ class ReviewScreen(QWidget):
         self.timeline = TimelineScreen(backend, theme, role)
         self.mutation.optimistic.connect(self.timeline.model.update_review)
         self.mutation.optimistic.connect(self.sync_detail)
+        # each combo's first item names it ('All kinds', 'All cameras', ...): no separate captions, so the whole
+        # sidebar fits a 768-pixel screen
         for key, combo in self.timeline.filters.items():
-            if key == 'camera':
-                combo.hide(); continue
-            filters.addWidget(label({'ai':'AI state', 'verdict':'Owner verdict'}.get(key, key.title()), 'muted'))
+            combo.setToolTip({'ai': 'AI state', 'verdict': 'Owner answer'}.get(key, key.title()))
+            if key == 'camera' and role == 'labeler':
+                combo.hide(); continue  # a labeler's cameras are pseudonyms
             filters.addWidget(combo)
+            if key == 'camera':
+                filters.addWidget(self.timeline.retired_toggle)
         self.timeline.filters['reviewed'].blockSignals(True)
         self.timeline.filters['reviewed'].setCurrentIndex(1)
         self.timeline.filters['reviewed'].blockSignals(False)
@@ -92,7 +96,9 @@ class ReviewScreen(QWidget):
         self.timeline.search.setVisible(role != 'labeler')
         filters.addWidget(button('Reset filters', self.clear_filters, 'link')); filters.addStretch()
         body.addWidget(self.sidebar)
-        self.timeline.range_bar.hide(); self.timeline.filter_bar.hide(); self.timeline.density.hide(); self.timeline.key_hint.hide()
+        self.timeline.filter_bar.hide(); self.timeline.density.hide(); self.timeline.density_scroll.hide(); self.timeline.key_hint.hide()
+        self.timeline.range_text.hide()
+        layout.insertWidget(1, self.timeline.range_bar)  # date range across houses, above the list
         self.timeline.table.setItemDelegate(ReviewDelegate(theme, self.timeline.table))
         self.timeline.table.horizontalHeader().hide(); self.timeline.table.verticalHeader().setDefaultSectionSize(102)
         self.timeline.table.setColumnWidth(0, 102)
@@ -122,13 +128,22 @@ class ReviewScreen(QWidget):
         layout.addWidget(label('j / k  Next / previous    ·    Space  Play / pause    ·    r  Reviewed + next    ·    f  Flag    ·    c  Add to collection', 'muted'))
         QApplication.instance().installEventFilter(self)
         self.metadata.start(lambda: (backend.saved_filters(), backend.review_count()))
+        self.cameras_runner = TaskRunner(self); self.cameras_runner.finished.connect(self.cameras_loaded)
         self.started = False
 
     def showEvent(self, event):
         super().showEvent(event)
         if not self.started:
             self.started = True
-            self.timeline.reload()
+            self.timeline.reload(); self.timeline.load_density()  # the density rows fill the camera filter
+            if self.role != 'labeler' and hasattr(self.backend, 'cameras'):
+                self.cameras_runner.start(self.backend.cameras)
+
+    def cameras_loaded(self, cameras, error):
+        if error:
+            if isinstance(error, AuthError): self.session_expired.emit()
+            return  # an older server: every camera the index saw stays listed
+        self.timeline.set_cameras(cameras)
 
     def metadata_loaded(self, result, error):
         if error:
@@ -186,7 +201,7 @@ class ReviewScreen(QWidget):
         view = self.event_view
         if not error and view.recording is result:
             view.title.setText(f'#{result.id} · {camera_name(result)}')
-            view.title.setToolTip(f'{result.camera} · {local_time(result.start_utc,result.timezone)}')
+            view.title.setToolTip(f'{camera_name(result)} · {local_time(result.start_utc,result.timezone)}')
             if self.mutation.busy:
                 current = next((e for e in self.timeline.model.rows if e.id == result.id),None)
                 if current: self.sync_detail(current)

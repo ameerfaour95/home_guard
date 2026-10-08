@@ -98,7 +98,7 @@ def test_totp_auto_advance_and_paste(widgets, app, tmp_path):
     assert screen.totp.code() == '654321'
 
 
-@pytest.mark.parametrize('role,expected', [('admin', ['Fleet', 'Review', 'Studio', 'Tag', 'Label', 'Audit']), ('support', ['Fleet', 'Review', 'Studio']), ('labeler', ['Label', 'Review', 'Studio'])])
+@pytest.mark.parametrize('role,expected', [('admin', ['Fleet', 'Review', 'Inbox', 'Tag', 'Label', 'Studio', 'Audit', 'Index problems']), ('support', ['Fleet', 'Review', 'Studio']), ('labeler', ['Review', 'Label', 'Studio'])])
 def test_role_navigation(role, expected, widgets, wait):
     class CountBackend(DemoBackend):
         calls = 0
@@ -222,3 +222,27 @@ def test_preferences_tolerate_corrupt_file(tmp_path):
     assert prefs.email() == ''
     prefs.save_email('maya@example.com')
     assert prefs.email() == 'maya@example.com'
+
+
+@pytest.mark.parametrize('role,sections', [('admin', ['MONITOR', 'STUDIO', 'ADMIN']), ('support', ['MONITOR', 'STUDIO']),
+                                           ('labeler', ['MONITOR', 'STUDIO'])])
+def test_rail_is_grouped_by_job(role, sections, widgets):
+    from PySide6.QtWidgets import QLabel, QFrame
+    from home_guard_project.admin.nav import NAV_TEXT
+    backend = DemoBackend(role=role)
+    shell = Shell(backend, backend.me()); widgets.append(shell); shell.show()
+    rail = shell.findChild(QFrame, 'rail')
+    assert [w.text() for w in rail.findChildren(QLabel) if w.objectName() == 'eyebrowMuted'] == sections
+    assert [nav.text() for nav in shell.navigation.values()] == [NAV_TEXT[name] for name in shell.navigation]
+    if role == 'admin':
+        assert shell.navigation['Review'].text() == 'Activity' and shell.navigation['Studio'].text() == 'Batches'
+        assert shell.navigation['Tag'].text() == 'Tag · AI' and shell.navigation['Label'].text() == 'Tag · YOLO'
+        shell.navigation['Inbox'].click()
+        assert shell.pages.currentWidget() is shell.screens['Inbox'] and shell.navigation['Inbox'].isChecked()
+        shell.navigation['Index problems'].click()
+        assert shell.pages.currentWidget() is shell.screens['Index problems']
+    shell.open_palette()
+    commands = [e[0] for e in shell.palette_dialog.entries if e[2].startswith('command:Go to')]
+    assert commands == ['Go to ' + NAV_TEXT[name] for name in shell.navigation]
+    shell.palette_dialog.filter('Go to Activity'); shell.palette_dialog.activate(shell.palette_dialog.model.index(0))
+    assert shell.pages.currentWidget() is shell.screens['Review'] and shell.navigation['Review'].isChecked()

@@ -46,6 +46,20 @@ class HealthReason:
 
 
 @dataclass
+class CameraOut:
+    """One camera of a house: ``name`` is what staff read (the family's name, else "Camera N"), ``camera`` the id
+    used in filters; retired ids (``current`` false: a site rename, a removed camera) are listed, never warned about."""
+    customer_id: int
+    device_id: str
+    site: str
+    camera: str
+    name: str
+    owner_named: bool
+    current: bool
+    newest_clip_utc: datetime | None
+
+
+@dataclass
 class CameraHealth:
     name: str
     newest_clip_utc: datetime | None
