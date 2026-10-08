@@ -39,19 +39,30 @@ CLI (on the box; the app may call these over ssh, like find_cameras' zone comman
     python -m home_guard_project.box.scene_interview confirm --camera front [--no-restart]
     python -m home_guard_project.box.scene_interview show --camera front
     python -m home_guard_project.box.scene_interview clear --camera front
+
+For the app's map editor (over ssh a value on the command line carries no spaces or quotes, and the box's console
+code page cannot print Hebrew, so these print one line of ASCII JSON)::
+
+    propose --camera front --json --embed          # + image_b64 (numbered JPEG), picture_b64 (the clean picture),
+                                                   #   each region's points, current_map (the camera's map now)
+    answer --camera front --text-b64 MSBtaW5l --json --embed      # + image_b64 (the ownership picture)
+    confirm --camera front --map-b64 eJy... --json [--no-restart]  # a map edited in the app (confirm_app_map)
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import json
 import logging
 import os
 import re
 import sys
 import time
+import zlib
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -858,6 +869,65 @@ def _known_cameras(cameras_path: str) -> List[str]:
     return list(dict(raw.get("cameras") or {})) + list(dict(raw.get("disabled") or {}))
 
 
+# ----------------------------------------------------------------------------
+# The app's map editor: pictures inside the answer, input as base64
+# ----------------------------------------------------------------------------
+def _b64_file(path: Optional[str]) -> str:
+    """The file at *path* as base64 ("" when there is none)."""
+    if not path or not os.path.isfile(path):
+        return ""
+    with open(path, "rb") as f:
+        return base64.b64encode(f.read()).decode("ascii")
+
+
+def embed_proposal(result: Dict[str, Any], picture_path: str, current: Optional[sm.SceneMap] = None) -> Dict[str, Any]:
+    """``propose``'s answer for the app: the numbered picture and the clean one as base64, each region's polygon
+    (the app draws its own live overlay), and the camera's map as it is now."""
+    out = dict(result)
+    points = {r.number: r.points for r in load_regions(result["regions_path"], result["camera"])}
+    out["regions"] = [dict(r, points=[list(p) for p in points.get(r["number"], ())]) for r in result["regions"]]
+    out["image_b64"] = _b64_file(result.get("image"))
+    out["picture_b64"] = _b64_file(picture_path)
+    if current is not None:
+        out["current_map"] = current.to_dict()
+    return out
+
+
+def decode_b64_text(value: str) -> str:
+    """The owner's words, sent as base64 of UTF-8 text."""
+    try:
+        return base64.b64decode(str(value or ""), validate=True).decode("utf-8")
+    except (binascii.Error, ValueError):
+        raise ValueError("the answers could not be read") from None
+
+
+def decode_map_b64(value: str) -> Dict[str, Any]:
+    """A map dict sent as base64 of its JSON (UTF-8), or of that JSON zlib-compressed (so it fits a command line)."""
+    try:
+        raw = base64.b64decode(str(value or ""), validate=True)
+        if raw[:1] == b"x":                    # a zlib stream; JSON starts with "{"
+            raw = zlib.decompress(raw)
+        data = json.loads(raw.decode("utf-8"))
+    except (binascii.Error, ValueError, zlib.error):
+        raise ValueError("the map could not be read") from None
+    if not isinstance(data, dict):
+        raise ValueError("the map could not be read")
+    return data
+
+
+def confirm_app_map(camera: str, data: Mapping[str, Any], out_dir: str = INTERVIEW_DIR) -> sm.SceneMap:
+    """A map edited in the app (region answers, areas drawn by hand, lines) as the camera's draft, validated the
+    way every stored map is (``SceneMap.from_dict``: kinds, owners, zones, points); ``confirm`` then makes it the
+    camera's whole truth. Raises ValueError in plain words."""
+    if str(data.get("camera") or camera) != str(camera):
+        raise ValueError(f"that map belongs to camera {data.get('camera')!r}, not {camera!r}")
+    scene = sm.SceneMap.from_dict(camera, data, data.get("watched") or None)
+    os.makedirs(out_dir, exist_ok=True)
+    with open(draft_path(camera, out_dir), "w", encoding="utf-8") as f:
+        json.dump(scene.to_dict(), f, ensure_ascii=False, indent=1)
+    return scene
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     from .find_cameras import CAMERAS_PATH, _known_camera, _restart_running_mode  # noqa: PLC0415
 
@@ -869,12 +939,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         p.add_argument("--json", action="store_true")
         if name in ("propose", "answer", "confirm"):
             p.add_argument("--out", default=INTERVIEW_DIR)
+        if name in ("propose", "answer"):
+            p.add_argument("--embed", action="store_true", help="the pictures inside the JSON, as base64 (the app)")
         if name == "propose":
             p.add_argument("--grid", action="store_true", help="number a grid instead of using SAM")
         if name == "answer":
-            p.add_argument("--text", required=True)
+            words = p.add_mutually_exclusive_group(required=True)
+            words.add_argument("--text")
+            words.add_argument("--text-b64", help="the answers as base64 of UTF-8 text")
         if name == "confirm":
             p.add_argument("--no-restart", action="store_true")
+            p.add_argument("--map-b64", help="a map edited in the app: base64 of its JSON, or of that JSON zlib-compressed")
     args = parser.parse_args(argv)
     try:
         if args.command == "telegram":
@@ -886,14 +961,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         camera = _known_camera(args.camera, CAMERAS_PATH)
         if args.command == "propose":
             picture, picture_path = interview_picture(camera, CAMERAS_PATH, args.out)
+            current = sm.load_scene_map(camera)
             result = propose(camera, picture, args.out, grid_segmenter if args.grid else None, picture_path,
-                             watched=sm.load_scene_map(camera).watched)
+                             watched=current.watched)
+            if args.embed:
+                result = embed_proposal(result, picture_path, current)
         elif args.command == "answer":
             regions_path = os.path.join(args.out, f"{_stem(camera)}_regions.json")
             with open(regions_path, encoding="utf-8") as f:
                 picture_path = json.load(f).get("picture") or ""
-            result = answer(camera, args.text, regions_path, _read_picture(picture_path), args.out)
+            text = args.text if args.text is not None else decode_b64_text(args.text_b64)
+            result = answer(camera, text, regions_path, _read_picture(picture_path), args.out)
+            if args.embed:
+                result["image_b64"] = _b64_file(result.get("image"))
         elif args.command == "confirm":
+            if args.map_b64 is not None:
+                confirm_app_map(camera, decode_map_b64(args.map_b64), args.out)
             result = confirm(camera, args.out, known_cameras=_known_cameras(CAMERAS_PATH))
             if result["restart_needed"] and not args.no_restart:
                 _restart_running_mode()
@@ -906,6 +989,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         message = str(exc) if isinstance(exc, (ValueError, RuntimeError)) else f"could not do that: {exc}"
         print(json.dumps({"error": message}) if args.json else f"Error: {message}")
         return 1
+    if any(getattr(args, flag, None) for flag in ("embed", "text_b64", "map_b64")):
+        print(json.dumps(result))          # the app: one line of ASCII JSON, whatever the console's code page
+        return 0
     print(json.dumps(result, ensure_ascii=False, indent=2) if args.json else json.dumps(result, ensure_ascii=False))
     return 0
 
