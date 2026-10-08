@@ -171,6 +171,19 @@ EVENTS: Any = None
 KNOWN_CAMERAS: Tuple[str, ...] = ()
 EVENTS_TICK_SEC = 1.0
 VERIFY_TIMEOUT_SEC = 15.0        # the second look before a red waits at most this long, then the red goes out
+# The investigator's wait-and-watch (stage 2b, owner-approved 2026-10-08: a suspicious may wait up to 20 s). A
+# "suspicious" only for lingering is lowered to normal when the tracker saw the person for less than LOITER_MIN_SEC
+# (box.yaml ``loiter_min_sec``) and they are gone; while they are still in view it watches up to
+# INVESTIGATOR_WAIT_SEC (box.yaml ``investigator_wait_sec``, at most INVESTIGATOR_MAX_WAIT_SEC). run() fills
+# TRACKERS (tracker.TrackerRegistry); without it nothing changes.
+TRACKERS: Any = None
+LOITER_MIN_SEC = 45.0
+INVESTIGATOR_WAIT_SEC = 20.0
+INVESTIGATOR_MAX_WAIT_SEC = 20.0
+INVESTIGATOR_POLL_SEC = 2.0
+STILL_IN_VIEW_SEC = 5.0          # a person the tracker saw this recently is still there (it loses a track after 4 s)
+_now = time.time                 # the investigator's clock and sleep (tests replace them)
+_sleep = time.sleep
 # Insertion order lets capacity eviction forget the oldest successful delivery first.
 _SOFTENED_DAYS: Dict[Tuple[str, str], None] = {}
 _SOFTENED_DAYS_LIMIT = 500
@@ -344,6 +357,13 @@ def start_events(box_settings: Mapping[str, Any]) -> Any:
     except Exception as exc:  # noqa: BLE001
         EVENTS = None
         log.warning("Event book not started (%s); every alert goes out on its own", exc)
+        return EVENTS
+    try:
+        from . import event_memory  # noqa: PLC0415
+
+        event_memory.attach(EVENTS)      # every closed event goes to the long-term memory (events_archive.jsonl)
+    except Exception as exc:  # noqa: BLE001 - the memory only adds; the alerts go on without it
+        log.warning("Event memory not started (%s); events are kept in events.jsonl only", exc)
     return EVENTS
 
 
@@ -1809,6 +1829,108 @@ def second_look(backend: Any, frames: List[Any], classes: Sequence[str], lang: s
     return record
 
 
+def about_lingering(text: str) -> bool:
+    """alert_guards.about_lingering: the reason is only lingering (loitering, standing a while, looking around)."""
+    from .alert_guards import about_lingering as lingering  # noqa: PLC0415
+
+    return lingering(text)
+
+
+def _presence(trackers: Any, camera: str, since: float, now: float) -> Tuple[bool, float, bool]:
+    """``(seen, seconds in view, still in view)`` of the people the camera's tracker saw since *since*. The time in
+    view spans the first to the last sighting of anyone (a track that broke and came back counts whole)."""
+    people = list(getattr(trackers.facts(camera, since, now), "people", ()) or ())
+    if not people:
+        return False, 0.0, False
+    first = min(float(p.first_seen) for p in people)
+    last = max(float(p.last_seen) for p in people)
+    longest = max(float(getattr(p, "time_in_view_s", 0) or 0) for p in people)
+    return True, max(last - first, longest), now - last <= STILL_IN_VIEW_SEC
+
+
+def investigate_lingering(camera: str, since: float, loiter_min: float = LOITER_MIN_SEC,
+                          wait_sec: float = INVESTIGATOR_WAIT_SEC, trackers: Any = None) -> Dict[str, Any]:
+    """The investigator's wait-and-watch for a "suspicious" only for lingering. Reads the camera's tracker (live,
+    *trackers* or TRACKERS) for the people seen since *since*:
+
+    - in view at least *loiter_min* seconds: it stays suspicious ("stayed");
+    - in view less and gone: ``lowered`` - a short visit is not loitering;
+    - in view less and still there: watch up to *wait_sec* (at most INVESTIGATOR_MAX_WAIT_SEC), re-reading every
+      INVESTIGATOR_POLL_SEC, then decide as above; still there at the end stays suspicious.
+
+    Without a tracker, or when it saw nobody, nothing changes. Never raises. The calling worker thread is marked
+    ``investigating`` while it waits, so the guard loop may start other cameras' alerts meanwhile."""
+    trackers = TRACKERS if trackers is None else trackers
+    record: Dict[str, Any] = {"verdict": "", "lowered": False, "in_view_s": 0, "still_there": False, "waited_s": 0.0,
+                              "loiter_min_sec": loiter_min}
+    if trackers is None:
+        record["verdict"] = "no tracker"
+        return record
+
+    def number(value: Any, default: float) -> float:
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            return default
+        return value if value == value and abs(value) != float("inf") else default     # NaN / inf: the default
+
+    loiter_min = max(0.0, number(loiter_min, LOITER_MIN_SEC))
+    record["loiter_min_sec"] = loiter_min
+    started = _now()
+    deadline = started + max(0.0, min(number(wait_sec, INVESTIGATOR_WAIT_SEC), INVESTIGATOR_MAX_WAIT_SEC))
+    thread = threading.current_thread()
+    record["verdict"] = "still there after waiting"
+    try:
+        # Bounded even if the clock stood still: about one look per INVESTIGATOR_POLL_SEC of the longest wait.
+        for _ in range(int(INVESTIGATOR_MAX_WAIT_SEC / INVESTIGATOR_POLL_SEC) + 5):
+            now = _now()
+            try:
+                seen, in_view, still = _presence(trackers, camera, since, now)
+            except Exception as exc:  # noqa: BLE001 - the tracker only adds facts
+                record["verdict"] = f"tracker failed: {exc}"[:200]
+                return record
+            record.update(in_view_s=int(round(in_view)), still_there=still, waited_s=round(now - started, 1))
+            if not seen:
+                record["verdict"] = "the tracker saw nobody"
+                return record
+            if in_view >= loiter_min:
+                record["verdict"] = f"stayed {int(in_view)} s"
+                return record
+            if not still:
+                record.update(verdict="short visit", lowered=True)
+                return record
+            if now >= deadline:
+                return record
+            thread.investigating = True     # type: ignore[attr-defined]
+            _sleep(max(0.05, min(INVESTIGATOR_POLL_SEC, deadline - now)))
+        return record
+    finally:
+        thread.investigating = False        # type: ignore[attr-defined]
+
+
+def _busy(thread: Any) -> bool:
+    """A worker holds the one VLM slot while it runs, except while its investigator only watches the tracker."""
+    return thread is not None and thread.is_alive() and not getattr(thread, "investigating", False)
+
+
+def _keep_keyframe(session_id: str, job: Optional[AlertJob], frames: List[Any]) -> None:
+    """The event's first alert job's snapshot becomes its keyframe in the event memory (event_memory.save_keyframe),
+    once per event. Never raises."""
+    directory = str(getattr(EVENTS, "directory", "") or "")
+    if not directory or not session_id:
+        return
+    try:
+        from .event_memory import has_keyframe, save_keyframe  # noqa: PLC0415
+
+        if has_keyframe(directory, session_id):
+            return
+        snapshot = job.snapshot if job is not None and job.snapshot is not None else (frames[-1] if frames else None)
+        if snapshot is not None:
+            save_keyframe(directory, session_id, frame_to_jpeg_bytes(snapshot))
+    except Exception as exc:  # noqa: BLE001 - a missing keyframe never stops an alert
+        log.debug("keyframe of event %s not kept: %s", session_id, exc)
+
+
 def _event_decision(camera: str, alert_ts: float, label: str, people: Optional[int], summary: str,
                     alert_id: str) -> Any:
     """The event book's say on this alert (events.Decision), or None without a book or on its failure (the alert
@@ -2015,6 +2137,24 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
             label = shown_label = "normal"
             cmd = LABEL_COMMANDS[label]
             decision.update(label=label, final_label=label, downgraded="appearance only")
+        # Lingering is a question of time, which the tracker measures (stage 2b): a "suspicious" only for loitering /
+        # standing / looking around waits up to 20 s for the investigator. A house note's verdict and an escalation
+        # are left alone.
+        if label == "suspicious" and not fact and TRACKERS is not None and about_lingering(f"{why} {reason}"):
+            from .alert_clips import PRE_SECONDS  # noqa: PLC0415
+
+            loiter_min = _optional_float(box_settings.get("loiter_min_sec"))
+            wait = _optional_float(box_settings.get("investigator_wait_sec"))
+            found = investigate_lingering(camera_name, alert_ts - PRE_SECONDS,
+                                          LOITER_MIN_SEC if loiter_min is None else max(0.0, loiter_min),
+                                          INVESTIGATOR_WAIT_SEC if wait is None else wait)
+            decision["investigation"] = found
+            log.info("[%s] investigator: %s (in view %d s, waited %.0f s)%s", camera_name, found["verdict"],
+                     found["in_view_s"], found["waited_s"], "; normal" if found["lowered"] else "")
+            if found["lowered"]:
+                label = shown_label = "normal"
+                cmd = LABEL_COMMANDS[label]
+                decision.update(label=label, final_label=label, investigator="short visit")
         # A red for a weapon, a car break-in or violence from one answer gets a second look first; clear serious
         # things (a break-in into the house, climbing in, fire, a person lying still) go out at once.
         look: Optional[Dict[str, Any]] = None
@@ -2043,6 +2183,8 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
         # One ongoing activity per camera is one event; only a change reaches the owner (events.py). Code decides,
         # never the model. Without a book (tests, tools) every alert goes out as before.
         event = None if muted else _event_decision(camera_name, alert_ts, label, people, summary, alert_id)
+        if event is not None:
+            _keep_keyframe(event.session_id, job, frames)
         if event is not None and not event.notify:
             log.info("[%s] not sent (%s): %s", camera_name, event.reason, summary)
             if status is not None:
@@ -2269,7 +2411,7 @@ def serve_without_cameras(box_settings: Dict[str, Any], env: Dict[str, str], tur
 
 
 def run() -> int:
-    global KNOWN_CAMERAS
+    global KNOWN_CAMERAS, TRACKERS
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", stream=sys.stdout)
     # Use the OS certificate store for all HTTPS (urllib + httpx), so Telegram
     # and OpenAI work on networks that intercept TLS (an antivirus / proxy whose
@@ -2418,6 +2560,7 @@ def run() -> int:
         from .tracker import TrackerRegistry  # noqa: PLC0415
 
         trackers = TrackerRegistry()
+        TRACKERS = trackers      # the investigator re-reads it while it waits (investigate_lingering)
     except Exception as exc:  # noqa: BLE001 - without the tracker every alert goes out as before
         log.warning("Tracker not started (%s); alerts go out without tracker facts.", exc)
     assistant = None
@@ -2501,7 +2644,7 @@ def run() -> int:
                 # running. The detector still looks about once a second then, only so the
                 # window can show what it sees.
                 waiting = (now_ts - last_alert_ts[name] < settings.cooldown_sec
-                           or bool(pending) or (worker["t"] is not None and worker["t"].is_alive()))
+                           or bool(pending) or _busy(worker["t"]))
                 if quiet_on:
                     if now_ts - quiet_look_ts.get(name, 0) < STATUS_LOOK_SEC:
                         continue

@@ -57,6 +57,34 @@ def appearance_only(text: str) -> bool:
     return bool(APPEARANCE.search(text)) and not ACTION.search(text)
 
 
+# ---------- lingering: the investigator watches the tracker before it goes out (stage 2b, 2026-10-08) ----------
+# A "suspicious" whose reason is only about time spent - loitering, standing there, looking around - is a question of
+# how long the person really stayed, which the tracker measures (inference.investigate_lingering). Any other action
+# (a handle, climbing, taking something, peeking in, night) keeps it suspicious whatever the time. Places (door,
+# gate, entrance) are not actions here: "loitering by the gate" is exactly the case.
+LINGER = _any([
+    r"\bloiter", r"\bling(?:er|ers|ered|ering)\b", r"\bstand(?:s|ing)? (?:\w+ ){0,4}for\b", r"\bstood (?:\w+ ){0,4}for\b",
+    r"\blook(?:s|ed|ing)? around\b", r"\bwander", r"\bhang(?:s|ing)? (?:a)?round\b", r"\bpac(?:es|ing)\b",
+    r"מסתובב", r"שוהה", r"שוהים", r"עומד(?:ת|ים|ות)? (?:\S+ ){0,3}זמן", r"מסתכל(?:ת|ים|ות)? (?:\S+ )?(?:סביב|מסביב|לצדדים)",
+])
+OTHER_ACTION = _any([
+    r"\bhandles?\b", r"\blocks?\b", r"\bclimb", r"\bhid(?:e|es|ing)\b(?! (?:his|her|their) faces?)", r"\bcrouch",
+    r"\bsteal", r"\bstole", r"\btak(?:e|es|ing|en)\b", r"\btook\b", r"\btamper", r"\bpeek", r"\bpeer",
+    r"\blook(?:s|ed|ing)? (?:in|into|inside|through)\b", r"\bbreak", r"\bforc", r"\bpry", r"\btr(?:y|ies|ied|ying)\b",
+    r"\bopen", r"\bnight\b", r"\bphotograph", r"\bfilm",
+    r"\b(?:cover|block|turn|mov|spray|paint|point|push|hit)\w* (?:the |a |at the )?camera",
+    r"ידית", r"מנעול", r"טיפוס", r"מטפס", r"מסתתר", r"מתחבא", r"כורע", r"גונב", r"לוקח", r"לקח", r"מציץ", r"פוגע במצלמה",
+    r"פורץ", r"מנסה", r"פותח", r"מצלם", r"לילה",
+])
+
+
+def about_lingering(text: str) -> bool:
+    """True when *text* (the model's why / alert_reason) makes it suspicious only for lingering - loitering,
+    standing there for a while, looking around, wandering - and names no other action."""
+    text = str(text or "")
+    return bool(LINGER.search(text)) and not OTHER_ACTION.search(text)
+
+
 # ---------- the second look before a red ----------
 _VEHICLE = r"(?:\bcars?\b|\bvehicles?\b|\btrucks?\b|\bvans?\b|רכב|מכונית)"
 VERIFY_PATTERNS = {
