@@ -634,10 +634,14 @@ class EventMemory:
                 counts[i][term] = counts[i].get(term, 0) + 1
             for term in set(d):
                 df[term] = df.get(term, 0) + 1
+        # A longer question must match at least half its words: "They left." is in every caption, so "did the white
+        # pickup leave?" must not find every event that ended.
+        needed = 1 if len(groups) <= 2 else math.ceil(len(groups) / 2)
         out = []
         for i, row in enumerate(pool):
             length = len(docs[i]) or 1
             total = 0.0
+            matched = 0
             for group in groups:
                 best = 0.0
                 for term in group:
@@ -647,7 +651,8 @@ class EventMemory:
                     idf = math.log(1.0 + (n - df[term] + 0.5) / (df[term] + 0.5))
                     best = max(best, idf * tf * 2.2 / (tf + 1.2 * (0.25 + 0.75 * length / avg)))
                 total += best
-            if total <= 0.0:
+                matched += best > 0.0
+            if total <= 0.0 or matched < needed:
                 continue
             if row.get("camera") in named:
                 total += 1.0
