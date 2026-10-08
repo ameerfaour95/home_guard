@@ -260,5 +260,61 @@ class FactsTest(unittest.TestCase):
                                           "zone": "parking"})
 
 
+
+class ConfirmTest(unittest.TestCase):
+    """The owner's [save]: the confirmed map is the camera's whole truth (owner, 2026-10-08)."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.zones = os.path.join(self.tmp.name, "zones.yaml")
+        self.scenes = z.scene_maps_path_for(self.zones)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_the_rest_of_the_picture_can_be_the_neighbours_ground(self) -> None:
+        m = sm.SceneMap("front", areas=(sm.Area("yard", sm.MINE, "yard", tuple(LEFT)),), rest=sm.WATCH,
+                        rest_owner="neighbour")
+        self.assertTrue(m.informative)
+        self.assertEqual(m.outside, "watch_no_alert")
+        self.assertEqual(m.area_at((0.2, 0.5)).name, "yard")
+        rest = m.area_at((0.8, 0.5))
+        self.assertEqual((rest.name, rest.ground, rest.implicit), (sm.REST_NAME, "neighbour", True))
+        with self.assertRaises(ValueError):
+            sm.SceneMap("front", rest="black")
+        with self.assertRaises(ValueError):
+            sm.SceneMap("front", rest_owner="neighbour")
+
+    def test_confirming_turns_todays_black_outside_into_the_neighbours_ground(self) -> None:
+        z.save_zone("front", LEFT, self.zones)
+        z.save_zone("ameer_test_ch2", RIGHT, self.zones)              # a stale key from before a site rename
+        answered = sm.SceneMap("front", areas=(sm.Area("window", sm.BLACK, "window", tuple(TOP_RIGHT)),))
+        after, mask_changed = sm.confirm_scene_map(answered, self.zones, now=1000.0, stale=["ameer_test_ch2"])
+        self.assertTrue(mask_changed)
+        self.assertEqual(z.load_zones(self.zones), {})                 # no black outside any more
+        self.assertIsNone(after.watched)
+        self.assertEqual(after.confirmed, 1000.0)
+        self.assertEqual(after.outside, "watch_no_alert")
+        self.assertEqual(after.area_at((0.2, 0.5)).name, sm.WATCHED_NAME)          # yesterday's zone: still mine
+        self.assertEqual(after.area_at((0.2, 0.5)).ground, "mine")
+        self.assertEqual(after.area_at((0.6, 0.9)).ground, "neighbour")            # was black, now watched
+        self.assertEqual(z.load_black(self.scenes), {"front": [TOP_RIGHT]})       # privacy only where asked
+        again = sm.load_scene_map("front", self.zones)
+        self.assertEqual((again.rest, again.rest_owner, again.confirmed), ("watch_no_alert", "neighbour", 1000.0))
+
+    def test_confirming_without_a_zone_keeps_the_rest_unmapped_and_the_mask(self) -> None:
+        answered = sm.SceneMap("front", areas=(sm.Area("yard", sm.MINE, "yard", tuple(LEFT)),))
+        after, mask_changed = sm.confirm_scene_map(answered, self.zones, now=5.0)
+        self.assertFalse(mask_changed)
+        self.assertEqual(after.outside, "unmapped")
+        self.assertIsNone(after.area_at((0.8, 0.5)))
+
+    def test_a_confirmed_map_round_trips_through_the_app_form(self) -> None:
+        m = sm.SceneMap("front", areas=(sm.Area("yard", sm.MINE, "yard", tuple(LEFT)),), rest=sm.WATCH,
+                        rest_owner="public", confirmed=7.0)
+        d = m.to_dict()
+        self.assertEqual(sm.SceneMap.from_dict("front", d), m)
+
+
 if __name__ == "__main__":
     unittest.main()

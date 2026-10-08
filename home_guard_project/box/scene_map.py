@@ -21,6 +21,13 @@ and everything outside it stays ``black``. A camera without a zone and without a
 whole, as today). A map that only holds the migrated zone is not ``informative``: the Eye's prompt does not change.
 Where areas overlap, the innermost (smallest) one wins.
 
+- **rest** (``rest`` / ``rest_owner``): what the picture outside every area is when no zone is drawn: unmapped
+  (""), or ``watch_no_alert`` ground of the neighbour or the public.
+- **confirmed** (a time): the owner said "save" to this map in the install interview. A confirmed map is the
+  camera's whole truth (``confirm_scene_map``): today's drawn zone becomes an explicit ``mine`` area, its entry in
+  zones.yaml is removed (so its black outside is not blacked out any more), and the rest of the picture becomes the
+  neighbour's ``watch_no_alert`` ground. Black stays only where the owner asked for it (black areas).
+
 UI contract (the app's map editor, the existing watch-zone dialog grown up; Codex builds it, this module is the
 engine): read a camera's map with ``load_scene_map(camera).to_dict()``; edit areas (polygon + name + zone + kind
 + owner) and lines (two points + which side is the owner's: ``Line.toward(name, a, b, inside_point)``, or
@@ -54,6 +61,8 @@ IN, OUT = "in", "out"
 
 NAME_LIMIT = 40
 WATCHED_NAME = "watched area"              # the implicit mine area that today's drawn zone becomes
+REST_NAME = "rest of the picture"          # the implicit area outside every area of a confirmed map
+WHOLE_PICTURE = ((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0))
 MAX_TRACKS_PER_KIND = 3
 FACTS_LIMIT = 400
 MATCH_DISTANCE = 0.25                      # a foot point this close (picture widths) to a track's last one continues it
@@ -223,11 +232,21 @@ class SceneMap:
     areas: Tuple[Area, ...] = ()
     lines: Tuple[Line, ...] = ()
     watched: Optional[Tuple[Point, ...]] = None     # today's drawn zone (zones.yaml): outside it is black
+    rest: str = ""                                  # outside every area, without a drawn zone: "" or watch_no_alert
+    rest_owner: str = ""                            # whose ground the rest is (neighbour | public)
+    confirmed: float = 0.0                          # when the owner confirmed this map (0: never)
+
+    def __post_init__(self) -> None:
+        if self.rest not in ("", WATCH):
+            raise ValueError(f"the rest of the picture is unmapped or {WATCH}")
+        if self.rest_owner and (self.rest != WATCH or self.rest_owner not in OWNERS):
+            raise ValueError(f"only a {WATCH} rest has an owner, one of {', '.join(OWNERS)}")
 
     @property
     def outside(self) -> str:
-        """What the picture outside every area is: ``black`` with a drawn zone, else ``unmapped``."""
-        return BLACK if self.watched else "unmapped"
+        """What the picture outside every area is: ``black`` with a drawn zone, else the rest (``unmapped`` or
+        ``watch_no_alert``)."""
+        return BLACK if self.watched else (self.rest or "unmapped")
 
     @property
     def migrated(self) -> bool:
@@ -237,13 +256,16 @@ class SceneMap:
     @property
     def informative(self) -> bool:
         """Something the code can tell the Eye beyond today's zone."""
-        return bool(self.areas or self.lines)
+        return bool(self.areas or self.lines or self.rest)
 
     def all_areas(self) -> Tuple[Area, ...]:
-        """The stored areas, then today's drawn zone as the implicit mine area."""
-        if not self.watched:
-            return self.areas
-        return self.areas + (Area(WATCHED_NAME, MINE, "other", self.watched, implicit=True),)
+        """The stored areas, then today's drawn zone as the implicit mine area, or the rest of the picture."""
+        if self.watched:
+            return self.areas + (Area(WATCHED_NAME, MINE, "other", self.watched, implicit=True),)
+        if self.rest:
+            return self.areas + (Area(REST_NAME, self.rest, "other", WHOLE_PICTURE, owner=self.rest_owner,
+                                      implicit=True),)
+        return self.areas
 
     def area_at(self, p: Point) -> Optional[Area]:
         """The innermost area under foot point *p*; None outside every area or outside today's zone (black)."""
@@ -270,7 +292,20 @@ class SceneMap:
     def to_dict(self) -> Dict[str, Any]:
         return {"camera": self.camera, "outside": self.outside,
                 "watched": [[x, y] for x, y in self.watched] if self.watched else None,
-                "areas": [a.to_dict() for a in self.areas], "lines": [ln.to_dict() for ln in self.lines]}
+                "areas": [a.to_dict() for a in self.areas], "lines": [ln.to_dict() for ln in self.lines],
+                "rest": self.rest, "rest_owner": self.rest_owner, "confirmed": self.confirmed}
+
+    def stored(self) -> Dict[str, Any]:
+        """The entry kept in scene_maps.yaml (today's drawn zone stays in zones.yaml)."""
+        out: Dict[str, Any] = {"areas": [a.to_dict() for a in self.areas if not a.implicit],
+                               "lines": [ln.to_dict() for ln in self.lines]}
+        if self.rest:
+            out["rest"] = self.rest
+            if self.rest_owner:
+                out["rest_owner"] = self.rest_owner
+        if self.confirmed:
+            out["confirmed"] = round(float(self.confirmed), 3)
+        return out
 
     @classmethod
     def from_dict(cls, camera: str, data: Mapping[str, Any], watched: Optional[Sequence[Point]] = None) -> "SceneMap":
@@ -290,7 +325,12 @@ class SceneMap:
             if not isinstance(ln, Mapping):
                 raise ValueError("every line must be a mapping")
             lines.append(Line(ln.get("name", ""), ln.get("a"), ln.get("b"), str(ln.get("inward") or "")))
-        return cls(str(camera), tuple(areas), tuple(lines), tuple(watched) if watched else None)
+        try:
+            confirmed = float(data.get("confirmed") or 0.0)
+        except (TypeError, ValueError):
+            raise ValueError("confirmed must be a time") from None
+        return cls(str(camera), tuple(areas), tuple(lines), tuple(watched) if watched else None,
+                   rest=str(data.get("rest") or ""), rest_owner=str(data.get("rest_owner") or ""), confirmed=confirmed)
 
 
 # ----------------------------------------------------------------------------
@@ -328,11 +368,60 @@ def save_scene_map(scene: SceneMap, zones_path: Optional[str] = None) -> SceneMa
 
     _zp, sp = _paths(zones_path)
     entries = read_scene_maps(sp)
-    entries[scene.camera] = {"areas": [a.to_dict() for a in scene.areas if not a.implicit],
-                             "lines": [ln.to_dict() for ln in scene.lines]}
+    entries[scene.camera] = scene.stored()
     write_scene_maps(entries, sp)
     log.info("Scene map of %s saved: %d area(s), %d line(s)", scene.camera, len(scene.areas), len(scene.lines))
     return load_scene_map(scene.camera, zones_path)
+
+
+def confirm_scene_map(scene: SceneMap, zones_path: Optional[str] = None, now: Optional[float] = None,
+                      stale: Sequence[str] = ()) -> Tuple[SceneMap, bool]:
+    """The owner said "save": make *scene* the camera's whole truth. Returns ``(map as it loads, mask changed)``.
+
+    - Today's drawn zone (if any) becomes an explicit ``mine`` area (WATCHED_NAME) under the owner's own areas,
+      and its zones.yaml entry is removed: its black outside is not blacked out any more.
+    - With a drawn zone, the rest of the picture becomes the neighbour's ``watch_no_alert`` ground (owner rule
+      2026-10-08: black stays only where the owner asks for privacy, as a black area).
+    - *stale* camera keys (zone and scene entries of names that are no camera any more, e.g. from before a site
+      rename) are removed too.
+    ``mask changed`` is true when the frame mask changes (zone removed, black areas changed): the running mode
+    must restart to load it.
+    """
+    import time  # noqa: PLC0415
+
+    from ..data_collection.zones import _read_raw, read_scene_maps, save_zones, write_scene_maps  # noqa: PLC0415
+
+    zp, sp = _paths(zones_path)
+    before = load_scene_map(scene.camera, zones_path)
+    zones = dict(_read_raw(zp))
+    watched = scene.watched or before.watched
+    areas = [a for a in scene.areas if not a.implicit]
+    rest, rest_owner = scene.rest, scene.rest_owner
+    if watched:
+        if not any(a.points == tuple(watched) for a in areas):
+            areas.append(Area(WATCHED_NAME, MINE, "other", tuple(watched)))
+        if not rest:
+            rest, rest_owner = WATCH, NEIGHBOUR
+    confirmed = SceneMap(scene.camera, tuple(areas), scene.lines, None, rest=rest, rest_owner=rest_owner,
+                         confirmed=float(time.time() if now is None else now))
+    entries = read_scene_maps(sp)
+    entries[scene.camera] = confirmed.stored()
+    for key in stale:
+        if key != scene.camera:
+            entries.pop(str(key), None)
+    write_scene_maps(entries, sp)
+    zones_after = {k: v for k, v in zones.items() if k != scene.camera and k not in {str(x) for x in stale}}
+    if zones_after != zones:
+        save_zones(zones_after, zp)
+    after = load_scene_map(scene.camera, zones_path)
+
+    def blacks(m: SceneMap) -> List[Tuple[Point, ...]]:
+        return sorted(a.points for a in m.areas if a.kind == BLACK)
+
+    changed = bool(before.watched) != bool(after.watched) or blacks(before) != blacks(after)
+    log.info("Scene map of %s confirmed: %d area(s), %d line(s), rest %s%s", scene.camera, len(after.areas),
+             len(after.lines), after.outside, "; mask changed" if changed else "")
+    return after, changed
 
 
 def clear_scene_map(camera: str, zones_path: Optional[str] = None) -> bool:
