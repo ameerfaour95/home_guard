@@ -33,6 +33,8 @@ router = APIRouter(tags=["chat"])
 
 _DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _IMAGE = re.compile(r"^[A-Za-z0-9_-]{1,160}\.jpg$")  # ChatFeed names pictures <alert id, unsafe chars as _>.jpg
+_CAMERA_IN = re.compile(r"[a-z0-9]+(?:_[a-z0-9]+)*?_ch\d+(?=_\d|\b|_)")  # a box camera id, e.g. ameer_tes2_ch6
+_FILE = re.compile(r"^[A-Za-z0-9_.-]{1,200}\.(?:jpg|jpeg|png|mp4)$")
 SEARCH_DAYS = 14  # the box keeps 14 days; a search reads at most that many day files per box
 _NOT_FOUND = "Customer not found"
 
@@ -68,10 +70,22 @@ def _days(s3, site: str) -> list[str]:
     return out
 
 
+def _camera_of(entry: dict, text: str) -> str:
+    """The camera a line is about: its own field, else the alert id's camera, else a sent file's name
+    (``<camera>_<epoch>_<...>.jpg|mp4``, what the assistant's photo and video lines carry)."""
+    for value in (entry.get("camera"), entry.get("alert_id"), text):
+        if isinstance(value, str) and value:
+            found = _CAMERA_IN.search(value)
+            if found:
+                return found.group(0)
+    return ""
+
+
 def _lines(s3, dev: Device, day: str, names: dict[str, str]) -> list[ChatLine]:
     key = f"production_{dev.site}/chat/{day}.jsonl"
     if s3.head(key) is None:
         return []
+    aliases = {cam: [name] for cam, name in names.items() if name}
     out = []
     for raw in s3.get_text(key).splitlines():
         try:
@@ -85,12 +99,15 @@ def _lines(s3, dev: Device, day: str, names: dict[str, str]) -> list[ChatLine]:
         def text(field):
             value = entry.get(field)
             return value if isinstance(value, str) else ""
-        camera = text("camera")
-        ids = sorted(set(names) | ({camera} if camera else set()))
-        aliases = {cam: [name] for cam, name in names.items()}
+        kind, body = text("kind"), text("text")
+        camera = _camera_of(entry, body)
+        if kind in ("photo", "video") and _FILE.match(body):
+            body = ""  # the assistant's photo / video line carries only a file name (with the camera id)
+        # every camera id in the text (old site ids too: ameer_tes2_ch6) becomes the owner's name by its channel
+        ids = set(_CAMERA_IN.findall(body)) | ({camera} if camera else set())
         image = text("image").rsplit("/", 1)[-1]
-        out.append(ChatLine(ts=ts, site=dev.site, who=text("who") or "unknown", name=text("name"), kind=text("kind"),
-                            text=replace_ids(text("text"), ids, "en", aliases), camera=camera,
+        out.append(ChatLine(ts=ts, site=dev.site, who=text("who") or "unknown", name=text("name"), kind=kind,
+                            text=replace_ids(body, sorted(ids), "en", aliases), camera=camera,
                             camera_name=health.camera_label(camera, names) if camera else "",
                             alert_id=text("alert_id"), image=image if _IMAGE.match(image) else "",
                             delivered=entry.get("delivered") is not False, error=text("error")))

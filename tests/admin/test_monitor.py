@@ -346,3 +346,38 @@ def test_clips_of_one_event_are_one_expandable_row(widgets, wait):
     combo = screen.filters['would_raise']
     combo.setCurrentIndex(combo.findData(True)); wait(lambda: not screen.runner.busy)
     assert [e.would_raise for e in model.rows] == [True]
+
+
+def test_every_chat_line_kind_renders(widgets, wait):
+    """The kinds in the live chat files: alert, the box's video, owner message and button, assistant answer, photo,
+    video (plus voice, should the box mark it): each says what it is, never a raw file name."""
+    from datetime import datetime, timezone
+    from PySide6.QtWidgets import QLabel
+    from home_guard_project.admin.chat_view import ChatView
+    from home_guard_project.admin.models import ChatDay, ChatLine
+
+    at = datetime(2026, 10, 7, 8, 32, tzinfo=timezone.utc)
+
+    def line(who, kind, text='', camera_name='', **kw):
+        return ChatLine(at, 'ameer_week_0_1', who, kw.get('name', ''), kind, text, 'x' if camera_name else '',
+                        camera_name, '', kw.get('image', ''), kw.get('delivered', True), kw.get('error', ''))
+
+    class Lines(DemoBackend):
+        def chat(self, customer_id, day=None, q=None):
+            return ChatDay('2026-10-07', ['2026-10-07'], [
+                line('box', 'alert', 'Looks normal · כניסה ראשית', 'כניסה ראשית'),
+                line('box', 'video', 'Video of the alert', 'כניסה ראשית'),
+                line('owner', 'button', '✏️ Other…', 'כניסה ראשית', name='Hello_24'),
+                line('owner', 'voice', 'a man in black', name='Hello_24'),
+                line('assistant', 'answer', 'Write the correct tag for this clip.'),
+                line('assistant', 'photo', '', 'Camera 2'),
+                line('assistant', 'video', '', 'כניסה ראשית', delivered=False, error='Bad Request')])
+    view = ChatView(Lines()); widgets.append(view); view.resize(1000, 700); view.show()
+    view.open(1, 'Asia/Jerusalem'); view.ensure_loaded()
+    wait(lambda: len(view.bubbles) == 7)
+    texts = [w.text() for w in view.list.findChildren(QLabel)]
+    for expected in ('Video of the alert', 'Pressed: ✏️ Other…', 'Voice message, transcribed: a man in black',
+                     'Sent a photo from Camera 2', 'Sent a video from כניסה ראשית',
+                     'Not delivered to the owner: Bad Request', 'ALERT · כניסה ראשית'):
+        assert expected in texts, expected
+    assert '(no text)' not in texts

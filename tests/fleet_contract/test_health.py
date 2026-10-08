@@ -194,3 +194,12 @@ def test_a_recent_event_keeps_a_camera_current_and_the_box_list_wins():
     assert listed_cameras(body) == {"new_site_ch1": "Gate"}
     assert listed_cameras({"cameras": {"x": {}}}) is None and listed_cameras(None) is None
     assert split_cameras(cameras, NOW, listed=["new_site_ch1"]) == (["new_site_ch1"], ["front_door", "old_site_ch1"])
+
+
+def test_an_old_site_id_takes_the_owner_name_by_its_channel():
+    from home_guard_project.fleet_contract.health import camera_label, owner_name
+    names = {"ameer_week_0_1_ch6": "כניסה ראשית", "ameer_week_0_1_ch3": "פרגולה"}
+    assert camera_label("ameer_tes2_ch6", names) == "כניסה ראשית" and owner_name("ameer_tes2_ch3", names) == "פרגולה"
+    assert camera_label("ameer_tes2_ch2", names) == "Camera 2" and owner_name("ameer_tes2_ch2", names) == ""
+    # two current cameras on one channel: ambiguous, the box's rule shows none rather than guess
+    assert camera_label("old_ch6", {**names, "other_ch6": "Gate"}) == "Camera 6"

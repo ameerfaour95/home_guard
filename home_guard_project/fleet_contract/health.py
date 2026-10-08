@@ -14,9 +14,13 @@ from ._time import normalize_utc
 
 
 def camera_label(camera: str, names: Optional[dict] = None) -> str:
-    """The camera as staff read it: the owner's name when known (``names``: id -> name), else "Camera N" from the
-    channel by the box's rule (camera_names.display_name), else the id in words. Never the raw id."""
-    aliases = {camera: [names[camera]]} if names and names.get(camera) else {}
+    """The camera as staff read it: the owner's name when known, else "Camera N" from the channel by the box's rule
+    (camera_names.display_name), else the id in words. Never the raw id.
+
+    ``names`` is ONE house's id -> name (its camera_list). An id the box no longer has (a site rename:
+    ameer_tes2_ch6 after ameer_week_0_1_ch6) takes the name of the one current camera on its channel, the box's own
+    rule; never pass names from several houses, or one house's ch6 would borrow another's name."""
+    aliases = {cam: [name] for cam, name in (names or {}).items() if name}
     if family_names(camera, aliases) or channel_of(camera):
         return display_name(camera, "en", aliases)
     text = camera.replace("_", " ")
@@ -81,6 +85,12 @@ def split_cameras(cameras: dict[str, Optional[datetime]], now: datetime, site: s
 
 def _names(names: list[str]) -> str:
     return ", ".join(names)
+
+
+def owner_name(camera: str, names: Optional[dict] = None) -> str:
+    """The family's name for *camera* from one house's ``names`` (exact id, else its channel), or ""."""
+    found = family_names(camera, {cam: [name] for cam, name in (names or {}).items() if name})
+    return found[-1].strip() if found else ""
 
 
 def camera_stale(newest: Optional[datetime], now) -> bool:

@@ -105,13 +105,22 @@ class ChatView(QWidget):
     def bubble(self, line):
         owner = line.who == 'owner'
         row = QWidget(); outer = QHBoxLayout(row); outer.setContentsMargins(0, 0, 0, 0)
-        card = QFrame(); card.setObjectName('opinion'); card.setMaximumWidth(560)
+        card = QFrame(); card.setObjectName('opinion'); card.setMaximumWidth(560); card.setMinimumWidth(360)
         card.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
         box = QVBoxLayout(card); box.setContentsMargins(12, 8, 12, 8); box.setSpacing(4)
         who = WHO.get(line.who, line.who.title()) + (f' · {line.name}' if line.name else '')
-        head = label(f'{who}   {local_time(line.ts, self.zone)}', 'muted'); box.addWidget(head)
+        about = (f'   ·   about {line.camera_name}' if line.camera_name and line.kind not in ('alert', 'photo', 'video')
+                 else '')
+        head = label(f'{who}   {local_time(line.ts, self.zone)}{about}', 'muted', True); box.addWidget(head)
         if line.kind == 'button':
             text = label(f'Pressed: {line.text}', 'badge', True)
+        elif line.kind in ('photo', 'video') and line.who == 'assistant':
+            text = label(f'Sent a {line.kind}' + (f' from {line.camera_name}' if line.camera_name else '')
+                         + (f': {line.text}' if line.text else ''), 'muted', True)
+        elif line.kind == 'video':  # the box's clip that follows an alert
+            text = label(line.text or 'Video of the alert', 'muted', True)
+        elif line.kind == 'voice':
+            text = label(f'Voice message, transcribed: {line.text}', '', True)
         else:
             text = label(line.text or '(no text)', 'opinionText' if line.kind == 'alert' else '', True)
         text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)

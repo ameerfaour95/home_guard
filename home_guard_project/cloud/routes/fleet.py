@@ -84,7 +84,8 @@ def camera_inventory(session: Session, now: datetime, devices: list[Device]) -> 
                                           listed=list(listed) if listed is not None else None)
         current = set(current)
         reported = set(newest) | {c["id"] for c in configured or ()}  # the box judges these (no clip yet: None)
-        out[dev.id] = sorted((KnownCamera(cam, names.get((dev.id, cam), ""), cam in current, cam in reported,
+        own = {cam: name for (pk, cam), name in names.items() if pk == dev.id}  # this house only
+        out[dev.id] = sorted((KnownCamera(cam, health.owner_name(cam, own), cam in current, cam in reported,
                                           newest.get(cam), events.get(cam), cam not in switched_off) for cam in ids),
                              key=lambda c: (not c.current, c.camera))
     return out

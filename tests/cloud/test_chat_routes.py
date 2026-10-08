@@ -108,3 +108,29 @@ def test_chat_needs_recordings_consent_and_a_staff_role(client, staff_factory, s
         assert s.scalars(select(m.AuditLog.action)).all().count("media_denied") == 1
         assert not s.scalars(select(m.AuditLog).where(m.AuditLog.action == "chat_view")).all()
     assert client.get("/v1/customers/99999/chat", headers=h).status_code == 404
+
+
+def test_real_chat_shapes_old_site_ids_and_sent_files(client, staff_factory, s3client):
+    """Shapes from the live files (production_ameer_week_0_1/chat, 2026-10-04..08): alerts and buttons name the
+    cameras by the OLD site's ids (ameer_tes2_ch6) and the text starts with them; the assistant's photo and video
+    lines carry only a file name. Old ids take the owner's name of the camera now on their channel."""
+    cid, _ = _seed(client, s3client)
+    lines = "\n".join([
+        _line(ts=_ts(11, 0), kind="alert", camera="ameer_tes2_ch1", alert_id="ameer_tes2_ch1_1791115353_alert",
+              text="🟢 Looks normal · ameer_tes2_ch1\nA person walks across the driveway",
+              image="ameer_tes2_ch1_1791115353_alert.jpg"),
+        _line(ts=_ts(11, 1), kind="video", text="Video of the alert", alert_id="ameer_tes2_ch1_1791115353_alert"),
+        _line(ts=_ts(11, 2), who="owner", name="Ameer", kind="button", text="✏️ Other…", camera="ameer_tes2_ch1",
+              alert_id="ameer_tes2_ch1_1791115353_alert"),
+        _line(ts=_ts(11, 3), who="assistant", kind="photo", text="ameer_tes2_ch2_1791274712_2a87cfbd.jpg"),
+        _line(ts=_ts(11, 4), who="assistant", kind="video", text=f"{SITE}_ch1_1791366411_alert.mp4"),
+    ]) + "\n"
+    b.put(s3client, f"production_{SITE}/chat/2026-10-07.jsonl", lines.encode("utf-8"))
+    _, _, _, h = staff_factory("admin")
+    got = client.get(f"/v1/customers/{cid}/chat", params={"day": "2026-10-07"}, headers=h).json()["messages"]
+    assert [(m_["kind"], m_["camera_name"]) for m_ in got] == [
+        ("alert", "כניסה ראשית"), ("video", "כניסה ראשית"), ("button", "כניסה ראשית"), ("photo", "Camera 2"),
+        ("video", "כניסה ראשית")]
+    assert got[0]["text"] == "🟢 Looks normal · כניסה ראשית\nA person walks across the driveway"
+    assert got[3]["text"] == "" and got[4]["text"] == ""  # a file name is not shown (it holds the camera id)
+    assert not any("ameer_tes2" in m_["text"] or SITE in m_["text"] for m_ in got)

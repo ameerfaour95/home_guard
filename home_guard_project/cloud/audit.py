@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from home_guard_project.fleet_contract import notices
+from home_guard_project.fleet_contract import health, notices
 
 from .models import AuditLog, Camera, Customer, Device, OwnerNotice, Staff
 
@@ -35,12 +35,14 @@ def record(session: Session, staff_id: Optional[int], action: str, target: str =
 # ---------------------------------------------------------------- owner notices
 
 def camera_label(session: Session, device_pk: int, camera: str) -> str:
-    """What the owner calls a camera: its display name, else the name with `_` as spaces, capitalised."""
-    shown = session.scalar(select(Camera.display_name).where(Camera.device_pk == device_pk, Camera.name == camera))
-    if shown and shown.strip():
-        return shown.strip()
-    plain = camera.replace("_", " ").strip()
-    return plain[:1].upper() + plain[1:]
+    """What the owner calls a camera: the box's camera_list name or a Camera.display_name (an old id by its channel),
+    else "Camera N" (fleet_contract.health.camera_label). Never the raw id: this text reaches the owner."""
+    names = {cam: shown.strip() for cam, shown in session.execute(
+        select(Camera.name, Camera.display_name).where(Camera.device_pk == device_pk)).all() if shown and shown.strip()}
+    device = session.get(Device, device_pk)
+    names.update({c["id"]: c["name"] for c in health.camera_list(device.last_heartbeat if device else None) or ()
+                  if c["name"]})
+    return health.camera_label(camera, names)
 
 
 def _notice_body(session: Session, row: OwnerNotice, device: Device, staff_name: str) -> dict[str, Any]:
