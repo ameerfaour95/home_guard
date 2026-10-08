@@ -33,7 +33,7 @@ UI contract (the Telegram flow is ``scene_chat.py``; an app dialog would use the
 
 CLI (on the box; the app may call these over ssh, like find_cameras' zone commands)::
 
-    python -m home_guard_project.box.scene_interview telegram [--camera front]   # the interview in the owner's chat
+    python -m home_guard_project.box.scene_interview telegram --camera front     # change its map in the owner's chat
     python -m home_guard_project.box.scene_interview propose --camera front [--grid] [--json]
     python -m home_guard_project.box.scene_interview answer --camera front --text "1,3 mine; 2 hide it" [--json]
     python -m home_guard_project.box.scene_interview confirm --camera front [--no-restart]
@@ -301,7 +301,7 @@ def _words(*words: str) -> re.Pattern:
 
 # Checked in this order: "my neighbour's" is the neighbour's, not mine.
 _SKIP = _words("skip", "don't know", "dont know", "not sure", "דלג", "לא יודע", "לא יודעת", "לא בטוח")
-_BLACK = _words("black", "hide", "hidden", "privacy", "blur", "don't look", "שחור", "להסתיר", "הסתר", "פרטיות")
+_BLACK = _words("black", "hide", "hidden", "privacy", "blur", "don't look", "שחור", "להסתיר", "הסתר", "תסתיר", "תסתירו", "פרטיות")
 _NEIGHBOUR = _words("neighbou?r'?s?", "next door", "שכן", "שכנה", "שכנים")
 _PUBLIC = _words("street", "road", "sidewalk", "pavement", "public", "כביש", "רחוב", "מדרכה", "ציבורי")
 _MINE = _words("mine", "my", "ours", "our", "שלי", "שלנו")
@@ -317,7 +317,7 @@ _ZONE_WORDS = (
     ("yard", _words("yard", "garden", "lawn", "grass", "pergola", "patio", "חצר", "גינה", "דשא", "פרגולה")),
 )
 _FILLER = {"is", "are", "it", "the", "a", "an", "and", "of", "זה", "זאת", "הם", "הן", "הוא", "היא", "את"}
-_KIND_ONLY = {"mine", "ours", "black", "hide", "skip", "public", "שלי", "שלנו", "שחור", "להסתיר", "דלג"}
+_KIND_ONLY = {"mine", "ours", "black", "hide", "skip", "public", "שלי", "שלנו", "שחור", "להסתיר", "תסתיר", "דלג"}
 _CLAUSES = re.compile(r"[;\n.]|\band\b", re.IGNORECASE)
 # A quoted name starts after a space and ends before one, so an apostrophe ("neighbour's") never opens one.
 _QUOTED = re.compile(r"(?:^|(?<=\s))['\"“”׳]([^'\"“”׳]{1,40})['\"“”׳]"
@@ -359,6 +359,8 @@ def _name_of(clause: str) -> str:
     return sm.plain_name(name) if name.lower() not in _KIND_ONLY else ""
 
 
+# Clauses end at ; . a line break, or a comma / "and" that is not followed by another number ("3,5" stays one group).
+_CLAUSE_SPLIT = re.compile(r"[;\n.]|,(?!\s*\d)|\band\b(?!\s*\d)", re.IGNORECASE)
 _GROUP = re.compile(r"\d+(?:\s*(?:,|ו-?|\band\b|&)\s*\d+)*", re.IGNORECASE)
 # "המעקה בין 2 ל-1", "the railing between 2 and 1": a boundary line where two numbered regions meet.
 _LINE_CLAUSE = re.compile(r"(?P<name>[^\d,;.\n]{1,40}?)\s*(?:\bbetween\b|בין)\s*(?P<a>\d+)\s*(?:ל-?|ו-?|\band\b|&|,|-)\s*"
@@ -390,17 +392,32 @@ def parse_answers(text: str) -> List[Answer]:
     for m in _LINE_CLAUSE.finditer(hidden):                    # the line clauses' numbers are not answers
         text = text[:m.start()] + " " * (m.end() - m.start()) + text[m.end():]
         hidden = hidden[:m.start()] + " " * (m.end() - m.start()) + hidden[m.end():]
-    groups = list(_GROUP.finditer(hidden))
     out: List[Answer] = []
-    for i, m in enumerate(groups):
-        end = groups[i + 1].start() if i + 1 < len(groups) else len(text)
-        words = text[m.end():end]
-        kind = _kind_of(words)
-        if kind is None:
-            continue
-        name, zone = _name_of(words), _zone_of(words)
-        out.extend(Answer(int(n), kind[0], kind[1], name, zone) for n in re.findall(r"\d+", m.group(0)))
+    start = 0
+    for cut in list(_CLAUSE_SPLIT.finditer(hidden)) + [None]:
+        end = cut.start() if cut is not None else len(text)
+        clause, shown = text[start:end], hidden[start:end]
+        start = cut.end() if cut is not None else len(text)
+        groups = list(_GROUP.finditer(shown))
+        for i, m in enumerate(groups):
+            words = clause[m.end():groups[i + 1].start() if i + 1 < len(groups) else len(clause)]
+            kind = _kind_of(words)
+            if kind is None and i == 0:
+                words = clause[:m.start()]                     # "להסתיר את 9": the words come first
+                kind = _kind_of(words)
+            if kind is None:
+                continue
+            name, zone = _name_of(words), _zone_of(words)
+            out.extend(Answer(int(n), kind[0], kind[1], name, zone) for n in re.findall(r"\d+", m.group(0)))
     return out
+
+
+def _mostly_inside(inner: Sequence[sm.Point], outer: Sequence[sm.Point], share: float = 0.8) -> bool:
+    """At least *share* of polygon *inner* lies inside polygon *outer*."""
+    size = 200
+    a, b = _fill((size, size), inner) > 0, _fill((size, size), outer) > 0
+    total = int(a.sum())
+    return total > 0 and int((a & b).sum()) >= share * total
 
 
 def _work_mask(region: Region, size: int = 200) -> np.ndarray:
@@ -456,7 +473,11 @@ def apply_answers(scene: sm.SceneMap, regions: Sequence[Region], answers: Sequen
         name = ans.name or (ans.zone if ans.zone != "other" else f"area {ans.number}")
         area = sm.Area(name, ans.kind, ans.zone if ans.zone in tx.ZONES else "other", region.points,
                        owner=ans.owner if ans.kind == sm.WATCH else "")
-        areas = [a for a in areas if a.points != area.points] + [area]
+        # The newest word wins where it was said: an area of the map that lies (mostly) inside the answered region
+        # is replaced; the others keep their kind (the change merges, it never resets the map). A black area is
+        # never lifted by a word about something else: privacy goes only when the owner removes it.
+        areas = [a for a in areas if a.points != area.points
+                 and (a.kind == sm.BLACK or not _mostly_inside(a.points, area.points))] + [area]
         if ans.kind == sm.MINE:
             ours.add(ans.number)
     found = list(scene.lines)
