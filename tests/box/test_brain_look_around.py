@@ -123,3 +123,13 @@ class KnownGuardTest(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MediaGuardTest(unittest.TestCase):
+    """2026-10-08 22:55 live: "שכחת את 7" recorded a clip of the entrance and sent it twice."""
+
+    def test_a_new_recording_needs_a_request(self):
+        from home_guard_project.box.brain.tools import asks_for_media
+        self.assertFalse(asks_for_media("שכחת את 7"))
+        for text in ("תשלח לי סרטון מהכניסה", "תביא 10 שניות מהשער", "send me a clip", "תצלם את החצר", "תראה לי"):
+            self.assertTrue(asks_for_media(text), text)

@@ -105,6 +105,7 @@ class ToolContext:
     threaded: bool = False
     receipts: List[Receipt] = field(default_factory=list)
     shown: List[str] = field(default_factory=list)
+    sent_paths: List[str] = field(default_factory=list)   # media files already sent this turn
     clarification: Optional[Dict[str, Any]] = None
     after_reply: List[Callable[[], None]] = field(default_factory=list)
     call_key: str = ""
@@ -644,8 +645,22 @@ def look_around(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
                      "that gave a picture." + (f" No picture from: {', '.join(blind)} - say so." if blind else ""))}
 
 
+# 2026-10-08 live: "שכחת את 7" (a correction meant for the install interview) made the model record a new clip of
+# the entrance and send it twice. A new recording only when the owner's message asks for a video or a picture.
+_ASKS_FOR_MEDIA = re.compile(
+    r"(?<![א-ת])[והשב]?(?:סרטון|סרטונים|וידאו|וידיאו|קליפ|הקלטה|תקליט|הקלט|צלם|תצלם|צילום|תמונה|תראה|הראה|תשלח|שלח|"
+    r"שניות|דקה)(?![א-ת])|\b(?:video|clip|record|film|footage|seconds|show me|send me|picture|photo)\b", re.IGNORECASE)
+
+
+def asks_for_media(text: str) -> bool:
+    return bool(_ASKS_FOR_MEDIA.search(str(text or "")))
+
+
 @_safe_tool
 def record_clip(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+    if str(ctx.text or "").strip() and not asks_for_media(ctx.text):     # no text: an internal call (tests, tools)
+        return _err("Not recorded: this message does not ask for a video. If you are not sure what the owner means, "
+                    "ask one short question instead of acting.")
     camera, bad = _camera_or_topic(ctx, args.get("camera"))
     if bad:
         return bad
@@ -670,6 +685,8 @@ def record_clip(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
                      "" if sent.get("ok") else "telegram")
     handle = ctx.state.add_handle("clip", rec["path"], camera, rec["start"])
     ctx.shown.append(handle)
+    if sent.get("ok"):
+        ctx.sent_paths.append(str(rec["path"]))
     ctx.state.topic_event_ref = {}
     return _result(receipt, handle=handle, bounds=bounds)
 
@@ -684,6 +701,9 @@ def send_media(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         return _result(_issue(ctx, "send_media", FAILED, handle, {"kind": "video"}, "too_many"))
     if entry.get("kind") in ("photo", "clip"):
         path, camera = str(entry["ref"]), str(entry.get("camera") or "")
+        if path in ctx.sent_paths:
+            return {"ok": True, "already_sent": True, "note": "This exact file was already sent in this turn; "
+                    "do not send it again and do not mention it twice."}
         if not os.path.isfile(path):
             return _result(_issue(ctx, "send_media", FAILED, handle, {"kind": entry["kind"]}, "not_on_box"))
         if entry["kind"] == "photo":
