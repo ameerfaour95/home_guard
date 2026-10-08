@@ -1079,9 +1079,11 @@ def _all_frames(path: str) -> List[Any]:
 
 def box_sent_frames(path: str, fps: float, sample_fps: float = VLM_SAMPLE_FPS) -> List[Any]:
     """The frames the box sends the AI from this clip: every round(fps / sample_fps)-th frame from the first
-    (data_collection.vlm_crop.sample_for_vlm), long side at most MAX_SIDE."""
-    step = max(1, int(round(float(fps) / max(1e-6, float(sample_fps)))))
-    return [fit_long_side(f) for f in _all_frames(path)[::step]]
+    (data_collection.model_input.render_model_input), long side at most MAX_SIDE."""
+    from ..data_collection import model_input  # noqa: PLC0415
+
+    sent = model_input.render_model_input(_all_frames(path), {"fps": fps}, model_input.ModelInputConfig(sample_fps))
+    return [fit_long_side(f) for f in sent.frames]
 
 
 def _box_path(box_dir: str, rel: str) -> str:

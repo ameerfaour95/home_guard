@@ -6,21 +6,26 @@ the sub-stream frames (about two looks a second), trigger boxes scaled to the
 main stream, a padded square around their union, gaps interpolated, EMA
 smoothing, every main-stream frame cropped to its own region and resized to the
 median crop size. Moved here unchanged from data_collection.py (2026-10-03); a
-golden-hash test pins the output.
+golden-hash test pins the output. Cutting the frames and sampling them for the
+model live in model_input.py, the one place that says what the model sees.
 """
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-import cv2
 import numpy as np
+
+if __package__:
+    from . import model_input
+else:
+    import model_input      # script mode: run_collector.sh puts this dir on sys.path
 
 log = logging.getLogger(__name__)
 
-Crop = Tuple[int, int, int, int]
+Crop = model_input.Crop
 
 
 @dataclass(frozen=True)
@@ -54,6 +59,7 @@ class CropResult:
     width: int
     height: int
     source: Tuple[int, int]     # main-stream (width, height)
+    crops: List[Optional[Crop]] = field(default_factory=list)   # each main-stream frame's region (None: not cut)
 
 
 def scale_boxes(
@@ -276,15 +282,11 @@ def crop_clip(
         smoothed_main.append(smoothed_sub[si])
 
     # Uniform output size from the median of smoothed crop dimensions
-    valid_sizes = [
-        (c[2] - c[0], c[3] - c[1])
-        for c in smoothed_main if c is not None
-    ]
-    if not valid_sizes:
+    median = model_input.median_crop_size(smoothed_main)
+    if median is None:
         log.warning("[%s] no usable smoothed crops for VLM clip", name)
         return None
-    valid_sizes.sort()
-    median_w, median_h = valid_sizes[len(valid_sizes) // 2]
+    median_w, median_h = median
     if median_w < 2 or median_h < 2:
         return None
 
@@ -293,13 +295,9 @@ def crop_clip(
     for frame, crop in zip(main_frames, smoothed_main):
         if crop is None:
             continue
-        x1, y1, x2, y2 = crop
-        cropped = frame[y1:y2, x1:x2]
-        if cropped.size == 0:
-            continue
-        if cropped.shape[1] != median_w or cropped.shape[0] != median_h:
-            cropped = cv2.resize(cropped, (median_w, median_h))
-        cropped_frames.append(cropped)
+        cropped = model_input.cut_crop(frame, crop, (median_w, median_h))
+        if cropped is not None:
+            cropped_frames.append(cropped)
 
     if len(cropped_frames) < 2:
         log.warning("[%s] no usable cropped frames for VLM clip", name)
@@ -307,7 +305,7 @@ def crop_clip(
 
     first_crop = next(c for c in smoothed_main if c is not None)
     return CropResult(frames=cropped_frames, first_crop=first_crop, width=median_w, height=median_h,
-                      source=(mw, mh))
+                      source=(mw, mh), crops=smoothed_main)
 
 
 def crop_meta(result: CropResult, settings: CropSettings, rel_path: str, fps: float) -> Dict[str, Any]:
@@ -329,7 +327,4 @@ def crop_meta(result: CropResult, settings: CropSettings, rel_path: str, fps: fl
 
 def sample_for_vlm(frames: List[np.ndarray], fps: float, sample_fps: float) -> List[np.ndarray]:
     """Frames of the crop clip at *sample_fps* (config vlm.sample_fps), starting with the first."""
-    if not frames:
-        return []
-    step = max(1, int(round(float(fps) / max(1e-6, float(sample_fps)))))
-    return frames[::step]
+    return model_input.render_model_input(frames, {"fps": fps}, model_input.ModelInputConfig(sample_fps)).frames
