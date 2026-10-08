@@ -62,6 +62,13 @@ class GroundGuardTest(GuardCase):
         self.assertEqual(len(self.assistant.sent), 1)
         self.assertNotIn("ground", job.alert)
 
+    def test_an_unanswered_look_off_our_ground_is_not_forced_out(self):
+        job = self.work_with(Backend(None), STAYS_THERE)
+        self.assertEqual(self.assistant.sent, [])
+        self.assertIn("not ours", job.alert["not_sent_reason"])
+        self.work_with(Backend(None), COMES_IN, ts=T0 + 600)            # on our ground: the detector's alert goes
+        self.assertEqual(len(self.assistant.sent), 1)
+
     def test_a_broken_map_never_stops_an_alert(self):
         with mock.patch.object(sm, "load_scene_map", side_effect=OSError("disk")), \
                 self.assertLogs("box.inference", level="WARNING"):

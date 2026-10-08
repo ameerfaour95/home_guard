@@ -90,7 +90,7 @@ def _decide(book: EventBook, cam: str, ts: float, label: str, people: Any, summa
     """``inference._event_decision``: an alert without a label is the detector's, first in its event."""
     d = book.decide(cam, ts, label if label in LABELS else "normal", people or 0, summary, stem,
                     **({"ground": where} if where else {}))
-    if label not in LABELS and not d.notify:
+    if label not in LABELS and not d.notify and not (where or {}).get("off_our_ground"):
         session = book.session_of_alert(stem) or {}
         if session.get("reported_level", "none") == "none":
             d.notify, d.reason = True, "no label (the AI did not answer): first in this event"
@@ -187,7 +187,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
         model = YOLO(paths.resolve_model(paths.DEFAULT_YOLO))
         looks = detect_looks(args.raw, metas, looks,
-                             lambda frame: model.predict(frame, conf=0.35, classes=[0, 2, 3, 5, 7], imgsz=640,
+                             lambda frame: model.predict(frame, conf=0.4, classes=[0, 2, 3, 5, 7], imgsz=640,
                                                          verbose=False))
         with open(looks_path, "w", encoding="utf-8") as f:
             json.dump(looks, f)

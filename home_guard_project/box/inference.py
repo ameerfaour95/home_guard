@@ -2001,14 +2001,15 @@ def _event_decision(camera: str, alert_ts: float, label: str, people: Optional[i
     entities when the tracker had data (stage 2a).
 
     A clip without a label (the AI did not answer: an outage, the daily cap) is still the detector's alert: it goes
-    out once per event, as the first message of the event, and is recorded as a normal."""
+    out once per event, as the first message of the event, and is recorded as a normal; unless the scene map says
+    everyone stayed off our ground (*ground*, ground.py): nothing done there can be known without the AI."""
     book = EVENTS
     if book is None:
         return None
     try:
         decision = book.decide(camera, alert_ts, label if label in LABELS else "normal", people or 0, summary,
                                alert_id, **(entity_args or {}), **({"ground": ground} if ground else {}))
-        if label not in LABELS and not decision.notify:
+        if label not in LABELS and not decision.notify and not (ground or {}).get("off_our_ground"):
             session = book.session_of_alert(alert_id) or {}
             if session.get("reported_level", "none") == "none":
                 import dataclasses  # noqa: PLC0415
