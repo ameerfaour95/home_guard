@@ -232,6 +232,30 @@ class DetectionsOut:
 
 
 @dataclass
+class ChatLine:
+    """One line of the owner's Telegram conversation; ``text`` already names cameras by the owner's names."""
+    ts: datetime
+    site: str
+    who: str
+    name: str
+    kind: str
+    text: str
+    camera: str
+    camera_name: str
+    alert_id: str
+    image: str
+    delivered: bool
+    error: str
+
+
+@dataclass
+class ChatDay:
+    day: str | None
+    days: list[str]
+    messages: list[ChatLine]
+
+
+@dataclass
 class MediaAccess:
     url: str
     expires_utc: datetime

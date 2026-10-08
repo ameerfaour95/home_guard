@@ -73,6 +73,43 @@ class DemoBackend(DemoTagging, DemoAnnotations, DemoStudio):
                                  entry.get('current', True), max(times) if times else None))
         return sorted(out, key=lambda c: (c.customer_id, not c.current, c.camera))
 
+    def chat(self, customer_id, day=None, q=None):
+        """Two days of a made-up conversation for customer 1 (the box's ChatFeed shape)."""
+        self._identity_access()
+        from .models import ChatDay, ChatLine
+        if not self.customer(customer_id).consent_recordings:
+            raise ForbiddenError()
+        base = self.now.replace(minute=0, second=0, microsecond=0)
+        lines = [] if int(customer_id) != 1 else [
+            ChatLine(base-timedelta(hours=21), 'cedar_house', 'owner', 'Daniel', 'message', 'Who was at the gate last night?',
+                     '', '', '', '', True, ''),
+            ChatLine(base-timedelta(hours=21)+timedelta(minutes=1), 'cedar_house', 'assistant', '', 'answer',
+                     'At 23:40 a delivery driver left a parcel at Front door and drove off.', '', '', '', '', True, ''),
+            ChatLine(base-timedelta(minutes=5), 'cedar_house', 'box', '', 'alert',
+                     'Front door: a person approached the entrance and left a parcel.', 'Front door', 'Front door',
+                     'front_door_1791027300_alert', 'person-36.jpg', True, ''),
+            ChatLine(base-timedelta(minutes=4), 'cedar_house', 'owner', 'Daniel', 'button', 'It was expected', '', '', '', '',
+                     True, ''),
+            ChatLine(base-timedelta(minutes=4)+timedelta(seconds=20), 'cedar_house', 'assistant', '', 'answer',
+                     'Thanks - noted as expected activity.', '', '', '', '', True, ''),
+            ChatLine(base-timedelta(minutes=2), 'cedar_house', 'box', '', 'alert', 'Driveway: a vehicle pulled into the driveway.',
+                     'Driveway', 'Driveway', 'driveway_1791027480_alert', 'car-36.jpg', False, 'Telegram: Forbidden'),
+        ]
+        days = sorted({line.ts.strftime('%Y-%m-%d') for line in lines}, reverse=True)
+        if q:
+            needle = q.casefold()
+            found = [line for line in lines if needle in (line.text+' '+line.name+' '+line.camera_name).casefold()]
+            return ChatDay(None, days, sorted(found, key=lambda line: line.ts, reverse=True))
+        shown = day or (days[0] if days else None)
+        return ChatDay(shown, days, [line for line in lines if line.ts.strftime('%Y-%m-%d') == shown])
+
+    def chat_image(self, customer_id, site, image):
+        self._identity_access()
+        from .models import MediaAccess
+        if image not in ('person-36.jpg', 'car-36.jpg'):
+            raise ServerError()
+        return MediaAccess(f'media/{image}', self.now+timedelta(minutes=5), 'image/jpeg')
+
     def update_customer(self, customer):
         self._identity_access()
         changes = {k: getattr(customer, k) for k in ('name', 'timezone', 'consent_live', 'consent_recordings',

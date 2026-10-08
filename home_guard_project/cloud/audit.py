@@ -59,7 +59,8 @@ def _notice_body(session: Session, row: OwnerNotice, device: Device, staff_name:
     t1, t2 = f"{first.astimezone(tz):%H:%M}", f"{last.astimezone(tz):%H:%M}"
     when = t1 if t1 == t2 else f"{t1}–{t2}"
     where = f" from {_join(cameras)}" if cameras else ""
-    message = f"Home Guard support viewed recordings{where} ({when})"
+    message = (f"Home Guard support viewed your chat with the assistant ({when})" if row.kind == "chat"
+               else f"Home Guard support viewed recordings{where} ({when})")
     return {"schema_version": 1, "id": row.id, "kind": row.kind, "staff_name": staff_name, "cameras": cameras,
             "from_utc": first.strftime("%Y-%m-%dT%H:%M:%SZ"), "to_utc": last.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "message": message}

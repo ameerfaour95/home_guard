@@ -169,8 +169,6 @@ def test_overview_says_how_the_house_is_its_cameras_and_retired_ids(widgets, wai
     assert any('Last heard 3 h ago  —  Check the box has power and internet.' in w for w in overview.warnings)
     assert [name for name, _ in overview.camera_rows] == ['Driveway', 'כניסה ראשית']
     assert overview.retired_rows and overview.retired_rows[0].startswith('Garden')
-    chat = screen.tabs.widget([screen.tabs.tabText(i) for i in range(screen.tabs.count())].index('Chat'))
-    assert any('arrives when the box uploads its chat log' in w.text() for w in chat.findChildren(type(overview.status)))
 
 
 def test_overview_status_and_old_site_names():
@@ -186,3 +184,32 @@ def test_overview_status_and_old_site_names():
     assert status_sentence([warned], [cam], now) == 'Ameer Week 0 1: No clip for 30 h from Camera 2 — check it has power and network'
     assert status_sentence([], None, now) == 'No box is enrolled for this customer yet.'
     assert old_site('ameer_tes2_ch6') == 'Ameer tes2' and old_site('front_door') == ''
+
+
+def test_chat_tab_loads_only_when_opened_and_shows_the_conversation(widgets, wait):
+    from PySide6.QtWidgets import QLabel
+    from home_guard_project.admin.customer import CustomerScreen
+    calls = []
+
+    class Counting(DemoBackend):
+        def chat(self, customer_id, day=None, q=None):
+            calls.append((customer_id, day, q)); return super().chat(customer_id, day, q)
+    screen = CustomerScreen(Counting()); widgets.append(screen)
+    screen.resize(1182, 688); screen.show(); screen.open(1)
+    wait(lambda: screen.customer is not None)
+    assert calls == []  # opening a customer never reads (or audits) the chat
+    screen.tabs.setCurrentWidget(screen.chat)
+    chat = screen.chat
+    wait(lambda: bool(chat.bubbles) and not chat.image_runner.busy and not chat.pending_images)
+    assert calls == [(1, None, None)] and chat.day.currentText() == chat.result.day
+    lines = [b.line for b in chat.bubbles]
+    assert [line.kind for line in lines] == ['alert', 'button', 'answer', 'alert']
+    texts = [w.text() for w in chat.list.findChildren(QLabel)]
+    assert 'Pressed: It was expected' in texts and any(t.startswith('Not delivered to the owner') for t in texts)
+    assert any(w.pixmap() and not w.pixmap().isNull() for w in chat.list.findChildren(QLabel))  # the alert pictures
+    chat.search.setText('gate'); chat.search.returnPressed.emit()
+    wait(lambda: not chat.runner.busy and calls[-1] == (1, None, 'gate'))
+    wait(lambda: [b.line.who for b in chat.bubbles] == ['owner'])
+    assert chat.clear_search.isVisibleTo(chat) and 'match' in chat.status.text()
+    screen.tabs.setCurrentIndex(0); screen.tabs.setCurrentWidget(chat)
+    assert len(calls) == 2  # coming back to the tab does not read it again

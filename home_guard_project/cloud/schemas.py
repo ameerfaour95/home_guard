@@ -238,6 +238,33 @@ class MediaAccessRequest(BaseModel):
     purpose: Literal["review", "support", "training"]
 
 
+class ChatLine(BaseModel):
+    """One line of the owner's Telegram conversation (the box's ChatFeed), camera ids replaced by owner names."""
+    ts: datetime
+    site: str
+    who: str            # "box" | "owner" | "assistant"
+    name: str
+    kind: str           # "alert" | "video" | "message" | "button" | "answer"
+    text: str
+    camera: str
+    camera_name: str
+    alert_id: str
+    image: str          # a picture's file name under production_<site>/chat/images/, or ""
+    delivered: bool
+    error: str
+
+
+class ChatDay(BaseModel):
+    day: Optional[str]  # the day shown; null for a search across days
+    days: list[str]     # days uploaded, newest first
+    messages: list[ChatLine]
+
+
+class ChatImageRequest(BaseModel):
+    site: str
+    image: str
+
+
 class MediaAccess(BaseModel):
     url: str
     expires_utc: datetime
