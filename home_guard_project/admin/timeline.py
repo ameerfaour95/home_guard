@@ -31,6 +31,7 @@ class TimelineScreen(QWidget):
         self.density_runner.finished.connect(self.density_loaded)
         self.review_runner.finished.connect(self.review_done)
         self.thumbnail_cache = {}
+        self.density_rows = 8  # camera rows the strip shows before it scrolls
         layout = QVBoxLayout(self); layout.setContentsMargins(0, 0, 0, 0); layout.setSpacing(8)
         ranges = QHBoxLayout(); ranges.setSpacing(8)
         self.range_chips = {}
@@ -42,10 +43,10 @@ class TimelineScreen(QWidget):
         self.clear_cell = button('Clear hour filter', self.reset_cell, 'link'); self.clear_cell.hide(); ranges.addWidget(self.clear_cell)
         self.range_bar = QWidget(); self.range_bar.setLayout(ranges); layout.addWidget(self.range_bar)
         self.density = DensityStrip(theme); self.density.selected.connect(self.filter_cell)
-        # A house with many cameras would push the event list off a 768-pixel screen: show 8 rows, scroll the rest.
+        # A house with many cameras would push the event list off a 768-pixel screen: show a few rows, scroll the rest.
         self.density_scroll = QScrollArea(); self.density_scroll.setWidget(self.density); self.density_scroll.setWidgetResizable(True)
         self.density_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.density_scroll.setFixedHeight(min(self.density.minimumHeight(), 24+22*8) + 4); self.density_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self.fit_density(); self.density_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         layout.addWidget(self.density_scroll)
         filters = QHBoxLayout(); filters.setSpacing(8)
         self.filters = {}
@@ -217,14 +218,17 @@ class TimelineScreen(QWidget):
             self.density.set_error()
             self.density.setToolTip('Activity could not be loaded. Change range to retry.'); self.density.update(); return
         self.density.set_density(events)
-        # the grid's own height up to 8 camera rows; more scroll
-        self.density_scroll.setFixedHeight(min(self.density.minimumHeight(), 24+22*8) + 4)
+        self.fit_density()
         combo = self.filters['camera']; selected = combo.currentData(); combo.blockSignals(True)
         combo.clear(); combo.addItem('All cameras', None)
         for camera in sorted({e.camera for e in events.rows}):
             combo.addItem(camera_name(camera), camera)
             combo.setItemData(combo.count()-1, camera, Qt.ItemDataRole.ToolTipRole)
         combo.setCurrentIndex(max(0, combo.findData(selected))); combo.blockSignals(False)
+
+    def fit_density(self):
+        # the grid's own height up to density_rows camera rows; more scroll
+        self.density_scroll.setFixedHeight(min(self.density.minimumHeight(), 24+22*self.density_rows) + 4)
 
     def filter_cell(self, camera, hour):
         self.cell = camera, hour; self.clear_cell.setText(f'{camera_name(camera)} · {local_time(hour, self.zone)[13:18]}  ×')

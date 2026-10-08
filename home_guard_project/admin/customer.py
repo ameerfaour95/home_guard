@@ -1,6 +1,6 @@
 from .formatting import camera_name
 from PySide6.QtCore import Signal, Qt
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget, QTabWidget, QDialog, QCheckBox
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget, QTabWidget, QDialog, QCheckBox, QScrollArea, QFrame
 from .backend import OfflineError, AuthError
 from .fleet_model import SEVERITY
 from .formatting import site_name, age, utcnow
@@ -14,6 +14,7 @@ from .widgets.common import label, button, EmptyState, Skeleton
 class CustomerScreen(QWidget):
     back = Signal()
     session_expired = Signal()
+    TABLE_MIN_HEIGHT = 5*64+40
 
     def __init__(self, backend, theme='dark', role='admin', review=False):
         super().__init__()
@@ -21,7 +22,13 @@ class CustomerScreen(QWidget):
         self.customer_id, self.device_id, self.zone = None, '', 'UTC'
         self.requested = None
         self.pending_navigation = None
-        layout = QVBoxLayout(self); layout.setContentsMargins(32, 20, 32, 20); layout.setSpacing(10)
+        # The whole page scrolls: on a 768-pixel screen the header, tabs, activity strip, filters, a readable event
+        # list and its footer do not all fit, and squeezing them made the footer float mid-screen.
+        outer = QVBoxLayout(self); outer.setContentsMargins(0, 0, 0, 0)
+        self.scroll = QScrollArea(); self.scroll.setWidgetResizable(True); self.scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff); outer.addWidget(self.scroll)
+        self.page = QWidget(); self.page.setObjectName('customerPage'); self.scroll.setWidget(self.page)
+        layout = QVBoxLayout(self.page); layout.setContentsMargins(32, 20, 32, 20); layout.setSpacing(10)
         if not review:
             back = button('←  Back to Fleet', self.back.emit, 'link')
             back.setStyleSheet('padding: 0; min-height: 20px;')
@@ -44,6 +51,8 @@ class CustomerScreen(QWidget):
         self.tabs = QTabWidget(); self.tabs.setDocumentMode(True); content.addWidget(self.tabs, 1)
         self.tabs.tabBar().setDrawBase(False)
         self.timeline = TimelineScreen(backend, theme); self.event_view = EventView(backend, role, theme)
+        self.timeline.density_rows = 6; self.timeline.fit_density()
+        self.timeline.stack.setMinimumHeight(self.TABLE_MIN_HEIGHT)  # five event rows and the header, never less
         self.tabs.addTab(self.timeline, icon('Timeline', theme), 'Timeline')
         self.tabs.addTab(self.event_view, icon('Event', theme), 'Event'); self.tabs.setTabEnabled(1, False)
         for title, description in [('Conversation', 'Owner messages and their context will appear here.'),
