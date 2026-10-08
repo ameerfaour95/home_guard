@@ -1872,6 +1872,25 @@ def second_look(backend: Any, frames: List[Any], classes: Sequence[str], lang: s
     return record
 
 
+def _alert_ground(job: Optional[AlertJob], camera: str, reason: str) -> Dict[str, Any]:
+    """Where the alert's people were by the camera's scene map (ground.py), with ``action`` (the Eye's reason names
+    something done): ``ground.Ground.record()`` plus ``action``, or {} without a map, without tracks, or on any
+    failure (the alert then goes on as before)."""
+    tracks = getattr(job, "tracker_tracks", None) if job is not None else None
+    if not tracks:
+        return {}
+    try:
+        from . import ground, scene_map  # noqa: PLC0415
+
+        where = ground.ground_of(tracks, scene_map.load_scene_map(camera))
+        if where == ground.UNKNOWN:
+            return {}
+        return dict(where.record(), action=ground.is_action(reason))
+    except Exception as exc:  # noqa: BLE001 - the map only adds a say; it must never stop an alert
+        log.warning("[%s] ground not judged: %s", camera, exc)
+        return {}
+
+
 def about_lingering(text: str) -> bool:
     """alert_guards.about_lingering: the reason is only lingering (loitering, standing a while, looking around)."""
     from .alert_guards import about_lingering as lingering  # noqa: PLC0415
@@ -1975,7 +1994,8 @@ def _keep_keyframe(session_id: str, job: Optional[AlertJob], frames: List[Any]) 
 
 
 def _event_decision(camera: str, alert_ts: float, label: str, people: Optional[int], summary: str,
-                    alert_id: str, entity_args: Optional[Dict[str, Any]] = None) -> Any:
+                    alert_id: str, entity_args: Optional[Dict[str, Any]] = None,
+                    ground: Optional[Dict[str, Any]] = None) -> Any:
     """The event book's say on this alert (events.Decision), or None without a book or on its failure (the alert
     then goes out as before). *entity_args* (``tracks``, ``since``, ``note``, ``per_entity``) give the event its
     entities when the tracker had data (stage 2a).
@@ -1987,7 +2007,7 @@ def _event_decision(camera: str, alert_ts: float, label: str, people: Optional[i
         return None
     try:
         decision = book.decide(camera, alert_ts, label if label in LABELS else "normal", people or 0, summary,
-                               alert_id, **(entity_args or {}))
+                               alert_id, **(entity_args or {}), **({"ground": ground} if ground else {}))
         if label not in LABELS and not decision.notify:
             session = book.session_of_alert(alert_id) or {}
             if session.get("reported_level", "none") == "none":
@@ -2269,10 +2289,25 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
             entity_args = {"tracks": entity_tracks, "since": entity_since,
                            "note": owner_summary(summary, summary_owner, lang) if parsed and parsed.get("summary") else "",
                            "per_entity": parsed.get("per_entity") if parsed and "entities_line" in context else None}
+        # Whose ground (scene map, ground.py): off our ground is quiet unless something is done there; coming onto
+        # our ground from the neighbour's side or the street is a message even when the Eye said normal.
+        where = _alert_ground(job, camera_name, f"{why} {reason}".strip() or summary)
+        if where:
+            decision["ground"] = where
+            if job is not None:
+                job.input_meta["ground"] = where
         event = None if muted else _event_decision(camera_name, alert_ts, label, people, summary, alert_id,
-                                                   entity_args)
+                                                   entity_args, where)
         if event is not None:
             _keep_keyframe(event.session_id, job, frames)
+        if where.get("entered") and label == "normal" and (event is None or event.notify):
+            from .ground import entered_text, from_record  # noqa: PLC0415
+
+            label = shown_label = "suspicious"
+            cmd = LABEL_COMMANDS[label]
+            why = entered_text(from_record(where), lang)
+            decision.update(label=label, final_label=label, raised="came onto our ground")
+            log.info("[%s] raised to suspicious: %s", camera_name, why)
         if event is not None and not event.notify:
             log.info("[%s] not sent (%s): %s", camera_name, event.reason, summary)
             if status is not None:
