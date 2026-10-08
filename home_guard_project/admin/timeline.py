@@ -225,7 +225,17 @@ class TimelineScreen(QWidget):
 
     def apply_groups(self):
         self.model.grouping = self.group_toggle.isChecked()
-        for row in range(len(self.model.rows)):
+        header, n = self.table.verticalHeader(), len(self.model.rows)
+        for visual in range(n):  # back to time order (model order), then an open event's clips right under it
+            if header.visualIndex(visual) != visual:
+                header.moveSection(header.visualIndex(visual), visual)
+        for key in self.model.expanded if self.model.grouping else ():
+            rows = self.model.members.get(key, [])
+            target = header.visualIndex(rows[0]) + 1 if rows else 0
+            for row in rows[1:]:
+                header.moveSection(header.visualIndex(row), target if header.visualIndex(row) > target else target - 1)
+                target = header.visualIndex(row) + 1
+        for row in range(n):
             self.table.setRowHidden(row, self.model.hidden(row))
         if self.model.rows:
             self.model.dataChanged.emit(self.model.index(0, 1), self.model.index(len(self.model.rows)-1, 3))
@@ -245,11 +255,13 @@ class TimelineScreen(QWidget):
             self.toggle_group(self.model.members[self.model.key(row)][0], True)
 
     def next_row(self, row, step):
-        """The next visible row from *row* (step +1 / -1), or *row* itself at the end."""
-        target = row + step
-        while 0 <= target < len(self.model.rows) and self.table.isRowHidden(target):
-            target += step
-        return target if 0 <= target < len(self.model.rows) else row
+        """The next visible row on screen from *row* (step +1 / -1), or *row* itself at the end. Rows are moved on
+        screen (an open event's clips sit under it), so this walks the view's order, not the model's."""
+        header, n = self.table.verticalHeader(), len(self.model.rows)
+        visual = header.visualIndex(row) + step if 0 <= row < n else (0 if step > 0 else n - 1)
+        while 0 <= visual < n and self.table.isRowHidden(header.logicalIndex(visual)):
+            visual += step
+        return header.logicalIndex(visual) if 0 <= visual < n else row
 
     def load_sessions(self):
         wanted = sorted({e.session_id for e in self.model.rows if e.session_id}

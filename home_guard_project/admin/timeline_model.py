@@ -54,9 +54,10 @@ class TimelineModel(QAbstractTableModel):
         first = known.first_utc if known else min(c.start_utc for c in clips)
         last = known.last_utc if known else max(c.start_utc for c in clips)
         sent = known.sent if known else sum(c.outcome_code == 'sent' for c in clips)
-        arrow = '▾' if key in self.expanded else '▸'
-        return (f'{arrow} {camera_name(e)}  {local_time(first, e.timezone)[13:18]}–{local_time(last, e.timezone)[13:18]}'
-                f'  ·  {self.size(key)} clips  ·  {sent} message{"" if sent == 1 else "s"} sent')
+        sign = '−' if key in self.expanded else '+'  # open / closed (glyphs every UI font has)
+        return (f'{sign} {self.size(key)} clips  ·  {camera_name(e)}  ·  '
+                f'{local_time(first, e.timezone)[13:18]}–{local_time(last, e.timezone)[13:18]}'
+                f'  ·  {sent} message{"" if sent == 1 else "s"} sent')
 
     def rowCount(self, parent=QModelIndex()):
         return 0 if parent.isValid() else len(self.rows)

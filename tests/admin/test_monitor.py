@@ -60,7 +60,7 @@ def test_camera_names_follow_the_box_rule_never_the_raw_id():
     assert camera_name('front_door') == 'Front door' and camera_name('cam-abcdef') == 'cam-abcdef'
     try:
         remember_names({'ameer_week_0_1_ch1': 'כניסה ראשית', 'ameer_week_0_1_ch2': ''})
-        assert camera_name('ameer_week_0_1_ch1') == 'כניסה ראשית'
+        assert camera_name('ameer_week_0_1_ch1') == '\u2068כניסה ראשית\u2069'  # isolated: never flips a line
         assert camera_name('ameer_week_0_1_ch2') == 'Camera 2'
         # exact ids only: another house's (or an old site's) ch1 never borrows this name
         assert camera_name('other_house_ch1') == 'Camera 1'
@@ -93,7 +93,7 @@ def test_customer_page_lists_current_cameras_and_hides_retired_behind_a_toggle(w
         screen.tabs.setCurrentWidget(timeline)
         combo = timeline.filters['camera']
         assert list(timeline.density.rows) == ['Driveway', 'Front door']
-        assert [combo.itemText(i) for i in range(combo.count())] == ['All cameras', 'Driveway', 'כניסה ראשית']
+        assert [combo.itemText(i).strip('\u2068\u2069') for i in range(combo.count())] == ['All cameras', 'Driveway', 'כניסה ראשית']
         assert timeline.retired_toggle.isVisibleTo(screen)
         timeline.retired_toggle.setChecked(True)
         assert list(timeline.density.rows) == ['Driveway', 'Front door', 'Garden']
@@ -324,18 +324,22 @@ def test_clips_of_one_event_are_one_expandable_row(widgets, wait):
     lead, members = rows[0], rows[1:]
     assert model.lead(lead) and all(table.isRowHidden(i) for i in members) and not table.isRowHidden(lead)
     text = model.index(lead, 1).data().split('\n')[0]
-    assert text.startswith('▸ Front door') and '32 clips' in text and '1 message sent' in text
+    assert text.startswith('+ 32 clips  ·  Front door') and '1 message sent' in text
     assert model.index(lead, HEADERS.index('AI decision')).data() == 'Sent'
     # j / k skip the hidden clips of a collapsed event
     table.setCurrentIndex(model.index(lead, 0))
     nxt = screen.next_row(lead, 1)
     assert nxt not in members and not table.isRowHidden(nxt)
     screen.toggle_group(lead)
-    assert not any(table.isRowHidden(i) for i in members) and model.index(lead, 1).data().startswith('▾')
+    assert not any(table.isRowHidden(i) for i in members) and model.index(lead, 1).data().startswith('−')
     assert model.index(members[0], 1).data().startswith('↳')
+    header = table.verticalHeader()  # an open event's clips sit right under it, newest first
+    assert [header.visualIndex(i) for i in members] == [header.visualIndex(lead) + 1 + n for n in range(len(members))]
+    assert screen.next_row(lead, 1) == members[0] and screen.next_row(members[0], -1) == lead
     assert model.index(members[0], HEADERS.index('AI decision')).data() == 'Kept in the event, not sent (normal)'
     screen.group_toggle.setChecked(False)
     assert not any(table.isRowHidden(i) for i in range(len(model.rows)))
+    assert all(header.visualIndex(i) == i for i in range(len(model.rows)))  # back to time order
     screen.group_toggle.setChecked(True); screen.toggle_group(lead, False)
     screen.reveal(members[-1])
     assert not table.isRowHidden(members[-1])
