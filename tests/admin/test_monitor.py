@@ -404,3 +404,23 @@ def test_kind_and_decision_agree_and_the_outcome_reads_in_full(widgets, wait):
     screen = TimelineScreen(SessionBackend()); widgets.append(screen); screen.resize(1100, 600); screen.show()
     screen.open(1, 'Asia/Jerusalem'); wait(lambda: bool(screen.model.rows))
     assert screen.table.columnWidth(HEADERS.index('AI decision')) >= 200
+
+
+def test_event_rows_say_event_and_the_outcome_is_in_the_tooltip(widgets, wait):
+    from dataclasses import replace as copy
+    from PySide6.QtCore import Qt
+    from home_guard_project.admin.event_logic import kind_label
+    from home_guard_project.admin.timeline import TimelineScreen
+    from home_guard_project.admin.timeline_model import HEADERS
+    base = DemoBackend().events(limit=1).items[0]
+    assert kind_label(copy(base, kind='paused', outcome_code='undelivered')) == 'Paused'
+    screen = TimelineScreen(SessionBackend()); widgets.append(screen); screen.resize(1100, 600); screen.show()
+    screen.open(1, 'Asia/Jerusalem')
+    wait(lambda: bool(screen.model.rows) and ('cedar_house', 'door-session') in screen.model.sessions)
+    model = screen.model
+    lead = next(i for i in range(len(model.rows)) if model.lead(i))
+    kind, decided = HEADERS.index('Kind'), HEADERS.index('AI decision')
+    assert model.index(lead, kind).data() == 'Event'  # the event row, although its newest clip was sent
+    member = next(i for i in model.members[model.key(lead)][1:] if model.rows[i].kind not in ('paused', 'trigger', 'random'))
+    assert model.index(member, kind).data() == 'Event'  # never 'Dismissed by AI' beside a held outcome
+    assert model.index(member, decided).data(Qt.ItemDataRole.ToolTipRole) == 'Kept in the event, not sent (normal)'

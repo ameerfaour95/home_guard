@@ -20,6 +20,8 @@ def kind_label(event):
     code = getattr(event, 'outcome_code', None)
     if event.kind in ('trigger', 'random'):
         return 'Collected'
+    if event.kind == 'paused':
+        return 'Paused'
     if code in ('sent', 'undelivered'):
         return 'Alert'
     if code:
