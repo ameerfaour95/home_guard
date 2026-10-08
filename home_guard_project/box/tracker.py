@@ -33,7 +33,9 @@ would mix them up.
 Vehicle tracks that crossed a line, entered another area or ended are handed over with
 ``drain_vehicle_events()`` (pure data, for the owner-car feature: plates, "car left / came back").
 
-Readers (the alert workers) ask ``facts(t0, t1)`` and ``tracks_between(t0, t1)``; the loop writes. One lock per
+Readers (the alert workers) ask ``facts(t0, t1)`` and ``tracks_between(t0, t1)``; the loop writes. Each track also
+keeps its box per look (thinned with the foot points), so an alert clip gets its tracks with boxes
+(``tracks_with_boxes``, written as the clip's ``.tracks.json`` by ``clip_tracks.py``). One lock per
 camera keeps them apart; every call is pure Python and well under a millisecond for a few tracks.
 
 ``TrackerFacts.line()`` is the one line the Eye may get (box.yaml ``eye_tracker_facts: on``). It never holds counts,
@@ -57,6 +59,8 @@ log = logging.getLogger("box.tracker")
 
 # Bumped whenever the facts line or its rule changes; the prompt version gets "+<this>" when the line is shown.
 TRACKER_FACTS_VERSION = "tf1"
+# Bumped whenever what ``tracks_with_boxes`` hands out (the clip's ``.tracks.json``) changes meaning.
+TRACKS_VERSION = "tb1"
 TRACKER_FACTS_RULE = ("Measured by code over the whole visit. Use them for how long and where; count people from "
                       "the frames, not from here.")
 
@@ -147,6 +151,7 @@ class _Track:
     followed: bool = False              # a later track already counts as this one coming back
     max_conf: float = 0.0               # the best detector score of any of its looks
     moved: float = 0.0                  # farthest its foot point got from the first one (picture widths)
+    boxes: List[Tuple[float, Box]] = field(default_factory=list)   # (ts, box) per look, thinned like the points
 
     @property
     def confirmed(self) -> bool:
@@ -174,6 +179,9 @@ class _Track:
         if len(self.points) > MAX_POINTS:
             # Every other point, keeping the first and the latest: the shape and the times survive.
             self.points = self.points[:-1:2] + [self.points[-1]]
+        self.boxes.append((ts, box))
+        if len(self.boxes) > MAX_POINTS:
+            self.boxes = self.boxes[:-1:2] + [self.boxes[-1]]
 
 
 # ----------------------------------------------------------------------------
@@ -518,7 +526,8 @@ class CameraTracker:
             for di, (kind, cls_id, box) in enumerate(dets):
                 if di in used_d or len(self._active) >= MAX_ACTIVE:
                     continue
-                track = _Track(self._next_id, kind, cls_id, box, ts, ts, [(ts,) + feet[di]], max_conf=confs[di])
+                track = _Track(self._next_id, kind, cls_id, box, ts, ts, [(ts,) + feet[di]], max_conf=confs[di],
+                               boxes=[(ts, box)])
                 self._next_id += 1
                 self._active.append(track)
                 seen.append(track.id)
@@ -693,6 +702,31 @@ class CameraTracker:
                             "max_conf": round(t.max_conf, 3)})
             return out
 
+    def tracks_with_boxes(self, t0: float, t1: float) -> List[Dict[str, Any]]:
+        """Every confirmed track seen in ``[t0, t1]`` with its box at each of its looks in that window, for the clip's
+        ``.tracks.json`` (labeling starts from these boxes and ids): ``id, kind, cls, first_seen, last_seen`` (over
+        the whole visit), ``hits, confirmed, shown`` (False: a vehicle that never moved, which nobody outside is
+        told about), ``max_conf, prev_id, returns`` and ``boxes`` [{``ts``, ``box``: normalised x1, y1, x2, y2}],
+        oldest first. A long visit's boxes are thinned as its foot points are (MAX_POINTS). Pure data."""
+        with self._lock:
+            out: List[Dict[str, Any]] = []
+            for t in sorted((t for t in self._history + self._active
+                             if t.confirmed and t.first_seen <= t1 and t.last_seen >= t0), key=lambda t: t.first_seen):
+                boxes = [{"ts": ts, "box": list(box)} for ts, box in t.boxes if t0 <= ts <= t1]
+                if not boxes:
+                    continue
+                out.append({"id": t.id, "kind": t.kind, "cls": t.cls, "first_seen": t.first_seen,
+                            "last_seen": t.last_seen, "hits": t.hits, "confirmed": True, "shown": t.shown,
+                            "max_conf": round(t.max_conf, 3), "prev_id": t.prev_id, "returns": t.returns,
+                            "boxes": boxes})
+            return out
+
+    def looks_between(self, t0: float, t1: float) -> List[Tuple[float, Tuple[int, ...]]]:
+        """``(ts, track ids seen)`` of every look in ``[t0, t1]``, oldest first (the ids include tracks not yet
+        confirmed). Kept HISTORY_SEC, at most MAX_LOOKS."""
+        with self._lock:
+            return [(ts, ids) for ts, ids in self._looks if t0 <= ts <= t1]
+
 
 class TrackerRegistry:
     """One tracker per camera, and each camera's scene map re-read at most every *refresh_sec* (the owner may
@@ -746,3 +780,9 @@ class TrackerRegistry:
     def drain_vehicle_events(self, camera: str) -> List[Dict[str, Any]]:
         """``CameraTracker.drain_vehicle_events`` for *camera*, with its cached scene map."""
         return self.get(camera).drain_vehicle_events(self.scene_map(camera))
+
+    def tracks_with_boxes(self, camera: str, t0: float, t1: float) -> List[Dict[str, Any]]:
+        return self.get(camera).tracks_with_boxes(t0, t1)
+
+    def looks_between(self, camera: str, t0: float, t1: float) -> List[Tuple[float, Tuple[int, ...]]]:
+        return self.get(camera).looks_between(t0, t1)

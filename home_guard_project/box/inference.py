@@ -1569,6 +1569,9 @@ class AlertJob:
     # where this alert's own window starts. None: no tracker data, the event counts people from the Eye's answer.
     tracker_entities: Optional[List[Dict[str, Any]]] = None
     tracker_since: Optional[float] = None
+    # The tracker's tracks with a box per look over the clip's own window (tracker.tracks_with_boxes), its looks and
+    # the settings they were made with: the clip's .tracks.json (clip_tracks.py). None: no tracker data.
+    track_boxes: Optional[Dict[str, Any]] = None
 
 
 def _camera_streams(cfg: Any) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -1698,6 +1701,44 @@ def _attach_tracker(job: AlertJob, trackers: Any, now: float) -> None:
             log.warning("[%s] tracker tracks for the event not taken: %s", job.camera, exc)
 
 
+def _attach_track_boxes(job: AlertJob, trackers: Any, clip: Sequence[Any], person_conf: Optional[float]) -> None:
+    """Keep the tracker's tracks with their boxes over the clip's window ``[first frame, last frame]`` for the clip's
+    ``.tracks.json``. Taken on the detection loop, when the clip is cut. Never raises: the clip is saved without it."""
+    if trackers is None or not clip or not hasattr(trackers, "tracks_with_boxes"):
+        return
+    try:
+        from .tracker import TRACKS_VERSION  # noqa: PLC0415
+
+        t0, t1 = float(clip[0][0]), float(clip[-1][0])
+        job.track_boxes = {
+            "tracks": trackers.tracks_with_boxes(job.camera, t0, t1),
+            "looks": trackers.looks_between(job.camera, t0, t1),
+            "params": {"person_conf": person_conf, "alert_person_conf": job.person_conf, "tracker": TRACKS_VERSION},
+        }
+    except Exception as exc:  # noqa: BLE001 - the clip goes on without its tracks file
+        log.warning("[%s] tracker boxes for the clip not taken: %s", job.camera, exc)
+
+
+def _write_clip_tracks(job: AlertJob, root_dir: str, meta_path: Optional[str]) -> None:
+    """Write the clip's ``responses/<camera>/<day>/<stem>.tracks.json`` (clip_tracks.py), with the event's entity ids
+    (P1, CAR1) for the tracks the event book mapped. Never raises: a failure is only a warning."""
+    if not meta_path or job.track_boxes is None:
+        return
+    try:
+        from . import clip_tracks  # noqa: PLC0415
+
+        entities: Dict[str, str] = {}
+        if EVENTS is not None:
+            try:
+                entities = clip_tracks.entity_ids(EVENTS.session_of_alert(job.stem))
+            except Exception as exc:  # noqa: BLE001 - the tracks are written without entity ids
+                log.warning("[%s] event entities for the tracks file not read: %s", job.camera, exc)
+        clip_tracks.write(root_dir, meta_path, job.track_boxes.get("tracks") or [],
+                          job.track_boxes.get("looks") or [], job.track_boxes.get("params"), entities)
+    except Exception as exc:  # noqa: BLE001 - the clip is saved; only its tracks file is missing
+        log.warning("[%s] tracks file for %s not written: %s", job.camera, job.stem, exc)
+
+
 def _start_due_alerts(pending: List[AlertJob], now: float, cfg: Any, detector: Any,
                       streams: Dict[str, Any], main_caps: Dict[str, Any], predict_args: Dict[str, Any],
                       backend: Any, box_settings: Dict[str, Any], env: Dict[str, str], settings: AlertSettings,
@@ -1713,6 +1754,7 @@ def _start_due_alerts(pending: List[AlertJob], now: float, cfg: Any, detector: A
         frames, clip = _prepare_alert(job, cfg, detector, streams[job.camera].sub_cap,
                                       main_caps[job.camera], predict_args)
         _attach_tracker(job, trackers, now)   # after _prepare_alert, which sets the job's input_meta afresh
+        _attach_track_boxes(job, trackers, clip, getattr(settings, "tracker_person_conf", None))
         pending.remove(job)
         thread = threading.Thread(target=_worker,
                                   args=(backend, box_settings, env, settings, job.camera, frames,
@@ -2571,18 +2613,22 @@ def _save_clip(job: AlertJob, frames: List[Any], production_dir: str, training_d
         if job.false_positive:
             meta = write_alert_clip(training_dir, job.camera, false_positive_stem(job.camera, job.ts), frames,
                                     training_alert, kind="false_positive", teacher=job.teacher, extra=job.input_meta, **clip_options)
+            _write_clip_tracks(job, training_dir, meta)
         elif job.paused:
             meta = write_alert_clip(training_dir, job.camera, f"{job.camera}_{int(job.ts)}_paused", frames,
                                     alert, kind="paused", extra=job.input_meta, **clip_options)
+            _write_clip_tracks(job, training_dir, meta)
         else:
             # The owner's copy carries the teacher's answer too: an owner's late answer re-creates the
             # training copy from it (feedback.keep_for_training) once the first one has been uploaded.
             meta = write_alert_clip(production_dir, job.camera, job.stem, frames, alert, teacher=job.teacher,
                                     extra={"trigger_ts": job.ts, "mode": "guard", **job.input_meta}, **clip_options)
+            _write_clip_tracks(job, production_dir, meta)
             # The owner's copy above expires in two weeks; the training set keeps every
             # alert with the teacher's answer, so a student model can be trained on it.
-            write_alert_clip(training_dir, job.camera, job.stem, frames, training_alert, kind="alert", teacher=job.teacher,
-                             extra=job.input_meta, **clip_options)
+            training_meta = write_alert_clip(training_dir, job.camera, job.stem, frames, training_alert, kind="alert",
+                                             teacher=job.teacher, extra=job.input_meta, **clip_options)
+            _write_clip_tracks(job, training_dir, training_meta)
         if meta:
             log.info("[%s] clip saved: %s (%d frames)", job.camera, os.path.basename(meta), len(frames))
         if (assistant is not None and not job.false_positive and not job.paused

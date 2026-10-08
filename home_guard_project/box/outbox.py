@@ -8,10 +8,15 @@ whose files are all on disk.
 
 from __future__ import annotations
 
+import datetime as dt
+import hashlib
+import json
 import logging
+import math
 import os
+import shutil
 import time
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 log = logging.getLogger(__name__)
 
@@ -144,6 +149,108 @@ def move_feedback(live_dir: str, outbox_dir: str) -> int:
             except OSError as exc:
                 log.warning("Could not move %s (will retry next run): %s", src, exc)
     return moved
+
+
+CHAT_DIR = "chat"                 # in the site outbox: chat/<YYYY-MM-DD>.jsonl and chat/images/
+CHAT_STATE_NAME = "chat_upload_state.json"
+
+
+def _line_hash(line: str) -> str:
+    return hashlib.sha1(line.encode("utf-8")).hexdigest()
+
+
+def _read_chat_state(path: str) -> Tuple[float, set]:
+    try:
+        with open(path, encoding="utf-8") as f:
+            state = json.load(f)
+        last = float(state.get("last_ts"))
+        if not math.isfinite(last):
+            raise ValueError("last_ts must be finite")
+        return last, set(state.get("at_last_ts") or ())
+    except (OSError, ValueError, TypeError, AttributeError):
+        return float("-inf"), set()
+
+
+def _write_chat_state(path: str, last_ts: float, at_last: set) -> None:
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({"last_ts": last_ts, "at_last_ts": sorted(at_last), "updated": time.time()}, f)
+    os.replace(tmp, path)
+
+
+def copy_chat_feed(feed_path: str, site_outbox: str, state_path: str) -> int:
+    """Copy the Telegram conversation's new lines (chat_feed.ChatFeed's file) into *site_outbox* for the uploader.
+
+    Lines go to ``chat/<YYYY-MM-DD>.jsonl`` by the local date of their ``ts``, appended to the day's file as they
+    are (UTF-8, Hebrew unescaped); the pictures they name (``logs/chat_images/``) are copied to ``chat/images/``.
+    The live feed is only read: the assistant and the window read it, and ChatFeed trims it itself.
+
+    Progress is the last copied ``ts`` (and the lines at exactly that ts) in *state_path*, not a line count, so a
+    trimmed feed neither repeats nor loses lines; a line already in its day file is never appended twice (a run
+    stopped between the copy and the state). A line still being written (no newline yet) waits for the next run.
+    Returns the lines copied; never raises (the clips' upload goes on).
+    """
+    try:
+        with open(feed_path, encoding="utf-8") as f:
+            raw = f.readlines()
+    except OSError:
+        return 0
+    last_ts, at_last = _read_chat_state(state_path)
+    new: List[Tuple[float, str, Dict[str, Any]]] = []
+    for line in raw:
+        if not line.endswith("\n"):
+            continue
+        text = line.rstrip("\r\n")
+        try:
+            entry = json.loads(text)
+            ts = float(entry["ts"])
+            if not math.isfinite(ts):
+                raise ValueError("ts must be finite")
+            day = dt.datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
+        except (ValueError, TypeError, KeyError, OverflowError, OSError):
+            continue                       # a damaged line, or one without a usable time
+        if not isinstance(entry, dict) or ts < last_ts or (ts == last_ts and _line_hash(text) in at_last):
+            continue
+        new.append((ts, text, dict(entry, _day=day)))
+    if not new:
+        return 0
+    chat_dir = os.path.join(site_outbox, CHAT_DIR)
+    image_src = os.path.join(os.path.dirname(feed_path) or ".", "chat_images")
+    copied = 0
+    try:
+        by_day: Dict[str, List[str]] = {}
+        for _, text, entry in new:
+            by_day.setdefault(entry["_day"], []).append(text)
+        os.makedirs(chat_dir, exist_ok=True)
+        for day, lines in sorted(by_day.items()):
+            day_path = os.path.join(chat_dir, f"{day}.jsonl")
+            try:
+                with open(day_path, encoding="utf-8") as f:
+                    there = {x.rstrip("\r\n") for x in f}
+            except OSError:
+                there = set()
+            fresh = [x for x in lines if x not in there]
+            if fresh:
+                with open(day_path, "a", encoding="utf-8", newline="\n") as f:
+                    f.write("".join(x + "\n" for x in fresh))
+                copied += len(fresh)
+        for _, _, entry in new:
+            name = os.path.basename(str(entry.get("image") or ""))
+            src = os.path.join(image_src, name)
+            if name and os.path.isfile(src):
+                dst = os.path.join(chat_dir, "images", name)
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                try:
+                    shutil.copy2(src, dst)
+                except OSError as exc:
+                    log.warning("Chat picture %s not copied (the next run does not retry it): %s", name, exc)
+        top = max(ts for ts, _, _ in new)
+        hashes = {_line_hash(text) for ts, text, _ in new if ts == top}
+        _write_chat_state(state_path, top, hashes | (at_last if top == last_ts else set()))
+    except OSError as exc:
+        log.warning("Telegram conversation not copied to the outbox (will retry next run): %s", exc)
+    return copied
 
 
 def move_finished_clips(
