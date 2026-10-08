@@ -3,10 +3,12 @@
 Fix tracker task 2.1 (the entity layer maps tracker tracks to P1/P2/CAR1; it needs recorded tracks to be judged).
 For every clip under ``<root>/clips/<camera>/<date>/<stem>.mp4`` with its ``<root>/meta/.../<stem>.meta.json``:
 
-1. Every frame (or every Nth, ``--every``) goes through the box's YOLO model with the box's thresholds
-   (``inference.filter_by_thresholds``: person 0.8, everything else 0.7 by default), then through a fresh
-   ``tracker.CameraTracker`` — exactly the code the box runs, fed at the clip's own timestamps
-   (``clip_start_ts``..``clip_end_ts`` spread over the frames, as ``inference._prepare_alert`` does).
+1. Every frame (or every Nth, ``--every``) goes through the box's YOLO model as the guard loop runs it: at the
+   lowest score in use, the alert's finds filtered at the box's thresholds (person 0.8, everything else 0.7 by
+   default) and the tracker fed with people from ``--track-person`` (the box's ``tracker_person_conf``; by default
+   the same as ``--person``, as before it existed), then through a fresh ``tracker.CameraTracker`` - exactly the
+   code the box runs, fed at the clip's own timestamps (``clip_start_ts``..``clip_end_ts`` spread over the frames,
+   as ``inference._prepare_alert`` does).
 2. ``<stem>.tracks.json`` is written next to the clip: every track (id, kind, class, first and last seen, hits,
    confirmed, prev_id, returns) with its box at every look, plus the per-clip split statistics below.
 3. ``--render`` draws the track ids on chosen clips (an mp4 and a contact sheet a person can check by eye).
@@ -18,7 +20,10 @@ Split statistics (what a person would call "one person became two tracks"):
   split.
 - ``duplicates``: two person tracks seen in the same look with boxes overlapping more than DUPLICATE_IOU, for at
   least two looks: one person counted twice.
-- ``flickers``: person tracks that never got confirmed (one look): noise the entity layer must ignore.
+- ``flickers``: tracks that never got confirmed (one look); ``one_look_people`` counts the person ones, and
+  ``one_look_only_evidence`` the clips where a one-look person was the only person the tracker had while the Eye
+  saw someone (what confirming a person on one look would gain) or saw nobody (what it would cost).
+- Vehicles that never moved are not counted as vehicle tracks (``parked_vehicles``), as the box hides them.
 - ``excess_vs_eye``: confirmed person tracks minus the Eye's own people count for the clip (``alert.people`` in the
   meta, when present): a rough upper bound on over-segmentation.
 
@@ -96,20 +101,24 @@ def read_frames(path: str) -> List[Any]:
 class Detector:
     """The box's YOLO model with the box's per-type thresholds."""
 
-    def __init__(self, weights: str, person: float, other: float, device: str = "") -> None:
+    def __init__(self, weights: str, person: float, other: float, device: str = "",
+                 track_person: Optional[float] = None) -> None:
         from ultralytics import YOLO  # noqa: PLC0415
+        from ..box.inference import tracker_thresholds  # noqa: PLC0415
 
         self.model = YOLO(weights)
         self.thresholds = {"person": person, "vehicle": other, "animal": other}
+        self.fed = tracker_thresholds(self.thresholds, person if track_person is None else track_person)
         self.other = other
         self.device = device
 
     def __call__(self, frame: Any) -> Any:
+        """What the tracker is fed from one look, as the guard loop filters it."""
         from ..box.inference import detector_floor, filter_by_thresholds  # noqa: PLC0415
 
         kwargs = {"device": self.device} if self.device else {}
-        raw = self.model.predict(frame, conf=detector_floor(self.thresholds, self.other), verbose=False, **kwargs)
-        return filter_by_thresholds(raw[0], self.thresholds, self.other) if raw else None
+        raw = self.model.predict(frame, conf=detector_floor(self.fed, self.other), verbose=False, **kwargs)
+        return filter_by_thresholds(raw[0], self.fed, self.other) if raw else None
 
 
 def replay(frames: Sequence[Any], times: Sequence[float], detect: Any, camera: str = "",
@@ -121,6 +130,7 @@ def replay(frames: Sequence[Any], times: Sequence[float], detect: Any, camera: s
     tracker = CameraTracker(camera)
     seen: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
     kinds: Dict[int, Tuple[str, int]] = {}
+    shown: Dict[int, bool] = {}
     looks: List[Dict[str, Any]] = []
     for i in range(0, len(frames), max(1, every)):
         frame, ts = frames[i], float(times[i])
@@ -133,6 +143,7 @@ def replay(frames: Sequence[Any], times: Sequence[float], detect: Any, camera: s
                       "tracks": [t.id for t in now]})
         for t in now:
             kinds[t.id] = (t.kind, t.cls)
+            shown[t.id] = bool(getattr(t, "shown", True))
             seen[t.id].append({"frame": i, "ts": round(ts, 3), "box": [round(v, 4) for v in t.box]})
     with tracker._lock:
         every_track = {t.id: t for t in tracker._history + tracker._active}
@@ -142,10 +153,12 @@ def replay(frames: Sequence[Any], times: Sequence[float], detect: Any, camera: s
         if t is None:                              # an unconfirmed track dropped on loss: rebuild what we saw
             boxes = seen[tid]
             tracks.append({"id": tid, "kind": kinds[tid][0], "cls": kinds[tid][1], "first_seen": boxes[0]["ts"], "last_seen": boxes[-1]["ts"],
-                           "hits": len(boxes), "confirmed": False, "prev_id": None, "returns": 0, "boxes": boxes})
+                           "hits": len(boxes), "confirmed": False, "shown": shown.get(tid, True), "max_conf": None,
+                           "prev_id": None, "returns": 0, "boxes": boxes})
             continue
         tracks.append({"id": t.id, "kind": t.kind, "cls": t.cls, "first_seen": round(t.first_seen, 3),
                        "last_seen": round(t.last_seen, 3), "hits": t.hits, "confirmed": t.confirmed,
+                       "shown": bool(getattr(t, "shown", True)), "max_conf": round(getattr(t, "max_conf", 0.0), 3),
                        "prev_id": t.prev_id, "returns": t.returns, "boxes": seen[tid]})
     return {"looks": looks, "tracks": tracks}
 
@@ -168,8 +181,10 @@ def _foot(box: Sequence[float]) -> Tuple[float, float]:
 def split_stats(result: Dict[str, Any], eye_people: Optional[int] = None) -> Dict[str, Any]:
     tracks = result["tracks"]
     people = [t for t in tracks if t["kind"] == "person" and t["confirmed"]]
-    vehicles = [t for t in tracks if t["kind"] == "vehicle" and t["confirmed"]]
+    vehicles = [t for t in tracks if t["kind"] == "vehicle" and t["confirmed"] and t.get("shown", True)]
+    parked = [t for t in tracks if t["kind"] == "vehicle" and t["confirmed"] and not t.get("shown", True)]
     flickers = [t for t in tracks if not t["confirmed"]]
+    one_look = [t for t in flickers if t["kind"] == "person"]
     fragments = []
     for new in people:
         start = new["boxes"][0]
@@ -194,12 +209,15 @@ def split_stats(result: Dict[str, Any], eye_people: Optional[int] = None) -> Dic
                     overlap_looks[tuple(sorted((items[i][0], items[j][0])))] += 1
     duplicates = [{"tracks": list(pair), "looks": n} for pair, n in overlap_looks.items() if n >= 2]
     most_at_once = max((len(v) for v in by_look.values()), default=0)
-    out = {"person_tracks": len(people), "vehicle_tracks": len(vehicles), "flickers": len(flickers),
+    out = {"person_tracks": len(people), "vehicle_tracks": len(vehicles), "parked_vehicles": len(parked),
+           "flickers": len(flickers), "one_look_people": len(one_look),
            "fragments": fragments, "duplicates": duplicates, "most_people_at_once": most_at_once,
            "returns_linked": sum(1 for t in people if t["prev_id"] is not None)}
     if eye_people is not None:
         out["eye_people"] = eye_people
         out["excess_vs_eye"] = len(people) - eye_people
+        if one_look and not people:
+            out["one_look_only_evidence"] = "eye_saw_people" if eye_people > 0 else "eye_saw_nobody"
     return out
 
 
@@ -292,6 +310,11 @@ def summarize(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
         "fragments_linked_as_return": sum(f["linked"] for r in rows for f in r["stats"]["fragments"]),
         "duplicates": dup, "clips_with_duplicates": sum(1 for r in rows if r["stats"]["duplicates"]),
         "flickers": sum(r["stats"]["flickers"] for r in rows),
+        "one_look_people": sum(r["stats"].get("one_look_people", 0) for r in rows),
+        "one_look_only_evidence": {k: sum(1 for r in rows if r["stats"].get("one_look_only_evidence") == k)
+                                   for k in ("eye_saw_people", "eye_saw_nobody")},
+        "vehicle_tracks": sum(r["stats"]["vehicle_tracks"] for r in rows),
+        "parked_vehicles": sum(r["stats"].get("parked_vehicles", 0) for r in rows),
         "excess_vs_eye": {"clips": len(excess), "exact": sum(1 for e in excess if e == 0),
                           "over": sum(1 for e in excess if e > 0), "under": sum(1 for e in excess if e < 0),
                           "sum_over": sum(e for e in excess if e > 0)},
@@ -305,6 +328,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     p.add_argument("--weights", default="yolo11s.pt")
     p.add_argument("--person", type=float, default=0.8, help="The box's person certainty (conf_person).")
     p.add_argument("--conf", type=float, default=0.7, help="The box's certainty for everything else (inference_conf).")
+    p.add_argument("--track-person", type=float, default=None,
+                   help="People fed to the tracker from this score (the box's tracker_person_conf); default: --person.")
     p.add_argument("--every", type=int, default=1, help="Look at every Nth frame (1 = all 7 fps; 3 = about the box's pace).")
     p.add_argument("--device", default="")
     p.add_argument("--camera", default="", help="Only clips whose camera name contains this.")
@@ -316,7 +341,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     p.add_argument("--render-dir", default="", help="Default: <root>/renders")
     args = p.parse_args(argv)
 
-    detect = Detector(args.weights, args.person, args.conf, args.device)
+    detect = Detector(args.weights, args.person, args.conf, args.device, args.track_person)
     render_dir = args.render_dir or os.path.join(args.root, "renders")
     rows, rendered = [], 0
     for clip, meta_path in find_clips(args.root, args.camera):
@@ -333,6 +358,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         stem = os.path.splitext(clip)[0]
         doc = {"clip": os.path.relpath(clip, args.root), "camera": camera, "start_local": _local_hhmm(times[0]),
                "params": {"weights": args.weights, "person": args.person, "conf": args.conf, "every": args.every,
+                          "track_person": args.track_person,
                           "fresh_tracker_per_clip": True},
                "frames": len(frames), **result, "stats": stats}
         with open(stem + f".tracks{args.suffix}.json", "w", encoding="utf-8") as f:
