@@ -116,6 +116,18 @@ def artifact_role(info: KeyInfo) -> Optional[str]:
     return None
 
 
+def owner_answer(body: dict) -> dict:
+    """The owner's own answer in a box feedback file (box feedback.py ``record``), beyond what the shared contract's
+    parse_feedback keeps: the Telegram tag, his words, a voice transcript and who tagged (else the sender). Strings
+    only; anything else reads as ""."""
+    text = lambda name: body.get(name) if isinstance(body.get(name), str) else ""  # noqa: E731
+    sender = body.get("from")
+    sender = sender.get("name") if isinstance(sender, dict) else sender
+    return {"owner_label": text("owner_label").strip(), "owner_text": text("owner_text"),
+            "transcript": text("transcript"),
+            "tagged_by": text("tagged_by") or (sender if isinstance(sender, str) else "")}
+
+
 def _cut(value, n: int):
     return value[:n] if isinstance(value, str) else value
 
@@ -203,6 +215,7 @@ class _Run:
         self.body_names: set[tuple[str, str]] = set()  # names in the JSON bodies applied this pass (redact)
         self.cursors: dict[str, S3Cursor] = {}
         self.feedback: Optional[dict[str, Feedback]] = None
+        self.answers: dict[str, dict] = {}   # feedback key -> owner_answer() of the revision being applied
         self.events: dict[tuple[str, str], Event] = {}
         self.events_by_id: dict[int, Event] = {}
         self.dirty: set[tuple[str, str]] = set()  # (camera, stem) of events to rebuild
@@ -465,6 +478,7 @@ class _Run:
                     self.problem(key, "timestamp out of range: time_utc", etag)
                     continue
                 feedback.append((art, etag, rec))
+                self.answers[key] = owner_answer(body)
             else:
                 if not isinstance(body, dict):
                     self.problem(key, "invalid heartbeat body", etag)
@@ -498,6 +512,9 @@ class _Run:
             fb.verdict, fb.action = redact.verdict(rec.verdict) if rec.verdict else "", _cut(rec.action, 64)
             fb.note, fb.raw_text, fb.source = rec.note, rec.raw_text, _cut(rec.source, 64)
             fb.scope_camera = _cut(rec.scope_camera, 128)
+            answer = self.answers.get(art.s3_key) or owner_answer({})
+            fb.owner_label, fb.owner_text = _cut(answer["owner_label"], 32), answer["owner_text"]
+            fb.transcript, fb.tagged_by = answer["transcript"], _cut(answer["tagged_by"], 128)
             fb.received_at = rec.time_utc
             ev = by_stem.get(alert_stem) if alert_stem else None
             fb.event_id = ev.id if ev is not None else None

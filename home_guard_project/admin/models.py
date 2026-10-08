@@ -196,6 +196,9 @@ class FeedbackOut:
     raw_text: str
     source: str
     received_utc: datetime
+    owner_label: str = ''   # the owner's Telegram tag: normal / suspicious / escalation / empty / other / rule_mismatch
+    owner_text: str = ''
+    transcript: str = ''
 
 
 @dataclass

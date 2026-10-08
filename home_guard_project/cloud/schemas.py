@@ -207,6 +207,11 @@ class FeedbackOut(BaseModel):
     raw_text: str
     source: str
     received_utc: datetime
+    # the owner's Telegram tag (box feedback.py OWNER_LABELS), the owner's own words and a voice answer's
+    # transcript (0017); a labeler reads the tag only
+    owner_label: str = ""
+    owner_text: str = ""
+    transcript: str = ""
 
 
 class ArtifactOut(BaseModel):
@@ -595,3 +600,38 @@ class TaggingExportOut(BaseModel):
 
 class TeacherAnswer(BaseModel):
     suggestion: Optional[dict] = None
+
+
+# ---------------------------------------------------------------- the Inbox: owner answers from Telegram (0017)
+
+class InboxItem(BaseModel):
+    feedback_id: int
+    event_id: int
+    clip_key: str                      # the Tag · AI key of the clip ("ev:<event id>")
+    customer_id: int
+    customer: str
+    site: str
+    camera: str
+    camera_name: Optional[str]         # the owner's name for the camera, when the box reported one
+    received_utc: Optional[datetime]
+    owner_label: str                   # normal / suspicious / escalation / empty / other / rule_mismatch, or ""
+    owner_text: str
+    transcript: str
+    raw_text: str
+    note: str
+    verdict: str
+    source: str
+    tagged_by: str
+    model_label: Optional[str]         # what the model said (the event's label) and its summary
+    model_summary: str
+    model: Optional[str]
+    consent_training: bool
+    decision: Optional[Literal["accepted", "fixed", "not_label"]]
+    decided_by: Optional[str]
+    decided_utc: Optional[datetime]
+    decision_note: str = ""
+
+
+class InboxDecisionIn(BaseModel):
+    decision: Literal["accepted", "fixed", "not_label"]
+    note: str = ""
