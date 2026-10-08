@@ -188,6 +188,7 @@ class TimingAndFallbackTest(unittest.TestCase):
                 mock.patch.object(config, "load_config", return_value=cfg),
                 mock.patch.object(inf, "make_backend", return_value=model),
                 mock.patch.object(inf, "load_detector", return_value=(detector, None)),
+                mock.patch.object(inf, "start_events", return_value=None),   # no event book on this disk
                 mock.patch.object(inf, "_camera_streams", return_value=(adapters, dict.fromkeys(cfg.CAMERAS))),
                 mock.patch.object(inf, "LiveSettings"),
                 mock.patch.object(inf, "filter_by_thresholds", side_effect=lambda r, *a: r),

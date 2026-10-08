@@ -111,7 +111,7 @@ def apply_policy_override(parsed: Dict[str, Any], in_window: bool, person: bool,
 
 
 # Bumped whenever the prompt or the answer's schema changes, so training records can be told apart.
-PROMPT_VERSION = "2026-10-03.tagged-rules-label-animals-why-owner-facts"
+PROMPT_VERSION = "2026-10-08.actions-not-appearance-why-owner-facts"
 
 # The three labels the model gives a scene, and what the box does with each. The owner
 # chose them (this is also what a student model will be trained to answer):
@@ -163,6 +163,14 @@ def is_silent(label: str) -> bool:
 
 
 FACTS_PROVIDER: Optional[Callable] = None
+# The box's event book (events.EventBook), started by run() (start_events). None - tests, tools, a book that could
+# not start - sends every alert as before; with it, one ongoing activity per camera is one event and only a change
+# reaches the owner (owner decision 2026-10-08).
+EVENTS: Any = None
+# Every camera id this box knows (run() fills it): the last guard swaps any of them in an owner text for its name.
+KNOWN_CAMERAS: Tuple[str, ...] = ()
+EVENTS_TICK_SEC = 1.0
+VERIFY_TIMEOUT_SEC = 15.0        # the second look before a red waits at most this long, then the red goes out
 # Insertion order lets capacity eviction forget the oldest successful delivery first.
 _SOFTENED_DAYS: Dict[Tuple[str, str], None] = {}
 _SOFTENED_DAYS_LIMIT = 500
@@ -289,6 +297,56 @@ def owner_language() -> str:
         return "en"
 
 
+def camera_display(camera: str, lang: str) -> str:
+    """The name the owner reads for *camera* (camera_names.display_name): the family's name, else "מצלמה 6" /
+    "Camera 6", never the internal id (owner rule 2026-10-06, again 2026-10-08). The id itself if that fails."""
+    try:
+        from .camera_names import display_name  # noqa: PLC0415
+
+        return display_name(camera, lang) or camera
+    except Exception as exc:  # noqa: BLE001 - a name must never stop an alert
+        log.debug("[%s] no display name: %s", camera, exc)
+        return camera
+
+
+def _looks_like_id(name: str) -> bool:
+    """Only ids that cannot be ordinary words are swapped in free text: "gate" may be a word in the summary,
+    "ameer_week_0_1_ch6" never is."""
+    return "_" in name or any(ch.isdigit() for ch in name)
+
+
+def owner_guard(text: str, camera: str, lang: str) -> str:
+    """The last guard before an owner text goes out: every camera id the box knows (KNOWN_CAMERAS, *camera*, the
+    ids that have family names) replaced by its display name. Ids used as keys never pass through here."""
+    if not text:
+        return text
+    try:
+        from .camera_names import _load, replace_ids  # noqa: PLC0415
+
+        aliases = _load(None)
+        cameras = [c for c in {*KNOWN_CAMERAS, camera, *aliases} if c and _looks_like_id(str(c))]
+        return replace_ids(text, cameras, lang, aliases)
+    except Exception as exc:  # noqa: BLE001 - the text goes out as it is
+        log.debug("camera ids not replaced: %s", exc)
+        return text
+
+
+def start_events(box_settings: Mapping[str, Any]) -> Any:
+    """Start the box's event book (events.py) once, in the state folder; box.yaml ``notify_normal`` (default off)
+    lets the first normal of an event be a message. Never raises: without a book alerts go out as before."""
+    global EVENTS
+    try:
+        from . import events  # noqa: PLC0415
+
+        EVENTS = events.book(directory=os.path.join(paths.state_dir(), "events"),
+                             notify_normal=_on_off(box_settings.get("notify_normal", False), "notify_normal"))
+        log.info("Events on: one activity per camera is one event (notify_normal=%s)", EVENTS.notify_normal)
+    except Exception as exc:  # noqa: BLE001
+        EVENTS = None
+        log.warning("Event book not started (%s); every alert goes out on its own", exc)
+    return EVENTS
+
+
 _PLACEHOLDERS = ("an empty string", "empty string")
 
 
@@ -321,17 +379,20 @@ VLM_RESPONSE_FORMAT: Dict[str, Any] = {
 # The tagging rules for the three labels, shared by the guard loop's prompt and the
 # assistant's guard-mode look at a saved clip, so both judge a scene the same way.
 LABEL_RULES = """
-- "normal": everyday life - family and visitors, people talking, walking, standing or waiting, looking
-  at a phone, smoking, cleaning, carrying babies or bags into the house, deliveries, cars parking or
-  leaving, pets, or no special activity. A person standing still is normal unless they hide their face
-  or do something from the "suspicious" list.
-- "suspicious": something the homeowner should look at - faces hidden by hoods, masks or clothing,
-  lingering or loitering, looking around cautiously, looking into windows or cars, trying doors,
-  gates or car doors, walking around the property at night, hiding, or a vehicle waiting with no
-  clear purpose.
-- "escalation": a crime or danger in progress - a break-in or forced entry, breaking a door, window
-  or car, stealing and carrying things away, climbing a fence or wall into the property, a fight or
-  attack, a knife, gun or other weapon in hand, fire or smoke, a crash.
+- "normal": everyday life - family and visitors, workers and gardeners at work, people talking, walking,
+  standing or waiting, looking at a phone, smoking, cleaning, carrying babies, bags, tools or materials,
+  deliveries, cars parking or leaving and people getting into or out of them, pets, or no special activity.
+  A person standing still is normal unless they do something from the "suspicious" list.
+- "suspicious": an ACTION the homeowner should look at - trying a door handle, door, gate, window or car
+  door, looking into windows or cars, climbing, hiding, crouching at a door at night, lingering or walking
+  around the property at night, taking something and leaving, tampering with a camera, deliberately
+  covering the face WHILE approaching an entrance, or a vehicle waiting with no clear purpose.
+  Appearance is never by itself a reason: clothing, hoods, hoodies, masks, hats, sunglasses, dark clothes,
+  or a covered, hidden, blurred or pixelated face are NOT suspicious without one of these actions.
+- "escalation": a crime or danger in progress - a break-in or forced entry, breaking a door, window or
+  car, stealing and carrying things away, climbing a fence or wall into the property, a fight or attack,
+  a gun or knife clearly held as a weapon, fire or smoke, a crash, a person lying motionless. Long tools,
+  poles, boards, pipes, ladders, brooms and garden tools are tools, not weapons.
 """.strip()
 
 
@@ -366,18 +427,18 @@ Write "summary": what happens in the clip, in one to three short sentences (usua
 
 Then give the clip ONE "label":
 {LABEL_RULES}
-Dark clothing alone never makes a scene suspicious; judge what people do.
+Dark clothing alone never makes a scene suspicious; judge what people do, never how they look.
 
 Reply with EXACTLY ONE strict JSON object and nothing else:
 {{"summary": "<one to three short sentences>",
   "label": "normal" | "suspicious" | "escalation",
   "raw_label": "<normal | suspicious | escalation: judge the scene as if no house notes existed>",
   "applied_fact_id": "<the ID of the house note used for label; empty string when none; label judges WITH notes>",
-  "serious_behaviour": <true if the fact-free scene shows a hidden or covered face, trying doors, gates or car doors, or looking into windows or cars; otherwise false>,
+  "serious_behaviour": <true if the fact-free scene shows trying doors, gates, windows or car doors, looking into windows or cars, climbing, hiding, or covering the face while approaching an entrance; otherwise false>,
   "people": <how many people are visible in the frames, as a number; 0 if none>,
   "vehicle_moving": <true if a vehicle is driving, arriving or leaving; false if vehicles are only parked or there are none>,
   "animals": <how many animals (cats, dogs and other animals, not birds) are visible, as a number; 0 if none>,
-  "why": "<one short clause in {language} naming the behaviour behind a suspicious or escalation label; empty for normal>",
+  "why": "<one short clause in {language} naming the action behind a suspicious or escalation label (what the person does, never what they wear); empty for normal>",
   "summary_owner": "<{owner_rule}>"}}
 """.strip()
     live = _prompt_facts(facts, camera_name, t_sec if alert_ts is None else alert_ts)
@@ -554,6 +615,11 @@ class NullBackend:
         parsed = {"summary": ""}
         return json.dumps(parsed), parsed
 
+    def verify(self, frames_bgr: List[Any], question: str, language: str = "English",
+               timeout: float = 15.0) -> Optional[Dict[str, Any]]:
+        """No model to ask: no second look (the red stays red, marked not verified)."""
+        return None
+
 
 def usage_of(resp: Any) -> Dict[str, int]:
     """Tokens the provider billed for one call; zeros when it did not say."""
@@ -638,13 +704,43 @@ class GptBackend:
         self.last_model = answered.strip() if isinstance(answered, str) and answered.strip() else getattr(self, "_model", "")
         return raw, parse_vlm_json(raw)
 
-    def _complete(self, content: List[Dict[str, Any]], response_format: Dict[str, Any]) -> Any:
+    def _complete(self, content: List[Dict[str, Any]], response_format: Optional[Dict[str, Any]],
+                  timeout: Optional[float] = None) -> Any:
         kwargs: Dict[str, Any] = dict(model=self._model, messages=[{"role": "user", "content": content}],
-                                      temperature=0, response_format=response_format)
+                                      temperature=0)
+        if response_format:
+            kwargs["response_format"] = response_format
+        if timeout is not None:
+            kwargs["timeout"] = timeout
         extra = getattr(self, "_extra_body", None)
         if extra:
             kwargs["extra_body"] = extra
         return self._client.chat.completions.create(**kwargs)
+
+    def verify(self, frames_bgr: List[Any], question: str, language: str = "English",
+               timeout: float = 15.0) -> Optional[Dict[str, Any]]:
+        """The second look before a red (alert_guards): one focused yes/no question on the alert's own frames.
+
+        Returns ``{"confirmed", "what_it_is", "evidence_frame"}``, or None when the answer is not that JSON. Raises
+        on a failed call (the caller keeps the red and records why). *what_it_is* is asked in *language*, the
+        owner's, since it goes into the owner's text as it is."""
+        from .alert_guards import verify_prompt  # noqa: PLC0415
+
+        images = [d for d in (frame_to_jpeg_bytes(fr) for fr in frames_bgr) if d]
+        prompt = verify_prompt(question, len(images))
+        if language != "English":
+            prompt += f'\nWrite "what_it_is" in {language}.'
+        content: List[Dict[str, Any]] = [{"type": "text", "text": prompt}]
+        for data in images:
+            b64 = base64.b64encode(data).decode("utf-8")
+            content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
+        try:
+            resp = self._complete(content, {"type": "json_object"}, timeout=timeout)
+        except Exception as exc:  # noqa: BLE001
+            if "response_format" not in str(exc):
+                raise
+            resp = self._complete(content, None, timeout=timeout)
+        return verify_answer(parse_vlm_json(resp.choices[0].message.content or ""))
 
 
 class FallbackBackend:
@@ -688,6 +784,31 @@ class FallbackBackend:
         log.warning("[%s] VLM fallback to %s: %s", camera_name, getattr(self.fallback, "model_name", "?"), reason)
         self._last = self.fallback
         return self.fallback.analyze(frames_bgr, camera_name, t_sec, start_hour, end_hour, **kwargs)
+
+
+    def verify(self, frames_bgr: List[Any], question: str, **kwargs: Any) -> Optional[Dict[str, Any]]:
+        """The second look on *primary*; on an error or no usable answer, once on *fallback*."""
+        try:
+            answer = self.primary.verify(frames_bgr, question, **kwargs)
+            if answer is not None:
+                return answer
+            reason = "no usable answer"
+        except Exception as exc:  # noqa: BLE001 - any failure goes to the fallback
+            reason = f"{type(exc).__name__}: {exc}"
+        log.warning("second look: fallback to %s: %s", getattr(self.fallback, "model_name", "?"), reason)
+        return self.fallback.verify(frames_bgr, question, **kwargs)
+
+
+def verify_answer(parsed: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """The second look's answer checked: ``confirmed`` must be a real true/false; None otherwise."""
+    if not isinstance(parsed, dict) or not isinstance(parsed.get("confirmed"), bool):
+        return None
+    try:
+        frame = int(parsed.get("evidence_frame") or 0)
+    except (TypeError, ValueError, OverflowError):
+        frame = 0
+    return {"confirmed": parsed["confirmed"], "what_it_is": " ".join(str(parsed.get("what_it_is") or "").split())[:120],
+            "evidence_frame": max(0, frame)}
 
 
 def build_gpt(provider: str, model: str, env: Mapping[str, str], timeout: float = 30.0) -> GptBackend:
@@ -737,7 +858,8 @@ def dispatch_alert(box_settings: Dict[str, Any], env: Dict[str, str],
                    command: str, summary: str, reason: str,
                    image: Optional[bytes] = None,
                    assistant: Any = None, alert: Optional[Dict[str, Any]] = None,
-                   graded: Optional[str] = None, silent: bool = False, lang: str = "en") -> Dict[str, Any]:
+                   graded: Optional[str] = None, silent: bool = False, lang: str = "en",
+                   reply_to: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Send the alert over the configured channel(s). Never raises.
 
     *image* (JPEG bytes) is the camera snapshot; Telegram sends it as a photo.
@@ -745,17 +867,23 @@ def dispatch_alert(box_settings: Dict[str, Any], env: Dict[str, str],
     out with the feedback question and buttons, filed under *alert*: as the
     *graded* text (telegram_notify.graded_alert_text) when given, without a
     sound when *silent*, with the question and buttons in *lang*.
+    *reply_to* (an event's first message, events.Decision.reply_to) sends it as a
+    reply in that event's thread; an assistant whose send_alert does not take it
+    yet sends it as before.
     """
     channel = str(box_settings.get("alert_channel", "telegram"))
     results: Dict[str, Any] = {"channel": channel}
+    thread = {"reply_to": reply_to} if reply_to else {}
     try:
         if channel in ("telegram", "both"):
             from . import telegram_notify  # noqa: PLC0415
 
             text = graded or telegram_notify.alert_text(command, summary, reason)
             if assistant is not None and alert is not None and text is not None:
+                extra = thread if thread and _accepts(assistant.send_alert, "reply_to") else {}
                 results["telegram"] = {"command": command,
-                                       "telegram": assistant.send_alert(alert, text, image, silent=silent, lang=lang)}
+                                       "telegram": assistant.send_alert(alert, text, image, silent=silent, lang=lang,
+                                                                        **extra)}
             else:
                 cfg = telegram_notify.load_telegram_config(box_settings, env)
                 if alert and alert.get("applied_fact_id") and graded:
@@ -763,11 +891,12 @@ def dispatch_alert(box_settings: Dict[str, Any], env: Dict[str, str],
 
                     button = not_them_button(alert, lang)
                     markup = json.dumps({"inline_keyboard": [[button]]}) if button else None
-                    sent = (telegram_notify.send_photo(cfg, image, graded, silent=silent, reply_markup=markup) if image
-                            else telegram_notify.send_message(cfg, graded, silent=silent, reply_markup=markup))
+                    sent = (telegram_notify.send_photo(cfg, image, graded, silent=silent, reply_markup=markup, **thread)
+                            if image else
+                            telegram_notify.send_message(cfg, graded, silent=silent, reply_markup=markup, **thread))
                     results["telegram"] = {"command": command, "telegram": sent}
                 else:
-                    results["telegram"] = telegram_notify.notify(cfg, command, summary, reason, image=image)
+                    results["telegram"] = telegram_notify.notify(cfg, command, summary, reason, image=image, **thread)
         if channel in ("twilio", "both"):
             from . import notify as twilio_notify  # noqa: PLC0415
 
@@ -1482,6 +1611,15 @@ def _jpegs(frames: List[Any]) -> List[bytes]:
     return out
 
 
+def _accepts(func: Any, name: str) -> bool:
+    """Whether the callable *func* takes the keyword *name* (or any keyword)."""
+    try:
+        params = inspect.signature(func).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(p.name == name or p.kind is inspect.Parameter.VAR_KEYWORD for p in params)
+
+
 def _takes_kwarg(backend: Any, name: str) -> bool:
     """Whether *backend*.analyze accepts the keyword *name*: a backend that does not keeps today's prompt instead
     of failing on an unexpected argument."""
@@ -1612,6 +1750,143 @@ def _case_memory(job: Optional[AlertJob], camera: str, alert_ts: float, parsed: 
         return "alert", None, None
 
 
+def appearance_only(text: str) -> bool:
+    """alert_guards.appearance_only: the reason names only looks (mask, hood, covered face...), no action."""
+    from .alert_guards import appearance_only as only  # noqa: PLC0415
+
+    return only(text)
+
+
+def second_look(backend: Any, frames: List[Any], classes: Sequence[str], lang: str,
+                timeout: Optional[float] = None) -> Dict[str, Any]:
+    """Ask *backend* once, on the alert's own frames, whether the red's reason (*classes*: weapon / vehicle /
+    violence) is really there; never longer than *timeout* seconds (VERIFY_TIMEOUT_SEC). Never raises.
+
+    The record (the clip's ``second_look``): ``answered`` (a usable yes/no came back), ``confirmed``,
+    ``verified`` (answered AND confirmed: only then is the red's reminder scheduled), ``what_it_is``,
+    ``evidence_frame``, and ``reason`` when there was no answer (the red then goes out as it is)."""
+    from .alert_guards import verify_question  # noqa: PLC0415
+
+    timeout = VERIFY_TIMEOUT_SEC if timeout is None else timeout
+    question = verify_question(classes)
+    record: Dict[str, Any] = {"class": classes[0] if classes else "", "classes": list(classes), "question": question,
+                              "answered": False, "confirmed": None, "verified": False, "what_it_is": "",
+                              "evidence_frame": 0, "reason": ""}
+    verify = getattr(backend, "verify", None)
+    if not callable(verify):
+        record["reason"] = "the vision model cannot take a second look"
+        return record
+    kwargs: Dict[str, Any] = {}
+    if _accepts(verify, "language"):
+        kwargs["language"] = "Hebrew" if lang == "he" else "English"
+    if _accepts(verify, "timeout"):
+        kwargs["timeout"] = timeout
+    box: Dict[str, Any] = {}
+
+    def call() -> None:
+        try:
+            box["answer"] = verify(frames, question, **kwargs)
+        except Exception as exc:  # noqa: BLE001
+            box["error"] = f"{type(exc).__name__}: {exc}"
+
+    started = time.monotonic()
+    thread = threading.Thread(target=call, name="second-look", daemon=True)
+    thread.start()
+    thread.join(timeout)
+    record["seconds"] = round(time.monotonic() - started, 2)
+    answer = box.get("answer")
+    if thread.is_alive():
+        record["reason"] = f"no answer within {timeout:.0f} s"
+    elif "error" in box:
+        record["reason"] = box["error"][:300]
+    elif not isinstance(answer, dict) or not isinstance(answer.get("confirmed"), bool):
+        record["reason"] = "no usable answer"
+    else:
+        record.update(answered=True, confirmed=answer["confirmed"], verified=answer["confirmed"],
+                      what_it_is=str(answer.get("what_it_is") or ""), evidence_frame=answer.get("evidence_frame") or 0)
+    return record
+
+
+def _event_decision(camera: str, alert_ts: float, label: str, people: Optional[int], summary: str,
+                    alert_id: str) -> Any:
+    """The event book's say on this alert (events.Decision), or None without a book or on its failure (the alert
+    then goes out as before).
+
+    A clip without a label (the AI did not answer: an outage, the daily cap) is still the detector's alert: it goes
+    out once per event, as the first message of the event, and is recorded as a normal."""
+    book = EVENTS
+    if book is None:
+        return None
+    try:
+        decision = book.decide(camera, alert_ts, label if label in LABELS else "normal", people or 0, summary,
+                               alert_id)
+        if label not in LABELS and not decision.notify:
+            session = book.session_of_alert(alert_id) or {}
+            if session.get("reported_level", "none") == "none":
+                import dataclasses  # noqa: PLC0415
+
+                decision = dataclasses.replace(decision, notify=True,
+                                               reason="no label (the AI did not answer): first in this event")
+        return decision
+    except Exception as exc:  # noqa: BLE001 - the book must never lose an alert
+        log.warning("[%s] event book failed; sending as before: %s", camera, exc)
+        return None
+
+
+def _first_message(res: Any) -> Optional[Tuple[str, int]]:
+    """``(chat_id, message_id)`` of the first delivered message in a dispatch result, or None."""
+    found: List[Tuple[str, int]] = []
+
+    def walk(node: Any) -> None:
+        if found:
+            return
+        if isinstance(node, dict):
+            if node.get("ok") is True and node.get("message_id") is not None and node.get("chat_id") is not None:
+                try:
+                    found.append((str(node["chat_id"]), int(node["message_id"])))
+                except (TypeError, ValueError):
+                    pass
+                return
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(res)
+    return found[0] if found else None
+
+
+def _record_event_sent(event_sent: Optional[Dict[str, Any]], message: Optional[Tuple[str, int]]) -> None:
+    """Tell the event book the alert reached the owner (events.record_sent), with its first message when known.
+    Called once at delivery (so the next look of the same event is already quiet) and again from _save_clip with
+    the message id of an alert that waited for its video. Never raises."""
+    if EVENTS is None or not event_sent:
+        return
+    chat_id, message_id = message if message else (None, None)
+    try:
+        EVENTS.record_sent(event_sent["session_id"], event_sent["label"], event_sent["people"], event_sent["ts"],
+                           alert_id=event_sent["alert_id"], chat_id=chat_id, message_id=message_id)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("event not marked as sent: %s", exc)
+
+
+def _record_held_message(job: AlertJob, assistant: Any) -> None:
+    """An alert that waited for its video got its message id only now: file it as the event's first message, so
+    later updates of the same event reply in its thread. Never raises."""
+    event_sent = (job.alert or {}).get("event_sent")
+    if EVENTS is None or not event_sent or event_sent.get("message_recorded"):
+        return
+    try:
+        index = getattr(assistant, "index", None)
+        messages = index.messages(job.stem) if index is not None else []
+        if messages:
+            _record_event_sent(event_sent, (str(messages[0][0]), int(messages[0][1])))
+            event_sent["message_recorded"] = True
+    except Exception as exc:  # noqa: BLE001
+        log.debug("[%s] event message not recorded: %s", job.camera, exc)
+
+
 def _worker(backend, box_settings, env, settings: AlertSettings,
             camera_name: str, frames: List[Any],
             assistant: Any = None, job: Optional[AlertJob] = None, status: Any = None,
@@ -1731,7 +2006,51 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
             if status is not None:
                 status.decision(camera_name, labels, summary, "[none]", sent=False, false_positive=True, label=label)
             return
+        # Appearance alone is never suspicious (owner, 2026-10-08): a "suspicious" whose reason names only looks is
+        # a normal. A house note's verdict is the owner's own and is left alone; escalation is never touched here.
+        if label == "suspicious" and not fact and appearance_only(f"{why} {reason}"):
+            log.info("[%s] suspicious only for appearance (%s); normal", camera_name, why or reason)
+            label = shown_label = "normal"
+            cmd = LABEL_COMMANDS[label]
+            decision.update(label=label, final_label=label, downgraded="appearance only")
+        # A red for a weapon, a car break-in or violence from one answer gets a second look first; clear serious
+        # things (a break-in into the house, climbing in, fire, a person lying still) go out at once.
+        look: Optional[Dict[str, Any]] = None
+        look_line = ""
+        if label == "escalation":
+            from .alert_guards import verify_classes  # noqa: PLC0415
+
+            classes = verify_classes(f"{why} {reason} {summary}")
+            if classes:
+                look = second_look(backend, frames, classes, lang)
+                decision["second_look"] = look
+                log.info("[%s] second look (%s): %s", camera_name, ",".join(classes),
+                         look.get("reason") or ("confirmed" if look["confirmed"] else f"not so: {look['what_it_is']}"))
+                if look["answered"] and look["confirmed"] is False:
+                    from .alert_texts import second_look as second_look_line  # noqa: PLC0415
+
+                    label = shown_label = "suspicious"
+                    cmd = LABEL_COMMANDS[label]
+                    decision.update(label=label, final_label=label)
+                    look_line = second_look_line(look["class"], look["what_it_is"], look["evidence_frame"], lang)
+        # The reminder ("nobody answered") only for a red that is sure: verified, or a clear class.
+        remind = label == "escalation" and (look is None or bool(look.get("verified")))
         log.info("[%s] alert=%s label=%s summary=%s", camera_name, cmd, label, summary)
+        muted = bool(assistant is not None and assistant.is_muted(camera_name))
+        alert_id = job.stem if job is not None else f"{camera_name}_{int(alert_ts)}"
+        # One ongoing activity per camera is one event; only a change reaches the owner (events.py). Code decides,
+        # never the model. Without a book (tests, tools) every alert goes out as before.
+        event = None if muted else _event_decision(camera_name, alert_ts, label, people, summary, alert_id)
+        if event is not None and not event.notify:
+            log.info("[%s] not sent (%s): %s", camera_name, event.reason, summary)
+            if status is not None:
+                status.decision(camera_name, labels, summary, cmd, sent=False, error=event.reason, label=label)
+            if job is not None:
+                job.alert = {**decision, "summary": summary, "alert_command": cmd, "alert_reason": reason,
+                             "labels": job.labels, "muted": False, "why": why, "summary_owner": summary_owner,
+                             "people": people, "sent": False, "event": event.record(),
+                             "not_sent_reason": event.reason, "dispatch": {"sent": False, "reason": event.reason}}
+            return
         # Attach the most recent frame of the clip as the alert snapshot.
         image = b""
         try:
@@ -1739,7 +2058,6 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
             image = frame_to_jpeg_bytes(snapshot) if snapshot is not None else b""
         except Exception as exc:  # noqa: BLE001
             log.warning("[%s] could not encode snapshot: %s", camera_name, exc)
-        muted = bool(assistant is not None and assistant.is_muted(camera_name))
         # Case memory (case_memory/INTEGRATION.md section 1): a precedent the owner explained may lower this
         # delivery one step, and adds a line saying why. Outside the softened lock: the judge may take seconds.
         level, case_note, case_signature = "alert", None, None
@@ -1750,6 +2068,7 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
         if level == "digest":
             log.info("[%s] case memory chose the digest, which the box doesn't have yet; sending quietly", camera_name)
         case_line = case_note.text(lang) if case_note is not None else ""
+        event_sent: Optional[Dict[str, Any]] = None
         # Serialize softened deliveries so concurrent workers cannot both claim the first sound.
         with _SOFTENED_LOCK if softened else nullcontext():
             sound_key = (fact["id"], datetime.fromtimestamp(alert_ts).date().isoformat()) if softened else None
@@ -1774,29 +2093,49 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                                  "ts": job.ts}
                     if fact:
                         alert_ref.update(softened=softened, applied_fact_id=fact["id"])
-                owner_text, owner_why = owner_summary(summary, summary_owner, lang), why
+                # The owner reads the camera's name, never its id (camera_names.display_name).
+                shown_camera = camera_display(camera_name, lang)
+                told_text, owner_why = owner_summary(summary, summary_owner, lang), why
                 if messenger.uses_translator(box_settings, lang):
                     # A house note's reason is already in the box language; only the model's own why is translated.
                     told = messenger.messenger_for(box_settings, env).to_owner(
-                        {"summary": summary, "why": "" if fact else why, "summary_owner": summary_owner},
-                        lang, keep=(camera_name,))
-                    owner_text, owner_why = told["summary"], why if fact else told["why"]
-                graded = graded_alert_text(shown_label, camera_name, owner_text, owner_why, lang)
+                        {"summary": owner_guard(summary, camera_name, lang),
+                         "why": "" if fact else owner_guard(why, camera_name, lang), "summary_owner": summary_owner},
+                        lang, keep=(shown_camera,))
+                    told_text, owner_why = told["summary"], why if fact else told["why"]
+                graded = graded_alert_text(shown_label, shown_camera, told_text, owner_why, lang)
                 if softened:
-                    sentence = owner_text.rstrip(". ")
-                    graded = f"🟢 {camera_name}: {sentence}. {why}"
+                    sentence = told_text.rstrip(". ")
+                    graded = f"🟢 {shown_camera}: {sentence}. {why}"
+                if look_line:
+                    graded = f"{graded}\n{look_line}"
                 if case_line:
                     graded = f"{graded}\n{case_line}"
-                res = dispatch_alert(box_settings, env, cmd, f"{camera_name}: {alert_summary(label, summary)}", reason,
+                if event is not None and event.new_people > 0 and event.reply_to is not None:
+                    from .alert_texts import more_people  # noqa: PLC0415
+
+                    graded = f"{more_people(event.new_people, lang)}\n{graded}"
+                graded = owner_guard(graded, camera_name, lang)
+                plain = owner_guard(f"{shown_camera}: {alert_summary(label, summary)}", camera_name, lang)
+                thread = {"reply_to": event.reply_to} if event is not None and event.reply_to else {}
+                res = dispatch_alert(box_settings, env, cmd, plain, owner_guard(reason, camera_name, lang),
                                      image=image or None, assistant=assistant, alert=alert_ref, graded=graded,
-                                     silent=silent, lang=lang)
+                                     silent=silent, lang=lang, **thread)
                 if softened and delivery(res)[0]:
                     if sound_key not in _SOFTENED_DAYS:
                         while len(_SOFTENED_DAYS) >= _SOFTENED_DAYS_LIMIT:
                             del _SOFTENED_DAYS[next(iter(_SOFTENED_DAYS))]
                         _SOFTENED_DAYS[sound_key] = None
                 log.info("[%s] alert dispatched: %s", camera_name, res)
-                if label == "escalation" and assistant is not None and alert_ref and delivery(res)[0]:
+                if event is not None and delivery(res)[0]:
+                    # Recorded at once, so the next look of the same activity is already quiet; an alert that
+                    # waits for its video gets its message id filed by _save_clip.
+                    first = _first_message(res)
+                    event_sent = {"session_id": event.session_id, "label": label if label in LABELS else "normal",
+                                  "people": people or 0, "ts": alert_ts, "alert_id": alert_id,
+                                  "message_recorded": first is not None}
+                    _record_event_sent(event_sent, first)
+                if remind and assistant is not None and alert_ref and delivery(res)[0]:
                     try:
                         assistant.remind_if_silent(alert_ref, graded, lang)
                     except Exception as exc:  # noqa: BLE001 - a missed reminder must not lose the alert's record
@@ -1812,6 +2151,8 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                          "delivery_level": level, "case_memory": case_note.record() if case_note is not None else None,
                          "case_buttons": list(case_note.buttons) if case_note is not None else [],
                          "case_signature": case_signature}
+            if event is not None:
+                job.alert.update(sent=delivery(res)[0], event=event.record(), event_sent=event_sent)
     except Exception as exc:  # noqa: BLE001
         log.warning("[%s] worker error: %s", camera_name, exc)
     finally:
@@ -1858,6 +2199,7 @@ def _save_clip(job: AlertJob, frames: List[Any], production_dir: str, training_d
             res = assistant.send_clip(job.stem, clip_file(production_dir, meta) if meta else "",
                                       silent=bool(alert.get("silent")))
             log.info("[%s] video %s", job.camera, "sent" if res.get("sent") else f"not sent: {res}")
+            _record_held_message(job, assistant)
     except Exception as exc:  # noqa: BLE001
         log.warning("[%s] could not save the clip %s: %s", job.camera, job.stem, exc)
 
@@ -1925,6 +2267,7 @@ def serve_without_cameras(box_settings: Dict[str, Any], env: Dict[str, str], tur
 
 
 def run() -> int:
+    global KNOWN_CAMERAS
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", stream=sys.stdout)
     # Use the OS certificate store for all HTTPS (urllib + httpx), so Telegram
     # and OpenAI work on networks that intercept TLS (an antivirus / proxy whose
@@ -1970,6 +2313,8 @@ def run() -> int:
         from .alert_settings import camera_names  # noqa: PLC0415
 
         return serve_without_cameras(box_settings, env, camera_names())
+    KNOWN_CAMERAS = tuple(cameras)
+    book = start_events(box_settings)
     # Every alert is saved as a clip (the seconds around it) in the production folder,
     # and the owner can answer it in Telegram. Neither may stop the alerts themselves.
     from .alert_clips import POST_SECONDS, PRE_SECONDS, alert_stem  # noqa: PLC0415
@@ -2083,6 +2428,7 @@ def run() -> int:
 
     log.info("Watching %d camera(s): %s", len(cameras), ", ".join(cameras))
     started = time.time()   # no camera counts as offline before it had a minute to deliver its first picture
+    last_tick = 0.0          # the event book closes idle events about once a second
     try:
         while True:
             now_ts = time.time()
@@ -2123,6 +2469,12 @@ def run() -> int:
                         last_memory_log = now_ts
                     except Exception as exc:  # noqa: BLE001
                         log.warning("Clip memory not measured: %s", exc)
+            if book is not None and now_ts - last_tick >= EVENTS_TICK_SEC:
+                last_tick = now_ts
+                try:
+                    book.tick(now_ts)
+                except Exception as exc:  # noqa: BLE001 - events must never stop the alerts
+                    log.warning("Event book tick failed: %s", exc)
             due_worker = _start_due_alerts(pending, now_ts, cam_cfg, model, streams, main_caps, predict_args,
                                            backend, box_settings, env, settings, assistant, status,
                                            PRODUCTION_LIVE_DIR, LIVE_DIR, trackers=trackers)
@@ -2203,6 +2555,14 @@ def run() -> int:
                 except Exception as exc:  # noqa: BLE001
                     log.warning("[%s] vehicle reference not updated: %s", name, exc)
                     continue
+                # Every look keeps the camera's event alive while someone is there (events.EventBook.activity):
+                # the people the thresholds kept, and vehicles only when they moved - a parked car is no activity.
+                if book is not None:
+                    try:
+                        book.activity(name, seen_ts, people=count_people(results[0]) if results else 0,
+                                      vehicles=len(boxes) if moved else 0)
+                    except Exception as exc:  # noqa: BLE001 - events must never stop the alerts
+                        log.debug("[%s] event activity not recorded: %s", name, exc)
                 if quiet_on:
                     try:
                         result = results[0] if results else None

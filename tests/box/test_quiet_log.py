@@ -275,6 +275,7 @@ class RunTest(unittest.TestCase):
                 mock.patch.object(telegram_agent, "start", return_value=None),
                 mock.patch.object(inf, "dispatch_alert"),
                 mock.patch.object(inf, "_start_due_alerts", side_effect=drain),
+                mock.patch.object(inf, "start_events", return_value=None),   # no event book on this disk
                 mock.patch.object(inf, "_save_quiet", side_effect=lambda ev, frames, root: saved.append((ev, frames))),
                 mock.patch.object(inf.time, "time", side_effect=lambda: clock[0]),
                 mock.patch.object(inf.time, "sleep", side_effect=sleep),

@@ -109,9 +109,35 @@ def _notification_fields(silent: bool, reply_markup: Optional[str]) -> Dict[str,
     return fields
 
 
+def reply_fields(chat_id: Any, reply_to: Optional[Dict[str, Any]]) -> Dict[str, str]:
+    """Telegram fields that send a message as a reply in an event's thread.
+
+    *reply_to* is the event's first message, ``{"chat_id", "message_id"}`` (events.Decision.reply_to). A message
+    id belongs to one chat, so only that chat's message replies; the others go out as before. A thread whose first
+    message was deleted still gets the message (``allow_sending_without_reply``)."""
+    if not isinstance(reply_to, dict) or reply_to.get("message_id") is None:
+        return {}
+    owner = reply_to.get("chat_id")
+    if owner not in (None, "", "None") and str(owner) != str(chat_id):
+        return {}
+    try:
+        return {"reply_to_message_id": str(int(reply_to["message_id"])), "allow_sending_without_reply": "true"}
+    except (TypeError, ValueError):
+        return {}
+
+
+def _message_id(resp: Dict[str, Any]) -> Optional[int]:
+    result = resp.get("result") if isinstance(resp, dict) else None
+    return result.get("message_id") if isinstance(result, dict) else None
+
+
 def send_photo(cfg: TelegramConfig, image_bytes: bytes, caption: str = "", *,
-               silent: bool = False, reply_markup: Optional[str] = None) -> Dict[str, Any]:
-    """Send a JPEG photo with an optional caption to every chat. Never raises."""
+               silent: bool = False, reply_markup: Optional[str] = None,
+               reply_to: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Send a JPEG photo with an optional caption to every chat. Never raises.
+
+    With *reply_to* (an event's first message) the photo is a reply in that thread. Each chat's result carries
+    the ``message_id`` Telegram gave it."""
     if cfg.dry_run or not cfg.enabled:
         reason = "dry_run" if cfg.dry_run else "not_configured"
         log.info("Telegram photo not sent (%s): %s", reason, caption)
@@ -121,11 +147,12 @@ def send_photo(cfg: TelegramConfig, image_bytes: bytes, caption: str = "", *,
         try:
             resp = _http_post_multipart(
                 cfg.bot_token, "sendPhoto",
-                {"chat_id": chat_id, "caption": caption, **_notification_fields(silent, reply_markup)},
+                {"chat_id": chat_id, "caption": caption, **_notification_fields(silent, reply_markup),
+                 **reply_fields(chat_id, reply_to)},
                 {"photo": ("alert.jpg", image_bytes, "image/jpeg")},
             )
             ok = bool(resp.get("ok"))
-            results.append({"chat_id": chat_id, "ok": ok})
+            results.append({"chat_id": chat_id, "ok": ok, "message_id": _message_id(resp)})
             if not ok:
                 log.warning("Telegram sendPhoto not ok for %s: %s", chat_id, resp.get("description"))
         except (urllib.error.URLError, OSError) as exc:
@@ -135,8 +162,11 @@ def send_photo(cfg: TelegramConfig, image_bytes: bytes, caption: str = "", *,
 
 
 def send_message(cfg: TelegramConfig, text: str, *, silent: bool = False,
-                 reply_markup: Optional[str] = None) -> Dict[str, Any]:
-    """Send *text* to every configured chat. Never raises; returns a status dict."""
+                 reply_markup: Optional[str] = None, reply_to: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Send *text* to every configured chat. Never raises; returns a status dict.
+
+    With *reply_to* (an event's first message) the text is a reply in that thread. Each chat's result carries
+    the ``message_id`` Telegram gave it."""
     if cfg.dry_run or not cfg.enabled:
         reason = "dry_run" if cfg.dry_run else "not_configured"
         log.info("Telegram not sent (%s): %s", reason, text)
@@ -145,9 +175,10 @@ def send_message(cfg: TelegramConfig, text: str, *, silent: bool = False,
     for chat_id in cfg.chat_ids:
         try:
             resp = _http_post(cfg.bot_token, "sendMessage",
-                              {"chat_id": chat_id, "text": text, **_notification_fields(silent, reply_markup)})
+                              {"chat_id": chat_id, "text": text, **_notification_fields(silent, reply_markup),
+                               **reply_fields(chat_id, reply_to)})
             ok = bool(resp.get("ok"))
-            results.append({"chat_id": chat_id, "ok": ok})
+            results.append({"chat_id": chat_id, "ok": ok, "message_id": _message_id(resp)})
             if not ok:
                 log.warning("Telegram sendMessage not ok for %s: %s", chat_id, resp.get("description"))
         except (urllib.error.URLError, OSError) as exc:
@@ -180,17 +211,19 @@ def graded_alert_text(label: str, camera: str, summary: str, why: str = "", lang
 
 
 def notify(cfg: TelegramConfig, command: str, summary: str = "", reason: str = "",
-           image: Optional[bytes] = None) -> Dict[str, Any]:
+           image: Optional[bytes] = None, reply_to: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Dispatch on an alert_command. Telegram cannot place calls, so
     ``[call_owner]`` is sent as a prominent urgent message. When *image* (JPEG
     bytes) is given, the alert is sent as a photo with the text as its caption.
+    With *reply_to* (an event's first message) it is a reply in that thread.
     """
     text = alert_text(command, summary, reason)
     if text is None:
         return {"command": command, "sent": False}
+    extra = {"reply_to": reply_to} if reply_to else {}
     if image:
-        return {"command": command, "telegram": send_photo(cfg, image, text)}
-    return {"command": command, "telegram": send_message(cfg, text)}
+        return {"command": command, "telegram": send_photo(cfg, image, text, **extra)}
+    return {"command": command, "telegram": send_message(cfg, text, **extra)}
 
 
 def discover_chats(token: str) -> List[Dict[str, str]]:
