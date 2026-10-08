@@ -213,3 +213,27 @@ def test_chat_tab_loads_only_when_opened_and_shows_the_conversation(widgets, wai
     assert chat.clear_search.isVisibleTo(chat) and 'match' in chat.status.text()
     screen.tabs.setCurrentIndex(0); screen.tabs.setCurrentWidget(chat)
     assert len(calls) == 2  # coming back to the tab does not read it again
+
+
+def test_launcher_starts_the_app_with_a_windowless_interpreter(tmp_path):
+    """uv's .venv\Scripts\pythonw.exe is a console launcher (a terminal opened behind the app); the launcher runs the
+    base interpreter's real pythonw.exe on admin/windowless.py, which must start the app with the venv's packages."""
+    import os
+    import struct
+    import subprocess
+    import sys
+    from pathlib import Path
+    repo = Path(__file__).resolve().parents[2]
+    script = (repo / 'home_guard_project' / 'cloud' / 'launch_admin.ps1').read_text(encoding='utf-8')
+    assert 'windowless.py' in script and '"-I"' in script and '.venv\Scripts\pythonw.exe"' not in script
+    if sys.platform != 'win32':
+        pytest.skip('Windows launcher')
+    home = Path(sys._base_executable).parent
+    data = (home / 'pythonw.exe').read_bytes()
+    pe = struct.unpack_from('<I', data, 0x3C)[0]
+    assert struct.unpack_from('<H', data, pe + 0x5C)[0] == 2  # IMAGE_SUBSYSTEM_WINDOWS_GUI: no console
+    env = {k: v for k, v in os.environ.items() if k not in ('SSLKEYLOGFILE', 'PYTHONSTARTUP', 'PYTHONPATH')}
+    env['HG_ADMIN_VENV'] = sys.prefix
+    result = subprocess.run([str(home / 'python.exe'), '-I', str(repo / 'home_guard_project' / 'admin' / 'windowless.py'),
+                             '--demo', '--smoke-test'], cwd=tmp_path, env=env, capture_output=True, timeout=60)
+    assert result.returncode == 0, result.stderr.decode(errors='replace')[-2000:]

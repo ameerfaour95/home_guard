@@ -65,9 +65,17 @@ if (-not (Test-Port $Port)) {
 $appArgs = @("--server", "http://127.0.0.1:$Port", "--local")
 # The app runs from this folder's code, so it is always the current version. The packaged exe in dist\ is a
 # snapshot that is only rebuilt by hand (and Windows Smart App Control can block it): it is the fallback.
-$pythonw = Join-Path $repo ".venv\Scripts\pythonw.exe"
-if (Test-Path $pythonw) {
-    Start-Process -FilePath $pythonw -ArgumentList (@("-m", "home_guard_project.admin") + $appArgs) -WorkingDirectory $repo
+# uv makes .venv\Scripts\pythonw.exe a console launcher (it runs python.exe), which opened a terminal window behind
+# the app; the base interpreter's real pythonw.exe (pyvenv.cfg "home") runs admin\windowless.py, which adds the venv.
+$pythonw = ""
+$cfg = Join-Path $repo ".venv\pyvenv.cfg"
+if (Test-Path $cfg) {
+    $homeLine = Get-Content $cfg | Where-Object { $_ -match '^\s*home\s*=' } | Select-Object -First 1
+    if ($homeLine) { $pythonw = Join-Path ($homeLine -replace '^\s*home\s*=\s*', '').Trim() "pythonw.exe" }
+}
+$starter = Join-Path $repo "home_guard_project\admin\windowless.py"
+if ($pythonw -and (Test-Path $pythonw) -and (Test-Path $starter)) {
+    Start-Process -FilePath $pythonw -ArgumentList (@("-I", "`"$starter`"") + $appArgs) -WorkingDirectory $repo
 } else {
     Start-Process -FilePath $App -ArgumentList $appArgs
 }
