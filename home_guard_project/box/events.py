@@ -126,6 +126,9 @@ class EventBook:
         self._known: List[Known] = []
         self._by_alert: Dict[str, str] = {}
         self._closed: List[Session] = []          # newest last, capped; the file holds the rest
+        # Called with every session as it is archived (event_memory.attach adds the long-term memory's writer).
+        # A hook must not raise; one that does is logged and the others still run.
+        self.archive_hooks: List[Any] = []          # callables taking the Session
         os.makedirs(directory, exist_ok=True)
         self._load_known()
 
@@ -159,6 +162,11 @@ class EventBook:
                 f.write(json.dumps(asdict(s), ensure_ascii=False) + "\n")
         except OSError as exc:
             log.warning("event %s not archived: %s", s.id, exc)
+        for hook in list(self.archive_hooks):
+            try:
+                hook(s)
+            except Exception as exc:  # noqa: BLE001 - the long-term memory must never stop the book
+                log.warning("event %s: archive hook failed: %s", s.id, exc)
 
     # ---------- sessions ----------
     def _close(self, camera: str, now: float) -> Optional[Session]:
