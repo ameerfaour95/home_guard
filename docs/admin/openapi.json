@@ -1645,6 +1645,28 @@
             ],
             "title": "Label"
           },
+          "outcome": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome"
+          },
+          "outcome_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome Code"
+          },
           "owner_verdicts": {
             "items": {
               "type": "string"
@@ -1660,6 +1682,17 @@
           "reviewed": {
             "title": "Reviewed",
             "type": "boolean"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
           },
           "site": {
             "title": "Site",
@@ -1689,6 +1722,17 @@
             "default": "UTC",
             "title": "Timezone",
             "type": "string"
+          },
+          "would_raise": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Would Raise"
           }
         },
         "required": [
@@ -1765,6 +1809,52 @@
           "next_cursor"
         ],
         "title": "EventPage",
+        "type": "object"
+      },
+      "EventSession": {
+        "description": "One event (the box's session: one ongoing activity at one camera) over its clips.",
+        "properties": {
+          "camera": {
+            "title": "Camera",
+            "type": "string"
+          },
+          "clips": {
+            "title": "Clips",
+            "type": "integer"
+          },
+          "first_utc": {
+            "format": "date-time",
+            "title": "First Utc",
+            "type": "string"
+          },
+          "last_utc": {
+            "format": "date-time",
+            "title": "Last Utc",
+            "type": "string"
+          },
+          "sent": {
+            "title": "Sent",
+            "type": "integer"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "site": {
+            "title": "Site",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "site",
+          "camera",
+          "first_utc",
+          "last_utc",
+          "clips",
+          "sent"
+        ],
+        "title": "EventSession",
         "type": "object"
       },
       "EventSummary": {
@@ -1857,6 +1947,28 @@
             ],
             "title": "Label"
           },
+          "outcome": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome"
+          },
+          "outcome_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome Code"
+          },
           "owner_verdicts": {
             "items": {
               "type": "string"
@@ -1867,6 +1979,17 @@
           "reviewed": {
             "title": "Reviewed",
             "type": "boolean"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
           },
           "site": {
             "title": "Site",
@@ -1896,6 +2019,17 @@
             "default": "UTC",
             "title": "Timezone",
             "type": "string"
+          },
+          "would_raise": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Would Raise"
           }
         },
         "required": [
@@ -4166,6 +4300,22 @@
           },
           {
             "in": "query",
+            "name": "would_raise",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Would Raise"
+            }
+          },
+          {
+            "in": "query",
             "name": "with_total",
             "required": false,
             "schema": {
@@ -4393,6 +4543,62 @@
           }
         ],
         "summary": "Review Count",
+        "tags": [
+          "events"
+        ]
+      }
+    },
+    "/v1/events/sessions": {
+      "get": {
+        "operationId": "event_sessions_v1_events_sessions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "session_id",
+            "required": false,
+            "schema": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100,
+              "title": "Session Id",
+              "type": "array"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EventSession"
+                  },
+                  "title": "Response Event Sessions V1 Events Sessions Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Event Sessions",
         "tags": [
           "events"
         ]

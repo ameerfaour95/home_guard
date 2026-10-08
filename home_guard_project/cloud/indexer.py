@@ -41,6 +41,7 @@ from sqlalchemy import and_, exists, or_, select, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
+from home_guard_project.fleet_contract import event_outcome
 from home_guard_project.fleet_contract._time import parse_utc
 from home_guard_project.fleet_contract.keys import KeyInfo, parse_key, stem_kind
 from home_guard_project.fleet_contract.legacy import ClipRecord, parse_feedback, parse_heartbeat, parse_meta
@@ -58,6 +59,7 @@ INDEXED_AREAS = {"meta", "clips", "feedback", "status", "responses", "vlm_crops"
 INDEXED_DIRS = {"meta", "clips", "feedback", "_status", "responses", "vlm_crops", "yolo"}
 EVENT_ROLES = ("original_video", "meta", "raw_answer", "teacher_frame", "crop_video", "yolo_image", "yolo_label")
 AI_RANK = {"none": 0, "fallback": 1, "failed": 2, "real": 3}
+DECISION_BACKFILL = 500  # events without a parsed event-layer decision rebuilt per pass (from stored revisions)
 FULL_SCAN_EVERY = timedelta(minutes=30)
 PRODUCTION_RETENTION = timedelta(days=14)
 INVALID_JSON = "_invalid_json"  # RawRevision body marker for an object that is not storable JSON
@@ -567,6 +569,8 @@ class _Run:
             winner = self.best_ai(current, metas, history)
             if current:
                 self.merge(ev, current, winner)
+            elif ev.decision is None:
+                ev.decision = {"v": event_outcome.VERSION}  # nothing to read: never picked up by the backfill again
             ev.updated_at = self.now
             meta_feedback = _union_owner_feedback(
                 self.parse(a.s3_key, etag, body)[0]
@@ -697,6 +701,10 @@ class _Run:
         prod = current.get("production")
         ev.dispatch = prod.rec.dispatch if prod is not None else None
         ev.muted = _raw_muted(prod.body) if prod is not None else None
+        # the box's event layer: its session and what it did with the clip (the production copy, else the training one)
+        decided = event_outcome.decision_of((prod or ordered[0]).body)
+        ev.decision, ev.session_id = decided, event_outcome.session_id(decided) or None
+        ev.would_raise = event_outcome.would_raise(decided)
         ev.detected = next((r.detected for r in recs if r.detected), [])
         ev.class_max_conf = next((r.class_max_conf for r in recs if r.class_max_conf), {})
         ev.duration_sec = first("duration_sec")
@@ -743,6 +751,9 @@ class _Run:
             rows = self.load_feedback()
             self.dirty_ids |= {rows[a.s3_key].event_id for a, _, _ in feedback
                                if a.s3_key in rows and rows[a.s3_key].event_id is not None}
+        # events indexed before the event layer was read (migration 0018): rebuilt from stored revisions, a chunk a pass
+        self.dirty_ids |= set(self.session.scalars(select(Event.id).where(
+            Event.device_pk == self.device.id, Event.decision.is_(None)).order_by(Event.id).limit(DECISION_BACKFILL)))
         self.load_events(self.dirty, self.dirty_ids, stems)
         self.apply_feedback(feedback)
         self.rebuild_all()

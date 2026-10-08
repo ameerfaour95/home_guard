@@ -159,6 +159,25 @@ class EventSummary(BaseModel):
     thumbnail_url: Optional[str]
     timezone: str = "UTC"
     annotation_status: Optional[str] = None  # new|edited|submitted|reviewed|rejected (None = never opened)
+    # The box's event layer (fleet_contract.event_outcome): the session the clip belongs to, what happened to it
+    # ("Sent", "Kept in the event, not sent (normal)", "Not sent: owner said known (...)", ...; null for a clip that
+    # predates events) with its code (sent|undelivered|held|known|not_ours|muted|dismissed|none), and whether the
+    # baseline in shadow mode would have raised it ("rare for this camera").
+    session_id: Optional[str] = None
+    outcome: Optional[str] = None
+    outcome_code: Optional[str] = None
+    would_raise: Optional[bool] = None
+
+
+class EventSession(BaseModel):
+    """One event (the box's session: one ongoing activity at one camera) over its clips."""
+    session_id: str
+    site: str
+    camera: str
+    first_utc: datetime
+    last_utc: datetime
+    clips: int
+    sent: int
 
 
 class EventPage(BaseModel):

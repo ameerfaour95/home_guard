@@ -29,6 +29,7 @@ from sqlalchemy import BigInteger, Integer, and_, cast, false, func, literal, or
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
+from home_guard_project.fleet_contract import event_outcome
 from home_guard_project.fleet_contract.classes import COCO_NAMES
 from home_guard_project.fleet_contract.keys import parse_key
 from home_guard_project.fleet_contract.legacy import parse_heartbeat, parse_meta
@@ -42,7 +43,8 @@ from ..models import (AiRun, AnnotationHead, Artifact, AuditLog, Camera, Collect
                       Device, Event, Feedback, IndexProblem, RawRevision, ReviewState, Staff)
 from ..s3 import ETagMismatch
 from ..schemas import (AiRunOut, ArtifactOut, Box, DensityOut, DensityRow, DetectionsOut, DispatchOut, EventDetail,
-                       AiStatus, EventKind, EventPage, EventSummary, FeedbackOut, FrameBoxes, ReviewCount, ReviewUpdate)
+                       AiStatus, EventKind, EventPage, EventSession, EventSummary, FeedbackOut, FrameBoxes, ReviewCount,
+                       ReviewUpdate)
 
 router = APIRouter(tags=["events"], dependencies=[Depends(current_staff)])
 
@@ -217,7 +219,14 @@ def _summary_fields(session: Session, viewer: _Viewer, ev: Event, customer_id: i
         completeness=completeness, reviewed=bool(reviewed), flagged=bool(flagged),
         thumbnail_url=f"/v1/events/{ev.id}/thumbnail" if has_thumbnail else None,
         timezone=tz or "UTC", annotation_status=annotation_status,
+        **_outcome_fields(ev, shown, private=not viewer.labeler),
     )
+
+
+def _outcome_fields(ev: Event, shown, private: bool) -> dict[str, Any]:
+    code, text = event_outcome.outcome(ev.decision, private=private) if isinstance(ev.decision, dict) else ("", "")
+    return dict(session_id=ev.session_id, outcome=shown(text) or None, outcome_code=code or None,
+                would_raise=ev.would_raise)
 
 
 def annotation_statuses(session: Session, ids: list[int]) -> dict[int, str]:
@@ -276,6 +285,7 @@ def list_events(
     flagged: Optional[bool] = None,
     filter: Optional[str] = None,
     collection_id: Optional[int] = None,
+    would_raise: Optional[bool] = None,
     with_total: bool = False,
     cursor: Optional[str] = None,
     limit: int = Query(100, ge=1, le=500),
@@ -320,6 +330,8 @@ def list_events(
         conds.append(_reviewed.is_(reviewed))
     if flagged is not None:
         conds.append(_flagged.is_(flagged))
+    if would_raise is not None:  # the baseline in shadow mode: "would raise: rare for this camera"
+        conds.append(Event.would_raise.is_(True) if would_raise else Event.would_raise.isnot(True))
     if filter is not None:
         conds.append(studio_logic.builtin_condition(filter))
     if collection_id is not None:  # a collection this viewer may not see filters like one that does not exist
@@ -491,6 +503,25 @@ def fleet_activity_density(session: Session, now: datetime, hours: int) -> Densi
     events, alerts, false_alarms = _bucket_counts(session, start, 3600, hours, []).get((), empty)
     return DensityOut(bucket="hour", starts_utc=_starts(start, 3600, hours), timezone="UTC",
                       rows=[DensityRow(camera="fleet", events=events, alerts=alerts, false_alarms=false_alarms)])
+
+
+@router.get("/events/sessions", response_model=list[EventSession])
+def event_sessions(request: Request, session_id: list[str] = Query(default=[], max_length=100),
+                   staff: Staff = Depends(current_staff), session: Session = SessionDep):
+    # The events (box sessions) the given ids name, over all their clips this viewer may see: first and last clip,
+    # how many clips, how many of them reached the owner. Unknown or invisible ids are left out.
+    viewer = _Viewer(staff, request)
+    ids = sorted({s for s in session_id if isinstance(s, str) and 0 < len(s) <= 64})
+    if not ids:
+        return []
+    sent = Event.decision["sent"].as_boolean().is_(True)
+    rows = session.execute(_scoped(select(
+        Event.session_id, Device.customer_id, Event.site, Event.camera, func.min(Event.start_ts), func.max(Event.start_ts),
+        func.count(), func.count().filter(sent)).select_from(Event)).where(viewer.visible(), Event.session_id.in_(ids))
+        .group_by(Event.session_id, Device.customer_id, Event.site, Event.camera)).all()
+    return [EventSession(session_id=sid, site=viewer.site(cid, site), camera=viewer.camera(site, cam),
+                         first_utc=_ts_utc(first), last_utc=_ts_utc(last), clips=clips, sent=n_sent)
+            for sid, cid, site, cam, first, last, clips, n_sent in rows]
 
 
 @router.get("/events/review-count", response_model=ReviewCount)

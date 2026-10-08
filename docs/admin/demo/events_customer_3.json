@@ -30,7 +30,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/110/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": "Dismissed: the AI saw nothing to alert on",
+      "outcome_code": "dismissed",
+      "would_raise": false
     },
     {
       "id": 109,
@@ -65,7 +69,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/109/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": "Dismissed: the AI saw nothing to alert on",
+      "outcome_code": "dismissed",
+      "would_raise": false
     },
     {
       "id": 108,
@@ -98,7 +106,11 @@
       "flagged": true,
       "thumbnail_url": "/v1/events/108/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 107,
@@ -130,7 +142,11 @@
       "flagged": false,
       "thumbnail_url": null,
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": "Not sent: camera muted by the owner",
+      "outcome_code": "muted",
+      "would_raise": false
     },
     {
       "id": 106,
@@ -162,7 +178,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/106/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 105,
@@ -197,7 +217,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/105/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": "Dismissed: the AI saw nothing to alert on",
+      "outcome_code": "dismissed",
+      "would_raise": false
     },
     {
       "id": 104,
@@ -233,7 +257,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/104/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 103,
@@ -266,7 +294,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/103/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 102,
@@ -298,7 +330,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/102/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 101,
@@ -334,7 +370,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/101/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 100,
@@ -366,7 +406,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/100/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 99,
@@ -396,7 +440,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/99/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 98,
@@ -428,7 +476,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/98/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 97,
@@ -464,7 +516,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/97/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 96,
@@ -496,7 +552,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/96/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 95,
@@ -526,7 +586,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/95/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 120,
@@ -561,7 +625,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/120/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 119,
@@ -594,7 +662,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/119/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": "Dismissed: the AI saw nothing to alert on",
+      "outcome_code": "dismissed",
+      "would_raise": false
     },
     {
       "id": 94,
@@ -630,7 +702,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/94/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 118,
@@ -663,7 +739,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/118/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 117,
@@ -698,7 +778,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/117/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 93,
@@ -730,7 +814,11 @@
       "flagged": false,
       "thumbnail_url": null,
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": "Dismissed: the AI saw nothing to alert on",
+      "outcome_code": "dismissed",
+      "would_raise": false
     },
     {
       "id": 92,
@@ -766,7 +854,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/92/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 116,
@@ -798,7 +890,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/116/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 91,
@@ -834,7 +930,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/91/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 90,
@@ -867,7 +967,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/90/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": "Dismissed: the AI saw nothing to alert on",
+      "outcome_code": "dismissed",
+      "would_raise": false
     },
     {
       "id": 115,
@@ -899,7 +1003,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/115/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 114,
@@ -932,7 +1040,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/114/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 113,
@@ -966,7 +1078,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/113/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 89,
@@ -998,7 +1114,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/89/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 112,
@@ -1030,7 +1150,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/112/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": "Dismissed: the AI saw nothing to alert on",
+      "outcome_code": "dismissed",
+      "would_raise": false
     },
     {
       "id": 111,
@@ -1063,7 +1187,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/111/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": "Dismissed: the AI saw nothing to alert on",
+      "outcome_code": "dismissed",
+      "would_raise": false
     },
     {
       "id": 88,
@@ -1097,7 +1225,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/88/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     },
     {
       "id": 87,
@@ -1130,7 +1262,11 @@
       "flagged": false,
       "thumbnail_url": "/v1/events/87/thumbnail",
       "timezone": "Asia/Jerusalem",
-      "annotation_status": null
+      "annotation_status": null,
+      "session_id": null,
+      "outcome": null,
+      "outcome_code": null,
+      "would_raise": false
     }
   ],
   "next_cursor": null,
