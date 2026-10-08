@@ -237,6 +237,32 @@ class SceneChat:
                 self._finish(chat_id, s, stopped=True)
             return True
 
+    # ---------- the Telegram inbox's one routing line each ----------
+    def inbox_text(self, inbox: Any, chat_id: str, sender: Dict[str, Any], text: str) -> bool:
+        """``on_text`` for the inbox: True when the message was the interview's (noted in the chat feed). Never
+        raises: a failing interview hands the message to the assistant."""
+        try:
+            taken = self.on_text(chat_id, text)
+        except Exception as exc:  # noqa: BLE001 - the interview must never lose the owner's message
+            log.warning("Install interview failed: %s", exc)
+            return False
+        if taken:
+            name = str(sender.get("first_name") or sender.get("username") or "") if isinstance(sender, dict) else ""
+            inbox._note("owner", "message", text, name)
+        return taken
+
+    def inbox_button(self, inbox: Any, query: Dict[str, Any], chat_id: str, code: str) -> None:
+        """An "sm:" button in the inbox: stop the spinner, note it, act. Never raises."""
+        try:
+            inbox._post(inbox.cfg.bot_token, "answerCallbackQuery", {"callback_query_id": str(query.get("id"))})
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Could not stop the button's spinner: %s", exc)
+        try:
+            inbox._note("owner", "button", code, str((query.get("from") or {}).get("first_name") or ""))
+            self.on_button(chat_id, code)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Install interview button failed: %s", exc)
+
     # ---------- the steps ----------
     def start(self, chat_id: str, cameras: Optional[Sequence[str]] = None) -> None:
         chat_id = str(chat_id)
