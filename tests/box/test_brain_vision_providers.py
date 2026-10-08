@@ -124,7 +124,8 @@ class AgentWiringTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root, \
                 mock.patch("home_guard_project.box.brain.models.make_model", return_value=mock.Mock()), \
                 mock.patch("home_guard_project.box.brain.vision.make_vision", return_value=None) as made, \
-                mock.patch("home_guard_project.box.embeddings.make_embedder", return_value=None):
+                mock.patch("home_guard_project.box.embeddings.make_embedder", return_value=None), \
+                mock.patch("home_guard_project.box.brain.agent._event_book", return_value=None):
             build_owner_agent(settings, {"OPENAI_API_KEY": "k"}, None, mock.Mock(), root, root, root)
             build_owner_agent({}, {"OPENAI_API_KEY": "k"}, None, mock.Mock(), root, root, root)
         first, second = made.call_args_list

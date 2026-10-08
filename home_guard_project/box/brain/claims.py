@@ -66,9 +66,43 @@ CLAIMS: Dict[str, Dict[str, object]] = {
         "he": ["החזרתי"],
         "ar": ["أعدت تشغيل التنبيهات", "عادت التنبيهات"],
     },
+    # Per action (2026-10-08): "שמרתי את המצלמה כ'כניסה ראשית'" needs set_alias, "רשמתי את זה כהתרעה צפויה" needs
+    # record_verdict, "רשמתי שאלה העובדים" needs mark_known - a receipt of another action backs none of them.
+    "alias": {
+        "tools": {"set_alias"},
+        "en": [r"\bI(?:['’]ve| have| just)?\s+(?:just\s+)?(?:saved|named|renamed|called)\b[^.?!\n]{0,40}"
+               r"\b(?:as|name|camera)\b",
+               r"\b(?:is|it['’]s)\s+now\s+(?:called|named)\b",
+               r"\bI(?:['’]ll| will)\s+call\s+(?:it|the camera)\b"],
+        "he": [r"(?:שמרתי|רשמתי|עדכנתי|קבעתי|שיניתי)\s+(?:את\s+)?(?:ה)?(?:מצלמה|שם|כינוי)",
+               r"(?:שמרתי|רשמתי|עדכנתי)[^.?!\n]{0,60}(?:\sכ[\"'״“”]|(?<!\w)בשם(?!\w))",
+               r"(?:אזכור|זוכר|זכרתי)\s+ש\S*\s+(?:זה|היא|הוא|זו)\s+(?:ה)?מצלמה",
+               r"(?<!\w)(?:אקרא|נקרא)\s+לה(?!\w)", r"מעכשיו\s+(?:היא|המצלמה|זו)\s+(?:נקראת|תיקרא)"],
+        "ar": [],
+    },
+    "verdict": {
+        "tools": {"record_verdict"},
+        "en": [r"(?:\bI(?:['’]ve| have| just)?\s+(?:just\s+)?|" + _OPEN + r")"
+               r"(?:marked|noted|filed|saved|recorded|logged)\b[^.?!\n]{0,40}\bas\s+(?:an?\s+)?"
+               r"(?:false alarm|real alert|true alert|expected|real|false|wrong)\b"],
+        "he": [r"(?<!\w)כהתר[עא]ה\s+(?:צפויה|אמיתית|שגויה|לא\s+נכונה|נכונה)",
+               r"(?<!\w)כהתר[עא]ת\s+שווא", r"(?<!\w)כפעילות\s+צפויה",
+               r"(?:רשמתי|סימנתי|שמרתי)[^.?!\n]{0,30}(?:התר[עא]ת\s+שווא|פעילות\s+צפויה)"],
+        "ar": [],
+    },
+    "known": {
+        "tools": {"mark_known", "house_expect"},
+        "en": [r"\b(?:noted|saved|remember)\b[^.?!\n]{0,60}"
+               r"\b(?:workers|gardener|neighbou?rs?|it was you|it['’]s you)\b",
+               r"\bI\s+won['’]?t\s+(?:alert|message|notify)\s+you\s+about\s+(?:them|this|it|you)\b"],
+        "he": [r"(?:שמרתי|רשמתי|זוכר|אזכור|הבנתי|סימנתי)[^.?!\n]{0,60}(?:עובדים|פועלים|הגנן|השכן|שכנים|מוכרים|"
+               r"זה\s+אתה|זה\s+היה\s+אתה|שזה\s+אתה|שאתה\s+יוצא)",
+               r"(?<!\w)לא\s+(?:אשלח|אתריע|אתריעה)\s+(?:לך\s+)?(?:עליהם|עליך|עליכם|על\s+זה)"],
+        "ar": [],
+    },
     "save": {
         # "רשמתי שאתם בחופשה" after a real house change is backed too
-        "tools": {"record_verdict", "set_alias", "house_state", "house_expect", "house_cancel"},
+        "tools": {"record_verdict", "set_alias", "house_state", "house_expect", "house_cancel", "mark_known"},
         # A promise to remember is a save too (2026-10-05: "I'll remember" went out and nothing was saved).
         "en": [_fp("marked|saved|changed|updated"), _BEEN % "saved|marked|changed|updated",
                _OPEN + r"(?:saved|marked)\b", r"\bI(?:['’]ll| will| shall)?\s+(?:always\s+)?remember\b",
@@ -213,3 +247,28 @@ def unbacked_claims(answer: str, receipts: Sequence[Receipt]) -> List[str]:
         if hit:
             out.append(name)
     return out
+
+
+# What the owner reads instead of a claim no receipt backs (claims per action, 2026-10-08), most specific first.
+_HONEST = (("known", "not_saved_known"), ("verdict", "not_saved_verdict"), ("alias", "not_saved_yet"))
+_NAMING = re.compile(r"(?<!\w)[ושה]?(?:תקרא|תקראי|לקרוא|קרא|תזכור|תזכרי|זכור|שם|כינוי)(?!\w)|"
+                     r"\b(?:call|name|rename|remember)\b|(?<!\w)זה\s+מצלמה|\bis\s+camera\b", re.IGNORECASE)
+_SENTENCES = re.compile(r"(?<=[.!?…\n])\s*")
+
+
+def honest_answer(answer: str, receipts: Sequence[Receipt], lang: str, request: str = "") -> str:
+    """*answer* without the sentences that claim an action no receipt of this turn backs, plus one plain line
+    saying what was NOT done ("לא רשמתי שום דבר על ההתראה"); "" when only the receipt lines should go out.
+    *request* is the owner's message: a bare "save" claim on a naming request gets the camera-name line."""
+    from .i18n import t  # noqa: PLC0415
+
+    text = answer if isinstance(answer, str) else ""
+    still = unbacked_claims(text, receipts)
+    if not still:
+        return text
+    kept = [part.strip() for part in _SENTENCES.split(text)
+            if part.strip() and not unbacked_claims(part, receipts)]
+    line = next((key for kind, key in _HONEST if kind in still), "")
+    if not line and "save" in still:
+        line = "not_saved_yet" if _NAMING.search(request or "") else "not_saved_any"
+    return " ".join(kept + ([t(line, lang)] if line else [])).strip()

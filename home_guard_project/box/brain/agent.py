@@ -27,18 +27,20 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from ..feedback import Feedback, save_feedback
 from . import house
-from .claims import unbacked_claims
+from .claims import honest_answer, unbacked_claims
 from .grounding import evidence_text, ungrounded_details
 from .i18n import LANGUAGE_NAMES, t
 from .memory import ChatMemory, ChatState
 from .aliases import normalize
-from .profiles import asks_about_now, needs_big, system_prompt, tool_names, tools_for
+from .profiles import asks_about_now, asks_which_event, needs_big, says_known, system_prompt, tool_names, tools_for
 from .receipts import ACTING_TOOLS, DONE, FAILED, REQUESTED, UNDONE, Receipt, ReceiptBook
 from .mode import hhmm
-from .registry import current_camera, mentioned_cameras, render_block, resolve_camera
+from .registry import current_camera, display, mentioned_cameras, render_block, resolve_camera
 from .render import receipt_line, render_reply, undo_what
+from .style import strip_boilerplate
 from .tools import DEFAULTS, TOOLS, KEYS, Services, ToolContext, _issue, settings_line
 from .tools import _alert_state, _alert_target, _alert_types, _alert_values
+from .tools import KNOWN_WEEK_SEC, in_place, known_line, known_rows, session_text
 
 log = logging.getLogger("box.brain.agent")
 
@@ -244,7 +246,62 @@ def focus_lines(state: ChatState, snapshot: Any, text: str, now: float, alert_ha
     if asks_about_now(text):
         lines.append("[RIGHT NOW] the message asks what is happening now: look live with check_camera, "
                      "not find_events")
+    if says_known(text):
+        lines.append("[OWNER SAYS WHO IS THERE] the message says who the people are: call mark_known (camera: the "
+                     "alert this message answers, or the camera being discussed; leave it out and the box uses "
+                     "them). Do not call record_verdict for it, and reply with an empty answer: the box writes "
+                     "the confirmation")
     return lines
+
+
+def event_session_line(services: Services, snapshot: Any, alert: Optional[Dict[str, Any]], lang: str,
+                       now: float) -> str:
+    """The event (the camera's session) of the alert this message answers, from the box's event book: who was
+    there, from when, what was seen since, whether the owner was told, what the owner said. "" without one."""
+    book = getattr(services, "events", None)
+    alert_id = str((alert or {}).get("alert_id") or "")
+    if book is None or not alert_id:
+        return ""
+    try:
+        session = book.session_of_alert(alert_id)
+        if not session:
+            return ""
+        return "[EVENT OF THIS ALERT] " + json.dumps(session_text(session, snapshot, lang, now), ensure_ascii=False)
+    except Exception as exc:  # noqa: BLE001 - the context is extra
+        log.warning("Event of the alert not read: %s", exc)
+        return ""
+
+
+def _kept_known(receipts: Sequence[Receipt]) -> bool:
+    """The Memory Keeper saved who is there this turn."""
+    return any(r.tool == "mark_known" and r.status == DONE for r in receipts)
+
+
+def _one_line(text: str, limit: int = 160) -> str:
+    text = " ".join(str(text or "").split())
+    for stop in (". ", "! ", "? "):
+        if stop in text:
+            text = text.split(stop, 1)[0] + stop.strip()
+            break
+    return text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
+
+
+def which_event(state: ChatState, snapshot: Any, lang: str, now: float) -> Optional[Dict[str, Any]]:
+    """"Which video do you mean?": the event being discussed - its time, the camera's name and one line of what was
+    seen - as a question with one button that sends its video. None when no event is being discussed."""
+    handle = state.topic_event(now)
+    entry = state.handles.get(handle) if handle else None
+    if not isinstance(entry, dict):
+        return None
+    try:
+        when = hhmm(float(entry.get("ts") or now))
+    except (TypeError, ValueError, OverflowError, OSError):
+        when = "?"
+    camera = in_place(display(snapshot, str(entry.get("camera") or ""), lang), lang)
+    summary = _one_line(entry.get("observation") or entry.get("summary") or "")
+    question = t("which_event_answer", lang, time=when, camera=camera, summary=summary).rstrip(": ").strip()
+    return {"question": question, "choices": [t("which_event_send", lang)], "ts": now, "kind": "send_event",
+            "handle": handle}
 
 
 def _default_run_tool(ctx: ToolContext, name: str, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -624,6 +681,55 @@ class OwnerAgentV2:
                 log.warning("Proposal answer failed at the poll boundary: %s", exc)
                 return _fallback_reply(ctx, lang)
 
+    def known_button(self, chat_id: Any, action: str, known_id: str,
+                     who: Optional[Dict[str, Any]] = None) -> AgentReply:
+        """The buttons under the Memory Keeper's receipt (``kn:x:<id>`` Cancel, ``kn:w:<id>`` All week). Never
+        raises."""
+        with self._lock:
+            lang = "en"
+            try:
+                chat_id, who = str(chat_id), _object(who)
+                now = _finite(self._now())
+                state = self.memory.load(chat_id)
+                try:
+                    settings = _object(self.services.read_settings()) if self.services.read_settings else {}
+                except Exception:  # noqa: BLE001
+                    settings = {}
+                speaker = str(who.get("user_id") or "")
+                lang = state.language_for(speaker, "", default=str(settings.get("owner_language") or "en"))
+                book = self.services.events
+                if book is None or action not in ("x", "w") or not isinstance(known_id, str) or not known_id:
+                    return AgentReply(text=t("unavailable", lang), lang=lang)
+                entry = next((k for k in book.list_known(now) if k.get("id") == known_id), None)
+                if entry is None:
+                    return AgentReply(text=t("known_gone", lang), lang=lang)
+                try:
+                    snapshot = self.registry.snapshot()
+                except Exception:  # noqa: BLE001
+                    snapshot = None
+                camera = str(entry.get("camera") or "")
+                if action == "x":
+                    book.cancel_known(known_id)
+                    text_out = t("known_cancelled", lang, camera=display(snapshot, camera, lang))
+                    receipts: Tuple[Receipt, ...] = ()
+                    rows: Tuple[Tuple[Tuple[str, str], ...], ...] = ()
+                else:
+                    until = now + KNOWN_WEEK_SEC
+                    saved = book.mark_known(camera, str(entry.get("text") or ""), by=str(who.get("name") or "owner"),
+                                            until=until, now=now, people=entry.get("people"))
+                    book.cancel_known(known_id)
+                    receipt = self.book.issue(f"{chat_id}:{int(now * 1000)}", "mark_known", DONE, camera, {
+                        "camera": camera, "who": str(entry.get("text") or ""), "until_ts": until, "at": now,
+                        "known_id": str(saved.get("id") or ""), "people": int(saved.get("people") or 0)})
+                    text_out, receipts = known_line(receipt, lang, snapshot), (receipt,)
+                    rows = tuple(row[:1] for row in known_rows(receipts, lang))     # Cancel only: it is a week now
+                state.add_turn(speaker, "✓", text_out, [], [r.summary() for r in receipts], now)
+                self.memory.save(chat_id, state)
+                return AgentReply(text=text_out, lang=lang, receipts=receipts, rows=rows)
+            except Exception as exc:
+                log.warning("Known-people button failed: %s", exc)
+                return AgentReply(text=t("unavailable", lang), lang=lang)
+
     def _undo_one(self, ctx: ToolContext, r: Receipt, snapshot: Any, now: float) -> None:
         """Reverse one receipt - only while what it changed still holds. Raises _ChangedSince when it no longer
         does (nothing is touched), any other exception when the reversal itself fails."""
@@ -838,11 +944,26 @@ class OwnerAgentV2:
         code_only = house_out.handled and not house_out.rest
         if code_only:
             answer, tier = house_out.text, "code"
+        elif choice is not None and isinstance(pending, dict) and pending.get("kind") == "send_event":
+            # "📹 Send the video" under "I meant the 12:46 clip at the pergola": done in code, no model.
+            code_only, tier = True, "code"
+            if snapshot is not None:
+                called.append("send_media")
+                self._dispatch(ctx, "send_media", {"handle": str(pending.get("handle") or "")}, True, ["send_media"])
         try:
             if snapshot is None:
                 raise RuntimeError("no house snapshot")
             settings_text = settings_line(settings, lang) if settings else ""
             focus = focus_lines(state, snapshot, text, now, ctx.alert_handle, alert)
+            if not code_only and choice is None and asks_which_event(text):
+                # "על איזה סרטון אתה מדבר?" (2026-10-07: answered with a verdict and the same video twice): the
+                # event being discussed, named in code, with a button for its video.
+                which = which_event(state, snapshot, lang, now)
+                if which is not None:
+                    code_only, tier, ctx.clarification = True, "code", which
+            session = event_session_line(self.services, snapshot, alert, lang, now)
+            if session:
+                focus.append(session)
             if self.services.house is not None:
                 try:
                     focus.append(house.context_line(self.services.house, now))
@@ -873,6 +994,9 @@ class OwnerAgentV2:
                     raise
                 if ctx.clarification is not None:
                     break
+                if _kept_known(ctx.receipts):
+                    answer = ""          # the Memory Keeper's receipt is the whole reply (written by code)
+                    break
                 if tier == FAST and not answer:
                     log.info("Fast model gave an empty answer; asking the big model.")
                     escalated = True
@@ -887,21 +1011,32 @@ class OwnerAgentV2:
                     guard_hits += 1
                     if answer:
                         messages.append({"role": "assistant", "content": answer})
-                    # A promise to remember with nothing saved (2026-10-05): the model may still save it now.
-                    save = "save" in bad and "set_alias" in tool_names(ctx.mode, tier)
+                    # A promise to remember with nothing saved (2026-10-05): the model may still save it now - the
+                    # tool of that action only (a name: set_alias; who is there: mark_known).
+                    can = tool_names(ctx.mode, tier)
+                    save = bool({"save", "alias"} & set(bad)) and "set_alias" in can
+                    keep = "known" in bad and "mark_known" in can
                     messages.append({"role": "user", "content": (
                         f"[BOX] Your answer describes actions that did not happen ({', '.join(bad)}). "
                         + ("If the owner asked you to remember a name for a camera, call set_alias now. " if save
-                           else "") +
-                        "Write the answer again with facts only and call reply. Do not call any other tool.")})
+                           else "")
+                        + ("If the owner said who the people at a camera are, call mark_known now. " if keep
+                           else "")
+                        + "Write the answer again with facts only and call reply. Do not call any other tool.")})
                     answer = self._loop(ctx, model, messages, tier, usage, called,
-                                        only=["reply", "set_alias"] if save else ["reply"])
+                                        only=["reply"] + (["set_alias"] if save else [])
+                                        + (["mark_known"] if keep else []))
+                    if _kept_known(ctx.receipts):
+                        answer = ""
+                        break
                     still = unbacked_claims(answer, ctx.receipts)
                     if still:
                         guard_hits += 1
-                        log.warning("claim_guard: the answer still claims actions; sending only the receipt lines")
-                        # Never "I'll remember" without a save receipt: say plainly that nothing was saved.
-                        answer = t("not_saved_yet", lang) if "save" in still else ""
+                        log.warning("claim_guard: the answer still claims %s; saying plainly what was not done",
+                                    still)
+                        # Never "I'll remember" / "רשמתי כהתרעה צפויה" without the receipt of that action: the
+                        # claim goes, and one plain line says what was NOT done.
+                        answer = honest_answer(answer, ctx.receipts, lang, ctx.text)
                 break
             if ctx.clarification is None and answer and not code_only:
                 # The observation is partial: a visual detail it does not give was never checked (§10).
@@ -924,18 +1059,22 @@ class OwnerAgentV2:
             log.warning("Could not save the owner's message: %s", exc)
         try:
             buttons: Tuple[str, ...] = ()
+            # When the Memory Keeper saved who is there, its line is the reply: a verdict filed for the same
+            # message is not repeated to the owner.
+            shown = [r for r in ctx.receipts if not (_kept_known(ctx.receipts) and r.tool == "record_verdict")]
             if ctx.clarification is not None:
                 reply_text = ctx.clarification["question"]
-                if ctx.receipts:
-                    done = render_reply("", ctx.receipts, lang, self.retention_days)
+                if shown:
+                    done = render_reply("", shown, lang, self.retention_days, snapshot)
                     if done:
                         reply_text = f"{done}\n\n{reply_text}"
                 buttons = tuple(ctx.clarification["choices"])
                 state.pending = dict(ctx.clarification, request=ctx.text, speaker=speaker,
                                      token=uuid.uuid4().hex[:8])
             else:
-                reply_text = render_reply(t("unavailable", lang) if failed else answer,
-                                          ctx.receipts, lang, self.retention_days)
+                # No closing offers ("אם יש משהו נוסף… אני כאן"), owner decision 2026-10-08.
+                reply_text = render_reply(t("unavailable", lang) if failed else strip_boilerplate(answer),
+                                          shown, lang, self.retention_days, snapshot)
                 if not reply_text:
                     reply_text = t("unavailable" if failed else "nothing_done", lang)
             token = _undo_token(ctx)
@@ -952,7 +1091,8 @@ class OwnerAgentV2:
                               after=tuple(ctx.after_reply), lang=lang,
                               receipts=tuple(ctx.receipts), tier=tier, escalated=escalated, guard_hits=guard_hits,
                               usage={k: (v[0], v[1]) for k, v in usage.items()}, tools_called=tuple(called),
-                              answer=answer, undo_token=token, rows=house_out.rows)
+                              answer=answer, undo_token=token,
+                              rows=tuple(house_out.rows or ()) + known_rows(ctx.receipts, lang))
         except Exception as exc:
             log.warning("Could not finish owner reply: %s", exc)
             return _fallback_reply(ctx, lang)
@@ -1017,6 +1157,18 @@ def _house_store(mute: Any) -> Any:
         return None
 
 
+def _event_book() -> Any:
+    """The box's one event book (events.book(): the guard loop in the same process writes the sessions, the
+    assistant reads them and writes the owner's "these are my workers"). None when it cannot be opened."""
+    try:
+        from .. import events  # noqa: PLC0415
+
+        return events.book()
+    except Exception as exc:  # noqa: BLE001 - the assistant works without it (mark_known says it is unavailable)
+        log.warning("Event book not available to the assistant: %s", exc)
+        return None
+
+
 def _budgeted(vision: Any, limit: int, path: str, wrapper: Any) -> Any:
     return wrapper(vision, limit, path) if vision is not None else None
 
@@ -1076,7 +1228,7 @@ def build_owner_agent(box_settings: Dict[str, Any], env: Dict[str, str], mute: A
         request_restart=_restart_running_mode,
         embedder=make_embedder(env, os.path.join(own_dir, ".alert_embeddings.json")),
         retention_days=retention, set_option=boxconfig.set_option, read_settings=boxconfig.load_box_settings,
-        alert_settings=alert_settings, house=_house_store(mute),
+        alert_settings=alert_settings, house=_house_store(mute), events=_event_book(),
     )
     def quiet_log_on() -> bool:
         return bool(boxconfig.load_box_settings().get("quiet_log", False))

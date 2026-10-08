@@ -17,7 +17,8 @@ class ClaimsTest(unittest.TestCase):
     def test_claims_without_receipts_are_caught_in_three_languages(self) -> None:
         self.assertEqual(unbacked_claims("Here are the two videos", []), ["send"])
         self.assertEqual(unbacked_claims("המצלמה הקדמית כובתה עד 01:35", []), ["off"])
-        self.assertEqual(unbacked_claims("סימנתי את ההתרעה הזו כהתרעה שגויה", []), ["save"])
+        # Claims per action (2026-10-08): a verdict wording is its own kind as well as a save.
+        self.assertEqual(unbacked_claims("סימנתי את ההתרעה הזו כהתרעה שגויה", []), ["verdict", "save"])
         self.assertEqual(unbacked_claims("أوقفت التنبيهات حتى السادسة", []), ["pause"])
 
     def test_plain_facts_and_negations_are_not_claims(self) -> None:
@@ -44,7 +45,7 @@ class ClaimsTest(unittest.TestCase):
             "Turned off the back camera.": ["off"],
             "The camera is off until 6.": ["off"],
             "Sent.": ["send"],
-            "Marked as a false alarm.": ["save"],
+            "Marked as a false alarm.": ["verdict", "save"],
             "Two events. Done - sent.": ["send"],
         }
         for text, kinds in cases.items():
@@ -98,7 +99,7 @@ class ClaimsTest(unittest.TestCase):
                      "סבבה, זוכרת!", "I'll remember that the pergola is camera 3.", "I will remember it.",
                      "Got it - I'll keep that in mind.", "Noted: pergola means camera 3.", "I've noted that."):
             with self.subTest(text=text):
-                self.assertEqual(unbacked_claims(text, []), ["save"])
+                self.assertIn(unbacked_claims(text, []), (["save"], ["alias", "save"]))   # a name: alias too
                 self.assertEqual(unbacked_claims(text, [r("set_alias", DONE)]), [])
         for text in ("אני לא זוכר שהיה שם מישהו", "I don't remember any event there", "I noted two events at 22:00",
                      "Remember to lock the gate", "עדיין לא שמרתי את זה"):
@@ -126,9 +127,9 @@ class RenderTest(unittest.TestCase):
         self.assertEqual(receipt_line(r("pause_alerts", DONE, camera="", until="06:00"), "en"),
                          "✓ Alerts paused until 06:00. The cameras keep watching.")
         self.assertEqual(receipt_line(r("set_camera_active", REQUESTED, camera="back_door", active=False), "en"),
-                         "⏳ Turning back_door off - the box restarts for a moment.")
+                         "⏳ Turning back door off - the box restarts for a moment.")      # a name, never the id
         self.assertEqual(receipt_line(r("set_camera_active", DONE, camera="back_door", active=False), "en"),
-                         "✓ back_door is off.")
+                         "✓ back door is off.")
         self.assertEqual(receipt_line(r("record_verdict", DONE, verdict="expected"), "en"),
                          "✓ Noted: expected activity")
         self.assertEqual(receipt_line(r("set_alias", FAILED, reason='"x" already names y'), "en"),
@@ -137,13 +138,31 @@ class RenderTest(unittest.TestCase):
 
     def test_lines_name_the_camera_the_way_the_owner_does(self) -> None:
         self.assertEqual(receipt_line(r("check_camera", DONE, camera="camera_3", aka="פרגולה"), "he"),
-                         "✓ התמונה נשלחה (camera_3 (פרגולה))")
+                         "✓ התמונה נשלחה (camera 3 (פרגולה))")
         self.assertEqual(receipt_line(r("record_clip", DONE, camera="camera_3", aka="pergola", seconds=10), "en"),
-                         "✓ New 10-second video from camera_3 (pergola) sent")
+                         "✓ New 10-second video from camera 3 (pergola) sent")
         self.assertEqual(receipt_line(r("set_alias", DONE, camera="camera_3", alias="פרגולה", photo=True), "he"),
-                         '✓ "פרגולה" מעכשיו זה camera_3')
+                         '✓ "פרגולה" מעכשיו זה camera 3')
         self.assertEqual(receipt_line(r("set_alias", DONE, camera="camera_3", alias="pergola", undo_of="set_alias"),
-                                      "en"), '✓ "pergola" no longer means camera_3')
+                                      "en"), '✓ "pergola" no longer means camera 3')
+
+    def test_lines_never_show_a_camera_id(self) -> None:
+        # Owner rule (2026-10-06, again 2026-10-08): the family's name, else "מצלמה 6", never ameer_week_0_1_ch6.
+        from home_guard_project.box.brain.registry import CameraState, HouseSnapshot
+        snap = HouseSnapshot(now=0.0, mode="guard", mode_ends=None, mode_started=None, start_hour=0, end_hour=0,
+                             cameras=(CameraState("ameer_week_0_1_ch6", True, aliases=("כניסה ראשית",)),
+                                      CameraState("ameer_week_0_1_ch2", True)))
+        self.assertEqual(receipt_line(r("pause_alerts", DONE, camera="ameer_week_0_1_ch6", until="06:00"), "he", 14,
+                                      snap), receipt_line(r("pause_alerts", DONE, camera="X", until="06:00"), "he")
+                         .replace("X", "כניסה ראשית"))
+        line = receipt_line(r("check_camera", DONE, camera="ameer_week_0_1_ch2"), "he", 14, snap)
+        self.assertIn("מצלמה 2", line)
+        self.assertNotIn("ameer", line)
+        # A new name's receipt says which camera got it by its other name, not by the new one twice.
+        self.assertEqual(receipt_line(r("set_alias", DONE, camera="ameer_week_0_1_ch6", alias="כניסה ראשית"), "he",
+                                      14, snap), '✓ "כניסה ראשית" מעכשיו זה מצלמה 6')
+        self.assertNotIn("ameer", render_reply("", [r("set_camera_active", DONE, camera="ameer_week_0_1_ch2",
+                                                      active=True)], "en", 14, snap))
 
     def test_reply_is_answer_then_receipt_lines(self) -> None:
         text = render_reply("Two events tonight.", [r("send_media", DONE, kind="video", bounds="b")], "en")

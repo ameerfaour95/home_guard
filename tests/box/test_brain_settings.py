@@ -42,7 +42,7 @@ class SettingsTest(unittest.TestCase):
 
     def test_registered(self) -> None:
         self.assertIn("change_setting", TOOLS)
-        self.assertEqual(len(TOOLS), 22)   # + ask_vision (§10), + 4 house-state tools
+        self.assertEqual(len(TOOLS), 24)   # + ask_vision (§10), + 4 house-state tools, + mark_known, recent_activity
 
     def test_settings_line(self) -> None:
         self.assertEqual(settings_line(self.store),

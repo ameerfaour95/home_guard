@@ -75,7 +75,7 @@
       "cameras": {"type": "array", "items": {"type": "string"}, "description": "Only these cameras; omit for all."}
     }}}},
   {"type": "function", "function": {"name": "record_verdict",
-    "description": "File the owner's judgement of an alert. Only when this message judges it.",
+    "description": "File the owner's judgement of an alert (real, false alarm, expected, described wrong, missed). Only when this message judges the alert itself. NEVER for a question (\"which video?\", \"why do you keep sending?\"), a complaint or an insult, a request, or a remark about your own message: answer those instead. When the owner says who the people are (\"these are my workers\", \"it's me\"), call mark_known, not this.",
     "parameters": {"type": "object", "properties": {
       "handle": {"type": "string", "description": "The event handle; omit for the alert this message answers."},
       "verdict": {"type": "string", "enum": ["true_alert", "false_alarm", "real_but_wrong", "expected", "missed_event"]},
@@ -212,5 +212,20 @@
       ]
     }
   }
-}
+},
+  {"type": "function", "function": {"name": "mark_known",
+    "description": "The owner says who the people at a camera are and that they are fine (\"these are my workers on the pergola\", \"זה בסדר זה עובדים אצלי\", \"it's me\", \"זה הגנן\", \"the neighbour\"). The box stops messaging about them at that camera (only something unusual still alerts) until 'until', and writes the confirmation itself with a Cancel button. When the message replies to an alert, that alert is also filed as expected - do not call record_verdict as well. Then reply with an empty answer.",
+    "parameters": {"type": "object", "properties": {
+      "who": {"type": "string", "description": "Who they are, in the owner's words and language: \"העובדים על הפרגולה\", \"עמיר\", \"the gardener\"."},
+      "camera": {"type": "string", "description": "The camera, by name or the owner's word; omit for the alert this message answers or the camera being discussed (the box asks when neither is known)."},
+      "until": {"type": "string", "description": "When it ends, from the owner's words: \"now\" (only now: one hour), \"today\" (default: 23:59), \"week\" (7 days), \"tomorrow\", \"HH:MM\", \"YYYY-MM-DD\" or \"YYYY-MM-DD HH:MM\"."},
+      "owner_words": {"type": "string", "description": "The owner's words saying who they are, copied exactly from this message."}
+    }, "required": ["who", "owner_words"]}}},
+  {"type": "function", "function": {"name": "recent_activity",
+    "description": "The box's events (one per camera activity: who was there, from when to when, how many people, what the vision model saw, whether the owner was told, and who the owner said they are). For \"what are they doing at the pergola?\", \"what happened at the gate at noon?\", \"is it still the workers?\". For right now, also look live with check_camera.",
+    "parameters": {"type": "object", "properties": {
+      "camera": {"type": "string", "description": "The camera, by name or the owner's word; omit for all cameras."},
+      "minutes": {"type": "number", "description": "How far back, in minutes (default 60, at most 1440)."},
+      "time_from": {"type": "string", "description": "Or: from this clock time today, \"HH:MM\" (\"at noon\" = \"12:00\")."}
+    }, "required": []}}}
 ]

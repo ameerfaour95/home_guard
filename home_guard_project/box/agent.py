@@ -41,6 +41,8 @@ from .feedback import (
     MuteState,
     confirmation_text,
     feedback_from_fields,
+    is_insult,
+    is_question,
     save_feedback,
 )
 
@@ -67,6 +69,9 @@ Language and tone:
 - Answer briefly, in plain text with no Markdown (Telegram shows the asterisks). Write in the
   language named in the bracketed context line above the owner's latest message, whatever language
   earlier messages or the tool results were in.
+- One or two short, human sentences. Never end with an offer or a pleasantry ("If there's anything
+  else...", "Let me know if...", "I'm here", "thanks for clarifying"). Never write a camera id.
+- A question, a complaint or an insult is never a verdict: answer it; do not call record_verdict.
 
 Acting:
 - Act only through the tools, and do only what the latest message asks.
@@ -343,6 +348,11 @@ class OwnerAgent:
 
     # -- tools (each returns a JSON-serialisable dict) -----------------------
     def _record_verdict(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        turn = self._turn
+        if turn is not None and (is_question(turn.text) or is_insult(turn.text)):
+            # 2026-10-07: "על איזה סרטון אתה מדבר" and "יא מטומטם" were filed as verdicts on the newest alert.
+            return {"ok": False, "error": "not saved: a question, a complaint or a command is not a judgement of "
+                                          "the alert; answer the owner instead"}
         feedback = self._checked({"verdict": args.get("verdict"), "note": args.get("note", "")})
         if feedback.verdict == "none":
             return {"ok": False,

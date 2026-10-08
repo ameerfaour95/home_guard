@@ -33,9 +33,10 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 from . import telegram_notify, voice
 from .agent import UNAVAILABLE_REPLY, AgentContext, OwnerAgent, make_chat_model
 from .chat_feed import ChatFeed
-from .brain.i18n import LANGS
+from .brain.i18n import LANGS, detect_language
 from .brain.i18n import t as tr
 from .brain.deliver import choice_keyboard
+from .brain.style import clean_outgoing, replace_camera_ids
 from .boxconfig import LOG_DIR, PRODUCTION_ARCHIVE_DIR, PRODUCTION_LIVE_DIR, PRODUCTION_RETENTION_DAYS
 from .feedback import (
     FEEDBACK_BUTTONS,
@@ -48,6 +49,7 @@ from .feedback import (
     _read_json,
     _write_json,
     button_feedback,
+    not_a_judgement,
     save_feedback,
     saved_tag_requests,
     undo_training_tag,
@@ -67,7 +69,10 @@ BUTTON_LABELS = {code: label for row in FEEDBACK_BUTTONS for label, code in row}
 
 REMIND_SEC = 300.0   # an escalation nobody answered is sent once more, loud, after this long
 TAG_WAIT_SEC = 86400.0     # how long "Other…" waits for the owner's words, as a reply to the question or video
-TAG_IMPLICIT_SEC = 1800.0  # how long a message that replies to nothing is taken as those words
+# How long a message that replies to nothing is taken as those words (2026-10-08: it was 30 minutes, and
+# "איזה תזכורת, אתה מטומטם ומגזים" was saved as a clip's explanation). Only a statement within this time counts;
+# a question, a complaint or a command goes to the assistant while the wait stays open.
+TAG_IMPLICIT_SEC = 180.0
 CALLBACK_DATA_LIMIT = 64  # Telegram refuses a button whose callback data is longer (bytes)
 VIDEO_WAIT_SEC = 60.0  # an alert waits this long for its video; then it goes out with the picture
 
@@ -343,6 +348,23 @@ def not_them_button(alert: Dict[str, Any], lang: str = "en") -> Optional[Dict[st
     return None
 
 
+def reply_fields(chat_id: Any, reply_to: Any) -> Dict[str, str]:
+    """Telegram's fields that put a message in the thread of *reply_to* ({"chat_id", "message_id"}: the event's
+    first alert), only in the chat that owns that message. {} otherwise. The guard's telegram_notify.reply_fields
+    when it exists. Never raises."""
+    try:
+        own = getattr(telegram_notify, "reply_fields", None)
+        if callable(own):
+            return dict(own(chat_id, reply_to) or {})
+        if (not isinstance(reply_to, dict) or reply_to.get("message_id") is None
+                or str(reply_to.get("chat_id")) != str(chat_id)):
+            return {}
+        return {"reply_to_message_id": str(int(reply_to["message_id"])), "allow_sending_without_reply": "true"}
+    except Exception as exc:  # noqa: BLE001 - an alert goes out without its thread rather than not at all
+        log.warning("Reply fields not built: %s", exc)
+        return {}
+
+
 def send_alert(
     cfg: TelegramConfig,
     index: AlertIndex,
@@ -355,8 +377,12 @@ def send_alert(
     silent: bool = False,
     lang: str = "en",
     video: Optional[str] = None,
+    reply_to: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Send one alert to every chat, with its buttons. Never raises.
+
+    *reply_to* ({"chat_id", "message_id"}): an update of an event goes out as a reply to its first alert, in the
+    chat that has it.
 
     *alert* is what an answer will be filed under: ``{"alert_id", "camera",
     "summary", "ts"}``. Each chat's message id is stored in *index*. With a
@@ -385,12 +411,13 @@ def send_alert(
     for chat_id in cfg.chat_ids:
         try:
             resp = None
+            thread = reply_fields(chat_id, reply_to)
             if clip is not None:
                 try:
                     resp = post_multipart(
                         cfg.bot_token, "sendVideo",
                         {"chat_id": chat_id, "caption": _with_clock(text, alert)[:CAPTION_LIMIT],
-                         "reply_markup": keyboard, "supports_streaming": "true", **quiet},
+                         "reply_markup": keyboard, "supports_streaming": "true", **quiet, **thread},
                         {"video": clip}, timeout=120.0,
                     )
                 except (urllib.error.URLError, OSError) as exc:
@@ -401,12 +428,13 @@ def send_alert(
             if resp is None and image:
                 resp = post_multipart(
                     cfg.bot_token, "sendPhoto",
-                    {"chat_id": chat_id, "caption": body[:CAPTION_LIMIT], "reply_markup": keyboard, **quiet},
+                    {"chat_id": chat_id, "caption": body[:CAPTION_LIMIT], "reply_markup": keyboard, **quiet,
+                     **thread},
                     {"photo": ("alert.jpg", image, "image/jpeg")},
                 )
             elif resp is None:
                 resp = post(cfg.bot_token, "sendMessage",
-                            {"chat_id": chat_id, "text": body, "reply_markup": keyboard, **quiet})
+                            {"chat_id": chat_id, "text": body, "reply_markup": keyboard, **quiet, **thread})
             ok = bool(resp.get("ok"))
             message_id = (resp.get("result") or {}).get("message_id")
             if ok and message_id is not None:
@@ -544,35 +572,37 @@ class OwnerAssistant:
         return self.mute.is_muted(time.time(), camera)
 
     def send_alert(self, alert: Dict[str, Any], text: str, image: Optional[bytes] = None, silent: bool = False,
-                   lang: str = "en") -> Dict[str, Any]:
+                   lang: str = "en", reply_to: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Send an alert. A new alert waits for its video (:meth:`send_clip`), at most ``video_wait`` seconds,
         so the owner gets one message: the clip, the caption and the buttons. Never raises.
 
         The answer says it is on its way (``sent``); the picture goes out instead if the video never comes.
-        An alert already delivered (the escalation reminder) goes out at once.
+        An alert already delivered (the escalation reminder) goes out at once. *reply_to* ({"chat_id",
+        "message_id"}, the event's first alert) threads it under that alert, held or not.
         """
         alert_id = str((alert or {}).get("alert_id") or "") if isinstance(alert, dict) else ""
         delivered = bool(alert_id and self.index is not None and self.index.messages(alert_id))
         if not alert_id or delivered or self.cfg.dry_run or not self.cfg.enabled:
-            return self._deliver(alert, text, image, silent, lang)
+            return self._deliver(alert, text, image, silent, lang, reply_to=reply_to)
         try:
             with self._held_lock:
                 if alert_id in self._held:
                     return {"sent": True, "held": "waiting for the video"}
-                self._held[alert_id] = {"alert": alert, "text": text, "image": image, "silent": silent, "lang": lang}
+                self._held[alert_id] = {"alert": alert, "text": text, "image": image, "silent": silent, "lang": lang,
+                                        "reply_to": reply_to}
             timer = threading.Timer(self.video_wait, self._release, args=(alert_id, ""))
             timer.daemon = True
             timer.start()
         except Exception as exc:  # noqa: BLE001 - without a timer the alert goes out now, with its picture
             log.warning("Alert %s not held for its video (%s); sending it now", alert_id, exc)
-            return self._release(alert_id, "") or self._deliver(alert, text, image, silent, lang)
+            return self._release(alert_id, "") or self._deliver(alert, text, image, silent, lang, reply_to=reply_to)
         return {"sent": True, "held": "waiting for the video"}
 
     def _deliver(self, alert: Dict[str, Any], text: str, image: Optional[bytes], silent: bool, lang: str,
-                 video: Optional[str] = None) -> Dict[str, Any]:
+                 video: Optional[str] = None, reply_to: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         res = send_alert(self.cfg, self.index, alert, text, image, post=telegram_notify._http_post,
                          post_multipart=telegram_notify._http_post_multipart, feed=self.feed, silent=silent,
-                         lang=lang, video=video)
+                         lang=lang, video=video, reply_to=reply_to)
         self._note_alert(alert, res)  # into the chat history only once it has really gone out
         return res
 
@@ -586,7 +616,8 @@ class OwnerAssistant:
                 return None
             if not video:
                 log.info("Alert %s goes out without its video", alert_id)
-            res = self._deliver(held["alert"], held["text"], held["image"], held["silent"], held["lang"], video or None)
+            res = self._deliver(held["alert"], held["text"], held["image"], held["silent"], held["lang"], video or None,
+                                reply_to=held.get("reply_to"))
             if not res.get("sent"):
                 log.warning("Alert %s not delivered: %s", alert_id, res)
             return res
@@ -678,39 +709,77 @@ def start(
     feed = ChatFeed(os.path.join(log_dir, "telegram_chat.jsonl"))
     agent = None
     deliverer = None
-    try:
-        version = int(str(box_settings.get("agent_version", 1) or 1))
-    except (ValueError, TypeError, OverflowError):
-        log.warning("Invalid agent_version; using v1")
-        version = 1
-    try:
-        if version == 2:
+    version = agent_version(box_settings)
+    if version == 2:
+        try:
             from .brain.agent import build_owner_agent, follow_up_camera_receipts  # noqa: PLC0415
 
             agent, deliverer = build_owner_agent(box_settings, env, mute, cfg, live_dir, archive_dir, log_dir, feed)
             if agent is not None:
                 threading.Thread(target=follow_up_camera_receipts, args=(agent.book, agent.registry, deliverer),
                                  name="camera-follow-up", daemon=True).start()
-        else:
-            model = make_chat_model(env, str(box_settings.get("agent_model", "gpt-4o-mini")))
+                log.info("Owner assistant v2 (brain) is on.")
+        except Exception as exc:  # noqa: BLE001 - the inbox must start whatever the brain does
+            log.warning("Owner assistant v2 not available (%s); using v1.", exc)
+            agent, deliverer = None, None
+    if agent is None:
+        try:
+            # v1 reads agent_model as a bare OpenAI name; as the fallback of v2 (whose agent_model is
+            # "provider:model") it runs on its own default.
+            model = make_chat_model(env, str(box_settings.get("agent_model", "gpt-4o-mini")) if version == 1
+                                    else "gpt-4o-mini")
             if model is not None:
                 agent = OwnerAgent(model, AgentContext(
                     camera_names=list(camera_names), mute_state=mute, feedback_dir=live_dir,
                     roots=lambda: alert_roots(live_dir, archive_dir),
                     retention_days=PRODUCTION_RETENTION_DAYS,
                 ))
-    except Exception as exc:  # noqa: BLE001 - a missing library must not stop the alerts
-        log.warning("Owner agent not available (%s); buttons still work.", exc)
+                if version == 2:
+                    log.warning("Owner assistant runs as v1 (the v2 brain could not be built).")
+        except Exception as exc:  # noqa: BLE001 - a missing library must not stop the alerts
+            log.warning("Owner agent not available (%s); buttons still work.", exc)
     transcriber = voice.make_transcriber(env, str(box_settings.get("transcribe_model") or voice.DEFAULT_MODEL))
+    names = list(camera_names)
+
+    def cameras() -> List[str]:
+        """The cameras whose ids an answer must never show: the box's list, and the brain's when it has one."""
+        try:
+            return names + list(agent.registry.snapshot().names) if getattr(agent, "version", 1) == 2 else names
+        except Exception:  # noqa: BLE001
+            return names
+
     inbox = TelegramInbox(cfg, agent, index, mute, live_dir, os.path.join(log_dir, "telegram_offset.json"),
                           feed=feed, deliverer=deliverer, archive_dir=archive_dir, lang=box_language,
-                          transcriber=transcriber)
+                          transcriber=transcriber, cameras=cameras)
     assistant = OwnerAssistant(cfg=cfg, index=index, mute=mute, inbox=inbox, feed=feed, deliverer=deliverer,
                                feedback_dir=live_dir, archive_dir=archive_dir)
     if cfg.enabled and not cfg.dry_run:
         assistant.thread = threading.Thread(target=inbox.run, name="telegram-inbox", daemon=True)
         assistant.thread.start()
     return assistant
+
+
+def is_tag_answer(text: str, replied: Any, request: Dict[str, Any]) -> bool:
+    """Is *text* the owner's words for the "Other…" wait *request*? A reply to its question ("מה קורה בסרטון?") always
+    is. A reply to the alert, or the first message within ``TAG_IMPLICIT_SEC`` that replies to nothing, is only when
+    it is a statement - not a question, a complaint or a command (2026-10-07: "איזה תזכורת, אתה מטומטם ומגזים" was
+    saved as the 12:46 clip's explanation)."""
+    prompts = [str(p) for p in (request or {}).get("prompt_ids") or []]
+    if replied is not None and str(replied) in prompts:
+        return True
+    return not not_a_judgement(text)
+
+
+def agent_version(box_settings: Dict[str, Any]) -> int:
+    """box.yaml ``agent_version``: 2 (the brain) unless it says 1. Before 2026-10-08 the default was 1, and the box
+    ran the old assistant with none of the brain's checks (aliases, claims, the topic camera)."""
+    value = box_settings.get("agent_version") if isinstance(box_settings, dict) else None
+    try:
+        return 1 if int(str(value).strip()) == 1 else 2
+    except (TypeError, ValueError, OverflowError):
+        if value not in (None, ""):
+            log.warning("Invalid agent_version %r; using v2", value)
+        return 2
 
 
 def _clock_of(alert: Dict[str, Any]) -> str:
@@ -763,8 +832,11 @@ class TelegramInbox:
         lang: Optional[Callable[[], str]] = None,
         transcriber: Optional[voice.Transcriber] = None,
         fetch_voice: Optional[Callable[[str], Tuple[bytes, str]]] = None,
+        cameras: Optional[Callable[[], Sequence[str]]] = None,
     ) -> None:
         self.feed = feed
+        # The camera ids no answer may show (brain/style.py swaps them for the family's names).
+        self._cameras = cameras
         # A spoken answer to "Other…": fetched from Telegram, then transcribed (None: asked for in writing).
         self.transcriber = transcriber
         self._fetch_voice = fetch_voice or (lambda file_id: voice.download(self.cfg.bot_token, file_id, post=self._post))
@@ -803,7 +875,13 @@ class TelegramInbox:
              rows: Sequence[Sequence[Sequence[str]]] = ()) -> Dict[str, Any]:
         """Send *text* (with retries) and return Telegram's answer. *undo_data* is a whole Undo callback
         code (``tu:...``); *markup* is used when there are no buttons (a ``force_reply``). *rows* are more button
-        rows of ``(label, callback)`` (the yes / no of a house-state request), after the others."""
+        rows of ``(label, callback)`` (the yes / no of a house-state request), after the others.
+
+        Every text goes out cleaned (brain/style.py): no closing offers ("אם יש משהו נוסף… אני כאן"), no camera
+        ids. A text with *entities* (a mention at a fixed offset) is sent as it is."""
+        cameras = self._camera_list()
+        if not entities:
+            text = clean_outgoing(text, cameras)
         fields = {"chat_id": chat_id, "text": text}
         if reply_to is not None:
             fields["reply_to_message_id"] = str(reply_to)
@@ -814,7 +892,10 @@ class TelegramInbox:
         undo_row = [{"text": tr("undo_button", lang), "callback_data": undo_code}] if undo_code else None
         if buttons:
             # A question asked after something was already changed: the choices, then the Undo row.
-            markup = json.loads(choice_keyboard(buttons, question_token))
+            # The labels name cameras by the family's names; the choice itself (the id) stays in the agent's state.
+            said = detect_language(text) or self._language()
+            markup = json.loads(choice_keyboard([replace_camera_ids(str(b), cameras, said) for b in buttons],
+                                                question_token))
             if undo_row:
                 markup.setdefault("inline_keyboard", []).append(undo_row)
             fields["reply_markup"] = json.dumps(markup)
@@ -841,6 +922,13 @@ class TelegramInbox:
                 time.sleep(2 * (attempt + 1))
         self._note("assistant", "answer", text)
         return resp if isinstance(resp, dict) else {}
+
+    def _camera_list(self) -> List[str]:
+        try:
+            return [str(c) for c in (self._cameras() if self._cameras is not None else ()) if c]
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Camera list for the answer not read: %s", exc)
+            return []
 
     def _after(self, reply: Any) -> None:
         for action in getattr(reply, "after", ()) or ():
@@ -902,13 +990,22 @@ class TelegramInbox:
             self._on_tag_button(query, message, chat_id, code)
             return
         self._cancel_tag(chat_id, (query.get("from") or {}).get("id"))   # any other tap ends an "Other…" wait
-        if getattr(self.agent, "version", 1) == 2 and code.startswith(("cl:", "u:", "hs:")):
+        if getattr(self.agent, "version", 1) == 2 and code.startswith(("cl:", "u:", "hs:", "kn:")):
             try:   # only stops the button's spinner: a dropped connection here must not lose the tap
                 self._post(self.cfg.bot_token, "answerCallbackQuery", {"callback_query_id": str(query.get("id"))})
             except Exception as exc:  # noqa: BLE001
                 log.warning("Could not stop the button's spinner: %s", exc)
             who = _who(query.get("from") or {})
-            if code.startswith("hs:"):            # yes / no to a house-state request (brain/house.py)
+            if code.startswith("kn:"):            # Cancel / All week under "these are my workers" (Memory Keeper)
+                parts = code.split(":")
+                if len(parts) != 3 or parts[1] not in ("x", "w") or not parts[2]:
+                    log.warning("Ignoring malformed known-people callback")
+                    return
+                self._note("owner", "button", _button_text(message, code, code), who["name"])
+                reply = self.agent.known_button(chat_id, parts[1], parts[2], who)
+                if reply is not None and parts[1] == "x":
+                    self._edit_buttons(chat_id, message.get("message_id"), {"inline_keyboard": []})
+            elif code.startswith("hs:"):            # yes / no to a house-state request (brain/house.py)
                 parts = code.split(":")
                 if len(parts) != 3 or parts[2] not in ("y", "n") or not parts[1]:
                     log.warning("Ignoring malformed house-state callback")
@@ -1127,9 +1224,11 @@ class TelegramInbox:
             reply_alert = str((replied_alert or {}).get("alert_id") or "") or None
         return self.pending.match(chat_id, user_id, now, reply_to=replied, reply_alert=reply_alert)
 
-    def _take_voice(self, chat_id: str, sender: Dict[str, Any], message: Dict[str, Any]) -> bool:
+    def _take_voice(self, chat_id: str, sender: Dict[str, Any], message: Dict[str, Any]) -> Any:
         """True when *message* is a voice answer to an "Other…" wait: it is transcribed and saved as the
-        words; when it cannot be, the owner is asked to write them (the wait stays). Never raises."""
+        words; when it cannot be, the owner is asked to write them (the wait stays). The transcript (a str) when
+        it was heard but is not the clip's words (a question, a complaint): the assistant reads it. False when no
+        wait is open. Never raises."""
         spoken = message.get("voice") or message.get("audio")
         if not isinstance(spoken, dict) or not spoken.get("file_id"):
             return False
@@ -1148,7 +1247,7 @@ class TelegramInbox:
         except Exception as exc:  # noqa: BLE001 - the owner is asked to write instead
             log.warning("Voice message not transcribed: %s", exc)
         if heard:
-            return self._take_tag_text(chat_id, sender, heard, message, spoken=True)
+            return self._take_tag_text(chat_id, sender, heard, message, spoken=True) or heard
         try:
             self._say(chat_id, tr("tag_voice_failed", lang), reply_to=message.get("message_id"))
         except Exception as exc:  # noqa: BLE001
@@ -1179,6 +1278,8 @@ class TelegramInbox:
                     self._say(chat_id, tr("tag_expired", lang), reply_to=message.get("message_id"))
                     return True
                 return False
+            if not is_tag_answer(text, replied, request):
+                return False          # meant for the assistant; the wait stays open
             taken = True
             self.pending.demote(chat_id, user_id, request["request_id"])
             alert_id = request["alert_id"]
@@ -1215,19 +1316,25 @@ class TelegramInbox:
         if not self._allowed(chat_id) or sender.get("is_bot"):
             return
         if not text:
-            if self._take_voice(chat_id, sender, message):
+            heard = self._take_voice(chat_id, sender, message)
+            if heard is True:
                 return
-            replied = (message.get("reply_to_message") or {}).get("message_id")
-            if self.pending.needs_text(chat_id, sender.get("id"), self._now(), replied):
-                self._say(chat_id, tr("tag_need_text", self._language()), reply_to=message.get("message_id"))
-            return
-        if self._take_tag_text(chat_id, sender, text, message):
+            if not (isinstance(heard, str) and heard.strip()):
+                replied = (message.get("reply_to_message") or {}).get("message_id")
+                if self.pending.needs_text(chat_id, sender.get("id"), self._now(), replied):
+                    self._say(chat_id, tr("tag_need_text", self._language()), reply_to=message.get("message_id"))
+                return
+            text = heard.strip()          # spoken, but not the clip's words: the assistant reads it
+        elif self._take_tag_text(chat_id, sender, text, message):
             return
         replied = (message.get("reply_to_message") or {}).get("message_id")
         alert = self.index.lookup(chat_id, replied) if replied is not None else None
         threaded = alert is not None
         v2 = getattr(self.agent, "version", 1) == 2
-        if alert is None:
+        # A message that replies to nothing is bound to the newest alert only when it may be a judgement of it: a
+        # question, a complaint or a command never is (2026-10-07: "על איזה סרטון אתה מדבר", "יא מטומטם" and
+        # "די עם ההודעה" were each filed as a verdict on the newest alert).
+        if alert is None and not not_a_judgement(text):
             if v2:
                 recent = self.index.recent(chat_id, self._now())
                 alert = recent[0] if len(recent) == 1 else None

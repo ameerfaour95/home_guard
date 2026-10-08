@@ -23,6 +23,7 @@ import yaml
 
 from .. import paths
 from ..ai_status import read_status
+from ..camera_names import channel_of, display_name, family_names
 from .aliases import ALIASES_PATH, load_aliases, normalize
 from .mode import GUARD, hhmm, mode_ends_at, mode_started_at, resolve_mode
 
@@ -150,6 +151,20 @@ def current_camera(snapshot: HouseSnapshot, name: str) -> Optional[str]:
         return str(name)
     hits = [c.name for c in snapshot.cameras if key in [normalize(c.name)] + [normalize(a) for a in c.aliases]]
     return hits[0] if len(hits) == 1 else None
+
+
+def display(snapshot: Optional[HouseSnapshot], camera: str, lang: str = "en") -> str:
+    """What the owner reads for *camera* (owner rule 2026-10-06/08: never the id): the family's newest name for it,
+    else "מצלמה 6" / "Camera 6" (camera_names.display_name). An old id follows a rename."""
+    raw = str(camera or "")
+    try:
+        now = current_camera(snapshot, raw) if snapshot is not None else None
+        cam = snapshot.camera(now) if (snapshot is not None and now) else None
+        if cam is not None and cam.aliases:
+            return str(cam.aliases[-1]).strip()
+        return display_name(now or raw, lang)
+    except Exception:  # noqa: BLE001 - a name is never worth a failed answer
+        return display_name(raw, lang)
 
 
 def mentioned_cameras(snapshot: HouseSnapshot, text: str) -> List[Tuple[str, str]]:
@@ -309,7 +324,11 @@ class HouseRegistry:
             zones = {}
         start, end = self.hours()
         cams = []
+        # A name saved before a site rename (ameer_tes2_ch6 -> ameer_week_0_1_ch6) still belongs to the camera on
+        # the same channel, when exactly one camera of the house has that channel (camera_names.family_names).
+        channels = [channel_of(n) for n in active + disabled]
         for name in active + disabled:
+            own = aliases.get(name) or (family_names(name, aliases) if channels.count(channel_of(name)) == 1 else [])
             entry = _dict(status_cams.get(name))
             # When the camera last delivered a new picture; the detector's last look for an older status file.
             checked = _num(entry.get("frame_ts") or entry.get("checked_ts"))
@@ -324,7 +343,7 @@ class HouseRegistry:
             except Exception:  # noqa: BLE001
                 muted = None
             cams.append(CameraState(
-                name=name, enabled=name in active, aliases=tuple(aliases.get(name, [])), live=live,
+                name=name, enabled=name in active, aliases=tuple(own), live=live,
                 last_seen=checked if checked else None, muted_until=muted,
                 sees=str(_dict(sees.get(name)).get("text") or ""), zone=bool(zones.get(name)),
             ))

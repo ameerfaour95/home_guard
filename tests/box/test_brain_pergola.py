@@ -84,7 +84,7 @@ class PergolaTest(unittest.TestCase):
         self.assertEqual(fast.seen, [])
         self.assertIn("מצלמה 3 = camera_3", big.seen[0][0][-1])  # resolved in code before the model
         self.assertEqual(aliases.load_aliases(self.aliases)["camera_3"], ["פרגולה"])
-        self.assertIn('✓ "פרגולה" מעכשיו זה camera_3', first.text)
+        self.assertIn('✓ "פרגולה" מעכשיו זה camera 3', first.text)
         self.assertTrue(first.undo_token)                         # the receipt has an Undo button
         self.assertEqual(self.grabbed, ["camera_3"])              # ... and a photo of the camera itself
 
@@ -99,7 +99,8 @@ class PergolaTest(unittest.TestCase):
         third = agent.handle(PICTURE, "-5", {"user_id": 1})
         self.assertEqual(third.tools_called, ("check_camera",))
         self.assertEqual(self.grabbed[-1], "camera_3")            # the photo comes from camera 3
-        self.assertIn("camera_3 (פרגולה)", third.text)            # and the reply names it
+        self.assertIn("(פרגולה)", third.text)                  # and the reply names it by the family's name
+        self.assertNotIn("camera_3", third.text)
 
     def test_a_remember_promise_without_a_save_becomes_not_saved_yet(self) -> None:
         big = Scripted([reply("אזכור שהפרגולה זה מצלמה 3."), reply("בסדר, אני זוכר.")], "big")
@@ -113,7 +114,7 @@ class PergolaTest(unittest.TestCase):
                        "big")
         out = self.agent(big, Scripted([], "fast")).handle(REMEMBER, "-5", {"user_id": 1})
         self.assertEqual(aliases.load_aliases(self.aliases)["camera_3"], ["פרגולה"])
-        self.assertIn('✓ "פרגולה" מעכשיו זה camera_3', out.text)
+        self.assertIn('✓ "פרגולה" מעכשיו זה camera 3', out.text)
 
     def test_a_picture_with_no_camera_being_discussed_asks_with_camera_buttons(self) -> None:
         fast = Scripted([call("check_camera")], "fast")
@@ -127,7 +128,7 @@ class PergolaTest(unittest.TestCase):
         agent = self.agent(big, Scripted([], "fast"))
         first = agent.handle(REMEMBER, "-5", {"user_id": 1})
         out = agent.undo_turn("-5", first.undo_token, {"user_id": 1})
-        self.assertEqual(out.text, '✓ "פרגולה" כבר לא camera_3')
+        self.assertEqual(out.text, '✓ "פרגולה" כבר לא camera 3')
         self.assertNotIn("camera_3", aliases.load_aliases(self.aliases))
         self.assertEqual(agent.undo_turn("-5", first.undo_token, {"user_id": 1}).text, t("nothing_to_undo", "he"))
 

@@ -112,7 +112,7 @@ class AlertTypesTest(unittest.TestCase):
         self.assertEqual((d["camera"], d["old"], d["new"], d["own_before"]),
                          ("main_entrance", ["person"], ["person", "vehicle"], None))
         self.assertEqual(receipt_line(ctx.receipts[-1], "en"),
-                         "✓ main_entrance alerts on: people → people, vehicles")
+                         "✓ main entrance alerts on: people → people, vehicles")
 
     def test_house_and_refusals(self) -> None:
         ctx = self.ctx("for the whole house, animals too")
@@ -129,7 +129,7 @@ class AlertTypesTest(unittest.TestCase):
         out = set_sensitivity(ctx, {"camera": "back", "values": {"person": 30}, "owner_words": "people 30%"})
         self.assertEqual(out["status"], DONE)
         self.assertEqual(ctx.receipts[-1].detail["new"]["person"], 0.3)
-        self.assertIn("back_door", receipt_line(ctx.receipts[-1], "en"))
+        self.assertIn("back door", receipt_line(ctx.receipts[-1], "en"))
 
     def test_undo_puts_back_the_exact_previous_choice(self) -> None:
         services = Services(roots=lambda: [], desc_dir=self.dir, feedback_dir=self.dir, work_dir=self.dir, mute=None,
@@ -482,7 +482,7 @@ class AlertTypesTest(unittest.TestCase):
         self.assertEqual(self.line("set_sensitivity", "en", camera="", old=old, new=new),
                          "✓ The house: how sure before alerting - people 40% → 30%, animals 50% → 70%")
         self.assertEqual(self.line("set_sensitivity", "en", camera="back_door", old=old, new=new),
-                         "✓ back_door: how sure before alerting - people 40% → 30%, animals 50% → 70%")
+                         "✓ back door: how sure before alerting - people 40% → 30%, animals 50% → 70%")
         he = self.line("set_sensitivity", "he", camera="", old=old, new=new)
         self.assertIn("אנשים 40% ← 30%", he)
         self.assertNotIn("רכבים", he)
@@ -491,7 +491,7 @@ class AlertTypesTest(unittest.TestCase):
     def test_alert_type_lists_are_in_people_vehicles_animals_order(self):
         self.assertEqual(self.line("set_alert_types", "en", camera="back_door",
                                    old=["animal", "person"], new=["animal", "vehicle", "person"]),
-                         "✓ back_door alerts on: people, animals → people, vehicles, animals")
+                         "✓ back door alerts on: people, animals → people, vehicles, animals")
 
     def test_hebrew_house_uses_the_masculine_verb(self):
         he = self.line("set_alert_types", "he", camera="", old=["person"], new=["person", "animal"])
@@ -503,7 +503,7 @@ class AlertTypesTest(unittest.TestCase):
     def test_changed_since_names_the_camera_or_house(self):
         from home_guard_project.box.brain.i18n import t
         from home_guard_project.box.brain.render import undo_what
-        for tool, camera, en in (("set_alert_types", "back_door", "the alert types of back_door"),
+        for tool, camera, en in (("set_alert_types", "back_door", "the alert types of back door"),
                                  ("set_sensitivity", "", "the sensitivity of the house")):
             what = undo_what(tool, {"camera": camera}, camera or "house", "en")
             self.assertEqual(what, en)
