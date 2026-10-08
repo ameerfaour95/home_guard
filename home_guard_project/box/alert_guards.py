@@ -44,6 +44,7 @@ ACTION = _any([
     r"\bhid(?:e|es|ing)\b(?! (?:his|her|their) faces?)",r"\bcrouch", r"\bsteal", r"\bstole",
     r"\btak(?:e|es|ing|en)\b", r"\btook\b", r"\btamper", r"\bpeek", r"\bpeer", r"\blook(?:s|ed|ing)? (?:in|into|inside)\b",
     r"\bloiter", r"\blurk", r"\bbreak", r"\bforc", r"\bpry", r"\bentrance", r"\bnight\b",
+    r"\b(?:cover|block|turn|mov|spray|paint|point|push|hit)\w* (?:the |a |at the )?camera",
     r"ידית", r"דלת", r"חלון", r"שער", r"גדר", r"מנעול", r"טיפוס", r"מטפס", r"מסתתר", r"מתחבא", r"כורע", r"גונב",
     r"לוקח", r"לקח", r"מציץ", r"פוגע במצלמה", r"פורץ", r"כניסה", r"לילה",
 ])
