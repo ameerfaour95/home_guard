@@ -259,17 +259,24 @@ class AppearanceTest(GuardCase):
         self.assertEqual(job.alert["label"], "escalation")
         self.assertNotIn("downgraded", job.alert)
 
-    def test_the_prompt_says_actions_not_appearance(self):
+    def test_the_prompt_is_the_oct_3_text_again(self):
+        # 2026-10-08 (home-guard-32, eval_set_v2): the "actions not appearance" prompt caught 109/181 alerts against
+        # 141/181 and missed a knife at the owner's house. The Oct 3 text is back; the code guard (why + reason +
+        # summary, deny by default) stays.
         prompt = inf.build_prompt("cam", 0, "12:00:00", 0, 0)
-        for words in ("Appearance is never by itself a reason", "covering the face WHILE approaching an entrance",
-                      "a gun or knife clearly held as a weapon", "ladders, brooms"):
-            self.assertIn(words, prompt)
-        self.assertNotIn("faces hidden by hoods, masks or clothing", prompt)
-        self.assertTrue(inf.PROMPT_VERSION.startswith("2026-10-08"))
+        self.assertIn("faces hidden by hoods, masks or clothing", prompt)
+        self.assertNotIn("Appearance is never by itself a reason", prompt)
+        self.assertTrue(inf.PROMPT_VERSION.startswith("2026-10-03"))
 
 
 class SecondLookTest(GuardCase):
     book_on = False
+
+    def test_a_no_that_names_the_class_keeps_the_red(self):
+        backend = Backend(answer("escalation", people=2, why="a fight", summary="Two men fight."),
+                          verify={"confirmed": False, "what_it_is": "a physical fight between two men", "evidence_frame": 2})
+        job = self.work(backend, T0)
+        self.assertEqual(job.alert["label"], "escalation")
     WEAPON = answer("escalation", people=1, why="holding a possible weapon", summary="A man holds a long object.")
 
     def test_not_confirmed_is_a_suspicious_with_one_line(self):

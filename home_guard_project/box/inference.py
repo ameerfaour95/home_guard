@@ -111,7 +111,7 @@ def apply_policy_override(parsed: Dict[str, Any], in_window: bool, person: bool,
 
 
 # Bumped whenever the prompt or the answer's schema changes, so training records can be told apart.
-PROMPT_VERSION = "2026-10-08.actions-not-appearance-why-owner-facts"
+PROMPT_VERSION = "2026-10-03.tagged-rules-label-animals-why-owner-facts"
 
 # The three labels the model gives a scene, and what the box does with each. The owner
 # chose them (this is also what a student model will be trained to answer):
@@ -416,20 +416,17 @@ ENTITIES_JSON_RULE = ('Also add "per_entity" to the JSON object: [{{"id": "<an i
 # The tagging rules for the three labels, shared by the guard loop's prompt and the
 # assistant's guard-mode look at a saved clip, so both judge a scene the same way.
 LABEL_RULES = """
-- "normal": everyday life - family and visitors, workers and gardeners at work, people talking, walking,
-  standing or waiting, looking at a phone, smoking, cleaning, carrying babies, bags, tools or materials,
-  deliveries, cars parking or leaving and people getting into or out of them, pets, or no special activity.
-  A person standing still is normal unless they do something from the "suspicious" list.
-- "suspicious": an ACTION the homeowner should look at - trying a door handle, door, gate, window or car
-  door, looking into windows or cars, climbing, hiding, crouching at a door at night, lingering or walking
-  around the property at night, taking something and leaving, tampering with a camera, deliberately
-  covering the face WHILE approaching an entrance, or a vehicle waiting with no clear purpose.
-  Appearance is never by itself a reason: clothing, hoods, hoodies, masks, hats, sunglasses, dark clothes,
-  or a covered, hidden, blurred or pixelated face are NOT suspicious without one of these actions.
-- "escalation": a crime or danger in progress - a break-in or forced entry, breaking a door, window or
-  car, stealing and carrying things away, climbing a fence or wall into the property, a fight or attack,
-  a gun or knife clearly held as a weapon, fire or smoke, a crash, a person lying motionless. Long tools,
-  poles, boards, pipes, ladders, brooms and garden tools are tools, not weapons.
+- "normal": everyday life - family and visitors, people talking, walking, standing or waiting, looking
+  at a phone, smoking, cleaning, carrying babies or bags into the house, deliveries, cars parking or
+  leaving, pets, or no special activity. A person standing still is normal unless they hide their face
+  or do something from the "suspicious" list.
+- "suspicious": something the homeowner should look at - faces hidden by hoods, masks or clothing,
+  lingering or loitering, looking around cautiously, looking into windows or cars, trying doors,
+  gates or car doors, walking around the property at night, hiding, or a vehicle waiting with no
+  clear purpose.
+- "escalation": a crime or danger in progress - a break-in or forced entry, breaking a door, window
+  or car, stealing and carrying things away, climbing a fence or wall into the property, a fight or
+  attack, a knife, gun or other weapon in hand, fire or smoke, a crash.
 """.strip()
 
 
@@ -466,18 +463,18 @@ Write "summary": what happens in the clip, in one to three short sentences (usua
 
 Then give the clip ONE "label":
 {LABEL_RULES}
-Dark clothing alone never makes a scene suspicious; judge what people do, never how they look.
+Dark clothing alone never makes a scene suspicious; judge what people do.
 
 Reply with EXACTLY ONE strict JSON object and nothing else:
 {{"summary": "<one to three short sentences>",
   "label": "normal" | "suspicious" | "escalation",
   "raw_label": "<normal | suspicious | escalation: judge the scene as if no house notes existed>",
   "applied_fact_id": "<the ID of the house note used for label; empty string when none; label judges WITH notes>",
-  "serious_behaviour": <true if the fact-free scene shows trying doors, gates, windows or car doors, looking into windows or cars, climbing, hiding, or covering the face while approaching an entrance; otherwise false>,
+  "serious_behaviour": <true if the fact-free scene shows a hidden or covered face, trying doors, gates or car doors, or looking into windows or cars; otherwise false>,
   "people": <how many people are visible in the frames, as a number; 0 if none>,
   "vehicle_moving": <true if a vehicle is driving, arriving or leaving; false if vehicles are only parked or there are none>,
   "animals": <how many animals (cats, dogs and other animals, not birds) are visible, as a number; 0 if none>,
-  "why": "<one short clause in {language} naming the action behind a suspicious or escalation label (what the person does, never what they wear); empty for normal>",
+  "why": "<one short clause in {language} naming the behaviour behind a suspicious or escalation label; empty for normal>",
   "summary_owner": "<{owner_rule}>"}}
 """.strip()
     live = _prompt_facts(facts, camera_name, t_sec if alert_ts is None else alert_ts)
@@ -2310,6 +2307,12 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                 decision["second_look"] = look
                 log.info("[%s] second look (%s): %s", camera_name, ",".join(classes),
                          look.get("reason") or ("confirmed" if look["confirmed"] else f"not so: {look['what_it_is']}"))
+                # A "no" whose own words name the class ("not confirmed: a physical altercation") contradicts itself:
+                # the red stays (home-guard-32, eval_set_v2 Abuse004).
+                if (look["answered"] and look["confirmed"] is False
+                        and look.get("class") in verify_classes(str(look.get("what_it_is") or ""))):
+                    look = dict(look, confirmed=True, verified=True, reason="the answer itself names it")
+                    decision["second_look"] = look
                 if look["answered"] and look["confirmed"] is False:
                     from .alert_texts import second_look as second_look_line  # noqa: PLC0415
 
