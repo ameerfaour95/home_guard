@@ -35,7 +35,7 @@ APPEARANCE = _any([
     r"\bcover(?:ed|ing|s)? (?:his |her |their |the )?faces?", r"\bfaces? (?:is |are |was |were )?(?:covered|hidden|obscured|concealed|not visible)",
     r"\b(?:hidden|obscured|concealed) faces?", r"\bhid(?:es|ing)? (?:his|her|their) faces?",
     r"מסכה", r"מסיכה", r"קפוצ['׳]?ון", r"ברדס", r"פנים מכוסות", r"פנים מוסתרות", r"פניו מכוסות", r"פניו מוסתרות",
-    r"מכסה את פניו", r"בגדים כהים", r"לבוש כהה", r"כובע", r"משקפי שמש", r"פיקסל", r"מפוקסל", r"מטושטש", r"רעול",
+    r"מכסה את פניו", r"כיסוי ראש", r"בגדים כהים", r"לבוש כהה", r"כובע", r"משקפי שמש", r"פיקסל", r"מפוקסל", r"מטושטש", r"רעול",
 ])
 
 # Anything here keeps the "suspicious": an action, or night (walking around the property at night stays suspicious).
@@ -50,11 +50,57 @@ ACTION = _any([
 ])
 
 
+# What may be left in a reason that is only about looks: who, the look itself, filler, and harmless presence
+# (standing, walking past, a phone). Anything else - any other word - is taken as an action and keeps the label.
+# 2026-10-08 (home-guard-32's replay on eval_set_v2): the first version kept a "suspicious" only when its reason had
+# a word from ACTION, and lowered 41 REAL alerts whose action was in other words ("loading items into a parked
+# vehicle", "carrying a large bag", "moving around the property"). Deny by default: an unknown word keeps the alert.
+_BENIGN_EN = set("""
+a an the this that one two three several some person people man men woman women someone somebody individual
+individuals figure figures guy boy girl child adult with without wearing wears wear dressed in and or is are was
+were be been being appears appear appeared seems seem possibly likely maybe partially partly fully mostly
+completely its it his her their them they he she of to by from for at on as due because while also only just
+face faces head heads features identity covered covering covers obscured obscuring hidden hiding concealed
+concealing masked mask masks balaclava ski hood hooded hoodie hoodies sweatshirt hat hats cap caps beanie helmet
+sunglasses glasses dark black darkly colored coloured clothing clothes clothed outfit attire jacket garment
+garments pants shirt long sleeve sleeves pixelated pixelation pixels blurry blurred blur unclear not visible
+cannot be seen unidentified unknown unrecognizable worker workers suspicious suspiciously behavior behaviour appearance presence
+present noted observed seen visible stands standing stood walks walking walked passes passing passed past by near
+nearby next wall frame scene view area outside here there phone looking looks look at talking talks
+""".split())
+_BENIGN_HE = set("""
+אדם אנשים גבר גברים אישה נשים מישהו דמות דמויות ילד ילדה שני שניים שלושה עם בלי לבוש לבושה לובש לובשת לבושים
+ו או של על ידי עקב בגלל כנראה נראה נראית נראים אולי חלקית לגמרי הוא היא הם הן את
+פנים פניו פניה פניהם מכוסות מכוסים מוסתרות מוסתרים מוסתר מכוסה מכסה מסתיר מסתירים כיסוי ראש
+מסכה מסכות מסיכה רעול רעולת רעולי ברדס קפוצון כובע כובעים קסדה משקפי שמש
+בגדים בגד כהים כהה שחורים שחור שחורה ארוכים פיקסלית פיקסלים מפוקסל מטושטש מטושטשות לא ברור ברורות
+התנהגות חשודה חשוד הופעת הופעה נוכחות עומד עומדת עומדים הולך הולכת הולכים עובר עוברת עוברים ליד קיר
+בתמונה בפריים באזור בחוץ כאן שם טלפון מסתכל מסתכלת מדבר מדברת
+עובד עובדים עובדת פועל פועלים מפוקסלות מפוקסלים מפוקסלת מטושטשים מטושטשת
+""".split())
+_TOKEN = re.compile(r"[A-Za-z]+|[א-ת]+")
+_HE_PREFIXES = ("ו", "ה", "ב", "ל", "ש", "מ", "כ")
+
+
+def _benign(token: str) -> bool:
+    t = token.lower()
+    if t in _BENIGN_EN or t in _BENIGN_HE:
+        return True
+    if t[:1] in _HE_PREFIXES and len(t) > 2:          # "והפנים", "במסכה": one or two prefix letters
+        if t[1:] in _BENIGN_HE or (t[1:2] in _HE_PREFIXES and t[2:] in _BENIGN_HE):
+            return True
+    return False
+
+
 def appearance_only(text: str) -> bool:
-    """True when *text* (the model's why / alert_reason) names appearance and no action: such a "suspicious" is
-    lowered to normal. Empty text, or text naming neither, is False (nothing to judge, the label stays)."""
-    text = str(text or "")
-    return bool(APPEARANCE.search(text)) and not ACTION.search(text)
+    """True when *text* (the model's why / alert_reason) is about looks and nothing else: it names an appearance
+    (APPEARANCE) and every other word is filler or harmless presence (standing, walking past, a phone). Such a
+    "suspicious" is lowered to normal. Any other word - an action in words we never listed - keeps the label, and
+    so does any listed action (ACTION). Empty text, or text naming no appearance, is False."""
+    text = str(text or "").replace("'", "").replace("׳", "").replace('"', " ")
+    if not APPEARANCE.search(text) or ACTION.search(text):
+        return False
+    return all(_benign(tok) for tok in _TOKEN.findall(text))
 
 
 # ---------- lingering: the investigator watches the tracker before it goes out (stage 2b, 2026-10-08) ----------
