@@ -49,7 +49,8 @@ class DeviceDetail(QFrame):
         for reason in device.reasons:
             self.content.addWidget(label('•  ' + reason.message, '', True))
         self.content.addSpacing(8)
-        values = [('DEVICE', device.device_id), ('HOST', device.host or 'Not reported'),
+        values = ([('OLD SITE NAMES', ', '.join(map(site_name, device.old_sites)))] if device.old_sites else []) + [
+                  ('DEVICE', device.device_id), ('HOST', device.host or 'Not reported'),
                   ('DISK FREE', f'{device.disk_free_gb:g} GB' if device.disk_free_gb is not None else 'Not reported'),
                   ('COLLECTOR', 'Running' if device.collector_running else 'Stopped' if device.collector_running is False else 'Not reported'),
                   ('MODE', mode_name(device.mode)), ('LAST SEEN · CUSTOMER TIME', local_time(device.last_seen_utc, timezone)),

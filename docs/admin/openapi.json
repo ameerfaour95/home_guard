@@ -1319,12 +1319,42 @@
             ],
             "title": "Newest Clip Utc"
           },
+          "old_sites": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Old Sites",
+            "type": "array"
+          },
           "reasons": {
             "items": {
               "$ref": "#/components/schemas/HealthReason"
             },
             "title": "Reasons",
             "type": "array"
+          },
+          "replaced_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replaced By"
+          },
+          "replaced_by_site": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replaced By Site"
           },
           "site": {
             "title": "Site",

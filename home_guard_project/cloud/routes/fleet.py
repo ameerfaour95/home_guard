@@ -90,6 +90,32 @@ def camera_inventory(session: Session, now: datetime, devices: list[Device]) -> 
     return out
 
 
+def box_lineage(session: Session) -> tuple[dict[int, tuple[str, str]], dict[int, list[str]]]:
+    """One physical box, many site names: a box renamed its site (ameer_tes2 -> ameer_week_0_1) or was re-registered,
+    and each site became its own device row. Devices whose heartbeat names the same host (else the registration's
+    tailscale host) are one box; the one heard from last is it, the others are its old site names.
+
+    Returns ({old device pk: (current device_id, current site)}, {current device pk: [old sites, newest first]})."""
+    boxes: dict[str, list[tuple[datetime, Device]]] = {}
+    oldest = datetime.min.replace(tzinfo=timezone.utc)
+    for dev in session.scalars(select(Device)):
+        hb = parse_heartbeat(dev.last_heartbeat) if isinstance(dev.last_heartbeat, dict) else None
+        key = ((hb.host if hb else None) or dev.tailscale_host or "").strip().lower()
+        if key:
+            boxes.setdefault(key, []).append((hb.time_utc if hb and hb.time_utc else oldest, dev))
+    replaced: dict[int, tuple[str, str]] = {}
+    old_sites: dict[int, list[str]] = {}
+    for members in boxes.values():
+        if len(members) < 2:
+            continue
+        members.sort(key=lambda m: (m[0], m[1].id), reverse=True)
+        current = members[0][1]
+        for _, dev in members[1:]:
+            replaced[dev.id] = (current.device_id, current.site)
+        old_sites[current.id] = [dev.site for _, dev in members[1:]]
+    return replaced, old_sites
+
+
 def build_summaries(session: Session, now: datetime, customer_id: Optional[int] = None,
                     device_pks: Optional[Iterable[int]] = None) -> list[DeviceSummary]:
     """One DeviceSummary per device, sorted by severity, customer name, site. Grouped queries, no per-device loops."""
@@ -111,6 +137,7 @@ def build_summaries(session: Session, now: datetime, customer_id: Optional[int] 
         Feedback.device_pk.in_(pks), Feedback.verdict == "false_alarm",
         Feedback.received_at >= now - timedelta(days=7)).group_by(Feedback.device_pk)).all())
     inventory = camera_inventory(session, now, [r[0] for r in rows])
+    replaced, old_sites = box_lineage(session)
 
     out: list[DeviceSummary] = []
     for dev, cust_name, name_source in rows:
@@ -137,7 +164,9 @@ def build_summaries(session: Session, now: datetime, customer_id: Optional[int] 
             events_24h=events.get(dev.id, 0), alerts_24h=alerts.get(dev.id, 0),
             false_alarms_7d=false_alarms.get(dev.id, 0),
             needs_details=(dev.enrolled_by == "discovered" and name_source != "admin"),
-            enrolled_by=dev.enrolled_by, app_version=dev.app_version))
+            enrolled_by=dev.enrolled_by, app_version=dev.app_version,
+            replaced_by=replaced.get(dev.id, (None, None))[0], replaced_by_site=replaced.get(dev.id, (None, None))[1],
+            old_sites=old_sites.get(dev.id, [])))
     out.sort(key=lambda d: (_SEVERITY_RANK[d.verdict], d.customer_name, d.site))
     return out
 

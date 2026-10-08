@@ -47,7 +47,10 @@
       "false_alarms_7d": 0,
       "needs_details": false,
       "enrolled_by": "admin",
-      "app_version": null
+      "app_version": null,
+      "replaced_by": null,
+      "replaced_by_site": null,
+      "old_sites": []
     },
     {
       "device_id": "0a5823a6-8e52-568d-802e-b19165904dc2",
@@ -76,7 +79,10 @@
       "false_alarms_7d": 2,
       "needs_details": false,
       "enrolled_by": "admin",
-      "app_version": null
+      "app_version": null,
+      "replaced_by": null,
+      "replaced_by_site": null,
+      "old_sites": []
     }
   ]
 }

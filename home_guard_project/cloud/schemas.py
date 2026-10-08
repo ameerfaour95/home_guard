@@ -87,6 +87,11 @@ class DeviceSummary(BaseModel):
     needs_details: bool = False
     enrolled_by: Literal["admin", "setup", "discovered"] = "admin"
     app_version: Optional[str] = None
+    # One box, many site names (routes/fleet.box_lineage): an old site's row names the device it became; the current
+    # row lists its old site names. The Fleet shows one row per box.
+    replaced_by: Optional[str] = None
+    replaced_by_site: Optional[str] = None
+    old_sites: list[str] = []
 
 
 class FleetResponse(BaseModel):

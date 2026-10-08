@@ -88,6 +88,10 @@ class DeviceSummary:
     events_24h: int
     alerts_24h: int
     false_alarms_7d: int
+    # one box, many site names: an old site's row names the device (and site) it became; the current row its old names
+    replaced_by: str | None = None
+    replaced_by_site: str | None = None
+    old_sites: list[str] = field(default_factory=list)
 
 
 @dataclass

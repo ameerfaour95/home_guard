@@ -252,3 +252,42 @@ def test_a_camera_the_owner_switched_off_reads_off_by_the_owner(widgets, wait):
     assert ('Pool', 'switched off') in screen.overview.camera_rows
     assert not any(row.startswith('Pool') for row in screen.overview.retired_rows)
     assert camera_name('Garden') == 'Pool (off by the owner)'
+
+
+class RenamedSiteBackend(DemoBackend):
+    """Demo customer 1's 'cedar_guest_house' box is an old site name of 'cedar_house' (one box, renamed)."""
+    def _mark(self, device):
+        if device.site == 'cedar_guest_house':
+            device.replaced_by, device.replaced_by_site = 'dev-cedar', 'cedar_house'
+        if device.site == 'cedar_house':
+            device.old_sites = ['cedar_guest_house']
+        return device
+
+    def fleet(self):
+        result = super().fleet(); result.devices = [self._mark(d) for d in result.devices]; return result
+
+    def customer(self, id):
+        result = super().customer(id); result.devices = [self._mark(d) for d in result.devices]; return result
+
+
+def test_fleet_shows_one_row_per_box_with_its_old_site_names(widgets, wait):
+    from home_guard_project.admin.fleet import FleetScreen
+    from PySide6.QtCore import Qt
+    screen = FleetScreen(RenamedSiteBackend()); widgets.append(screen); screen.show()
+    wait(lambda: screen.snapshot is not None)
+    sites = [d.site for d in screen.model.rows]
+    assert 'cedar_guest_house' not in sites and len(sites) == len(screen.snapshot.devices) - 1
+    assert screen.summary.text().startswith(f'{len(sites)} boxes')
+    row = sites.index('cedar_house')
+    assert screen.model.index(row, 0).data().endswith('·  was Cedar Guest House')
+    screen.filter(query='guest house')
+    assert [d.site for d in screen.model.rows] == ['cedar_house']
+
+
+def test_customer_page_never_warns_about_an_old_site_name(widgets, wait):
+    from home_guard_project.admin.customer import CustomerScreen
+    screen = CustomerScreen(RenamedSiteBackend()); widgets.append(screen); screen.show(); screen.open(1)
+    wait(lambda: screen.camera_list is not None)
+    assert 'Cedar Guest House' not in screen.health.text() and screen.health.text().startswith('Cedar House')
+    assert not any('Cedar Guest House' in w for w in screen.overview.warnings)
+    assert not screen.overview.status.text().startswith('Cedar Guest House')

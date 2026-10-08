@@ -30,7 +30,10 @@
       "false_alarms_7d": 2,
       "needs_details": false,
       "enrolled_by": "admin",
-      "app_version": null
+      "app_version": null,
+      "replaced_by": null,
+      "replaced_by_site": null,
+      "old_sites": []
     }
   ]
 }

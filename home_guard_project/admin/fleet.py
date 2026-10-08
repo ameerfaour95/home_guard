@@ -173,12 +173,14 @@ class FleetScreen(QWidget):
         scroll = self.table.verticalScrollBar().value()
         horizontal = self.table.horizontalScrollBar().value()
         selected = self.selected_id
-        self.model.replace(snapshot.devices)
+        # one row per box: a renamed site's old rows (replaced_by) are listed on the box's row, never as boxes
+        boxes = [d for d in snapshot.devices if not d.replaced_by]
+        self.model.replace(boxes)
         self.restore_selection(selected)
         self.table.verticalScrollBar().setValue(scroll)
         self.table.horizontalScrollBar().setValue(horizontal)
-        counts = {v: sum(d.verdict == v for d in snapshot.devices) for v in self.chips}
-        self.summary.setText(f'{len(snapshot.devices)} boxes    /    {counts["healthy"]} healthy    /    {counts["critical"]+counts["warning"]} need attention    /    {counts["offline"]} offline' + (f'    /    {counts["unknown"]} unknown' if counts['unknown'] else ''))
+        counts = {v: sum(d.verdict == v for d in boxes) for v in self.chips}
+        self.summary.setText(f'{len(boxes)} boxes    /    {counts["healthy"]} healthy    /    {counts["critical"]+counts["warning"]} need attention    /    {counts["offline"]} offline' + (f'    /    {counts["unknown"]} unknown' if counts['unknown'] else ''))
         self.update_view()
         self.update_age()
         self.loaded.emit(snapshot, customers)

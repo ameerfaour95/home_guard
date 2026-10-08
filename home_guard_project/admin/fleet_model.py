@@ -42,8 +42,8 @@ class FleetModel(QAbstractTableModel):
         self.beginResetModel()
         self.rows = sorted([d for d in self.devices if
             (self.verdict == 'all' or d.verdict == self.verdict) and
-            self.query in ' '.join([d.customer_name, d.site, site_name(d.site), d.device_id,
-                                    *[r.message for r in d.reasons]]).casefold()],
+            self.query in ' '.join([d.customer_name, d.site, site_name(d.site), d.device_id, *d.old_sites,
+                                    *map(site_name, d.old_sites), *[r.message for r in d.reasons]]).casefold()],
             key=lambda d: SEVERITY[d.verdict])
         self.endResetModel()
 
@@ -59,7 +59,8 @@ class FleetModel(QAbstractTableModel):
                                   self.timezones.get(d.customer_id, 'UTC'))
             return '\n'.join([d.customer_name, site_name(d.site), d.device_id, *[r.message for r in d.reasons]])
         if role == Qt.ItemDataRole.DisplayRole:
-            values = [f'{d.customer_name}\n{site_name(d.site)}',
+            values = [f'{d.customer_name}\n{site_name(d.site)}' + (f'  ·  was {", ".join(map(site_name, d.old_sites))}'
+                                                                    if d.old_sites else ''),
                       f'{d.verdict.title()}\n{d.reasons[0].message if d.reasons else "No health details reported"}',
                       age(d.last_seen_utc, self.now()),
                       f'{d.cameras_total-d.cameras_stale}/{d.cameras_total}' if d.verdict != 'offline' else f'—/{d.cameras_total}',

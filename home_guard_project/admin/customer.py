@@ -121,12 +121,17 @@ class CustomerScreen(QWidget):
             self.consent_note.show()
         else:
             self.consent_note.hide()
-        devices = [d for d in customer.devices if d.device_id == self.device_id] or customer.devices
+        boxes = [d for d in customer.devices if not d.replaced_by]  # old site names of a box are not boxes
+        devices = [d for d in boxes if d.device_id == self.device_id] or boxes
         if devices:
             device = min(devices, key=lambda d: SEVERITY[d.verdict])
             reason = device.reasons[0].message if device.reasons else 'No health details reported'
             now = getattr(self.backend, 'now', None) or utcnow()
             self.health.setText(f'{site_name(device.site)}  ·  {device.verdict.title()} — {reason}')
+        elif customer.devices:
+            now = getattr(self.backend, 'now', None) or utcnow()
+            self.health.setText('Old site names of the box now reporting as '
+                                + ', '.join(sorted({site_name(d.replaced_by_site) for d in customer.devices})))
         else:
             self.health.setText('No boxes enrolled')
         self.consent.setText('Consent  ·  '+ '  /  '.join(f'{text}: {"yes" if allowed else "no"}' for text, allowed in
