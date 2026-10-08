@@ -460,6 +460,7 @@ class RunLoopTest(unittest.TestCase):
                 mock.patch.object(inf, "vehicle_boxes", return_value=boxes),
                 mock.patch.object(inf, "start_case_memory", return_value=False),
                 mock.patch.object(inf, "start_events", return_value=book),
+                mock.patch.object(inf, "start_baseline", return_value=None),
                 mock.patch.object(inf, "KNOWN_CAMERAS", ()),
                 mock.patch.object(ai_status, "AiStatus", return_value=mock.Mock()),
                 mock.patch.object(ai_status, "objects_from_result", return_value=[]),

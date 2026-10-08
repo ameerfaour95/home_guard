@@ -169,6 +169,10 @@ FACTS_PROVIDER: Optional[Callable] = None
 EVENTS: Any = None
 # Every camera id this box knows (run() fills it): the last guard swaps any of them in an owner text for its name.
 KNOWN_CAMERAS: Tuple[str, ...] = ()
+# What is usual at each camera (baseline.Historian, task 2.9), started by run() (start_baseline). None - tests, tools -
+# changes nothing. It only RAISES: box.yaml baseline_alerts off | shadow (default: decide and log only) | on.
+HISTORIAN: Any = None
+BASELINE_BUILD: Any = None       # baseline.NightlyBuild, ticked by the guard loop (start_baseline)
 EVENTS_TICK_SEC = 1.0
 VERIFY_TIMEOUT_SEC = 15.0        # the second look before a red waits at most this long, then the red goes out
 # The investigator's wait-and-watch (stage 2b, owner-approved 2026-10-08: a suspicious may wait up to 20 s). A
@@ -365,6 +369,61 @@ def start_events(box_settings: Mapping[str, Any]) -> Any:
     except Exception as exc:  # noqa: BLE001 - the memory only adds; the alerts go on without it
         log.warning("Event memory not started (%s); events are kept in events.jsonl only", exc)
     return EVENTS
+
+
+def start_baseline(box_settings: Mapping[str, Any], cameras: Sequence[str] = ()) -> Any:
+    """Start what is usual at each camera (baseline.py): the historian the guard asks, and its nightly rebuild at
+    ~03:30 from the event archive. Never raises: without it nothing changes."""
+    global HISTORIAN, BASELINE_BUILD
+    try:
+        from . import baseline  # noqa: PLC0415
+        from .camera_profiles import PROFILES_NAME, CameraProfiles  # noqa: PLC0415
+
+        events_dir = os.path.join(paths.state_dir(), "events")
+        HISTORIAN = baseline.Historian(baseline.Baseline(os.path.join(events_dir, baseline.BASELINE_NAME)),
+                                       CameraProfiles(os.path.join(events_dir, PROFILES_NAME)),
+                                       names=camera_display, settings=dict(box_settings or {}))
+        BASELINE_BUILD = baseline.NightlyBuild(events_dir, list(cameras))
+        log.info("Baseline on: baseline_alerts=%s, %d days of history needed (rebuilt nightly at %s)",
+                 baseline.mode_of(box_settings), baseline.min_days_of(box_settings), baseline.NIGHTLY_AT)
+    except Exception as exc:  # noqa: BLE001
+        HISTORIAN = BASELINE_BUILD = None
+        log.warning("Baseline not started (%s); alerts go on without it", exc)
+    return HISTORIAN
+
+
+def baseline_look(camera: str, alert_ts: float, label: str, text: str,
+                  box_settings: Mapping[str, Any]) -> Dict[str, Any]:
+    """What the camera's history says about this alert, for the clip's meta and the event decision; {} when off,
+    without a historian or on any failure. ``raise`` is set only with ``baseline_alerts: on`` (shadow only logs)."""
+    historian = HISTORIAN
+    if historian is None:
+        return {}
+    try:
+        from . import baseline  # noqa: PLC0415
+        from .activities import tags_of  # noqa: PLC0415
+
+        mode = baseline.mode_of(box_settings)
+        if mode == "off":
+            return {}
+        seen = historian.surprise(camera, alert_ts, tags_of(text))
+        would = bool(seen.get("raise"))
+        out = {"mode": mode, "rarity": seen.get("rarity", "unknown"), "said_by": seen.get("said_by", ""),
+               "tags": list(seen.get("tags") or []), "days_of_data": seen.get("days_of_data", 0),
+               "expected_per_hour": seen.get("expected_per_hour"),
+               "seen_in_last_30_days_same_bucket": seen.get("seen_in_last_30_days_same_bucket"),
+               "explained_by": list(seen.get("explained_by") or []), "would_raise": would,
+               "raise": would and mode == "on", "text_he": seen.get("text_he", ""), "text_en": seen.get("text_en", "")}
+        if would and mode == "shadow":
+            if label not in LABELS or label == "normal":
+                log.info("[%s] baseline: would raise (rare: %s)", camera, out["text_en"])
+            else:
+                log.info("[%s] baseline: rare (%s); a %s is never changed, the line is added only when on",
+                         camera, out["text_en"], label)
+        return out
+    except Exception as exc:  # noqa: BLE001 - the baseline only adds
+        log.warning("[%s] baseline not asked: %s", camera, exc)
+        return {}
 
 
 _PLACEHOLDERS = ("an empty string", "empty string")
@@ -2030,20 +2089,22 @@ def _keep_keyframe(session_id: str, job: Optional[AlertJob], frames: List[Any]) 
 
 def _event_decision(camera: str, alert_ts: float, label: str, people: Optional[int], summary: str,
                     alert_id: str, entity_args: Optional[Dict[str, Any]] = None,
-                    ground: Optional[Dict[str, Any]] = None) -> Any:
+                    ground: Optional[Dict[str, Any]] = None, baseline: Optional[Dict[str, Any]] = None) -> Any:
     """The event book's say on this alert (events.Decision), or None without a book or on its failure (the alert
     then goes out as before). *entity_args* (``tracks``, ``since``, ``note``, ``per_entity``) give the event its
     entities when the tracker had data (stage 2a).
 
     A clip without a label (the AI did not answer: an outage, the daily cap) is still the detector's alert: it goes
     out once per event, as the first message of the event, and is recorded as a normal; unless the scene map says
-    everyone stayed off our ground (*ground*, ground.py): nothing done there can be known without the AI."""
+    everyone stayed off our ground (*ground*, ground.py): nothing done there can be known without the AI. *baseline*
+    (baseline.py, task 2.9) is what the camera's history says (``raise`` only with ``baseline_alerts: on``)."""
     book = EVENTS
     if book is None:
         return None
     try:
         decision = book.decide(camera, alert_ts, label if label in LABELS else "normal", people or 0, summary,
-                               alert_id, **(entity_args or {}), **({"ground": ground} if ground else {}))
+                               alert_id, **(entity_args or {}), **({"ground": ground} if ground else {}),
+                               **({"baseline": baseline} if baseline else {}))
         if label not in LABELS and not decision.notify and not (ground or {}).get("off_our_ground"):
             session = book.session_of_alert(alert_id) or {}
             if session.get("reported_level", "none") == "none":
@@ -2339,8 +2400,23 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
             decision["ground"] = where
             if job is not None:
                 job.input_meta["ground"] = where
+        # What is usual at this camera (baseline.py, task 2.9): recorded always; with baseline_alerts: on a rare
+        # "normal" becomes one quiet message per event, and a rare suspicious / escalation only gets the line.
+        usual = {} if muted else baseline_look(camera_name, alert_ts, label, f"{summary} {why} {reason}",
+                                               box_settings)
+        if usual:
+            decision["baseline"] = usual
+            if job is not None:
+                job.input_meta["baseline"] = usual
         event = None if muted else _event_decision(camera_name, alert_ts, label, people, summary, alert_id,
-                                                   entity_args, where)
+                                                   entity_args, where,
+                                                   usual if usual.get("raise") and label == "normal" else None)
+        rarity_line = ""
+        if usual.get("raise") and (event is None or event.notify):
+            rarity_line = str((usual.get("text_he") if lang == "he" else usual.get("text_en")) or "")
+            if label == "normal" and event is not None and str(event.reason).startswith("normal, but rare here"):
+                decision.update(raised="rare here")
+                log.info("[%s] baseline: a quiet message (%s)", camera_name, usual.get("text_en"))
         if event is not None:
             _keep_keyframe(event.session_id, job, frames)
         if where.get("entered") and label == "normal" and (event is None or event.notify):
@@ -2419,6 +2495,8 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                     graded = f"🟢 {shown_camera}: {sentence}. {why}"
                 if look_line:
                     graded = f"{graded}\n{look_line}"
+                if rarity_line:
+                    graded = f"{graded}\n{rarity_line}"
                 if case_line:
                     graded = f"{graded}\n{case_line}"
                 story = _event_story(event, alert_id, alert_ts, lang) if event is not None else ""
@@ -2629,6 +2707,7 @@ def run() -> int:
         return serve_without_cameras(box_settings, env, camera_names())
     KNOWN_CAMERAS = tuple(cameras)
     book = start_events(box_settings)
+    start_baseline(box_settings, KNOWN_CAMERAS)
     # Every alert is saved as a clip (the seconds around it) in the production folder,
     # and the owner can answer it in Telegram. Neither may stop the alerts themselves.
     from .alert_clips import POST_SECONDS, PRE_SECONDS, alert_stem  # noqa: PLC0415
@@ -2790,6 +2869,8 @@ def run() -> int:
                     book.tick(now_ts)
                 except Exception as exc:  # noqa: BLE001 - events must never stop the alerts
                     log.warning("Event book tick failed: %s", exc)
+                if BASELINE_BUILD is not None:
+                    BASELINE_BUILD.tick(now_ts)          # the nightly rebuild (~03:30), in its own short thread
             due_worker = _start_due_alerts(pending, now_ts, cam_cfg, model, streams, main_caps, predict_args,
                                            backend, box_settings, env, settings, assistant, status,
                                            PRODUCTION_LIVE_DIR, LIVE_DIR, trackers=trackers)

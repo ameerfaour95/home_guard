@@ -11,7 +11,7 @@ through. One event per session (a rolled-over chain of event-book sessions is on
 SESSION_GAP_SEC on one camera are one event). False positives (the VLM saw nobody) are skipped. Days the source was
 watching with no event are kept as zero days: ``days_of_data`` is how many days a camera has.
 
-- Rebuilt nightly at ~03:30 local (:func:`start_nightly`, a daemon thread the guard starts) and on demand
+- Rebuilt nightly at ~03:30 local (:class:`NightlyBuild`, ticked by the guard loop) and on demand
   (``python -m home_guard_project.box.baseline build``), from the event archive (event_memory.py). The archive keeps
   30 days; the ledger keeps KEEP_DAYS, so older days stay.
 - An offline importer (``import --raw <folder>``) adds history from production meta (``production_<site>``,
@@ -919,33 +919,48 @@ def _seconds_until(at: str, now: float) -> float:
     return max(1.0, target.timestamp() - now)
 
 
-def start_nightly(events_dir: str, cameras: Sequence[str] = (), at: str = NIGHTLY_AT,
-                  stop: Optional[threading.Event] = None) -> threading.Thread:
-    """A daemon thread: a build now when the baseline is missing or older than a day, then every night at *at*."""
-    stop = stop or threading.Event()
-    path = os.path.join(events_dir, BASELINE_NAME)
+class NightlyBuild:
+    """The nightly rebuild, driven by the guard loop's tick (no thread of its own waits): due at once when the
+    baseline is missing or older than a day, then every night at *at* (~03:30 local). The build itself runs in a
+    short daemon thread so the tick never waits for it; one at a time."""
 
-    def build() -> None:
+    def __init__(self, events_dir: str, cameras: Sequence[str] = (), at: str = NIGHTLY_AT,
+                 now: Optional[float] = None, builder: Optional[Callable[[], Dict[str, Any]]] = None) -> None:
+        self.events_dir = events_dir
+        self.cameras = list(cameras)
+        self.at = at
+        self.builder = builder or (lambda: build_for_box(self.events_dir, self.cameras))
+        self._running = threading.Lock()
+        now = time.time() if now is None else float(now)
         try:
-            result = build_for_box(events_dir, cameras)
-            log.info("baseline rebuilt: %d day(s) added, %d replaced", result["days_added"], result["days_replaced"])
-        except Exception as exc:  # noqa: BLE001 - the baseline only adds; the guard goes on without it
-            log.warning("baseline not rebuilt: %s", exc)
-
-    def run() -> None:
-        try:
-            stale = time.time() - os.path.getmtime(path) > 26 * 3600
+            stale = now - os.path.getmtime(os.path.join(events_dir, BASELINE_NAME)) > 26 * 3600
         except OSError:
             stale = True
-        if stale:
-            build()
-        while not stop.wait(_seconds_until(at, time.time())):
-            build()
+        self.next = now if stale else now + _seconds_until(at, now)
 
-    thread = threading.Thread(target=run, name="baseline-nightly", daemon=True)
-    thread.stop_event = stop  # type: ignore[attr-defined]
-    thread.start()
-    return thread
+    def build(self) -> None:
+        if not self._running.acquire(blocking=False):
+            return
+        try:
+            result = self.builder()
+            log.info("baseline rebuilt: %d day(s) added, %d replaced", result.get("days_added", 0),
+                     result.get("days_replaced", 0))
+        except Exception as exc:  # noqa: BLE001 - the baseline only adds; the guard goes on without it
+            log.warning("baseline not rebuilt: %s", exc)
+        finally:
+            self._running.release()
+
+    def tick(self, now: float) -> bool:
+        """Start the build when it is due; True when one was started. Never raises."""
+        if now < self.next:
+            return False
+        self.next = now + _seconds_until(self.at, now)
+        try:
+            threading.Thread(target=self.build, name="baseline-build", daemon=True).start()
+            return True
+        except Exception as exc:  # noqa: BLE001
+            log.warning("baseline build not started: %s", exc)
+            return False
 
 
 # ---------- the lead's sanity check ----------

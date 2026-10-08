@@ -16,6 +16,8 @@ https://claude.ai/artifact/9Fh6q2W5XbndKSkNgVJa4M (section 3).
     in the last ``ESCALATION_REPEAT_SEC``.
   - What the owner marked as known ("these are my workers", until a time) silences "suspicious" for that camera
     while the head-count stays within what was known (plus KNOWN_EXTRA_PEOPLE); never an escalation.
+  - What is usual here (optional ``baseline``, baseline.py, task 2.9): a "normal" the camera's history calls rare is
+    one quiet message per event with box.yaml ``baseline_alerts: on``. It only raises; nothing else changes.
   - Whose ground (optional ``ground``, ``ground.Ground.record()`` plus ``action``; scene map stage 2c): everyone
     stayed on the neighbour's or public ground -> not sent, unless an escalation or a suspicious for something
     done there (``action``); someone came onto our ground from the neighbour's side or the street (``entered``)
@@ -309,7 +311,8 @@ class EventBook:
 
     def decide(self, camera: str, ts: float, label: str, people: Any = None, summary: str = "",
                alert_id: str = "", tracks: Any = None, since: Optional[float] = None, note: str = "",
-               per_entity: Any = None, ground: Optional[Dict[str, Any]] = None) -> Decision:
+               per_entity: Any = None, ground: Optional[Dict[str, Any]] = None,
+               baseline: Optional[Dict[str, Any]] = None) -> Decision:
         """Should this alert job reach the owner? Records the observation in the camera's session either way.
 
         With *tracks* (the tracker's ``snapshot`` around the alert, stage 2a) the session's entities are brought up to
@@ -317,7 +320,9 @@ class EventBook:
         them "more people" and the owner's known group are judged by those entities instead of the Eye's head-count
         *people*. *note* (the owner-language summary) and *per_entity* (the Eye's ``per_entity`` answer) are what the
         entities in view did (entities.attribute). *ground* (optional, stage 2c): where it happened by the scene map
-        (ground.Ground.record() plus ``action``)."""
+        (ground.Ground.record() plus ``action``). *baseline* (optional, task 2.9, baseline.py): ``{"raise": True,
+        "text_en": ...}`` when what is usual at this camera says this is rare and box.yaml ``baseline_alerts`` is on;
+        it only RAISES: a normal becomes one quiet message per event, a suspicious or an escalation is unchanged."""
         label = label if label in LEVELS else "normal"
         count = _int(people)
         with self._lock:
@@ -371,6 +376,10 @@ class EventBook:
             if label == "normal":
                 if self.notify_normal and reported == 0:
                     return make(True, "normal (notify_normal on), first in this event")
+                usual = baseline if isinstance(baseline, dict) else {}
+                if usual.get("raise") and reported == 0:
+                    return make(True, "normal, but rare here: a quiet message, once in this event ("
+                                + str(usual.get("text_en") or "rare at this camera")[:160] + ")")
                 return no("normal: kept in the event, not sent")
             if label == "escalation":
                 if (s.reported_level == "escalation" and new_people == 0
