@@ -567,6 +567,8 @@ class Window(QMainWindow):
         self.content_stack.addWidget(settings_scroll)
         from .camera_ui import CameraPage
         self.cameras_page = CameraPage(self.camera_controls, self.settings_changed)
+        from . import camera_display
+        camera_display.subscribe(self.camera_names_changed)
         self.content_stack.addWidget(self.cameras_page.widget)
         if getattr(self.args, "panel", None) == "cameras":
             self.open_cameras()
@@ -1103,8 +1105,12 @@ class Window(QMainWindow):
     def camera_names_loaded(self, names):
         from . import camera_display
         camera_display.set_names(names, self.names)
+
+    def camera_names_changed(self):
+        """The box's names changed (loaded, or a camera renamed on its card): the tiles and the feed show them."""
+        from . import camera_display
         for tile in getattr(self, "tiles", []):
-            tile.caption.setText(camera_display.shown(tile.name))
+            tile.caption.setText(camera_display.shown(tile.name)); tile.update()
         if getattr(self, "events", None) is not None and hasattr(self, "activity_layout"):
             self.render_activity()
 

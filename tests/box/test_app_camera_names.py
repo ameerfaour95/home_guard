@@ -80,6 +80,32 @@ class CameraNamesTest(unittest.TestCase):
         self.assertEqual(page.rows[1][1].text(), 'The garden')
         self.assertEqual(camera_display.shown('ameer_week_0_1_ch3'), 'The garden')
 
+    def test_a_new_name_reaches_the_tiles_the_feed_and_the_map_title(self):
+        from types import SimpleNamespace
+        from home_guard_project.box.app.ui import Window
+        from home_guard_project.box.app.scene_editor import open_map_dialog
+        window = Window(SimpleNamespace(demo=True, remote_box=None, aspect='16:9', detections=False, theme='dark',
+                                        panel='cameras', setup=False, fail=None, wifi=False, skip_cameras=False,
+                                        alerts=False, details=False, technical_log=False, state='mixed', cameras=2,
+                                        page=None, scene=None, lang='en', size='1366x768', screenshot=None))
+        self.addCleanup(lambda: (window.close(), window.deleteLater()))
+        window.tick()
+        page = window.cameras_page
+        page.future.result(timeout=5); page.poll()
+        self.assertEqual([t.caption.text() for t in window.tiles], ['Front door', 'Garden'])
+        backend = mock.Mock(); backend.set_name.return_value = {'he': 'הגינה', 'en': 'The lawn'}
+        page.rows[1][1].setText('The lawn')
+        with mock.patch('home_guard_project.box.app.scene_backend.scene_backend_for', return_value=backend):
+            page.save_clicked()
+            page.future.result(timeout=5); page.poll()
+        backend.set_name.assert_called_once_with('garden', 'The lawn')
+        self.assertEqual([t.caption.text() for t in window.tiles], ['Front door', 'The lawn'])
+        from home_guard_project.box.app.model import parse_activity
+        self.assertEqual(parse_activity('12:00:00 INFO [garden] trigger saved: clip.mp4').text, 'Clip saved from The lawn')
+        dialog = open_map_dialog(page, 'garden', demo_state='loading', display=page.camera_names.get('garden', ''))
+        self.addCleanup(lambda: (dialog.editor.close_jobs(), dialog.deleteLater()))
+        self.assertEqual(dialog.editor.title.text(), 'The lawn')
+
     def test_two_cameras_cannot_share_a_name_and_a_refusal_reads_plainly(self):
         page = self.page()
         page.render(page.load_photos())

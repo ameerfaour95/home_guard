@@ -146,8 +146,6 @@ class CameraPage:
     def read_zones(self, records):
         # One zone request after snapshots, never one request per card or UI tick.
         self.camera_names = box_names(self.controls)
-        from . import camera_display
-        camera_display.set_names(self.camera_names, [r.name for r in records])
         try:
             self.zone_values = self.controls.zones()
             self.zones_loaded = True
@@ -210,6 +208,8 @@ class CameraPage:
         self.search_start.setEnabled(True)
         try:
             records = future.result()
+            from . import camera_display
+            camera_display.set_names(self.camera_names, [r.name for r in records])   # tiles, feed, titles follow
             self.render(records)
             self.loaded = True
             self.note.setStyleSheet(f"color: {OK if getattr(self, 'saving', False) else MUTED};")
@@ -443,8 +443,6 @@ class CameraPage:
                     except Exception as exc:
                         raise NameNotSaved(name) from exc
                     self.camera_names[camera] = given.get(language()) or name
-                from . import camera_display
-                camera_display.set_names(self.camera_names, [old for old, _, _ in self.rows])
             records=self.controls.save(changes)
             self.zone_values={new:self.zone_values.get(old,[]) for old,new,_ in changes}
             self.alert_values={new:self.alert_values.get(old) for old,new,_ in changes}
