@@ -47,6 +47,9 @@ code page cannot print Hebrew, so these print one line of ASCII JSON)::
                                                    #   each region's points, current_map (the camera's map now)
     answer --camera front --text-b64 MSBtaW5l --json --embed      # + image_b64 (the ownership picture)
     confirm --camera front --map-b64 eJy... --json [--no-restart]  # a map edited in the app (confirm_app_map)
+    answer ... --sides-b64 eyI0IjogImxlZnQifQ==                    # the owner's side per wall ({"4": "left"})
+    restore --camera front --check --json          # {"has_previous", "saved_at"}
+    restore --camera front --json [--no-restart]   # restore_previous: {"restart_needed", "saved_at", "map"}
 """
 
 from __future__ import annotations
@@ -915,6 +918,32 @@ def decode_map_b64(value: str) -> Dict[str, Any]:
     return data
 
 
+def decode_sides_b64(value: str) -> Dict[int, str]:
+    """The owner's side per wall region, sent as base64 of JSON ``{"4": "left"}`` (``answer``'s *sides*)."""
+    try:
+        data = json.loads(base64.b64decode(str(value or ""), validate=True).decode("utf-8"))
+        sides = {int(k): str(v) for k, v in data.items()}
+    except (binascii.Error, ValueError, AttributeError, TypeError):
+        raise ValueError("the sides could not be read") from None
+    if any(v not in sm.SIDES for v in sides.values()):
+        raise ValueError("a side is left or right")
+    return sides
+
+
+def restore_result(camera: str, check: bool = False, zones_path: Optional[str] = None) -> Dict[str, Any]:
+    """``restore``: with *check*, whether the camera has a previous map and when it was replaced; otherwise
+    ``restore_previous`` and the map as it is now. ValueError in plain words when there is none."""
+    if check:
+        backup = previous_map(camera, zones_path)
+        return {"camera": camera, "has_previous": backup is not None,
+                "saved_at": backup.get("saved_at") if backup else None}
+    try:
+        result = restore_previous(camera, zones_path)
+    except LookupError:
+        raise ValueError("there is no previous map of this camera") from None
+    return dict(result, map=sm.load_scene_map(camera, zones_path).to_dict())
+
+
 def confirm_app_map(camera: str, data: Mapping[str, Any], out_dir: str = INTERVIEW_DIR) -> sm.SceneMap:
     """A map edited in the app (region answers, areas drawn by hand, lines) as the camera's draft, validated the
     way every stored map is (``SceneMap.from_dict``: kinds, owners, zones, points); ``confirm`` then makes it the
@@ -933,7 +962,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     parser = argparse.ArgumentParser(prog="scene_interview", description=__doc__.split("\n", 1)[0])
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("propose", "answer", "confirm", "show", "clear", "telegram"):
+    for name in ("propose", "answer", "confirm", "show", "clear", "telegram", "restore"):
         p = sub.add_parser(name)
         p.add_argument("--camera", required=name != "telegram", default="")
         p.add_argument("--json", action="store_true")
@@ -947,6 +976,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             words = p.add_mutually_exclusive_group(required=True)
             words.add_argument("--text")
             words.add_argument("--text-b64", help="the answers as base64 of UTF-8 text")
+            p.add_argument("--sides-b64", help='the side of each wall: base64 of JSON {"4": "left"}')
+        if name == "restore":
+            p.add_argument("--check", action="store_true", help="only say whether there is a previous map")
+            p.add_argument("--no-restart", action="store_true")
         if name == "confirm":
             p.add_argument("--no-restart", action="store_true")
             p.add_argument("--map-b64", help="a map edited in the app: base64 of its JSON, or of that JSON zlib-compressed")
@@ -971,7 +1004,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             with open(regions_path, encoding="utf-8") as f:
                 picture_path = json.load(f).get("picture") or ""
             text = args.text if args.text is not None else decode_b64_text(args.text_b64)
-            result = answer(camera, text, regions_path, _read_picture(picture_path), args.out)
+            sides = decode_sides_b64(args.sides_b64) if args.sides_b64 else None
+            result = answer(camera, text, regions_path, _read_picture(picture_path), args.out, sides=sides)
             if args.embed:
                 result["image_b64"] = _b64_file(result.get("image"))
         elif args.command == "confirm":
@@ -979,6 +1013,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 confirm_app_map(camera, decode_map_b64(args.map_b64), args.out)
             result = confirm(camera, args.out, known_cameras=_known_cameras(CAMERAS_PATH))
             if result["restart_needed"] and not args.no_restart:
+                _restart_running_mode()
+        elif args.command == "restore":
+            result = restore_result(camera, args.check)
+            if result.get("restart_needed") and not args.no_restart:
                 _restart_running_mode()
         elif args.command == "show":
             result = sm.load_scene_map(camera).to_dict()
@@ -989,7 +1027,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         message = str(exc) if isinstance(exc, (ValueError, RuntimeError)) else f"could not do that: {exc}"
         print(json.dumps({"error": message}) if args.json else f"Error: {message}")
         return 1
-    if any(getattr(args, flag, None) for flag in ("embed", "text_b64", "map_b64")):
+    if args.command == "restore" or any(getattr(args, flag, None) for flag in ("embed", "text_b64", "map_b64",
+                                                                                 "sides_b64")):
         print(json.dumps(result))          # the app: one line of ASCII JSON, whatever the console's code page
         return 0
     print(json.dumps(result, ensure_ascii=False, indent=2) if args.json else json.dumps(result, ensure_ascii=False))

@@ -164,6 +164,50 @@ class AppCommandLineTest(unittest.TestCase):
         self.assertEqual(sm.load_scene_map("front", self.zones).areas, ())
         self.restart.assert_not_called()
 
+    def test_answer_asks_for_a_walls_side_then_takes_it_as_sides_b64(self) -> None:
+        self.run_main("propose", "--camera", "front", "--json", "--grid", "--out", self.out)
+        words = base64.b64encode("5 המעקה ביני לבין השכן".encode("utf-8")).decode("ascii")
+        code, _text, data = self.run_main("answer", "--camera", "front", "--text-b64", words, "--json",
+                                          "--out", self.out)
+        self.assertEqual(code, 0, data)
+        self.assertEqual([s["number"] for s in data["sides_needed"]], [5])
+        self.assertEqual(data["map"]["lines"], [])                       # no line until the owner says the side
+        sides = base64.b64encode(json.dumps({"5": "left"}).encode("utf-8")).decode("ascii")
+        code, text, data = self.run_main("answer", "--camera", "front", "--text-b64", words, "--sides-b64", sides,
+                                         "--json", "--out", self.out)
+        self.assertEqual(code, 0, data)
+        text.encode("ascii")
+        self.assertEqual(data["sides_needed"], [])
+        self.assertEqual([ln["inward"] for ln in data["map"]["lines"]], ["left"])
+        bad = base64.b64encode(json.dumps({"5": "up"}).encode("utf-8")).decode("ascii")
+        code, _text, data = self.run_main("answer", "--camera", "front", "--text-b64", words, "--sides-b64", bad,
+                                          "--json", "--out", self.out)
+        self.assertEqual((code, data["error"]), (1, "a side is left or right"))
+
+    def test_restore_check_then_restore_the_previous_map(self) -> None:
+        code, _text, data = self.run_main("restore", "--camera", "front", "--check", "--json")
+        self.assertEqual((code, data["has_previous"], data["saved_at"]), (0, False, None))
+        code, _text, data = self.run_main("restore", "--camera", "front", "--json")
+        self.assertEqual((code, data["error"]), (1, "there is no previous map of this camera"))
+        z.save_zone("front", [(0, 0), (0.5, 0), (0.5, 1), (0, 1)], self.zones)
+        self.run_main("confirm", "--camera", "front", "--map-b64", b64z(self.app_map()), "--json", "--out", self.out)
+        self.restart.reset_mock()
+        code, _text, data = self.run_main("restore", "--camera", "front", "--check", "--json")
+        self.assertTrue(data["has_previous"])
+        self.assertIsInstance(data["saved_at"], float)
+        code, text, data = self.run_main("restore", "--camera", "front", "--json")
+        self.assertEqual(code, 0, data)
+        text.encode("ascii")
+        self.assertTrue(data["restart_needed"])                        # the zone and its black outside are back
+        self.restart.assert_called_once()
+        self.assertEqual(data["map"]["areas"], [])
+        self.assertEqual(data["map"]["watched"], [[0.0, 0.0], [0.5, 0.0], [0.5, 1.0], [0.0, 1.0]])
+        self.restart.reset_mock()
+        code, _text, data = self.run_main("restore", "--camera", "front", "--json", "--no-restart")
+        self.assertEqual(code, 0, data)                                 # a restore is undone the same way
+        self.assertEqual(len(data["map"]["areas"]), 4)                 # its three, and the zone as ours
+        self.restart.assert_not_called()
+
     def test_the_app_map_round_trips_through_from_dict_and_to_dict(self) -> None:
         data = self.app_map(rest="watch_no_alert", rest_owner="public")
         scene = sm.SceneMap.from_dict("front", data)
