@@ -523,6 +523,7 @@ TEXT.update(language_label="Language", language_he="עברית", language_en="En
 TEXT.update(rel_unknown="Unknown", rel_now="now", rel_seconds="{n} s ago", rel_minutes="{n} min ago", rel_hours="{n} h ago",
             rel_days="{n} d ago", tile_connecting="Connecting…", tile_reconnecting="Reconnecting… {seconds} s",
             tile_last_frame="Last frame {when}")
+TEXT.update(camera_name_save_failed="The name \"{name}\" could not be saved. Each camera needs its own name; try another.")
 TEXT.update(tile_turn_on="Turn on", remote_read_only="Change settings on the box", detections_need_running="Detections appear when Home Guard is running.")
 
 TEXT_EN = dict(TEXT)          # every key, in English: the base the other languages are laid over

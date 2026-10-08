@@ -29,6 +29,7 @@ from .box_layout import box_command
 from .scene_model import Region, encode_map, shrink_map
 
 MODULE = "home_guard_project.box.scene_interview"
+NAMES_MODULE = "home_guard_project.box.camera_names"     # set: the family's name for a camera
 REMOTE_LIMIT = 8000            # cmd.exe runs the remote command: its line stops at 8191 characters
 MAP_LIMIT = 7500               # the --map-b64 value, leaving room for the rest of the line
 SHRINK_STEPS = (.002, .004, .008, .015)       # outline tolerances tried, in picture fractions, before refusing
@@ -94,6 +95,15 @@ def map_argument(scene):
     if len(encoded) > MAP_LIMIT:
         raise SceneError("too_detailed")
     return encoded
+
+
+def name_operation(camera, name):
+    """The camera_names arguments that give *camera* the name *name* (no interpreter, no ssh)."""
+    name = str(name or "").strip()
+    if not name or len(name) > 40 or "\n" in name:
+        raise ValueError("A camera's name is 1 to 40 characters on one line")
+    return ["set", "--camera", camera_name(camera), "--name-b64",
+            base64.b64encode(name.encode("utf-8")).decode("ascii"), "--json"]
 
 
 def operation(command, camera=None, grid=False, scene=None, restart=True, check=False, lang="he"):
@@ -175,19 +185,19 @@ class SceneBackend:
         self.own_runner = runner is None      # a cancelled runner of ours is dropped; the next step gets a new one
         self.python = python
 
-    def command_line(self, args):
+    def command_line(self, args, module=MODULE):
         if self.target:
-            remote = box_command(f"-m {MODULE} " + " ".join(args))
+            remote = box_command(f"-m {module} " + " ".join(args))
             if '"' in remote or "'" in remote:
                 raise ValueError("Quotes are not allowed in the remote command")
             if len(remote) > REMOTE_LIMIT:
                 raise SceneError("too_detailed")
             return ["ssh.exe", "-i", str(self.key), "-o", "LogLevel=ERROR", self.target, remote]
         from .camera_controls import box_python
-        return [self.python or box_python(), "-m", MODULE, *args]
+        return [self.python or box_python(), "-m", module, *args]
 
-    def run(self, args):
-        line = self.command_line(args)
+    def run(self, args, module=MODULE):
+        line = self.command_line(args, module)
         try:
             if self.target:
                 from .remote_cameras import CommandRunner
@@ -214,6 +224,13 @@ class SceneBackend:
 
     def previous(self, camera):
         return previous_from(camera, self.run(operation("restore", camera, check=True)))
+
+    def set_name(self, camera, name):
+        """Give *camera* the name *name* on the box (its newest alias); returns the box's names for it."""
+        data = self.run(name_operation(camera, name), NAMES_MODULE)
+        if data.get("camera") != camera:
+            raise SceneError("bad_answer")
+        return names_from(data)
 
     def names(self, lang="he"):
         """``{camera id: name}`` for every camera of the box; ids are for commands only, never shown."""
@@ -270,7 +287,7 @@ class DemoSceneBackend:
     ``fail`` makes that step fail once (``propose`` | ``confirm``). *names*: the box's names per camera
     (``{"he", "en"}``); a camera without one gets none, as from a box that cannot say."""
     def __init__(self, fail=None, method="sam", current=None, names=None):
-        self.names_by_camera = DEMO_NAMES if names is None else dict(names)
+        self.names_by_camera = {k: dict(v) for k, v in (DEMO_NAMES if names is None else names).items()}
         self.fail = fail
         self.method = method
         self.current = dict(current or {})          # the first camera's map now; each camera keeps its own after
@@ -308,6 +325,15 @@ class DemoSceneBackend:
 
     def name_of(self, camera):
         return dict(self.names_by_camera.get(camera) or {"he": "", "en": ""})
+
+    def set_name(self, camera, name):
+        self._check("set_name", camera)
+        name_operation(camera, name)                 # the same checks as the box's command line
+        taken = [c for c, n in self.names_by_camera.items() if c != camera and name.strip() in n.values()]
+        if taken:
+            raise SceneError("box_refused", f'"{name.strip()}" already names {taken[0]}')
+        self.names_by_camera[camera] = {"he": name.strip(), "en": name.strip()}
+        return dict(self.names_by_camera[camera])
 
     def names(self, lang="he"):
         self._check("names", "")

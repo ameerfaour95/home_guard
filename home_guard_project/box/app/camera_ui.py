@@ -17,6 +17,13 @@ def box_names(controls):
     except Exception:  # noqa: BLE001 - an older box or no answer: the cards say "Camera 2 of 5"
         return {}
 
+class NameNotSaved(RuntimeError):
+    """The box refused a camera's new name (another camera has it, or it could not be written)."""
+    def __init__(self, name):
+        super().__init__(name)
+        self.name = name
+
+
 class CameraPage:
     def __init__(self, controls, changed, wizard=False, check_state=None, skip=None):
         from .ui import card, label, layout_for
@@ -229,6 +236,7 @@ class CameraPage:
                 self.note.setText(tr("camera_photos_load_failed"))
             else:
                 self.note.setText(tr("camera_save_failed") if self.wizard and self.check_state.setup_finished else tr("camera_changes_save_failed") if self.wizard else tr("camera_error"))
+                if isinstance(exc, NameNotSaved): self.note.setText(tr("camera_name_save_failed", name=exc.name))
                 if getattr(self,'searching',False): self.note.setText(tr('camera_search_error'))
         self.saving = False
         self.searching = False
@@ -276,12 +284,12 @@ class CameraPage:
             alert_button.clicked.connect(lambda checked=False,n=camera.name:self.open_alerts(n))
             actions.addWidget(alert_button,1);self.alert_widgets[camera.name]=alert_button
             line = QHBoxLayout()
-            # The camera's name as the family reads it, from the box. The id (cameras.yaml) is never shown, and
-            # the name cannot be edited here until the box has a command that sets it (owner rule 2026-10-08).
-            name = QLabel(self.camera_names.get(camera.name) or fallback_name((i + 1, len(records))))
-            name.setObjectName('cameraName'); name.setTextFormat(Qt.TextFormat.PlainText)
-            name.setStyleSheet('font-size: 12pt; font-weight: 600; padding: 6px 2px;')
-            name.setAccessibleName(tr("camera_name") + ": " + name.text())
+            # The camera's name as the family reads it, from the box; editing it sets the box's name (camera_names
+            # set). The id (cameras.yaml) is never shown or renamed here (owner rule 2026-10-08).
+            name = QLineEdit(self.camera_names.get(camera.name, ''))
+            name.setPlaceholderText(fallback_name((i + 1, len(records)))); name.setMaxLength(40)
+            name.setAccessibleName(tr("camera_name"))
+            name.textChanged.connect(self.validate)
             from .motion import Switch
             enabled = Switch(tr("camera_enabled" if camera.enabled else "camera_off"))
             enabled.setChecked(camera.enabled)
@@ -392,14 +400,23 @@ class CameraPage:
             toast(self.widget.window(),tr('camera_error'))
         self.controls.toggle_pending=False
         self.toggle_before=None
+        edits={old:field.text() for old,field,_ in self.rows}
         self.render(records)
+        for old,field,_ in self.rows:
+            if old in edits: field.setText(edits[old])
         self.changed()
+
+    def name_edits(self):
+        """{camera id: new name} for the names changed in the fields (an emptied field keeps the name)."""
+        return {old: field.text().strip() for old, field, _ in self.rows
+                if field.text().strip() and field.text().strip() != self.camera_names.get(old, '')}
 
     def validate(self):
         self.saved = False
         try:
             changes_payload(self.changes())
-            valid = bool(self.rows)
+            names = [field.text().strip() or self.camera_names.get(old) or old for old, field, _ in self.rows]
+            valid = bool(self.rows) and len({n.casefold() for n in names}) == len(names)   # each its own name
         except ValueError:
             valid = False
         self.save.setEnabled(valid and self.future is None)
@@ -414,7 +431,20 @@ class CameraPage:
     def save_clicked(self):
         changes = self.changes()
         self.saving = True
+        names = self.name_edits()
         def save():
+            if names:
+                from .scene_backend import scene_backend_for
+                backend = scene_backend_for(self.controls)
+                from .scene_strings import language
+                for camera, name in names.items():
+                    try:
+                        given = backend.set_name(camera, name)
+                    except Exception as exc:
+                        raise NameNotSaved(name) from exc
+                    self.camera_names[camera] = given.get(language()) or name
+                from . import camera_display
+                camera_display.set_names(self.camera_names, [old for old, _, _ in self.rows])
             records=self.controls.save(changes)
             self.zone_values={new:self.zone_values.get(old,[]) for old,new,_ in changes}
             self.alert_values={new:self.alert_values.get(old) for old,new,_ in changes}

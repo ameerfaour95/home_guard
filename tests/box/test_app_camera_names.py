@@ -13,6 +13,11 @@ from home_guard_project.box.app.scene_backend import DemoSceneBackend
 IDS = ['front_door', 'ameer_week_0_1_ch3']
 
 
+def tr_(key, **values):
+    from home_guard_project.box.app.strings import tr
+    return tr(key, **values)
+
+
 def texts(widget):
     out = [w.text() for w in widget.findChildren(QLabel)]
     out += [w.text() for w in widget.findChildren(QAbstractButton)]
@@ -46,10 +51,10 @@ class CameraNamesTest(unittest.TestCase):
     def test_the_card_shows_the_boxs_name_and_never_the_id(self):
         page = self.page()
         page.render(page.load_photos())
-        names = [field.text() for _id, field, _switch in page.rows]
-        self.assertEqual(names, ['Front door', 'Camera 2 of 2'])      # the box names one; the other by its place
-        self.assertEqual([f for f in page.widget.findChildren(QLineEdit) if f not in (page.search_user, page.search_password)], [])
-        shown = texts(page.widget)
+        fields = [field for _id, field, _switch in page.rows]
+        self.assertEqual([f.text() for f in fields], ['Front door', ''])     # the box names one...
+        self.assertEqual(fields[1].placeholderText(), 'Camera 2 of 2')     # ...the other reads by its place
+        shown = texts(page.widget) + [f.placeholderText() for f in fields]
         self.assertFalse([t for t in shown if any(i in t for i in IDS)], shown)
 
     def test_saving_switches_cameras_and_never_renames_an_id(self):
@@ -58,6 +63,38 @@ class CameraNamesTest(unittest.TestCase):
         page.rows[1][2].blockSignals(True); page.rows[1][2].setChecked(False)
         self.assertEqual(page.changes(), [('front_door', 'front_door', True),
                                           ('ameer_week_0_1_ch3', 'ameer_week_0_1_ch3', False)])
+
+    def test_editing_the_name_sets_it_on_the_box_and_never_renames_the_id(self):
+        page = self.page()
+        page.render(page.load_photos())
+        backend = mock.Mock()
+        backend.set_name.return_value = {'he': 'הגינה', 'en': 'The garden'}
+        page.rows[1][1].setText('The garden')
+        self.assertEqual(page.name_edits(), {'ameer_week_0_1_ch3': 'The garden'})
+        self.assertTrue(page.save.isEnabled())
+        with mock.patch('home_guard_project.box.app.scene_backend.scene_backend_for', return_value=backend):
+            page.save_clicked()
+            page.future.result(timeout=5); page.poll()
+        backend.set_name.assert_called_once_with('ameer_week_0_1_ch3', 'The garden')
+        self.assertEqual([c.name for c in page.controls.records], IDS)      # the ids stay as they are
+        self.assertEqual(page.rows[1][1].text(), 'The garden')
+        self.assertEqual(camera_display.shown('ameer_week_0_1_ch3'), 'The garden')
+
+    def test_two_cameras_cannot_share_a_name_and_a_refusal_reads_plainly(self):
+        page = self.page()
+        page.render(page.load_photos())
+        page.rows[1][1].setText('front DOOR')                             # the other camera's name
+        self.assertFalse(page.save.isEnabled())
+        self.assertEqual(page.note.text(), tr_('camera_names_invalid'))
+        page.rows[1][1].setText('Garden')
+        backend = mock.Mock(); backend.set_name.side_effect = RuntimeError('"Garden" already names x')
+        with mock.patch('home_guard_project.box.app.scene_backend.scene_backend_for', return_value=backend):
+            page.save_clicked()
+            with self.assertRaises(Exception):
+                page.future.result(timeout=5)
+            page.poll()
+        self.assertEqual(page.note.text(), tr_('camera_name_save_failed', name='Garden'))
+        self.assertFalse([t for t in texts(page.widget) if any(i in t for i in IDS)])
 
     def test_a_box_that_cannot_say_leaves_the_place_in_the_list(self):
         from home_guard_project.box.app.camera_ui import box_names

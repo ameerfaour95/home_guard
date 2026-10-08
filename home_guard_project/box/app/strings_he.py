@@ -496,6 +496,7 @@ TEXT_HE = {
     "language_en": "English",
     "camera_unnamed": "מצלמה",
     "tile_turn_on": "להפעיל",
+    "camera_name_save_failed": "לא הצלחנו לשמור את השם \"{name}\". לכל מצלמה צריך שם משלה; נסו שם אחר.",
     "rel_unknown": "לא ידוע", "rel_now": "עכשיו", "rel_seconds": "לפני {n} שנ'", "rel_minutes": "לפני {n} דק'",
     "rel_hours": "לפני {n} שע'", "rel_days": "לפני {n} ימים", "tile_connecting": "מתחברים…",
     "tile_reconnecting": "מתחברים מחדש… {seconds} שנ'", "tile_last_frame": "תמונה אחרונה {when}",

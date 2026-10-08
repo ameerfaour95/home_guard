@@ -251,6 +251,30 @@ class BackendTest(unittest.TestCase):
         with self.assertRaises(sb.SceneError):
             sb.SceneBackend(runner=lambda line, **kw: answer({"oops": 1}), python="py").names()
 
+    def test_setting_a_name_runs_camera_names_on_the_box(self) -> None:
+        import base64 as b
+        self.assertEqual(sb.name_operation("front", " הגינה "),
+                         ["set", "--camera", "front", "--name-b64", b.b64encode("הגינה".encode()).decode(), "--json"])
+        for bad in ("", "x" * 41, "two\nlines"):
+            with self.assertRaises(ValueError):
+                sb.name_operation("front", bad)
+        line = sb.SceneBackend("admin@box").command_line(sb.name_operation("front", "the garden"), sb.NAMES_MODULE)
+        self.assertEqual(line[6], r"cd /d C:\home_guard && .venv\Scripts\python.exe -m home_guard_project.box.camera_names "
+                                  "set --camera front --name-b64 dGhlIGdhcmRlbg== --json")
+        calls = []
+
+        def run(line, **kwargs):
+            calls.append(line)
+            return answer({"camera": "front", "display_name": "הגינה", "display_name_en": "הגינה"})
+        given = sb.SceneBackend(runner=run, python="py").set_name("front", "הגינה")
+        self.assertEqual(calls[0][:4], ["py", "-m", "home_guard_project.box.camera_names", "set"])
+        self.assertEqual(given, {"he": "הגינה", "en": "הגינה"})
+        demo = sb.DemoSceneBackend()
+        self.assertEqual(demo.set_name("garden", "the lawn")["en"], "the lawn")
+        with self.assertRaises(sb.SceneError):
+            demo.set_name("driveway", "the lawn")
+        self.assertEqual(sb.DEMO_NAMES["garden"]["en"], "Garden")          # the shared demo names stay as they were
+
     def test_the_app_never_names_a_camera_itself(self) -> None:
         import pathlib
         app = pathlib.Path(sb.__file__).parent
