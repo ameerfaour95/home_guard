@@ -193,3 +193,20 @@ class MakeBackendTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FallbackVerifySignatureTest(unittest.TestCase):
+    """2026-10-08: the live check called verify(frames, question, "he", 15.0) and the fallback took kwargs only."""
+
+    def test_positional_and_keyword_arguments(self):
+        from home_guard_project.box.inference import FallbackBackend
+
+        class Primary:
+            model_name = "p"
+
+            def verify(self, frames, question, language="English", timeout=15.0):
+                return {"confirmed": False, "what_it_is": f"{language}:{timeout}", "evidence_frame": 1}
+
+        fb = FallbackBackend(Primary(), Primary())
+        self.assertEqual(fb.verify([], "q", "he", 7.0)["what_it_is"], "he:7.0")
+        self.assertEqual(fb.verify([], "q", language="en", timeout=3.0)["what_it_is"], "en:3.0")

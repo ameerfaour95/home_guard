@@ -786,8 +786,10 @@ class FallbackBackend:
         return self.fallback.analyze(frames_bgr, camera_name, t_sec, start_hour, end_hour, **kwargs)
 
 
-    def verify(self, frames_bgr: List[Any], question: str, **kwargs: Any) -> Optional[Dict[str, Any]]:
+    def verify(self, frames_bgr: List[Any], question: str, language: str = "English",
+               timeout: float = 15.0) -> Optional[Dict[str, Any]]:
         """The second look on *primary*; on an error or no usable answer, once on *fallback*."""
+        kwargs = {"language": language, "timeout": timeout}
         try:
             answer = self.primary.verify(frames_bgr, question, **kwargs)
             if answer is not None:
