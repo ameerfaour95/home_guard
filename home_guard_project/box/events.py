@@ -18,6 +18,11 @@ https://claude.ai/artifact/9Fh6q2W5XbndKSkNgVJa4M (section 3).
     while the head-count stays within what was known (plus KNOWN_EXTRA_PEOPLE); never an escalation.
 - **Known** (``mark_known``) is written only from the owner's own words, through the assistant, with a receipt.
   It covers the camera until ``until`` and the session it was said in.
+- **Entities** (stage 2a, entities.py): with the tracker's tracks (``decide(tracks=...)``) the session keeps who is
+  who (P1, P2, CAR1). Then "more people" counts entities the owner was not told about instead of the Eye's
+  head-count, and under the owner's words for this session only the entities present when they were said are
+  covered: a person who arrives later is "not one of those the owner marked" (sent only when suspicious or higher).
+  Without tracker data everything above holds as it was.
 
 The book keeps open sessions in memory and appends every closed one to ``events.jsonl`` (for the assistant's
 "what happened at the pergola today" and for the investigator). Thread-safe: one lock for everything.
@@ -316,7 +321,8 @@ class EventBook:
                 observation["entities"] = list(in_view)
                 if note:
                     observation["note"] = str(note)[:400]
-                observation["noted"] = ent.attribute(s.entities, in_view, ts, note, label, per_entity)
+                observation["noted"] = ent.attribute(s.entities, in_view, ts, note, label, per_entity,
+                                                     people=count if people is not None else None)
             s.observations = (s.observations + [observation])[-KEEP_OBSERVATIONS:]
             if alert_id:
                 self._by_alert[alert_id] = s.id

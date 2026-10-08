@@ -222,10 +222,11 @@ def add_note(e: Dict[str, Any], ts: float, text: str, label: str = "", source: s
 
 
 def attribute(entities: Sequence[Dict[str, Any]], in_view: Sequence[str], ts: float, note: str, label: str,
-              per_entity: Any = None) -> List[str]:
+              per_entity: Any = None, people: Optional[int] = None) -> List[str]:
     """What the Eye said, given to the entities it is about. With *per_entity* (``[{"id": "P1", "action": ...}]``,
     box.yaml ``eye_entities: on``) each action goes to its own entity in view; otherwise one person in view (or, with
-    no people, one vehicle) gets the whole *note*. Returns the ids that got a note."""
+    no people, one vehicle) gets the whole *note*, unless the Eye itself counted more than one person (*people*):
+    then the note is about several and stays the session's observation. Returns the ids that got a note."""
     index = by_id(entities)
     view = [i for i in in_view if i in index]
     got: List[str] = []
@@ -242,7 +243,7 @@ def attribute(entities: Sequence[Dict[str, Any]], in_view: Sequence[str], ts: fl
     persons = [i for i in view if index[i].get("kind") == "person"]
     vehicles = [i for i in view if index[i].get("kind") == "vehicle"]
     lone = persons if persons else vehicles
-    if len(lone) == 1 and note:
+    if len(lone) == 1 and note and not (persons and people is not None and people > 1):
         add_note(index[lone[0]], ts, note, label, "summary")
         return [lone[0]]
     return []

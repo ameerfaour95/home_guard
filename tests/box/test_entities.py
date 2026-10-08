@@ -108,6 +108,7 @@ class IngestTest(unittest.TestCase):
         self.assertEqual(rows[1]["notes"][-1]["text"], "cleans the floor")
         self.assertEqual(ent.attribute(rows, view, T0 + 6, "two men", "normal"), [])     # two in view: no guess
         self.assertEqual(ent.attribute(rows, ["P1"], T0 + 7, "a man walks", "normal"), ["P1"])
+        self.assertEqual(ent.attribute(rows, ["P1"], T0 + 8, "two men talk", "normal", people=2), [])
 
     def test_roster_line(self):
         rows = []
