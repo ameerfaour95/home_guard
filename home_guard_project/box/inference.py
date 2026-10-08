@@ -1554,7 +1554,7 @@ class AlertJob:
     crop_settings: Any = None
     crop_fps: Optional[float] = None
     input_meta: Dict[str, Any] = field(default_factory=dict)
-    model_input: Any = None          # model_input.ModelInput: the frames sent and how they were made (not saved yet)
+    model_input: Any = None          # model_input.ModelInput: the frames sent and how they were made (meta "model_input")
     # The person score that triggered this alert (the camera's conf_person): the investigator counts only people the
     # tracker saw at least once at this score, as the tracker is fed from a lower one (tracker_person_conf).
     person_conf: Optional[float] = None
@@ -1658,6 +1658,24 @@ def _prepare_alert(job: AlertJob, cfg: Any, detector: Any, sub_cap: Any, main_ca
         job.model_input = model_input.render_model_input(
             sub_frames, {"vlm_input": model_input.VLM_INPUT_WHOLE, "fps": sub_fps}, model_input.config_from(cfg))
     return job.model_input.frames, clip
+
+
+def _model_input_record(job: Optional[AlertJob]) -> Optional[Dict[str, Any]]:
+    """How the frames sent were made (model_input.ModelInput.record), for .meta.json and the teacher: everything
+    but the per-frame crop boxes, so it stays small. None before the job was prepared."""
+    rendered = getattr(job, "model_input", None)
+    if rendered is None:
+        return None
+    return {k: v for k, v in rendered.record().items() if k != "crops"}
+
+
+def _clip_extra(job: AlertJob) -> Dict[str, Any]:
+    """The job's input fields for the clip's meta, with ``model_input`` when the job has one."""
+    extra = dict(job.input_meta)
+    record = _model_input_record(job)
+    if record is not None:
+        extra["model_input"] = record
+    return extra
 
 
 def _scene_look(job: AlertJob, ts: Optional[float], frame: Any, results: Any) -> None:
@@ -2340,6 +2358,8 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
             }
             if job.tracker:
                 job.teacher["tracker"] = job.tracker     # always, switch on or off: training and the case memory
+            if getattr(job, "model_input", None) is not None:
+                job.teacher["model_input"] = _model_input_record(job)   # next to prompt_version: the input's recipe
         summary = ""
         if parsed:
             summary = str(parsed.get("summary", "")).strip()
@@ -2614,24 +2634,25 @@ def _save_clip(job: AlertJob, frames: List[Any], production_dir: str, training_d
         alert = job.alert or {**empty_fact_decision(), "summary": "", "alert_command": "[none]", "alert_reason": "", "labels": job.labels}
         training_alert = dict(alert, label=alert.get("raw_label", alert.get("label", "")))
         clip_options = dict(fps=job.clip_fps, crop=job.crop, crop_settings=job.crop_settings, crop_fps=job.crop_fps)
+        inputs = _clip_extra(job)
         if job.false_positive:
             meta = write_alert_clip(training_dir, job.camera, false_positive_stem(job.camera, job.ts), frames,
-                                    training_alert, kind="false_positive", teacher=job.teacher, extra=job.input_meta, **clip_options)
+                                    training_alert, kind="false_positive", teacher=job.teacher, extra=inputs, **clip_options)
             _write_clip_tracks(job, training_dir, meta)
         elif job.paused:
             meta = write_alert_clip(training_dir, job.camera, f"{job.camera}_{int(job.ts)}_paused", frames,
-                                    alert, kind="paused", extra=job.input_meta, **clip_options)
+                                    alert, kind="paused", extra=inputs, **clip_options)
             _write_clip_tracks(job, training_dir, meta)
         else:
             # The owner's copy carries the teacher's answer too: an owner's late answer re-creates the
             # training copy from it (feedback.keep_for_training) once the first one has been uploaded.
             meta = write_alert_clip(production_dir, job.camera, job.stem, frames, alert, teacher=job.teacher,
-                                    extra={"trigger_ts": job.ts, "mode": "guard", **job.input_meta}, **clip_options)
+                                    extra={"trigger_ts": job.ts, "mode": "guard", **inputs}, **clip_options)
             _write_clip_tracks(job, production_dir, meta)
             # The owner's copy above expires in two weeks; the training set keeps every
             # alert with the teacher's answer, so a student model can be trained on it.
             training_meta = write_alert_clip(training_dir, job.camera, job.stem, frames, training_alert, kind="alert",
-                                             teacher=job.teacher, extra=job.input_meta, **clip_options)
+                                             teacher=job.teacher, extra=inputs, **clip_options)
             _write_clip_tracks(job, training_dir, training_meta)
         if meta:
             log.info("[%s] clip saved: %s (%d frames)", job.camera, os.path.basename(meta), len(frames))

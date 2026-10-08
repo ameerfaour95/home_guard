@@ -141,7 +141,7 @@ def teacher_record(root_dir: str, camera: str, day: str, stem: str, teacher: Dic
 
     *teacher* holds ``model``, ``prompt_version``, ``prompt``, ``frames``
     (the JPEG bytes sent, in order), ``raw`` (the answer verbatim),
-    ``parsed`` and optionally ``tracker`` (kept in the meta's ``teacher``). The pictures become ``vlm_crops/<camera>/<day>/<stem>_f<i>.jpg``
+    ``parsed`` and optionally ``tracker`` and ``model_input`` (kept in the meta's ``teacher``). The pictures become ``vlm_crops/<camera>/<day>/<stem>_f<i>.jpg``
     and the raw answer ``responses/<camera>/<day>/<stem>.model_raw.txt``, the
     layout the collector already uses, so the uploader and the tagging tools
     take them as they are.
@@ -176,6 +176,9 @@ def teacher_record(root_dir: str, camera: str, day: str, stem: str, teacher: Dic
     if teacher.get("tracker"):
         # What the tracker measured over the visit (tracker.TrackerFacts.record), whether or not the prompt had it.
         out["teacher"]["tracker"] = teacher["tracker"]
+    if teacher.get("model_input"):
+        # How the pictures sent were made (inference._model_input_record): next to prompt_version, the input's recipe.
+        out["teacher"]["model_input"] = teacher["model_input"]
     return out
 
 
