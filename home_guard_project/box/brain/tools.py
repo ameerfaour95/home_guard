@@ -588,6 +588,55 @@ def check_camera(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+LOOK_AROUND_PHOTOS = 2
+
+
+@_safe_tool
+def look_around(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+    """A live look at every camera that is on ("anything outside?", "what's around the house?" with no camera named).
+
+    2026-10-08: the owner's "יש משהו מעניין בחוץ?" got "on which camera?" back. Every camera is looked at; a photo is
+    sent only of cameras where people are seen (at most LOOK_AROUND_PHOTOS), the rest is told in words."""
+    cams = [c.name for c in ctx.snapshot.cameras if c.enabled]
+    if not cams:
+        return _err("every camera is off")
+    rows: List[Dict[str, Any]] = []
+    for cam in cams:
+        name = display(ctx.snapshot, cam, ctx.lang)
+        shot = ctx.services.grab_photo(cam) if ctx.services.grab_photo else {"error": "no live view"}
+        if not isinstance(shot, dict) or shot.get("error") or not isinstance(shot.get("image"), str):
+            rows.append({"camera": name, "error": "no picture from this camera now"})
+            continue
+        look: Dict[str, Any] = {}
+        if ctx.services.vision is not None:
+            try:
+                with open(shot["image"], "rb") as f:
+                    look = ctx.services.vision.look(cam, [f.read()], guard=ctx.mode == GUARD) or {}
+            except Exception as exc:  # noqa: BLE001 - one camera's failure must not end the look
+                log.warning("look_around: vision failed on %s: %s", cam, exc)
+                look = {}
+        if not (isinstance(look, dict) and look.get("ok")):
+            rows.append({"camera": name, "error": "the picture could not be described"})
+            continue
+        people = look.get("people") if isinstance(look.get("people"), int) else 0
+        row: Dict[str, Any] = {"camera": name, "description": look.get("description"), "people": people,
+                               "quality": look.get("quality")}
+        if ctx.mode == GUARD:
+            row.update(label=look.get("label", ""), why=look.get("why", ""))
+        handle = ctx.state.add_handle("photo", shot["image"], cam, ctx.services.now())
+        ctx.state.note_observation(handle, str(look.get("description") or ""))
+        row["handle"] = handle
+        if people and _media_sent(ctx) < LOOK_AROUND_PHOTOS and ctx.services.deliver is not None:
+            sent = _service_result(ctx.services.deliver.photo(ctx.chat_id, shot["image"]))
+            _issue(ctx, "check_camera", DONE if sent.get("ok") else FAILED, cam,
+                   {"camera": cam, "message_id": sent.get("message_id")}, "" if sent.get("ok") else "telegram")
+            ctx.shown.append(handle)
+            row["photo_sent"] = bool(sent.get("ok"))
+        rows.append(row)
+    return {"ok": True, "cameras": rows,
+            "note": "Answer in one or two sentences: where people are and what they do; say the rest is quiet."}
+
+
 @_safe_tool
 def record_clip(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     camera, bad = _camera_or_topic(ctx, args.get("camera"))
@@ -606,7 +655,7 @@ def record_clip(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     bounds = bounds_text(_finite(rec["start"]), _finite(rec["end"]))
     if not isinstance(rec["path"], str):
         raise ValueError("recording path must be a string")
-    sent = _service_result(ctx.services.deliver.video(ctx.chat_id, rec["path"], caption=f"{camera} · {bounds}"))
+    sent = _service_result(ctx.services.deliver.video(ctx.chat_id, rec["path"], caption=f"{display(ctx.snapshot, camera, ctx.lang)} · {bounds}"))
     detail = {"camera": camera, "seconds": seconds, "bounds": bounds, "message_id": sent.get("message_id")}
     if _aka(ctx, camera):
         detail["aka"] = _aka(ctx, camera)
@@ -663,7 +712,7 @@ def send_media(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
                 return _result(_issue(ctx, "send_media", FAILED, handle, {"kind": "video", "camera": camera},
                                       "error"))
             path, bounds = out_path, bounds_text(*[_finite(v) for v in span])
-    sent = _service_result(ctx.services.deliver.video(ctx.chat_id, path, caption=f"{camera} · {bounds}".strip(" ·")))
+    sent = _service_result(ctx.services.deliver.video(ctx.chat_id, path, caption=f"{display(ctx.snapshot, camera, ctx.lang)} · {bounds}".strip(" ·")))
     return _result(_issue(ctx, "send_media", DONE if sent.get("ok") else FAILED, handle,
                           {"kind": "video", "camera": camera, "bounds": bounds, "message_id": sent.get("message_id")},
                           "" if sent.get("ok") else "telegram"))
@@ -1416,6 +1465,28 @@ def known_rows(receipts: Sequence[Receipt], lang: str) -> Tuple[Tuple[Tuple[str,
     return tuple(rows)
 
 
+# mark_known is for WHO the people are (2026-10-08 replay: "מדי פעם אני יוצא החוצה" silenced the entrance, and a
+# description of what a man did - "he stands by the car talking with his hands" - was saved as "known people").
+_IDENTITY = re.compile(
+    r"(?<![א-ת])[והשב]?(?:עובד|עובדים|עובדת|פועל|פועלים|אני|אנחנו|הגנן|גנן|השכן|שכן|שכנה|השכנים|משפחה|המשפחה|הילדים|"
+    r"ילדים שלי|אשתי|בעלי|אמא|אבא|אחי|אחותי|סבא|סבתא|אורח|אורחים|חברים|חבר שלי|שליח|השליח|מנקה|המנקה|טכנאי|"
+    r"הטכנאי|קבלן|הקבלן|מוכר|מוכרים|שלי|שלנו|אצלי|צפוי|מצפה|מצפים)(?![א-ת])|"
+    r"\b(?:workers?|my|me|mine|our|we|gardener|neighbou?rs?|family|kids|wife|husband|mom|dad|guests?|friends?|"
+    r"delivery|courier|cleaner|technician|contractor|known|expected)\b", re.IGNORECASE)
+_ROUTINE = re.compile(r"(?<![א-ת])(?:מדי פעם|לפעמים|בדרך כלל|תמיד|כל יום|כל בוקר|כל ערב|כל לילה)(?![א-ת])|"
+                      r"\b(?:sometimes|usually|always|every (?:day|morning|evening|night)|often)\b", re.IGNORECASE)
+
+
+def identifies_people(text: str) -> bool:
+    """The owner's message says who the people are (workers, me, the gardener), not only what they did."""
+    return bool(_IDENTITY.search(str(text or "")))
+
+
+def is_routine(text: str) -> bool:
+    """"Sometimes", "every day": a routine, which the box cannot learn yet (case memory, stage 2)."""
+    return bool(_ROUTINE.search(str(text or "")))
+
+
 @_safe_tool
 def mark_known(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     book = ctx.services.events
@@ -1426,6 +1497,13 @@ def mark_known(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         return _err("who: who the people are, in the owner's words (\"the workers\", \"Ameer\")")
     if not _said(args.get("owner_words"), ctx.text):
         return _err("Not saved: owner_words must be copied exactly from this message.")
+    if not identifies_people(ctx.text):
+        return _err("Not saved: this message says what happened, not who the people are. Do not call mark_known; "
+                    "answer the message itself.")
+    if is_routine(ctx.text) and not ctx.alert_handle:
+        return _err("Not saved: a routine ('sometimes', 'every day') is not learned yet. Tell the owner in one line "
+                    "that you cannot learn routines yet, and that replying 'זה אני' / 'these are mine' to an alert "
+                    "about them stops the alerts about them for that day.")
     camera, bad = _known_camera(ctx, args.get("camera"))
     if bad:
         return bad
@@ -1512,6 +1590,7 @@ TOOLS: Dict[str, Callable[[ToolContext, Dict[str, Any]], Dict[str, Any]]] = {
     "ask_vision": ask_vision,
     "ask_clarification": ask_clarification,
     "check_camera": check_camera,
+    "look_around": look_around,
     "record_clip": record_clip,
     "send_media": send_media,
     "pause_alerts": pause_alerts,
