@@ -7,7 +7,7 @@ from PySide6.QtCore import Qt, QRectF, Signal
 from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QWidget
 
-from .scene_editor import SceneMapEditor, TextAction, drive, words
+from .scene_editor import Jobs, SceneMapEditor, TextAction, drive, words
 from .scene_strings import language, st
 from .zone_editor import alpha, colors
 
@@ -47,6 +47,8 @@ class SceneSetupStep(QFrame):
         self.backend = backend
         self.cameras = list(cameras)
         self.pictures = dict(pictures or {})
+        self.names = {}                      # camera id -> the box's name for it (names --json)
+        self.jobs = Jobs(self)
         self.lang = lang or language()
         self.states = {}
         self.index = 0
@@ -74,6 +76,13 @@ class SceneSetupStep(QFrame):
         root.addLayout(self.body, 1)
         if self.cameras:
             self.show_camera(0)
+            self.jobs.submit(lambda: self.backend.names(self.lang), self.named, lambda exc: None)
+
+    def named(self, names):
+        """The box's names for its cameras: the one on screen takes its name unless the box already gave it."""
+        self.names = {k: v for k, v in dict(names or {}).items() if v}
+        if self.editor is not None and not self.editor.named_by_box:
+            self.editor.set_name(self.names.get(self.editor.camera, ''))
 
     def show_camera(self, index, start=True):
         if self.editor is not None:
@@ -83,7 +92,7 @@ class SceneSetupStep(QFrame):
         self.index = index
         camera = self.cameras[index]
         self.editor = SceneMapEditor(self.backend, camera, self.lang, setup=(index + 1, len(self.cameras)),
-                                     placeholder=self.pictures.get(camera))
+                                     placeholder=self.pictures.get(camera), name=self.names.get(camera, ''))
         self.progress.setText(st('setup_eyebrow', self.lang, number=index + 1, total=len(self.cameras)))
         self.editor.finished.connect(self.camera_finished)
         self.body.addWidget(self.editor)
@@ -114,6 +123,7 @@ class SceneSetupStep(QFrame):
         self.leave()
 
     def leave(self):
+        self.jobs.close()
         if self.editor is not None:
             self.editor.close_jobs()
         self.finished.emit(dict(self.states))

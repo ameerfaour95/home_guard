@@ -16,7 +16,8 @@ from home_guard_project.box.app import scene_editor as se
 from home_guard_project.box.app.scene_backend import DemoSceneBackend, SceneError
 from home_guard_project.box.app.scene_strings import st
 
-CAMERA = 'ameer_week_0_1_ch2'          # its owner-facing name is "מצלמה 2" / "Camera 2", never the id
+CAMERA = 'ameer_week_0_1_ch2'          # an id: for box commands only, never on the screen
+NAMED = {CAMERA: {'he': 'הכניסה', 'en': 'Front door'}}          # the box's name for it
 
 
 def wait_until(condition, timeout_ms=15000):
@@ -42,12 +43,17 @@ class Base(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
-        cls.aliases = mock.patch('home_guard_project.box.camera_names._load', return_value={})
-        cls.aliases.start()
+        # The box is the only source of camera names: the app never asks camera_names itself.
+        refuse = AssertionError('the app must not name cameras itself')
+        cls.guards = [mock.patch(f'home_guard_project.box.camera_names.{f}', side_effect=refuse)
+                      for f in ('display_name', 'replace_ids', 'family_names')]
+        for guard in cls.guards:
+            guard.start()
 
     @classmethod
     def tearDownClass(cls):
-        cls.aliases.stop()
+        for guard in cls.guards:
+            guard.stop()
 
     def editor(self, backend=None, lang='he', **kwargs):
         editor = se.SceneMapEditor(backend or DemoSceneBackend(), CAMERA, lang, **kwargs)
@@ -77,17 +83,27 @@ class EditorTest(Base):
         self.assertEqual(editor.stage.layoutDirection(), Qt.LayoutDirection.LeftToRight)   # the picture never mirrors
 
     def test_the_camera_id_is_never_shown(self) -> None:
-        for lang, name in (('he', 'מצלמה 2'), ('en', 'Camera 2')):
-            editor = self.loaded(lang=lang)
+        # A box that gives no name: "מצלמה 2 מתוך 5" by the camera's place in the list, never the id.
+        for lang, name in (('he', 'מצלמה 2 מתוך 5'), ('en', 'Camera 2 of 5')):
+            editor = self.loaded(lang=lang, position=(2, 5))
             self.assertEqual(editor.title.text(), name)
             editor.failed(SceneError('box_refused', f"could not get a picture from {CAMERA} right now (is it online?)"))
             shown = texts(editor)
             self.assertTrue(any(name in t for t in shown))
             self.assertFalse([t for t in shown if CAMERA in t])
-        dialog = se.SceneMapDialog(DemoSceneBackend(), CAMERA, 'he', start=False)
-        self.addCleanup(dialog.deleteLater)
-        self.assertNotIn(CAMERA, dialog.windowTitle())
-        self.assertIn('מצלמה 2', dialog.windowTitle())
+        self.assertEqual(self.editor().title.text(), 'מצלמה')                # no place in a list either
+        # A box that names it: its name, from its own answer.
+        editor = self.loaded(backend=DemoSceneBackend(names=NAMED), position=(2, 5))
+        self.assertEqual(editor.title.text(), 'הכניסה')
+        dialog = se.SceneMapDialog(DemoSceneBackend(names=NAMED), CAMERA, 'en', start=False, position=(1, 3))
+        self.addCleanup(lambda: (dialog.editor.close_jobs(), dialog.deleteLater()))
+        self.assertEqual(dialog.windowTitle(), st('window_title', 'en', camera='Camera 1 of 3'))
+        dialog.editor.start()
+        self.assertTrue(wait_until(lambda: dialog.editor.page == se.EDIT))
+        self.assertEqual(dialog.windowTitle(), st('window_title', 'en', camera='Front door'))
+        dialog.editor.primary.click(); dialog.editor.primary.click()
+        self.assertTrue(wait_until(lambda: dialog.editor.page == se.SAVED))
+        self.assertFalse([t for t in texts(dialog) if CAMERA in t])
 
     def test_a_click_on_the_picture_selects_the_place_and_answers_colour_it(self) -> None:
         editor = self.loaded()
@@ -205,7 +221,7 @@ class EditorTest(Base):
         editor.start()
         self.assertTrue(wait_until(lambda: editor.page == se.ERROR))
         self.assertEqual(editor.error_label.text(), st('error_box_refused', 'he'))
-        self.assertIn('מצלמה 2', editor.error_detail.text())
+        self.assertEqual(editor.error_detail.text(), 'could not get a picture from מצלמה right now (is it online?)')
         self.assertEqual(editor.primary.text(), st('try_again', 'he'))
         editor.primary.click()
         self.assertTrue(wait_until(lambda: editor.page == se.EDIT))
@@ -253,7 +269,7 @@ class EditorTest(Base):
         self.assertEqual(line.crossing((.95, .5), (.8, .5)), 'in')       # towards the house is inward
 
     def test_restore_the_previous_map(self) -> None:
-        backend = DemoSceneBackend()
+        backend = DemoSceneBackend(names=NAMED)
         editor = self.loaded(backend=backend)
         self.assertFalse(editor.restore_row.isHidden())
         self.assertFalse(editor.restore_button.isEnabled())             # nothing saved yet: nothing to restore
@@ -268,7 +284,7 @@ class EditorTest(Base):
         again.restore_button.click()
         self.assertTrue(wait_until(lambda: again.page == se.SAVED))
         self.assertEqual(again.saved_title.text(), st('restored_title', 'he'))
-        self.assertEqual(again.saved_hint.text(), 'החזרתי את המפה הקודמת של מצלמה 2. היא פועלת עכשיו.')
+        self.assertEqual(again.saved_hint.text(), 'החזרתי את המפה הקודמת של הכניסה. היא פועלת עכשיו.')
         self.assertTrue(again.saved.restored)
         self.assertTrue(again.saved_restart.isVisibleTo(again))          # the hidden area went away
         self.assertEqual(backend.calls[-1], 'restore')
@@ -317,7 +333,8 @@ class SetupStepTest(Base):
         self.assertTrue(step.editor.back_button.isHidden())               # nothing before the first camera
         step.editor.skip_button.click()                                    # skip camera 1, even while it loads
         self.assertEqual(step.index, 1)
-        self.assertEqual(step.editor.title.text(), 'מצלמה 2')
+        self.assertEqual(step.editor.title.text(), 'מצלמה 2 מתוך 2')          # the box named neither
+        self.assertFalse([t for t in texts(step) if 'front_ch1' in t or 'back_ch2' in t])
         step.skip_all.click()                                              # finish without maps
         self.assertEqual(window.pages_set, [Page.SUMMARY])
         self.assertEqual(window.scene_states, {'front_ch1': SKIPPED, 'back_ch2': SKIPPED})
@@ -345,6 +362,24 @@ class SetupStepTest(Base):
         step.editor.skip_button.click(); step.editor.skip_button.click()
         self.assertEqual(states, [{'front_ch1': SAVED, 'back_ch2': 'skipped'}])
 
+    def test_the_step_lists_cameras_by_the_boxs_names(self) -> None:
+        from home_guard_project.box.app.scene_setup_step import SceneSetupStep
+        ids = ['ameer_week_0_1_ch3', CAMERA, 'ameer_week_0_1_ch5']
+        backend = DemoSceneBackend(names={'ameer_week_0_1_ch3': {'he': 'הגינה', 'en': 'Garden'}, **NAMED})
+        step = SceneSetupStep(backend, ids)
+        step.resize(1300, 720); step.show()
+        self.addCleanup(lambda: (step.editor.close_jobs(), step.deleteLater()))
+        self.assertTrue(wait_until(lambda: step.names and step.editor.page == se.EDIT))
+        self.assertEqual(step.editor.title.text(), 'הגינה')
+        self.assertIn('names', backend.calls)
+        step.editor.skip_button.click()
+        self.assertEqual(step.editor.title.text(), 'הכניסה')               # named before the box answers propose
+        step.editor.skip_button.click()
+        self.assertEqual(step.editor.title.text(), 'מצלמה 3 מתוך 3')         # the box has no name for it
+        step.editor.failed(SceneError('box_refused', "unknown camera: 'ameer_week_0_1_ch5'"))
+        shown = texts(step)
+        self.assertFalse([t for t in shown if any(i in t for i in ids)], shown)
+
     def test_no_cameras_go_straight_to_the_summary(self) -> None:
         from home_guard_project.box.app.scene_setup_step import open_scene_step
         from home_guard_project.box.app.setup_pages import Page
@@ -367,7 +402,9 @@ class CameraCardTest(Base):
         button.click()
         dialog = page.zone_dialog
         self.assertIsInstance(dialog, se.SceneMapDialog)
+        self.assertEqual(dialog.editor.title.text(), 'מצלמה 1 מתוך 1')        # the card knows only the id
         self.assertTrue(wait_until(lambda: dialog.editor.page == se.EDIT))
+        self.assertNotIn(CAMERA, dialog.windowTitle())
         saved = []
         page.zone_saved = lambda name, points: saved.append((name, points))
         dialog.editor.primary.click(); dialog.editor.primary.click()

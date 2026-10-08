@@ -14,6 +14,8 @@ TEXT = {
         window_title="{camera} · Map",
         eyebrow="Camera map",
         setup_eyebrow="Camera {number} of {total}",
+        camera_fallback="Camera {number} of {total}",
+        camera_plain="Camera",
 
         tab_regions="Numbered places",
         tab_draw="Draw by hand",
@@ -152,6 +154,8 @@ TEXT = {
         window_title="{camera} · המפה",
         eyebrow="המפה של המצלמה",
         setup_eyebrow="מצלמה {number} מתוך {total}",
+        camera_fallback="מצלמה {number} מתוך {total}",
+        camera_plain="מצלמה",
 
         tab_regions="מקומות ממוספרים",
         tab_draw="ציור ידני",

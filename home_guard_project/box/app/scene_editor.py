@@ -37,16 +37,17 @@ REGIONS, DRAW, LINES = range(3)
 HANDLE = 12                      # px: how close a click must be to a corner or a line
 
 
-def display_title(camera, lang=None):
-    """The camera's name for the owner: never its id (camera_names.display_name)."""
-    from ..camera_names import display_name
-    return display_name(camera, lang or language())
+def fallback_name(position=None, lang=None):
+    """A camera the box did not name: "מצלמה 2 מתוך 5" by its place in the list (never its id)."""
+    if position:
+        return st('camera_fallback', lang, number=position[0], total=position[1])
+    return st('camera_plain', lang)
 
 
-def plain_detail(detail, camera, lang=None):
-    """What the box said, with the camera's id swapped for its name."""
-    from ..camera_names import replace_ids
-    return replace_ids(str(detail or ""), [camera], lang or language())
+def plain_detail(detail, camera, name):
+    """What the box said, with the camera's id swapped for the name on the screen (the box's own words may
+    carry the id: "could not get a picture from front_door")."""
+    return str(detail or "").replace(str(camera), name) if camera else str(detail or "")
 
 
 def rgba(colour, opacity):
@@ -1127,14 +1128,23 @@ class CountTile(QFrame):
 # ----------------------------------------------------------------------------
 class SceneMapEditor(QWidget):
     """One camera's map. ``finished`` says how it ended: ("saved", Saved) | ("skip", None) | ("back", None) |
-    ("cancel", None). In setup (*setup* = (number, total)) the footer offers Back / Skip for now / Save & next."""
-    finished = Signal(str, object)
+    ("cancel", None). In setup (*setup* = (number, total)) the footer offers Back / Skip for now / Save & next.
 
-    def __init__(self, backend, camera, lang=None, setup=None, placeholder=None, parent=None):
+    *camera* is the box's id, for commands only. What the owner reads is *name* (the box's name for it), then the
+    name in the box's own answers; without one "מצלמה 2 מתוך 5" by *position* (number, total). ``name_changed``
+    says when the box named it."""
+    finished = Signal(str, object)
+    name_changed = Signal(str)
+
+    def __init__(self, backend, camera, lang=None, setup=None, placeholder=None, parent=None, name="",
+                 position=None):
         super().__init__(parent)
         self.backend, self.camera = backend, camera
         self.lang = lang or language()
         self.setup = setup
+        self.position = position or setup
+        self.name = name or fallback_name(self.position, self.lang)
+        self.named_by_box = bool(name)
         self.proposal = None
         self.current = {}
         self.regions = ()
@@ -1168,7 +1178,7 @@ class SceneMapEditor(QWidget):
             f'QLabel#scene_count {{ color: {t["secondary"]}; font-size: 10.5pt; }}')
         root = QHBoxLayout(self); root.setContentsMargins(0, 0, 0, 0); root.setSpacing(28)
         self.stage = MapStage(self)
-        self.stage.setAccessibleName(display_title(camera, self.lang))
+        self.stage.setAccessibleName(self.name)
         self.stage.setLayoutDirection(Qt.LayoutDirection.LeftToRight)      # the picture never mirrors
         self.stage.text_direction = self.layoutDirection()
         if placeholder is not None and not placeholder.isNull():
@@ -1182,7 +1192,7 @@ class SceneMapEditor(QWidget):
         self.eyebrow.setVisible(not setup)              # setup says "camera 2 of 5" above, for the whole step
         # The camera's name, and at the end of its line "restore the previous map" with when it was replaced.
         heading = QHBoxLayout(); heading.setSpacing(12)
-        self.title = words(display_title(camera, self.lang), 'title'); heading.addWidget(self.title, 1)
+        self.title = words(self.name, 'title'); heading.addWidget(self.title, 1)
         restore = QVBoxLayout(); restore.setSpacing(0); restore.setContentsMargins(0, 0, 0, 0)
         self.restore_button = TextAction(st('restore_button', self.lang))
         self.restore_button.clicked.connect(self.restore_previous)
@@ -1362,7 +1372,8 @@ class SceneMapEditor(QWidget):
             labels = {r.number: label_point(r.points, [o.points for o in proposal.regions[i + 1:]])
                       for i, r in enumerate(proposal.regions)}
         self.proposal = proposal
-        self.current = dict(proposal.current or {})
+        self.set_name((proposal.names or {}).get(self.lang, ''))
+        self.current = dict(proposal.current or {})       # the whole truth: after a save, today's zone is gone
         self.regions = tuple(proposal.regions)
         self.answers, self.names, self.sides = {}, {}, {}
         self.previous = previous
@@ -1387,7 +1398,7 @@ class SceneMapEditor(QWidget):
         if not isinstance(exc, SceneError):
             exc = SceneError('invalid' if isinstance(exc, ValueError) else 'box_refused', str(exc))
         kind = exc.kind if f'error_{exc.kind}' in TEXT_KEYS else 'box_refused'
-        detail = plain_detail(exc.detail, self.camera, self.lang)
+        detail = plain_detail(exc.detail, self.camera, self.name)
         self.error_label.setText(st('error_' + kind, self.lang, detail=detail) if kind == 'invalid' else st('error_' + kind, self.lang))
         said = bool(detail) and kind != 'invalid'
         self.error_said.setText(st('error_detail', self.lang, detail='').strip()); self.error_said.setVisible(said)
@@ -1456,6 +1467,16 @@ class SceneMapEditor(QWidget):
             self.backend.cancel()
         except Exception:  # noqa: BLE001
             pass
+
+    def set_name(self, name):
+        """The box's name for the camera (its own answers carry it); an empty one keeps what is shown."""
+        name = str(name or '').strip()
+        if not name or name == self.name:
+            return
+        self.name, self.named_by_box = name, True
+        self.title.setText(name); self.stage.setAccessibleName(name)
+        align_labels(self)
+        self.name_changed.emit(name)
 
     # --- the previous map --------------------------------------------------
     def show_previous(self):
@@ -1587,10 +1608,11 @@ class SceneMapEditor(QWidget):
 
     def show_saved(self, saved):
         self.saved = saved
+        self.set_name((getattr(saved, 'names', None) or {}).get(self.lang, ''))
         self.current = dict(saved.map)
         restored = getattr(saved, 'restored', False)
         self.saved_title.setText(st('restored_title' if restored else 'saved_title', self.lang))
-        self.saved_hint.setText(st('restored_receipt', self.lang, camera=display_title(self.camera, self.lang))
+        self.saved_hint.setText(st('restored_receipt', self.lang, camera=self.name)
                                 if restored else st('saved_hint', self.lang))
         self.stage.walls = []
         hands, lines = from_current(saved.map)     # a restored drawn zone shows as ours, its outside hidden
@@ -1849,10 +1871,9 @@ class SceneMapDialog(QDialog):
         height = min(room.height(), max(620, round(parent_size.height() * .93)))
         return QSize(width, height)
 
-    def __init__(self, backend, camera, lang=None, parent=None, start=True, placeholder=None):
+    def __init__(self, backend, camera, lang=None, parent=None, start=True, placeholder=None, name="", position=None):
         super().__init__(parent)
         lang = lang or language()
-        self.setWindowTitle(st('window_title', lang, camera=display_title(camera, lang)))
         self.setModal(True)
         self.setObjectName('sceneDialog')
         t = colors(self)
@@ -1862,8 +1883,11 @@ class SceneMapDialog(QDialog):
         self.setMinimumSize(1000, 620)
         self.resize(self.opening_size(host, screen))
         layout = QVBoxLayout(self); layout.setContentsMargins(28, 26, 28, 26)
-        self.editor = SceneMapEditor(backend, camera, lang, placeholder=placeholder, parent=self)
+        self.editor = SceneMapEditor(backend, camera, lang, placeholder=placeholder, parent=self, name=name,
+                                     position=position)
         layout.addWidget(self.editor)
+        self.setWindowTitle(st('window_title', lang, camera=self.editor.name))
+        self.editor.name_changed.connect(lambda n: self.setWindowTitle(st('window_title', lang, camera=n)))
         self.editor.finished.connect(self.finish)
         if start:
             self.editor.start()
@@ -1896,8 +1920,11 @@ def open_map_dialog(page, name, demo_state=None):
     """Open the map editor for camera *name* from a camera page (camera_ui.CameraPage)."""
     from .scene_backend import scene_backend_for
     photo = page.zone_widgets.get(name, (None, None, None))[2]
+    ids = [c.name for c in getattr(page.controls, 'records', [])]
+    position = (ids.index(name) + 1, len(ids)) if name in ids else None
+    # The card knows only ids; the box names the camera in its first answer (propose), "מצלמה 2 מתוך 5" till then.
     dialog = SceneMapDialog(scene_backend_for(page.controls), name, parent=page.widget, start=demo_state is None,
-                            placeholder=getattr(photo, 'pix', None))
+                            placeholder=getattr(photo, 'pix', None), position=position)
     page.zone_dialog = dialog            # the camera page pauses its polling while a dialog is open
     dialog.saved.connect(lambda saved: page.zone_saved(name, []))     # confirm removes today's zone: whole picture
     if demo_state:

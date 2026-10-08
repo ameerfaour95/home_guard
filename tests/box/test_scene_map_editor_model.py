@@ -236,6 +236,27 @@ class BackendTest(unittest.TestCase):
             sb.SceneBackend(runner=failing({"error": "unknown camera: 'front'"}, 1), python="py").propose("front")
         self.assertEqual(caught.exception.detail, "unknown camera: 'front'")
 
+    def test_the_box_names_its_cameras(self) -> None:
+        self.assertEqual(sb.operation("names"), ["names", "--json", "--lang", "he"])
+        self.assertEqual(sb.operation("names", lang="en")[-1], "en")
+        backend = sb.SceneBackend(runner=lambda line, **kw: answer(
+            {"names": {"ameer_week_0_1_ch3": "\u05de\u05e6\u05dc\u05de\u05d4 3", "front": None}}), python="py")
+        self.assertEqual(backend.names(), {"ameer_week_0_1_ch3": "מצלמה 3", "front": ""})
+        data = dict(proposal_json(), display_name="הכניסה", display_name_en="Front door")
+        proposal = sb.proposal_from("front", data)
+        self.assertEqual(proposal.names, {"he": "הכניסה", "en": "Front door"})
+        self.assertEqual(sb.proposal_from("front", proposal_json()).names, {"he": "", "en": ""})
+        saved = sb.saved_from("front", {"camera": "front", "map": {}, "display_name": "הכניסה"})
+        self.assertEqual(saved.names["he"], "הכניסה")
+        with self.assertRaises(sb.SceneError):
+            sb.SceneBackend(runner=lambda line, **kw: answer({"oops": 1}), python="py").names()
+
+    def test_the_app_never_names_a_camera_itself(self) -> None:
+        import pathlib
+        app = pathlib.Path(sb.__file__).parent
+        for path in app.glob("*.py"):
+            self.assertNotRegex(path.read_text(encoding="utf-8"), r"camera_names\b(?!_invalid)", path.name)
+
     def test_the_previous_map_check_and_restore(self) -> None:
         self.assertEqual(sb.operation("restore", "front", check=True), ["restore", "--camera", "front", "--json", "--check"])
         self.assertEqual(sb.operation("restore", "front"), ["restore", "--camera", "front", "--json"])

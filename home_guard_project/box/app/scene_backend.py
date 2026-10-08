@@ -7,7 +7,11 @@ Every command is ``python -m home_guard_project.box.scene_interview <command> --
 - ``confirm --map-b64 <map>`` saves the map built in the app as the camera's whole truth, and restarts the running
   mode once when its frame mask changed (``--no-restart`` leaves that to the caller);
 - ``restore --check`` says whether the camera has a previous map (the one its last save replaced), ``restore``
-  brings it back.
+  brings it back;
+- ``names`` gives every camera's name as the owner reads it.
+
+The box is the only source of camera names (the family sets them over Telegram, they live on the box): every
+answer carries ``display_name`` / ``display_name_en`` and the app never shows a camera id.
 
 Nothing is ever written on the laptop: from the laptop these run over ssh on the box. The map travels zlib-compressed
 as base64, because the remote command line carries no spaces or quotes in a value. Only the injected runner
@@ -39,13 +43,19 @@ class SceneError(RuntimeError):
         self.detail = str(detail or "")
 
 
+def names_from(data):
+    """``{"he": ..., "en": ...}``: the box's names for the camera in this answer ("" where it gave none)."""
+    return {"he": str(data.get("display_name") or ""), "en": str(data.get("display_name_en") or "")}
+
+
 @dataclass(frozen=True)
 class Proposal:
     camera: str
     method: str                                  # sam | grid
     picture: bytes                               # the clean JPEG: the app draws its own overlay
     regions: tuple = ()
-    current: dict = field(default_factory=dict)  # the camera's map now (SceneMap.to_dict)
+    current: dict = field(default_factory=dict)  # the camera's map now (SceneMap.to_dict): the whole truth
+    names: dict = field(default_factory=dict)    # the box's names for it: {"he", "en"}
 
     @property
     def grid(self):
@@ -58,6 +68,7 @@ class Saved:
     map: dict
     restart_needed: bool = False
     restored: bool = False         # the previous map came back (restore), not a new one saved
+    names: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -85,8 +96,10 @@ def map_argument(scene):
     return encoded
 
 
-def operation(command, camera, grid=False, scene=None, restart=True, check=False):
+def operation(command, camera=None, grid=False, scene=None, restart=True, check=False, lang="he"):
     """The scene_interview arguments for one step (no interpreter, no ssh)."""
+    if command == "names":
+        return ["names", "--json", "--lang", "en" if lang == "en" else "he"]
     args = [command, "--camera", camera_name(camera), "--json"]
     if command == "propose":
         return args + ["--embed"] + (["--grid"] if grid else [])
@@ -136,13 +149,14 @@ def proposal_from(camera, data):
     if not picture:
         raise SceneError("bad_picture")
     current = data.get("current_map") if isinstance(data.get("current_map"), dict) else {}
-    return Proposal(camera, "grid" if data.get("method") == "grid" else "sam", picture, regions, current)
+    return Proposal(camera, "grid" if data.get("method") == "grid" else "sam", picture, regions, current,
+                    names_from(data))
 
 
 def saved_from(camera, data, restored=False):
     if data.get("camera") != camera or not isinstance(data.get("map"), dict):
         raise SceneError("bad_answer")
-    return Saved(camera, data["map"], data.get("restart_needed") is True, restored)
+    return Saved(camera, data["map"], data.get("restart_needed") is True, restored, names_from(data))
 
 
 def previous_from(camera, data):
@@ -201,6 +215,14 @@ class SceneBackend:
     def previous(self, camera):
         return previous_from(camera, self.run(operation("restore", camera, check=True)))
 
+    def names(self, lang="he"):
+        """``{camera id: name}`` for every camera of the box; ids are for commands only, never shown."""
+        data = self.run(operation("names", lang=lang))
+        names = data.get("names")
+        if not isinstance(names, dict):
+            raise SceneError("bad_answer")
+        return {str(k): str(v or "") for k, v in names.items()}
+
     def restore(self, camera, restart=True):
         return saved_from(camera, self.run(operation("restore", camera, restart=restart)), restored=True)
 
@@ -236,10 +258,16 @@ DEMO_REGIONS = (
 )
 
 
+DEMO_NAMES = {"front_door": {"he": "הכניסה", "en": "Front door"}, "garden": {"he": "הגינה", "en": "Garden"},
+              "driveway": {"he": "החניה", "en": "Driveway"}}
+
+
 class DemoSceneBackend:
     """No box: the demo picture and regions; ``confirm`` validates and shapes the map as the box would.
-    ``fail`` makes that step fail once (``propose`` | ``confirm``)."""
-    def __init__(self, fail=None, method="sam", current=None):
+    ``fail`` makes that step fail once (``propose`` | ``confirm``). *names*: the box's names per camera
+    (``{"he", "en"}``); a camera without one gets none, as from a box that cannot say."""
+    def __init__(self, fail=None, method="sam", current=None, names=None):
+        self.names_by_camera = DEMO_NAMES if names is None else dict(names)
         self.fail = fail
         self.method = method
         self.current = dict(current or {})          # the first camera's map now; each camera keeps its own after
@@ -273,7 +301,14 @@ class DemoSceneBackend:
         if grid:
             self.method = "grid"
         return Proposal(camera, self.method, self.picture(camera), self.regions(),
-                        dict(self.maps.get(camera, self.current)))
+                        dict(self.maps.get(camera, self.current)), self.name_of(camera))
+
+    def name_of(self, camera):
+        return dict(self.names_by_camera.get(camera) or {"he": "", "en": ""})
+
+    def names(self, lang="he"):
+        self._check("names", "")
+        return {camera: names.get(lang, "") for camera, names in self.names_by_camera.items()}
 
     def confirm(self, camera, scene, restart=True):
         self._check("confirm", camera)
@@ -285,7 +320,7 @@ class DemoSceneBackend:
         saved = confirmed_preview(draft).to_dict()
         self.backups[camera] = (current, __import__("time").time())
         self.maps[camera] = saved
-        return Saved(camera, saved, restart_expected(current, scene))
+        return Saved(camera, saved, restart_expected(current, scene), names=self.name_of(camera))
 
     def previous(self, camera):
         self._check("previous", camera)
@@ -301,7 +336,8 @@ class DemoSceneBackend:
         back, _when = self.backups[camera]
         self.backups[camera] = (now, __import__("time").time())
         self.maps[camera] = back
-        return Saved(camera, dict(back), restart_expected(now, back) or bool(back.get("watched")), restored=True)
+        return Saved(camera, dict(back), restart_expected(now, back) or bool(back.get("watched")), restored=True,
+                     names=self.name_of(camera))
 
     def cancel(self):
         pass
