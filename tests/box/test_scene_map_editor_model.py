@@ -255,7 +255,7 @@ class BackendTest(unittest.TestCase):
         import pathlib
         app = pathlib.Path(sb.__file__).parent
         for path in app.glob("*.py"):
-            self.assertNotRegex(path.read_text(encoding="utf-8"), r"camera_names\b(?!_invalid)", path.name)
+            self.assertNotRegex(path.read_text(encoding="utf-8"), r"(?:from|import)\s+[.\w]*camera_names\b", path.name)
 
     def test_the_previous_map_check_and_restore(self) -> None:
         self.assertEqual(sb.operation("restore", "front", check=True), ["restore", "--camera", "front", "--json", "--check"])

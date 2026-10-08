@@ -10,7 +10,9 @@ class TimelineTests(unittest.TestCase):
     def test_safe_image_path_and_thinking_freshness(self):
         self.assertIsNone(image_path(Path('images'),'../secret.jpg'));self.assertEqual(image_path(Path('images'),'door_123.jpg'),Path('images/door_123.jpg'))
         data={'thinking':{'camera':'front_door','ts':100}}
-        self.assertEqual(thinking_camera(data,150),'Front Door');self.assertEqual(thinking_camera(data,161),'')
+        from home_guard_project.box.app import camera_display
+        camera_display.set_names({'front_door':'Front door'},['front_door']);self.addCleanup(camera_display.set_names,{},())
+        self.assertEqual(thinking_camera(data,150),'Front door');self.assertEqual(thinking_camera(data,161),'')
 
     def test_recorded_feed_preserves_hebrew_and_survives_partial_line(self):
         import json,tempfile

@@ -19,6 +19,12 @@ from home_guard_project.box.app.strings import tr
 
 
 class AppModelTest(unittest.TestCase):
+    def setUp(self):
+        # The activity names cameras by the box's names (camera_display), never by their ids.
+        from home_guard_project.box.app import camera_display
+        camera_display.set_names({"front_door": "Front door", "front": "Front"}, ["front_door", "front"])
+        self.addCleanup(camera_display.set_names, {}, ())
+
     def test_heartbeat_combines_live_and_outbox_without_mutation(self):
         payload = dict(
             site="home",
@@ -41,7 +47,7 @@ class AppModelTest(unittest.TestCase):
             event = parse_activity(
                 f"12:00:00 INFO [front_door] {kind} saved: clip.mp4 (no VLM)"
             )
-            self.assertEqual(event.text, "Clip saved from front door")
+            self.assertEqual(event.text, "Clip saved from Front door")
         self.assertEqual(
             parse_activity("Starting data_collection (overlay: config)").text,
             tr("restart"),
@@ -90,7 +96,7 @@ class AppModelTest(unittest.TestCase):
                 "2026-10-02 12:00:00 Done. Uploaded: 13 | Failed: 0"
             )
             events, upload = read_activity(root)
-            self.assertEqual(events[0].text, "Clip saved from front")
+            self.assertEqual(events[0].text, "Clip saved from Front")
             self.assertEqual(upload, "2026-10-02 12:00:00")
             self.assertEqual(len(events), 3)
             (root / "upload-2026-10-03.log").write_text(

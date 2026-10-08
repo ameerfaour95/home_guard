@@ -57,11 +57,11 @@ class OffCameraTests(unittest.TestCase):
         from home_guard_project.box.app.alert_types_ui import CameraAlertButton
         self.assertTrue(all(slot.height()==36 for slot in slots))
         self.assertTrue(all(len(slot.findChildren(CameraAlertButton))==1 for slot in slots))
-        page.rows[0][1].setText("renamed_door")
+        shown=page.rows[0][1].text()          # the box's name for the camera: read only, never the id
         off.turn_on.click()
         self.assertTrue(all(c.enabled for c in w.camera_controls.records))
         page.future.result();page.poll()
-        self.assertEqual(page.rows[0][1].text(),"renamed_door")
+        self.assertEqual(page.rows[0][1].text(),shown)
         self.assertEqual(len(w.tiles),3)
         self.assertTrue(all(not t.off for t in w.tiles))
         w.close()

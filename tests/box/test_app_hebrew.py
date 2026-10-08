@@ -126,6 +126,8 @@ class ScreenTest(Hebrew):
                       state='mixed', cameras=3, page=None, scene=None, lang=lang, size='1366x768', screenshot=None)
         values.update(extra)
         window = Window(SimpleNamespace(**values))
+        from home_guard_project.box.app import camera_display
+        self.addCleanup(camera_display.set_names, {}, ())
         self.addCleanup(lambda: (window.close(), window.deleteLater()))
         return window
 
