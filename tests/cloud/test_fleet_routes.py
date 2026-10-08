@@ -114,3 +114,55 @@ def test_customer_crud_and_patch_audit(client, staff_factory):
     assert row.customer_id == cid
     assert row.detail == {"changed": ["consent_recordings", "consent_training", "name", "notes"]}  # names, never values
     assert "secret" not in str(row.detail) and "Acme" not in str(row.detail)
+
+
+def _iso(dt):
+    return dt.isoformat().replace("+00:00", "Z")
+
+
+def _renamed_house(client):
+    """A box renamed from site ameer_tes2 to ameer_week_0_1: the heartbeat still lists the old ids (14-day archive)."""
+    with session_scope(client.app.state.engine) as s:
+        dev = b.enroll(s, "ameer_week_0_1", "Ameer")
+        dev.last_heartbeat = _hb("ameer_week_0_1", NOW - timedelta(minutes=5), cameras={
+            "ameer_tes2_ch6": {"newest_clip_utc": _iso(NOW - timedelta(days=5))},
+            "ameer_tes2_ch3": {"newest_clip_utc": _iso(NOW - timedelta(days=6))},
+            "ameer_week_0_1_ch6": {"newest_clip_utc": _iso(NOW - timedelta(minutes=10))},
+            "ameer_week_0_1_ch2": {"newest_clip_utc": _iso(NOW - timedelta(hours=30))}})
+        s.flush()
+        s.add(Event(device_pk=dev.id, site="ameer_week_0_1", camera="ameer_tes2_ch1", stem="old",
+                    kind="trigger", start_ts=_ts(NOW - timedelta(days=9))))
+        return dev.customer_id
+
+
+def test_warnings_cover_current_cameras_only_with_owner_names(client, staff_factory):
+    _setup(client)
+    _, _, _, h = staff_factory("support")
+    cid = _renamed_house(client)
+    dev = client.get("/v1/fleet", headers=h).json()["devices"][0]
+    assert dev["verdict"] == "warning" and dev["cameras_total"] == 2 and dev["cameras_stale"] == 1
+    assert [r["message"] for r in dev["reasons"]] == ["No clip for 30 h from Camera 2 — check it has power and network"]
+    assert "tes2" not in repr(dev["reasons"])
+    cams = client.get("/v1/cameras", params={"customer_id": cid}, headers=h).json()
+    assert [(c["camera"], c["name"], c["current"]) for c in cams] == [
+        ("ameer_week_0_1_ch2", "Camera 2", True), ("ameer_week_0_1_ch6", "Camera 6", True),
+        ("ameer_tes2_ch1", "Camera 1", False), ("ameer_tes2_ch3", "Camera 3", False),
+        ("ameer_tes2_ch6", "Camera 6", False)]
+    assert cams[1]["newest_clip_utc"].startswith("2026-10-03T11:50")
+    assert client.get("/v1/cameras", params={"customer_id": 99999}, headers=h).status_code == 404
+    _, _, _, lab = staff_factory("labeler")
+    assert client.get("/v1/cameras", headers=lab).status_code == 403
+
+
+def test_the_box_camera_list_decides_and_names_when_present(client, staff_factory):
+    _setup(client)
+    _, _, _, h = staff_factory("admin")
+    with session_scope(client.app.state.engine) as s:
+        dev = b.enroll(s, "home", "Home")
+        dev.last_heartbeat = _hb("home", NOW - timedelta(minutes=5), cameras=[
+            {"id": "home_ch1", "name": "כניסה ראשית", "newest_clip_utc": _iso(NOW - timedelta(hours=40))},
+            {"id": "home_ch2", "name": "", "newest_clip_utc": _iso(NOW - timedelta(minutes=1))}])
+    dev = client.get("/v1/fleet", headers=h).json()["devices"][0]
+    assert [r["message"] for r in dev["reasons"]] == ["No clip for 40 h from כניסה ראשית — check it has power and network"]
+    cams = client.get("/v1/cameras", headers=h).json()
+    assert [(c["name"], c["owner_named"], c["current"]) for c in cams] == [("כניסה ראשית", True, True), ("Camera 2", False, True)]

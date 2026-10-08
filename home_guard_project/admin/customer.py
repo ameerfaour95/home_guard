@@ -3,7 +3,7 @@ from PySide6.QtCore import Signal, Qt
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget, QTabWidget, QDialog, QCheckBox, QScrollArea, QFrame
 from .backend import OfflineError, AuthError
 from .fleet_model import SEVERITY
-from .formatting import site_name, age, utcnow
+from .formatting import site_name, age, utcnow, remember_names
 from .workers import TaskRunner
 from .timeline import TimelineScreen
 from .event_view import EventView
@@ -73,6 +73,8 @@ class CustomerScreen(QWidget):
         self.offline = EmptyState("Can't reach Home Guard Cloud", 'Check your connection, then try loading this customer again.', eyebrow='OFFLINE')
         self.offline.action.show(); self.offline.action.clicked.connect(lambda: self.open(self.customer_id, self.device_id)); self.stack.addWidget(self.offline)
         self.runner = TaskRunner(self); self.runner.finished.connect(self.completed)
+        self.camera_list = None
+        self.cameras_runner = TaskRunner(self); self.cameras_runner.finished.connect(self.cameras_loaded)
         if review:
             self.stack.setCurrentWidget(self.body)
             self.timeline.open()
@@ -120,7 +122,26 @@ class CustomerScreen(QWidget):
         self.consent.setMinimumWidth(410)
         self.tabs.setCurrentIndex(0); self.tabs.setTabEnabled(1, False)
         self.timeline.open(customer.id, customer.timezone)
+        self.camera_list = None
+        if hasattr(self.backend, 'cameras'):
+            cid = customer.id
+            self.cameras_runner.start(lambda: (cid, self.backend.cameras(cid)))
         self.stack.setCurrentWidget(self.body)
+
+    def cameras_loaded(self, result, error):
+        if error:
+            if isinstance(error, AuthError):
+                self.session_expired.emit()
+            return  # an older server without the camera list: every camera the index saw stays listed
+        cid, cameras = result
+        if cid != self.customer_id:
+            if self.customer is not None and self.customer.id == self.customer_id:
+                current = self.customer_id
+                self.cameras_runner.start(lambda: (current, self.backend.cameras(current)))
+            return
+        remember_names({c.camera: c.name for c in cameras if c.owner_named})
+        self.camera_list = cameras
+        self.timeline.set_cameras(cameras)
 
     def review_consent(self):
         """Consent comes from the sales contract. An admin switches one off when the customer withdraws it."""

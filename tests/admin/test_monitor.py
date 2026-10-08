@@ -50,3 +50,36 @@ def test_camera_names_follow_the_box_rule_never_the_raw_id():
         assert camera_name('other_house_ch1') == 'Camera 1'
     finally:
         formatting.KNOWN_NAMES.clear()
+
+
+class RenamedBackend(DemoBackend):
+    """Demo customer 1 after a rename: 'Garden' is an old id the box still lists; 'Front door' has an owner name."""
+    def cameras(self, customer_id=None):
+        from dataclasses import replace
+        out = []
+        for c in super().cameras(customer_id):
+            if c.customer_id == 1 and c.camera == 'Garden':
+                c = replace(c, current=False)
+            if c.customer_id == 1 and c.camera == 'Front door':
+                c = replace(c, name='כניסה ראשית', owner_named=True)
+            out.append(c)
+        return out
+
+
+def test_customer_page_lists_current_cameras_and_hides_retired_behind_a_toggle(widgets, wait):
+    from home_guard_project.admin import formatting
+    from home_guard_project.admin.customer import CustomerScreen
+    screen = CustomerScreen(RenamedBackend()); widgets.append(screen)
+    screen.resize(1182, 688); screen.show(); screen.open(1)
+    timeline = screen.timeline
+    try:
+        wait(lambda: screen.camera_list is not None and timeline.density_result is not None)
+        combo = timeline.filters['camera']
+        assert list(timeline.density.rows) == ['Driveway', 'Front door']
+        assert [combo.itemText(i) for i in range(combo.count())] == ['All cameras', 'Driveway', 'כניסה ראשית']
+        assert timeline.retired_toggle.isVisibleTo(screen)
+        timeline.retired_toggle.setChecked(True)
+        assert list(timeline.density.rows) == ['Driveway', 'Front door', 'Garden']
+        assert combo.itemText(combo.count()-1) == 'Garden  (retired)'
+    finally:
+        formatting.KNOWN_NAMES.clear()

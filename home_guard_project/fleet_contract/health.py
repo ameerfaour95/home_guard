@@ -1,7 +1,12 @@
-"""Deterministic health verdicts from the legacy heartbeat snapshot."""
+"""Deterministic health verdicts from the legacy heartbeat snapshot.
+
+Camera warnings cover only the cameras the house has now. The box's heartbeat lists every camera folder still in its
+14-day archive, so a site rename (``ameer_tes2_ch6`` -> ``ameer_week_0_1_ch6``) or a removed camera would otherwise
+warn for two weeks about a camera that no longer exists. ``split_cameras`` decides current vs retired.
+"""
 
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Iterable, Optional
 
 from .camera_names import channel_of, display_name, family_names
 from .legacy import Heartbeat
@@ -18,16 +23,84 @@ def camera_label(camera: str, names: Optional[dict] = None) -> str:
     return text[:1].upper() + text[1:]
 
 
+CURRENT_WINDOW = timedelta(hours=48)
+
+
+def listed_cameras(body) -> Optional[dict[str, str]]:
+    """The box's own list of its cameras now, ``{id: owner name}``, from an additive heartbeat field
+    ``cameras: [{"id", "name"}]`` (or ``current_cameras``); None while the box does not send one (it does not yet)."""
+    if not isinstance(body, dict):
+        return None
+    for key in ("current_cameras", "cameras"):
+        value = body.get(key)
+        if isinstance(value, list):
+            out = {}
+            for item in value:
+                if isinstance(item, dict) and isinstance(item.get("id"), str) and item["id"]:
+                    name = item.get("name")
+                    out[item["id"]] = name.strip() if isinstance(name, str) else ""
+            return out
+    return None
+
+
+def listed_newest(body) -> dict[str, Optional[datetime]]:
+    """Newest clip per camera from the list form of ``cameras`` (items may carry ``newest_clip_utc``)."""
+    from ._time import parse_utc
+
+    value = body.get("cameras") if isinstance(body, dict) else None
+    if not isinstance(value, list):
+        return {}
+    return {item["id"]: parse_utc(item.get("newest_clip_utc")) for item in value
+            if isinstance(item, dict) and isinstance(item.get("id"), str) and item["id"]}
+
+
+def split_cameras(cameras: dict[str, Optional[datetime]], now: datetime, site: str = "",
+                  recent: Iterable[str] = (), listed: Optional[Iterable[str]] = None) -> tuple[list[str], list[str]]:
+    """(current, retired) camera ids, each sorted.
+
+    ``cameras`` maps every known id to its newest clip (None: never); ``recent`` names cameras with a clip in the last
+    48 h from another source (the event index); ``listed`` is the box's own current list when it sends one, and then
+    it alone decides. Otherwise a camera is current when it had a clip in the last 48 h. An older one is retired when
+    a newer id took its channel (a site rename) or when its id carries another site's name; a quiet camera of this
+    site stays current, so a dead camera keeps its warning.
+    """
+    ids = set(cameras) | set(recent)
+    if listed is not None:
+        listed = set(listed)
+        return sorted(listed), sorted(ids - listed)
+    now = normalize_utc(now)
+    fresh = set(recent) | {c for c, newest in cameras.items()
+                           if newest is not None and now - normalize_utc(newest) < CURRENT_WINDOW}
+    fresh_channels = {channel_of(c) for c in fresh} - {None}
+    current = set(fresh)
+    for camera in ids - fresh:
+        channel = channel_of(camera)
+        if channel is None:
+            current.add(camera)          # no channel to compare: never guess it away
+        elif channel in fresh_channels:
+            continue                     # a newer id has this channel now
+        elif not site or camera.startswith(site + "_"):
+            current.add(camera)
+    return sorted(current), sorted(ids - current)
+
+
+def _names(names: list[str]) -> str:
+    return ", ".join(names)
+
+
 def camera_stale(newest: Optional[datetime], now) -> bool:
     return newest is None or normalize_utc(now) - normalize_utc(newest) >= timedelta(hours=24)
 
 
-def verdict(hb: Optional[Heartbeat], now: datetime, alert_hours: Optional[tuple[int, int]] = None) -> tuple[str, list[dict]]:
+def verdict(hb: Optional[Heartbeat], now: datetime, alert_hours: Optional[tuple[int, int]] = None,
+            cameras: Optional[Iterable[str]] = None, names: Optional[dict] = None) -> tuple[str, list[dict]]:
     """Return the worst applicable condition and all contributing reasons.
 
     ``alert_hours`` is reserved: the legacy contract specifies no schedule-based
     exceptions to these thresholds. A missing heartbeat time is offline; a
     camera with no newest clip is stale. Other missing values imply no fault.
+    ``cameras`` limits the camera warnings to those ids (the current cameras; default every heartbeat camera) and
+    ``names`` gives owner names (id -> name). Repeats are grouped: one warning lists every quiet camera.
     """
     if hb is None:
         return "unknown", [{"code": "no_heartbeat", "message": "No heartbeat received", "severity": "unknown"}]
@@ -56,19 +129,21 @@ def verdict(hb: Optional[Heartbeat], now: datetime, alert_hours: Optional[tuple[
             add("disk_low", f"Only {hb.disk_free_gb:g} GB of disk space free", "warning")
     quiet = []
     never = []
-    quietest_age = timedelta(0)
-    for camera, newest in hb.cameras.items():
-        name = camera_label(camera)
+    judged = hb.cameras if cameras is None else {c: hb.cameras.get(c) for c in cameras}
+    for camera, newest in judged.items():
+        name = camera_label(camera, names)
         if newest is None:
             never.append(name)
         elif camera_stale(newest, now):
-            quiet.append(name)
-            quietest_age = max(quietest_age, normalize_utc(now) - normalize_utc(newest))
+            quiet.append((name, int((normalize_utc(now) - normalize_utc(newest)).total_seconds() // 3600)))
     if quiet:
-        hours = int(quietest_age.total_seconds() // 3600)
-        add("camera_quiet", f"No clip for {hours} h: " + ", ".join(quiet), "warning")
+        hours = sorted({h for _, h in quiet})
+        since = f"{hours[0]} h" if len(hours) == 1 else f"{hours[0]}-{hours[-1]} h"
+        add("camera_quiet", f"No clip for {since} from {_names([n for n, _ in quiet])} — check "
+            + ("it has power and network" if len(quiet) == 1 else "they have power and network"), "warning")
     if never:
-        add("camera_never", "No clip recorded yet: " + ", ".join(never), "warning")
+        add("camera_never", f"No clip recorded yet from {_names(never)} — check "
+            + ("its login and stream on the box" if len(never) == 1 else "their login and stream on the box"), "warning")
     if hb.clips_outbox > 500:
         add("upload_backlog", f"{hb.clips_outbox} clips in the upload outbox", "warning")
 

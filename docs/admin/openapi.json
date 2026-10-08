@@ -567,6 +567,63 @@
         "title": "Box",
         "type": "object"
       },
+      "CameraOut": {
+        "description": "One camera of a house as staff read it. `name` is the family's name when the box sent one, else \"Camera N\"\nfrom the channel (never the raw id); `camera` is the id, for filters. `current` is false for retired ids (a site\nrename, a removed camera): they are listed, never warned about.",
+        "properties": {
+          "camera": {
+            "title": "Camera",
+            "type": "string"
+          },
+          "current": {
+            "title": "Current",
+            "type": "boolean"
+          },
+          "customer_id": {
+            "title": "Customer Id",
+            "type": "integer"
+          },
+          "device_id": {
+            "title": "Device Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "newest_clip_utc": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Newest Clip Utc"
+          },
+          "owner_named": {
+            "title": "Owner Named",
+            "type": "boolean"
+          },
+          "site": {
+            "title": "Site",
+            "type": "string"
+          }
+        },
+        "required": [
+          "customer_id",
+          "device_id",
+          "site",
+          "camera",
+          "name",
+          "owner_named",
+          "current",
+          "newest_clip_utc"
+        ],
+        "title": "CameraOut",
+        "type": "object"
+      },
       "ClipAnnotationIn": {
         "properties": {
           "base_version": {
@@ -3314,6 +3371,64 @@
         "summary": "Refresh",
         "tags": [
           "auth"
+        ]
+      }
+    },
+    "/v1/cameras": {
+      "get": {
+        "operationId": "cameras_v1_cameras_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "customer_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Customer Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CameraOut"
+                  },
+                  "title": "Response Cameras V1 Cameras Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Cameras",
+        "tags": [
+          "fleet"
         ]
       }
     },

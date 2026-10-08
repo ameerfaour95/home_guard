@@ -67,13 +67,15 @@ def test_camera_quiet(hb):
         "recent": NOW - timedelta(hours=23),
     }), NOW)
     assert (status, reasons) == ("warning", [{
-        "code": "camera_quiet", "message": "No clip for 26 h: Front side, Back door", "severity": "warning",
+        "code": "camera_quiet", "message": "No clip for 25-26 h from Front side, Back door — check they have power and network",
+        "severity": "warning",
     }])
 
 
 def test_camera_never(hb):
     assert verdict(replace(hb, cameras={"left_side_2": None}), NOW) == ("warning", [{
-        "code": "camera_never", "message": "No clip recorded yet: Left side 2", "severity": "warning",
+        "code": "camera_never", "message": "No clip recorded yet from Left side 2 — check its login and stream on the box",
+        "severity": "warning",
     }])
 
 
@@ -97,8 +99,9 @@ def test_reasons_are_human(hb):
     status, reasons = verdict(replace(hb, cameras={"front_side": None, "back_door": NOW - timedelta(days=2)}), NOW)
     assert status == "warning"
     assert reasons == [
-        {"code": "camera_quiet", "message": "No clip for 48 h: Back door", "severity": "warning"},
-        {"code": "camera_never", "message": "No clip recorded yet: Front side", "severity": "warning"},
+        {"code": "camera_quiet", "message": "No clip for 48 h from Back door — check it has power and network", "severity": "warning"},
+        {"code": "camera_never", "message": "No clip recorded yet from Front side — check its login and stream on the box",
+         "severity": "warning"},
     ]
 
 
@@ -148,7 +151,7 @@ def test_naive_and_offset_datetimes(hb):
         "front_side": (NOW - timedelta(hours=26, minutes=59)).replace(tzinfo=None),
         "back_door": (NOW - timedelta(hours=25)).astimezone(timezone(timedelta(hours=3))),
     }), NOW.replace(tzinfo=None))
-    assert status == "warning" and reasons[0]["message"] == "No clip for 26 h: Front side, Back door"
+    assert status == "warning" and reasons[0]["message"].startswith("No clip for 25-26 h from Front side, Back door")
 
 
 def test_alert_hours_do_not_change_the_prescribed_rules(hb):
@@ -157,4 +160,34 @@ def test_alert_hours_do_not_change_the_prescribed_rules(hb):
 
 def test_camera_names_are_never_raw_ids(hb):
     status, reasons = verdict(replace(hb, cameras={"ameer_tes2_ch6": NOW - timedelta(hours=30)}), NOW)
-    assert reasons[0]["message"] == "No clip for 30 h: Camera 6"
+    assert reasons[0]["message"] == "No clip for 30 h from Camera 6 — check it has power and network"
+
+
+def test_renamed_site_ids_are_retired_and_never_warn(hb):
+    from home_guard_project.fleet_contract.health import split_cameras
+    cameras = {"ameer_tes2_ch6": NOW - timedelta(days=5), "ameer_tes2_ch3": NOW - timedelta(days=6),
+               "ameer_week_0_1_ch6": NOW - timedelta(minutes=5), "ameer_week_0_1_ch2": NOW - timedelta(hours=30),
+               "ameer_week_0_1_ch4": None}
+    current, retired = split_cameras(cameras, NOW, site="ameer_week_0_1")
+    # ch6 moved to the new id; ch3 sits under the old site's name; the quiet ch2 and the silent ch4 of this site stay
+    assert current == ["ameer_week_0_1_ch2", "ameer_week_0_1_ch4", "ameer_week_0_1_ch6"]
+    assert retired == ["ameer_tes2_ch3", "ameer_tes2_ch6"]
+    status, reasons = verdict(replace(hb, cameras=cameras), NOW, cameras=current,
+                              names={"ameer_week_0_1_ch2": "כניסה ראשית"})
+    assert [r["message"] for r in reasons] == [
+        "No clip for 30 h from כניסה ראשית — check it has power and network",
+        "No clip recorded yet from Camera 4 — check its login and stream on the box"]
+    assert "tes2" not in repr(reasons) and "Ameer" not in repr(reasons)
+
+
+def test_a_recent_event_keeps_a_camera_current_and_the_box_list_wins():
+    from home_guard_project.fleet_contract.health import split_cameras, listed_cameras, listed_newest
+    cameras = {"old_site_ch1": NOW - timedelta(days=3), "front_door": NOW - timedelta(days=9)}
+    assert split_cameras(cameras, NOW, site="new_site", recent=["old_site_ch1"]) == (["front_door", "old_site_ch1"], [])
+    assert split_cameras(cameras, NOW, site="new_site") == (["front_door"], ["old_site_ch1"])
+    body = {"cameras": [{"id": "new_site_ch1", "name": " Gate ", "newest_clip_utc": "2026-10-03T10:00:00Z"},
+                        {"id": "new_site_ch2"}, {"name": "no id"}, "junk"]}
+    assert listed_cameras(body) == {"new_site_ch1": "Gate", "new_site_ch2": ""}
+    assert listed_newest(body)["new_site_ch1"] == datetime(2026, 10, 3, 10, tzinfo=timezone.utc)
+    assert listed_cameras({"cameras": {"x": {}}}) is None and listed_cameras(None) is None
+    assert split_cameras(cameras, NOW, listed=["new_site_ch1"]) == (["new_site_ch1"], ["front_door", "old_site_ch1"])

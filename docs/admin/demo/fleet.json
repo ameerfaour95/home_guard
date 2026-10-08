@@ -14,7 +14,7 @@
         },
         {
           "code": "camera_quiet",
-          "message": "No clip for 39 h: Front door",
+          "message": "No clip for 39 h from Front door — check it has power and network",
           "severity": "warning"
         }
       ],

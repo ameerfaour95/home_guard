@@ -1,7 +1,7 @@
 from datetime import timedelta, timezone
 from PySide6.QtCore import Qt, Signal, QTimer, QEvent, QDateTime
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QComboBox, QTableView,
-    QHeaderView, QAbstractItemView, QStackedWidget, QDialog, QDateTimeEdit, QDialogButtonBox, QSizePolicy, QScrollArea)
+    QHeaderView, QAbstractItemView, QStackedWidget, QDialog, QDateTimeEdit, QDialogButtonBox, QSizePolicy, QScrollArea, QCheckBox)
 from .backend import AuthError, BackendError
 from PySide6.QtGui import QPixmap
 from .formatting import utcnow, local_time, camera_name
@@ -23,6 +23,8 @@ class TimelineScreen(QWidget):
         self.customer_id, self.zone, self.cursor = None, 'UTC', None
         self.start, self.end = self.now()-timedelta(hours=24), self.now()
         self.cell = None
+        self.cameras = None  # the house's cameras (CameraOut) once known; None: every camera the index has seen
+        self.density_result = None
         self.saved_filter = None
         self.generation = 0
         self.runner, self.density_runner = [TaskRunner(self) for _ in range(2)]
@@ -62,6 +64,9 @@ class TimelineScreen(QWidget):
                 combo.addItem(text, data)
             combo.currentIndexChanged.connect(self.reload)
             self.filters[key] = combo; filters.addWidget(combo)
+        self.retired_toggle = QCheckBox('Retired cameras'); self.retired_toggle.hide()
+        self.retired_toggle.setToolTip('Also list cameras this house no longer has (old ids after a rename, removed cameras)')
+        self.retired_toggle.toggled.connect(lambda _: self.apply_density()); filters.addWidget(self.retired_toggle)
         self.search = QLineEdit(); self.search.setPlaceholderText('Search events…'); self.search.setMinimumWidth(120)
         self.debounce = QTimer(self); self.debounce.setSingleShot(True); self.debounce.setInterval(250); self.debounce.timeout.connect(self.reload)
         self.search.textChanged.connect(lambda: self.debounce.start())
@@ -98,6 +103,8 @@ class TimelineScreen(QWidget):
 
     def open(self, customer_id=None, zone='UTC'):
         self.customer_id, self.zone, self.model.zone = customer_id, zone, zone
+        self.cameras = None; self.retired_toggle.hide()
+        self.retired_toggle.blockSignals(True); self.retired_toggle.setChecked(False); self.retired_toggle.blockSignals(False)
         self.cell = None
         self.clear_cell.hide()
         for combo in self.filters.values():
@@ -217,14 +224,40 @@ class TimelineScreen(QWidget):
         if error:
             self.density.set_error()
             self.density.setToolTip('Activity could not be loaded. Change range to retry.'); self.density.update(); return
-        self.density.set_density(events)
+        self.density_result = events
+        self.apply_density()
+
+    def set_cameras(self, cameras):
+        """The house's camera list: the strip and the camera filter then show current cameras; retired ones only
+        behind the toggle."""
+        self.cameras = cameras
+        self.retired_toggle.setVisible(any(not c.current for c in cameras or ()))
+        self.apply_density()
+
+    def retired_ids(self):
+        return {c.camera for c in self.cameras or () if not c.current}
+
+    def shown(self, camera):
+        # density rows are '<site>/<camera>' when the customer has more than one box
+        return self.retired_toggle.isChecked() or camera.split('/', 1)[-1] not in self.retired_ids()
+
+    def apply_density(self):
+        events = self.density_result
+        if events is None:
+            return
+        from dataclasses import replace
+        self.density.set_density(replace(events, rows=[r for r in events.rows if self.shown(r.camera)]))
         self.fit_density()
+        retired = self.retired_ids()
         combo = self.filters['camera']; selected = combo.currentData(); combo.blockSignals(True)
         combo.clear(); combo.addItem('All cameras', None)
-        for camera in sorted({e.camera for e in events.rows}):
-            combo.addItem(camera_name(camera), camera)
-            combo.setItemData(combo.count()-1, camera, Qt.ItemDataRole.ToolTipRole)
+        for camera in sorted({e.camera for e in events.rows if self.shown(e.camera)},
+                             key=lambda c: (c.split('/', 1)[-1] in retired, camera_name(c))):
+            combo.addItem(camera_name(camera) + ('  (retired)' if camera.split('/', 1)[-1] in retired else ''), camera)
+            combo.setItemData(combo.count()-1, camera_name(camera), Qt.ItemDataRole.ToolTipRole)
         combo.setCurrentIndex(max(0, combo.findData(selected))); combo.blockSignals(False)
+        if selected is not None and combo.currentData() != selected:
+            self.reload()
 
     def fit_density(self):
         # the grid's own height up to density_rows camera rows; more scroll

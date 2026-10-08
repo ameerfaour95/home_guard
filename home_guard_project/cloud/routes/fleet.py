@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta
+from dataclasses import dataclass, replace
+from datetime import datetime, timedelta, timezone
 from typing import Iterable, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -15,7 +16,7 @@ from home_guard_project.fleet_contract.legacy import parse_heartbeat
 from .. import audit, redact
 from ..deps import TEXT_MAX, SessionDep, check_length, require_id, require_role
 from ..models import Camera, Customer, Device, Event, Feedback, Staff
-from ..schemas import DensityOut, DeviceSummary, EnrollRequest, FleetResponse, HealthReason
+from ..schemas import CameraOut, DensityOut, DeviceSummary, EnrollRequest, FleetResponse, HealthReason
 from .events import fleet_activity_density
 
 router = APIRouter(tags=["fleet"])
@@ -26,6 +27,66 @@ _SEVERITY_RANK = {"offline": 0, "critical": 1, "warning": 2, "unknown": 3, "heal
 
 def now_of(request: Request) -> datetime:
     return request.app.state.clock()
+
+
+@dataclass
+class KnownCamera:
+    camera: str
+    owner_name: str                     # the family's name when the box sent one, else ""
+    current: bool
+    in_heartbeat: bool
+    heartbeat_newest: Optional[datetime]
+    last_event_utc: Optional[datetime]
+
+    @property
+    def newest_clip_utc(self) -> Optional[datetime]:
+        times = [t for t in (self.heartbeat_newest, self.last_event_utc) if t is not None]
+        return max(times) if times else None
+
+
+def camera_inventory(session: Session, now: datetime, devices: list[Device]) -> dict[int, list[KnownCamera]]:
+    """Every camera ever known per device pk (heartbeat, Camera rows, events), split into current and retired by
+    fleet_contract.health.split_cameras: a clip in the last 48 h, or the box's own list when its heartbeat carries one.
+    Owner names come from that list or from Camera.display_name; aliases are otherwise not in the cloud."""
+    pks = [d.id for d in devices]
+    out: dict[int, list[KnownCamera]] = {pk: [] for pk in pks}
+    if not pks:
+        return out
+    names: dict[tuple[int, str], str] = {}
+    known: set[tuple[int, str]] = set()
+    for pk, cam, shown in session.execute(select(Camera.device_pk, Camera.name, Camera.display_name)
+                                          .where(Camera.device_pk.in_(pks))).all():
+        known.add((pk, cam))
+        if shown:
+            names[(pk, cam)] = shown
+    last_event = {(pk, cam): ts for pk, cam, ts in session.execute(
+        select(Event.device_pk, Event.camera, func.max(Event.start_ts)).where(Event.device_pk.in_(pks))
+        .group_by(Event.device_pk, Event.camera)).all()}
+    known |= set(last_event)
+    since48 = (now - health.CURRENT_WINDOW).timestamp()
+    for dev in devices:
+        body = dev.last_heartbeat if isinstance(dev.last_heartbeat, dict) else None
+        hb = parse_heartbeat(body) if body is not None else None
+        newest = dict(hb.cameras) if hb else {}
+        for cam, when in health.listed_newest(body).items():
+            if when is not None or cam not in newest:
+                newest[cam] = when
+        listed = health.listed_cameras(body)
+        for cam, name in (listed or {}).items():
+            if name:
+                names[(dev.id, cam)] = name
+        ids = {cam for pk, cam in known if pk == dev.id} | set(newest) | set(listed or ())
+        events = {cam: datetime.fromtimestamp(ts, timezone.utc) for (pk, cam), ts in last_event.items()
+                  if pk == dev.id and ts is not None}
+        recent = [cam for (pk, cam), ts in last_event.items() if pk == dev.id and ts is not None and ts >= since48]
+        current, _ = health.split_cameras({cam: newest.get(cam) for cam in ids}, now,
+                                          site=(hb.site if hb and hb.site else dev.site), recent=recent,
+                                          listed=list(listed) if listed is not None else None)
+        current = set(current)
+        out[dev.id] = sorted((KnownCamera(cam, names.get((dev.id, cam), ""), cam in current, cam in newest,
+                                          newest.get(cam), events.get(cam)) for cam in ids),
+                             key=lambda c: (not c.current, c.camera))
+    return out
 
 
 def build_summaries(session: Session, now: datetime, customer_id: Optional[int] = None,
@@ -48,21 +109,27 @@ def build_summaries(session: Session, now: datetime, customer_id: Optional[int] 
     false_alarms = dict(session.execute(select(Feedback.device_pk, func.count()).where(
         Feedback.device_pk.in_(pks), Feedback.verdict == "false_alarm",
         Feedback.received_at >= now - timedelta(days=7)).group_by(Feedback.device_pk)).all())
-    cams: dict[int, set[str]] = {}
-    for pk, name in session.execute(select(Camera.device_pk, Camera.name).where(Camera.device_pk.in_(pks))).all():
-        cams.setdefault(pk, set()).add(name)
+    inventory = camera_inventory(session, now, [r[0] for r in rows])
 
     out: list[DeviceSummary] = []
     for dev, cust_name, name_source in rows:
         hb = parse_heartbeat(dev.last_heartbeat) if isinstance(dev.last_heartbeat, dict) else None
-        v, reasons = health.verdict(hb, now)
-        names = set(cams.get(dev.id, ())) | (set(hb.cameras) if hb else set())
-        stale = sum(1 for newest in hb.cameras.values() if health.camera_stale(newest, now)) if hb else 0
+        cams = inventory[dev.id]
+        if hb:
+            # warnings only over the cameras the house has now; renamed or removed ids are retired, never warned about
+            judged = {c.camera: c.heartbeat_newest for c in cams if c.in_heartbeat}
+            current = [c.camera for c in cams if c.current and c.in_heartbeat]
+            v, reasons = health.verdict(replace(hb, cameras=judged), now, cameras=current,
+                                        names={c.camera: c.owner_name for c in cams if c.owner_name})
+        else:
+            v, reasons = health.verdict(hb, now)
+        current_cams = [c for c in cams if c.current]
+        stale = sum(1 for c in current_cams if c.in_heartbeat and health.camera_stale(c.heartbeat_newest, now))
         out.append(DeviceSummary(
             device_id=dev.device_id, site=dev.site, customer_id=dev.customer_id, customer_name=cust_name,
             verdict=v, reasons=[HealthReason(**r) for r in reasons],
             last_seen_utc=hb.time_utc if hb else None, mode=hb.mode if hb else None, host=hb.host if hb else None,
-            cameras_total=len(names), cameras_stale=stale,
+            cameras_total=len(current_cams), cameras_stale=stale,
             disk_free_gb=hb.disk_free_gb if hb else None,
             collector_running=hb.collector_running if hb else None, stopped=hb.stopped if hb else None,
             newest_clip_utc=hb.newest_clip_utc if hb else None,
@@ -84,6 +151,22 @@ def fleet(request: Request, session: Session = SessionDep):
 def fleet_activity(request: Request, hours: int = Query(24, ge=1, le=168), session: Session = SessionDep):
     # Hourly event, alert and false-alarm counts over the whole fleet; the last bucket is the current hour.
     return fleet_activity_density(session, now_of(request), hours)
+
+
+@router.get("/cameras", response_model=list[CameraOut], dependencies=[Depends(require_role("admin", "support"))])
+def cameras(request: Request, customer_id: Optional[int] = None, session: Session = SessionDep):
+    # Every known camera of the houses in scope (one customer, or all), current ones first, with the name staff read.
+    q = select(Device).order_by(Device.site)
+    if customer_id is not None:
+        if session.get(Customer, require_id(customer_id, "Customer not found")) is None:
+            raise HTTPException(status_code=404, detail="Customer not found")
+        q = q.where(Device.customer_id == customer_id)
+    devices = list(session.scalars(q))
+    inventory = camera_inventory(session, now_of(request), devices)
+    return [CameraOut(customer_id=dev.customer_id, device_id=dev.device_id, site=dev.site, camera=c.camera,
+                      name=health.camera_label(c.camera, {c.camera: c.owner_name} if c.owner_name else None),
+                      owner_named=bool(c.owner_name), current=c.current, newest_clip_utc=c.newest_clip_utc)
+            for dev in devices for c in inventory[dev.id]]
 
 
 @router.post("/devices/enroll", response_model=DeviceSummary)

@@ -8,7 +8,7 @@ import certifi
 import httpx
 from .backend import (AuthError, LoginError, ForbiddenError, OfflineError, ServerError,
                       RateLimitError, TlsError, ConfigurationError, UnsupportedError, BackendError)
-from .models import ExportPreview, IndexProblem
+from .models import ExportPreview, IndexProblem, CameraOut
 from .backend import ValidationError
 from .backend import ConflictError
 from .models import AnnotationOut, AnnotationVersion, PublishOut
@@ -191,6 +191,9 @@ class HttpBackend(HttpTagging):
 
     def customer(self, id):
         return self._get(f'customers/{int(id)}', CustomerOut)
+
+    def cameras(self, customer_id=None):
+        return self._get('cameras', list[CameraOut], **({'customer_id': int(customer_id)} if customer_id is not None else {}))
 
     def events(self, **filters):
         if self.tokens and self.tokens.staff.role == 'labeler':
