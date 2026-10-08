@@ -61,7 +61,7 @@ from .registration import (
     update_site,
     write_registration,
 )
-from .outbox import ORPHAN_AGE_SEC, move_feedback, move_finished_clips, move_orphans
+from .outbox import CHAT_STATE_NAME, ORPHAN_AGE_SEC, copy_chat_feed, move_feedback, move_finished_clips, move_orphans
 
 log = logging.getLogger("box")
 
@@ -86,6 +86,8 @@ def run_upload(
     uploader: Callable[..., Any],
     prefix_for: Callable[[str], str] = s3_prefix,
     keep_local: bool = False,
+    chat_feed: Optional[str] = None,
+    chat_state: Optional[str] = None,
 ) -> Tuple[int, int]:
     """Move finished clips to the outbox and upload it. Returns ``(clips_moved, files_moved)``.
 
@@ -93,6 +95,12 @@ def run_upload(
     (named by *prefix_for*), so clips saved before a box changed house still go
     where they belong. With *keep_local* the uploaded files stay on the box:
     the outbox is then an archive, emptied by age and not by upload.
+
+    With *chat_feed* (logs/telegram_chat.jsonl) its new lines are copied to the
+    site outbox's ``chat/<day>.jsonl`` first (outbox.copy_chat_feed; progress in
+    *chat_state*, default ``chat_upload_state.json`` next to the feed). Give it
+    only with *keep_local*: a day file grows all day and is re-sent whole, so it
+    must stay on the box after its upload.
     """
     os.makedirs(outbox_dir, exist_ok=True)
     site_outbox = os.path.join(outbox_dir, cfg.site)
@@ -103,6 +111,11 @@ def run_upload(
     if orphans:
         log.info("Moved %d file(s) of interrupted clips (no meta) to the outbox.", orphans)
     move_feedback(live_dir, site_outbox)
+    if chat_feed:
+        state = chat_state or os.path.join(os.path.dirname(chat_feed) or ".", CHAT_STATE_NAME)
+        copied = copy_chat_feed(chat_feed, site_outbox, state)
+        if copied:
+            log.info("Copied %d Telegram message(s) to the outbox.", copied)
 
     uploaded_any = False
     for site in _site_dirs(outbox_dir):
@@ -378,10 +391,15 @@ def main() -> None:
 
         run_upload(cfg, LIVE_DIR, OUTBOX_DIR, s3_cfg.bucket, s3_cfg.workers, uploader=s3_run)
         # Clips saved in inference mode are kept two weeks, on the box (so the owner can
-        # ask for them) and in an S3 folder the bucket empties after the same time.
+        # ask for them) and in an S3 folder the bucket empties after the same time. The
+        # Telegram conversation goes with them (production_<site>/chat/), for the Admin Center.
+        from . import paths  # noqa: PLC0415
+        from .chat_feed import FEED_NAME  # noqa: PLC0415
+
         run_upload(
             cfg, PRODUCTION_LIVE_DIR, PRODUCTION_ARCHIVE_DIR, s3_cfg.bucket, s3_cfg.workers,
             uploader=s3_run, prefix_for=production_prefix, keep_local=True,
+            chat_feed=os.path.join(paths.logs_dir(), FEED_NAME),
         )
 
     key = put_heartbeat(_status(cfg), s3_cfg.bucket, s3_prefix(cfg.site))

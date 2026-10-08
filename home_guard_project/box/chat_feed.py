@@ -25,6 +25,7 @@ import threading
 import time
 from typing import Any, Dict, List, Optional
 
+FEED_NAME = "telegram_chat.jsonl"   # in the logs folder (paths.logs_dir())
 KEEP = 300            # messages kept; the file is trimmed back to this when it reaches twice as many
 _SAFE = re.compile(r"[^A-Za-z0-9_-]")
 
