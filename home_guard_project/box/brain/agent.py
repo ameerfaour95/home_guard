@@ -46,7 +46,7 @@ log = logging.getLogger("box.brain.agent")
 
 FAST, BIG = "fast", "big"
 UNDOABLE = ("pause_alerts", "set_camera_active", "change_setting", "set_alert_types", "set_sensitivity", "set_alias",
-            "house_state", "house_expect", "house_cancel")
+            "house_state", "house_expect", "house_cancel", "camera_fact")
 
 
 def _finite(value: Any) -> float:
@@ -863,6 +863,30 @@ class OwnerAgentV2:
                 house.undo(ctx, r, now)
             except house.ChangedSince:
                 raise _ChangedSince() from None
+        elif r.tool == "camera_fact":
+            from .tools import profiles_for  # noqa: PLC0415
+
+            store = profiles_for(self.services)
+            if store is None:
+                raise ValueError("the camera memory is not available")
+            camera = str(d.get("camera") or "")
+            base = {"camera": camera, "fact": str(d.get("fact") or ""), "whole_house": bool(d.get("whole_house")),
+                    "undo_of": "camera_fact"}
+            if d.get("role"):
+                if store.profile(camera).get("role") != d["role"]:
+                    raise _ChangedSince()
+                store.set_role(camera, str(d.get("old_role") or ""))
+                _issue(ctx, "camera_fact", DONE, camera, dict(base, role=str(d.get("old_role") or ""),
+                                                              old_role=str(d["role"])))
+            elif d.get("removed"):
+                restore = d.get("restore")
+                if not isinstance(restore, dict) or not store.restore_fact(str(d.get("key") or camera), restore):
+                    raise _ChangedSince()
+                _issue(ctx, "camera_fact", DONE, camera, dict(base, removed=False, fact_id=str(restore.get("id"))))
+            else:
+                if store.remove_fact(str(d.get("fact_id") or "")) is None:
+                    raise _ChangedSince()
+                _issue(ctx, "camera_fact", DONE, camera, dict(base, removed=True, fact_id=str(d.get("fact_id"))))
         elif r.tool == "change_setting":
             setting = d.get("setting")
             restore, wrote = d.get("restore"), d.get("wrote")

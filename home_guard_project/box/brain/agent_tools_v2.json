@@ -780,5 +780,76 @@
         ]
       }
     }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "how_usual",
+      "description": "What is usual at a camera, from the box's own history: how often people are there by hour and part of the day, which activities happen there (a knock at the door, a delivery, walking past, work, a car moving, kids, an animal...) and how often, compared with the other cameras, its role, and what the owner taught about it. For \"זה רגיל?\" (about the alert being discussed), \"כמה פעמים זה קורה?\", \"מה רגיל בחצר האחורית בלילה?\". Answer from its 'answer'.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "camera": {
+            "type": "string",
+            "description": "The camera, by name or the owner's word; omit for the camera or alert being discussed."
+          },
+          "time": {
+            "type": "string",
+            "description": "\"HH:MM\", or a part of the day (\"night\", \"בלילה\", \"evening\", \"morning\"); omit for the alert's time or now."
+          },
+          "activity": {
+            "type": "string",
+            "description": "What happened, in a few words (\"knocking at the door\", \"a delivery\", \"דפיקה בדלת\"); omit for the alert's own activity or for everything."
+          }
+        },
+        "required": []
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "camera_fact",
+      "description": "Keep (or remove) a lasting fact the owner teaches about one camera or the whole house, in the owner's own words (\"בדלת האחורית משתמשים רק אנחנו\", \"שליחים מגיעים רק לכניסה הראשית\", \"בחצר האחורית אין אף אחד בלילה\", \"יש לנו כלב\"), or the camera's role when the owner says it (\"זו הכניסה הראשית\" = entrance). It never expires until the owner asks to remove it. Only when this message says it; never for who is there right now (that is mark_known).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "camera": {
+            "type": "string",
+            "description": "The camera, by name or the owner's word; omit for the camera being discussed."
+          },
+          "owner_words": {
+            "type": "string",
+            "description": "The fact, copied exactly from the owner's message."
+          },
+          "whole_house": {
+            "type": "boolean",
+            "description": "True for a fact about the house or family (a dog, kids, who lives here), not one camera."
+          },
+          "remove": {
+            "type": "boolean",
+            "description": "True when the owner asks to forget a saved fact; 'fact' says which."
+          },
+          "fact": {
+            "type": "string",
+            "description": "With remove: the saved fact's words."
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "entrance",
+              "private",
+              "street",
+              "parking",
+              "work_area"
+            ],
+            "description": "The camera's role, only when the owner says what the camera is."
+          }
+        },
+        "required": [
+          "owner_words"
+        ]
+      }
+    }
   }
 ]

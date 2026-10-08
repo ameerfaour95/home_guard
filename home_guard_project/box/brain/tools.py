@@ -1767,6 +1767,193 @@ def get_event(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+# -- what is usual at each camera (baseline.py, camera_profiles.py; task 2.9) --------------------------------------
+_PHASE_WORDS = {"late_night": ("late night", "לפנות בוקר", "באמצע הלילה", "אחרי חצות"),
+                "night": ("night", "tonight", "לילה", "בלילה", "בלילות"),
+                "evening": ("evening", "ערב", "בערב", "בערבים"),
+                "day": ("day", "daytime", "morning", "noon", "afternoon", "יום", "ביום", "בוקר", "בבוקר", "צהריים",
+                        "בצהריים", "אחה\"צ")}
+_PHASE_AT = {"late_night": "03:00", "night": "22:30", "evening": "19:00", "day": "12:00"}
+
+
+def profiles_for(services: Services) -> Any:
+    """The camera personalities beside the event book (``<events>/camera_profiles.json``), or None."""
+    book = services.events
+    if book is None or not getattr(book, "directory", ""):
+        return None
+    from ..camera_profiles import PROFILES_NAME, CameraProfiles  # noqa: PLC0415
+
+    return CameraProfiles(os.path.join(book.directory, PROFILES_NAME))
+
+
+def _historian(ctx: ToolContext) -> Any:
+    book = ctx.services.events
+    if book is None or not getattr(book, "directory", ""):
+        return None
+    from types import SimpleNamespace  # noqa: PLC0415
+
+    from ..baseline import BASELINE_NAME, Baseline, Historian  # noqa: PLC0415
+    from ..camera_profiles import house_profile  # noqa: PLC0415
+
+    store = profiles_for(ctx.services)
+    settings: Dict[str, Any] = {}
+    try:
+        settings = dict(ctx.services.read_settings() or {}) if ctx.services.read_settings else {}
+    except Exception:  # noqa: BLE001
+        settings = {}
+
+    def house_now(ts: float) -> Dict[str, Any]:
+        state = ctx.services.house.current(ts) if ctx.services.house is not None else \
+            SimpleNamespace(state="", expecting=[])
+        return house_profile(now=ts, events_dir=book.directory, profiles=store, house_now=state)
+
+    return Historian(Baseline(os.path.join(book.directory, BASELINE_NAME), clock=ctx.services.now), store,
+                     names=lambda cam, lang: display(ctx.snapshot, cam, lang), house=house_now, settings=settings)
+
+
+def _usual_time(value: Any, now: float, default: float) -> Tuple[float, str]:
+    """``(ts, part of day)`` for how_usual's time: "HH:MM" (the last time the clock read it), a part of the day
+    ("בלילה", "evening"), "now", or *default*."""
+    text = str(value or "").strip().lower()
+    if not text:
+        return default, ""
+    m = re.fullmatch(r"(\d{1,2}):(\d{2})", text)
+    if m and int(m.group(1)) < 24 and int(m.group(2)) < 60:
+        return house.next_at(now, f"{int(m.group(1)):02d}:{m.group(2)}") - 86400.0, ""
+    for phase in ("late_night", "night", "evening", "day"):
+        if any(w in text for w in _PHASE_WORDS[phase]):
+            return house.next_at(now, _PHASE_AT[phase]) - 86400.0, phase
+    return now, ""
+
+
+def _at_place(name: str, lang: str) -> str:
+    """"בכניסה הראשית" / "at the main entrance"."""
+    if lang != "he":
+        return f"at {name}"
+    return f"ב{name[1:]}" if name.startswith("ה") and len(name) > 2 else f"ב{name}"
+
+
+def usual_answer(d: Dict[str, Any], lang: str, phase: str = "", tag: str = "") -> str:
+    """The code-written answer of how_usual, in the owner's language. Names only, never ids."""
+    he = lang == "he"
+    name = d["camera"]
+    parts: List[str] = []
+    asked = d.get("asked_activity")
+    if tag and asked:
+        from ..activities import name_at  # noqa: PLC0415
+
+        parts.append(f"{name_at(tag, name, lang)} {_at_place(name, lang)}: {asked.get('often')}")
+        for other, often in list((asked.get("elsewhere") or {}).items())[:5]:
+            parts.append(f"{_at_place(other, lang)}: {often}")
+    elif phase and d.get("asked_part_of_day"):
+        p = d["asked_part_of_day"]
+        parts.append(f"{name} {p['name']}: " + (f"אנשים {p['often']}" if he else f"people {p['often']}"))
+    else:
+        busiest = ", ".join(d.get("busiest_hours") or []) or ("אין" if he else "none")
+        parts.append((f"{name}: הכי עמוס {busiest}" if he else f"{name}: busiest {busiest}"))
+        top = sorted((v for v in (d.get("activities") or {}).values() if v.get("events")),
+                     key=lambda v: -v["events"])[:3]
+        if top:
+            parts.append("; ".join(f"{v['name']} - {v['often']}" for v in top))
+    if d.get("at_that_time", {}).get("says"):
+        parts.append(d["at_that_time"]["says"])
+    if d.get("owner_facts"):
+        parts.append(("מה שלימדת: " if he else "What you taught me: ") + "; ".join(d["owner_facts"][:3]))
+    if not d.get("enough_data"):
+        parts.append(f"(יש לי רק {d['days_of_data']} ימים של היסטוריה, אז זו הערכה זהירה)" if he
+                     else f"(only {d['days_of_data']} days of history so far, so this is a careful guess)")
+    return "; ".join(p for p in parts if p).replace(";;", ";")
+
+
+@_safe_tool
+def how_usual(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+    """What is usual at a camera ("זה רגיל?", "כמה פעמים זה קורה?", "מה רגיל בחצר האחורית בלילה?"): its history
+    by hour and by activity, its role and what the owner taught about it, from the box's own counts."""
+    historian = _historian(ctx)
+    if historian is None:
+        return _err("the box's history is not available")
+    camera, bad = _known_camera(ctx, args.get("camera"))
+    if bad:
+        return bad
+    now = _finite(ctx.services.now())
+    entry = ctx.state.resolve(str(ctx.alert_handle or "")) if ctx.alert_handle else None
+    alert_ts = float(entry["ts"]) if isinstance(entry, dict) and entry.get("ts") else None
+    ts, phase = _usual_time(args.get("time"), now, alert_ts if alert_ts is not None else now)
+    from ..activities import TAGS, tags_of  # noqa: PLC0415
+
+    tag = str(args.get("activity") or "").strip().lower()
+    if tag not in TAGS:
+        found = tags_of(tag) if tag else []
+        if not found and isinstance(entry, dict) and not args.get("activity"):
+            found = tags_of(str(entry.get("summary") or ""))
+        tag = found[0] if found else ""
+    asked_time = bool(str(args.get("time") or "").strip()) or alert_ts is not None
+    d = historian.describe(camera, ts if asked_time and not phase else None, phase=phase, tag=tag, lang=ctx.lang)
+    if asked_time and phase:
+        d["at_that_time"] = {"says": ""}
+    out = {"ok": True, **d, "answer": usual_answer(d, ctx.lang, phase, tag),
+           "note": "Answer from 'answer' (written by the box from its own counts); say how many days of history "
+                   "it has when it is short. Never invent a number. Only the owner's own words go into "
+                   "camera_fact."}
+    return out
+
+
+@_safe_tool
+def camera_fact(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+    """The owner teaches (or removes) a fact about one camera or the whole house ("בדלת האחורית משתמשים רק אנחנו",
+    "שליחים מגיעים רק לכניסה הראשית", "יש לנו כלב"), or confirms the camera's role. Kept until removed."""
+    store = profiles_for(ctx.services)
+    if store is None:
+        return _err("the box's camera memory is not available; tell the owner it was not saved")
+    words = " ".join(str(args.get("owner_words") or "").split())[:200]
+    if not _said(words, ctx.text):
+        return _err("Not saved: owner_words must be copied exactly from this message.")
+    whole_house = bool(args.get("whole_house"))
+    camera = ""
+    if not whole_house:
+        camera, bad = _known_camera(ctx, args.get("camera"))
+        if bad:
+            return bad
+    by = str(ctx.speaker.get("name") or "owner")
+    now = _finite(ctx.services.now())
+    role = str(args.get("role") or "").strip().lower()
+    if role:
+        from ..camera_profiles import ROLES  # noqa: PLC0415
+
+        if whole_house or role not in ROLES:
+            return _err(f"role must be one of {', '.join(ROLES)}, for one camera")
+        old = store.set_role(camera, role, by=by, now=now)
+        return _result(_issue(ctx, "camera_fact", DONE, camera,
+                              {"camera": camera, "role": role, "old_role": old, "already": old == role}),
+                       note="The box writes the confirmation; reply with an empty answer.")
+    if args.get("remove"):
+        wanted = " ".join(str(args.get("fact") or words).split()).casefold()
+        rows = store.house_facts() if whole_house else store.facts(camera)
+        hits = [f for f in rows if f.get("id") == args.get("fact") or wanted in str(f.get("text") or "").casefold()
+                or str(f.get("text") or "").casefold() in wanted]
+        if len(hits) != 1:
+            return _err("which fact? the saved ones are: " + " | ".join(str(f.get("text")) for f in rows)
+                        if rows else "nothing is saved there", saved=[str(f.get("text")) for f in rows])
+        removed = store.remove_fact(str(hits[0]["id"]))
+        if removed is None:
+            return _err("that fact is no longer saved")
+        key, fact = removed
+        detail = {"camera": camera, "fact": str(fact.get("text") or ""), "fact_id": str(fact.get("id")),
+                  "removed": True, "whole_house": whole_house, "key": key,
+                  "restore": {k: fact[k] for k in ("id", "text", "by", "at") if k in fact}}
+        return _result(_issue(ctx, "camera_fact", DONE, camera, detail),
+                       note="The box writes the confirmation; reply with an empty answer.")
+    try:
+        fact = store.add_fact(camera, words, by=by, now=now)
+    except ValueError as exc:
+        return _result(_issue(ctx, "camera_fact", FAILED, camera, {"camera": camera, "fact": words}, str(exc)))
+    detail = {"camera": camera, "fact": fact["text"], "fact_id": fact["id"], "removed": False,
+              "whole_house": whole_house, "rule": (fact.get("rule") or {}).get("kind", ""),
+              "already": bool(fact.get("already"))}
+    return _result(_issue(ctx, "camera_fact", DONE, camera, detail),
+                   note="The box writes the confirmation; reply with an empty answer.")
+
+
 TOOLS: Dict[str, Callable[[ToolContext, Dict[str, Any]], Dict[str, Any]]] = {
     "find_events": find_events,
     "summarize_period": summarize_period,
@@ -1795,4 +1982,6 @@ TOOLS: Dict[str, Callable[[ToolContext, Dict[str, Any]], Dict[str, Any]]] = {
     "recent_activity": recent_activity,
     "search_events": search_events,
     "get_event": get_event,
+    "how_usual": how_usual,
+    "camera_fact": camera_fact,
 }

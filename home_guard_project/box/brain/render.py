@@ -103,6 +103,19 @@ def _receipt_line(receipt: Receipt, lang: str, retention_days: float, snapshot: 
         from .house import receipt_line as house_line  # noqa: PLC0415
 
         return house_line(receipt, lang)
+    if receipt.tool == "camera_fact":          # what the owner taught about a camera (camera_profiles.py)
+        where = t("the_house", lang) if d.get("whole_house") else _name(snapshot, str(d.get("camera") or ""), lang)
+        if d.get("role") or (d.get("undo_of") and "old_role" in d):
+            from ..camera_profiles import ROLE_NAMES  # noqa: PLC0415
+
+            role = ROLE_NAMES.get(str(d.get("role") or ""), {}).get("he" if lang == "he" else "en", "")
+            return t("camera_role_saved", lang, camera=where, role=role) if role else \
+                t("camera_role_cleared", lang, camera=where)
+        if d.get("undo_of"):
+            key = "camera_fact_removed" if d.get("removed") else "camera_fact_restored"
+        else:
+            key = "camera_fact_removed" if d.get("removed") else "camera_fact_saved"
+        return t(key, lang, camera=where, fact=str(d.get("fact") or ""))
     if receipt.tool == "mark_known":           # the Memory Keeper's own line (brain/tools.py)
         from .tools import known_line  # noqa: PLC0415
 

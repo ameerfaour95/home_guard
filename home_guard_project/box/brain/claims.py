@@ -102,7 +102,8 @@ CLAIMS: Dict[str, Dict[str, object]] = {
     },
     "save": {
         # "רשמתי שאתם בחופשה" after a real house change is backed too
-        "tools": {"record_verdict", "set_alias", "house_state", "house_expect", "house_cancel", "mark_known"},
+        "tools": {"record_verdict", "set_alias", "house_state", "house_expect", "house_cancel", "mark_known",
+                  "camera_fact"},
         # A promise to remember is a save too (2026-10-05: "I'll remember" went out and nothing was saved).
         "en": [_fp("marked|saved|changed|updated"), _BEEN % "saved|marked|changed|updated",
                _OPEN + r"(?:saved|marked)\b", r"\bI(?:['’]ll| will| shall)?\s+(?:always\s+)?remember\b",
