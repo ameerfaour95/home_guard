@@ -21,7 +21,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from home_guard_project.fleet_contract import tracks as ft
-from home_guard_project.fleet_contract.classes import COCO_NAMES, CONTIGUOUS, name_to_coco
+from home_guard_project.fleet_contract.classes import COCO_NAMES, coco_to_contiguous, name_to_coco
 
 from . import media
 from .models import (AiRun, Annotation, AnnotationHead, AnnotationReview, AnnotationSuggestion, Artifact,
@@ -280,13 +280,14 @@ def yolo_rows(tracks: list[ft.Track], t_sec: float) -> list[str]:
     rows = []
     for label, box in ft.boxes_at(tracks, t_sec):
         coco = name_to_coco(label)
-        if coco is None:
+        index = coco_to_contiguous(coco) if coco is not None else None
+        if index is None:
             continue
         x1, y1, x2, y2 = (min(max(v, 0.0), 1.0) for v in box)
         w, h = x2 - x1, y2 - y1
         if w <= 0 or h <= 0:
             continue
-        rows.append(f"{CONTIGUOUS[coco]} {(x1 + x2) / 2:.6f} {(y1 + y2) / 2:.6f} {w:.6f} {h:.6f}")
+        rows.append(f"{index} {(x1 + x2) / 2:.6f} {(y1 + y2) / 2:.6f} {w:.6f} {h:.6f}")
     return rows
 
 
