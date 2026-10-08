@@ -206,3 +206,79 @@ def test_old_site_names_of_one_box_are_one_house(client, staff_factory):
     cid = client.get("/v1/customers", headers=h).json()
     old_customer = next(c for c in cid if c["name"] == "Ameer_Tes2")
     assert client.get(f"/v1/customers/{old_customer['id']}", headers=h).json()["devices"][0]["replaced_by_site"] == "ameer_week_0_1"
+
+
+HOME_BOX = "df7b4c2e1bde4e379774d703ca0a0d18"  # the home box's id (heartbeat box_id, live 2026-10-09)
+OTHER_BOX = "0123456789abcdef0123456789abcdef"
+
+
+def _lineage_house(client, rows):
+    """rows: (site, heard hours ago, heartbeat extras, registration or None) -> {site: device_id}."""
+    from home_guard_project.cloud.models import RawRevision
+    ids = {}
+    with session_scope(client.app.state.engine) as s:
+        for site, hours, beat, reg in rows:
+            dev = b.enroll(s, site, site.title())
+            dev.last_heartbeat = _hb(site, NOW - timedelta(hours=hours), **beat)
+            if reg is not None:
+                s.add(RawRevision(s3_key=f"dataset_{site}/_status/registration.json", etag=f"e-{site}",
+                                  fetched_at=NOW, body={"schema_version": 1, "site": site, **reg}))
+            ids[site] = dev.device_id
+    return ids
+
+
+def _groups(client, h):
+    devs = client.get("/v1/fleet", headers=h).json()["devices"]
+    return {d["site"]: d["replaced_by_site"] for d in devs}
+
+
+def test_box_identity_order_box_id_then_tailscale_then_box_host_then_heartbeat_host(client, staff_factory):
+    _setup(client)
+    _, _, _, h = staff_factory("admin")
+    _lineage_house(client, [
+        # 1. the same box_id is one box, whatever the hosts say
+        ("bx_new", 0.1, {"box_id": HOME_BOX, "host": "DESKTOP-NEW"}, None),
+        ("bx_old", 30, {"box_id": HOME_BOX, "host": "DESKTOP-OLD"}, None),
+        # 2. different box_ids are different boxes, even on one host (box_id wins)
+        ("two_a", 0.1, {"box_id": "a" * 32, "host": "shared-host"}, None),
+        ("two_b", 0.2, {"box_id": "b" * 32, "host": "shared-host"}, None),
+        # 3. no box_id: the registration's tailscale_host groups, the heartbeat hosts differ
+        ("ts_new", 0.1, {"host": "pc-1"}, {"tailscale_host": "box-ts", "box_host": "x1"}),
+        ("ts_old", 40, {"host": "pc-2"}, {"tailscale_host": "BOX-TS", "box_host": "x2"}),
+        # 4. no box_id, no tailscale host: the registration's box_host groups
+        ("bh_new", 0.1, {"host": "pc-3"}, {"box_host": "beelink-7"}),
+        ("bh_old", 50, {"host": "pc-4"}, {"box_host": "beelink-7"}),
+        # 5. nothing but the heartbeat host
+        ("hb_new", 0.1, {"host": "lone-host"}, None),
+        ("hb_old", 60, {"host": "LONE-HOST"}, None),
+    ])
+    groups = _groups(client, h)
+    assert groups["bx_old"] == "bx_new" and groups["bx_new"] is None
+    assert groups["two_a"] is None and groups["two_b"] is None
+    assert groups["ts_old"] == "ts_new" and groups["bh_old"] == "bh_new" and groups["hb_old"] == "hb_new"
+    assert {k for k, v in groups.items() if v} == {"bx_old", "ts_old", "bh_old", "hb_old"}
+
+
+def test_a_site_from_before_box_id_joins_the_box_with_its_host(client, staff_factory):
+    """Live: ameer_week_0_1 now sends box_id; ameer_tes2's last heartbeat (2026-10-06) predates it. Same host, one box.
+    With two box ids on that host the old row cannot be placed and stays its own row."""
+    _setup(client)
+    _, _, _, h = staff_factory("admin")
+    _lineage_house(client, [
+        ("ameer_week_0_1", 0.1, {"box_id": HOME_BOX, "host": "DESKTOP-43DP1TI"}, None),
+        ("ameer_tes2", 49, {"host": "DESKTOP-43DP1TI"}, None),
+        ("lab_a", 0.1, {"box_id": "c" * 32, "host": "lab"}, None),
+        ("lab_b", 0.1, {"box_id": "d" * 32, "host": "lab"}, None),
+        ("lab_old", 70, {"host": "lab"}, None),
+    ])
+    groups = _groups(client, h)
+    assert groups["ameer_tes2"] == "ameer_week_0_1"
+    assert groups["lab_old"] is None and groups["lab_a"] is None and groups["lab_b"] is None
+
+
+def test_box_identity_reads_the_registration_when_the_heartbeat_has_no_box_id():
+    from home_guard_project.cloud.routes.fleet import box_identity
+    assert box_identity({"host": "PC"}, {"box_id": OTHER_BOX.upper(), "tailscale_host": "TS", "box_host": "BH"}) == (
+        OTHER_BOX, ["ts", "bh", "pc"])
+    assert box_identity({"box_id": HOME_BOX, "host": "pc"}, {"box_id": OTHER_BOX}) == (HOME_BOX, ["pc"])
+    assert box_identity(None, None) == ("", [])
