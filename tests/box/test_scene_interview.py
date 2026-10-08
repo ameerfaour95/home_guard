@@ -100,7 +100,15 @@ class AnswersTest(unittest.TestCase):
 
     def test_an_apostrophe_is_not_a_quoted_name(self) -> None:
         answers = si.parse_answers("7 the neighbour's car, 8 the neighbour's gate")
-        self.assertEqual([(a.number, a.zone) for a in answers], [(7, "car"), (8, "car")])   # one clause, one name
+        self.assertEqual([(a.number, a.zone) for a in answers], [(7, "car"), (8, "gate")])
+
+    def test_a_comma_list_is_one_answer_per_number(self) -> None:
+        answers = si.parse_answers("1 שלי, 2 של השכן, 3 רחוב, המעקה בין 2 ל-1")
+        self.assertEqual([(a.number, a.kind, a.owner) for a in answers],
+                         [(1, "mine", ""), (2, "watch_no_alert", "neighbour"), (3, "watch_no_alert", "public")])
+        self.assertEqual(si.parse_lines("1 שלי, 2 של השכן, 3 רחוב, המעקה בין 2 ל-1"), [("המעקה", 2, 1)])
+        self.assertEqual(si.parse_lines("the railing between 2 and 1; 3 ו-4 שלי"), [("railing", 2, 1)])
+        self.assertEqual([a.number for a in si.parse_answers("3 ו-4 שלי")], [3, 4])
 
     def test_hebrew_answers(self) -> None:
         answers = si.parse_answers("1 שלי; 2 הרכב של השכן; 3 כביש; 4 להסתיר; 5 לא יודע; 6 'בית הכלב' שלי")
@@ -141,7 +149,7 @@ class ApplyTest(unittest.TestCase):
         scene, _ = si.apply_answers(scene, self.regions, si.parse_answers("2 is the neighbour's car"))
         self.assertEqual([a.ground for a in scene.areas], ["neighbour"])
 
-    def test_answer_session_end_to_end(self) -> None:
+    def test_answer_makes_a_draft_and_only_confirm_saves(self) -> None:
         out = os.path.join(self.tmp.name, "interview")
         proposal = si.propose("front", picture(), out, segmenter=two_objects)
         self.assertTrue(os.path.isfile(proposal["image"]))
@@ -149,18 +157,64 @@ class ApplyTest(unittest.TestCase):
         self.assertEqual([q["number"] for q in proposal["questions"]], [1, 2])
         result = si.answer("front", "1 mine; 2 hide it", proposal["regions_path"], picture(), out,
                            zones_path=self.zones)
-        self.assertTrue(result["restart_needed"])                 # a new black area: the readers must reload
         self.assertTrue(os.path.isfile(result["image"]))
         self.assertEqual(json.loads(json.dumps(result["map"]))["areas"][1]["kind"], "black")
-        self.assertEqual(sm.load_scene_map("front", self.zones).areas[0].kind, "mine")
+        self.assertEqual(sm.load_scene_map("front", self.zones).areas, ())          # nothing saved yet
+        done = si.confirm("front", out, zones_path=self.zones)
+        self.assertTrue(done["restart_needed"])                   # a new black area: the readers must reload
+        saved = sm.load_scene_map("front", self.zones)
+        self.assertEqual(saved.areas[0].kind, "mine")
+        self.assertTrue(saved.confirmed)
         self.assertEqual(len(z.load_black(z.scene_maps_path_for(self.zones))["front"]), 1)
+        self.assertFalse(os.path.exists(si.draft_path("front", out)))
+        with self.assertRaises(OSError):
+            si.confirm("front", out, zones_path=self.zones)       # no draft left to confirm
 
-    def test_no_black_change_needs_no_restart(self) -> None:
+    def test_no_mask_change_needs_no_restart(self) -> None:
         out = os.path.join(self.tmp.name, "interview")
         proposal = si.propose("front", picture(), out, segmenter=two_objects)
         result = si.answer("front", "1 mine", proposal["regions_path"], None, out, zones_path=self.zones)
-        self.assertFalse(result["restart_needed"])
         self.assertIsNone(result["image"])
+        self.assertFalse(si.confirm("front", out, zones_path=self.zones)["restart_needed"])
+
+    def test_todays_black_outside_is_previewed_as_the_neighbours_and_confirmed(self) -> None:
+        z.save_zone("front", [(0, 0), (0.5, 0), (0.5, 1), (0, 1)], self.zones)
+        z.save_zone("ameer_test_front", [(0, 0), (1, 0), (1, 1)], self.zones)   # no camera of this box
+        out = os.path.join(self.tmp.name, "interview")
+        proposal = si.propose("front", picture(), out, segmenter=two_objects,
+                              watched=sm.load_scene_map("front", self.zones).watched)
+        result = si.answer("front", "1 mine", proposal["regions_path"], picture(), out, zones_path=self.zones)
+        self.assertEqual(result["map"]["outside"], "watch_no_alert")
+        self.assertEqual(result["map"]["rest_owner"], "neighbour")
+        done = si.confirm("front", out, zones_path=self.zones, known_cameras=["front"])
+        self.assertTrue(done["restart_needed"])                   # the zone's black outside is gone
+        self.assertEqual(z.load_zones(self.zones), {"ameer_test_front": [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)]})
+
+    def test_stale_keys_share_the_channel(self) -> None:
+        z.save_zone("ameer_week_0_1_ch2", [(0, 0), (1, 0), (1, 1)], self.zones)
+        z.save_zone("ameer_test_ch2", [(0, 0), (1, 0), (1, 1)], self.zones)
+        z.save_zone("ameer_test_ch5", [(0, 0), (1, 0), (1, 1)], self.zones)
+        self.assertEqual(si.stale_keys("ameer_week_0_1_ch2", ["ameer_week_0_1_ch2", "ameer_week_0_1_ch5"],
+                                       self.zones), ["ameer_test_ch2"])
+
+    def test_a_line_between_two_regions_that_touch(self) -> None:
+        a = si.Region(1, ((0.0, 0.0), (0.5, 0.0), (0.5, 1.0), (0.0, 1.0)), 0.5)
+        b = si.Region(2, ((0.5, 0.0), (1.0, 0.0), (1.0, 1.0), (0.5, 1.0)), 0.5)
+        line = si.line_between("railing", a, b, ours=a)
+        self.assertAlmostEqual(line.a[0], 0.5, delta=0.03)
+        self.assertAlmostEqual(line.b[0], 0.5, delta=0.03)
+        self.assertEqual(line.crossing((0.8, 0.5), (0.2, 0.5)), "in")
+        far = si.Region(3, ((0.9, 0.9), (1.0, 0.9), (1.0, 1.0)), 0.01)
+        with self.assertRaises(ValueError):
+            si.line_between("x", a, far, ours=a)
+        with self.assertRaises(ValueError):
+            si.line_between("x", a, b, ours=None)
+        scene, notes = si.apply_answers(sm.SceneMap("front"), [a, b], si.parse_answers("1 שלי, 2 של השכן"),
+                                        si.parse_lines("המעקה בין 2 ל-1"))
+        self.assertEqual([ln.name for ln in scene.lines], ["המעקה"])
+        self.assertEqual(notes, [])
+        _, notes = si.apply_answers(sm.SceneMap("front"), [a, b], [], si.parse_lines("המעקה בין 2 ל-1"))
+        self.assertIn("which side", notes[0])
 
 
 

@@ -751,6 +751,12 @@ def start(
     inbox = TelegramInbox(cfg, agent, index, mute, live_dir, os.path.join(log_dir, "telegram_offset.json"),
                           feed=feed, deliverer=deliverer, archive_dir=archive_dir, lang=box_language,
                           transcriber=transcriber, cameras=cameras)
+    try:
+        from .scene_chat import for_inbox  # noqa: PLC0415
+
+        inbox.scene = for_inbox(inbox, lambda: list(names), box_language)
+    except Exception as exc:  # noqa: BLE001 - without the interview the assistant still works
+        log.warning("Install interview not available (%s)", exc)
     assistant = OwnerAssistant(cfg=cfg, index=index, mute=mute, inbox=inbox, feed=feed, deliverer=deliverer,
                                feedback_dir=live_dir, archive_dir=archive_dir)
     if cfg.enabled and not cfg.dry_run:
@@ -833,8 +839,11 @@ class TelegramInbox:
         transcriber: Optional[voice.Transcriber] = None,
         fetch_voice: Optional[Callable[[str], Tuple[bytes, str]]] = None,
         cameras: Optional[Callable[[], Sequence[str]]] = None,
+        scene: Any = None,
     ) -> None:
         self.feed = feed
+        # The install interview (scene_chat.SceneChat): "מפה" starts it; its answers and buttons never reach the agent.
+        self.scene = scene
         # The camera ids no answer may show (brain/style.py swaps them for the family's names).
         self._cameras = cameras
         # A spoken answer to "Other…": fetched from Telegram, then transcribed (None: asked for in writing).
@@ -986,6 +995,14 @@ class TelegramInbox:
         if not self._allowed(chat_id):
             return
         code = str(query.get("data") or "")
+        if code.startswith("sm:") and self.scene is not None:      # the install interview's [שמור] [תקן]
+            try:
+                self._post(self.cfg.bot_token, "answerCallbackQuery", {"callback_query_id": str(query.get("id"))})
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Could not stop the button's spinner: %s", exc)
+            self._note("owner", "button", _button_text(message, code, code), _who(query.get("from") or {})["name"])
+            self.scene.on_button(chat_id, code)
+            return
         if code.startswith(("tag:", "tu:")):          # tagging: before the v1/v2 split, both agents share it
             self._on_tag_button(query, message, chat_id, code)
             return
@@ -1315,6 +1332,15 @@ class TelegramInbox:
         text = str(message.get("text") or "").strip()
         if not self._allowed(chat_id) or sender.get("is_bot"):
             return
+        if text and self.scene is not None:
+            try:
+                taken = self.scene.on_text(chat_id, text)
+            except Exception as exc:  # noqa: BLE001 - the interview must never lose the owner's message
+                log.warning("Install interview failed: %s", exc)
+                taken = False
+            if taken:
+                self._note("owner", "message", text, _who(sender)["name"])
+                return
         if not text:
             heard = self._take_voice(chat_id, sender, message)
             if heard is True:

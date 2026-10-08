@@ -105,11 +105,12 @@ def _remove_quietly(path: str) -> None:
 
 def grab_masked(camera: str, cameras_path: str, out_dir: str, now: Callable[[], float] = time.time,
                 grab: Optional[Callable[[str, str], bool]] = None,
-                zones_path: Optional[str] = None) -> Dict[str, Any]:
+                zones_path: Optional[str] = None, keep_zone: bool = True) -> Dict[str, Any]:
     """A current picture from *camera*, masked to its watch zone: ``{"camera", "image"}`` or ``{"error"}``.
 
     The unmasked grab only ever exists under a temporary name; if the zone cannot
-    be applied the picture is dropped (fail closed).
+    be applied the picture is dropped (fail closed). ``keep_zone=False`` (the owner's own install interview, which
+    asks about what today's zone blacks out) masks only the scene map's black areas, never less.
     """
     temp_path = None
     try:
@@ -127,6 +128,8 @@ def grab_masked(camera: str, cameras_path: str, out_dir: str, now: Callable[[], 
         temp_path = image_path + ".tmp.jpg"
         polygon, readable = strict_zone(camera, zones_path)
         black, black_readable = strict_black(camera, zones_path)
+        if not keep_zone:
+            polygon = None
         if not (readable and black_readable):
             return {"error": f"could not prepare the picture from {camera} right now"}
         if not grab(url, temp_path):
