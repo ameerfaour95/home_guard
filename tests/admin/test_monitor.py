@@ -1,6 +1,7 @@
 """Monitor side of the Admin Center: the customer page layout, camera names, warnings and filters."""
 import pytest
 from datetime import timedelta
+from dataclasses import replace
 from PySide6.QtCore import QPoint
 from home_guard_project.admin.demo_backend import DemoBackend
 from home_guard_project.admin.prefs import Preferences
@@ -31,7 +32,11 @@ def test_customer_page_scrolls_and_the_footer_sits_under_the_table(size, widgets
     shell.open_customer(1)
     page = shell.customer_page; timeline = page.timeline
     wait(lambda: bool(timeline.model.rows) and not timeline.density_runner.busy)
+    assert page.tabs.currentWidget() is page.overview  # a customer opens on the Overview
     tabs_page = page.page
+    page.tabs.setCurrentWidget(timeline)
+    wait(lambda: timeline.table.height() >= page.TABLE_MIN_HEIGHT - 2
+         and top_of(timeline.count, tabs_page) >= bottom_of(timeline.table, tabs_page))
     assert timeline.table.height() >= page.TABLE_MIN_HEIGHT - 2
     assert top_of(timeline.count, tabs_page) >= bottom_of(timeline.table, tabs_page)
     assert top_of(timeline.older, tabs_page) >= bottom_of(timeline.table, tabs_page)
@@ -43,6 +48,8 @@ def test_customer_page_scrolls_and_the_footer_sits_under_the_table(size, widgets
     footer = timeline.older.mapTo(page.scroll.viewport(), QPoint(0, timeline.older.height())).y()
     assert footer <= page.scroll.viewport().height()
     assert window.height() == size[1]
+    # nothing is cut off at the right: the page is never wider than the window leaves it
+    assert page.page.minimumSizeHint().width() <= page.scroll.viewport().width()
 
 
 def test_camera_names_follow_the_box_rule_never_the_raw_id():
@@ -83,13 +90,14 @@ def test_customer_page_lists_current_cameras_and_hides_retired_behind_a_toggle(w
     timeline = screen.timeline
     try:
         wait(lambda: screen.camera_list is not None and timeline.density_result is not None)
+        screen.tabs.setCurrentWidget(timeline)
         combo = timeline.filters['camera']
         assert list(timeline.density.rows) == ['Driveway', 'Front door']
         assert [combo.itemText(i) for i in range(combo.count())] == ['All cameras', 'Driveway', 'כניסה ראשית']
         assert timeline.retired_toggle.isVisibleTo(screen)
         timeline.retired_toggle.setChecked(True)
         assert list(timeline.density.rows) == ['Driveway', 'Front door', 'Garden']
-        assert combo.itemText(combo.count()-1) == 'Garden  (retired)'
+        assert combo.itemText(combo.count()-1) == 'Garden (old)'
     finally:
         formatting.KNOWN_NAMES.clear()
 
@@ -146,3 +154,35 @@ def test_activity_has_a_date_range_and_a_camera_filter(widgets, wait):
     assert timeline.retired_toggle.isVisibleTo(screen)
     labeler = ReviewScreen(DemoBackend(role='labeler'), role='labeler'); widgets.append(labeler); labeler.show()
     assert not labeler.timeline.filters['camera'].isVisibleTo(labeler)
+
+
+def test_overview_says_how_the_house_is_its_cameras_and_retired_ids(widgets, wait):
+    from home_guard_project.admin.customer import CustomerScreen
+    screen = CustomerScreen(RenamedBackend()); widgets.append(screen)
+    screen.resize(1182, 688); screen.show(); screen.open(1)
+    wait(lambda: screen.camera_list is not None)
+    overview = screen.overview
+    assert screen.tabs.currentWidget() is overview
+    assert [screen.tabs.tabText(i) for i in range(screen.tabs.count())][:4] == ['Overview', 'Events', 'Event', 'Chat']
+    # demo customer 1: Cedar Guest House is offline with 'Last heard 3 h ago'; the next step is appended
+    assert overview.status.text() == 'Cedar Guest House: Last heard 3 h ago. Check the box has power and internet.'
+    assert any('Last heard 3 h ago  —  Check the box has power and internet.' in w for w in overview.warnings)
+    assert [name for name, _ in overview.camera_rows] == ['Driveway', 'כניסה ראשית']
+    assert overview.retired_rows and overview.retired_rows[0].startswith('Garden')
+    chat = screen.tabs.widget([screen.tabs.tabText(i) for i in range(screen.tabs.count())].index('Chat'))
+    assert any('arrives when the box uploads its chat log' in w.text() for w in chat.findChildren(type(overview.status)))
+
+
+def test_overview_status_and_old_site_names():
+    from datetime import datetime, timezone
+    from home_guard_project.admin.models import CameraOut, DeviceSummary, HealthReason
+    from home_guard_project.admin.overview import status_sentence, old_site
+    now = datetime(2026, 10, 9, 12, tzinfo=timezone.utc)
+    cam = CameraOut(1, 'd', 'ameer_week_0_1', 'ameer_week_0_1_ch6', 'Camera 6', False, True, now-timedelta(minutes=5))
+    device = DeviceSummary('d', 'ameer_week_0_1', 1, 'Ameer', 'healthy', [], now, 'inference', 'box', 1, 0, 300., True,
+                           False, now, 3, 1, 0)
+    assert status_sentence([device], [cam], now) == 'All 1 cameras reporting normally; newest clip 5 min ago.'
+    warned = replace(device, verdict='warning', reasons=[HealthReason('camera_quiet', 'No clip for 30 h from Camera 2 — check it has power and network', 'warning')])
+    assert status_sentence([warned], [cam], now) == 'Ameer Week 0 1: No clip for 30 h from Camera 2 — check it has power and network'
+    assert status_sentence([], None, now) == 'No box is enrolled for this customer yet.'
+    assert old_site('ameer_tes2_ch6') == 'Ameer tes2' and old_site('front_door') == ''

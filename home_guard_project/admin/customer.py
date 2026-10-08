@@ -3,10 +3,11 @@ from PySide6.QtCore import Signal, Qt
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget, QTabWidget, QDialog, QCheckBox, QScrollArea, QFrame
 from .backend import OfflineError, AuthError
 from .fleet_model import SEVERITY
-from .formatting import site_name, age, utcnow, remember_names
+from .formatting import site_name, age, utcnow
 from .workers import TaskRunner
 from .timeline import TimelineScreen
 from .event_view import EventView
+from .overview import CustomerOverview
 from .widgets.icons import icon
 from .widgets.common import label, button, EmptyState, Skeleton
 
@@ -53,12 +54,22 @@ class CustomerScreen(QWidget):
         self.timeline = TimelineScreen(backend, theme); self.event_view = EventView(backend, role, theme)
         self.timeline.density_rows = 6; self.timeline.fit_density()
         self.timeline.stack.setMinimumHeight(self.TABLE_MIN_HEIGHT)  # five event rows and the header, never less
-        self.tabs.addTab(self.timeline, icon('Timeline', theme), 'Timeline')
-        self.tabs.addTab(self.event_view, icon('Event', theme), 'Event'); self.tabs.setTabEnabled(1, False)
-        for title, description in [('Conversation', 'Owner messages and their context will appear here.'),
+        # Overview (is this house OK, its cameras, what to do) · Events · Event (the one opened) · Chat · Config · Access
+        self.overview = None
+        if not review:
+            self.overview = CustomerOverview(theme)
+            self.tabs.addTab(self.overview, icon('Fleet', theme), 'Overview')
+        self.tabs.addTab(self.timeline, icon('Timeline', theme), 'Events')
+        self.tabs.addTab(self.event_view, icon('Event', theme), 'Event'); self.set_event_tab(False)
+        if role != 'labeler':
+            self.tabs.addTab(EmptyState('Chat arrives when the box uploads its chat log',
+                                        'The owner and bot conversation from Telegram will show here, read-only: alert cards, '
+                                        'photos and the buttons the owner pressed. Opening it will be audit-logged like any '
+                                        'staff view.', eyebrow='CHAT'), icon('Conversation', theme), 'Chat')
+        for title, description in [
                                    ('Config', 'Box settings and change history will appear here.'),
                                    ('Access', 'Staff recording access and owner notices will appear here.')]:
-            if role == 'labeler' and title in ('Conversation', 'Access'):
+            if role == 'labeler' and title == 'Access':
                 continue
             self.tabs.addTab(EmptyState(f'{title} is coming soon in this release', description, eyebrow=title.upper()), icon(title, theme), title)
         self.timeline.event_requested.connect(self.open_event)
@@ -73,7 +84,7 @@ class CustomerScreen(QWidget):
         self.offline = EmptyState("Can't reach Home Guard Cloud", 'Check your connection, then try loading this customer again.', eyebrow='OFFLINE')
         self.offline.action.show(); self.offline.action.clicked.connect(lambda: self.open(self.customer_id, self.device_id)); self.stack.addWidget(self.offline)
         self.runner = TaskRunner(self); self.runner.finished.connect(self.completed)
-        self.camera_list = None
+        self.camera_list, self.cameras_failed = None, False
         self.cameras_runner = TaskRunner(self); self.cameras_runner.finished.connect(self.cameras_loaded)
         if review:
             self.stack.setCurrentWidget(self.body)
@@ -120,9 +131,10 @@ class CustomerScreen(QWidget):
                             [('live', customer.consent_live), ('recordings', customer.consent_recordings), ('training', customer.consent_training)])
                             + (f'\nLast heard {age(device.last_seen_utc, now).lower()}' if devices else ''))
         self.consent.setMinimumWidth(410)
-        self.tabs.setCurrentIndex(0); self.tabs.setTabEnabled(1, False)
+        self.tabs.setCurrentIndex(0); self.set_event_tab(False)
+        self.camera_list, self.cameras_failed = None, False
+        self.show_overview()
         self.timeline.open(customer.id, customer.timezone)
-        self.camera_list = None
         if hasattr(self.backend, 'cameras'):
             cid = customer.id
             self.cameras_runner.start(lambda: (cid, self.backend.cameras(cid)))
@@ -132,6 +144,7 @@ class CustomerScreen(QWidget):
         if error:
             if isinstance(error, AuthError):
                 self.session_expired.emit()
+            self.cameras_failed = True; self.show_overview()
             return  # an older server without the camera list: every camera the index saw stays listed
         cid, cameras = result
         if cid != self.customer_id:
@@ -139,9 +152,17 @@ class CustomerScreen(QWidget):
                 current = self.customer_id
                 self.cameras_runner.start(lambda: (current, self.backend.cameras(current)))
             return
-        remember_names({c.camera: c.name for c in cameras if c.owner_named})
         self.camera_list = cameras
         self.timeline.set_cameras(cameras)
+        self.show_overview()
+
+    def show_overview(self):
+        if self.overview is not None and self.customer is not None:
+            self.overview.show_customer(self.customer, self.camera_list, getattr(self.backend, 'now', None) or utcnow(),
+                                        failed=self.cameras_failed)
+
+    def set_event_tab(self, enabled):
+        self.tabs.setTabEnabled(self.tabs.indexOf(self.event_view), enabled)
 
     def review_consent(self):
         """Consent comes from the sales contract. An admin switches one off when the customer withdraws it."""
@@ -200,7 +221,7 @@ class CustomerScreen(QWidget):
                     self.name.setText(event.customer_name)
                     self.health.setText(f'{event.site}  ·  {camera_name(event)}  ·  Times shown in {event.timezone}')
                 break
-        self.tabs.setTabEnabled(1, True); self.tabs.setCurrentIndex(1)
+        self.set_event_tab(True); self.tabs.setCurrentWidget(self.event_view)
         self.event_view.open(event_id, self.zone)
 
     def navigate_event(self, direction):

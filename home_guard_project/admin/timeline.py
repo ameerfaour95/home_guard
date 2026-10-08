@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QCo
     QHeaderView, QAbstractItemView, QStackedWidget, QDateEdit, QSizePolicy, QScrollArea, QCheckBox)
 from .backend import AuthError, BackendError
 from PySide6.QtGui import QPixmap
-from .formatting import utcnow, local_time, camera_name
+from .formatting import utcnow, local_time, camera_name, remember_names
 from .event_logic import KINDS, VERDICTS
 from .timeline_model import TimelineModel, TimelineDelegate
 from .workers import TaskRunner
@@ -51,7 +51,8 @@ class TimelineScreen(QWidget):
             edit.setCalendarPopup(True); edit.setDisplayFormat('dd MMM yyyy'); edit.setAccessibleName(f'{text} date')
             edit.dateChanged.connect(lambda _: self.set_days())
             ranges.addSpacing(4 if text == 'to' else 12); ranges.addWidget(label(text, 'muted')); ranges.addWidget(edit)
-        self.range_text = label('', 'muted'); ranges.addWidget(self.range_text); ranges.addStretch()
+        self.range_text = label('', 'muted'); ranges.addWidget(self.range_text, 1); ranges.addStretch()
+        self.range_text.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)  # informational: may clip
         self.clear_cell = button('Clear hour filter', self.reset_cell, 'link'); self.clear_cell.hide(); ranges.addWidget(self.clear_cell)
         self.range_bar = QWidget(); self.range_bar.setLayout(ranges); layout.addWidget(self.range_bar)
         self.density = DensityStrip(theme); self.density.selected.connect(self.filter_cell)
@@ -70,6 +71,7 @@ class TimelineScreen(QWidget):
                    'flagged': [('Any flag', None), ('Flagged', True), ('Unflagged', False)]}
         for key, values in choices.items():
             combo = QComboBox(); combo.setAccessibleName(key)
+            combo.setMinimumWidth(96)  # sized to its text, but may narrow so the row fits the 1200-pixel minimum window
             for text, data in values:
                 combo.addItem(text, data)
             combo.currentIndexChanged.connect(self.reload)
@@ -252,6 +254,9 @@ class TimelineScreen(QWidget):
         """The house's camera list: the strip and the camera filter then show current cameras; retired ones only
         behind the toggle."""
         self.cameras = cameras
+        # owner names for current cameras; retired ids read 'Camera 6 (old)' so they never pass for the current one
+        remember_names({c.camera: c.name if c.current else f'{c.name} (old)' for c in cameras or ()
+                        if c.owner_named or not c.current})
         self.retired_toggle.setVisible(any(not c.current for c in cameras or ()))
         self.apply_density()
 
@@ -274,7 +279,7 @@ class TimelineScreen(QWidget):
         combo.clear(); combo.addItem('All cameras', None)
         for camera in sorted({e.camera for e in events.rows if self.shown(e.camera)},
                              key=lambda c: (c.split('/', 1)[-1] in retired, camera_name(c))):
-            combo.addItem(camera_name(camera) + ('  (retired)' if camera.split('/', 1)[-1] in retired else ''), camera)
+            combo.addItem(camera_name(camera), camera)
             combo.setItemData(combo.count()-1, camera_name(camera), Qt.ItemDataRole.ToolTipRole)
         combo.setCurrentIndex(max(0, combo.findData(selected))); combo.blockSignals(False)
         if selected is not None and combo.currentData() != selected:

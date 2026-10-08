@@ -8,7 +8,7 @@ from .timeline import TimelineScreen
 from .timeline_model import TimelineDelegate, status_chip_width
 from .event_view import EventView
 from .event_logic import KINDS, VERDICTS
-from .formatting import local_time, remember_names
+from .formatting import local_time
 from .workers import TaskRunner
 from .review_controller import ReviewController
 from .backend import AuthError
@@ -143,7 +143,6 @@ class ReviewScreen(QWidget):
         if error:
             if isinstance(error, AuthError): self.session_expired.emit()
             return  # an older server: every camera the index saw stays listed
-        remember_names({c.camera: c.name for c in cameras if c.owner_named})
         self.timeline.set_cameras(cameras)
 
     def metadata_loaded(self, result, error):

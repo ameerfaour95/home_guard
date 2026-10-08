@@ -207,6 +207,7 @@ class Shell(QWidget):
         if self.customer_page is None:
             return
         self.pages.setCurrentWidget(self.customer_page)
+        for name, nav in self.navigation.items(): nav.setChecked(name == 'Fleet')  # a house page belongs to Fleet
         self.customer_page.open(customer_id, device_id)
 
     def open_palette(self):
