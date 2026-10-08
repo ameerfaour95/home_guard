@@ -47,7 +47,7 @@ class StoryTest(StoryCase):
         self.step(T0, [trk(1, T0 - 2, T0, path=("כניסה",)), trk(2, T0 - 2, T0, start=(0.2, 0.8), path=("כניסה",))])
         _, lines = self.step(T0 + 60, [trk(1, T0 - 2, T0 + 60, path=("כניסה", "פרגולה")),
                                        trk(2, T0 - 2, T0 + 60, start=(0.2, 0.8), path=("כניסה", "פרגולה"))])
-        self.assertEqual(lines["he"], "שניהם (P1, P2) עברו לכיוון פרגולה.")
+        self.assertEqual(lines["he"], "שניהם (P1, P2) עברו לפרגולה.")
         self.assertEqual(lines["en"], "Both (P1, P2) moved toward פרגולה.")
 
     def test_one_moved_one_stayed_is_not_both(self):

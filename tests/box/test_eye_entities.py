@@ -235,7 +235,7 @@ class OwnersExampleTest(WorkerCase):
         self.assertIsNone(msgs[0]["reply_to"])
         self.assertNotIn("P1", msgs[0]["text"])                      # the first message keeps today's format
         self.assertEqual(msgs[1]["reply_to"]["message_id"], msgs[0]["id"])
-        self.assertEqual(msgs[1]["text"].splitlines()[0], "שניהם (P1, P2) עברו לכיוון פרגולה.")
+        self.assertEqual(msgs[1]["text"].splitlines()[0], "שניהם (P1, P2) עברו לפרגולה.")
         self.assertEqual(msgs[2]["reply_to"]["message_id"], msgs[0]["id"])
         self.assertIn("P2 (קודם: מנקה את הרצפה): שם את המטאטא בטנדר.", msgs[2]["text"].splitlines()[0])
         self.assertNotIn("עברו", msgs[2]["text"])                    # they did not move again

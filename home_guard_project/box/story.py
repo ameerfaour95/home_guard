@@ -26,8 +26,8 @@ from typing import Any, Dict, List, Optional, Sequence
 HINT_CHARS = 60
 
 _T = {
-    "he": {"both": "שניהם ({ids}) עברו לכיוון {area}.", "group": "{ids} עברו לכיוון {area}.",
-           "moved": "{name} עבר לכיוון {area}.", "new": "{name} חדש בתמונה.", "at": "{name} עכשיו ליד {area}.",
+    "he": {"both": "שניהם ({ids}) עברו ל{to_area}.", "group": "{ids} עברו ל{to_area}.",
+           "moved": "{name} עבר ל{to_area}.", "new": "{name} חדש בתמונה.", "at": "{name} עכשיו ליד {area}.",
            "still": "{name} עדיין בתמונה.", "still_many": "עדיין בתמונה: {ids}.", "left": "{ids} יצא מהתמונה.",
            "left_many": "{ids} יצאו מהתמונה.", "now": "בתמונה עכשיו: {ids}.", "earlier": "קודם: {text}",
            "maybe": "אולי {ids} שחזר, לא בטוח", "and": " ו-", "or": " או "},
@@ -38,6 +38,12 @@ _T = {
            "maybe": "maybe {ids} back, not sure", "and": " and ", "or": " or "},
 }
 
+
+
+def _after_lamed(name: str) -> str:
+    """*name* after the Hebrew "ל" ("ל" + "הפרגולה" is "לפרגולה"); English templates ignore it."""
+    name = str(name or "").strip()
+    return name[1:] if len(name) > 2 and name.startswith("ה") else name
 
 def _lang(lang: str) -> str:
     return "he" if str(lang or "").startswith("he") else "en"
@@ -112,9 +118,9 @@ def story_line(session: Any, lang: str = "he", now: Optional[float] = None,
     for area, ids in movers.items():
         if len(ids) >= 2:
             key = "both" if len(ids) == 2 and len(view) == 2 else "group"
-            sentences.append(t[key].format(ids=_join(ids, t["and"]) if key == "group" else ", ".join(ids), area=area))
+            sentences.append(t[key].format(ids=_join(ids, t["and"]) if key == "group" else ", ".join(ids), area=area, to_area=_after_lamed(area)))
         else:
-            sentences.append(t["moved"].format(name=ids[0], area=area))
+            sentences.append(t["moved"].format(name=ids[0], area=area, to_area=_after_lamed(area)))
         said.update(ids)
     still: List[str] = []
     for i in view:
