@@ -1,9 +1,18 @@
 """Monitor side of the Admin Center: the customer page layout, camera names, warnings and filters."""
 import pytest
+from datetime import timedelta
 from PySide6.QtCore import QPoint
 from home_guard_project.admin.demo_backend import DemoBackend
 from home_guard_project.admin.prefs import Preferences
 from home_guard_project.admin.shell import AdminWindow
+
+
+@pytest.fixture(autouse=True)
+def forget_owner_names():
+    """Owner names the screens learn are process-wide; no test may leak them into another."""
+    from home_guard_project.admin import formatting
+    yield
+    formatting.KNOWN_NAMES.clear()
 
 
 def bottom_of(widget, ancestor):
@@ -83,3 +92,57 @@ def test_customer_page_lists_current_cameras_and_hides_retired_behind_a_toggle(w
         assert combo.itemText(combo.count()-1) == 'Garden  (retired)'
     finally:
         formatting.KNOWN_NAMES.clear()
+
+
+def test_owner_answer_filter_speaks_the_server_vocabulary(widgets, wait):
+    from home_guard_project.cloud.redact import VERDICTS as SERVER
+    from home_guard_project.admin.event_logic import VERDICTS
+    from home_guard_project.admin.timeline import TimelineScreen
+    assert set(VERDICTS) <= SERVER and 'real' not in VERDICTS and VERDICTS['expected'] == 'Normal (expected)'
+    queries = []
+
+    class Recording(DemoBackend):
+        def events(self, **filters):
+            queries.append(filters); return super().events(**filters)
+    screen = TimelineScreen(Recording()); widgets.append(screen); screen.show(); screen.open(1, 'Asia/Jerusalem')
+    wait(lambda: not screen.runner.busy and bool(queries))
+    combo = screen.filters['verdict']
+    assert [combo.itemData(i) for i in range(1, combo.count())] == list(VERDICTS)
+    combo.setCurrentIndex(combo.findData('expected')); wait(lambda: not screen.runner.busy)
+    assert queries[-1]['verdict'] == 'expected'
+    combo.setCurrentIndex(combo.findData('true_alert')); wait(lambda: not screen.runner.busy)
+    assert queries[-1]['verdict'] == 'true_alert' and 101 in [e.id for e in screen.model.rows]
+
+
+def test_date_range_picks_whole_days_in_the_house_zone(widgets, wait):
+    from datetime import date
+    from home_guard_project.admin.timeline import TimelineScreen
+    queries = []
+
+    class Recording(DemoBackend):
+        def events(self, **filters):
+            queries.append(filters); return super().events(**filters)
+    screen = TimelineScreen(Recording()); widgets.append(screen); screen.show(); screen.open(1, 'Asia/Jerusalem')
+    wait(lambda: not screen.runner.busy and bool(queries))
+    assert screen.date_to.date().toPython() == date(2026, 10, 3)
+    screen.set_days(date(2026, 9, 20), date(2026, 10, 2)); wait(lambda: not screen.runner.busy)
+    assert queries[-1]['from_utc'] == '2026-09-19T21:00:00+00:00' and queries[-1]['to_utc'] == '2026-10-02T21:00:00+00:00'
+    assert not any(chip.isChecked() for chip in screen.range_chips.values())
+    assert screen.date_from.date().toPython() == date(2026, 9, 20) and screen.date_to.date().toPython() == date(2026, 10, 2)
+    count = len(queries)
+    screen.set_days(date(2026, 8, 1), date(2026, 10, 2))
+    assert screen.banner.isVisibleTo(screen) and '31 days' in screen.banner.text() and len(queries) == count
+    screen.range_chips['30 d'].click(); wait(lambda: not screen.runner.busy)
+    assert screen.range_chips['30 d'].isChecked() and screen.end - screen.start == timedelta(days=30)
+
+
+def test_activity_has_a_date_range_and_a_camera_filter(widgets, wait):
+    from home_guard_project.admin.review import ReviewScreen
+    screen = ReviewScreen(RenamedBackend()); widgets.append(screen); screen.resize(1182, 663); screen.show()
+    timeline = screen.timeline
+    wait(lambda: timeline.cameras is not None and timeline.density_result is not None)
+    assert timeline.range_bar.isVisibleTo(screen) and timeline.date_from.isVisibleTo(screen)
+    assert timeline.filters['camera'].isVisibleTo(screen) and timeline.filters['camera'].count() > 1
+    assert timeline.retired_toggle.isVisibleTo(screen)
+    labeler = ReviewScreen(DemoBackend(role='labeler'), role='labeler'); widgets.append(labeler); labeler.show()
+    assert not labeler.timeline.filters['camera'].isVisibleTo(labeler)

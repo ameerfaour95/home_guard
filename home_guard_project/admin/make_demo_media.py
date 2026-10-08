@@ -82,7 +82,7 @@ def main():
         summary = ('A person approached the entrance and left a parcel.', 'A vehicle pulled into the driveway.',
                    'An animal crossed the garden.', 'A visitor walked past the front door without stopping.',
                    'A car passed the driveway and continued along the road.', 'A dog walked across the garden toward the trees.')[i % 6]
-        verdicts = ['false_alarm'] if i % 5 == 4 else ['real'] if i % 7 == 0 else []
+        verdicts = ['false_alarm'] if i % 5 == 4 else ['true_alert'] if i % 7 == 0 else []
         base = dict(id=eid, site=customer['devices'][0]['site'], customer_id=customer['id'], customer_name=customer['name'],
                     camera=('Front door', 'Driveway', 'Garden')[i % 3], kind=kind, timezone=customer['timezone'],
                     start_utc=start.isoformat(), end_utc=(start+timedelta(seconds=SECONDS)).isoformat(),
@@ -117,7 +117,7 @@ def main():
                       ai_runs=[dict(id=eid, purpose='guard', status=status, model='gpt-4o' if status in ('real','failed') else None,
                                     prompt_version='guard-v3', prompt='Review the supplied camera frames. Describe the activity and return summary, alert_command and confidence. Alert only for a person entering the entrance zone.',
                                     parsed=parsed, raw_text_artifact_id=rawid, input_frame_artifact_ids=input_ids)],
-                      feedback=[dict(id=eid, verdict=v, action='keep', note='Expected delivery.' if v == 'real' else 'Our own car returning home.', raw_text='Owner reply from Telegram.', source='telegram', received_utc=(start+timedelta(minutes=2)).isoformat()) for v in verdicts],
+                      feedback=[dict(id=eid, verdict=v, action='keep', note='Expected delivery.' if v == 'true_alert' else 'Our own car returning home.', raw_text='Owner reply from Telegram.', source='telegram', received_utc=(start+timedelta(minutes=2)).isoformat()) for v in verdicts],
                       artifacts=artifacts, raw_meta=dict(schema_version=1, synthetic=True, event_id=eid, teacher={'model': 'gpt-4o', 'status': status}))
         write(f'event_{eid}.json', detail)
         write(f'detections_{eid}.json', dict(provenance=boxes, model='synthetic-yolo-demo' if boxes != 'none' else None, frames=frames[i % 3] if boxes != 'none' else []))

@@ -1,16 +1,20 @@
-from datetime import timedelta, timezone
-from PySide6.QtCore import Qt, Signal, QTimer, QEvent, QDateTime
+from datetime import datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from PySide6.QtCore import Qt, Signal, QTimer, QEvent, QDate
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QComboBox, QTableView,
-    QHeaderView, QAbstractItemView, QStackedWidget, QDialog, QDateTimeEdit, QDialogButtonBox, QSizePolicy, QScrollArea, QCheckBox)
+    QHeaderView, QAbstractItemView, QStackedWidget, QDateEdit, QSizePolicy, QScrollArea, QCheckBox)
 from .backend import AuthError, BackendError
 from PySide6.QtGui import QPixmap
 from .formatting import utcnow, local_time, camera_name
-from .event_logic import KINDS
+from .event_logic import KINDS, VERDICTS
 from .timeline_model import TimelineModel, TimelineDelegate
 from .workers import TaskRunner
 from .review_controller import ReviewController
 from .widgets.activity import DensityStrip
 from .widgets.common import label, button, Skeleton, EmptyState
+
+
+RANGES = {'6 h': 6, '24 h': 24, '7 d': 168, '30 d': 720}
 
 
 class TimelineScreen(QWidget):
@@ -37,10 +41,16 @@ class TimelineScreen(QWidget):
         layout = QVBoxLayout(self); layout.setContentsMargins(0, 0, 0, 0); layout.setSpacing(8)
         ranges = QHBoxLayout(); ranges.setSpacing(8)
         self.range_chips = {}
-        for title, hours in [('6 h', 6), ('24 h', 24), ('7 d', 168), ('Custom', None)]:
+        for title, hours in RANGES.items():
             chip = button(title, lambda checked=False, h=hours: self.set_range(h))
             chip.setCheckable(True); chip.setChecked(hours == 24)
             ranges.addWidget(chip); self.range_chips[title] = chip
+        # any whole days in the house's time zone, up to 31 days
+        self.date_from, self.date_to = QDateEdit(), QDateEdit()
+        for text, edit in (('From', self.date_from), ('to', self.date_to)):
+            edit.setCalendarPopup(True); edit.setDisplayFormat('dd MMM yyyy'); edit.setAccessibleName(f'{text} date')
+            edit.dateChanged.connect(lambda _: self.set_days())
+            ranges.addSpacing(4 if text == 'to' else 12); ranges.addWidget(label(text, 'muted')); ranges.addWidget(edit)
         self.range_text = label('', 'muted'); ranges.addWidget(self.range_text); ranges.addStretch()
         self.clear_cell = button('Clear hour filter', self.reset_cell, 'link'); self.clear_cell.hide(); ranges.addWidget(self.clear_cell)
         self.range_bar = QWidget(); self.range_bar.setLayout(ranges); layout.addWidget(self.range_bar)
@@ -55,7 +65,7 @@ class TimelineScreen(QWidget):
         choices = {'kind': [('All kinds', None)]+[(v, k) for k, v in KINDS.items()],
                    'camera': [('All cameras', None)],
                    'ai': [('All AI states', None)]+[(s.title(), s) for s in ('real', 'failed', 'fallback', 'none')],
-                   'verdict': [('All owner verdicts', None), ('Confirmed', 'real'), ('False alarm', 'false_alarm'), ('Real, wrong decision', 'real_but_wrong')],
+                   'verdict': [('All owner answers', None)]+[(v, k) for k, v in VERDICTS.items()],
                    'reviewed': [('Any review', None), ('Unreviewed', False), ('Reviewed', True)],
                    'flagged': [('Any flag', None), ('Flagged', True), ('Unflagged', False)]}
         for key, values in choices.items():
@@ -97,6 +107,7 @@ class TimelineScreen(QWidget):
         footer = QHBoxLayout(); self.count = label('Loading events…', 'muted'); footer.addWidget(self.count)
         footer.addStretch(); self.key_hint = label('j / k Select   ·   Enter Open   ·   r Review   ·   f Flag', 'muted'); footer.addWidget(self.key_hint)
         self.older = button('Load older', self.load_older); footer.addWidget(self.older); layout.addLayout(footer)
+        self.show_dates()
 
     def now(self):
         return getattr(self.backend, 'now', None) or utcnow()
@@ -112,27 +123,37 @@ class TimelineScreen(QWidget):
         self.search.blockSignals(True); self.search.clear(); self.search.blockSignals(False)
         self.set_range(24)
 
+    def tz(self):
+        try:
+            return ZoneInfo(self.zone)
+        except (ZoneInfoNotFoundError, ValueError):
+            return timezone.utc
+
     def set_range(self, hours):
-        if hours is None:
-            dialog = QDialog(self); dialog.setWindowTitle('Custom range · UTC')
-            form = QVBoxLayout(dialog)
-            form.addWidget(label('Enter start and end in UTC. The timeline displays customer time.', 'muted', True))
-            edits = []
-            for value in (self.start, self.end):
-                edit = QDateTimeEdit(QDateTime(value)); edit.setDisplayFormat('yyyy-MM-dd HH:mm'); edit.setCalendarPopup(True)
-                edits.append(edit); form.addWidget(edit)
-            actions = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-            actions.accepted.connect(dialog.accept); actions.rejected.connect(dialog.reject); form.addWidget(actions)
-            if dialog.exec() != QDialog.DialogCode.Accepted:
-                self.range_chips['Custom'].setChecked(False); return
-            start, end = [e.dateTime().toPython().replace(tzinfo=timezone.utc) for e in edits]
-            if not start < end or end-start > timedelta(days=31):
-                self.banner.setText('Choose a range between one minute and 31 days.'); self.banner.show(); return
-            self.start, self.end = start, end
-        else:
-            self.end = self.now(); self.start = self.end-timedelta(hours=hours)
+        self.end = self.now(); self.start = self.end-timedelta(hours=hours)
+        self.range_changed(hours)
+
+    def set_days(self, first=None, last=None):
+        """Whole days in the house's zone, from the date pickers (or the dates given)."""
+        first = first or self.date_from.date().toPython()
+        last = last or self.date_to.date().toPython()
+        if last < first:
+            first, last = last, first
+        if (last-first).days >= 31:
+            self.banner.setText('Choose a range of at most 31 days.'); self.banner.show(); self.show_dates(); return
+        self.banner.hide()
+        self.start = datetime.combine(first, time(0), self.tz()).astimezone(timezone.utc)
+        self.end = datetime.combine(last+timedelta(days=1), time(0), self.tz()).astimezone(timezone.utc)
+        self.range_changed(None)
+
+    def show_dates(self):
+        for edit, value in ((self.date_from, self.start), (self.date_to, self.end-timedelta(microseconds=1))):
+            edit.blockSignals(True); edit.setDate(QDate(value.astimezone(self.tz()).date())); edit.blockSignals(False)
+
+    def range_changed(self, hours):
         for title, chip in self.range_chips.items():
-            chip.setChecked(title == ({6:'6 h', 24:'24 h', 168:'7 d'}.get(hours, 'Custom')))
+            chip.setChecked(RANGES[title] == hours)
+        self.show_dates()
         self.range_text.setText(f'{local_time(self.start, self.zone)[:6]} {local_time(self.start, self.zone)[13:18]} — {local_time(self.end, self.zone)[:6]} {local_time(self.end, self.zone)[13:18]}  ·  {self.zone}')
         self.cell = None; self.clear_cell.hide(); self.reload(); self.load_density()
 
