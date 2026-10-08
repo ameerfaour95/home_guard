@@ -244,15 +244,16 @@ class CameraPage:
             slot=QWidget();slot.setObjectName('cameraActionSlot');slot.setFixedHeight(36)
             actions=QHBoxLayout(slot);actions.setContentsMargins(0,0,0,0);actions.setSpacing(8);layout.addWidget(slot)
             if self.zones_loaded or self.zone_load_failed:
-                from .zone_editor import ZonePill, colors
+                from .zone_editor import colors
                 from .zone_picture import WatchingStatus
-                zone_button=ZonePill(tr('camera_zone_button'),compact=True)
-                zone_button.setEnabled(isinstance(photo,ZonePicture) and not photo.pix.isNull() and not self.zone_load_failed)
-                zone_button.clicked.connect(lambda checked=False,n=camera.name,p=photo:self.open_zone(n,p))
+                # The camera map grew out of the watch-zone dialog: drawing by hand is inside it (open_zone stays).
+                from .scene_editor import map_button
+                zone_button=map_button()
+                zone_button.clicked.connect(lambda checked=False,n=camera.name:self.open_scene(n))
                 status=WatchingStatus(tr('camera_error') if self.zone_load_failed else tr('camera_zone_drawn' if self.zone_values.get(camera.name) else 'camera_zone_whole'), bool(self.zone_values.get(camera.name)))
                 status.setStyleSheet(f'color: {colors(self.widget)["secondary"]}; font-size: 13px;')
                 status.setAccessibleName(status.text())
-                actions.addWidget(zone_button);status.hide();zone_button.setToolTip(status.text())
+                actions.addWidget(zone_button);status.hide()
                 self.zone_widgets[camera.name]=(zone_button,status,photo)
             from .alert_types_ui import CameraAlertButton
             alert_button=CameraAlertButton(self.alert_house,self.alert_values.get(camera.name),self.sensitivity_values.get(camera.name))
@@ -318,6 +319,11 @@ class CameraPage:
     def house_alert_saved(self,value):
         self.alert_house=value
         self.refresh_alert_labels();self.changed()
+
+    def open_scene(self, name, demo_state=None):
+        if self.future is not None: return
+        from .scene_editor import open_map_dialog
+        return open_map_dialog(self, name, demo_state)
 
     def open_zone(self, name, photo):
         if self.future is not None or self.zone_load_failed or not self.zones_loaded: return

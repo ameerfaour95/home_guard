@@ -39,19 +39,38 @@ CLI (on the box; the app may call these over ssh, like find_cameras' zone comman
     python -m home_guard_project.box.scene_interview confirm --camera front [--no-restart]
     python -m home_guard_project.box.scene_interview show --camera front
     python -m home_guard_project.box.scene_interview clear --camera front
+
+For the app's map editor (over ssh a value on the command line carries no spaces or quotes, and the box's console
+code page cannot print Hebrew, so these print one line of ASCII JSON)::
+
+    propose --camera front --json --embed          # + image_b64 (numbered JPEG), picture_b64 (the clean picture),
+                                                   #   each region's points, current_map (the camera's map now)
+    answer --camera front --text-b64 MSBtaW5l --json --embed      # + image_b64 (the ownership picture)
+    confirm --camera front --map-b64 eJy... --json [--no-restart]  # a map edited in the app (confirm_app_map)
+    answer ... --sides-b64 eyI0IjogImxlZnQifQ==                    # the owner's side per wall ({"4": "left"})
+    restore --camera front --check --json          # {"has_previous", "saved_at"}
+    restore --camera front --json [--no-restart]   # restore_previous: {"restart_needed", "saved_at", "map"}
+    names --json                                   # {camera id: the name the owner reads}, every camera
+
+The box is the only source of camera names (the family sets them over Telegram, they live here): ``propose
+--embed``, ``confirm``, ``restore`` and ``names`` carry ``display_name`` (Hebrew, camera_names.display_name) and
+``display_name_en``; the app never shows a camera id.
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import json
 import logging
 import os
 import re
 import sys
 import time
+import zlib
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -858,23 +877,134 @@ def _known_cameras(cameras_path: str) -> List[str]:
     return list(dict(raw.get("cameras") or {})) + list(dict(raw.get("disabled") or {}))
 
 
+# ----------------------------------------------------------------------------
+# The app's map editor: pictures inside the answer, input as base64
+# ----------------------------------------------------------------------------
+def _b64_file(path: Optional[str]) -> str:
+    """The file at *path* as base64 ("" when there is none)."""
+    if not path or not os.path.isfile(path):
+        return ""
+    with open(path, "rb") as f:
+        return base64.b64encode(f.read()).decode("ascii")
+
+
+def embed_proposal(result: Dict[str, Any], picture_path: str, current: Optional[sm.SceneMap] = None) -> Dict[str, Any]:
+    """``propose``'s answer for the app: the numbered picture and the clean one as base64, each region's polygon
+    (the app draws its own live overlay), and the camera's map as it is now."""
+    out = dict(result)
+    points = {r.number: r.points for r in load_regions(result["regions_path"], result["camera"])}
+    out["regions"] = [dict(r, points=[list(p) for p in points.get(r["number"], ())]) for r in result["regions"]]
+    out["image_b64"] = _b64_file(result.get("image"))
+    out["picture_b64"] = _b64_file(picture_path)
+    if current is not None:
+        out["current_map"] = current.to_dict()
+    return out
+
+
+def decode_b64_text(value: str) -> str:
+    """The owner's words, sent as base64 of UTF-8 text."""
+    try:
+        return base64.b64decode(str(value or ""), validate=True).decode("utf-8")
+    except (binascii.Error, ValueError):
+        raise ValueError("the answers could not be read") from None
+
+
+def decode_map_b64(value: str) -> Dict[str, Any]:
+    """A map dict sent as base64 of its JSON (UTF-8), or of that JSON zlib-compressed (so it fits a command line)."""
+    try:
+        raw = base64.b64decode(str(value or ""), validate=True)
+        if raw[:1] == b"x":                    # a zlib stream; JSON starts with "{"
+            raw = zlib.decompress(raw)
+        data = json.loads(raw.decode("utf-8"))
+    except (binascii.Error, ValueError, zlib.error):
+        raise ValueError("the map could not be read") from None
+    if not isinstance(data, dict):
+        raise ValueError("the map could not be read")
+    return data
+
+
+def decode_sides_b64(value: str) -> Dict[int, str]:
+    """The owner's side per wall region, sent as base64 of JSON ``{"4": "left"}`` (``answer``'s *sides*)."""
+    try:
+        data = json.loads(base64.b64decode(str(value or ""), validate=True).decode("utf-8"))
+        sides = {int(k): str(v) for k, v in data.items()}
+    except (binascii.Error, ValueError, AttributeError, TypeError):
+        raise ValueError("the sides could not be read") from None
+    if any(v not in sm.SIDES for v in sides.values()):
+        raise ValueError("a side is left or right")
+    return sides
+
+
+def with_names(result: Dict[str, Any], camera: str) -> Dict[str, Any]:
+    """*result* with the camera's name as the owner reads it (the box is the only source of names)."""
+    from .camera_names import display_name  # noqa: PLC0415
+
+    return dict(result, display_name=display_name(camera, "he"), display_name_en=display_name(camera, "en"))
+
+
+def camera_names_result(cameras_path: str, lang: str = "he") -> Dict[str, Any]:
+    """``names``: every camera of this box (enabled and switched off) -> the name the owner reads."""
+    from .camera_names import _load, display_name  # noqa: PLC0415
+
+    aliases = _load(None)
+    return {"names": {c: display_name(c, lang, aliases) for c in _known_cameras(cameras_path)}}
+
+
+def restore_result(camera: str, check: bool = False, zones_path: Optional[str] = None) -> Dict[str, Any]:
+    """``restore``: with *check*, whether the camera has a previous map and when it was replaced; otherwise
+    ``restore_previous`` and the map as it is now. ValueError in plain words when there is none."""
+    if check:
+        backup = previous_map(camera, zones_path)
+        return {"camera": camera, "has_previous": backup is not None,
+                "saved_at": backup.get("saved_at") if backup else None}
+    try:
+        result = restore_previous(camera, zones_path)
+    except LookupError:
+        raise ValueError("there is no previous map of this camera") from None
+    return dict(result, map=sm.load_scene_map(camera, zones_path).to_dict())
+
+
+def confirm_app_map(camera: str, data: Mapping[str, Any], out_dir: str = INTERVIEW_DIR) -> sm.SceneMap:
+    """A map edited in the app (region answers, areas drawn by hand, lines) as the camera's draft, validated the
+    way every stored map is (``SceneMap.from_dict``: kinds, owners, zones, points); ``confirm`` then makes it the
+    camera's whole truth. Raises ValueError in plain words."""
+    if str(data.get("camera") or camera) != str(camera):
+        raise ValueError(f"that map belongs to camera {data.get('camera')!r}, not {camera!r}")
+    scene = sm.SceneMap.from_dict(camera, data, data.get("watched") or None)
+    os.makedirs(out_dir, exist_ok=True)
+    with open(draft_path(camera, out_dir), "w", encoding="utf-8") as f:
+        json.dump(scene.to_dict(), f, ensure_ascii=False, indent=1)
+    return scene
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     from .find_cameras import CAMERAS_PATH, _known_camera, _restart_running_mode  # noqa: PLC0415
 
     parser = argparse.ArgumentParser(prog="scene_interview", description=__doc__.split("\n", 1)[0])
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("propose", "answer", "confirm", "show", "clear", "telegram"):
+    for name in ("propose", "answer", "confirm", "show", "clear", "telegram", "restore", "names"):
         p = sub.add_parser(name)
-        p.add_argument("--camera", required=name != "telegram", default="")
+        p.add_argument("--camera", required=name not in ("telegram", "names"), default="")
+        if name == "names":
+            p.add_argument("--lang", choices=("he", "en"), default="he")
         p.add_argument("--json", action="store_true")
         if name in ("propose", "answer", "confirm"):
             p.add_argument("--out", default=INTERVIEW_DIR)
+        if name in ("propose", "answer"):
+            p.add_argument("--embed", action="store_true", help="the pictures inside the JSON, as base64 (the app)")
         if name == "propose":
             p.add_argument("--grid", action="store_true", help="number a grid instead of using SAM")
         if name == "answer":
-            p.add_argument("--text", required=True)
+            words = p.add_mutually_exclusive_group(required=True)
+            words.add_argument("--text")
+            words.add_argument("--text-b64", help="the answers as base64 of UTF-8 text")
+            p.add_argument("--sides-b64", help='the side of each wall: base64 of JSON {"4": "left"}')
+        if name == "restore":
+            p.add_argument("--check", action="store_true", help="only say whether there is a previous map")
+            p.add_argument("--no-restart", action="store_true")
         if name == "confirm":
             p.add_argument("--no-restart", action="store_true")
+            p.add_argument("--map-b64", help="a map edited in the app: base64 of its JSON, or of that JSON zlib-compressed")
     args = parser.parse_args(argv)
     try:
         if args.command == "telegram":
@@ -883,19 +1013,35 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             result = start_from_cli(args.camera or "")
             print(json.dumps(result, ensure_ascii=False, indent=2) if args.json else json.dumps(result, ensure_ascii=False))
             return 0 if "error" not in result else 1
+        if args.command == "names":
+            print(json.dumps(camera_names_result(CAMERAS_PATH, args.lang)))     # ASCII: any console code page
+            return 0
         camera = _known_camera(args.camera, CAMERAS_PATH)
         if args.command == "propose":
             picture, picture_path = interview_picture(camera, CAMERAS_PATH, args.out)
+            current = sm.load_scene_map(camera)
             result = propose(camera, picture, args.out, grid_segmenter if args.grid else None, picture_path,
-                             watched=sm.load_scene_map(camera).watched)
+                             watched=current.watched)
+            if args.embed:
+                result = with_names(embed_proposal(result, picture_path, current), camera)
         elif args.command == "answer":
             regions_path = os.path.join(args.out, f"{_stem(camera)}_regions.json")
             with open(regions_path, encoding="utf-8") as f:
                 picture_path = json.load(f).get("picture") or ""
-            result = answer(camera, args.text, regions_path, _read_picture(picture_path), args.out)
+            text = args.text if args.text is not None else decode_b64_text(args.text_b64)
+            sides = decode_sides_b64(args.sides_b64) if args.sides_b64 else None
+            result = answer(camera, text, regions_path, _read_picture(picture_path), args.out, sides=sides)
+            if args.embed:
+                result["image_b64"] = _b64_file(result.get("image"))
         elif args.command == "confirm":
-            result = confirm(camera, args.out, known_cameras=_known_cameras(CAMERAS_PATH))
+            if args.map_b64 is not None:
+                confirm_app_map(camera, decode_map_b64(args.map_b64), args.out)
+            result = with_names(confirm(camera, args.out, known_cameras=_known_cameras(CAMERAS_PATH)), camera)
             if result["restart_needed"] and not args.no_restart:
+                _restart_running_mode()
+        elif args.command == "restore":
+            result = with_names(restore_result(camera, args.check), camera)
+            if result.get("restart_needed") and not args.no_restart:
                 _restart_running_mode()
         elif args.command == "show":
             result = sm.load_scene_map(camera).to_dict()
@@ -906,6 +1052,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         message = str(exc) if isinstance(exc, (ValueError, RuntimeError)) else f"could not do that: {exc}"
         print(json.dumps({"error": message}) if args.json else f"Error: {message}")
         return 1
+    if args.command == "restore" or any(getattr(args, flag, None) for flag in ("embed", "text_b64", "map_b64",
+                                                                                 "sides_b64")):
+        print(json.dumps(result))          # the app: one line of ASCII JSON, whatever the console's code page
+        return 0
     print(json.dumps(result, ensure_ascii=False, indent=2) if args.json else json.dumps(result, ensure_ascii=False))
     return 0
 
