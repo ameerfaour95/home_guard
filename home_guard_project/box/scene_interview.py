@@ -50,6 +50,11 @@ code page cannot print Hebrew, so these print one line of ASCII JSON)::
     answer ... --sides-b64 eyI0IjogImxlZnQifQ==                    # the owner's side per wall ({"4": "left"})
     restore --camera front --check --json          # {"has_previous", "saved_at"}
     restore --camera front --json [--no-restart]   # restore_previous: {"restart_needed", "saved_at", "map"}
+    names --json                                   # {camera id: the name the owner reads}, every camera
+
+The box is the only source of camera names (the family sets them over Telegram, they live here): ``propose
+--embed``, ``confirm``, ``restore`` and ``names`` carry ``display_name`` (Hebrew, camera_names.display_name) and
+``display_name_en``; the app never shows a camera id.
 """
 
 from __future__ import annotations
@@ -930,6 +935,21 @@ def decode_sides_b64(value: str) -> Dict[int, str]:
     return sides
 
 
+def with_names(result: Dict[str, Any], camera: str) -> Dict[str, Any]:
+    """*result* with the camera's name as the owner reads it (the box is the only source of names)."""
+    from .camera_names import display_name  # noqa: PLC0415
+
+    return dict(result, display_name=display_name(camera, "he"), display_name_en=display_name(camera, "en"))
+
+
+def camera_names_result(cameras_path: str, lang: str = "he") -> Dict[str, Any]:
+    """``names``: every camera of this box (enabled and switched off) -> the name the owner reads."""
+    from .camera_names import _load, display_name  # noqa: PLC0415
+
+    aliases = _load(None)
+    return {"names": {c: display_name(c, lang, aliases) for c in _known_cameras(cameras_path)}}
+
+
 def restore_result(camera: str, check: bool = False, zones_path: Optional[str] = None) -> Dict[str, Any]:
     """``restore``: with *check*, whether the camera has a previous map and when it was replaced; otherwise
     ``restore_previous`` and the map as it is now. ValueError in plain words when there is none."""
@@ -962,9 +982,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     parser = argparse.ArgumentParser(prog="scene_interview", description=__doc__.split("\n", 1)[0])
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("propose", "answer", "confirm", "show", "clear", "telegram", "restore"):
+    for name in ("propose", "answer", "confirm", "show", "clear", "telegram", "restore", "names"):
         p = sub.add_parser(name)
-        p.add_argument("--camera", required=name != "telegram", default="")
+        p.add_argument("--camera", required=name not in ("telegram", "names"), default="")
+        if name == "names":
+            p.add_argument("--lang", choices=("he", "en"), default="he")
         p.add_argument("--json", action="store_true")
         if name in ("propose", "answer", "confirm"):
             p.add_argument("--out", default=INTERVIEW_DIR)
@@ -991,6 +1013,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             result = start_from_cli(args.camera or "")
             print(json.dumps(result, ensure_ascii=False, indent=2) if args.json else json.dumps(result, ensure_ascii=False))
             return 0 if "error" not in result else 1
+        if args.command == "names":
+            print(json.dumps(camera_names_result(CAMERAS_PATH, args.lang)))     # ASCII: any console code page
+            return 0
         camera = _known_camera(args.camera, CAMERAS_PATH)
         if args.command == "propose":
             picture, picture_path = interview_picture(camera, CAMERAS_PATH, args.out)
@@ -998,7 +1023,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             result = propose(camera, picture, args.out, grid_segmenter if args.grid else None, picture_path,
                              watched=current.watched)
             if args.embed:
-                result = embed_proposal(result, picture_path, current)
+                result = with_names(embed_proposal(result, picture_path, current), camera)
         elif args.command == "answer":
             regions_path = os.path.join(args.out, f"{_stem(camera)}_regions.json")
             with open(regions_path, encoding="utf-8") as f:
@@ -1011,11 +1036,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         elif args.command == "confirm":
             if args.map_b64 is not None:
                 confirm_app_map(camera, decode_map_b64(args.map_b64), args.out)
-            result = confirm(camera, args.out, known_cameras=_known_cameras(CAMERAS_PATH))
+            result = with_names(confirm(camera, args.out, known_cameras=_known_cameras(CAMERAS_PATH)), camera)
             if result["restart_needed"] and not args.no_restart:
                 _restart_running_mode()
         elif args.command == "restore":
-            result = restore_result(camera, args.check)
+            result = with_names(restore_result(camera, args.check), camera)
             if result.get("restart_needed") and not args.no_restart:
                 _restart_running_mode()
         elif args.command == "show":

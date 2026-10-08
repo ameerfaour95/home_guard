@@ -41,7 +41,7 @@ class AppCommandLineTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.cameras = os.path.join(self.tmp.name, "cameras.yaml")
         with open(self.cameras, "w", encoding="utf-8") as f:
-            f.write("cameras:\n  front: rtsp://x\n  back: rtsp://y\n")
+            f.write("cameras:\n  front: rtsp://x\n  back: rtsp://y\ndisabled:\n  ameer_week_0_1_ch3: rtsp://z\n")
         self.zones = os.path.join(self.tmp.name, "zones.yaml")
         self.out = os.path.join(self.tmp.name, "interview")
         self.picture_path = os.path.join(self.tmp.name, "front_clean.jpg")
@@ -59,6 +59,7 @@ class AppCommandLineTest(unittest.TestCase):
                 mock.patch.object(find_cameras, "_restart_running_mode", self.restart), \
                 mock.patch.object(z, "ZONES_PATH", self.zones), \
                 mock.patch.object(si, "interview_picture", return_value=(picture(), self.picture_path)), \
+                mock.patch("home_guard_project.box.camera_names._load", return_value={"front": ["הכניסה"]}), \
                 contextlib.redirect_stdout(out):
             code = si.main(list(argv))
         text = out.getvalue()
@@ -207,6 +208,24 @@ class AppCommandLineTest(unittest.TestCase):
         self.assertEqual(code, 0, data)                                 # a restore is undone the same way
         self.assertEqual(len(data["map"]["areas"]), 4)                 # its three, and the zone as ours
         self.restart.assert_not_called()
+
+    def test_the_box_names_the_cameras_the_app_never_shows_an_id(self) -> None:
+        code, text, data = self.run_main("names", "--json")
+        self.assertEqual(code, 0)
+        text.encode("ascii")
+        self.assertEqual(data["names"], {"front": "הכניסה", "back": "back", "ameer_week_0_1_ch3": "מצלמה 3"})
+        self.assertEqual(self.run_main("names", "--json", "--lang", "en")[2]["names"]["ameer_week_0_1_ch3"], "Camera 3")
+        _code, _text, data = self.run_main("propose", "--camera", "front", "--json", "--embed", "--grid", "--out",
+                                           self.out)
+        self.assertEqual((data["display_name"], data["display_name_en"]), ("הכניסה", "הכניסה"))
+        _code, _text, data = self.run_main("propose", "--camera", "ameer_week_0_1_ch3", "--json", "--embed", "--grid",
+                                           "--out", self.out)
+        self.assertEqual((data["display_name"], data["display_name_en"]), ("מצלמה 3", "Camera 3"))
+        _code, _text, data = self.run_main("confirm", "--camera", "front", "--map-b64", b64z(self.app_map()), "--json",
+                                           "--out", self.out)
+        self.assertEqual(data["display_name"], "הכניסה")
+        for argv in (("restore", "--camera", "front", "--check", "--json"), ("restore", "--camera", "front", "--json")):
+            self.assertEqual(self.run_main(*argv)[2]["display_name"], "הכניסה")
 
     def test_the_app_map_round_trips_through_from_dict_and_to_dict(self) -> None:
         data = self.app_map(rest="watch_no_alert", rest_owner="public")
