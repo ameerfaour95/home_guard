@@ -159,10 +159,23 @@ def test_the_box_camera_list_decides_and_names_when_present(client, staff_factor
     _, _, _, h = staff_factory("admin")
     with session_scope(client.app.state.engine) as s:
         dev = b.enroll(s, "home", "Home")
-        dev.last_heartbeat = _hb("home", NOW - timedelta(minutes=5), cameras=[
-            {"id": "home_ch1", "name": "כניסה ראשית", "newest_clip_utc": _iso(NOW - timedelta(hours=40))},
-            {"id": "home_ch2", "name": "", "newest_clip_utc": _iso(NOW - timedelta(minutes=1))}])
+        dev.last_heartbeat = _hb("home", NOW - timedelta(minutes=5), cameras={
+            "home_ch1": {"newest_clip_utc": _iso(NOW - timedelta(hours=40))},
+            "home_ch2": {"newest_clip_utc": _iso(NOW - timedelta(minutes=1))},
+            "home_ch5": {"newest_clip_utc": _iso(NOW - timedelta(hours=50))},
+            "old_ch9": {"newest_clip_utc": _iso(NOW - timedelta(minutes=30))}},
+            camera_list=[{"id": "home_ch1", "name": "כניסה ראשית", "channel": "1", "enabled": True},
+                         {"id": "home_ch2", "name": "Camera 2", "channel": "2", "enabled": True},
+                         {"id": "home_ch3", "name": "Camera 3", "channel": "3", "enabled": True},
+                         {"id": "home_ch5", "name": "Pool", "channel": "5", "enabled": False}])
     dev = client.get("/v1/fleet", headers=h).json()["devices"][0]
-    assert [r["message"] for r in dev["reasons"]] == ["No clip for 40 h from כניסה ראשית — check it has power and network"]
+    # the list decides: old_ch9 (fresh clip, not configured) is retired; the switched-off Pool never warns;
+    # a configured camera with no clip yet does
+    assert [r["message"] for r in dev["reasons"]] == [
+        "No clip for 40 h from כניסה ראשית — check it has power and network",
+        "No clip recorded yet from Camera 3 — check its login and stream on the box"]
+    assert dev["cameras_total"] == 3
     cams = client.get("/v1/cameras", headers=h).json()
-    assert [(c["name"], c["owner_named"], c["current"]) for c in cams] == [("כניסה ראשית", True, True), ("Camera 2", False, True)]
+    assert [(c["camera"], c["name"], c["current"], c["enabled"]) for c in cams] == [
+        ("home_ch1", "כניסה ראשית", True, True), ("home_ch2", "Camera 2", True, True),
+        ("home_ch3", "Camera 3", True, True), ("home_ch5", "Pool", False, False), ("old_ch9", "Camera 9", False, True)]

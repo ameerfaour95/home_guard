@@ -37,6 +37,7 @@ class KnownCamera:
     in_heartbeat: bool
     heartbeat_newest: Optional[datetime]
     last_event_utc: Optional[datetime]
+    enabled: bool = True                # false: in the box's camera_list but switched off (never warned about)
 
     @property
     def newest_clip_utc(self) -> Optional[datetime]:
@@ -46,8 +47,8 @@ class KnownCamera:
 
 def camera_inventory(session: Session, now: datetime, devices: list[Device]) -> dict[int, list[KnownCamera]]:
     """Every camera ever known per device pk (heartbeat, Camera rows, events), split into current and retired by
-    fleet_contract.health.split_cameras: a clip in the last 48 h, or the box's own list when its heartbeat carries one.
-    Owner names come from that list or from Camera.display_name; aliases are otherwise not in the cloud."""
+    fleet_contract.health.split_cameras: the box's camera_list when its heartbeat carries one (switched-on cameras are
+    current), else a clip in the last 48 h. Owner names come from camera_list or Camera.display_name."""
     pks = [d.id for d in devices]
     out: dict[int, list[KnownCamera]] = {pk: [] for pk in pks}
     if not pks:
@@ -68,14 +69,13 @@ def camera_inventory(session: Session, now: datetime, devices: list[Device]) -> 
         body = dev.last_heartbeat if isinstance(dev.last_heartbeat, dict) else None
         hb = parse_heartbeat(body) if body is not None else None
         newest = dict(hb.cameras) if hb else {}
-        for cam, when in health.listed_newest(body).items():
-            if when is not None or cam not in newest:
-                newest[cam] = when
-        listed = health.listed_cameras(body)
-        for cam, name in (listed or {}).items():
-            if name:
-                names[(dev.id, cam)] = name
-        ids = {cam for pk, cam in known if pk == dev.id} | set(newest) | set(listed or ())
+        configured = health.camera_list(body)
+        listed = health.listed_cameras(body)  # switched-on cameras; the box's list decides when it sends one
+        switched_off = {c["id"] for c in configured or () if not c["enabled"]}
+        for cam in configured or ():
+            if cam["name"]:
+                names[(dev.id, cam["id"])] = cam["name"]
+        ids = {cam for pk, cam in known if pk == dev.id} | set(newest) | {c["id"] for c in configured or ()}
         events = {cam: datetime.fromtimestamp(ts, timezone.utc) for (pk, cam), ts in last_event.items()
                   if pk == dev.id and ts is not None}
         recent = [cam for (pk, cam), ts in last_event.items() if pk == dev.id and ts is not None and ts >= since48]
@@ -83,8 +83,9 @@ def camera_inventory(session: Session, now: datetime, devices: list[Device]) -> 
                                           site=(hb.site if hb and hb.site else dev.site), recent=recent,
                                           listed=list(listed) if listed is not None else None)
         current = set(current)
-        out[dev.id] = sorted((KnownCamera(cam, names.get((dev.id, cam), ""), cam in current, cam in newest,
-                                          newest.get(cam), events.get(cam)) for cam in ids),
+        reported = set(newest) | {c["id"] for c in configured or ()}  # the box judges these (no clip yet: None)
+        out[dev.id] = sorted((KnownCamera(cam, names.get((dev.id, cam), ""), cam in current, cam in reported,
+                                          newest.get(cam), events.get(cam), cam not in switched_off) for cam in ids),
                              key=lambda c: (not c.current, c.camera))
     return out
 
@@ -165,7 +166,8 @@ def cameras(request: Request, customer_id: Optional[int] = None, session: Sessio
     inventory = camera_inventory(session, now_of(request), devices)
     return [CameraOut(customer_id=dev.customer_id, device_id=dev.device_id, site=dev.site, camera=c.camera,
                       name=health.camera_label(c.camera, {c.camera: c.owner_name} if c.owner_name else None),
-                      owner_named=bool(c.owner_name), current=c.current, newest_clip_utc=c.newest_clip_utc)
+                      owner_named=bool(c.owner_name), current=c.current, newest_clip_utc=c.newest_clip_utc,
+                      enabled=c.enabled)
             for dev in devices for c in inventory[dev.id]]
 
 

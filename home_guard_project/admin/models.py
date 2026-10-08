@@ -57,6 +57,7 @@ class CameraOut:
     owner_named: bool
     current: bool
     newest_clip_utc: datetime | None
+    enabled: bool = True  # false: the box lists it but the owner switched it off
 
 
 @dataclass

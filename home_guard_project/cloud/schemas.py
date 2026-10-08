@@ -62,6 +62,7 @@ class CameraOut(BaseModel):
     owner_named: bool
     current: bool
     newest_clip_utc: Optional[datetime]
+    enabled: bool = True  # false: the box lists it but the owner switched it off
 
 
 class DeviceSummary(BaseModel):

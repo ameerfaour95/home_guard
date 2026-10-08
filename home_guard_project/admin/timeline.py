@@ -255,8 +255,8 @@ class TimelineScreen(QWidget):
         behind the toggle."""
         self.cameras = cameras
         # owner names for current cameras; retired ids read 'Camera 6 (old)' so they never pass for the current one
-        remember_names({c.camera: c.name if c.current else f'{c.name} (old)' for c in cameras or ()
-                        if c.owner_named or not c.current})
+        remember_names({c.camera: c.name if c.current else f'{c.name} (off)' if not c.enabled else f'{c.name} (old)'
+                        for c in cameras or () if c.owner_named or not c.current})
         self.retired_toggle.setVisible(any(not c.current for c in cameras or ()))
         self.apply_density()
 

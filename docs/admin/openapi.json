@@ -586,6 +586,11 @@
             "title": "Device Id",
             "type": "string"
           },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
           "name": {
             "title": "Name",
             "type": "string"

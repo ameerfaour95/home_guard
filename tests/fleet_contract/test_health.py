@@ -181,13 +181,16 @@ def test_renamed_site_ids_are_retired_and_never_warn(hb):
 
 
 def test_a_recent_event_keeps_a_camera_current_and_the_box_list_wins():
-    from home_guard_project.fleet_contract.health import split_cameras, listed_cameras, listed_newest
+    from home_guard_project.fleet_contract.health import split_cameras, listed_cameras, camera_list
     cameras = {"old_site_ch1": NOW - timedelta(days=3), "front_door": NOW - timedelta(days=9)}
     assert split_cameras(cameras, NOW, site="new_site", recent=["old_site_ch1"]) == (["front_door", "old_site_ch1"], [])
     assert split_cameras(cameras, NOW, site="new_site") == (["front_door"], ["old_site_ch1"])
-    body = {"cameras": [{"id": "new_site_ch1", "name": " Gate ", "newest_clip_utc": "2026-10-03T10:00:00Z"},
-                        {"id": "new_site_ch2"}, {"name": "no id"}, "junk"]}
-    assert listed_cameras(body) == {"new_site_ch1": "Gate", "new_site_ch2": ""}
-    assert listed_newest(body)["new_site_ch1"] == datetime(2026, 10, 3, 10, tzinfo=timezone.utc)
+    # the box's heartbeat camera_list (beelink-collector-box 79e9785); `cameras` stays the clip times
+    body = {"cameras": {"x": {}}, "camera_list": [
+        {"id": "new_site_ch1", "name": " Gate ", "channel": "1", "enabled": True},
+        {"id": "new_site_ch2", "name": "", "channel": "2", "enabled": False}, {"name": "no id"}, "junk"]}
+    assert camera_list(body) == [{"id": "new_site_ch1", "name": "Gate", "enabled": True},
+                                 {"id": "new_site_ch2", "name": "", "enabled": False}]
+    assert listed_cameras(body) == {"new_site_ch1": "Gate"}
     assert listed_cameras({"cameras": {"x": {}}}) is None and listed_cameras(None) is None
     assert split_cameras(cameras, NOW, listed=["new_site_ch1"]) == (["new_site_ch1"], ["front_door", "old_site_ch1"])
