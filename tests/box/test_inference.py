@@ -184,8 +184,8 @@ class WorkerWithAssistantTest(unittest.TestCase):
         (sent,) = assistant.sent
         self.assertEqual(sent["alert"], {"alert_id": "front_door_100_alert", "camera": "front_door", "label": "",
                                          "summary": "a person at the door", "ts": 100.0})
-        # The model gave no label: the owner reads "Activity", with a sound.
-        self.assertEqual(sent["text"], "\u26aa Activity \u00b7 front_door\na person at the door")
+        # The model gave no label: the owner reads "Activity", with a sound, and the camera's name, not its id.
+        self.assertEqual(sent["text"], "\u26aa Activity \u00b7 front door\na person at the door")
         self.assertEqual((sent["silent"], sent["lang"]), (False, "en"))
         self.assertEqual(sent["image"], b"jpg")
         self.assertTrue(job.ready.is_set())

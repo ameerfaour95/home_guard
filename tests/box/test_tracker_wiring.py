@@ -166,6 +166,7 @@ class RunLoopTest(unittest.TestCase):
                 mock.patch.object(inf, "detect_trigger", return_value=(False, False, [])),
                 mock.patch.object(inf, "vehicle_boxes", return_value=[]),
                 mock.patch.object(inf, "start_case_memory", return_value=False),
+                mock.patch.object(inf, "start_events", return_value=None),   # no event book on this disk
                 mock.patch.object(ai_status, "AiStatus", return_value=mock.Mock()),
                 mock.patch.object(ai_status, "objects_from_result", return_value=[]),
                 mock.patch.object(mode, "ModeWatch", return_value=mock.Mock(due=lambda now: False)),

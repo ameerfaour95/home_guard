@@ -45,14 +45,15 @@ class SwitchTest(unittest.TestCase):
 
 
 class OffIsByteIdenticalTest(unittest.TestCase):
-    """Hashes of the prompts as they were before the tracker (2026-10-06): off must not change a byte."""
+    """Hashes of the prompts without the tracker line (the 2026-10-08 rules, actions not appearance): off must not
+    change a byte."""
 
     def test_legacy_prompt(self) -> None:
         self.assertEqual(sha(inf.build_prompt(CAM, int(NIGHT), "02:14:00", 0, 0)),
-                         "721186ed2b68a28f2666d7df4b3fe7e1556b342388092852d1cf9010766594db")
+                         "651da7ab13100ceaa5d17c4a70efa66c33463de21fd2e3886e92e26db800b589")
         self.assertEqual(sha(inf.build_prompt(CAM, int(NIGHT), "02:14:00", 0, 0, owner_language="he", facts=[FACT],
                                               alert_ts=NIGHT)),
-                         "90885bd184667b2a3e62c3c903d45d2eb2afacd574164236b94da47897e8aa05")
+                         "0bf05d13d9f5dd1f72bfb9e1e8ebdcbe691c75a9a407668c22549781c2714c94")
         self.assertEqual(inf.build_prompt(CAM, int(NIGHT), "02:14:00", 0, 0, tracker_facts=""),
                          inf.build_prompt(CAM, int(NIGHT), "02:14:00", 0, 0))
 

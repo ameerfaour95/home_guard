@@ -128,8 +128,13 @@ class PromptTests(unittest.TestCase):
         exec(compile(ast.Module(body=nodes, type_ignores=[]), "baseline", "exec"), namespace)
         old = namespace["build_prompt"](CAM, int(TS), "12:00:00", 0, 0)
         new = inf.build_prompt(CAM, int(TS), "12:00:00", 0, 0)
+        # 2026-10-08 rewrote the label rules (actions, not appearance) and two lines that say the same: swap the
+        # rules back and leave those lines out; everything else must still be the original prompt.
+        new = new.replace(inf.LABEL_RULES, namespace["LABEL_RULES"])
+        rewritten = ("raw_label", "applied_fact_id", "serious_behaviour", "why")
         new = "\n".join(line for line in new.splitlines()
-                        if not any('"' + key + '"' in line for key in ("raw_label", "applied_fact_id", "serious_behaviour")))
+                        if not any('"' + key + '"' in line for key in rewritten) and "Dark clothing" not in line)
+        old = "\n".join(line for line in old.splitlines() if '"why"' not in line and "Dark clothing" not in line)
         self.assertEqual(new, old)
         self.assertNotIn("House notes", new)
 
@@ -212,7 +217,8 @@ class WorkerTests(unittest.TestCase):
             self.assertIs(job.alert["serious_behaviour"], False)
             self.assertEqual(job.alert["silent"], silent)
             text = assistant.send_alert.call_args.args[1]
-            self.assertEqual(text, f"🟢 {CAM}: People wait at the pergola. Normal: {note()['text']} (your note, 07:00-17:00)")
+            # The owner reads the camera's name (no family name here: the id with spaces), never the id.
+            self.assertEqual(text, f"🟢 {CAM.replace('_', ' ')}: People wait at the pergola. Normal: {note()['text']} (your note, 07:00-17:00)")
             self.assertTrue(assistant.send_alert.call_args.args[0]["softened"])
             provider.assert_called_once_with(CAM, TS + offset)
             self.assertEqual(backend.analyze.call_args.kwargs["facts"], [note()])
