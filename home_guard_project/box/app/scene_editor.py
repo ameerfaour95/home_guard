@@ -18,7 +18,7 @@ import math
 
 from PySide6.QtCore import Qt, QPointF, QRectF, QSize, QTimer, QVariantAnimation, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPixmap, QPolygonF
-from PySide6.QtWidgets import (QAbstractButton, QDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
+from PySide6.QtWidgets import (QAbstractButton, QApplication, QDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
                                QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget)
 
 from . import motion
@@ -540,9 +540,9 @@ class MapStage(QWidget):
                     norm = math.hypot(d.x(), d.y()) or 1.
                     along = d / norm * (rect.width() + rect.height()) * 2
                     out = QPointF(vx * rect.width(), vy * rect.height())
-                    out = out / (math.hypot(out.x(), out.y()) or 1.) * (rect.width() + rect.height()) * 2
+                    out = out / (math.hypot(out.x(), out.y()) or 1.) * max(70., min(rect.width(), rect.height()) * .22)
                     half = QPolygonF([points[0] - along, points[1] + along, points[1] + along + out, points[0] - along + out])
-                    p.setPen(Qt.PenStyle.NoPen); p.setBrush(alpha(t['action'], .22)); p.drawPolygon(half)
+                    p.setPen(Qt.PenStyle.NoPen); p.setBrush(alpha(t['action'], .28)); p.drawPolygon(half)
                     self.arrow(p, preview, accent, rect)
             for pen_colour, width in ((alpha('#000000', .55), 8), (accent, 3.5)):
                 p.setPen(QPen(pen_colour, width, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
@@ -1042,6 +1042,9 @@ class SceneMapEditor(QWidget):
         self.retry = None
         self.page = LOADING
         self.jobs = Jobs(self)
+        app = QApplication.instance()
+        if app is not None:
+            app.aboutToQuit.connect(self.close_jobs)        # never keep the app waiting on a box command
         self.setObjectName('sceneEditor')
         self.setLayoutDirection(Qt.LayoutDirection.RightToLeft if is_rtl(self.lang) else Qt.LayoutDirection.LeftToRight)
         t = colors(self)
@@ -1060,6 +1063,7 @@ class SceneMapEditor(QWidget):
             f'QLabel#scene_count {{ color: {t["secondary"]}; font-size: 10.5pt; }}')
         root = QHBoxLayout(self); root.setContentsMargins(0, 0, 0, 0); root.setSpacing(28)
         self.stage = MapStage(self)
+        self.stage.setAccessibleName(display_title(camera, self.lang))
         self.stage.setLayoutDirection(Qt.LayoutDirection.LeftToRight)      # the picture never mirrors
         self.stage.text_direction = self.layoutDirection()
         if placeholder is not None and not placeholder.isNull():

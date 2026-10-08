@@ -1437,7 +1437,7 @@ class Window(QMainWindow):
                 self.run_answers=self.collect_answers()
                 self.engine_cameras=[]
                 self.open_camera_check()
-                if self.args.page == "scene-map":
+                if self.args.page == "scene-map" and self.args.demo:   # render flags never reach a real box
                     self.open_scene_step(getattr(self.args,"scene",None) or "regions")
             else:
                 self.set_page(index)

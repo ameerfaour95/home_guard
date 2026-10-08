@@ -203,7 +203,8 @@ class DemoSceneBackend:
     def __init__(self, fail=None, method="sam", current=None):
         self.fail = fail
         self.method = method
-        self.current = dict(current or {})
+        self.current = dict(current or {})          # the first camera's map now; each camera keeps its own after
+        self.maps = {}
         self.calls = []
 
     def _check(self, step, camera):
@@ -231,18 +232,19 @@ class DemoSceneBackend:
         self._check("propose", camera)
         if grid:
             self.method = "grid"
-        return Proposal(camera, self.method, self.picture(camera), self.regions(), dict(self.current))
+        return Proposal(camera, self.method, self.picture(camera), self.regions(),
+                        dict(self.maps.get(camera, self.current)))
 
     def confirm(self, camera, scene, restart=True):
         self._check("confirm", camera)
         from .. import scene_map as sm
         from ..scene_interview import confirmed_preview
         from .scene_model import restart_expected
-        draft = sm.SceneMap.from_dict(camera, scene, self.current.get("watched") or None)
+        current = self.maps.get(camera, self.current)
+        draft = sm.SceneMap.from_dict(camera, scene, current.get("watched") or None)
         saved = confirmed_preview(draft).to_dict()
-        changed = restart_expected(self.current, scene)
-        self.current = saved
-        return Saved(camera, saved, changed)
+        self.maps[camera] = saved
+        return Saved(camera, saved, restart_expected(current, scene))
 
     def cancel(self):
         pass
