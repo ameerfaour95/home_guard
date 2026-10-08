@@ -992,7 +992,7 @@ def report(folder: str, cameras: Sequence[str] = (), now: Optional[float] = None
                                    "phase_event_hours": phase_counts, "top_tags": top_tags,
                                    "event_hours": sum(by_hour)}
         print(f"\n{cam}: {d['days_of_data']} day(s) of data, {sum(by_hour)} event-hours", file=out)
-        print(f"  busiest hours: {', '.join(f'{h} ' for h in d['busiest_hours']) or '-'}", file=out)
+        print(f"  busiest hours: {', '.join(d['busiest_hours']) or '-'}", file=out)
         print(f"  quietest hours: {', '.join(d['quietest_hours'])}", file=out)
         print("  by part of day (event-hours): " + ", ".join(f"{p} {n}" for p, n in phase_counts.items()), file=out)
         print("  hours 00-23: " + " ".join(str(x) for x in by_hour), file=out)
