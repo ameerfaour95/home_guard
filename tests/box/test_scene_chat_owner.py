@@ -35,7 +35,9 @@ class OwnerAnswerChatTest(unittest.TestCase):
                                  lambda: [CAM], lambda: "he", state_path=os.path.join(self.tmp, "chat.json"),
                                  out_dir=os.path.join(self.tmp, "interview"), zones_path=self.zones,
                                  picture=self.grab, segmenter=si.grid_segmenter, background=False, now=lambda: NOW)
-        self.chat.on_text(CHAT, "מפה")
+        self.chat.on_text(CHAT, "מפה")                                  # the box's one camera: "are you sure"
+        yes = {label: code for row in self.texts[-1]["rows"] for label, code in row}["כן, להגדיר מחדש"]
+        self.chat.on_button(CHAT, yes)
         # The numbers the owner saw on the box: the real regions of camera 1.
         s = self.chat.session(CHAT)
         shutil.copy(REGIONS, s["regions_path"])

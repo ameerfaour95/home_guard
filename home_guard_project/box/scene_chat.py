@@ -1,38 +1,44 @@
-"""Changing one camera's map over Telegram, on demand (owner's decision 2026-10-08 22:55): ONE camera, ONE change.
+"""Re-defining one camera's map over Telegram, on demand (owner's decisions 2026-10-08 22:55 and 23:10).
 
 The map itself is set up in the box's setup (the app). Telegram only changes it when the owner asks:
 
-    owner:  אני רוצה לשנות את האזור של השכן במצלמה 3        (or "תגדיר אזור חדש", "מפה פרגולה", "/map")
-    bot:    [numbered picture] "פרגולה: מה משתנה? למשל: 4 של השכן, להסתיר את 9, המעקה בין 4 ל-9"
+    owner:  אני רוצה להגדיר מחדש את האזור של השכן במצלמה 3     (or "תגדיר אזור חדש", "מפה פרגולה", "/map")
+    bot:    "אתה בטוח שאתה רוצה להגדיר מחדש את חניה? המפה הנוכחית ממשיכה לעבוד עד שתאשר את החדשה."
+            [כן, להגדיר מחדש] [לא]
+    bot:    [numbered picture] "חניה: מה משתנה? למשל: 4 של השכן, להסתיר את 9, המעקה בין 4 ל-9"   [בטל]
     owner:  4 של השכן
-    bot:    [coloured picture] "ככה? כחול שלנו, כתום של השכן, ..."  [שמור] [תקן]
-    owner:  [שמור]   -> scene_interview.confirm: the change merges into the camera's map, nothing else changes
+    bot:    [coloured picture] "ככה? כחול שלנו, כתום של השכן, ..."   [שמור] [תקן] [בטל]
+    owner:  [שמור]   -> scene_interview.confirm: the change merges into the camera's map; the old one is the backup
 
-- Only an explicit request starts it ("מפה" or "/map", "תגדיר/תשנה ... אזור"). With no camera named the bot asks
-  with one button per camera (the family's names, camera_names). It never walks the cameras.
-- The change MERGES into the camera's existing map: areas the owner did not mention keep their kind, and a
-  confirmed map stays the camera's whole truth (``scene_interview.apply_answers`` / ``confirm``).
-- The owner's other messages are never taken as answers: only a message that parses as a change of this picture
-  (a number of it with an ownership, hide or line word) is, and only within ANSWER_WINDOW of the bot's last
-  interview message (reset on each answer). Everything else goes to the assistant; while a change is open the
-  owner gets one short reminder at most. "עצור" ends it. The buttons carry the session's token.
-- One exception (2026-10-08, "שכחת את 7" went to the assistant, which sent a clip twice): while the coloured
-  picture waits for [שמור] / [תקן], a message with a fix word ("שכחת", "תתקן", "לא נכון", "חסר") or a short one
-  naming a number of the picture is a correction: it is added to the answer, or the bot asks what that number is.
-- A wall the owner calls the one between us ("4 המעקה ביני לבין השכן") stays ours with a boundary along it; when
-  the side that is ours is unclear the bot asks with two buttons ("הצד הימני" / "הצד השמאלי"), never guesses.
-  A number the owner wrote that made nothing is said back: "לא הבנתי את 7".
-- State: a small JSON file in the box's state folder (version 2, one session per chat). Anything else in it (the
-  multi-camera sessions of stage 2c, a damaged file) is dropped harmlessly the first time it is read.
-- A change that alters the frame mask (a black area, or a zone's black outside opened) restarts the running mode
-  once, after the session is closed.
+The owner's rules (23:10), each tested:
 
-CLI on the box: ``python -m home_guard_project.box.scene_interview telegram --camera X`` sends the first picture
-for camera X to the owner's chat; the running inbox carries on with the answer.
+1. It starts only when the owner ASKS to define or re-define an area ("תגדיר", "להגדיר מחדש", "לשנות את האזור",
+   "מפה <camera>", "/map"). A message that only mentions a camera never starts it. With no camera named: one
+   button per camera (camera_names), never a walk over all of them.
+2. Before anything, "are you sure" with [כן, להגדיר מחדש] [לא]. Nothing starts without [כן].
+3. Exit at any point: "עצור", "בטל", "לא משנה", or the [בטל] button every step carries. Exiting changes nothing,
+   and the exit message says the current map stays as it is.
+4. Until [שמור] the camera's live map and its mask are untouched: answers only write the draft.
+5. Only [שמור] on the final coloured picture replaces the map; the map it replaced is kept (``scene_interview.
+   restore_previous``), and "תחזיר את המפה הקודמת" brings it back after its own [כן, להחזיר] [לא], with a receipt.
+6. A flow nobody moves on expires after SESSION_TTL (30 min); after that nothing is taken. Within it, a message
+   is an answer only when it parses as a change of this picture (a number of it with an ownership, hide or line
+   word); everything else goes to the assistant, with one short reminder at most.
+
+From the owner's camera-1 answer (stage 2c): while the coloured picture waits, a message with a fix word
+("שכחת", "תתקן", "לא נכון", "חסר") or a short one naming a number of the picture is a correction (added to the
+answer, or the bot asks what that number is); a wall "between us" stays ours with a boundary, its side asked with
+buttons when unclear; a number that made nothing is said back ("לא הבנתי את 7").
+
+State: a small JSON file in the box's state folder (version 2, one session per chat). Anything else in it (the
+multi-camera sessions of stage 2c, a damaged file) is dropped harmlessly. A change of the frame mask restarts the
+running mode once, after the session is closed. The box CLI (``scene_interview telegram --camera X``) sends the
+"are you sure" for camera X; the running inbox carries on.
 """
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import logging
 import os
@@ -50,44 +56,59 @@ log = logging.getLogger("box.scene_chat")
 
 STATE_NAME = "scene_chat.json"
 STATE_VERSION = 2
-ANSWER_WINDOW = 600.0             # an answer counts only this long after the bot's last interview message
-SESSION_TTL = 1800.0              # the session's buttons work this long after the bot's last interview message
+SESSION_TTL = 1800.0              # a flow nobody moved on for this long is over (owner: 30 minutes)
 CAPTION_LIMIT = 1024
-SAVE, FIX, STOP, CHOOSE, SIDE = "sm:s", "sm:f", "sm:x", "sm:c", "sm:d"
+SAVE, FIX, STOP, CHOOSE, SIDE, SURE, RESTORE = "sm:s", "sm:f", "sm:x", "sm:c", "sm:d", "sm:y", "sm:r"
 FIX_WORDS_SHORT = 3               # a correction without a fix word is at most this many words ("7", "גם 7 שלי")
 
-_TRIGGER = re.compile(
-    r"(?:^|\s|/)(?:מפה|map)(?=\s|$|[?!.,:])"
-    r"|(?:תגדיר|להגדיר|נגדיר|תשנה|לשנות|נשנה|תעדכן|לעדכן|תסמן|לסמן)\s+(?:\S+\s+){0,3}?(?:אזור|האזור|אזורים|מפה|המפה|מפת)"
-    r"|(?:set up|define|change|edit|update|mark)\s+(?:\S+\s+){0,3}?(?:area|zone|map)\b", re.IGNORECASE)
-_STOP_WORDS = re.compile(r"^\s*(?:עצור|תעצור|בטל|די|stop|cancel)\s*[.!]?\s*$", re.IGNORECASE)
+_DEFINE = re.compile(
+    r"^\s*/map\b|^\s*(?:מפה|map)(?:\s+\S+){0,3}\s*[?!.]?\s*$"
+    r"|(?:תגדיר|להגדיר|נגדיר|הגדר|תגדירו|תשנה|לשנות|נשנה|שנה|תעדכן|לעדכן|תסמן|לסמן)\s+(?:\S+\s+){0,4}?"
+    r"(?:אזור|האזור|אזורים|מפה|המפה|מפת|מחדש)"
+    r"|\b(?:set up|define|redefine|re-define|change|edit|update|mark)\s+(?:\S+\s+){0,4}?(?:area|zone|map)\b",
+    re.IGNORECASE)
+_RESTORE = re.compile(r"(?:תחזיר|להחזיר|החזר|תשחזר|לשחזר)\s+(?:לי\s+)?(?:את\s+)?(?:ה)?מפה\s+(?:ה)?קודמת"
+                      r"|\b(?:restore|bring back)\s+the\s+(?:previous|old)\s+map\b", re.IGNORECASE)
+_STOP_WORDS = re.compile(r"^\s*(?:עצור|תעצור|בטל|תבטל|לא משנה|די|stop|cancel|never ?mind)\s*[.!]?\s*$",
+                         re.IGNORECASE)
 _FIX_WORDS = re.compile(r"שכחת|תתקן|לתקן|לא נכון|חסר|טעות|\b(?:forgot|fix|wrong|missing)\b", re.IGNORECASE)
 _CAMERA_NUMBER = re.compile(r"(?:מצלמה|camera|cam|ch)\s*-?\s*(\d+)", re.IGNORECASE)
 
 TEXTS = {
     "he": {
         "which": "איזו מצלמה?",
+        "sure": "אתה בטוח שאתה רוצה להגדיר מחדש את {name}? המפה הנוכחית ממשיכה לעבוד עד שתאשר את החדשה.",
+        "yes_define": "כן, להגדיר מחדש", "no": "לא", "cancel": "בטל",
         "ask": "{name}: מה משתנה?\nלמשל: 4 של השכן, להסתיר את 9, המעקה בין 4 ל-9\nמה שלא תזכירו נשאר כמו שהוא.",
         "zone": "\nהקו הלבן: מה שנצפה עד היום.",
         "grid": "\n(המספרים על רשת: זיהוי האובייקטים לא זמין עכשיו.)",
         "confirm": "{name}: ככה? כחול שלנו, כתום של השכן, אפור רחוב, שחור מוסתר.",
         "ours": "שלנו", "neighbour": "של השכן", "public": "רחוב", "black": "מוסתר", "lines": "קווים",
         "rest": "כל השאר: {who}",
-        "save": "שמור", "fix": "תקן", "stop_btn": "עצור",
-        "saved": "נשמר: {name}.", "fixing": "בסדר. כתבו שוב מה משתנה ב{name}.",
-        "stopped": "עצרתי. המפה לא השתנתה.", "restart": " הצפייה מתחילה מחדש כדי שהשינוי ייכנס (כדקה).",
-        "expired": "פג הזמן לשינוי הזה. כדי להתחיל שוב כתבו למשל 'מפה {name}'.",
-        "no_picture": "לא הצלחתי לקבל תמונה מ{name} עכשיו.",
-        "no_cameras": "לא מצאתי מצלמות.", "reminder": "(השינוי במפה של {name} עדיין פתוח: כתבו למשל '4 של השכן', "
-                                                          "או 'עצור'.)",
+        "save": "שמור", "fix": "תקן",
+        "saved": "נשמר: המפה החדשה של {name} פועלת. המפה הקודמת שמורה: אפשר לכתוב 'תחזיר את המפה הקודמת'.",
+        "fixing": "בסדר. כתבו שוב מה משתנה ב{name}.",
+        "stopped": "עצרתי. לא שיניתי כלום: המפה של {name} נשארת כמו שהיא.",
+        "stopped_any": "עצרתי. לא שיניתי כלום.",
+        "restart": " הצפייה מתחילה מחדש כדי שהשינוי ייכנס (כדקה).",
+        "expired": "פג הזמן לשינוי הזה. לא שיניתי כלום: המפה של {name} נשארת כמו שהיא.",
+        "no_picture": "לא הצלחתי לקבל תמונה מ{name} עכשיו. לא שיניתי כלום.",
+        "no_cameras": "לא מצאתי מצלמות.",
+        "reminder": "(הגדרת המפה של {name} עדיין פתוחה: כתבו למשל '4 של השכן', או 'בטל'.)",
         "which_side": "באיזה צד של {name} ({n}) השטח שלכם?",
         "what_is": "מה {nums}? כתבו למשל '{n} שלי' או '{n} של השכן'.", "what_fix": "מה לתקן? כתבו למשל '7 שלי'.",
+        "restore_q": "להחזיר את המפה הקודמת של {name} (מ-{when})? המפה הנוכחית תישמר במקומה כגיבוי.",
+        "yes_restore": "כן, להחזיר", "restored": "החזרתי את המפה הקודמת של {name}. היא פועלת עכשיו.",
+        "no_previous": "אין מפה קודמת של {name}.",
         "notes": {"no_region": "אין {n} בתמונה", "side": "איזה צד של {name} שלכם? כתבו למשל '{a} שלי'",
                   "not_understood": "לא הבנתי את {n}",
                   "touch": "{a} ו-{b} לא נוגעים, אז אין ביניהם קו", "nothing": "עוד אין מה לשמור: כתבו מה משתנה"},
     },
     "en": {
         "which": "Which camera?",
+        "sure": "Are you sure you want to re-define {name}? The current map keeps working until you confirm the new "
+                "one.",
+        "yes_define": "Yes, re-define", "no": "No", "cancel": "Cancel",
         "ask": "{name}: what changes?\nFor example: 4 the neighbour's, hide 9, the railing between 4 and 9\n"
                "What you do not mention stays as it is.",
         "zone": "\nThe white line: what was watched until now.",
@@ -95,20 +116,24 @@ TEXTS = {
         "confirm": "{name}: like this? Blue ours, orange the neighbour's, grey street, black hidden.",
         "ours": "ours", "neighbour": "the neighbour's", "public": "street", "black": "hidden", "lines": "lines",
         "rest": "everything else: {who}",
-        "save": "Save", "fix": "Fix", "stop_btn": "Stop",
-        "saved": "Saved: {name}.", "fixing": "OK. Write again what changes in {name}.",
-        "stopped": "Stopped. The map did not change.", "restart": " Watching restarts so the change takes hold "
-                                                                  "(about a minute).",
-        "expired": "This change has timed out. To start again write for example 'map {name}'.",
-        "no_picture": "I could not get a picture from {name} now.",
-        "no_cameras": "I found no cameras.", "reminder": "(The change to {name}'s map is still open: write for "
-                                                         "example '4 the neighbour's', or 'stop'.)",
+        "save": "Save", "fix": "Fix",
+        "saved": "Saved: {name}'s new map is working. The previous one is kept: write 'restore the previous map'.",
+        "fixing": "OK. Write again what changes in {name}.",
+        "stopped": "Stopped. Nothing changed: {name}'s map stays as it is.", "stopped_any": "Stopped. Nothing changed.",
+        "restart": " Watching restarts so the change takes hold (about a minute).",
+        "expired": "This change timed out. Nothing changed: {name}'s map stays as it is.",
+        "no_picture": "I could not get a picture from {name} now. Nothing changed.",
+        "no_cameras": "I found no cameras.",
+        "reminder": "(Re-defining {name}'s map is still open: write for example '4 the neighbour's', or 'cancel'.)",
         "which_side": "Which side of {name} ({n}) is yours?",
         "what_is": "What is {nums}? Write for example '{n} mine' or '{n} the neighbour's'.",
         "what_fix": "What should change? Write for example '7 mine'.",
+        "restore_q": "Bring back {name}'s previous map (from {when})? The current one is kept as the backup instead.",
+        "yes_restore": "Yes, bring it back", "restored": "{name}'s previous map is back and working.",
+        "no_previous": "There is no previous map of {name}.",
         "notes": {"no_region": "there is no {n} in the picture", "not_understood": "I did not understand {n}",
-                  "side": "which side of {name} is yours? Write "
-                  "for example '{a} mine'", "touch": "{a} and {b} do not touch, so there is no line between them",
+                  "side": "which side of {name} is yours? Write for example '{a} mine'",
+                  "touch": "{a} and {b} do not touch, so there is no line between them",
                   "nothing": "nothing to save yet: say what changes"},
     },
 }
@@ -119,8 +144,14 @@ def _t(lang: str) -> Dict[str, Any]:
 
 
 def is_trigger(text: str) -> bool:
-    """The owner explicitly asks to change a camera's map ("מפה", "/map", "תגדיר אזור חדש", "לשנות את האזור")."""
-    return bool(_TRIGGER.search(str(text or "")))
+    """The owner asks to define or re-define a camera's area ("תגדיר אזור חדש", "להגדיר מחדש", "מפה פרגולה",
+    "/map"). Only mentioning a camera is not asking."""
+    return bool(_DEFINE.search(str(text or "")))
+
+
+def is_restore(text: str) -> bool:
+    """"תחזיר את המפה הקודמת": the owner wants the map before the last [שמור] back."""
+    return bool(_RESTORE.search(str(text or "")))
 
 
 def owner_notes(notes: Sequence[str], lang: str) -> List[str]:
@@ -176,7 +207,7 @@ def is_answer(text: str, numbers: Sequence[int]) -> bool:
 
 
 class SceneChat:
-    """One change of one camera's map per chat; the state in a JSON file (the box's CLI can start one)."""
+    """One re-definition of one camera's map per chat; the state in a JSON file (the box's CLI can start one)."""
 
     def __init__(self, send_photo: Callable[[str, str, str, List[List[tuple]]], Any],
                  send_text: Callable[[str, str, List[List[tuple]]], Any], cameras: Callable[[], Sequence[str]],
@@ -218,7 +249,7 @@ class SceneChat:
         os.replace(tmp, self.state_path)
 
     def session(self, chat_id: str) -> Optional[Dict[str, Any]]:
-        """The chat's open session, or None (none, an old format, or timed out)."""
+        """The chat's open session, or None (none, an old format, or nobody moved it on for SESSION_TTL)."""
         s = self._load().get(str(chat_id))
         if s is None:
             return None
@@ -242,27 +273,26 @@ class SceneChat:
 
     # ---------- what the owner sends ----------
     def on_text(self, chat_id: str, text: str) -> bool:
-        """True when *text* belonged to the map change (a request, an answer, "עצור"); else the assistant reads it."""
+        """True when *text* belonged to the map flow (a request, an answer, an exit); else the assistant reads it."""
         chat_id, text = str(chat_id), str(text or "").strip()
         with self._lock:
             s = self.session(chat_id)
             if s is not None and _STOP_WORDS.match(text):
-                self._put(chat_id, None)
-                self._say(chat_id, _t(self.lang())["stopped"])
+                self._cancel(chat_id, s)
+                return True
+            if is_restore(text):
+                self._request(chat_id, text, "restore")
                 return True
             if is_trigger(text):
-                named = self._named(text) or [c for c in self.cameras() if c]
-                if len(named) == 1:                 # named, or the box has one camera
-                    self.begin(chat_id, named[0])
-                else:
-                    self.ask_camera(chat_id, named)
+                self._request(chat_id, text, "define")
                 return True
-            fresh = s is not None and self.now() - float(s.get("last_bot") or 0) <= ANSWER_WINDOW
-            numbers = (s or {}).get("numbers") or []
-            if fresh and s.get("stage") in ("answer", "side") and is_answer(text, numbers):
+            if s is None:
+                return False
+            numbers = s.get("numbers") or []
+            if s.get("stage") in ("answer", "side") and is_answer(text, numbers):
                 self._answer(chat_id, s, text, append=bool(s.get("append")) or s.get("stage") == "side")
                 return True
-            if fresh and s.get("stage") == "confirm" and self._correction(text, numbers):
+            if s.get("stage") == "confirm" and self._correction(text, numbers):
                 if is_answer(text, numbers):
                     self._answer(chat_id, s, text, append=True)
                 else:
@@ -271,9 +301,9 @@ class SceneChat:
                     self._put(chat_id, s)
                     words = _t(self.lang())
                     self._say(chat_id, words["what_is"].format(nums=", ".join(map(str, named)), n=named[0])
-                              if named else words["what_fix"])
+                              if named else words["what_fix"], self._cancel_row(s))
                 return True
-            if s is not None and s.get("camera") and not s.get("reminded"):
+            if s.get("camera") and not s.get("reminded"):
                 s["reminded"] = True
                 self._put(chat_id, s)
                 self._say(chat_id, _t(self.lang())["reminder"].format(name=self._name(s["camera"])))
@@ -299,48 +329,90 @@ class SceneChat:
                 old = self._load().get(chat_id)
                 if old is not None and parts[2] == old.get("token"):
                     self._put(chat_id, None)            # this session's own button, after its time
-                    self._say(chat_id, words["expired"].format(name=self._name(old["camera"])))
+                    self._say(chat_id, words["expired"].format(name=self._name(old.get("camera") or "")))
                 return True
             action = f"sm:{parts[1]}"
-            if action == CHOOSE and s.get("stage") == "choose" and len(parts) == 4:
-                choices = s.get("choices") or []
+            stage = s.get("stage")
+            if action == STOP:
+                self._cancel(chat_id, s)
+            elif action == CHOOSE and stage == "choose" and len(parts) == 4:
                 try:
-                    camera = choices[int(parts[3])]
+                    camera = (s.get("choices") or [])[int(parts[3])]
                 except (ValueError, IndexError):
                     return True
-                self.begin(chat_id, camera)
-            elif action == SIDE and s.get("stage") == "side" and len(parts) == 5 and parts[4] in sm.SIDES:
+                self._after_choice(chat_id, camera, s.get("purpose") or "define")
+            elif action == SURE and stage == "sure":
+                self.begin(chat_id, s["camera"])
+            elif action == RESTORE and stage == "restore":
+                self._restore(chat_id, s)
+            elif action == SIDE and stage == "side" and len(parts) == 5 and parts[4] in sm.SIDES:
                 sides = dict(s.get("sides") or {})
                 sides[str(parts[3])] = parts[4]
                 s["sides"] = sides
                 self._answer(chat_id, s, "", append=True)
-            elif action == SAVE and s.get("stage") == "confirm":
+            elif action == SAVE and stage == "confirm":
                 self._confirm(chat_id, s)
-            elif action == FIX and s.get("stage") == "confirm":
+            elif action == FIX and stage == "confirm":
                 s.update(stage="answer", last_bot=self.now(), append=False, text="", sides={})
                 self._put(chat_id, s)
-                self._say(chat_id, words["fixing"].format(name=self._name(s["camera"])))
-            elif action == STOP:
-                self._put(chat_id, None)
-                self._say(chat_id, words["stopped"])
+                self._say(chat_id, words["fixing"].format(name=self._name(s["camera"])), self._cancel_row(s))
             return True
 
     # ---------- the steps ----------
-    def ask_camera(self, chat_id: str, cameras: Sequence[str]) -> None:
-        """Which camera? One button each, by the family's names."""
+    def _request(self, chat_id: str, text: str, purpose: str) -> None:
+        """A request to re-define (or restore) a map: the camera named, the box's only one, or a choice."""
+        named = self._named(text) or [c for c in self.cameras() if c]
+        if len(named) == 1:
+            self._after_choice(chat_id, named[0], purpose)
+        else:
+            self.ask_camera(chat_id, named, purpose)
+
+    def ask_camera(self, chat_id: str, cameras: Sequence[str], purpose: str = "define") -> None:
+        """Which camera? One button each, by the family's names, and [בטל]."""
         words = _t(self.lang())
         cameras = [c for c in cameras if c]
         if not cameras:
             self._say(chat_id, words["no_cameras"])
             return
-        token = uuid.uuid4().hex[:8]
-        self._put(chat_id, {"camera": "", "choices": list(cameras), "stage": "choose", "token": token,
-                            "last_bot": self.now()})
-        rows = [[(self._name(c), f"{CHOOSE}:{token}:{i}")] for i, c in enumerate(cameras)]
-        self._say(chat_id, words["which"], rows)
+        s = {"camera": "", "choices": list(cameras), "purpose": purpose, "stage": "choose",
+             "token": uuid.uuid4().hex[:8], "last_bot": self.now()}
+        self._put(chat_id, s)
+        rows = [[(self._name(c), f"{CHOOSE}:{s['token']}:{i}")] for i, c in enumerate(cameras)]
+        self._say(chat_id, words["which"], rows + self._cancel_row(s))
+
+    def _after_choice(self, chat_id: str, camera: str, purpose: str) -> None:
+        if purpose == "restore":
+            self.ask_restore(chat_id, camera)
+        else:
+            self.ask_sure(chat_id, camera)
+
+    def ask_sure(self, chat_id: str, camera: str) -> None:
+        """Rule 2: are you sure? Nothing starts without [כן]."""
+        words = _t(self.lang())
+        s = {"camera": camera, "stage": "sure", "token": uuid.uuid4().hex[:8], "last_bot": self.now()}
+        self._put(chat_id, s)
+        self._say(chat_id, words["sure"].format(name=self._name(camera)),
+                  [[(words["yes_define"], f"{SURE}:{s['token']}"), (words["no"], f"{STOP}:{s['token']}")]])
+
+    def ask_restore(self, chat_id: str, camera: str) -> None:
+        """Rule 5: bring the previous map back? Its own [כן, להחזיר] [לא]."""
+        words = _t(self.lang())
+        previous = si.previous_map(camera, self.zones_path)
+        if previous is None:
+            self._put(chat_id, None)
+            self._say(chat_id, words["no_previous"].format(name=self._name(camera)))
+            return
+        try:
+            when = dt.datetime.fromtimestamp(float(previous.get("saved_at") or 0)).strftime("%d.%m %H:%M")
+        except (TypeError, ValueError, OverflowError, OSError):
+            when = "?"
+        s = {"camera": camera, "stage": "restore", "token": uuid.uuid4().hex[:8], "last_bot": self.now()}
+        self._put(chat_id, s)
+        self._say(chat_id, words["restore_q"].format(name=self._name(camera), when=when),
+                  [[(words["yes_restore"], f"{RESTORE}:{s['token']}"), (words["no"], f"{STOP}:{s['token']}")]])
 
     def begin(self, chat_id: str, camera: str) -> None:
-        """Start the change of *camera*'s map: the numbered picture (made in the background)."""
+        """After [כן]: the numbered picture (made in the background). The live map is not touched."""
         s = {"camera": camera, "stage": "preparing", "token": uuid.uuid4().hex[:8], "last_bot": self.now(),
              "started": self.now()}
         self._put(chat_id, s)
@@ -371,16 +443,15 @@ class SceneChat:
         with self._lock:
             current = self.session(chat_id)
             if current is None or current.get("token") != s["token"]:
-                return                          # stopped while the picture was made
+                return                          # cancelled while the picture was made
             current.update(stage="answer", regions_path=proposal["regions_path"], picture=picture_path,
                            numbers=[r["number"] for r in proposal["regions"]], last_bot=self.now())
             self._put(chat_id, current)
-        self.send_photo(chat_id, proposal["image"], caption[:CAPTION_LIMIT],
-                        [[(words["stop_btn"], f"{STOP}:{s['token']}")]])
+        self.send_photo(chat_id, proposal["image"], caption[:CAPTION_LIMIT], self._cancel_row(s))
 
     def _answer(self, chat_id: str, s: Dict[str, Any], text: str, append: bool = False) -> None:
-        """The owner's words (added to what they already said when *append*) into the draft; then the side of a
-        wall when unclear, else the coloured picture with [שמור] / [תקן]."""
+        """The owner's words (added to what they already said when *append*) into the DRAFT only; then the side
+        of a wall when unclear, else the coloured picture with [שמור] / [תקן] / [בטל]."""
         camera, words = s["camera"], _t(self.lang())
         said = "\n".join(t for t in ((s.get("text") or "") if append else "", text) if t)
         s.update(text=said, append=False)
@@ -393,8 +464,7 @@ class SceneChat:
             s.update(stage="side", last_bot=self.now())
             self._put(chat_id, s)
             rows = [[(names["left"], f"{SIDE}:{s['token']}:{need['number']}:left"),
-                     (names["right"], f"{SIDE}:{s['token']}:{need['number']}:right")],
-                    [(words["stop_btn"], f"{STOP}:{s['token']}")]]
+                     (names["right"], f"{SIDE}:{s['token']}:{need['number']}:right")]] + self._cancel_row(s)
             question = words["which_side"].format(name=need["name"], n=need["number"])
             if result["image"]:
                 self.send_photo(chat_id, result["image"], question, rows)
@@ -406,7 +476,7 @@ class SceneChat:
         lines += owner_notes(result["notes"], self.lang())
         s.update(stage="confirm", last_bot=self.now())
         self._put(chat_id, s)
-        rows = [[(words["save"], f"{SAVE}:{s['token']}"), (words["fix"], f"{FIX}:{s['token']}")]]
+        rows = [[(words["save"], f"{SAVE}:{s['token']}"), (words["fix"], f"{FIX}:{s['token']}")]] + self._cancel_row(s)
         caption = "\n".join(lines)[:CAPTION_LIMIT]
         if result["image"]:
             self.send_photo(chat_id, result["image"], caption, rows)
@@ -414,6 +484,7 @@ class SceneChat:
             self._say(chat_id, caption, rows)
 
     def _confirm(self, chat_id: str, s: Dict[str, Any]) -> None:
+        """Rule 5: only [שמור] on the final picture replaces the map (the old one becomes the backup)."""
         camera, words = s["camera"], _t(self.lang())
         result = si.confirm(camera, self.out_dir, self.zones_path, known_cameras=self._all_cameras())
         self._put(chat_id, None)
@@ -424,13 +495,40 @@ class SceneChat:
         if result["restart_needed"]:
             (self._restart or _request_restart)()
 
+    def _restore(self, chat_id: str, s: Dict[str, Any]) -> None:
+        camera, words = s["camera"], _t(self.lang())
+        self._put(chat_id, None)
+        try:
+            result = si.restore_previous(camera, self.zones_path)
+        except LookupError:
+            self._say(chat_id, words["no_previous"].format(name=self._name(camera)))
+            return
+        text = words["restored"].format(name=self._name(camera))
+        if result["restart_needed"]:
+            text += words["restart"]
+        self._say(chat_id, text)
+        if result["restart_needed"]:
+            (self._restart or _request_restart)()
+
+    def _cancel(self, chat_id: str, s: Dict[str, Any]) -> None:
+        """Rule 3: exiting changes nothing; the draft is dropped and the message says the map stays."""
+        words = _t(self.lang())
+        self._put(chat_id, None)
+        camera = s.get("camera") or ""
+        if camera:
+            try:
+                os.remove(si.draft_path(camera, self.out_dir))
+            except OSError:
+                pass
+        self._say(chat_id, words["stopped"].format(name=self._name(camera)) if camera else words["stopped_any"])
+
     # ---------- the Telegram inbox's one routing line each ----------
     def inbox_text(self, inbox: Any, chat_id: str, sender: Dict[str, Any], text: str) -> bool:
-        """``on_text`` for the inbox: True when the message was the map change's (noted in the chat feed). Never
-        raises: a failing change hands the message to the assistant."""
+        """``on_text`` for the inbox: True when the message was the map flow's (noted in the chat feed). Never
+        raises: a failing flow hands the message to the assistant."""
         try:
             taken = self.on_text(chat_id, text)
-        except Exception as exc:  # noqa: BLE001 - the change must never lose the owner's message
+        except Exception as exc:  # noqa: BLE001 - the flow must never lose the owner's message
             log.warning("Map change failed: %s", exc)
             return False
         if taken:
@@ -451,6 +549,9 @@ class SceneChat:
             log.warning("Map change button failed: %s", exc)
 
     # ---------- helpers ----------
+    def _cancel_row(self, s: Dict[str, Any]) -> List[List[tuple]]:
+        return [[(_t(self.lang())["cancel"], f"{STOP}:{s['token']}")]]
+
     def _say(self, chat_id: str, text: str, rows: Optional[List[List[tuple]]] = None) -> None:
         try:
             self.send_text(chat_id, text, rows or [])
@@ -468,9 +569,8 @@ class SceneChat:
 
         cameras = list(self.cameras())
         numbers = {m.group(1) for m in _CAMERA_NUMBER.finditer(text)}
-        found = [c for c in cameras
-                 if channel_of(c) in numbers or any(n and n in text for n in family_names(c) + [self._name(c)])]
-        return found
+        return [c for c in cameras
+                if channel_of(c) in numbers or any(n and n in text for n in family_names(c) + [self._name(c)])]
 
     def _all_cameras(self) -> List[str]:
         """Every camera of the box, the disabled ones too (their zones are not stale)."""
@@ -519,7 +619,7 @@ def telegram_senders(token: str, post: Callable[..., Any], post_multipart: Calla
 
 
 def for_inbox(inbox: Any, cameras: Callable[[], Sequence[str]], lang: Callable[[], str]) -> SceneChat:
-    """The map change the running Telegram inbox carries on (telegram_agent.start)."""
+    """The map flow the running Telegram inbox carries on (telegram_agent.start)."""
     send_photo, _ = telegram_senders(inbox.cfg.bot_token, inbox._post, inbox._post_multipart)
 
     def send_text(chat_id: str, text: str, rows: List[List[tuple]]) -> Any:
@@ -529,8 +629,8 @@ def for_inbox(inbox: Any, cameras: Callable[[], Sequence[str]], lang: Callable[[
 
 
 def start_from_cli(camera: str = "") -> Dict[str, Any]:
-    """The box's CLI: start the change of *camera*'s map in the owner's chat (one camera, always named). The
-    picture is sent from here; the running inbox carries on with the owner's answer."""
+    """The box's CLI: ask the owner whether to re-define *camera*'s map (one camera, always named). The running
+    inbox carries on with the owner's [כן] and answer."""
     if not camera:
         return {"error": "name the camera: --camera X"}
     from dotenv import load_dotenv  # noqa: PLC0415
@@ -548,5 +648,5 @@ def start_from_cli(camera: str = "") -> Dict[str, Any]:
     name = _known_camera(camera, CAMERAS_PATH)
     send_photo, send_text = telegram_senders(cfg.bot_token, telegram_notify._http_post,
                                              telegram_notify._http_post_multipart)
-    SceneChat(send_photo, send_text, lambda: active, box_language, background=False).begin(cfg.chat_ids[0], name)
+    SceneChat(send_photo, send_text, lambda: active, box_language, background=False).ask_sure(cfg.chat_ids[0], name)
     return {"chat": cfg.chat_ids[0], "camera": name}

@@ -66,8 +66,15 @@ class InboxInterviewTest(unittest.TestCase):
         return {"update_id": uid, "callback_query": {"id": f"q{uid}", "data": data, "from": {"id": 7},
                                                      "message": {"message_id": 1, "chat": {"id": int(CHAT)}}}}
 
+    def start(self, uid: int = 1) -> None:
+        self.inbox.handle_update(self.message("מפה", uid))
+        sure = self.tg.sent("sendMessage")[-1]
+        yes = json.loads(sure["fields"]["reply_markup"])["inline_keyboard"][0][0]
+        self.assertEqual(yes["text"], "כן, להגדיר מחדש")
+        self.inbox.handle_update(self.tap(yes["callback_data"], uid + 100))
+
     def test_the_whole_interview_runs_without_the_agent(self) -> None:
-        self.inbox.handle_update(self.message("מפה", 1))
+        self.start()
         photos = self.tg.sent("sendPhoto")
         self.assertEqual(len(photos), 1)
         self.assertTrue(photos[0]["fields"]["caption"].startswith("פרגולה: מה משתנה?"))   # the box's one camera
@@ -78,14 +85,22 @@ class InboxInterviewTest(unittest.TestCase):
         self.inbox.handle_update(self.tap(buttons[0]["callback_data"], 3))
         self.assertTrue(sm.load_scene_map(CAM, self.zones).confirmed)
         self.assertEqual(self.agent.seen, [])                       # nothing of it reached the assistant
-        self.assertTrue(any("נשמר: פרגולה" in c["fields"].get("text", "") for c in self.tg.sent("sendMessage")))
+        self.assertTrue(any("נשמר: המפה החדשה של פרגולה" in c["fields"].get("text", "") for c in self.tg.sent("sendMessage")))
+
+    def test_forgot_7_while_the_coloured_picture_waits_never_reaches_the_agent(self) -> None:
+        self.start()
+        self.inbox.handle_update(self.message("1 שלי", 2))
+        self.inbox.handle_update(self.message("שכחת את 2", 3))
+        self.assertEqual(self.agent.seen, [])
+        texts = [c["fields"].get("text", "") for c in self.tg.sent("sendMessage")]
+        self.assertTrue(any("מה 2?" in t for t in texts), texts)
 
     def test_other_messages_still_reach_the_agent(self) -> None:
         self.inbox.handle_update(self.message("מה קורה בחצר?", 1))
         self.assertEqual(len(self.agent.seen), 1)
 
     def test_ordinary_messages_reach_the_agent_while_a_change_is_open(self) -> None:
-        self.inbox.handle_update(self.message("מפה", 1))
+        self.start()
         for uid, text in enumerate(("מה המצב?", "יצאנו", "תן לי תמונה", "יש 2 אנשים בחוץ?"), 2):
             self.inbox.handle_update(self.message(text, uid))
         self.assertEqual([s["text"] for s in self.agent.seen], ["מה המצב?", "יצאנו", "תן לי תמונה", "יש 2 אנשים בחוץ?"])
