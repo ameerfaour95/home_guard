@@ -308,7 +308,7 @@ class TagStudio:
         from sqlalchemy import select  # noqa: PLC0415
 
         from ..models import ClipAnnotation  # noqa: PLC0415
-        from .boxes import dataset_tracks  # noqa: PLC0415
+        from .boxes import preload_tracks  # noqa: PLC0415
 
         item, _ = self._item(session, key)
         if item.origin != "dataset" or item.event_id:
@@ -318,7 +318,9 @@ class TagStudio:
         row = session.scalar(select(ClipAnnotation).where(ClipAnnotation.clip_key == key)
                              .order_by(ClipAnnotation.version.desc()).limit(1))
         old = item.opinions.get(OLD)
-        tracks = [_track_dict(t) for t in dataset_tracks(str(self.paths.dataset), item.clip_id, fps)]             if row is None else row.tracks or []
+        preload, source = ([], None) if row is not None else preload_tracks(
+            str(self.paths.dataset), item.clip_id, fps, (item.meta_path, item.video))
+        tracks = [_track_dict(t) for t in preload] if row is None else row.tracks or []
         # the label files number the clip's own frames; fps is an estimate, so the clip is at least that long
         last = max((k["frame"] for t in tracks for k in t.get("keyframes", [])), default=-1)
         frames = max(round(duration * fps) if duration else 0, last + 1) or None
@@ -327,7 +329,7 @@ class TagStudio:
         if row is None:
             return dict(common, version=0, status="new", tracks=tracks,
                         description=old.text if old else "", drop_clip=False, needs_review=False, author=None,
-                        updated_utc=None, suggestions_used=bool(tracks))
+                        updated_utc=None, suggestions_used=bool(tracks), preload_source=source)
         return dict(common, version=row.version, status=row.status, tracks=row.tracks or [],
                     description=row.description, drop_clip=row.drop_clip, needs_review=row.needs_review,
                     author=row.author_name, updated_utc=row.created_at,

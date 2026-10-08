@@ -246,6 +246,17 @@
             "title": "Needs Review",
             "type": "boolean"
           },
+          "preload_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preload Source"
+          },
           "review_frame": {
             "anyOf": [
               {

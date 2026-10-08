@@ -167,17 +167,18 @@ class _MemoryStudio(TagStudio):
         self._events, self._lock, self._boxes = [], RLock(), {}
 
     def clip_boxes(self, session, key):
-        from home_guard_project.cloud.tagstudio.boxes import dataset_tracks
+        from home_guard_project.cloud.tagstudio.boxes import preload_tracks
         from home_guard_project.cloud.tagstudio.service import _track_dict
 
         item, _ = self._item(session, key)
         fps = item.fps or 7.0
         frames = round(float(item.duration_sec or 0) * fps) or None
-        tracks = [_track_dict(t) for t in dataset_tracks(str(self.paths.dataset), item.clip_id, fps)]
+        preload, source = preload_tracks(str(self.paths.dataset), item.clip_id, fps, (item.meta_path, item.video))
+        tracks = [_track_dict(t) for t in preload]
         return dict(event_id=0, version=0, status='new', tracks=tracks, description='', ai_description='',
                     ai_status='none', ai_model=None, ai_prompt_version=None, drop_clip=False, needs_review=False,
                     author=None, updated_utc=None, fps=fps, frame_count=frames, frame_size=None,
-                    suggestions_used=bool(tracks))
+                    suggestions_used=bool(tracks), preload_source=source)
 
     def tags(self, session):
         with self._lock:

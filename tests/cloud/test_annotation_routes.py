@@ -349,3 +349,48 @@ def test_media_loop_precomputes_suggestions_and_get_reads_no_label_file(client, 
     client.get(_url(eid), headers=h)
     assert reads.calls >= 1
     assert labeling.SUGGESTION_MODEL  # unchanged model tag for predictions
+
+
+# ---------------------------------------------------------------- the box tracker's tracks (tracks.json)
+
+def _tracks_doc():
+    import json
+    from pathlib import Path
+    doc = json.loads((Path(__file__).parent / "fixtures" / "tracks" /
+                      "ameer_week_0_1_ch2_1791439138_alert.tracks.json").read_text(encoding="utf-8"))
+    return json.dumps(doc).encode()
+
+
+@pytest.fixture()
+def fresh_tracks():
+    from home_guard_project.cloud import labeling
+    labeling.TRACKS_CACHE.clear()
+    yield
+    labeling.TRACKS_CACHE.clear()
+
+
+def test_new_annotation_prefers_the_tracker_tracks(client, staff_factory, s3client, fresh_tracks):
+    tracks_key = b.COLLECT_META[:-len(".meta.json")] + ".tracks.json"
+    _seed(client, s3client, all_frames=False, overrides={tracks_key: _tracks_doc()})
+    _, _, _, h = staff_factory("admin")
+    eid = _event_id(client, b.COLLECT_STEM)
+    body = client.get(_url(eid), headers=h).json()
+    assert body["preload_source"] == "tracker" and body["suggestions_used"] is True
+    assert [(t["track_id"], t["label"], t["source"]) for t in body["tracks"]] == [
+        ("t-1", "person", "yolo"), ("t-2", "car", "yolo")]
+    # a human edit is a saved version: the clip never re-preloads over it
+    person = body["tracks"][0]
+    person["source"] = "human"
+    person["keyframes"][0]["xyxy"] = [0.1, 0.1, 0.2, 0.3]
+    r = _save(client, h, eid, tracks=[person])
+    assert r.status_code == 200, r.text
+    again = client.get(_url(eid), headers=h).json()
+    assert again["version"] == 1 and again["preload_source"] is None
+    assert [(t["label"], t["source"]) for t in again["tracks"]] == [("person", "human")]
+    assert again["tracks"][0]["keyframes"][0]["xyxy"] == [0.1, 0.1, 0.2, 0.3]
+
+
+def test_weak_labels_are_the_fallback_without_a_tracks_file(client, staff_factory, fresh_tracks, seeded_sparse):
+    _, _, _, h = staff_factory("admin")
+    body = client.get(_url(_event_id(client, b.COLLECT_STEM)), headers=h).json()
+    assert body["preload_source"] == "yolo" and {t["label"] for t in body["tracks"]} == {"person", "dog"}

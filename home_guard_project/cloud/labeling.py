@@ -275,6 +275,42 @@ def precompute_suggestions(session: Session, s3, now: Optional[datetime] = None,
     return stored
 
 
+TRACKS_CACHE: dict = {}  # (tracks.json key, its meta's etag) -> (expires monotonic, document or None)
+TRACKS_TTL_SEC = 300
+
+
+def tracker_tracks(session: Session, s3, ev: Event, fps: Optional[float]) -> list[ft.Track]:
+    """The box tracker's tracks of the clip (``<stem>.tracks.json`` uploaded next to its meta; the format of
+    tagstudio/tracks_file.py), [] when there is none or it cannot be read. The file is not indexed: it is read on
+    demand and remembered (absent too) for TRACKS_TTL_SEC per meta revision, so reopening a clip reads nothing."""
+    import time  # noqa: PLC0415
+
+    from .tagstudio import tracks_file  # noqa: PLC0415
+
+    if s3 is None:
+        return []
+    metas = session.execute(select(Artifact.s3_key, Artifact.etag).where(Artifact.event_id == ev.id,
+                                                                        Artifact.role == "meta")).all()
+    now = time.monotonic()
+    for meta_key, etag in sorted(metas, key=lambda r: (not r[0].startswith("production_"), r[0])):
+        key = tracks_file.candidates([meta_key])[0]
+        cached = TRACKS_CACHE.get((key, etag))
+        if cached is not None and cached[0] > now:
+            doc = cached[1]
+        else:
+            try:
+                doc = s3.get_json(key)
+            except Exception:  # noqa: BLE001 - absent or unreadable: the weak labels are used instead
+                doc = None
+            if len(TRACKS_CACHE) > 5000:
+                TRACKS_CACHE.clear()
+            TRACKS_CACHE[(key, etag)] = (now + TRACKS_TTL_SEC, doc if isinstance(doc, dict) else None)
+        tracks = tracks_file.read_tracks(doc, fps) if isinstance(doc, dict) else []
+        if tracks:
+            return tracks
+    return []
+
+
 def yolo_rows(tracks: list[ft.Track], t_sec: float) -> list[str]:
     """YOLO label rows (contiguous class ids, `cls xc yc w h` normalised) of every track visible at `t_sec`."""
     rows = []

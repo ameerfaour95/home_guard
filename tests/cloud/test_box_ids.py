@@ -63,3 +63,18 @@ def test_contiguous_only_id_marks_the_folder(tmp_path):
 def test_unknown_coco_classes_are_dropped(tmp_path):
     dataset, folder = _dataset(tmp_path, "box_cam", {0: [0, 9, 56], 1: [0], 2: [0]}, declare="coco")
     assert [n for n, _ in boxes.read_boxes(folder + "/clip_a_f0000.txt", boxes.DEFAULT_CLASSES, COCO_IDS)] == ["person"]
+
+
+def test_preload_prefers_the_tracker_file_then_the_label_files(tmp_path):
+    import shutil
+    from pathlib import Path
+    dataset, _ = _dataset(tmp_path, "house", {0: [0], 1: [0], 2: [0]})
+    meta = tmp_path / "meta" / "house" / "clip_a.meta.json"
+    tracks, source = boxes.preload_tracks(dataset, "clip_a", 7.0, (str(meta), ""))
+    assert source == "yolo" and [t.label for t in tracks] == ["person"]
+    meta.parent.mkdir(parents=True)
+    shutil.copy(Path(__file__).parent / "fixtures" / "tracks" / "ameer_week_0_1_ch2_1791439138_alert.tracks.json",
+                meta.parent / "clip_a.tracks.json")
+    tracks, source = boxes.preload_tracks(dataset, "clip_a", 7.0, (str(meta), ""))
+    assert source == "tracker" and [t.label for t in tracks] == ["person", "car"]
+    assert boxes.preload_tracks(str(tmp_path / "none"), "clip_b", 7.0) == ([], None)

@@ -1,0 +1,528 @@
+{
+ "clip": "clips\\ameer_week_0_1_ch2\\2026-10-08\\ameer_week_0_1_ch2_1791439138_alert.mp4",
+ "camera": "ameer_week_0_1_ch2",
+ "start_local": "08:58",
+ "params": {
+  "weights": "C:/Users/ameer/Ameer/home_guard/yolo11s.pt",
+  "person": 0.8,
+  "conf": 0.7,
+  "every": 1,
+  "fresh_tracker_per_clip": true
+ },
+ "frames": 61,
+ "looks": [
+  {
+   "frame": 0,
+   "ts": 1791439135.912,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 1,
+   "ts": 1791439136.078,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 2,
+   "ts": 1791439136.243,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 3,
+   "ts": 1791439136.408,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 4,
+   "ts": 1791439136.573,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 5,
+   "ts": 1791439136.739,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 6,
+   "ts": 1791439136.904,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 7,
+   "ts": 1791439137.069,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 8,
+   "ts": 1791439137.234,
+   "detections": 1,
+   "tracks": [
+    1
+   ]
+  },
+  {
+   "frame": 9,
+   "ts": 1791439137.4,
+   "detections": 1,
+   "tracks": [
+    1
+   ]
+  },
+  {
+   "frame": 10,
+   "ts": 1791439137.565,
+   "detections": 1,
+   "tracks": [
+    1
+   ]
+  },
+  {
+   "frame": 11,
+   "ts": 1791439137.73,
+   "detections": 1,
+   "tracks": [
+    1
+   ]
+  },
+  {
+   "frame": 12,
+   "ts": 1791439137.895,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 13,
+   "ts": 1791439138.061,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 14,
+   "ts": 1791439138.226,
+   "detections": 1,
+   "tracks": [
+    1
+   ]
+  },
+  {
+   "frame": 15,
+   "ts": 1791439138.391,
+   "detections": 1,
+   "tracks": [
+    1
+   ]
+  },
+  {
+   "frame": 16,
+   "ts": 1791439138.556,
+   "detections": 1,
+   "tracks": [
+    1
+   ]
+  },
+  {
+   "frame": 17,
+   "ts": 1791439138.722,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 18,
+   "ts": 1791439138.887,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 19,
+   "ts": 1791439139.052,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 20,
+   "ts": 1791439139.217,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 21,
+   "ts": 1791439139.383,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 22,
+   "ts": 1791439139.548,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 23,
+   "ts": 1791439139.713,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 24,
+   "ts": 1791439139.878,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 25,
+   "ts": 1791439140.044,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 26,
+   "ts": 1791439140.209,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 27,
+   "ts": 1791439140.374,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 28,
+   "ts": 1791439140.539,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 29,
+   "ts": 1791439140.705,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 30,
+   "ts": 1791439140.87,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 31,
+   "ts": 1791439141.035,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 32,
+   "ts": 1791439141.2,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 33,
+   "ts": 1791439141.366,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 34,
+   "ts": 1791439141.531,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 35,
+   "ts": 1791439141.696,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 36,
+   "ts": 1791439141.861,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 37,
+   "ts": 1791439142.027,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 38,
+   "ts": 1791439142.192,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 39,
+   "ts": 1791439142.357,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 40,
+   "ts": 1791439142.522,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 41,
+   "ts": 1791439142.688,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 42,
+   "ts": 1791439142.853,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 43,
+   "ts": 1791439143.018,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 44,
+   "ts": 1791439143.183,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 45,
+   "ts": 1791439143.349,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 46,
+   "ts": 1791439143.514,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 47,
+   "ts": 1791439143.679,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 48,
+   "ts": 1791439143.844,
+   "detections": 1,
+   "tracks": [
+    2
+   ]
+  },
+  {
+   "frame": 49,
+   "ts": 1791439144.01,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 50,
+   "ts": 1791439144.175,
+   "detections": 1,
+   "tracks": [
+    2
+   ]
+  },
+  {
+   "frame": 51,
+   "ts": 1791439144.34,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 52,
+   "ts": 1791439144.505,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 53,
+   "ts": 1791439144.671,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 54,
+   "ts": 1791439144.836,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 55,
+   "ts": 1791439145.001,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 56,
+   "ts": 1791439145.166,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 57,
+   "ts": 1791439145.332,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 58,
+   "ts": 1791439145.497,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 59,
+   "ts": 1791439145.662,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 60,
+   "ts": 1791439145.827,
+   "detections": 0,
+   "tracks": []
+  }
+ ],
+ "tracks": [
+  {
+   "id": 1,
+   "kind": "person",
+   "cls": 0,
+   "first_seen": 1791439137.234,
+   "last_seen": 1791439138.556,
+   "hits": 7,
+   "confirmed": true,
+   "prev_id": null,
+   "returns": 0,
+   "boxes": [
+    {
+     "frame": 8,
+     "ts": 1791439137.234,
+     "box": [
+      0.8957,
+      0.4811,
+      0.938,
+      0.6589
+     ]
+    },
+    {
+     "frame": 9,
+     "ts": 1791439137.4,
+     "box": [
+      0.8955,
+      0.4792,
+      0.9373,
+      0.6583
+     ]
+    },
+    {
+     "frame": 10,
+     "ts": 1791439137.565,
+     "box": [
+      0.8957,
+      0.4781,
+      0.9367,
+      0.6591
+     ]
+    },
+    {
+     "frame": 11,
+     "ts": 1791439137.73,
+     "box": [
+      0.8957,
+      0.4768,
+      0.9362,
+      0.6589
+     ]
+    },
+    {
+     "frame": 14,
+     "ts": 1791439138.226,
+     "box": [
+      0.8951,
+      0.4758,
+      0.9378,
+      0.6585
+     ]
+    },
+    {
+     "frame": 15,
+     "ts": 1791439138.391,
+     "box": [
+      0.8951,
+      0.4747,
+      0.9476,
+      0.6582
+     ]
+    },
+    {
+     "frame": 16,
+     "ts": 1791439138.556,
+     "box": [
+      0.8954,
+      0.4765,
+      0.952,
+      0.6582
+     ]
+    }
+   ]
+  },
+  {
+   "id": 2,
+   "kind": "vehicle",
+   "cls": 2,
+   "first_seen": 1791439143.844,
+   "last_seen": 1791439144.175,
+   "hits": 2,
+   "confirmed": true,
+   "prev_id": null,
+   "returns": 0,
+   "boxes": [
+    {
+     "frame": 48,
+     "ts": 1791439143.844,
+     "box": [
+      0.9214,
+      0.5951,
+      0.962,
+      0.7364
+     ]
+    },
+    {
+     "frame": 50,
+     "ts": 1791439144.175,
+     "box": [
+      0.9213,
+      0.5953,
+      0.9621,
+      0.7368
+     ]
+    }
+   ]
+  }
+ ],
+ "stats": {
+  "person_tracks": 1,
+  "vehicle_tracks": 1,
+  "flickers": 0,
+  "fragments": [],
+  "duplicates": [],
+  "most_people_at_once": 1,
+  "returns_linked": 0,
+  "eye_people": 1,
+  "excess_vs_eye": 0
+ }
+}
