@@ -79,3 +79,4 @@ production_archive/
 
 # Customer registration (box): name, phone, consents
 home_guard_project/box/registration.json
+home_guard_project/box/box_id.txt

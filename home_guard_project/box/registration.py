@@ -98,6 +98,13 @@ def _atomic_text(path: str, text: str) -> None:
         if os.path.exists(tmp): os.remove(tmp)
 
 
+def _box_id(registration_path: str) -> str:
+    """The box's id, kept beside the registration file being written (box_identity.py)."""
+    from .box_identity import FILE_NAME, box_id  # noqa: PLC0415
+
+    return box_id(os.path.join(os.path.dirname(registration_path) or ".", FILE_NAME)) or ""
+
+
 def write_registration(path: str = REGISTRATION_PATH, box_yaml: str = BOX_YAML, **fields: Any) -> Dict[str, Any]:
     """Validate *fields* and save them. Fields not given keep their saved value.
 
@@ -151,6 +158,7 @@ def write_registration(path: str = REGISTRATION_PATH, box_yaml: str = BOX_YAML, 
         "tailscale_host": pick("tailscale_host", ""),
         "box_host": pick("box_host", socket.gethostname()),
         "app_version": pick("app_version", _app_version()),
+        "box_id": old.get("box_id") or _box_id(path),
     }
     _save(path, reg)
     return reg

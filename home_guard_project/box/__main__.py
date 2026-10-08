@@ -271,6 +271,9 @@ def _status(cfg: BoxConfig) -> dict:
         lang = "en"
     status = build_heartbeat(cfg.site, *_clip_dirs(cfg.mode), ALIVE_FILE, mode=cfg.mode,
                              cameras_path=paths.cameras_yaml(), lang=lang, aliases_path=paths.camera_aliases_yaml())
+    from .box_identity import box_id  # noqa: PLC0415
+
+    status["box_id"] = box_id()           # the same across site renames (box_identity.py)
     status["stopped"] = control.is_stopped()
     status["registration"] = registration_status(load_registration())
     if status["stopped"]:
