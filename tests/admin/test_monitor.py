@@ -237,3 +237,18 @@ def test_launcher_starts_the_app_with_a_windowless_interpreter(tmp_path):
     result = subprocess.run([str(home / 'python.exe'), '-I', str(repo / 'home_guard_project' / 'admin' / 'windowless.py'),
                              '--demo', '--smoke-test'], cwd=tmp_path, env=env, capture_output=True, timeout=60)
     assert result.returncode == 0, result.stderr.decode(errors='replace')[-2000:]
+
+
+def test_a_camera_the_owner_switched_off_reads_off_by_the_owner(widgets, wait):
+    from home_guard_project.admin.customer import CustomerScreen
+    from home_guard_project.admin.formatting import camera_name
+
+    class OffBackend(DemoBackend):
+        def cameras(self, customer_id=None):
+            return [replace(c, current=False, enabled=False, name='Pool') if c.camera == 'Garden' else c
+                    for c in super().cameras(customer_id)]
+    screen = CustomerScreen(OffBackend()); widgets.append(screen); screen.show(); screen.open(1)
+    wait(lambda: screen.camera_list is not None)
+    assert ('Pool', 'switched off') in screen.overview.camera_rows
+    assert not any(row.startswith('Pool') for row in screen.overview.retired_rows)
+    assert camera_name('Garden') == 'Pool (off by the owner)'

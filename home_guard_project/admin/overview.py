@@ -101,7 +101,7 @@ class CustomerOverview(QWidget):
             if not current:
                 box.addWidget(label('No current cameras known.', 'muted'))
             for camera in (c for c in cameras if not c.enabled):
-                row = label(f'{camera.name}  ·  switched off by the owner', 'muted'); box.addWidget(row)
+                row = label(f'{camera.name}  ·  off by the owner', 'muted'); box.addWidget(row)
                 self.camera_rows.append((camera.name, 'switched off'))
             retired = [c for c in cameras if not c.current and c.enabled]
             if retired:
