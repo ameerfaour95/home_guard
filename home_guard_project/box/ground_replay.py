@@ -108,7 +108,7 @@ def replay(metas: Sequence[Dict[str, Any]], looks: Dict[str, Any], scene_for: Ca
         label = str(alert.get("label") or "")
         why, reason = str(alert.get("why") or ""), str(alert.get("alert_reason") or "")
         summary, people = str(alert.get("summary") or ""), alert.get("people")
-        if label == "suspicious" and appearance_only(f"{why} {reason}"):
+        if label == "suspicious" and appearance_only(f"{why} {reason} {summary}"):
             label = "normal"                     # the guard loop's appearance-only rule
         clip = looks.get(stem) or {"looks": [], "t0": ts, "t1": ts}
         scene = scene_for(cam)
