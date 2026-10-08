@@ -78,10 +78,18 @@ class InboxV2Test(unittest.TestCase):
 
     def test_an_unthreaded_message_binds_only_one_recent_alert(self) -> None:
         self.index.remember("-5", 50, {"alert_id": "a1", "ts": NOW - 60})
-        self.inbox.handle_update(self.message("who is it", update_id=1))
+        self.inbox.handle_update(self.message("that was the courier", update_id=1))
         self.index.remember("-5", 51, {"alert_id": "a2", "ts": NOW - 30})
         self.inbox.handle_update(self.message("and now", update_id=2))
         self.assertEqual([c[2] for c in self.agent.calls], ["a1", None])
+
+    def test_a_question_or_complaint_is_never_bound_to_the_recent_alert(self) -> None:
+        # 2026-10-07: "על איזה סרטון אתה מדבר" and "די עם ההודעה" were filed as verdicts on the newest alert.
+        self.index.remember("-5", 50, {"alert_id": "a1", "ts": NOW - 60})
+        for uid, text in enumerate(("who is it", "אני לא יודע על איזה סרטון אתה מדבר בכלל",
+                                    "די עם ההודעה המטופשת הזאת", "תראה לי אותו"), start=1):
+            self.inbox.handle_update(self.message(text, update_id=uid))
+        self.assertEqual([c[2] for c in self.agent.calls], [None, None, None, None])
 
     def test_the_undo_button_and_after_reply_actions(self) -> None:
         self.inbox.handle_update(self.message("pause"))
@@ -227,7 +235,8 @@ class StartupTest(unittest.TestCase):
         from unittest.mock import Mock, patch
         from home_guard_project.box import telegram_agent as module
         with tempfile.TemporaryDirectory() as root:
-            for version in (2, "2", 1, "nonsense", [], float("inf")):
+            # v2 (the brain) unless box.yaml says 1 (2026-10-08: the default was 1 and the box ran the old one).
+            for version in (2, "2", 1, "1", None, "nonsense", [], float("inf")):
                 with (
                     self.subTest(version=version),
                     patch.object(module.telegram_notify, "load_telegram_config", return_value=CFG),
@@ -235,8 +244,9 @@ class StartupTest(unittest.TestCase):
                     patch.object(module, "make_chat_model", return_value=None) as v1,
                     patch("home_guard_project.box.brain.agent.build_owner_agent", return_value=(Mock(), Mock())) as v2,
                 ):
-                    out = module.start({"agent_version": version}, {}, [], log_dir=root, live_dir=root, archive_dir=root)
-                    if version in (2, "2"):
+                    settings = {} if version is None else {"agent_version": version}
+                    out = module.start(settings, {}, [], log_dir=root, live_dir=root, archive_dir=root)
+                    if version not in (1, "1"):
                         v2.assert_called_once()
                         v1.assert_not_called()
                         self.assertEqual([c.kwargs["name"] for c in thread.call_args_list],
@@ -245,6 +255,22 @@ class StartupTest(unittest.TestCase):
                     else:
                         v2.assert_not_called()
                         v1.assert_called_once()
+
+    def test_a_failing_brain_falls_back_to_v1_and_the_inbox_still_starts(self):
+        from unittest.mock import Mock, patch
+        from home_guard_project.box import telegram_agent as module
+        with (
+            tempfile.TemporaryDirectory() as root,
+            patch.object(module.telegram_notify, "load_telegram_config", return_value=CFG),
+            patch.object(module.threading, "Thread") as thread,
+            patch.object(module, "make_chat_model", return_value=Mock()) as v1,
+            patch.object(module, "OwnerAgent") as owner_agent,
+            patch("home_guard_project.box.brain.agent.build_owner_agent", side_effect=ImportError("no brain")),
+        ):
+            out = module.start({}, {"OPENAI_API_KEY": "k"}, ["cam_ch1"], log_dir=root, live_dir=root, archive_dir=root)
+        v1.assert_called_once()
+        self.assertIs(out.inbox.agent, owner_agent.return_value)
+        self.assertIn("telegram-inbox", [c.kwargs["name"] for c in thread.call_args_list])
 
     def test_without_any_model_unavailable_still_works(self):
         from unittest.mock import patch
