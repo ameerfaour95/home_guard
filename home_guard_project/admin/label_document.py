@@ -60,6 +60,9 @@ class LabelDocument(QObject):
         self.timestamps = {k.frame: k.t_sec for t in annotation.tracks for k in t.keyframes}
         self.selected, self.current_class = None, CLASSES[0]
         self.hidden = set()   # track ids hidden from view (H): display only, never saved
+        # where K extended a track or uncovered a hidden gap: {track id: {first frame of that span}}; display only,
+        # a mark shows while the track is visible there (an undo hides it)
+        self.extended = {}
         self.preload_source = getattr(annotation, 'preload_source', None)  # 'tracker' / 'yolo': who drew the unchecked boxes
         self.tracks = fill_entities(deepcopy(annotation.tracks))   # an older save gets its names once, then keeps them
         self.description, self.drop_clip, self.needs_review = annotation.description, annotation.drop_clip, annotation.needs_review
@@ -167,16 +170,23 @@ class LabelDocument(QObject):
         shown = [k for k in kfs if k.enabled] or kfs
         nearest = min(shown, key=lambda k: abs(k.t_sec - self.t_sec))
         last_shown = max((k.t_sec for k in kfs if k.enabled), default=None)
+        mark = self.frame                  # the first newly shown frame: here, or the old end when past the end
         if last_shown is not None and self.t_sec > last_shown:
             # past the end: the end marker(s) after the last visible keyframe move to just after this frame
             tail = [k for k in kfs if k.t_sec > last_shown]
             if tail and all(not k.enabled and k.t_sec < self.t_sec for k in tail):
+                mark = tail[0].frame
                 for k in tail:
                     kfs.remove(k)
                 if self.frame+1 < self.frame_count:
                     kfs.append(Keyframe(self.frame+1, self.time_for(self.frame+1), list(nearest.xyxy), False))
         if not self.put_box(list(nearest.xyxy), track):   # one undo step for the whole extension
-            kfs[:] = before
+            kfs[:] = before; return
+        self.extended.setdefault(track.track_id, set()).add(mark)
+
+    def extension_marks(self, track):
+        """The frames where K extended *track* or uncovered a hidden gap, while the track is still shown there."""
+        return sorted(f for f in self.extended.get(track.track_id, ()) if box_at(track, self.time_for(f)) is not None)
 
     def set_enabled(self, enabled=None):
         tr = self.track

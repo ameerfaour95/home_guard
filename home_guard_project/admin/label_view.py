@@ -153,7 +153,7 @@ class LabelView(QWidget):
         self.timeline = TrackTimeline(theme); self.timeline.seek_requested.connect(self.seek); self.timeline.selected.connect(self.selection_changed)
         scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setWidget(self.timeline)
         scroll.setMinimumHeight(122); scroll.setMaximumHeight(200); scroll.setFrameShape(QFrame.Shape.NoFrame); column.addWidget(scroll)
-        column.addWidget(label('● Keyframes    Solid: kept / interpolated    Dotted: hidden', 'muted'))
+        column.addWidget(label('● Keyframes    Solid: kept / interpolated    Dotted: hidden    Amber tick: extended here by K', 'muted'))
         self.splitter.addWidget(left)
         panel = QFrame(); panel.setObjectName('card'); right = QVBoxLayout(panel); right.setContentsMargins(18, 16, 18, 16); right.setSpacing(8)
         panel.setStyleSheet('QCheckBox { background: transparent; } QWidget#annotationReview { background: transparent; }')

@@ -126,3 +126,59 @@ def test_k_extends_in_the_view_and_the_save_keeps_it(widgets, wait):
     assert saved.keyframes[0].frame == 0 and saved.source == 'human'
     rows = labeling.yolo_rows(labeling.to_tracks([asdict(t) for t in b.annotation(101).tracks]), v.doc.time_for(0))
     assert len(rows) == 1 and first == 30                                # frame 0 now has the person's label
+
+
+# ---------------------------------------------------------------- "extended here by K": a mark where the span starts
+
+def timeline(widgets, d):
+    from home_guard_project.admin.label_canvas import TrackTimeline
+    tl = TrackTimeline(); tl.doc = d; tl.resize(900, 120); tl.show(); widgets.append(tl)
+    return tl
+
+
+def amber_at(tl, frame, row=0):
+    from PySide6.QtGui import QColor
+    from home_guard_project.admin.theme import PALETTES
+    image = tl.grab().toImage()
+    want = QColor(PALETTES['dark']['warning'])
+    y = 48 + row*tl.row_height
+    def near(c):                                                         # antialiased: close to amber
+        return abs(c.red()-want.red()) + abs(c.green()-want.green()) + abs(c.blue()-want.blue()) < 60
+    return any(near(image.pixelColor(round(tl.x(frame)) + dx, y + 15)) for dx in (-3, -2, 2, 3))   # the flag
+
+
+def hover(tl, frame, row=0):
+    from PySide6.QtCore import QPoint
+    from PySide6.QtTest import QTest
+    QTest.mouseMove(tl, QPoint(round(tl.x(frame)), 48 + row*tl.row_height))
+    return tl.toolTip()
+
+
+def test_the_mark_sits_where_an_extension_at_the_start_begins(app, widgets):
+    d = document((20, A, True), (30, B, True), (40, B, False))
+    tl = timeline(widgets, d)
+    assert d.extension_marks(d.tracks[0]) == [] and not amber_at(tl, 5)
+    d.seek(5); d.toggle_keyframe()
+    assert d.extension_marks(d.tracks[0]) == [5] and d.tracks[0].source == 'human'
+    assert amber_at(tl, 5) and not amber_at(tl, 30)
+    assert hover(tl, 5) == 'extended here by K' and hover(tl, 30) == ''
+    d.undo()                                                             # undone: the mark goes with it
+    assert d.extension_marks(d.tracks[0]) == [] and not amber_at(tl, 5)
+
+
+def test_the_mark_sits_at_the_old_end_when_the_track_is_extended_past_it(app, widgets):
+    d = document((20, A, True), (30, B, True), (40, B, False))
+    tl = timeline(widgets, d)
+    d.seek(50); d.toggle_keyframe()
+    assert d.extension_marks(d.tracks[0]) == [40]                         # the first newly covered frame
+    assert amber_at(tl, 40) and hover(tl, 40) == 'extended here by K'
+
+
+def test_the_mark_sits_where_k_uncovered_a_hidden_gap(app, widgets):
+    d = document((10, A, True), (20, A, False), (40, C, True), (50, C, False))
+    tl = timeline(widgets, d)
+    d.seek(30); d.toggle_keyframe()
+    assert d.extension_marks(d.tracks[0]) == [30]
+    assert amber_at(tl, 30) and not amber_at(tl, 20) and hover(tl, 30) == 'extended here by K'
+    d.seek(12); d.toggle_keyframe()                                      # a plain K where the box shows: no mark
+    assert d.extension_marks(d.tracks[0]) == [30]

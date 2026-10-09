@@ -4,7 +4,7 @@ The canvas zooms (wheel or trackpad pinch around the cursor, + / - and Fit) and 
 with Space held). Every box is kept in IMAGE coordinates: the zoom only changes where the picture is drawn
 (display_rect), so drawing, moving and resizing give the same box at any zoom."""
 from PySide6.QtCore import Qt, QRectF, QPointF, QEvent, Signal
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtGui import QColor, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import QWidget, QMenu, QApplication
 from home_guard_project.fleet_contract.tracks import box_at
 from .player import VideoCanvas, SESSION
@@ -259,6 +259,11 @@ class TrackTimeline(QWidget):
                 pen = QPen(color, 5 if k.enabled else 1.5)
                 if not k.enabled: pen.setStyle(Qt.PenStyle.DotLine)
                 p.setPen(pen); p.drawLine(QPointF(self.x(k.frame), y), QPointF(self.x(end), y))
+            for f in self.doc.extension_marks(tr):     # "extended here by K": a thin amber tick, a small flag at its foot
+                amber, x = QColor(t['warning']), self.x(f)  # (the flag stays visible beside the playhead standing on it)
+                p.setPen(QPen(amber, 2)); p.drawLine(QPointF(x, y-13), QPointF(x, y+13))
+                p.setPen(Qt.PenStyle.NoPen); p.setBrush(amber)
+                p.drawPolygon(QPolygonF([QPointF(x-5, y+16), QPointF(x+5, y+16), QPointF(x, y+10)]))
             for k in tr.keyframes:
                 p.setPen(QPen(color, 2)); p.setBrush(color if k.enabled else QColor(t['surface']))
                 p.drawEllipse(QPointF(self.x(k.frame), y), 5, 5)
@@ -311,8 +316,10 @@ class TrackTimeline(QWidget):
         elif self.doc:
             row = int((event.position().y()-31)//self.row_height)
             tracks = self.doc.tracks
+            x = event.position().x()
+            mark = 0 <= row < len(tracks) and any(abs(self.x(f)-x) < 5 for f in self.doc.extension_marks(tracks[row]))
             self.setToolTip(f'{self.doc.display_name(tracks[row])}  ·  id {tracks[row].track_id}'
-                            if 0 <= row < len(tracks) and event.position().x() < self.left else '')
+                            if 0 <= row < len(tracks) and x < self.left else 'extended here by K' if mark else '')
 
     def mouseReleaseEvent(self, event):
         self.scrubbing = None
