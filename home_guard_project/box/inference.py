@@ -2290,16 +2290,37 @@ def _keep_keyframe(session_id: str, job: Optional[AlertJob], frames: List[Any]) 
         log.debug("keyframe of event %s not kept: %s", session_id, exc)
 
 
+def _detector_people(job: Optional[AlertJob]) -> int:
+    """The most people the detector saw at once in this alert, without the AI: the tracker's ``people_together``
+    or the crop's YOLO looks (COCO 0), whichever is more. 0: not counted."""
+    if job is None:
+        return 0
+    most = 0
+    try:
+        most = max(0, int((job.tracker or {}).get("people_together") or 0))
+    except (TypeError, ValueError, AttributeError):
+        most = 0
+    for look in getattr(job, "scene_looks", None) or ():
+        try:
+            most = max(most, sum(1 for d in look[1] if int(d[0]) == 0))
+        except (TypeError, ValueError, IndexError):
+            continue
+    return most
+
+
 def _event_decision(camera: str, alert_ts: float, label: str, people: Optional[int], summary: str,
                     alert_id: str, entity_args: Optional[Dict[str, Any]] = None,
-                    ground: Optional[Dict[str, Any]] = None, baseline: Optional[Dict[str, Any]] = None) -> Any:
+                    ground: Optional[Dict[str, Any]] = None, baseline: Optional[Dict[str, Any]] = None,
+                    ai_failed: bool = False, detector_people: int = 0) -> Any:
     """The event book's say on this alert (events.Decision), or None without a book or on its failure (the alert
     then goes out as before). *entity_args* (``tracks``, ``since``, ``note``, ``per_entity``) give the event its
     entities when the tracker had data (stage 2a).
 
     A clip without a label (the AI did not answer: an outage, the daily cap) is still the detector's alert: it goes
     out once per event, as the first message of the event, and is recorded as a normal; unless the scene map says
-    everyone stayed off our ground (*ground*, ground.py): nothing done there can be known without the AI. *baseline*
+    everyone stayed off our ground (*ground*, ground.py): nothing done there can be known without the AI, or no model
+    answered (*ai_failed*) and the owner's live mark covers the camera inside its hours with the detector's head-count
+    (*detector_people*, 0: not counted) within it (events.EventBook.known_covers; 2026-10-09 11:12, the pergola's workers). *baseline*
     (baseline.py, task 2.9) is what the camera's history says (``raise`` only with ``baseline_alerts: on``)."""
     book = EVENTS
     if book is None:
@@ -2308,6 +2329,13 @@ def _event_decision(camera: str, alert_ts: float, label: str, people: Optional[i
         decision = book.decide(camera, alert_ts, label if label in LABELS else "normal", people or 0, summary,
                                alert_id, **(entity_args or {}), **({"ground": ground} if ground else {}),
                                **({"baseline": baseline} if baseline else {}))
+        if ai_failed and label not in LABELS:
+            known = book.known_covers(camera, alert_ts, detector_people)
+            if known is not None:
+                import dataclasses  # noqa: PLC0415
+
+                return dataclasses.replace(decision, notify=False, known_text=known.text,
+                                           reason="AI check failed, but the owner said who is here")
         if label not in LABELS and not decision.notify and not (ground or {}).get("off_our_ground"):
             session = book.session_of_alert(alert_id) or {}
             if session.get("reported_level", "none") == "none":
@@ -2658,7 +2686,9 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                 job.input_meta["baseline"] = usual
         event = None if muted else _event_decision(camera_name, alert_ts, label, people, summary, alert_id,
                                                    entity_args, where,
-                                                   usual if usual.get("raise") and label == "normal" else None)
+                                                   usual if usual.get("raise") and label == "normal" else None,
+                                                   ai_failed=ai_failed,
+                                                   detector_people=_detector_people(job) if ai_failed else 0)
         rarity_line = ""
         if usual.get("raise") and (event is None or event.notify):
             rarity_line = str((usual.get("text_he") if lang == "he" else usual.get("text_en")) or "")

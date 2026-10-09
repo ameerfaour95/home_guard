@@ -379,6 +379,24 @@ class EventBook:
             live = [k for k in self._known if k.live(now) and (not k.camera or k.camera == camera)]
             return live[-1] if live else None
 
+    def known_covers(self, camera: str, now: float, people: Any = None) -> Optional[Known]:
+        """The owner's mark that covers *camera* at *now* (live: inside its daily hours) for *people*, the detector's
+        head-count (0 or None: not counted), the way ``decide`` covers a suspicious: within what was known plus
+        KNOWN_EXTRA_PEOPLE, or any count when the mark counted nobody. None: not covered.
+
+        2026-10-09 11:12: no model answered at the pergola under a live workers mark and the owner still got "the AI
+        check did not finish" (inference._event_decision)."""
+        count = _int(people)
+        with self._lock:
+            known = self.known_for(camera, now)
+            if known is None:
+                return None
+            if known.people == 0 or count == 0:
+                return known
+            s = self._open.get(camera)
+            said = s.people_when_said(known.id) if s is not None else 0
+            return known if count <= max(known.people, said) + KNOWN_EXTRA_PEOPLE else None
+
     def mark_known(self, camera: str, text: str, by: str, until: float, now: Optional[float] = None,
                    people: Optional[int] = None, daily_from: str = "", daily_to: str = "") -> Dict[str, Any]:
         """The owner said who is there. Returns a receipt; raises ValueError on a bad request. *daily_from* /
