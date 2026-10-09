@@ -137,6 +137,7 @@ class EventsTest(GuardCase):
         self.assertEqual(session["messages"][0]["message_id"], self.assistant.sent[0]["id"])
         self.assertEqual(session["reported_people"], 3)
 
+    @mock.patch.object(inf, "AI_FAILED_NOTIFY", True)       # the "on" path; default off sends nothing
     def test_an_unanswered_look_goes_out_once_per_event(self):
         self.work(Backend(None), T0)
         self.book.activity(CAM, T0 + 60, people=1)
