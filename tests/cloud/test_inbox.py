@@ -229,3 +229,44 @@ def test_0020_records_superseded_tags_indexed_before_it(fresh_url):
             assert compare_metadata(MigrationContext.configure(conn), Base.metadata) == []
     finally:
         engine.dispose()
+
+
+def test_0020_repairs_a_database_stamped_past_0017_without_its_schema(fresh_url):
+    """A DB that went 0016 -> 0018 -> 0019 before 0017 existed: stamped 0019, no 0017 columns or table."""
+    from alembic import command
+    from alembic.autogenerate import compare_metadata
+    from alembic.migration import MigrationContext
+
+    from home_guard_project.cloud.manage import alembic_config
+    from home_guard_project.cloud.models import Base
+
+    cfg = alembic_config(fresh_url)
+    command.upgrade(cfg, "0019")
+    engine = _engine(fresh_url)
+    key = "production_x/feedback/cam/2026-10-03/cam_1791020177_alert_1.feedback.json"
+    body = {"owner_label": "escalation", "owner_text": "someone at the gate", "from": {"name": "Eli"}}
+    try:
+        with engine.begin() as conn:     # what that database looks like: 0017 never ran
+            conn.execute(text("DROP TABLE inbox_decisions"))
+            for column in ("owner_label", "owner_text", "transcript", "tagged_by"):
+                conn.execute(text(f"ALTER TABLE feedback DROP COLUMN {column}"))
+            conn.execute(text("INSERT INTO customers (id, name) VALUES (1, 'Eli')"))
+            conn.execute(text("INSERT INTO devices (id, device_id, site, customer_id) VALUES (1, 'd1', 'x', 1)"))
+            conn.execute(text("INSERT INTO feedback (id, device_pk, s3_key) VALUES (1, 1, :k)"), {"k": key})
+            conn.execute(text("INSERT INTO raw_revisions (s3_key, etag, fetched_at, body) "
+                              "VALUES (:k, 'e1', now(), CAST(:b AS jsonb))"), {"k": key, "b": json.dumps(body)})
+        command.upgrade(cfg, "0020")
+        with engine.begin() as conn:
+            row = conn.execute(text("SELECT owner_label, owner_text, tagged_by, superseded_by FROM feedback")).one()
+            assert tuple(row) == ("escalation", "someone at the gate", "Eli", "")
+            conn.execute(text("INSERT INTO inbox_decisions (feedback_id, decision, decided_at) VALUES (1, 'fixed', now())"))
+        with engine.connect() as conn:
+            assert compare_metadata(MigrationContext.configure(conn), Base.metadata) == []
+        # and re-running it changes nothing: 0020 down and up again on the repaired database
+        command.downgrade(cfg, "0019")
+        command.upgrade(cfg, "head")
+        with engine.begin() as conn:
+            assert conn.execute(text("SELECT owner_label FROM feedback")).scalar() == "escalation"
+            assert conn.execute(text("SELECT decision FROM inbox_decisions")).scalar() == "fixed"
+    finally:
+        engine.dispose()
