@@ -687,7 +687,10 @@ class _OpenAIChat:
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = tool_choice or "auto"   # "none" forces a plain answer with the tools still declared
-        resp = self._client.chat.completions.create(**kwargs)
+        from . import usage_ledger  # noqa: PLC0415
+
+        resp = usage_ledger.call("brain", lambda: self._client.chat.completions.create(**kwargs),
+                                 client=self._client, model=self._model)
         choice = resp.choices[0]
         truncated = (getattr(choice, "finish_reason", None) == "length")   # cut-off tool args can't be trusted
         msg = choice.message

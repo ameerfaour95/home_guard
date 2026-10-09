@@ -40,7 +40,7 @@ import threading
 import time
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
-from . import marks
+from . import marks, usage_ledger
 
 log = logging.getLogger("box.describer")
 
@@ -539,11 +539,12 @@ class Describer:
 
         def call() -> None:
             try:
-                box["resp"] = self._client.chat.completions.create(**kwargs)
+                box["resp"] = usage_ledger.call("describer", lambda: self._client.chat.completions.create(**kwargs),
+                                                client=self._client, model=self.model, images=len(jpegs))
             except BaseException as exc:  # noqa: BLE001 - handed to the caller
                 box["error"] = exc
 
-        worker = threading.Thread(target=call, name="describer", daemon=True)
+        worker = threading.Thread(target=usage_ledger.carry(call), name="describer", daemon=True)
         worker.start()
         worker.join(self.timeout)
         if worker.is_alive():

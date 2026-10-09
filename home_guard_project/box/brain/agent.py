@@ -1910,6 +1910,8 @@ def build_owner_agent(box_settings: Dict[str, Any], env: Dict[str, str], mute: A
         big, fast = fast, None
     if big is None:
         return None, deliverer
+    if fast is not None and hasattr(fast, "usage_agent"):
+        fast.usage_agent = "brain_fast"          # the usage ledger counts the two models apart
     # The assistant's own files: data\state on a migrated box, inside live_dir before (paths.state_paths_for).
     state_dir, own_dir = paths.state_paths_for(live_dir)
     work_dir = os.path.join(own_dir, ".live")

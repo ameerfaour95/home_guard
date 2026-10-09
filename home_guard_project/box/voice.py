@@ -60,7 +60,10 @@ def make_transcriber(env: Mapping[str, str], model: str = DEFAULT_MODEL) -> Opti
         kwargs: Dict[str, Any] = {"model": model, "file": (name or "voice.ogg", audio)}
         if language:
             kwargs["language"] = language        # ISO 639-1: the box language ("he", "en", "ar")
-        result = client.audio.transcriptions.create(**kwargs)
+        from . import usage_ledger  # noqa: PLC0415
+
+        result = usage_ledger.call("transcription", lambda: client.audio.transcriptions.create(**kwargs),
+                                   client=client, provider="openai", model=model)
         return " ".join(str(getattr(result, "text", "") or "").split())
 
     return transcribe

@@ -80,8 +80,9 @@ class StartDueAlertsTest(unittest.TestCase):
                 self.target, self.args = target, args
 
             def start(self):
-                task = self.args[7] if self.target is inf._worker else self.args[0]
-                seen[self.target.__name__] = "tracker" in task.input_meta
+                target = getattr(self.target, "__wrapped__", self.target)   # the worker runs in its usage scope
+                task = self.args[7] if target is inf._worker else self.args[0]
+                seen[target.__name__] = "tracker" in task.input_meta
 
         reg = fed_registry([(0.5, 0.9)] * 80)
         with mock.patch.object(inf.threading, "Thread", InlineThread):

@@ -35,7 +35,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
-from . import messenger, paths, providers
+from . import messenger, paths, providers, usage_ledger
 
 log = logging.getLogger("box.inference")
 
@@ -874,7 +874,7 @@ def call_with_deadline(fn: Callable[[], Any], seconds: float, what: str = "the v
         finally:
             done.set()
 
-    threading.Thread(target=run, name="vlm-call", daemon=True).start()
+    threading.Thread(target=usage_ledger.carry(run), name="vlm-call", daemon=True).start()
     if not done.wait(seconds):
         raise VlmDeadline(f"{what} gave no answer in {seconds:.0f} s")
     if "error" in box:
@@ -926,8 +926,9 @@ def vlm_rescue(backend: Any, frames: Sequence[Any], camera_name: str, t_sec: int
     try:
         small = shrink_to_max_side(frames, VLM_RESCUE_MAX_SIDE)
         record["size"] = [int(small[0].shape[1]), int(small[0].shape[0])] if small else None
-        raw, parsed = primary.analyze(small, camera_name, t_sec, start_hour, end_hour,
-                                      call_timeout=VLM_RESCUE_TIMEOUT_SEC, **kwargs)
+        with usage_ledger.scope(agent="eye_rescue"):
+            raw, parsed = primary.analyze(small, camera_name, t_sec, start_hour, end_hour,
+                                          call_timeout=VLM_RESCUE_TIMEOUT_SEC, **kwargs)
     except Exception as exc:  # noqa: BLE001 - the honest "AI check did not finish" alert goes out as before
         record["error"] = f"{type(exc).__name__}: {exc}"[:300]
     record["seconds"] = round(time.monotonic() - started, 1)
@@ -977,6 +978,7 @@ class GptBackend:
         self.last_usage = {"prompt_tokens": 0, "completion_tokens": 0}
         self.last_prompt = ""           # what the last call asked, kept for the training record
         self._response_format: Dict[str, Any] = VLM_RESPONSE_FORMAT
+        self.usage_agent = "eye"        # the usage ledger's agent for analyze (make_backend: eye_fallback)
 
     def analyze(self, frames_bgr: List[Any], camera_name: str, t_sec: int,
                 start_hour: int, end_hour: int, owner_language: str = "en",
@@ -1028,7 +1030,9 @@ class GptBackend:
         return raw, parse_vlm_json(raw)
 
     def _complete(self, content: List[Dict[str, Any]], response_format: Optional[Dict[str, Any]],
-                  timeout: Optional[float] = None) -> Any:
+                  timeout: Optional[float] = None, agent: str = "") -> Any:
+        """One request, recorded in the usage ledger (as *agent*, else this backend's usage_agent) by the thread
+        that makes it, so a call the deadline gave up on is still counted when it ends."""
         kwargs: Dict[str, Any] = dict(model=self._model, messages=[{"role": "user", "content": content}],
                                       temperature=0)
         if response_format:
@@ -1039,13 +1043,19 @@ class GptBackend:
         if extra:
             kwargs["extra_body"] = extra
         budget = timeout if timeout is not None else getattr(self, "_timeout", None)
+        ledger_agent = agent or getattr(self, "usage_agent", "eye")
+        images = sum(1 for part in content if part.get("type") == "image_url")
+
+        def create() -> Any:
+            return usage_ledger.call(ledger_agent, lambda: self._client.chat.completions.create(**kwargs),
+                                     client=self._client, model=getattr(self, "_model", ""), images=images)
+
         if not budget:
-            return self._client.chat.completions.create(**kwargs)
+            return create()
         # The SDK's retries each get a full timeout: the wall clock covers all of them.
         retries = getattr(self._client, "max_retries", 0)
         tries = 1 + (max(0, retries) if isinstance(retries, int) else 0)
-        return call_with_deadline(lambda: self._client.chat.completions.create(**kwargs),
-                                  float(budget) * tries + DEADLINE_GRACE_SEC, getattr(self, "_model", "the model"))
+        return call_with_deadline(create, float(budget) * tries + DEADLINE_GRACE_SEC, getattr(self, "_model", "the model"))
 
     def verify(self, frames_bgr: List[Any], question: str, language: str = "English",
                timeout: float = 15.0) -> Optional[Dict[str, Any]]:
@@ -1065,11 +1075,11 @@ class GptBackend:
             b64 = base64.b64encode(data).decode("utf-8")
             content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
         try:
-            resp = self._complete(content, {"type": "json_object"}, timeout=timeout)
+            resp = self._complete(content, {"type": "json_object"}, timeout=timeout, agent="second_look")
         except Exception as exc:  # noqa: BLE001
             if "response_format" not in str(exc):
                 raise
-            resp = self._complete(content, None, timeout=timeout)
+            resp = self._complete(content, None, timeout=timeout, agent="second_look")
         return verify_answer(parse_vlm_json(resp.choices[0].message.content or ""))
 
 
@@ -1185,6 +1195,8 @@ def make_backend(settings: AlertSettings, env: Dict[str, str]):
         except Exception as exc:  # noqa: BLE001
             log.warning("Fallback vision model %s (%s) cannot be used: %s",
                         settings.vlm_fallback_model, settings.vlm_fallback_provider, exc)
+    if fallback is not None:
+        fallback.usage_agent = "eye_fallback"
     if primary is not None and fallback is not None:
         log.info("Vision model %s, fallback %s; each call up to %.0f s, %d retries",
                  settings.vlm_model, settings.vlm_fallback_model, settings.vlm_timeout_sec, settings.vlm_max_retries)
@@ -2018,7 +2030,7 @@ def _start_due_alerts(pending: List[AlertJob], now: float, cfg: Any, detector: A
         _attach_tracker(job, trackers, now)   # after _prepare_alert, which sets the job's input_meta afresh
         _attach_track_boxes(job, trackers, clip, getattr(settings, "tracker_person_conf", None))
         pending.remove(job)
-        thread = threading.Thread(target=_worker,
+        thread = threading.Thread(target=usage_ledger.bound(_worker, camera=job.camera, alert_id=job.stem),
                                   args=(backend, box_settings, env, settings, job.camera, frames,
                                         assistant, job, status, job.alert_on), daemon=True)
         thread.start()
@@ -2254,7 +2266,7 @@ def second_look(backend: Any, frames: List[Any], classes: Sequence[str], lang: s
             box["error"] = f"{type(exc).__name__}: {exc}"
 
     started = time.monotonic()
-    thread = threading.Thread(target=call, name="second-look", daemon=True)
+    thread = threading.Thread(target=usage_ledger.carry(call), name="second-look", daemon=True)
     thread.start()
     thread.join(timeout)
     record["seconds"] = round(time.monotonic() - started, 2)

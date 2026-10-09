@@ -112,10 +112,13 @@ def _public(message: Dict[str, Any]) -> Dict[str, Any]:
 
 
 class OpenAIChat:
-    def __init__(self, client: Any, model_name: str, temperature: Optional[float] = 0.0) -> None:
+    def __init__(self, client: Any, model_name: str, temperature: Optional[float] = 0.0,
+                 extra_body: Optional[Dict[str, Any]] = None) -> None:
         self._client = client
         self.model_name = model_name
         self._temperature = temperature
+        self._extra_body = dict(extra_body) if extra_body else None
+        self.usage_agent = "brain"           # the usage ledger's agent (brain/agent.py: brain_fast for the fast one)
 
     @_safe(ModelMessage)
     def chat(self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]],
@@ -126,7 +129,13 @@ class OpenAIChat:
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "none" if tool_choice == "none" else "auto"
-        resp = self._client.chat.completions.create(**kwargs)
+        if getattr(self, "_extra_body", None):
+            kwargs["extra_body"] = self._extra_body
+        from .. import usage_ledger  # noqa: PLC0415
+
+        resp = usage_ledger.call(getattr(self, "usage_agent", "brain"),
+                                 lambda: self._client.chat.completions.create(**kwargs), client=self._client,
+                                 model=self.model_name, images=usage_ledger.images_in(kwargs["messages"]))
         choice = resp.choices[0]
         truncated = getattr(choice, "finish_reason", None) == "length"
         msg = choice.message
@@ -224,6 +233,7 @@ class AnthropicChat:
         self.model_name = model_name
         self._max_tokens = max_tokens
         self._effort = effort
+        self.usage_agent = "brain"
 
     @_safe(ModelMessage)
     def chat(self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]],
@@ -237,7 +247,11 @@ class AnthropicChat:
             kwargs["tool_choice"] = {"type": "none"} if tool_choice == "none" else {"type": "auto"}
         if self._effort:
             kwargs["output_config"] = {"effort": self._effort}
-        resp = self._client.messages.create(**kwargs)
+        from .. import usage_ledger  # noqa: PLC0415
+
+        resp = usage_ledger.call(getattr(self, "usage_agent", "brain"), lambda: self._client.messages.create(**kwargs),
+                                 provider="anthropic", model=self.model_name,
+                                 images=usage_ledger.images_in(converted))
         usage = getattr(resp, "usage", None)
         tokens = (_tokens(getattr(usage, "input_tokens", 0)), _tokens(getattr(usage, "output_tokens", 0)))
         if getattr(resp, "stop_reason", None) == "refusal":
@@ -335,6 +349,8 @@ def make_model(spec: str, env: Dict[str, str]) -> Optional[Any]:
         except Exception:
             http_client.close()
             raise
-        return OpenAIChat(client, name, temperature)
+        # OpenRouter says what each call cost when asked (the usage ledger's usd_source "provider").
+        usage_body = {"usage": (known.extra_body or {}).get("usage")} if (known.extra_body or {}).get("usage") else None
+        return OpenAIChat(client, name, temperature, extra_body=usage_body)
     _warn_once("Unknown model provider; disabling the model")
     return None

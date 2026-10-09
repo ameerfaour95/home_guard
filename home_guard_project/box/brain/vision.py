@@ -296,7 +296,10 @@ def _completer(env: Mapping[str, Any], provider: str,
                                           response_format=response_format)
             if extra:
                 kwargs["extra_body"] = extra
-            return client.chat.completions.create(**kwargs)
+            from .. import usage_ledger  # noqa: PLC0415
+
+            return usage_ledger.call("brain_tool_vision", lambda: client.chat.completions.create(**kwargs),
+                                     client=client, provider=provider, model=model, images=len(images))
 
         strict = {"type": "json_schema", "json_schema": {"name": "camera_look", "strict": True, "schema": schema}}
         if plain_json:

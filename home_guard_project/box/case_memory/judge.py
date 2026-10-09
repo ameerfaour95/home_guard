@@ -182,7 +182,9 @@ def run_judge(judge: Callable[[Dict[str, Any]], Any], request: Dict[str, Any],
         except Exception as exc:  # noqa: BLE001 - a failing judge must never silence anything
             box["error"] = exc
 
-    worker = threading.Thread(target=call, name="case-judge", daemon=True)
+    from .. import usage_ledger  # noqa: PLC0415
+
+    worker = threading.Thread(target=usage_ledger.carry(call), name="case-judge", daemon=True)
     worker.start()
     worker.join(timeout)
     if worker.is_alive():
@@ -233,7 +235,10 @@ class OpenAICompatibleJudge:
                                       response_format=request["response_format"])
         if self._extra:
             kwargs["extra_body"] = self._extra
-        resp = self._client.chat.completions.create(**kwargs)
+        from .. import usage_ledger  # noqa: PLC0415
+
+        resp = usage_ledger.call("case_judge", lambda: self._client.chat.completions.create(**kwargs),
+                                 client=self._client, provider=self.provider, model=self.model)
         return resp.choices[0].message.content or ""
 
 

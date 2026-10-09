@@ -27,9 +27,10 @@ import logging
 import math
 import os
 import ssl
+import time
 from typing import Dict, List, Optional, Sequence
 
-from . import providers
+from . import providers, usage_ledger
 
 log = logging.getLogger("box.embeddings")
 
@@ -96,14 +97,23 @@ class Embedder:
         import httpx  # noqa: PLC0415
 
         payload = {"model": self._model, "input": texts, "dimensions": self._dim}
+        url = providers.openai_url("/embeddings")
+        started = time.monotonic()
         try:
-            resp = httpx.post(
-                providers.openai_url("/embeddings"), json=payload, timeout=self._timeout,
-                headers={"Authorization": f"Bearer {self._api_key}"},
-                verify=ssl.create_default_context(),
-            )
-            resp.raise_for_status()
-            rows = resp.json().get("data", [])
+            try:
+                resp = httpx.post(
+                    url, json=payload, timeout=self._timeout,
+                    headers={"Authorization": f"Bearer {self._api_key}"},
+                    verify=ssl.create_default_context(),
+                )
+                resp.raise_for_status()
+                body = resp.json()
+            except Exception as exc:  # noqa: BLE001 - counted, then the fallback below
+                usage_ledger.record("embeddings", None, started, provider=usage_ledger.provider_of(url),
+                                    model=self._model, error=exc)
+                raise
+            usage_ledger.record("embeddings", body, started, provider=usage_ledger.provider_of(url), model=self._model)
+            rows = body.get("data", [])
             vecs = [row.get("embedding") for row in rows]
             if len(vecs) == len(texts) and all(isinstance(v, list) for v in vecs):
                 return vecs

@@ -27,7 +27,7 @@ import time
 from collections import OrderedDict
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
-from . import providers
+from . import providers, usage_ledger
 
 log = logging.getLogger("box.messenger")
 
@@ -304,7 +304,7 @@ class Messenger:
             except Exception as exc:  # noqa: BLE001 - handed to the waiting caller
                 answers.put(("error", exc))
 
-        threading.Thread(target=call, args=(self.model,), name="messenger-1", daemon=True).start()
+        threading.Thread(target=usage_ledger.carry(call), args=(self.model,), name="messenger-1", daemon=True).start()
         started, failed, last_error = 1, 0, None
         while True:
             elapsed = time.monotonic() - start
@@ -318,7 +318,8 @@ class Messenger:
             except queue.Empty:
                 if started == 1:
                     started = 2
-                    threading.Thread(target=call, args=(self.hedge_model,), name="messenger-2", daemon=True).start()
+                    threading.Thread(target=usage_ledger.carry(call), args=(self.hedge_model,), name="messenger-2",
+                                     daemon=True).start()
                     continue
                 raise TimeoutError(f"no answer within {budget:g}s") from None
             if kind == "ok":
@@ -327,7 +328,8 @@ class Messenger:
             if failed >= started:
                 if started == 1 and time.monotonic() - start < budget - 1.0:
                     started = 2           # a broken answer: one more try within the budget
-                    threading.Thread(target=call, args=(self.hedge_model,), name="messenger-2", daemon=True).start()
+                    threading.Thread(target=usage_ledger.carry(call), args=(self.hedge_model,), name="messenger-2",
+                                     daemon=True).start()
                     continue
                 raise last_error
 
@@ -346,15 +348,18 @@ class Messenger:
         if timeout is not None:
             kwargs["timeout"] = float(timeout)     # the client's own HTTP timeout is the alert's 4 s
         box: Dict[str, Any] = {}
+        # The hedge (a second model raced after a slow or broken answer) is counted apart from the main model.
+        agent = "translator_fast" if model and model != self.model else "translator"
 
         def call() -> None:
             try:
-                box["resp"] = self._client.chat.completions.create(**kwargs)
+                box["resp"] = usage_ledger.call(agent, lambda: self._client.chat.completions.create(**kwargs),
+                                                client=self._client, model=kwargs["model"])
             except BaseException as exc:  # noqa: BLE001 - handed to the caller
                 box["error"] = exc
 
         budget = self.timeout if timeout is None else float(timeout)
-        worker = threading.Thread(target=call, name="messenger", daemon=True)
+        worker = threading.Thread(target=usage_ledger.carry(call), name="messenger", daemon=True)
         worker.start()
         worker.join(budget)
         if worker.is_alive():

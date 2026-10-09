@@ -460,7 +460,11 @@ def red_look(backend: Any, frames: List[Any], camera: str, ts: float, text: str,
                 box["error"] = f"{type(exc).__name__}: {exc}"
 
         started = time.monotonic()
-        thread = threading.Thread(target=call, name="activity-look", daemon=True)
+        from . import usage_ledger  # noqa: PLC0415
+
+        with usage_ledger.scope(agent="activity_look"):     # the second look's code, counted as this look
+            target = usage_ledger.carry(call)
+        thread = threading.Thread(target=target, name="activity-look", daemon=True)
         thread.start()
         thread.join(timeout)
         record["seconds"] = round(time.monotonic() - started, 2)

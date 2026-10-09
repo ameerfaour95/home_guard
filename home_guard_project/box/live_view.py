@@ -68,10 +68,18 @@ def _describe(image_path: str, api_key: str, model: str = VISION_MODEL, timeout:
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
             ]}],
         }
-        resp = httpx.post(providers.openai_url("/chat/completions"), json=payload, timeout=timeout,
-                          headers={"Authorization": f"Bearer {api_key}"}, verify=ssl.create_default_context())
-        resp.raise_for_status()
-        text = (resp.json()["choices"][0]["message"]["content"] or "").strip()
+        from . import usage_ledger  # noqa: PLC0415
+
+        url = providers.openai_url("/chat/completions")
+
+        def post() -> Any:
+            got = httpx.post(url, json=payload, timeout=timeout,
+                             headers={"Authorization": f"Bearer {api_key}"}, verify=ssl.create_default_context())
+            got.raise_for_status()
+            return got.json()
+
+        body = usage_ledger.call("other", post, provider=usage_ledger.provider_of(url), model=model, images=1)
+        text = (body["choices"][0]["message"]["content"] or "").strip()
         return text or None
     except Exception as exc:  # noqa: BLE001 - offline, TLS, a refusal: the caller reports a clean error
         log.warning("Live-view describe failed: %s", exc)
