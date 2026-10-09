@@ -16,11 +16,16 @@ sentences in Hebrew or English. It never invents continuity:
 
 Inference puts it above the new observation in the event's thread (updates only; the first message of an event is
 unchanged). No camera ids here: the graded alert line under it names the camera by its display name.
+
+Alert message v2 (2026-10-09): the owner reads short lines in their own language. A note in another language (the
+Eye's English) is never quoted inside a Hebrew line; the describer's per-id lines (describer.py) say what each one
+does now, so the ids they cover (*described*) only get the moves and exits here ("P2 עבר לחניה.", "P1 יצא מהתמונה.").
 """
 
 from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
+import re
 from typing import Any, Dict, List, Optional, Sequence
 
 HINT_CHARS = 60
@@ -65,15 +70,32 @@ def _as_dict(session: Any) -> Dict[str, Any]:
     return asdict(session) if is_dataclass(session) else dict(session or {})
 
 
+_HEBREW = re.compile(r"[֐-׿]")
+_ARABIC = re.compile(r"[؀-ۿ]")
+
+
+def in_language(text: str, lang: str) -> bool:
+    """Is *text* written in the owner's language? (Hebrew / Arabic letters for he / ar; neither for en.)"""
+    text = str(text or "")
+    code = _lang(lang) if not str(lang or "").startswith("ar") else "ar"
+    if code == "he":
+        return bool(_HEBREW.search(text))
+    if code == "ar":
+        return bool(_ARABIC.search(text))
+    return not (_HEBREW.search(text) or _ARABIC.search(text))
+
+
 def _area(e: Dict[str, Any]) -> str:
     return e["path"][-1] if e.get("mapped") and e.get("path") else ""
 
 
 def story_line(session: Any, lang: str = "he", now: Optional[float] = None,
-               in_view: Optional[Sequence[str]] = None, announced: Sequence[str] = ()) -> str:
+               in_view: Optional[Sequence[str]] = None, announced: Sequence[str] = (),
+               described: Sequence[str] = ()) -> str:
     """The owner's update text that continues the event's story, or "" when the session has no entities (no tracker
     data): then the update reads as before. *now* and *in_view* default to the session's latest observation;
-    *announced* are new ids the update's first line already names (``new_people_line``), not repeated as new."""
+    *announced* are new ids the update's first line already names (``new_people_line``), not repeated as new;
+    *described* are ids the update's own per-id lines describe (only their moves and exits are told here)."""
     s = _as_dict(session)
     entities = list(s.get("entities") or [])
     if not entities:
@@ -93,7 +115,8 @@ def story_line(session: Any, lang: str = "he", now: Optional[float] = None,
         bits = []
         if e.get("owner_label"):
             bits.append(_short(e["owner_label"]))
-        earlier = [n for n in e.get("notes") or () if float(n.get("ts", 0.0)) < now - 0.5]
+        earlier = [n for n in e.get("notes") or () if float(n.get("ts", 0.0)) < now - 0.5
+                   and in_language(n.get("text", ""), lang)]
         if earlier:
             bits.append(t["earlier"].format(text=_short(earlier[-1]["text"])))
         return "; ".join(bits)
@@ -104,7 +127,8 @@ def story_line(session: Any, lang: str = "he", now: Optional[float] = None,
 
     def action(e: Dict[str, Any]) -> str:
         """What the Eye said this one does in this very look (``per_entity``), "" otherwise."""
-        now_notes = [n for n in e.get("notes") or () if n.get("source") == "eye" and abs(float(n.get("ts", 0.0)) - now) <= 0.5]
+        now_notes = [n for n in e.get("notes") or () if n.get("source") in ("eye", "describer")
+                     and abs(float(n.get("ts", 0.0)) - now) <= 0.5 and in_language(n.get("text", ""), lang)]
         return _short(now_notes[-1]["text"]) if now_notes else ""
 
     # Who moved since the owner was last told: told before, in a mapped area now, somewhere else then.
@@ -125,6 +149,8 @@ def story_line(session: Any, lang: str = "he", now: Optional[float] = None,
     still: List[str] = []
     for i in view:
         e = index[i]
+        if i in described:
+            continue                   # the update's own line for it says what it does now
         act = action(e)
         if act:
             sentences.append(f"{name(e)}: {act}.")
@@ -147,8 +173,9 @@ def story_line(session: Any, lang: str = "he", now: Optional[float] = None,
                          else t["still_many"].format(ids=_join(still, t["and"])))
     if left:
         sentences.append((t["left"] if len(left) == 1 else t["left_many"]).format(ids=_join(left, t["and"])))
-    if not sentences and view:
-        sentences.append(t["now"].format(ids=_join(view, t["and"])))
+    rest = [i for i in view if i not in described]
+    if not sentences and rest:
+        sentences.append(t["now"].format(ids=_join(rest, t["and"])))
     return " ".join(sentences)
 
 
