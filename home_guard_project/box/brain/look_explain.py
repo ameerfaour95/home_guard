@@ -42,7 +42,7 @@ def recent_looks(state: Any, now: float, within: float = FRESH_SEC) -> List[Dict
     """The latest described photo of each camera these *within* seconds (oldest camera first), from the chat's
     handles: ``{"camera", "ts", "description", "people"}``."""
     latest: Dict[str, Dict[str, Any]] = {}
-    for entry in (getattr(state, "handles", None) or {}).values():
+    for handle, entry in (getattr(state, "handles", None) or {}).items():
         if not isinstance(entry, dict) or entry.get("kind") != "photo" or not entry.get("camera"):
             continue
         description = str(entry.get("observation") or "").strip()
@@ -55,8 +55,9 @@ def recent_looks(state: Any, now: float, within: float = FRESH_SEC) -> List[Dict
         cam = str(entry["camera"])
         if cam not in latest or ts >= latest[cam]["ts"]:
             people = entry.get("people")
-            latest[cam] = {"camera": cam, "ts": ts, "description": description,
-                           "people": people if isinstance(people, int) else None}
+            latest[cam] = {"camera": cam, "ts": ts, "description": description, "handle": handle,
+                           "people": people if isinstance(people, int) else None,
+                           "explained": bool(entry.get("explained"))}
     return sorted(latest.values(), key=lambda x: x["ts"])[-MAX_CAMERAS:]
 
 
@@ -132,10 +133,16 @@ def explain(model: Any, looks: Sequence[Dict[str, Any]], snapshot: Any, marks: S
 
 def answer(model: Any, state: Any, snapshot: Any, events: Any, now: float, lang: str,
            usage: Dict[str, List[int]]) -> Optional[str]:
-    """The explanation of the photos just sent, or None when there are none fresh."""
+    """The explanation of the photos just sent, or None when there are none fresh, or they were explained already
+    (2026-10-09 replay: the 13:02 explanation again at 13:04 was a repeat; the models then take a new look)."""
     looks = recent_looks(state, now)
-    if not looks:
+    if not looks or all(look["explained"] for look in looks):
         return None
     from . import known_memory as km  # noqa: PLC0415
 
-    return explain(model, looks, snapshot, km.live_marks(events, now), lang, usage)
+    out = explain(model, looks, snapshot, km.live_marks(events, now), lang, usage)
+    for look in looks:
+        entry = state.handles.get(look["handle"])
+        if isinstance(entry, dict):
+            entry["explained"] = True
+    return out

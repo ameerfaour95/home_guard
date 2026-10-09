@@ -141,6 +141,16 @@ class ExplainTest(Base):
         self.assertEqual(out.text, "במצלמה 1 ב-13:00: אדם אחד\nבפרגולה ב-13:00: 3 אנשים\n"
                                    "בכניסה הראשית ב-13:00: אין אנשים")
 
+    def test_the_same_photos_are_explained_once(self) -> None:
+        lines = "בפרגולה ב-13:00: שלושה עובדים ליד הטנדר."
+        big = Scripted([text(lines), call("reply", answer="צודק, אסביר מעכשיו כל פעם.")])
+        self.photos(T(13, 0, 53), LOOKS_1300)
+        agent = self.agent(big)
+        self.assertEqual(self.say(agent, "למה אתה לא נותן הסבר ?", T(13, 2, 1)).text, lines)
+        again = self.say(agent, "אתה צריך להסביר כאשר אני אומר לך אם יש משהו בחוץ אצלי", T(13, 4, 29)).text
+        self.assertEqual(again, "צודק, אסביר מעכשיו כל פעם.")       # the models: a new look, not a repeat
+        self.assertEqual(len(big.seen), 2)
+
     def test_old_photos_go_to_the_model_as_before(self) -> None:
         big = Scripted([call("reply", answer="אני לא רואה עכשיו תמונות חדשות.")])
         self.photos(T(12, 40), LOOKS_1300)
