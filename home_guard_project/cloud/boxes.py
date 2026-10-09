@@ -74,8 +74,16 @@ def box_lineage(session: Session) -> tuple[dict[int, tuple[str, str]], dict[int,
     return replaced, old_sites
 
 
-def current_site_for(session: Session, device: Device) -> str:
-    """The site the box of *device* is heard from now (box_lineage): an old site row names its live site, a current
-    or ungrouped row its own."""
+def current_device_for(session: Session, device: Device) -> Device:
+    """The row the box of *device* is heard from now (box_lineage): an old site row gives its live row, a current or
+    ungrouped row itself."""
     replaced, _ = box_lineage(session)
-    return replaced.get(device.id, (None, device.site))[1]
+    if device.id not in replaced:
+        return device
+    return session.scalar(select(Device).where(Device.device_id == replaced[device.id][0])) or device
+
+
+def current_site_for(session: Session, device: Device) -> str:
+    """The site the box of *device* is heard from now: an old site row names its live site, a current or ungrouped
+    row its own."""
+    return current_device_for(session, device).site
