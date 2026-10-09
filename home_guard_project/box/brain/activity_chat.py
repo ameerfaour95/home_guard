@@ -335,6 +335,7 @@ def handle(model: Any, ctx: Any, activities: Any, events_book: Any, alert_handle
                               place_words=place_words, owner_words=" ".join(text.split())[:300], by=by,
                               daily_from=win["daily_from"], daily_to=win["daily_to"], who=win["who"],
                               known_id=win["known_id"], alert_id=str(entry.get("ref") or ""))
+        _learn(ctx, fact, entry, now)
         line = t("act_new", lang, actions=am.actions_text(fact.actions, lang), where=where_text(fact, snapshot, lang),
                  cause=fact.cause)
         out = {"text": line + " " + (t("act_ask_until", lang) if ask else t("act_normal_until", lang,
@@ -376,6 +377,7 @@ def _follow_up(ctx: Any, activities: Any, fact: am.ActivityFact, camera: str, en
                  cause=fact.cause)
         return {"text": line, "rows": (), "note": f"activity fact {fact.id} unchanged", "fact": fact.id}
     fact = activities.update(fact.id, now, **changes) or fact
+    _learn(ctx, fact, entry, now)
     if set(changes) == {"actions"}:
         line = t("act_more", lang, actions=am.actions_text(new_actions, lang), where=where_text(fact, snapshot, lang),
                  cause=fact.cause)
@@ -384,6 +386,17 @@ def _follow_up(ctx: Any, activities: Any, fact: am.ActivityFact, camera: str, en
                  cause=fact.cause)
     return {"text": line, "rows": (((t("btn_cancel_activity", lang), f"kn:x:{fact.id}"),),),
             "note": f"activity fact {fact.id} updated: {changes}", "fact": fact.id}
+
+
+def _learn(ctx: Any, fact: am.ActivityFact, entry: Optional[Dict[str, Any]], now: float) -> None:
+    """The explanation also learns for the long term: its precedent, in shadow (case_chat). Never raises."""
+    try:
+        from . import case_chat  # noqa: PLC0415
+
+        case_chat.after_fact(getattr(ctx, "services", None), fact, entry or None, str(getattr(ctx, "chat_id", "")),
+                             getattr(ctx, "speaker", None), now)
+    except Exception as exc:  # noqa: BLE001 - the week-long memory is saved either way
+        log.warning("Precedent not saved: %s", exc)
 
 
 def answer_until(activities: Any, pending: Dict[str, Any], text: str, choice: Optional[Tuple[str, int]], now: float,

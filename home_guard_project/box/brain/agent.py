@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from ..feedback import Feedback, is_complaint, save_feedback
-from . import activity_chat, day_story, house, human, look_explain, reply_guard, same_people
+from . import activity_chat, case_chat, day_story, house, human, look_explain, reply_guard, same_people
 from . import known_memory as km
 from .claims import empty_reply, honest_answer, unbacked_claims
 from .grounding import evidence_text, ungrounded_details
@@ -1140,7 +1140,9 @@ class OwnerAgentV2:
             facts += activity_chat.memory_rows(getattr(self.services, "activities", None), snapshot, lang, now)
             if ctx.state.prefs.get("group_scope") == km.HOUSE:
                 facts.append(t("pref_crew_house", lang))
-            return km.memory_text(getattr(self.services, "events", None), snapshot, lang, now, facts)
+            listed = km.memory_text(getattr(self.services, "events", None), snapshot, lang, now, facts)
+            long_term = case_chat.memory_section(self.services, snapshot, lang, now)
+            return f"{listed}\n\n{long_term}" if long_term else listed
         return None
 
     def _second_look(self, ctx: ToolContext, model: Any, messages: List[Dict[str, Any]], tier: str,
@@ -1496,12 +1498,26 @@ class OwnerAgentV2:
                     settings = {}
                 speaker = str(who.get("user_id") or "")
                 lang = state.language_for(speaker, "", default=str(settings.get("owner_language") or "en"))
+                if isinstance(known_id, str) and known_id.startswith("ce."):
+                    # The one question about an explained action's future days, or a routine proposal
+                    # (case_chat): answered once; a second tap says nothing new.
+                    try:
+                        snap = self.registry.snapshot()
+                    except Exception:  # noqa: BLE001
+                        snap = None
+                    text_out = case_chat.button(self.services, snap, known_id, who, lang, now)
+                    if text_out is None:
+                        return None
+                    state.add_turn(speaker, "✓", text_out, [], [f"case memory answer {known_id}"], now)
+                    self.memory.save(chat_id, state)
+                    return AgentReply(text=text_out, lang=lang)
                 if isinstance(known_id, str) and known_id.startswith("act_"):
                     # [↩ ביטול] under an explained action (activity_memory): that action is unusual again.
                     activities = getattr(self.services, "activities", None)
                     fact = activities.get(known_id) if activities is not None and action == "x" else None
                     if fact is None or not activities.cancel(known_id, now):
                         return AgentReply(text=t("act_gone", lang), lang=lang)
+                    case_chat.after_fact_cancelled(self.services, known_id, who)
                     try:
                         snap = self.registry.snapshot()
                     except Exception:  # noqa: BLE001
@@ -1527,6 +1543,7 @@ class OwnerAgentV2:
                 rows: Tuple[Tuple[Tuple[str, str], ...], ...] = ()
                 if action == "x":
                     book.cancel_known(known_id)
+                    case_chat.after_mark_cancelled(self.services, known_id, who)
                     text_out = t("known_cancelled", lang, camera=km.where_text(snapshot, camera, lang))
                 elif action == "w" and daily:
                     text_out = t("known_kept_week", lang, who=str(entry.get("text") or ""),
@@ -1547,6 +1564,8 @@ class OwnerAgentV2:
                     saved = book.replace_known(known_id, camera, str(entry.get("text") or ""),
                                                by=str(who.get("name") or "owner"), until=until, now=now,
                                                people=entry.get("people"), **window)
+                    case_chat.after_mark(self.services, dict(saved, at=now), snapshot, chat_id, who,
+                                         replaces=[known_id], now=now)
                     receipt = self.book.issue(f"{chat_id}:{int(now * 1000)}", "mark_known", DONE, camera or "house", {
                         "camera": camera, "who": str(entry.get("text") or ""), "until_ts": until, "at": now,
                         "house": not camera, "known_id": str(saved.get("id") or ""),
@@ -1800,6 +1819,9 @@ class OwnerAgentV2:
             pass
         elif isinstance(pending, dict) and pending.get("kind") == "activity_until":
             known_done = activity_chat.answer_until(activities, pending, text, choice, now, lang)
+            if known_done is not None:          # its new end: the precedent follows (case_chat)
+                case_chat.after_fact(self.services, activities.get(str(pending.get("id") or "")), None, chat_id,
+                                     who, now)
         elif choice is None and pending is None and activity_chat.is_ack(text) and not _asked_last(state):
             # "סבבה" / "בסדר הבנתי" / "תודה" (2026-10-09 13:55: answered with the memory status, twice): 👍.
             known_done = t("ack_short", lang)
@@ -2195,6 +2217,19 @@ def _activity_book() -> Any:
         return None
 
 
+def _case_store() -> Any:
+    """The investigator's case memory store: the guard loop's own (case_memory.current()) when it runs, else the
+    same journal file (case_memory.default_path()). None when it cannot be opened."""
+    try:
+        from ..case_memory import CaseStore, current, default_path  # noqa: PLC0415
+
+        memory = current()
+        return memory.store if memory is not None else CaseStore.at(default_path())
+    except Exception as exc:  # noqa: BLE001 - the assistant works without it
+        log.warning("Case memory not available to the assistant: %s", exc)
+        return None
+
+
 def _budgeted(vision: Any, limit: int, path: str, wrapper: Any) -> Any:
     return wrapper(vision, limit, path) if vision is not None else None
 
@@ -2276,7 +2311,8 @@ def build_owner_agent(box_settings: Dict[str, Any], env: Dict[str, str], mute: A
         embedder=make_embedder(env, os.path.join(own_dir, ".alert_embeddings.json")),
         retention_days=retention, set_option=boxconfig.set_option, read_settings=boxconfig.load_box_settings,
         alert_settings=alert_settings, house=_house_store(mute), events=_event_book(),
-        activities=_activity_book(), story_model=story_model, **_grounding_services(box_settings),
+        activities=_activity_book(), story_model=story_model, cases=_case_store(),
+        **_grounding_services(box_settings),
     )
     def quiet_log_on() -> bool:
         return bool(boxconfig.load_box_settings().get("quiet_log", False))

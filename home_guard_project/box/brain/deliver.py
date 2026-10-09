@@ -91,7 +91,9 @@ class Deliverer:
                 log.warning("Telegram feed entry not saved: %s", exc)
 
     def text(self, chat_id: str, text: str, reply_to: Optional[int] = None,
-             buttons: Optional[Sequence[str]] = None, silent: bool = False) -> Dict[str, Any]:
+             buttons: Optional[Sequence[str]] = None, silent: bool = False,
+             rows: Sequence[Sequence[Sequence[str]]] = ()) -> Dict[str, Any]:
+        """*rows*: inline button rows of ``(label, callback)`` (a question the box asks on its own, case_chat)."""
         try:
             blocked = self._blocked()
             if blocked:
@@ -104,6 +106,9 @@ class Deliverer:
                 fields["allow_sending_without_reply"] = "true"
             if buttons:
                 fields["reply_markup"] = choice_keyboard(buttons)
+            elif rows:
+                fields["reply_markup"] = json.dumps({"inline_keyboard": [
+                    [{"text": str(label)[:60], "callback_data": str(data)[:64]} for label, data in row] for row in rows]})
             if silent:
                 fields["disable_notification"] = "true"
             result = self._call(lambda: self._post(self.cfg.bot_token, "sendMessage", fields), attempts=1)

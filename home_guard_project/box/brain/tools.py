@@ -95,6 +95,7 @@ class Services:
     status_path: str = ""
     zones_path: Optional[str] = None
     story_model: Any = None    # the model that writes the day's story (box.yaml day_story_model; day_story.py)
+    cases: Any = None          # case_memory.CaseStore: the long-term precedents those memories also write (case_chat)
 
 
 @dataclass
@@ -1930,6 +1931,11 @@ def mark_known(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         log.warning("mark_known refused: %s", exc)
         return _result(_issue(ctx, "mark_known", FAILED, camera or "house", detail, "error"))
     detail.update(known_id=str(saved.get("id") or ""), people=int(saved.get("people") or 0))
+    # The same memory also learns for the long term (a precedent in shadow, case_memory/link.py).
+    from . import case_chat  # noqa: PLC0415
+
+    case_chat.after_mark(ctx.services, dict(saved, by=by, at=now), ctx.snapshot, ctx.chat_id, ctx.speaker,
+                         replaces=[str(k.get("id") or "") for k in old], now=now)
     if old:
         detail["replaced"] = [{"id": str(k.get("id") or ""), "camera": str(k.get("camera") or ""),
                                "until": _finite(k.get("until")), "text": str(k.get("text") or ""),
