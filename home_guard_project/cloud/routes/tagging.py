@@ -26,6 +26,8 @@ from ..schemas import (
     TaggingState,
     MediaAccess,
     ModelInputView,
+    TagConversion,
+    TagConvertRequest,
     TeacherAnswer,
 )
 from ..tagstudio.config import StudioPaths
@@ -118,6 +120,17 @@ def tagging_media(body: TaggingMediaRequest, request: Request, staff: Staff = De
                      device_id=device.device_id if device is not None else None,
                      detail={"via": "tagging", "kind": body.kind}, ts=now)
     return MediaAccess(url=url, expires_utc=now + timedelta(seconds=MEDIA_TTL_SECONDS), mime="video/mp4")
+
+
+@router.post("/convert", response_model=TagConversion)
+def tagging_convert(body: TagConvertRequest, request: Request, staff: Staff = Depends(_admin),
+                    session: Session = SessionDep):
+    # only the tagger's words, the taxonomy and the schema leave the machine: never a picture
+    result = _call(studio_of(request).convert, session, body.key, body.words)
+    audit.record(session, staff.id, "tag_converted", target=body.key, reason="training",
+                 detail={"model": result["model"], "language": result["language"],
+                         "prompt_version": result["prompt_version"]}, ts=request.app.state.clock())
+    return {**result, "schema_name": result.pop("schema")}
 
 
 @router.post("/model_input", response_model=ModelInputView)

@@ -77,6 +77,13 @@ class HttpTagging:
         return self._tag_json('POST', 'tagging/suggest', json=dict(key=key, refresh=refresh),
                               timeout=httpx.Timeout(180, connect=5))
 
+    def tagging_convert(self, key, words):
+        return self._tag_json('POST', 'tagging/convert', json=dict(key=key, words=words),
+                              timeout=httpx.Timeout(90, connect=5))
+
+    def tagging_model_input(self, key):
+        return self._tag_json('POST', 'tagging/model_input', json=dict(key=key), timeout=httpx.Timeout(90, connect=5))
+
     def clip_boxes(self, key):
         """The Label view's annotation of a dataset clip (not an indexed event)."""
         return decode(AnnotationOut, self._tag_json('GET', 'tagging/boxes', params=dict(key=key)))
@@ -127,6 +134,17 @@ class DemoTagging:
         if getattr(studio, 'suggest_client', None) is None:
             studio.suggest_client = DemoSuggestClient()
         return _demo_call(lambda: studio.suggest(None, key, refresh))
+
+    def tagging_convert(self, key, words):
+        """The demo converts with a canned model (no network)."""
+        studio = self._tag_studio()
+        if getattr(studio, 'convert_client', None) is None:
+            studio.convert_client = DemoConvertClient()
+        result = _demo_call(lambda: studio.convert(None, key, words))
+        return {**result, 'schema_name': result.pop('schema')}
+
+    def tagging_model_input(self, key):
+        return _demo_call(lambda: self._tag_studio().model_input(None, key))
 
     def clip_boxes(self, key):
         studio = self._tag_studio()
@@ -202,6 +220,33 @@ class _MemoryStudio(TagStudio):
         rows = work_queue.build(items.values(), tags)
         next_key = next((i.key for i, a in rows if a.tier != work_queue.DONE and i.key != key), '')
         return dict(tag=tags[key].as_dict(), assessment=work_queue.assess(item, tags[key]).as_dict(), next_key=next_key)
+
+
+class DemoConvertClient:
+    """An OpenAI-shaped text model for "In my words" without the network (demo, screenshots, tests): it answers in the
+    schema it is asked for, from the words' first sentence."""
+
+    model = 'demo/gemini-3.1-flash-lite (offline)'
+
+    def __init__(self):
+        self.calls, self.chat, self.completions = [], self, self
+
+    def create(self, **kwargs):
+        import json
+        from types import SimpleNamespace
+        self.calls.append(kwargs)
+        schema = kwargs['response_format']['json_schema']['schema']
+        words = kwargs['messages'][0]['content'].split('"""')[1].strip()
+        guess = {'summary': 'A man walks to the back fence with a bag, looks over it and walks away.',
+                 'category': 'S2', 'raw_label': 'suspicious', 'label': 'suspicious', 'people': 1,
+                 'why': 'He looks over the fence into the yard.', 'zone': 'yard', 'movement': 'approaching',
+                 'summary_owner': words if any('\u0590' <= ch <= '\u05ff' for ch in words) else '',
+                 'visibility': 'clear', 'serious_behaviour': False}
+        answer = {}
+        for name, spec in schema['properties'].items():
+            default = {'integer': 0, 'boolean': False, 'array': []}.get(spec.get('type'), '')
+            answer[name] = guess.get(name, default)
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(answer)))])
 
 
 class DemoSuggestClient:

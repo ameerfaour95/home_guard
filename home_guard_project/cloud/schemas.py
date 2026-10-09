@@ -591,6 +591,22 @@ class TaggingKey(BaseModel):
     key: str = Field(max_length=512)
 
 
+class TagConvertRequest(BaseModel):
+    key: str = Field(max_length=512)
+    words: str = Field(max_length=2000)
+
+
+class TagConversion(BaseModel):
+    """"In my words" restructured into the clip's answer schema (tagstudio/convert.py): a suggestion for the form."""
+    key: str
+    model: str
+    language: str
+    prompt_version: str
+    schema_name: str
+    fields: dict
+    raw: str
+
+
 class ModelInputView(BaseModel):
     """What the AI saw of a clip (tagstudio/model_view.py): the JPEG frames, base64, in the order the model got them."""
     key: str

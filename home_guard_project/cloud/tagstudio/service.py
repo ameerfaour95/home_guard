@@ -354,6 +354,37 @@ class TagStudio:
                                         frames_for=getattr(self, "suggest_frames", None))
         return self._suggester
 
+    def prompt_version_of(self, session, item: ClipItem) -> str:
+        """The prompt version a clip's tag follows: the saved tag's, else the clip's meta (teacher.prompt_version)."""
+        tag = self.tags(session).get(item.key)
+        if tag is not None and tag.fields.get("prompt_version"):
+            return str(tag.fields["prompt_version"])
+        return str((self.clip_meta(session, item).get("teacher") or {}).get("prompt_version") or "")
+
+    def converter(self):
+        """The "In my words" converter (built once; ``convert_client`` is injected by tests and the demo)."""
+        from .convert import ConvertConfig, Converter  # noqa: PLC0415
+
+        if getattr(self, "_converter", None) is None:
+            repo = Path(__file__).resolve().parents[3]
+            keys = [repo / "api_key.env", repo.parent / "home_guard" / "api_key.env",
+                    Path.home() / "Ameer" / "home_guard" / "api_key.env"]
+            config, client = ConvertConfig.resolve(key_files=keys), getattr(self, "convert_client", None)
+            if getattr(client, "model", None):
+                config = ConvertConfig(model=client.model, base_url="offline", api_key="")
+            self._converter = Converter(config, client=client)
+        return self._converter
+
+    def convert(self, session, key: str, words: str) -> Dict[str, Any]:
+        """The tagger's words as the clip's answer schema (a suggestion for the form; nothing is saved)."""
+        from .convert import ConvertError  # noqa: PLC0415
+
+        item, _ = self._item(session, key)
+        try:
+            return {**self.converter().convert(words, self.prompt_version_of(session, item)), "key": key}
+        except ConvertError as e:
+            raise StudioError(str(e), 409) from None
+
     def video_for(self, item: ClipItem, s3=None) -> Optional[str]:
         """A local copy of the clip's full-frame video (else its crop): this machine's file, or one downloaded once
         from S3 (read only) into the exports folder's media cache."""

@@ -3133,6 +3133,71 @@
         "title": "StaffOut",
         "type": "object"
       },
+      "TagConversion": {
+        "description": "\"In my words\" restructured into the clip's answer schema (tagstudio/convert.py): a suggestion for the form.",
+        "properties": {
+          "fields": {
+            "additionalProperties": true,
+            "title": "Fields",
+            "type": "object"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "language": {
+            "title": "Language",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "prompt_version": {
+            "title": "Prompt Version",
+            "type": "string"
+          },
+          "raw": {
+            "title": "Raw",
+            "type": "string"
+          },
+          "schema_name": {
+            "title": "Schema Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "model",
+          "language",
+          "prompt_version",
+          "schema_name",
+          "fields",
+          "raw"
+        ],
+        "title": "TagConversion",
+        "type": "object"
+      },
+      "TagConvertRequest": {
+        "properties": {
+          "key": {
+            "maxLength": 512,
+            "title": "Key",
+            "type": "string"
+          },
+          "words": {
+            "maxLength": 2000,
+            "title": "Words",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "words"
+        ],
+        "title": "TagConvertRequest",
+        "type": "object"
+      },
       "TagSave": {
         "properties": {
           "fields": {
@@ -6453,6 +6518,52 @@
           }
         ],
         "summary": "Tagging Clip",
+        "tags": [
+          "tagging"
+        ]
+      }
+    },
+    "/v1/tagging/convert": {
+      "post": {
+        "operationId": "tagging_convert_v1_tagging_convert_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagConvertRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TagConversion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Tagging Convert",
         "tags": [
           "tagging"
         ]
