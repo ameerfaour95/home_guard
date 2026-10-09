@@ -353,6 +353,23 @@ def _last_photo_camera(state: ChatState, now: float, within: float = 900.0) -> s
     return ""
 
 
+PICTURE_VIDEO_SEC = 300.0
+_NO_VIDEO = re.compile(r"(?<![א-ת])(?:אל|לא|בלי|אין\s+צורך)\s+(?:\S+\s+)?(?:ב|ה|ל)?(?:סרטון|וידאו|קליפ)|"
+                       r"\b(?:no|don't|do\s+not|without)\s+(?:\w+\s+)?(?:video|clip)", re.IGNORECASE)
+
+
+def video_of_the_picture(text: str, snapshot: Any, state: ChatState, now: float) -> str:
+    """"או מביא סרטון, למה תמונה?" right after live photos (2026-10-09 13:02:13): the camera whose live video it
+    asks for (the busiest picture these 5 minutes), or "". Not when the message names a camera or a time (an
+    event's clip, or another camera: the models read those) or says no video."""
+    text = str(text or "")
+    if not _ASKS_VIDEO.search(text) or _NO_VIDEO.search(text) or re.search(r"\d", text):
+        return ""
+    if snapshot is not None and mentioned_cameras(snapshot, text):
+        return ""
+    return _last_photo_camera(state, now, within=PICTURE_VIDEO_SEC)
+
+
 def _asked_last(state: ChatState) -> bool:
     """The bot's last reply asked something ("רוצה סרטון?"): a "סבבה" now may be the answer, not an ack."""
     for turn in reversed(state.turns):
@@ -1537,6 +1554,14 @@ class OwnerAgentV2:
             except Exception as exc:  # noqa: BLE001 - the model still gets the message
                 log.warning("Evidence answer not made: %s", exc)
                 known_done = None
+        if known_done is None and choice is None and snapshot is not None and not code_only and not (threaded or alert):
+            camera = video_of_the_picture(text, snapshot, state, now)
+            if camera:
+                # 13:02:13 replay: the models looked again, recorded three times and said "לא הצלחתי לשלוח" over a
+                # sent video. The video of the picture is recorded in code; its receipt is the reply.
+                called.append("record_clip")
+                self._dispatch(ctx, "record_clip", {"camera": camera, "seconds": 10}, True, ["record_clip"])
+                known_done = ""
         if known_done is None and choice is None and snapshot is not None and not code_only:
             # The owner explains an action seen in an alert, in plain text (activity_memory, 2026-10-09): saved in
             # code, answered in one line about THAT explanation (never baseline counts or the marks' status).

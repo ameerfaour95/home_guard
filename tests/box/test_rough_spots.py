@@ -17,7 +17,7 @@ from typing import Any, Dict, List
 from home_guard_project.box import entities as ent
 from home_guard_project.box.brain import look_explain as le
 from home_guard_project.box.brain import same_people as sp
-from home_guard_project.box.brain.agent import OwnerAgentV2, _last_photo_camera
+from home_guard_project.box.brain.agent import OwnerAgentV2, _last_photo_camera, video_of_the_picture
 from home_guard_project.box.brain.i18n import t
 from home_guard_project.box.brain.memory import ChatMemory, ChatState
 from home_guard_project.box.brain.models import ModelMessage, ToolCall
@@ -162,6 +162,43 @@ class ExplainTest(Base):
         self.photos(T(13, 0, 53), LOOKS_1300)
         state = self.memory.load(CHAT)
         self.assertEqual(_last_photo_camera(state, T(13, 2, 13)), PERGOLA)
+        snap = Registry(lambda: T(13, 2, 13)).snapshot()
+        self.assertEqual(video_of_the_picture("או מביא סרטון למה תמונה?", snap, state, T(13, 2, 13)), PERGOLA)
+        for words in ("אל תשלח סרטון", "סרטון מהפרגולה", "סרטון של 12:46", "למה אתה לא נותן הסבר ?"):
+            self.assertEqual(video_of_the_picture(words, snap, state, T(13, 2, 13)), "", words)
+        self.assertEqual(video_of_the_picture("סרטון", snap, state, T(13, 9)), "")      # the photos are old
+
+    def test_1302_the_video_of_the_picture_is_recorded_in_code(self) -> None:
+        self.photos(T(13, 0, 53), LOOKS_1300)
+        sent: List[tuple] = []
+
+        class Deliver:
+            def video(self, chat_id, path, caption=""):
+                sent.append((path, caption))
+                return {"ok": True, "message_id": 7}
+
+            def photo(self, chat_id, path, caption=""):
+                raise AssertionError("no photo again")
+
+        clip = os.path.join(self.root, "live.mp4")
+        with open(clip, "wb") as f:
+            f.write(b"x")
+        services = Services(roots=lambda: [self.root], desc_dir=os.path.join(self.root, ".desc"),
+                            feedback_dir=self.root, work_dir=os.path.join(self.root, ".live"), mute=None,
+                            deliver=Deliver(), read_settings=lambda: {"owner_language": "he"}, now=lambda: self.clock,
+                            events=self.events,
+                            record_live=lambda cam, sec: {"ok": True, "path": clip, "start": self.clock,
+                                                          "end": self.clock + sec})
+        big = Scripted([])
+        agent = OwnerAgentV2(big, Registry(lambda: self.clock), self.memory,
+                             ReceiptBook(os.path.join(self.root, ".receipts"), now=lambda: self.clock), services,
+                             fast_model=None, now=lambda: self.clock)
+        out = self.say(agent, "או מביא סרטון למה תמונה?", T(13, 2, 13))
+        self.assertEqual(big.seen, [])                                     # no model, no second look
+        self.assertEqual(len(sent), 1)
+        self.assertIn("פרגולה", sent[0][1])
+        self.assertIn("פרגולה", out.text)
+        self.assertNotIn("לא הצלחתי", out.text)
 
 
 class SamePeopleTest(Base):
