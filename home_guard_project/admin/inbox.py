@@ -16,12 +16,15 @@ from PySide6.QtGui import QShortcut, QKeySequence
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter, QComboBox, QDateEdit, QTableWidget,
                                QTableWidgetItem, QAbstractItemView, QHeaderView, QFrame, QLineEdit, QSizePolicy)
 from .backend import AuthError
-from .tag_widgets import Pill, ProvenanceChip, LABEL_TOKENS
+from .tag_widgets import BidiElideDelegate, Pill, ProvenanceChip, LABEL_TOKENS
 from .workers import TaskRunner
 from .widgets.common import label, button
 
+# One name per owner tag, everywhere on this screen: "nothing there" is the owner's tag, "no tag" is its absence.
+OWNER_TAG_TITLES = {'': 'no tag', 'empty': 'nothing there', 'other': 'other', 'rule_mismatch': 'rule mismatch',
+                    'normal': 'normal', 'suspicious': 'suspicious', 'escalation': 'escalation'}
 OWNER_LABELS = [('', 'All owner tags'), ('normal', 'normal'), ('suspicious', 'suspicious'),
-                ('escalation', 'escalation'), ('empty', 'empty (nothing there)'), ('other', 'other (own words)'),
+                ('escalation', 'escalation'), ('empty', 'nothing there'), ('other', 'other (own words)'),
                 ('rule_mismatch', 'rule mismatch'), ('-', 'no tag (words only)')]
 HANDLED = [('unhandled', 'Waiting'), ('handled', 'Handled'), ('all', 'All answers')]
 DECISION_TITLES = {'accepted': 'Accepted as tag', 'fixed': 'Fixed in Tag · AI', 'not_label': 'Not a label'}
@@ -34,6 +37,10 @@ def camera_title(item):
         return item.camera_name
     m = re.search(r'ch(\d+)$', item.camera or '')
     return f'Camera {m.group(1)}' if m else (item.camera or '').replace('_', ' ')
+
+
+def owner_tag(item):
+    return OWNER_TAG_TITLES.get(item.owner_label, item.owner_label)
 
 
 def owner_words(item):
@@ -99,6 +106,7 @@ class InboxScreen(QWidget):
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.verticalHeader().hide(); self.table.setWordWrap(False); self.table.setAccessibleName('Owner answers')
+        self.table.setItemDelegate(BidiElideDelegate(self.table))   # Hebrew cells elide at their own end
         # the one-letter keys belong to the screen: a focused table would take them for its type-to-search
         self.table.setFocusPolicy(Qt.FocusPolicy.NoFocus); self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         header = self.table.horizontalHeader()
@@ -106,10 +114,12 @@ class InboxScreen(QWidget):
             header.setSectionResizeMode(c, QHeaderView.ResizeMode.Stretch if c in (5, 6) else QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
         header.resizeSection(3, ProvenanceChip(self.theme, 'owner').sizeHint().width() + 16)
+        header.setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed); header.resizeSection(7, 140)
+        header.setMinimumSectionSize(60)
         self.table.itemSelectionChanged.connect(self.show_selected)
         split.addWidget(self.table)
         split.addWidget(self._detail_panel())
-        split.setStretchFactor(0, 3); split.setStretchFactor(1, 2); split.setSizes([760, 460])
+        split.setStretchFactor(0, 3); split.setStretchFactor(1, 1); split.setSizes([900, 360])
         for key, slot in {'A': self.accept, 'F': self.fix, 'N': self.not_label, 'J': lambda: self.move(1),
                           'K': lambda: self.move(-1), 'R': self.load}.items():
             sc = QShortcut(QKeySequence(key), self); sc.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
@@ -117,7 +127,7 @@ class InboxScreen(QWidget):
         self.show_selected()
 
     def _detail_panel(self):
-        panel = QFrame(); panel.setObjectName('panel'); panel.setMinimumWidth(360)
+        panel = QFrame(); panel.setObjectName('panel'); panel.setMinimumWidth(340)
         col = QVBoxLayout(panel); col.setContentsMargins(16, 14, 16, 14); col.setSpacing(8)
         chips = QHBoxLayout(); chips.setSpacing(6)
         self.source_chip = ProvenanceChip(self.theme, 'owner'); chips.addWidget(self.source_chip)
@@ -191,10 +201,10 @@ class InboxScreen(QWidget):
         self.count.setToolTip(f'{len(items)} answer(s) in this view')
         self.table.setRowCount(len(items))
         for r, i in enumerate(items):
-            when = i.received_utc.astimezone().strftime('%Y-%m-%d %H:%M') if i.received_utc else '—'
-            status = DECISION_TITLES.get(i.decision) or ('Waiting · probably not a label' if i.probably_not_label
+            when = i.received_utc.astimezone().strftime('%d.%m %H:%M') if i.received_utc else '—'
+            status = DECISION_TITLES.get(i.decision) or ('Waiting · not a label?' if i.probably_not_label
                                                          else 'Waiting')
-            values = (when, i.customer, camera_title(i), '', i.owner_label or '—', owner_words(i) or '—',
+            values = (when, i.customer, camera_title(i), '', owner_tag(i), owner_words(i) or '—',
                       i.model_label or '—', status)
             for c, value in enumerate(values):
                 cell = QTableWidgetItem(value); cell.setToolTip(value)
@@ -242,7 +252,7 @@ class InboxScreen(QWidget):
         when = i.received_utc.astimezone().strftime('%Y-%m-%d %H:%M') if i.received_utc else ''
         self.clip.setText(f'{i.customer}  ·  {camera_title(i)}')
         self.clip_meta.setText(f'Answered {when} by {i.tagged_by or "the owner"}  ·  clip {i.clip_key}')
-        self.owner_pill.show_label(i.owner_label or 'no tag', LABEL_TOKENS.get(i.owner_label, 'muted'))
+        self.owner_pill.show_label(owner_tag(i), LABEL_TOKENS.get(i.owner_label, 'muted'))
         words = owner_words(i)
         self.owner_said.setText(words or ('(tag button, no words)' if i.owner_label else '(no words)'))
         how = []

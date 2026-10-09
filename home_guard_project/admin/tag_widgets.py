@@ -15,6 +15,30 @@ WHO_TITLES = {'old': 'Old tag', 'owner': "Customer's answer", 'ai': 'AI label', 
 ORIGIN_TITLES = {'dataset': 'Old tags', 'customer': 'Customer', 'owner_feedback': 'Customer (local)'}
 
 
+def is_rtl(text):
+    """True when the text's first strong character is right-to-left (Hebrew, Arabic): its paragraph runs RTL."""
+    import unicodedata
+    for ch in text or '':
+        kind = unicodedata.bidirectional(ch)
+        if kind in ('R', 'AL'):
+            return True
+        if kind == 'L':
+            return False
+    return False
+
+
+class BidiElideDelegate(QStyledItemDelegate):
+    """Table cells that elide in the text's own direction: a Hebrew cell keeps its beginning and loses its end
+    ("זה הגנן ש…", never "…ש זה הגנן"), right-aligned like the language reads; Latin cells are unchanged."""
+
+    def initStyleOption(self, option, index):
+        super().initStyleOption(option, index)
+        option.textElideMode = Qt.TextElideMode.ElideRight
+        if is_rtl(option.text):
+            option.direction = Qt.LayoutDirection.RightToLeft
+            option.displayAlignment = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+
+
 def soft(color, alpha=46):
     c = QColor(color); c.setAlpha(alpha); return c
 

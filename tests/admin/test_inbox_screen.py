@@ -72,7 +72,7 @@ def test_fix_not_a_label_and_consent(widgets, wait):
     s.tag_requested.connect(lambda key, fields: asked.append((key, fields)))
     s.table.selectRow(row_of(s, 902))
     assert not s.accept_button.isEnabled() and s.consent.isVisible()             # no training consent
-    assert s.table.item(row_of(s, 902), 7).text() == 'Waiting · probably not a label'
+    assert s.table.item(row_of(s, 902), 7).text() == 'Waiting · not a label?'
     assert 'probably not a label' in s.owner_how.text()
     assert s.model_chip.toolTip() == 'Prompt version: 2026-10-03.tagged-rules-label-animals-why-owner-facts'
     s.accept(); assert not s.writer.busy and not asked
@@ -88,6 +88,28 @@ def test_fix_not_a_label_and_consent(widgets, wait):
     wait(lambda: not s.loader.busy and len(s.items) == 5)
     s.table.selectRow(row_of(s, 902)); s.reopen()
     wait(lambda: not s.writer.busy and not s.loader.busy and s.items[row_of(s, 902)].decision is None)
+
+
+def test_hebrew_cells_elide_at_their_own_end_and_one_name_per_tag(widgets, wait):
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QStyleOptionViewItem
+    from home_guard_project.admin.tag_widgets import BidiElideDelegate, is_rtl
+    s, _ = inbox(widgets, wait)
+    delegate = s.table.itemDelegate()
+    assert isinstance(delegate, BidiElideDelegate)
+    for row, col, rtl in ((row_of(s, 904), 5, True), (row_of(s, 904), 2, True), (row_of(s, 903), 5, False)):
+        option = QStyleOptionViewItem(); delegate.initStyleOption(option, s.table.model().index(row, col))
+        assert (option.direction == Qt.LayoutDirection.RightToLeft) is rtl
+        assert option.textElideMode == Qt.TextElideMode.ElideRight
+    # eliding the logical end of an RTL paragraph keeps its beginning: "זה הגנן ש…"
+    text = s.table.item(row_of(s, 904), 5).text()
+    elided = s.table.fontMetrics().elidedText(text, Qt.TextElideMode.ElideRight, 60)
+    assert elided.endswith('…') and text.startswith(elided[:-1]) and elided.startswith('זה')
+    assert is_rtl('למה המצלמה') and not is_rtl('yard') and is_rtl('  "זה"') and not is_rtl('')
+    # "nothing there" is the owner's tag, "no tag" is its absence: never "empty" next to "—"
+    tags = {s.items[r].feedback_id: s.table.item(r, 4).text() for r in range(s.table.rowCount())}
+    assert tags[905] == 'nothing there' and tags[902] == 'no tag'
+    s.table.selectRow(row_of(s, 905)); assert s.owner_pill.text() == 'nothing there'
 
 
 def test_owner_prefill_and_camera_titles():
