@@ -19,15 +19,17 @@ import json
 import logging
 import math
 import os
+import re
 import threading
 import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
-from ..feedback import Feedback, save_feedback
+from ..feedback import Feedback, is_complaint, save_feedback
 from . import house
-from .claims import honest_answer, unbacked_claims
+from . import known_memory as km
+from .claims import empty_reply, honest_answer, unbacked_claims
 from .grounding import evidence_text, ungrounded_details
 from .i18n import LANGUAGE_NAMES, t
 from .memory import ChatMemory, ChatState
@@ -40,7 +42,8 @@ from .render import receipt_line, render_reply, undo_what
 from .style import strip_boilerplate
 from .tools import DEFAULTS, TOOLS, KEYS, Services, ToolContext, _issue, settings_line
 from .tools import _alert_state, _alert_target, _alert_types, _alert_values
-from .tools import KNOWN_WEEK_SEC, in_place, known_line, known_rows, session_text
+from .tools import KNOWN_WEEK_SEC, ask_known, asks_retag, in_place, known_line, known_rows, retag_words, session_text
+from .tools import known_where, profiles_for
 
 log = logging.getLogger("box.brain.agent")
 
@@ -277,6 +280,73 @@ def _kept_known(receipts: Sequence[Receipt]) -> bool:
     return any(r.tool == "mark_known" and r.status == DONE for r in receipts)
 
 
+# An offer to mark people (2026-10-09, 09:45: "אם תרצה, אני יכול לסמן את האנשים ליד הפרגולה כעובדים עד 18:00" -
+# they were marked since 09:34).
+_OFFERS_MARK = re.compile(r"(?<!\w)(?:אני\s+)?(?:יכול|יכולה|אוכל|אפשר)\s+(?:\S+\s+){0,2}?ל(?:סמן|שמור|זכור|רשום)|"
+                          r"(?<!\w)(?:לסמן|לשמור|לזכור)\s+(?:\S+\s+){0,4}?(?:עובדים|כעובדים|מוכרים)|"
+                          r"\b(?:I\s+can|shall\s+I|should\s+I|want\s+me\s+to)\s+(?:mark|save|remember)\b", re.IGNORECASE)
+
+
+def offers_mark(answer: str) -> bool:
+    return isinstance(answer, str) and bool(_OFFERS_MARK.search(answer))
+
+
+def _event_camera(state: ChatState, snapshot: Any, alert: Optional[Dict[str, Any]], now: float) -> Tuple[str, str]:
+    """The camera and "E3 09:43" of the alert this message answers, else of the event being discussed."""
+    handle = state.topic_event(now)
+    entry = state.handles.get(handle) if handle else None
+    raw, ts = "", 0.0
+    if alert and alert.get("camera"):
+        raw, ts = str(alert.get("camera") or ""), float(alert.get("ts") or 0)
+    elif isinstance(entry, dict):
+        raw, ts = str(entry.get("camera") or ""), float(entry.get("ts") or 0)
+    camera = current_camera(snapshot, raw) or raw if raw else ""
+    when = hhmm(ts) if ts else ""
+    return camera, " ".join(x for x in (handle or "", when) if x)
+
+
+def memory_lines(services: Services, state: ChatState, snapshot: Any, alert: Optional[Dict[str, Any]], lang: str,
+                 now: float) -> List[str]:
+    """What the box remembers, read before every answer (2026-10-09: "אתה לא בודק מה יש בזיכרון?"): the live
+    marks, what the owner said today, and the camera of this event that no mark covers."""
+    book = getattr(services, "events", None)
+    lines = km.live_lines(book, snapshot, lang, now) + km.today_lines(state, now)
+    try:
+        camera, when = _event_camera(state, snapshot, alert, now)
+        gap = km.gap_line(book, snapshot, camera, when, lang, now)
+        if gap:
+            lines.append(gap)
+    except Exception as exc:  # noqa: BLE001 - the context is extra
+        log.warning("Gap line not read: %s", exc)
+    return lines
+
+
+def live_status(services: Services, snapshot: Any, lang: str, now: float) -> str:
+    """A concrete status of what is live, for a reply that would otherwise say nothing."""
+    marks = km.live_marks(getattr(services, "events", None), now)
+    if not marks:
+        return f"{t('live_status_none', lang)} {t('live_status_ask', lang)}"
+    rows = []
+    for k in marks:
+        camera = str(k.get("camera") or "")
+        where = (t("known_where_house", lang) if not camera
+                 else t("known_where_camera", lang, camera=in_place(display(snapshot, camera, lang), lang)))
+        rows.append(f"{k.get('text')} {where}, {km.mark_when(k, now, lang)}")
+    return f"{t('live_status', lang, marks='; '.join(rows))} {t('live_status_ask', lang)}"
+
+
+def _tag_undo_rows(ctx: ToolContext, lang: str) -> Tuple[Tuple[Tuple[str, str], ...], ...]:
+    """[↩ תיוג] under a tag the turn filed (each line its own undo: the tag's here, the memory's under its line)."""
+    rows = []
+    for r in ctx.receipts:
+        d = r.detail if isinstance(r.detail, dict) else {}
+        if r.tool == "retag_clip" and r.status == DONE and d.get("alert_id"):
+            row = ((t("btn_undo_tag", lang), f"tu:{d['alert_id']}"),)
+            if row not in rows and row not in ctx.extra_rows:
+                rows.append(row)
+    return tuple(rows)
+
+
 def _one_line(text: str, limit: int = 160) -> str:
     text = " ".join(str(text or "").split())
     for stop in (". ", "! ", "? "):
@@ -494,6 +564,253 @@ class OwnerAgentV2:
                 log.warning("Could not note the alert in the chat history: %s", exc)
                 return None
 
+    # -- what the owner said about who is around (2026-10-09) ------------------------------------------------------
+    def _complete_known(self, ctx: ToolContext, pending: Any, text: str, choice: Optional[Tuple[str, int]],
+                        snapshot: Any, now: float) -> Optional[str]:
+        """The owner answered the keeper's question (a tap on [18:00] / [כל הבית] / [כן], or typed "עד 18"): the
+        next question is asked (at most two in all), or the memory is saved in code and the reply is the short
+        receipt: "אוקי תודה, רשמתי." with the 🏷️ tag line of the clip (when the episode began with one) and the 🧠
+        memory line. Returns the answer text ("" when a question is the reply), or None when the answer is not one
+        the code reads - then the model reads it with the question."""
+        if isinstance(pending, dict) and pending.get("kind") == "known_days":
+            return self._known_days(ctx, pending, text, snapshot, now)
+        if not isinstance(pending, dict) or pending.get("kind") != "known":
+            return None
+        args = dict(pending.get("args") or {})
+        need = [n for n in pending.get("need") or [] if n in ("until", "scope", "confirm")]
+        choices = pending.get("choices") if isinstance(pending.get("choices"), list) else []
+        lang = ctx.lang
+        if km.declined(text) or (choice is not None and "confirm" in need and choice[1] == 1):
+            return t("known_not_marked", lang)
+        if choice is not None and choices and choice[1] == len(choices) - 1 and choices[-1] == t("btn_other", lang):
+            # [אחר…]: the owner types the time; the same question stays open, no new one is counted.
+            ctx.clarification = {"question": t("ask_type_time", lang), "choices": [], "ts": now, "kind": "known",
+                                 "need": need, "args": args}
+            return ""
+        progress = False
+        if "confirm" in need and (choice is not None and choice[1] == 0 or re.match(r"^\s*(?:כן|yes|ok|אוקי)\b",
+                                                                                     text, re.IGNORECASE)):
+            need.remove("confirm")
+            progress = True
+        if "until" in need and km.until_from_words(text, now) is not None:
+            need.remove("until")
+            progress = True
+        if "scope" in need:
+            scope: Optional[str] = None
+            if choice is not None and need[0] == "scope":
+                scope = km.HOUSE if choice[1] == 0 else (str(args.get("camera") or "") or None)
+            else:
+                scope = km.scope_from_words(text, snapshot)
+            if scope:
+                need.remove("scope")
+                progress = True
+                ctx.state.prefs["group_scope"] = km.HOUSE if scope == km.HOUSE else "camera"
+                if scope == km.HOUSE:
+                    args["camera"], args["scope"] = "all", "house"
+                else:
+                    args["camera"], args["scope"] = scope, "camera"
+        if not progress:
+            return None
+        if need and int(args.get("asked") or 0) >= 2:
+            if need == ["scope"]:                       # never a third question: the camera they named
+                need, args["scope"] = [], "camera"
+            else:
+                return t("known_not_marked", lang)
+        if need:
+            ask_known(ctx, args, need, now)
+            return ""
+        run = {"who": str(args.get("who") or ""), "owner_words": str(args.get("owner_words") or "")}
+        if args.get("camera"):
+            run["camera"] = str(args["camera"])
+        if args.get("scope"):
+            run["scope"] = str(args["scope"])
+        self._dispatch(ctx, "mark_known", run, True, ["mark_known"])
+        if ctx.clarification is not None or not _kept_known(ctx.receipts):
+            return ""
+        lines = [t("ok_noted", lang)]
+        tag = args.get("tag") if isinstance(args.get("tag"), dict) else {}
+        if tag.get("line"):
+            lines.append(str(tag["line"]))
+        if tag.get("alert_id"):
+            ctx.extra_rows.append(((t("btn_undo_tag", lang), f"tu:{tag['alert_id']}"),))
+        return "\n".join(lines)
+
+    def _known_days(self, ctx: ToolContext, pending: Dict[str, Any], text: str, snapshot: Any,
+                    now: float) -> Optional[str]:
+        """[אחר…] under a crew's week: the last day the owner typed ("עד יום ה׳", "20.10") becomes the window's end."""
+        book = getattr(self.services, "events", None)
+        last = km.last_day_from_words(text, now)
+        entry = next((k for k in km.live_marks(book, now) if k.get("id") == pending.get("id")), None)
+        if book is None or entry is None or last is None:
+            return None
+        end = str(entry.get("daily_to") or "23:59")
+        until = dt.datetime.combine(last, dt.datetime.strptime(end, "%H:%M").time()).timestamp()
+        if until <= now:
+            return None
+        camera = str(entry.get("camera") or "")
+        window = ({"daily_from": str(entry["daily_from"]), "daily_to": end} if entry.get("daily_from") else {})
+        saved = book.replace_known(str(entry["id"]), camera, str(entry.get("text") or ""),
+                                   by=str(ctx.speaker.get("name") or "owner"), until=until, now=now,
+                                   people=entry.get("people"), **window)
+        from .tools import _issue  # noqa: PLC0415
+
+        _issue(ctx, "mark_known", DONE, camera or "house", {
+            "camera": camera, "who": str(entry.get("text") or ""), "until_ts": until, "at": now, "house": not camera,
+            "known_id": str(saved.get("id") or ""), "people": int(saved.get("people") or 0), **window,
+            "replaced": [{"camera": camera, "until": float(entry.get("until") or 0),
+                          "daily_from": str(entry.get("daily_from") or ""), "daily_to": str(entry.get("daily_to") or "")}]})
+        return ""
+
+    def _memory_answer(self, ctx: ToolContext, text: str, snapshot: Any, now: float) -> Optional[str]:
+        """"מה אתה זוכר?" lists the live memories; "מה תייגתי היום?" lists today's tags of clips - two different
+        things, answered in code."""
+        lang = ctx.lang
+        if km.asks_tags(text):
+            try:
+                roots = list(self.services.roots()) if self.services.roots else [self.services.feedback_dir]
+            except Exception:  # noqa: BLE001
+                roots = [self.services.feedback_dir]
+            return km.tags_today(list(dict.fromkeys([self.services.feedback_dir, *roots])), snapshot, lang, now)
+        if km.asks_memory(text):
+            facts: List[str] = []
+            try:
+                store = profiles_for(self.services)
+                if store is not None:
+                    for camera, rows in store.all_facts().items():
+                        where = (t("known_where_house", lang) if camera in ("", "house", "_house")
+                                 else known_where(snapshot, camera, lang))
+                        facts += [f"{r.get('text')} ({where})" for r in rows if r.get("text")]
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Camera facts not read: %s", exc)
+            if ctx.state.prefs.get("group_scope") == km.HOUSE:
+                facts.append(t("pref_crew_house", lang))
+            return km.memory_text(getattr(self.services, "events", None), snapshot, lang, now, facts)
+        return None
+
+    def _second_look(self, ctx: ToolContext, model: Any, messages: List[Dict[str, Any]], tier: str,
+                     usage: Dict[str, List[int]], called: List[str], answer: str, snapshot: Any,
+                     now: float) -> Optional[str]:
+        """2026-10-09: the answer offered to mark people already marked ("אם תרצה, אני יכול לסמן את האנשים ליד
+        הפרגולה כעובדים עד 18:00"), or was empathy only ("אני מבין את התסכול שלך."). The big model gets one
+        rewrite with the reason; empathy that is still empty becomes a concrete status of what is live. None: the
+        fast model's answer was empty - the big model answers the message."""
+        marks = km.live_marks(getattr(self.services, "events", None), now)
+        empty = empty_reply(answer) and not any(r.status == DONE for r in ctx.receipts)
+        offer = bool(marks) and offers_mark(answer) and not any(r.tool == "mark_known" for r in ctx.receipts)
+        if not empty and not offer:
+            return answer
+        if tier == FAST:
+            return None
+        log.warning("memory guard: %s; one rewrite", "empty empathy" if empty else "offers a live mark")
+        messages.append({"role": "assistant", "content": answer})
+        messages.append({"role": "user", "content": (
+            "[BOX] " + ("Your answer has no fact, no action and no question; it is never sent. " if empty else
+                        "Your answer offers to mark people who are ALREADY marked ([LIVE MARKS]). ")
+            + "Read [LIVE MARKS], [OWNER SAID TODAY] and [NOT COVERED]. Say what is live and what the real gap is, "
+              "and fix it now with its tool when the owner asked for it (a correction of a mark is mark_known: it "
+              "replaces the old one) - or ask ONE concrete question. When the owner complains, name the concrete "
+              "mistake in one line. Then call reply.")})
+        try:
+            again = self._loop(ctx, model, messages, tier, usage, called)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Rewrite failed: %s", exc)
+            again = ""
+        if ctx.clarification is not None or _kept_known(ctx.receipts):
+            return again
+        if unbacked_claims(again, ctx.receipts):
+            again = honest_answer(again, ctx.receipts, ctx.lang, ctx.text)
+        if (empty_reply(again) or not again.strip()) and not any(r.status == DONE for r in ctx.receipts):
+            return live_status(self.services, snapshot, ctx.lang, now)
+        if bool(marks) and offers_mark(again) and not any(r.tool == "mark_known" for r in ctx.receipts):
+            return live_status(self.services, snapshot, ctx.lang, now)
+        return again
+
+    def note_tag(self, chat_id: Any, alert: Dict[str, Any], words: str,
+                 who: Optional[Dict[str, Any]] = None, label: str = "") -> Optional[AgentReply]:
+        """The owner's ✏️ explanation of a clip, saved as its TAG by the inbox (2026-10-09: "זה תקין עובדים על
+        הפרגולה בשעות אלה" was a tag only, and the assistant never heard it). It goes into the chat history and the
+        clip becomes the event being discussed. When it states a lasting fact about who is around, the box draws the
+        conclusion itself (the owner's workers, here today, likely all week) and asks only what it cannot know, as
+        short natural questions with button answers - at most two: "אה, הם של הפרגולה? עד איזו שעה הם עובדים?"
+        [16:00] [17:00] [18:00] [אחר…], then "והם עובדים רק בפרגולה, או בכל הבית?" [כל הבית] [רק פרגולה] (only
+        what the owner did not already say). Returns the first question (None when there is none); never raises,
+        never saves a memory by itself."""
+        with self._lock:
+            try:
+                alert, who = _object(alert), _object(who)
+                chat_id, now = str(chat_id), _finite(self._now())
+                words = " ".join(str(words or "").split())
+                if not alert.get("alert_id") or not words:
+                    return None
+                state = self.memory.load(chat_id)
+                speaker = str(who.get("user_id") or "")
+                try:
+                    settings = _object(self.services.read_settings()) if self.services.read_settings else {}
+                except Exception:  # noqa: BLE001
+                    settings = {}
+                lang = state.language_for(speaker, words, default=str(settings.get("owner_language") or "en"))
+                try:
+                    ts = _finite(alert.get("ts") or now)
+                except (TypeError, ValueError):
+                    ts = now
+                try:
+                    snapshot = self.registry.snapshot()
+                except Exception:  # noqa: BLE001
+                    snapshot = None
+                raw = str(alert.get("camera") or "")
+                camera = (current_camera(snapshot, raw) or raw) if snapshot is not None else raw
+                handle = state.add_handle("event", str(alert["alert_id"]), raw, ts, str(alert.get("summary") or ""))
+                state.set_topic_event(handle, now)
+                if camera:
+                    state.set_topic_camera(camera, "", now)
+                label = label or km.tag_label(words)
+                name = display(snapshot, camera, lang) if camera else ""
+                tag = {"line": km.tag_line(hhmm(ts), name, label, words, lang), "alert_id": str(alert["alert_id"]),
+                       "label": label}
+                reply: Optional[AgentReply] = None
+                marks = km.live_marks(getattr(self.services, "events", None), now)
+                covered = any(km.covers(k, camera) and km.same_people(words, str(k.get("text") or "")) for k in marks)
+                if km.lasting_fact(words) and not covered and camera:
+                    ctx = ToolContext(turn_id=f"{chat_id}:{int(now * 1000)}", chat_id=chat_id, speaker=who, text=words,
+                                      lang=lang, mode=getattr(snapshot, "mode", "guard"), snapshot=snapshot,
+                                      state=state, services=self.services, book=self.book)
+                    args = {"who": km.who_label(words, lang), "owner_words": words, "camera": camera,
+                            "handle": handle, "tag": tag}
+                    need: List[str] = []
+                    if km.until_from_words(words, now) is None and km.until_said_today(state, words, now) is None:
+                        need.append("until")
+                    pref = state.prefs.get("group_scope")
+                    if km.work_group(words):
+                        said = km.scope_from_words(words, snapshot)
+                        if said == km.HOUSE or (said is None and pref == km.HOUSE):
+                            args["camera"], args["scope"] = "all", "house"
+                        elif said is None and pref is None:
+                            need.append("scope")
+                        else:
+                            args["scope"] = "camera"
+                    if not need:                         # one obvious answer: one confirm
+                        until = km.until_from_words(words, now) or km.until_said_today(state, words, now)
+                        where = known_where(snapshot, "" if args["camera"] == "all" else camera, lang)
+                        args["confirm"] = t("ask_confirm", lang, who=args["who"], where=where,
+                                            when=km.mark_when({"until": until}, now, lang))
+                        need = ["confirm"]
+                    ask_known(ctx, args, need, now)
+                    question = ctx.clarification or {}
+                    state.pending = dict(question, request=words, speaker=speaker, token=uuid.uuid4().hex[:8])
+                    reply = AgentReply(text=str(question.get("question") or ""),
+                                       buttons=tuple(question.get("choices") or ()),
+                                       question_token=str(state.pending["token"]) if question.get("choices") else "",
+                                       lang=lang, tier="code")
+                state.add_turn(speaker, f"✏️ {words}", tag["line"] + (f"\n{reply.text}" if reply else ""), [handle],
+                               [f"tag saved for {handle} ({name} {hhmm(ts)}, {label}): the clip's TAG only - "
+                                f"training data, not a memory"], now)
+                state.turns[-1]["kind"] = "tag"
+                self.memory.save(chat_id, state)
+                return reply
+            except Exception as exc:  # noqa: BLE001 - the tag is saved; the question is extra
+                log.warning("Tag explanation not noted in the chat: %s", exc)
+                return None
+
     # -- the model/tool loop -----------------------------------------------------------
     def _loop(self, ctx: ToolContext, model: Any, messages: List[Dict[str, Any]], tier: str,
               usage: Dict[str, List[int]], called: List[str], only: Optional[Sequence[str]] = None) -> str:
@@ -515,7 +832,7 @@ class OwnerAgentV2:
             })
             final: Optional[str] = None
             for c in msg.tool_calls:
-                if ctx.clarification is not None:      # a question was asked: nothing after it runs
+                if ctx.clarification is not None and c.name != "retag_clip":   # a question: nothing after it runs
                     messages.append({"role": "tool", "tool_call_id": c.id, "content": json.dumps(
                         {"ok": False, "error": "not run: you asked the owner a question; wait for the answer"})})
                     continue
@@ -554,13 +871,7 @@ class OwnerAgentV2:
             except Exception as exc:  # the outer boundary also covers loading and saving state
                 log.warning("Owner message failed at the poll boundary: %s", exc)
                 lang = ChatState().language_for("", text if isinstance(text, str) else "")
-                reply_text = t("unavailable", lang)
-                try:
-                    save_feedback(self.services.feedback_dir, None, Feedback(), str(text or ""),
-                                  {}, str(chat_id), time.time())
-                except Exception as save_exc:
-                    log.warning("Could not save the owner's message: %s", save_exc)
-                return AgentReply(text=reply_text, lang=lang)
+                return AgentReply(text=t("unavailable", lang), lang=lang)
 
     def handle_choice(self, chat_id: Any, token: str, index: int,
                       who: Optional[Dict[str, Any]] = None) -> Optional[AgentReply]:
@@ -683,8 +994,8 @@ class OwnerAgentV2:
 
     def known_button(self, chat_id: Any, action: str, known_id: str,
                      who: Optional[Dict[str, Any]] = None) -> AgentReply:
-        """The buttons under the Memory Keeper's receipt (``kn:x:<id>`` Cancel, ``kn:w:<id>`` All week). Never
-        raises."""
+        """The buttons under a memory's receipt: ``kn:x:<id>`` cancel, ``kn:w:<id>`` all week (a crew's week window
+        stays as it is), ``kn:d:<id>`` only today, ``kn:o:<id>`` another last day (one typed answer). Never raises."""
         with self._lock:
             lang = "en"
             try:
@@ -698,7 +1009,7 @@ class OwnerAgentV2:
                 speaker = str(who.get("user_id") or "")
                 lang = state.language_for(speaker, "", default=str(settings.get("owner_language") or "en"))
                 book = self.services.events
-                if book is None or action not in ("x", "w") or not isinstance(known_id, str) or not known_id:
+                if book is None or action not in ("x", "w", "d", "o") or not isinstance(known_id, str) or not known_id:
                     return AgentReply(text=t("unavailable", lang), lang=lang)
                 entry = next((k for k in book.list_known(now) if k.get("id") == known_id), None)
                 if entry is None:
@@ -708,22 +1019,41 @@ class OwnerAgentV2:
                 except Exception:  # noqa: BLE001
                     snapshot = None
                 camera = str(entry.get("camera") or "")
+                daily = bool(entry.get("daily_from"))
+                receipts: Tuple[Receipt, ...] = ()
+                rows: Tuple[Tuple[Tuple[str, str], ...], ...] = ()
                 if action == "x":
                     book.cancel_known(known_id)
-                    text_out = t("known_cancelled", lang, camera=display(snapshot, camera, lang))
-                    receipts: Tuple[Receipt, ...] = ()
-                    rows: Tuple[Tuple[Tuple[str, str], ...], ...] = ()
+                    text_out = t("known_cancelled", lang, camera=km.where_text(snapshot, camera, lang))
+                elif action == "w" and daily:
+                    text_out = t("known_kept_week", lang, who=str(entry.get("text") or ""),
+                                 where=known_where(snapshot, camera, lang), when=km.mark_when(entry, now, lang))
+                elif action == "o":
+                    state.pending = {"question": t("ask_last_day", lang), "choices": [], "ts": now,
+                                     "kind": "known_days", "id": known_id, "speaker": speaker,
+                                     "token": uuid.uuid4().hex[:8]}
+                    text_out = t("ask_last_day", lang)
                 else:
-                    until = now + KNOWN_WEEK_SEC
-                    saved = book.mark_known(camera, str(entry.get("text") or ""), by=str(who.get("name") or "owner"),
-                                            until=until, now=now, people=entry.get("people"))
-                    book.cancel_known(known_id)
-                    receipt = self.book.issue(f"{chat_id}:{int(now * 1000)}", "mark_known", DONE, camera, {
+                    if action == "d":
+                        until = km.until_from_words(str(entry.get("daily_to") or ""), now) if daily else None
+                        until = until if until and dt.datetime.fromtimestamp(until).date() == \
+                            dt.datetime.fromtimestamp(now).date() else float(entry.get("until") or now + 3600)
+                        window: Dict[str, str] = {}
+                    else:
+                        until, window = now + KNOWN_WEEK_SEC, {}
+                    saved = book.replace_known(known_id, camera, str(entry.get("text") or ""),
+                                               by=str(who.get("name") or "owner"), until=until, now=now,
+                                               people=entry.get("people"), **window)
+                    receipt = self.book.issue(f"{chat_id}:{int(now * 1000)}", "mark_known", DONE, camera or "house", {
                         "camera": camera, "who": str(entry.get("text") or ""), "until_ts": until, "at": now,
-                        "known_id": str(saved.get("id") or ""), "people": int(saved.get("people") or 0)})
+                        "house": not camera, "known_id": str(saved.get("id") or ""),
+                        "people": int(saved.get("people") or 0),
+                        "replaced": [{"camera": camera, "until": float(entry.get("until") or 0),
+                                      "daily_from": str(entry.get("daily_from") or ""),
+                                      "daily_to": str(entry.get("daily_to") or "")}] if action == "d" else []})
                     text_out, receipts = known_line(receipt, lang, snapshot), (receipt,)
-                    rows = tuple(row[:1] for row in known_rows(receipts, lang))     # Cancel only: it is a week now
-                state.add_turn(speaker, "✓", text_out, [], [r.summary() for r in receipts], now)
+                    rows = tuple(row[:1] for row in known_rows(receipts, lang))     # Cancel only now
+                state.add_turn(speaker, "✓", text_out, [], [km.receipt_note(r, snapshot) for r in receipts], now)
                 self.memory.save(chat_id, state)
                 return AgentReply(text=text_out, lang=lang, receipts=receipts, rows=rows)
             except Exception as exc:
@@ -952,10 +1282,20 @@ class OwnerAgentV2:
         answer, tier, escalated, guard_hits = "", BIG, False, 0
         usage: Dict[str, List[int]] = {}
         called: List[str] = []
+        # The answer to "until when?" / "all the cameras or only the pergola?" completes the mark in code.
+        known_done = None
+        if snapshot is not None:
+            try:
+                known_done = self._complete_known(ctx, pending, text, choice, snapshot, now)
+            except Exception as exc:  # noqa: BLE001 - the model still reads the answer with the question
+                log.warning("Known answer not completed in code: %s", exc)
+                known_done = None
+            if known_done is not None:
+                called += [r.tool for r in ctx.receipts]
         # "Going to sleep", "we left", "status": read and carried out in code, in any mode, with no model; the
         # writer confirms before a receipt says so. Only what the parser does not take reaches the models.
         house_out = house.NOT_OURS
-        if choice is None and snapshot is not None and self.services.house is not None:
+        if known_done is None and choice is None and snapshot is not None and self.services.house is not None:
             try:
                 schedule = house.schedule_of(self.services.house, now) or house.DEFAULT_SCHEDULE
                 house_out = house.run_command(ctx, house.parse_command(text, now, schedule))
@@ -966,7 +1306,17 @@ class OwnerAgentV2:
                 return self._undo(chat_id, house_out.undo, who)
             called += [r.tool for r in ctx.receipts]
         code_only = house_out.handled and not house_out.rest
-        if code_only:
+        if known_done is None and choice is None and snapshot is not None:
+            try:
+                listed = self._memory_answer(ctx, text, snapshot, now)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Memory list failed: %s", exc)
+                listed = None
+            if listed is not None:
+                known_done = listed
+        if known_done is not None:
+            code_only, answer, tier = True, known_done, "code"
+        elif code_only:
             answer, tier = house_out.text, "code"
         elif choice is not None and isinstance(pending, dict) and pending.get("kind") == "send_event":
             # "📹 Send the video" under "I meant the 12:46 clip at the pergola": done in code, no model.
@@ -993,6 +1343,7 @@ class OwnerAgentV2:
                     focus.append(house.context_line(self.services.house, now))
                 except Exception as exc:  # noqa: BLE001
                     log.warning("House state not read for the context: %s", exc)
+            focus += memory_lines(self.services, state, snapshot, alert, lang, now)
             block = context_block(snapshot, settings_text, now, lang, ctx.alert_handle, alert,
                                   (pending, text) if pending else None, text, box_lang, focus)
             history = state.history_messages(now)
@@ -1061,7 +1412,21 @@ class OwnerAgentV2:
                         # Never "I'll remember" / "רשמתי כהתרעה צפויה" without the receipt of that action: the
                         # claim goes, and one plain line says what was NOT done.
                         answer = honest_answer(answer, ctx.receipts, lang, ctx.text)
+                if ctx.clarification is None and not _kept_known(ctx.receipts):
+                    answer = self._second_look(ctx, model, messages, tier, usage, called, answer, snapshot, now)
+                    if answer is None:              # the fast model's answer was empty empathy: the big one answers
+                        escalated = True
+                        continue
+                    if _kept_known(ctx.receipts):
+                        answer = ""
                 break
+            if (not code_only or known_done is not None) and asks_retag(text) and not any(
+                    r.tool == "retag_clip" and r.status == DONE for r in ctx.receipts):
+                # "שמור מידע ושנה תיוג / התיוג זה ..." (2026-10-09): the tag change was dropped; it is done in code.
+                words = retag_words(text)
+                if words:
+                    called.append("retag_clip")
+                    self._dispatch(ctx, "retag_clip", {"tag": words}, True, ["retag_clip"])
             if ctx.clarification is None and answer and not code_only:
                 # The observation is partial: a visual detail it does not give was never checked (§10).
                 evidence = evidence_text([render_block(snapshot), str((alert or {}).get("summary") or ""),
@@ -1076,11 +1441,8 @@ class OwnerAgentV2:
             log.warning("The agent could not handle a message: %s", exc)
             failed = True
             answer = ""
-        try:
-            if not ctx.saved:
-                save_feedback(self.services.feedback_dir, alert, Feedback(), text, who, chat_id, now)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("Could not save the owner's message: %s", exc)
+        # A plain message (a question, a complaint, chit-chat) stays in the chat log only (owner, 2026-10-09): feedback/
+        # holds TAGS of clips (record_verdict, retag_clip, the alert's buttons and ✏️), never conversation.
         try:
             buttons: Tuple[str, ...] = ()
             # When the Memory Keeper saved who is there, its line is the reply: a verdict filed for the same
@@ -1101,12 +1463,15 @@ class OwnerAgentV2:
                                           shown, lang, self.retention_days, snapshot)
                 if not reply_text:
                     reply_text = t("unavailable" if failed else "nothing_done", lang)
+                elif not answer and is_complaint(text) and any(
+                        r.tool == "mark_known" and r.status == DONE and r.detail.get("replaced") for r in shown):
+                    reply_text = f"{t('you_are_right', lang)} {reply_text}"     # and the line says what changed
             token = _undo_token(ctx)
             if house_out.handled and token:
                 state.house_last = {"token": token, "ts": now}      # a bare "cancel" next undoes this
             try:
-                state.add_turn(speaker, text, reply_text, ctx.shown, [r.summary() for r in ctx.receipts], now,
-                               notes=ctx.vision_notes)
+                state.add_turn(speaker, text, reply_text, ctx.shown, [km.receipt_note(r, snapshot) for r in ctx.receipts],
+                               now, notes=ctx.vision_notes)
                 self.memory.save(chat_id, state)
             except Exception as exc:  # noqa: BLE001 - what was done is still reported, and its restart still runs
                 log.warning("Could not save the conversation: %s", exc)
@@ -1116,7 +1481,8 @@ class OwnerAgentV2:
                               receipts=tuple(ctx.receipts), tier=tier, escalated=escalated, guard_hits=guard_hits,
                               usage={k: (v[0], v[1]) for k, v in usage.items()}, tools_called=tuple(called),
                               answer=answer, undo_token=token,
-                              rows=tuple(house_out.rows or ()) + known_rows(ctx.receipts, lang))
+                              rows=tuple(house_out.rows or ()) + known_rows(ctx.receipts, lang)
+                              + tuple(ctx.extra_rows) + _tag_undo_rows(ctx, lang))
         except Exception as exc:
             log.warning("Could not finish owner reply: %s", exc)
             return _fallback_reply(ctx, lang)

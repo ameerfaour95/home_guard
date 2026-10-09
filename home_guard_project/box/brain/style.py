@@ -63,10 +63,21 @@ def _clean_sentence(sentence: str) -> str:
     return head if head[-1:] in ".!?…" else head + "."
 
 
+# An opening that only empathises before the real answer ("אני מבין אותך. ההתראה הייתה בכניסה"): dropped when real
+# words follow (2026-10-09); a reply that is nothing else is the agent's to rewrite (claims.empty_reply).
+_LEADING_EMPATHY = re.compile(
+    r"^\s*(?:ו?אני\s+)?(?:מבין|מבינה)\s+(?:אותך|את\s+ה?(?:תסכול|כעס)(?:\s+שלך)?)\s*[.!,]\s*|"
+    r"^\s*I\s+(?:completely\s+)?understand(?:\s+(?:you|your\s+frustration|how\s+you\s+feel))?\s*[.!,]\s*",
+    re.IGNORECASE)
+
+
 def strip_boilerplate(text: str) -> str:
     """*text* without closing offers and empty thanks; may be "" when that is all it was."""
     if not isinstance(text, str) or not text.strip():
         return text if isinstance(text, str) else ""
+    rest = _LEADING_EMPATHY.sub("", text, count=1)
+    if rest != text and re.search(r"\w{2,}", rest):
+        text = rest
     lines: List[str] = []
     for line in text.split("\n"):
         if not line.strip():

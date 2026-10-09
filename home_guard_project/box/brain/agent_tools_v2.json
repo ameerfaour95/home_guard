@@ -659,7 +659,7 @@
     "type": "function",
     "function": {
       "name": "mark_known",
-      "description": "The owner says who the people at a camera are and that they are fine (\"these are my workers on the pergola\", \"זה בסדר זה עובדים אצלי\", \"it's me\", \"זה הגנן\", \"the neighbour\"). The box stops messaging about them at that camera (only something unusual still alerts) until 'until', and writes the confirmation itself with a Cancel button. When the message replies to an alert, that alert is also filed as expected - do not call record_verdict as well. Then reply with an empty answer.",
+      "description": "The owner says who the people at a camera are and that they are fine (\"these are my workers on the pergola\", \"זה בסדר זה עובדים אצלי\", \"it's me\", \"זה הגנן\", \"the neighbour\"). The box stops messaging about them (only something unusual still alerts) until 'until', and writes the confirmation itself. [LIVE MARKS] in the context lists what is already saved: never call this to repeat one. A correction of a live mark (another time, another camera, the whole house, other words) is this tool again: it REPLACES the old mark. When the owner gave no end time, leave 'until' out: the box asks them - never invent one. A work crew (workers, gardener, cleaner) usually moves around the house: the box asks once whether to mark them at all the cameras or one. When the message replies to an alert, that alert is also filed as expected - do not call record_verdict as well. Then reply with an empty answer.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -669,20 +669,55 @@
           },
           "camera": {
             "type": "string",
-            "description": "The camera, by name or the owner's word; omit for the alert this message answers or the camera being discussed (the box asks when neither is known)."
+            "description": "The camera, by name or the owner's word; \"all\" for the whole house (every camera); omit for the alert this message answers or the camera being discussed (the box asks when neither is known)."
           },
           "until": {
             "type": "string",
-            "description": "When it ends, from the owner's words: \"now\" (only now: one hour), \"today\" (default: 23:59), \"week\" (7 days), \"tomorrow\", \"HH:MM\", \"YYYY-MM-DD\" or \"YYYY-MM-DD HH:MM\"."
+            "description": "When it ends, ONLY from the owner's words: \"HH:MM\" (\"עד 18:00\", \"עד שש\" = 18:00), \"now\" (only now: one hour), \"week\" (7 days), \"tomorrow\", \"YYYY-MM-DD\" or \"YYYY-MM-DD HH:MM\". Leave it out when the owner said no time (\"today\" alone is no time): the box asks \"until when?\". When correcting a live mark's camera only, the same time as that mark."
           },
           "owner_words": {
             "type": "string",
             "description": "The owner's words saying who they are, copied exactly from this message."
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "house",
+              "camera"
+            ],
+            "description": "Only when the owner said it: \"house\" = all the cameras (\"בכל הבית\"), \"camera\" = only the camera named."
+          },
+          "replaces": {
+            "type": "string",
+            "description": "The id of the live mark (from [LIVE MARKS]) this corrects; the box also finds it itself."
           }
         },
         "required": [
           "who",
           "owner_words"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "retag_clip",
+      "description": "Change the tag (the owner's description) of a saved clip, when the owner gives the correct description (\"שנה תיוג\", \"התיוג זה אדם עם חולצה לבנה ליד הטנדר\", \"the tag should be ...\"). A tag is training data about the clip; it is NOT a memory - who is around is mark_known. A message that asks for both (\"שמור מידע ושנה תיוג\") needs both tools. The box writes the confirmation.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "handle": {
+            "type": "string",
+            "description": "The event handle (E3); omit for the alert this message answers or the event being discussed."
+          },
+          "tag": {
+            "type": "string",
+            "description": "The new description, copied exactly from this message."
+          }
+        },
+        "required": [
+          "tag"
         ]
       }
     }

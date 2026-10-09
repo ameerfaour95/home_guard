@@ -58,6 +58,9 @@ class ChatState:
     topic: Dict[str, Any] = field(default_factory=dict)
     topic_event_ref: Dict[str, Any] = field(default_factory=dict)
     house_last: Dict[str, Any] = field(default_factory=dict)   # the last house command: {"token", "ts"} (cancel)
+    # The owner's answers kept for the chat (2026-10-09): "group_scope" = "house" | "camera", asked once when a work
+    # crew is marked (do the workers move around the house, or stay at one camera?).
+    prefs: Dict[str, Any] = field(default_factory=dict)
 
     def set_topic_camera(self, camera: str, word: str, ts: float) -> None:
         if camera:
@@ -257,7 +260,14 @@ class ChatState:
                  if isinstance(event, dict) and isinstance(event.get("handle"), str) else {})
         return cls(turns=turns, handles=handles, next_handle=max(next_handle, highest + 1, 1), pending=pending,
                    languages=_lang_map(data.get("languages")), overrides=_lang_map(data.get("overrides")),
-                   topic=topic, topic_event_ref=event, house_last=_house_last(data.get("house_last")))
+                   topic=topic, topic_event_ref=event, house_last=_house_last(data.get("house_last")),
+                   prefs=_prefs(data.get("prefs")))
+
+
+def _prefs(value: Any) -> Dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    return {k: v for k, v in value.items() if isinstance(k, str) and isinstance(v, (str, int, float, bool))}
 
 
 def _house_last(value: Any) -> Dict[str, Any]:

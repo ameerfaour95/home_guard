@@ -409,7 +409,7 @@ class InboxTaggingTest(unittest.TestCase):
         self.assertEqual(self._training_meta()["owner_feedback"][-1]["owner_text"], "two kids on bikes")
         said = self.tg.sent("sendMessage")[-1]
         clock = dt.datetime.fromtimestamp(ALERT["ts"]).strftime("%H:%M")
-        self.assertEqual(said["fields"]["text"], f"✓ Saved your explanation for the {clock} clip.")
+        self.assertTrue(said["fields"]["text"].startswith(f"🏷️ Tag for the {clock} clip"))   # a TAG line
         self.assertEqual(callback_codes(said), [f"tu:{ALERT_ID}"])
         (receipt,) = self.tg.sent("editMessageReplyMarkup")              # the alert shows it too
         self.assertEqual((receipt["fields"]["message_id"], callback_codes(receipt)), ("77", ["tag:noop", f"tu:{ALERT_ID}"]))

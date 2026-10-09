@@ -273,3 +273,29 @@ def honest_answer(answer: str, receipts: Sequence[Receipt], lang: str, request: 
     if not line and "save" in still:
         line = "not_saved_yet" if _NAMING.search(request or "") else "not_saved_any"
     return " ".join(kept + ([t(line, lang)] if line else [])).strip()
+
+
+# -- empty empathy (2026-10-09) ----------------------------------------------------------------------------------
+# "אני מבין אותך." / "אני מבין את התסכול שלך." went out three times in one morning, each the whole reply, while the
+# owner asked to be remembered and understood. A reply with no fact, no action and no question is never sent.
+_EMPATHY = re.compile(
+    r"(?<!\w)(?:ו?אני\s+)?(?:מבין|מבינה|מבינים)(?:\s+(?:אותך|אותכם|לגמרי|היטב|מאוד|את\s+(?:ה?תסכול|ה?כעס|ה?עצבים|"
+    r"ה?בלבול|ה?בעיה|ה?מצב|ה?טענה|ה?הבדל|מה\s+(?:שאתה|את)\s+(?:אומר|אומרת))(?:\s+שלך|\s+שלכם)?|ש(?:זה|אתה)\s+\S+))*|"
+    r"(?<!\w)(?:אני\s+)?(?:מצטער|מצטערת|סליחה|מתנצל|מתנצלת)(?:\s+(?:על|ש)\S*(?:\s+\S+){0,3})?|"
+    r"(?<!\w)(?:צודק|צודקת|אוקיי|אוקי|בסדר|הבנתי|ברור|כמובן|תודה)(?!\w)|"
+    r"\bI\s+(?:completely\s+|totally\s+)?(?:understand|hear you|get it|see)(?:\s+(?:you|your\s+\w+|how\s+you\s+feel|"
+    r"that|why))?\b|\b(?:I['’]m|I am)\s+sorry(?:\s+(?:for|about)\s+(?:the\s+|that|this|your\s+)?\w*)?|"
+    r"\b(?:sorry|ok(?:ay)?|got it|understood|right|thanks?)\b",
+    re.IGNORECASE)
+
+
+def empty_reply(answer: str) -> bool:
+    """True for a reply that only empathises or acknowledges ("אני מבין אותך.", "I understand your frustration.") -
+    no fact, no action, no question. "" is not empty empathy (the receipts are the reply then)."""
+    if not isinstance(answer, str) or not answer.strip():
+        return False
+    if "?" in answer:
+        return False
+    rest = _EMPATHY.sub(" ", answer)
+    words = re.findall(r"[^\W\d_]{2,}|\d+", rest)
+    return len(words) == 0

@@ -225,7 +225,7 @@ class UndoRobustnessTest(UndoTest):
         with patch("home_guard_project.box.brain.agent.render_reply", side_effect=ValueError("bad render")), patch(
                 "home_guard_project.box.brain.agent.save_feedback") as saved:
             out = agent.handle("turn off front", "-5")
-        saved.assert_called_once()
+        saved.assert_not_called()          # conversation is not a tag (2026-10-09)
         self.assertTrue(out.after)
         self.assertIn("front side", out.text)
         self.assertTrue(out.undo_token)

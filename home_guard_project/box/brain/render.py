@@ -116,6 +116,11 @@ def _receipt_line(receipt: Receipt, lang: str, retention_days: float, snapshot: 
         else:
             key = "camera_fact_removed" if d.get("removed") else "camera_fact_saved"
         return t(key, lang, camera=where, fact=str(d.get("fact") or ""))
+    if receipt.tool == "retag_clip":           # a TAG of one clip (🏷️), never a memory (brain/tools.file_tag)
+        from .known_memory import tag_line  # noqa: PLC0415
+
+        return tag_line(str(d.get("time") or ""), _name(snapshot, str(d.get("camera") or ""), lang),
+                        str(d.get("label") or "other"), str(d.get("tag") or ""), lang)
     if receipt.tool == "mark_known":           # the Memory Keeper's own line (brain/tools.py)
         from .tools import known_line  # noqa: PLC0415
 

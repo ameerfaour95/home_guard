@@ -102,7 +102,7 @@ class AgentTest(unittest.TestCase):
         self.assertEqual((first.text, first.buttons), ("Which camera?", ("main_entrance", "front_side")))
         self.assertTrue(first.question_token)
         self.assertIsNone(agent.handle_choice("-5", "stale", 1, {"user_id": 1}))   # an old button
-        big.responses = [reply("ok")]
+        big.responses = [reply("The front side camera had one event today.")]
         agent.handle_choice("-5", first.question_token, 1, {"user_id": 1})
         last_user = big.seen[-1][0][-1]
         self.assertIn('You asked: "Which camera?"', last_user)
@@ -130,7 +130,8 @@ class AgentTest(unittest.TestCase):
     def test_model_failure_answers_in_the_owners_language_and_saves_the_message(self) -> None:
         out = self.agent(Scripted([])).handle("מה קורה בכניסה", "-5", {"user_id": 1})
         self.assertEqual(out.text, "לא הצלחתי לטפל בזה כרגע, אבל ההודעה שלך נשמרה.")
-        self.assertTrue(glob.glob(os.path.join(self.root, "feedback", "**", "*.feedback.json"), recursive=True))
+        # 2026-10-09: a plain message is conversation (the chat log), never a feedback/ (tag) file.
+        self.assertFalse(glob.glob(os.path.join(self.root, "feedback", "**", "*.feedback.json"), recursive=True))
 
     def test_plain_text_without_reply_is_accepted(self) -> None:
         out = self.agent(Scripted([ModelMessage(content="Two events today.")])).handle("anything?", "-5", {})
@@ -248,7 +249,7 @@ class AgentTest(unittest.TestCase):
         agent = self.agent(Scripted([]))
         agent.memory.load = Mock(side_effect=ValueError("damaged"))
         self.assertEqual(agent.handle("מה קורה", "-5").text, t("unavailable", "he"))
-        self.assertTrue(glob.glob(os.path.join(self.root, "feedback", "**", "*.feedback.json"), recursive=True))
+        self.assertFalse(glob.glob(os.path.join(self.root, "feedback", "**", "*.feedback.json"), recursive=True))
         self.assertIsNone(agent.handle_choice("-5", "old", 0))
 
     def test_fast_actions_are_not_repeated_by_big_after_handoff(self) -> None:
@@ -444,7 +445,7 @@ class AgentTest(unittest.TestCase):
         self.assertTrue(out.receipts)
         self.assertTrue(out.after)
         self.assertEqual(len(glob.glob(os.path.join(self.root, "feedback", "**", "*.feedback.json"),
-                                       recursive=True)), 1)
+                                       recursive=True)), 0)      # a command is conversation, not a tag
 
     def test_builder_wires_services(self) -> None:
         from home_guard_project.box import find_cameras  # noqa: PLC0415
