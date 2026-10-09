@@ -448,6 +448,11 @@ TEMPLATES: Dict[str, Dict[str, str]] = {
     "tag_ask_failed": {"en": "Could not ask for the tag right now; tap Other… again.",
                        "he": "לא הצלחתי לבקש את התיוג כרגע; לחצו שוב על אחר…",
                        "ar": "تعذّر طلب الوسم الآن؛ اضغط على غير ذلك… مرة أخرى."},
+    # 2026-10-09 12:48: eleven taps on ✏️ while the assistant was busy each asked again. A repeat only gets this toast.
+    "tag_already_waiting": {"en": "Already waiting for your answer", "he": "כבר מחכה לתשובה שלך",
+                            "ar": "ما زلت أنتظر إجابتك"},
+    "busy_ack": {"en": "⏳ One moment, finishing an answer first", "he": "⏳ רגע, אני מסיים תשובה קודמת",
+                 "ar": "⏳ لحظة، أنهي إجابة سابقة أولاً"},
 }
 
 
