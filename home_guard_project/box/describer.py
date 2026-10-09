@@ -572,7 +572,10 @@ def describe(describer: Describer, frames: Sequence[Any], frame_indices: Sequenc
     try:
         sizes = [(int(f.shape[1]), int(f.shape[0])) for f in frames]
         ts = sent_frame_times(frame_indices, clock)
-        ids = assign_ids([t for t in tracks if t.get("kind") in ("person", "vehicle")], mapped)
+        # A "person" the tracker found to be a fixture (tracker.STATIC_PERSON_*: a wall lamp) is not drawn; parked
+        # vehicles still are (the owner may need "CAR1 · טנדר לבן: חונה").
+        ids = assign_ids([t for t in tracks if t.get("kind") == "vehicle"
+                          or (t.get("kind") == "person" and t.get("shown", True))], mapped)
         per_frame = keep_relevant(place_marks(tracks, ids, ts, crops, sizes, source_size))
         picked = pick_frames(per_frame, max_frames)
         drawn = draw_frames(frames, per_frame, picked, list(model_times) or [None] * len(frames), max_side)

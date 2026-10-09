@@ -22,6 +22,11 @@ would mix them up.
 - **Vehicles that never moved** (less than ``scene_map.PARKED_DISTANCE`` from where they were first seen - a
   parked car, a trailer read as a vehicle) are followed inside but are not tracks to anyone outside: no facts, no
   snapshot (so no entity), no vehicle event. The moment one drives off it is handed over whole, from its start.
+- **"People" that are a fixture** (2026-10-09 17:44 ch1: the wall lamp was P1, P2, P4) the same way: a person track
+  whose foot point never moved STATIC_PERSON_DISTANCE in STATIC_PERSON_MIN_SEC or more (its returns to the same spot
+  count as one stay), and that the detector was never sure of (max below STATIC_PERSON_MAX_CONF, the alert's own
+  person score, and mean below STATIC_PERSON_MEAN_CONF). A real person standing still for long is seen surely at
+  least once, so stays a person.
 - Each track keeps the best detector score it had (``max_conf``). The loop feeds people from a lower score than
   the alert needs (box.yaml ``tracker_person_conf``), so a reader that must know a person was seen at the alert's
   own certainty checks ``max_conf`` (``inference.investigate_lingering``).
@@ -96,6 +101,12 @@ EXIT_GRACE_SEC = 2.0
 STATIONARY_DISTANCE = 0.02   # a foot point that stays this close to where it stopped is standing, not walking
 STATIONARY_MIN_SEC = 2.0     # shorter pauses are part of walking
 STATIONARY_SHOWN_SEC = 5.0
+# A fixture read as a person (a wall lamp): never moved, never sure, for a long time. The lamp at ch1 (17:44): moved
+# ~0.001, max 0.71-0.78 on the box, mean 0.59-0.72 (yolo11s re-run on the clip), in view 611 s with 3 returns.
+STATIC_PERSON_DISTANCE = 0.015
+STATIC_PERSON_MIN_SEC = 60.0
+STATIC_PERSON_MAX_CONF = 0.8     # box.yaml conf_person: a person the alert itself would trust
+STATIC_PERSON_MEAN_CONF = 0.75
 
 Box = Tuple[float, float, float, float]
 Point3 = Tuple[float, float, float]          # (ts, x, y) foot point
@@ -153,15 +164,35 @@ class _Track:
     last_conf: float = 0.0              # the detector score of its latest look (reid.py picks its best looks)
     moved: float = 0.0                  # farthest its foot point got from the first one (picture widths)
     boxes: List[Tuple[float, Box]] = field(default_factory=list)   # (ts, box) per look, thinned like the points
+    conf_sum: float = 0.0               # the detector scores of all its looks, for mean_conf
+    static_since: Optional[float] = None   # a return to the same spot by a fixture: when the stay began
 
     @property
     def confirmed(self) -> bool:
         return self.hits >= CONFIRM_HITS
 
     @property
+    def mean_conf(self) -> float:
+        return self.conf_sum / self.hits if self.hits else 0.0
+
+    @property
+    def still(self) -> bool:
+        """Never moved and never sure: what a fixture read as a person looks like, however long so far."""
+        return (self.kind == "person" and self.moved < STATIC_PERSON_DISTANCE
+                and self.max_conf < STATIC_PERSON_MAX_CONF and self.mean_conf < STATIC_PERSON_MEAN_CONF)
+
+    @property
+    def fixture(self) -> bool:
+        """A "person" that is a fixture (a wall lamp): :attr:`still` for STATIC_PERSON_MIN_SEC or more."""
+        start = self.first_seen if self.static_since is None else min(self.static_since, self.first_seen)
+        return self.still and self.last_seen - start >= STATIC_PERSON_MIN_SEC
+
+    @property
     def shown(self) -> bool:
-        """A person always; a vehicle only once it has moved (a parked one is no track to anyone outside)."""
-        return self.kind != "vehicle" or self.moved >= sm.PARKED_DISTANCE
+        """A person unless a fixture; a vehicle only once it has moved (a parked one is no track to anyone outside)."""
+        if self.kind == "vehicle":
+            return self.moved >= sm.PARKED_DISTANCE
+        return not self.fixture
 
     @property
     def first_foot(self) -> Tuple[float, float]:
@@ -175,6 +206,7 @@ class _Track:
         self.box, self.last_seen, self.hits = box, ts, self.hits + 1
         self.max_conf = max(self.max_conf, float(conf))
         self.last_conf = float(conf)
+        self.conf_sum += float(conf)
         foot = sm.foot_point(box)
         self.moved = max(self.moved, math.hypot(foot[0] - self.points[0][1], foot[1] - self.points[0][2]))
         self.points.append((ts,) + foot)
@@ -529,7 +561,7 @@ class CameraTracker:
                 if di in used_d or len(self._active) >= MAX_ACTIVE:
                     continue
                 track = _Track(self._next_id, kind, cls_id, box, ts, ts, [(ts,) + feet[di]], max_conf=confs[di],
-                               boxes=[(ts, box)], last_conf=confs[di])
+                               boxes=[(ts, box)], last_conf=confs[di], conf_sum=confs[di])
                 self._next_id += 1
                 self._active.append(track)
                 seen.append(track.id)
@@ -579,6 +611,10 @@ class CameraTracker:
             if self._same_place((old.points[-1][1], old.points[-1][2]), start, scene):
                 old.followed = True
                 track.prev_id = old.id
+                # A fixture lost and found again at the very same spot is one long stay.
+                if old.still and math.hypot(start[0] - old.points[0][1],
+                                            start[1] - old.points[0][2]) < STATIC_PERSON_DISTANCE:
+                    track.static_since = old.first_seen if old.static_since is None else old.static_since
                 count, cur = 0, old
                 while cur is not None and track.first_seen - cur.last_seen <= RETURN_SEC:
                     count += 1
@@ -701,7 +737,7 @@ class CameraTracker:
                             "moved": sm.Track(t.kind, list(points)).moved, "active": t.id in live,
                             "path": list(_collapse(area.name for area, _, _ in runs)),
                             "entry_edge": _edge(first[1], first[2]), "exit_edge": _edge(last[1], last[2]),
-                            "max_conf": round(t.max_conf, 3)})
+                            "max_conf": round(t.max_conf, 3), "fixture": t.fixture})
             return out
 
     def tracks_with_boxes(self, t0: float, t1: float) -> List[Dict[str, Any]]:
