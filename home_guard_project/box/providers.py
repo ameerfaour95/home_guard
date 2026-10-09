@@ -42,6 +42,13 @@ PROVIDERS: Dict[str, Provider] = {
     "gateway": Provider("gateway", None, "HOMEGUARD_BOX_TOKEN", base_url_env="HOMEGUARD_GATEWAY_URL"),
 }
 
+# Per-model request extras that replace the provider's: OpenRouter refuses "reasoning off" for some models
+# ("Reasoning is mandatory for this endpoint", gemini-3.8-flash, 2026-10-09); the least thinking they allow instead.
+MODEL_EXTRA_BODY: Dict[Tuple[str, str], Dict[str, Any]] = {
+    ("openrouter", "google/gemini-3.8-flash"): {"reasoning": {"effort": "minimal"}},
+    ("openrouter", "google/gemini-3.5-flash-lite"): {"reasoning": {"effort": "minimal"}},
+}
+
 OPENAI_URL = "https://api.openai.com/v1"
 
 # $ per million tokens (input, output). OpenRouter list prices on 2026-10-06; OpenAI's own for gpt-4o,
@@ -53,14 +60,24 @@ PRICES: Dict[str, Tuple[float, float]] = {
     "openai/gpt-4o": (2.50, 10.00),
     "gpt-4o-mini": (0.15, 0.60),
     "text-embedding-3-small": (0.02, 0.0),
-    "qwen/qwen3.5-9b": (0.10, 0.15),
-    "qwen/qwen3-vl-8b-instruct": (0.117, 0.455),
+    "qwen/qwen3.5-9b": (0.10, 0.15),               # OpenRouter retires it 2026-10-21
+    "qwen/qwen3-vl-8b-instruct": (0.25, 0.75),     # was 0.117 / 0.455 on 2026-10-06; list price 2026-10-09
     "qwen/qwen3-vl-8b-thinking": (0.18, 2.10),
     "qwen/qwen3-vl-32b-instruct": (0.104, 0.416),
     "qwen/qwen2.5-vl-72b-instruct": (0.80, 1.00),
+    # The 2026-10-09 migration candidates for the Eye (OpenRouter list prices that day).
+    "qwen/qwen3.7-flash": (0.03, 0.13),
+    "qwen/qwen3.8-flash": (0.15, 0.47),
+    "qwen/qwen3.5-35b-a3b": (0.08, 0.75),
+    "qwen/qwen3.5-flash-02-23": (0.065, 0.26),
+    "qwen/qwen3.7-plus": (0.32, 1.28),
+    "qwen/qwen3.8-27b": (0.425, 2.55),
+    "qwen/qwen3.8-omni-flash": (0.15, 0.47),
+    "google/gemini-3.8-flash": (0.75, 3.75),
     # The owner's translator (messenger.py) and the model it is compared with.
     "google/gemini-3.1-flash-lite": (0.25, 1.50),
     "google/gemini-3.5-flash-lite": (0.30, 2.50),
+    "google/gemini-2.5-flash-lite": (0.10, 0.40),  # the translator's racer; OpenRouter retires it 2026-10-20
     "openai/gpt-6-luna": (0.10, 0.50),
 }
 
@@ -79,7 +96,8 @@ def get(name: str) -> Provider:
 def resolve(name: str, env: Mapping[str, str],
             model: str = "") -> Tuple[str, Optional[str], Optional[Dict[str, Any]]]:
     """``(api_key, base_url, extra_body)`` for *name*; raises naming the missing variable.
-    A ``*thinking*`` model gets no extras: its provider refuses "thinking off"."""
+    A ``*thinking*`` model gets no extras: its provider refuses "thinking off". A model in MODEL_EXTRA_BODY gets
+    its own extras instead of the provider's."""
     p = get(name)
     url = (str(env.get(p.base_url_env) or "").strip() if p.base_url_env else "") or p.base_url
     if url is None and p.base_url_env:
@@ -89,6 +107,9 @@ def resolve(name: str, env: Mapping[str, str],
         if p.key_required:
             raise ProviderError(f"{p.key_env} is not set (put it in api_key.env: python -m home_guard_project.box paths --get secrets_env)")
         key = "ollama" if p.name == "ollama" else "none"   # the SDK wants some key; these servers ignore it
+    own = MODEL_EXTRA_BODY.get((p.name, model.strip()))
+    if own is not None:
+        return key, url, dict(own)
     extra = dict(p.extra_body) if p.extra_body and "thinking" not in model.lower() else None
     return key, url, extra
 

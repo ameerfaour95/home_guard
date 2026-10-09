@@ -334,7 +334,7 @@ class TranslateFieldsTest(unittest.TestCase):
         self.assertEqual(Messenger(slow).translate({"scene": "Two men"}, "he", timeout=5.0, hedge_after=0.2),
                          {"scene": "שני אנשים"})
         self.assertLess(time.monotonic() - started, 1.5)
-        self.assertEqual(n["models"], ["google/gemini-3.1-flash-lite", "google/gemini-2.5-flash-lite"])   # another model
+        self.assertEqual(n["models"], ["google/gemini-3.1-flash-lite", "google/gemini-3.5-flash-lite"])   # another model
         broken, n = client(0.0, "not json")
         self.assertEqual(Messenger(broken).translate({"scene": "Two men"}, "he", timeout=5.0, hedge_after=2.0),
                          {"scene": "שני אנשים"})

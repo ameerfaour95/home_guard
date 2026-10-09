@@ -39,8 +39,11 @@ DEFAULT_MODEL = "google/gemini-3.1-flash-lite"
 DEFAULT_TIMEOUT_SEC = 4.0
 HEDGE_AFTER_SEC = 3.0      # Messenger.translate: a second call races a first one this slow ...
 # ... on another model, so one provider's slow minute does not sink both (2026-10-09: the same request on 3.1 Flash
-# Lite took 1.7-7 s and over 10 s on 4 of 8; 2.5 Flash Lite answered the same JSON in about 1 s, same Hebrew).
-HEDGE_MODEL = "google/gemini-2.5-flash-lite"
+# Lite took 1.7-7 s and over 10 s on 4 of 8). 2.5 Flash Lite raced until OpenRouter retired it (2026-10-20); 3.5 Flash
+# Lite replaced it (2026-10-09 bench, 40 real alerts: p50 1.0 s / p95 1.3 s, the same Hebrew; qwen3.7-flash was cheaper
+# but slower, p95 5.5 s, and mistranslated 5 of 15 spot-checked). Its thinking cannot be turned off: it gets its own
+# extras (providers.MODEL_EXTRA_BODY), never the main model's.
+HEDGE_MODEL = "google/gemini-3.5-flash-lite"
 CACHE_SIZE = 256
 
 LANGUAGE_NAMES = {"he": "Hebrew", "ar": "Arabic"}
@@ -227,7 +230,9 @@ class Messenger:
 
     def __init__(self, client: Any, model: str = DEFAULT_MODEL, timeout: float = DEFAULT_TIMEOUT_SEC,
                  extra_body: Optional[Dict[str, Any]] = None, cache_size: int = CACHE_SIZE,
-                 unavailable: str = "", hedge_model: str = HEDGE_MODEL) -> None:
+                 unavailable: str = "", hedge_model: str = HEDGE_MODEL,
+                 hedge_extra_body: Optional[Dict[str, Any]] = None) -> None:
+        """*hedge_extra_body*: the racer's own request extras (None: the main model's)."""
         self._client = client
         self.model = model
         self.timeout = float(timeout)
@@ -237,6 +242,7 @@ class Messenger:
         self._lock = threading.Lock()
         self.unavailable = unavailable
         self.hedge_model = hedge_model or model
+        self._hedge_extra_body = dict(hedge_extra_body) if hedge_extra_body is not None else self._extra_body
         self.last_usage = {"prompt_tokens": 0, "completion_tokens": 0}
 
     def to_owner(self, texts: Mapping[str, str], lang: str, keep: Sequence[str] = ()) -> Dict[str, str]:
@@ -343,8 +349,9 @@ class Messenger:
             response_format={"type": "json_object"} if fields else _RESPONSE_FORMAT,
             messages=[{"role": "system", "content": prompt},
                       {"role": "user", "content": json.dumps(dict(source), ensure_ascii=False)}])
-        if self._extra_body:
-            kwargs["extra_body"] = self._extra_body
+        extra = self._extra_body if kwargs["model"] == self.model else self._hedge_extra_body
+        if extra:
+            kwargs["extra_body"] = extra
         if timeout is not None:
             kwargs["timeout"] = float(timeout)     # the client's own HTTP timeout is the alert's 4 s
         box: Dict[str, Any] = {}
@@ -431,7 +438,11 @@ def messenger_for(box_settings: Mapping[str, Any], env: Mapping[str, str]) -> Me
             try:
                 client, extra = build_client(provider, env, timeout, model)
                 hedge = str(box_settings.get("messenger_hedge_model") or HEDGE_MODEL).strip()
-                found = Messenger(client, model, timeout, extra, hedge_model=hedge)
+                try:
+                    hedge_extra = providers.resolve(provider, env, hedge)[2]
+                except providers.ProviderError:
+                    hedge_extra = extra
+                found = Messenger(client, model, timeout, extra, hedge_model=hedge, hedge_extra_body=hedge_extra)
             except Exception as exc:  # noqa: BLE001
                 log.warning("Translator %s (%s) cannot be used: %s; alerts fall back to the model's own text.",
                             model, provider, exc)

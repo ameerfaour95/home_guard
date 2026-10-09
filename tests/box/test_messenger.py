@@ -174,6 +174,22 @@ class SettingsTest(unittest.TestCase):
             self.assertIs(msg.messenger_for({}, {}), m)                         # built once
             self.assertEqual(m.to_owner(EN, "he"), {**EN, "source": "fallback"})
 
+    def test_the_racer_gets_its_own_request_extras(self) -> None:
+        # 2026-10-09: gemini-3.5-flash-lite refuses "reasoning off" (the main model's extras); it races with its own.
+        with mock.patch.dict(msg._MESSENGERS, clear=True):
+            m = msg.messenger_for({}, {"OPENROUTER_API_KEY": "or-1"})
+        self.assertEqual(m.hedge_model, "google/gemini-3.5-flash-lite")
+        self.assertEqual(m._extra_body, {"reasoning": {"enabled": False}})
+        self.assertEqual(m._hedge_extra_body, {"reasoning": {"effort": "minimal"}})
+        client = _FakeClient(HE)
+        m = msg.Messenger(client, "main/model", 4.0, {"main": 1}, hedge_model="racer/model",
+                          hedge_extra_body={"racer": 1})
+        m._ask(EN, "he", (), timeout=1.0, model="racer/model")
+        m._ask(EN, "he", (), timeout=1.0)
+        self.assertEqual([c["extra_body"] for c in client.calls], [{"racer": 1}, {"main": 1}])
+        same = msg.Messenger(_FakeClient(HE), "main/model", 4.0, {"main": 1}, hedge_model="racer/model")
+        self.assertEqual(same._hedge_extra_body, {"main": 1})          # not given: the main model's, as before
+
 
 class _Assistant:
     def __init__(self) -> None:
