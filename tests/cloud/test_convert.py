@@ -167,3 +167,12 @@ def test_redact_replaces_names_longest_first_and_id_shapes():
                     cameras=["Front Door", "Front Door house"], places=["Ameer"])
     assert "Front" not in out and "ch6" not in out and "ameer" not in out.lower()
     assert out.count("camera") >= 3
+
+
+def test_the_hebrew_house_glossary_is_in_the_outgoing_prompt():
+    fake = FakeModel(LEGACY_ANSWER)
+    cv.Converter(cv.ConvertConfig(api_key="k"), client=fake).convert("ילד משחק ליד המשטחים והטנדר", ps.PROMPT_VERSION)
+    content = fake.calls[0]["messages"][0]["content"]
+    for line in ("משטחים = pallets", "טנדר = pickup truck", "פרגולה = pergola", "מעקה = railing", "שער = gate",
+                 "חניה = parking", "מחסן = shed", "גדר = fence", "עובדים / פועלים = workers"):
+        assert line in content, line

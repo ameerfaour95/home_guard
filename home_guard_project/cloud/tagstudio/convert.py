@@ -67,6 +67,20 @@ def language(text: str) -> str:
     return "en"
 
 
+# Hebrew house words and what they are in English (the same idea as box/messenger.py's GLOSSARY, the other way):
+# the converter writes the scene in English, and these words have one right translation in a yard.
+GLOSSARY = {
+    "משטחים": "pallets",
+    "טנדר": "pickup truck",
+    "פרגולה": "pergola",
+    "מעקה": "railing",
+    "שער": "gate",
+    "חניה": "parking",
+    "מחסן": "shed",
+    "גדר": "fence",
+    "עובדים / פועלים": "workers",
+}
+
 _CAMERA_ID = re.compile(r"\b[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*_ch\d+\b|\b(?:production|dataset)_[A-Za-z0-9_]+\b")
 
 
@@ -97,9 +111,11 @@ def prompt(words: str, prompt_version: Optional[str]) -> str:
                   '- "summary_owner": the summary in the language the tagger wrote in (empty when that is English).',
                   '- "serious_behaviour": true only for a hidden or covered face, trying doors, gates or car doors, '
                   'or looking into windows or cars.']
+    glossary = "\n".join(f"  {he} = {en}" for he, en in GLOSSARY.items())
     return (f"A person who watched a home security clip described it in their own words (any language). Restructure "
             f"those words into the JSON answer below, with the fields in this order: {fields}.\n"
-            + "\n".join(rules) + f"\n\nTheir words:\n\"\"\"\n{words.strip()[:MAX_WORDS]}\n\"\"\"\n\n"
+            + "\n".join(rules) + f"\n- Use these English words for Hebrew house words:\n{glossary}"
+            + f"\n\nTheir words:\n\"\"\"\n{words.strip()[:MAX_WORDS]}\n\"\"\"\n\n"
             "Reply with exactly one JSON object and nothing else.")
 
 
