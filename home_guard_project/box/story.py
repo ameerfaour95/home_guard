@@ -170,3 +170,13 @@ def new_people_line(fresh: Sequence[str], unmarked: bool, known_text: str, lang:
     if he:
         return f"עוד אדם אחד הגיע ({ids})" if len(fresh) == 1 else f"עוד {len(fresh)} אנשים הגיעו ({ids})"
     return f"1 more person arrived ({ids})" if len(fresh) == 1 else f"{len(fresh)} more people arrived ({ids})"
+
+
+def incident_line(entity_id: str, from_camera: str, to_camera: str, lang: str) -> str:
+    """The first line of an alert that continues an incident from another camera (stage 3.3, events.py
+    ``cross_camera: on``): "אותו אדם (P1) עבר מהשער לכניסה". *from_camera* / *to_camera* are DISPLAY names
+    (camera_names), never ids; *entity_id* is the id the first camera's thread used."""
+    who = f" ({entity_id})" if entity_id else ""
+    if _lang(lang) == "he":
+        return f"אותו אדם{who} עבר מ{from_camera} ל{_after_lamed(to_camera)}"
+    return f"The same person{who} went from {from_camera} to {to_camera}"

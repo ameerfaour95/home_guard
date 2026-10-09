@@ -500,6 +500,22 @@ With `situational` the guard loop asks the vision model with `eye_prompt.py`: th
 
 Every event (`events.py`, one ongoing activity per camera) keeps who is who (`entities.py`): the live tracker's tracks become `P1`, `P2` for people and `CAR1` for moving vehicles (parked ones never). A person the tracker saw come back, or a lone new track within 2 minutes near where a lost one was last seen, keeps the same id; with two possible candidates it is a new id marked "maybe P1 or P2", never merged. Ids restart at P1 in a new event and carry over when a long event rolls over. With tracker data, "N more people arrived" and the owner's "these are my workers" count these entities instead of the vision model's head-count: a person who arrives after the owner marked the group is "not one of those you marked" (still only sent when suspicious or worse). An update in an event's thread starts with the story so far (`story.py`: who is new, "both moved toward the pergola" only when the scene map shows it, "P2 (earlier: cleaning the floor): ..."); the event's first message is unchanged. `eye_entities: on` also shows the vision model the roster and asks what each id does (prompt version `+ent1`); keep it off until the stage-3 benchmark, because the roster names how many people the box follows.
 
+### Same person later, and across cameras (box.yaml)
+
+    reid: shadow                           # off | shadow (the default: compute and log only) | on
+    reid_device: AUTO                      # AUTO (graphics chip when there is one, else the CPU) | CPU | GPU
+    reid_link: 0.70                        # clothes match to re-link a lost person ...
+    reid_margin: 0.08                      # ... ahead of the second candidate by this much
+    reid_veto: 0.35                        # geometry would re-attach, the clothes match less: a new person
+    cross_camera: shadow                   # off | shadow (the default: log only) | on
+    cross_sec: 45                          # left one camera's picture, starts at a neighbour's within this
+    camera_neighbours:                     # which cameras a person can walk between (both ways)
+      ameer_week_0_1_ch1: [ameer_week_0_1_ch2]
+
+Stage 3.2 (`reid.py`): a person who comes back after more than 2 minutes, or where two lost people could be them, is matched by their CLOTHES only (OpenVINO `person-reidentification-retail-0277`, the whole person box, never a face). The embeddings stay in memory only, are dropped when the event closes and after 24 hours at the latest, and are never tied to a name. Only confirmed person tracks, their 3 best looks, at most 5 a second for the whole box (about 2 ms a crop on a laptop CPU). A match of 0.70 or more, clearly ahead of the second candidate, with a plausible time and place, keeps the old id (`linked_by: appearance` on the entity); clothes matching less than 0.35 keep apart two people that geometry alone would have merged. In `shadow` the log says `[camera] reid: would link P3->P1 (0.78)` and the entity gets `reid_shadow`. Without the model files ReID is off: `python -m home_guard_project.box.reid download` fetches them (checksum verified) into the models folder.
+
+Stage 3.3 (`events.py`): a person who left one camera's picture at its edge and starts at a neighbouring camera within 45 s is one incident: the second camera's event gets `incident_id` and `incident_from`. With `reid: on` the clothes confirm it (a match under the veto is a different person; two candidates need a clear winner). A suspicious that continues an incident the owner already heard about is not a new message: it replies in the first camera's thread, starting with "אותו אדם (P1) עבר מהשער לכניסה". An escalation always goes out on its own. Only cameras named in `camera_neighbours` are linked; another pair that fits is logged as `cross-camera suggestion`. In `shadow` the log says `[camera] cross-camera: would link P1 at <camera> -> P2 here`.
+
 ### What is usual at each camera (box.yaml)
 
     baseline_alerts: shadow                # off | shadow (the default: decide and log only) | on

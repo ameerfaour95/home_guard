@@ -173,6 +173,9 @@ KNOWN_CAMERAS: Tuple[str, ...] = ()
 # changes nothing. It only RAISES: box.yaml baseline_alerts off | shadow (default: decide and log only) | on.
 HISTORIAN: Any = None
 BASELINE_BUILD: Any = None       # baseline.NightlyBuild, ticked by the guard loop (start_baseline)
+# The same-day appearance memory (reid.Reid, stage 3.2), started by run() (start_reid). None - tests, tools, box.yaml
+# reid: off, no model files - changes nothing: entities are judged by geometry alone.
+REID: Any = None
 EVENTS_TICK_SEC = 1.0
 VERIFY_TIMEOUT_SEC = 15.0        # the second look before a red waits at most this long, then the red goes out
 # The investigator's wait-and-watch (stage 2b, owner-approved 2026-10-08: a suspicious may wait up to 20 s). A
@@ -363,12 +366,40 @@ def start_events(box_settings: Mapping[str, Any]) -> Any:
         log.warning("Event book not started (%s); every alert goes out on its own", exc)
         return EVENTS
     try:
+        # Stage 3.3: one event across cameras (box.yaml cross_camera off | shadow (default, log only) | on).
+        EVENTS.configure(cross_camera=events.cross_mode_of(box_settings), cross_sec=events.cross_sec_of(box_settings),
+                         neighbours=box_settings.get("camera_neighbours") or {})
+        log.info("Cross-camera events: %s (within %.0f s; neighbours: %s)", EVENTS.cross_mode, EVENTS.cross_sec,
+                 ", ".join(f"{a}-{b}" for a, others in sorted(EVENTS.neighbours.items()) for b in sorted(others)
+                           if a < b) or "none set")
+    except Exception as exc:  # noqa: BLE001 - the events go on, one camera at a time
+        log.warning("Cross-camera events not configured (%s)", exc)
+    try:
         from . import event_memory  # noqa: PLC0415
 
         event_memory.attach(EVENTS)      # every closed event goes to the long-term memory (events_archive.jsonl)
     except Exception as exc:  # noqa: BLE001 - the memory only adds; the alerts go on without it
         log.warning("Event memory not started (%s); events are kept in events.jsonl only", exc)
     return EVENTS
+
+
+def start_reid(box_settings: Mapping[str, Any], trackers: Any = None) -> Any:
+    """Start the same-day appearance memory (reid.py, box.yaml ``reid: off | shadow | on``, default shadow) and hand
+    it, with the tracker's snapshots, to the event book. Never raises: without it entities are judged by geometry."""
+    global REID
+    try:
+        from . import reid  # noqa: PLC0415
+
+        REID = reid.start(box_settings)
+    except Exception as exc:  # noqa: BLE001
+        REID = None
+        log.warning("ReID not started (%s)", exc)
+    if EVENTS is not None:
+        try:
+            EVENTS.configure(reid=REID, tracks_source=getattr(trackers, "snapshot", None))
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Event book not given ReID / tracker (%s)", exc)
+    return REID
 
 
 def start_baseline(box_settings: Mapping[str, Any], cameras: Sequence[str] = ()) -> Any:
@@ -2201,6 +2232,22 @@ def _event_story(event: Any, alert_id: str, alert_ts: float, lang: str) -> str:
         return ""
 
 
+def _incident_text(event: Any, camera: str, lang: str) -> str:
+    """"אותו אדם (P1) עבר מהשער לכניסה" on top of the first alert of a camera that continues an incident from another
+    camera (events.py stage 3.3, ``cross_camera: on``); "" otherwise. Display names only. Never raises."""
+    incident = getattr(event, "incident", None) or {}
+    if incident.get("mode") != "on" or not incident.get("announce") or not incident.get("camera"):
+        return ""
+    try:
+        from .story import incident_line  # noqa: PLC0415
+
+        return incident_line(str(incident.get("entity") or ""), camera_display(str(incident["camera"]), lang),
+                             camera_display(camera, lang), lang)
+    except Exception as exc:  # noqa: BLE001 - the alert goes out without the line
+        log.debug("[%s] incident line not written: %s", camera, exc)
+        return ""
+
+
 def _first_message(res: Any) -> Optional[Tuple[str, int]]:
     """``(chat_id, message_id)`` of the first delivered message in a dispatch result, or None."""
     found: List[Tuple[str, int]] = []
@@ -2572,6 +2619,9 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                     from .alert_texts import more_people  # noqa: PLC0415
 
                     graded = f"{more_people(event.new_people, lang)}\n{graded}"
+                passed = _incident_text(event, camera_name, lang)
+                if passed:
+                    graded = f"{passed}\n{graded}"
                 graded = owner_guard(graded, camera_name, lang)
                 plain = owner_guard(f"{shown_camera}: {alert_summary(label, summary)}", camera_name, lang)
                 thread = {"reply_to": event.reply_to} if event is not None and event.reply_to else {}
@@ -2883,6 +2933,8 @@ def run() -> int:
         TRACKERS = trackers      # the investigator re-reads it while it waits (investigate_lingering)
     except Exception as exc:  # noqa: BLE001 - without the tracker every alert goes out as before
         log.warning("Tracker not started (%s); alerts go out without tracker facts.", exc)
+    reid = start_reid(box_settings, trackers) if trackers is not None else None
+    reid_failed: Set[str] = set()
     assistant = None
     try:
         from . import telegram_agent  # noqa: PLC0415
@@ -2940,6 +2992,12 @@ def run() -> int:
                     book.tick(now_ts)
                 except Exception as exc:  # noqa: BLE001 - events must never stop the alerts
                     log.warning("Event book tick failed: %s", exc)
+                if reid is not None:
+                    try:
+                        # Same day only: an event that closed takes its people's clothes with it (reid.py).
+                        reid.prune(now_ts, book.open_track_keys())
+                    except Exception as exc:  # noqa: BLE001
+                        log.debug("ReID prune failed: %s", exc)
                 if BASELINE_BUILD is not None:
                     BASELINE_BUILD.tick(now_ts)          # the nightly rebuild (~03:30), in its own short thread
             due_worker = _start_due_alerts(pending, now_ts, cam_cfg, model, streams, main_caps, predict_args,
@@ -3008,6 +3066,13 @@ def run() -> int:
                         # Loud once per camera, then quiet: a broken tracker must not flood the log every look.
                         (log.debug if name in tracker_failed else log.warning)("[%s] tracker not updated: %s", name, exc)
                         tracker_failed.add(name)
+                    if reid is not None:
+                        try:
+                            # Only a copy of a confirmed person's best looks; the embedding runs in its own thread.
+                            reid.offer(name, seen_ts, frame, trackers.person_looks(name, seen_ts))
+                        except Exception as exc:  # noqa: BLE001 - ReID only adds
+                            (log.debug if name in reid_failed else log.warning)("[%s] reid look skipped: %s", name, exc)
+                            reid_failed.add(name)
                 # Every look feeds the camera's vehicle memory - the once-a-second looks of the
                 # cooldown too - so a car that arrives and parks during the cooldown is compared
                 # with its own parked position afterwards, and stays quiet.
