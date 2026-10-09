@@ -146,7 +146,7 @@ def test_tag_view_boxes_overlay_and_toggle(widgets, wait):
     v.setFocus(); QTest.keyClick(v, Qt.Key.Key_B)
     assert player.SESSION['boxes'] is False and not v.boxes.isChecked()
     v.view = 'crop'; v.render_boxes(); assert overlay.message is None       # boxes off: no crop note either
-    QTest.keyClick(v, Qt.Key.Key_B); assert overlay.message and 'full frame' in overlay.message
+    QTest.keyClick(v, Qt.Key.Key_B); assert overlay.message and 'full scene' in overlay.message
     v.view = 'clip'; v.render_boxes(); assert overlay.message is None
     v.canvas.grab()
 

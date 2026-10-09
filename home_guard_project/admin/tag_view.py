@@ -2,17 +2,24 @@
 the right. Laid out like CVAT / Label Studio / Encord / V7 video tools: the picture dominates, the class panel is on
 the right with one-key hotkeys, and next/previous walks a slim queue.
 
+The player shows what the AI saw (the frames the box sent the model, "What the AI sees: crop · 1 fps · N frames");
+"Full scene" plays the whole clip, marked as not seen by the AI. The form follows the clip's prompt version: the
+legacy box prompt's fields, or the Eye's category form. "In my words" + Convert turns the tagger's own words (any
+language) into that form as a suggestion.
+
 Keys (also in the help): Ctrl+Enter save and next · n/s/e then a digit picks a category (s3 = S3, n0 = N10) · o other
-· Shift+N/S/E raw label · Space play · , . one frame · ← → one second · v crop/full · b boxes · f evidence frame · a use the
-teacher · g suggest the whole tag · c needs check · x delete · j/k next/previous clip · d description · ? help.
+· Shift+N/S/E raw label · Space play · , . one frame · ← → one second · v AI view / full scene · b boxes · f evidence
+frame · w convert my words · a use the teacher · g suggest the whole tag · c needs check · x delete · j/k next/previous
+clip · d description · ? help.
 """
+import base64
 from copy import deepcopy
 from PySide6.QtCore import Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QShortcut, QKeySequence, QImage
 from PySide6.QtMultimedia import QMediaPlayer, QVideoSink
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QSplitter, QListView, QComboBox,
                                QLineEdit, QPlainTextEdit, QCheckBox, QScrollArea, QFrame, QSizePolicy, QDialog,
-                               QAbstractItemView)
+                               QAbstractItemView, QSpinBox)
 from .backend import AuthError
 from .player import VideoCanvas, TrackOverlay, SESSION
 from .tag_widgets import (QueueModel, QueueDelegate, CategoryButton, ChipGroup, OpinionCard, Pill, TIER_TOKENS,
@@ -27,14 +34,23 @@ ORIGINS = [('', 'All sources'), ('dataset', 'Old tags (dataset)'), ('customer', 
 HELP = [('Ctrl + Enter', 'Save and open the next clip'), ('n / s / e, then 1–9 or 0', 'Category (s 3 = S3, n 0 = N10)'),
         ('o', 'Category: other'), ('Shift + N / S / E', 'Raw label: normal / suspicious / escalation'),
         ('Space', 'Play / pause'), (', / .', 'One frame back / forward'), ('← / →', 'One second back / forward'),
-        ('v', 'Crop / full frame'), ('b', 'Boxes on / off (YOLO and tracker boxes, full frame)'),
+        ('v', 'What the AI sees / full scene'), ('b', 'Boxes on / off (YOLO and tracker boxes, full scene)'),
+        ('w', 'Convert "In my words" into the form (a suggestion to check)'),
         ('f', 'Evidence frame = this moment'), ('a', "Use the teacher's suggestion"),
         ('g', 'Suggest the whole tag (a model fills the form in as a draft)'),
         ('c / x', 'Needs check / delete'), ('j / k', 'Next / previous clip'), ('d', 'Write the description'),
         ('Esc', 'Leave a text field'), ('?', 'This help')]
-KIND_NAMES = {'clip': 'Full frame', 'crop': 'Crop'}
+KIND_NAMES = {'clip': 'Full scene', 'crop': 'What the AI sees'}
+FULL_SCENE = 'Full scene · not seen by the AI'
+VIEW_TIP = 'What the AI sees: the frames the box sent the model · Full scene: the whole clip, not seen by the AI  (V)'
+# The form's widgets of each answer schema (fleet_contract/prompt_schemas.py); raw label and description are shared.
+EYE_ONLY = ('category', 'other_text', 'zone', 'movement', 'flags', 'visibility', 'appearance', 'evidence')
+LEGACY_ONLY = ('legacy',)
 # The fields a "Suggest tag" draft fills in: a saved tag counts as accepted as-is when none of them changed.
 SUGGESTED = ('category', 'other_text', 'raw_label', 'zone', 'movement', 'flags', 'visibility', 'appearance', 'description', 'evidence_frame', 'evidence_sec')
+CONVERTED = ('description', 'category', 'other_text', 'zone', 'movement', 'flags', 'visibility', 'appearance',
+             'raw_label', 'label', 'applied_fact_id', 'serious_behaviour', 'people', 'vehicles', 'vehicle_moving',
+             'animals', 'why', 'summary_owner', 'evidence_frame')
 
 
 class TagView(QWidget):
@@ -54,6 +70,9 @@ class TagView(QWidget):
         self.state_runner, self.queue_runner, self.clip_runner, self.media_runner, self.save_runner, self.side_runner = \
             [TaskRunner(self) for _ in range(6)]
         self.boxes_runner = TaskRunner(self); self.boxes_runner.finished.connect(self.boxes_loaded)
+        self.ai, self.ai_images, self.ai_index = None, [], 0      # what the AI saw: the model-input view
+        self.ai_timer = QTimer(self); self.ai_timer.timeout.connect(lambda: self.ai_step(1, wrap=False))
+        self.kind = 'eye'                                          # the form's answer schema: 'eye' or 'legacy'
         self.state_runner.finished.connect(self.state_loaded); self.queue_runner.finished.connect(self.queue_loaded)
         self.clip_runner.finished.connect(self.clip_loaded); self.media_runner.finished.connect(self.media_loaded)
         self.save_runner.finished.connect(self.saved); self.side_runner.finished.connect(self.side_done)
@@ -145,14 +164,17 @@ class TagView(QWidget):
         self.boxes.setToolTip('Show / hide the YOLO and tracker boxes on the full frame (B). The AI never sees them.')
         reasons.addWidget(self.boxes)
         col.addLayout(reasons)
+        self.view_label = label('', 'muted'); self.view_label.setObjectName('viewLabel')
+        self.view_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        col.addWidget(self.view_label)
         self.canvas = VideoCanvas(self.theme, TrackOverlay); self.canvas.message = 'Select a clip'
         self.canvas.setMinimumHeight(220)
         col.addWidget(self.canvas, 3)
         bar = QHBoxLayout(); bar.setSpacing(0)
         self.segments = {}
-        for kind, text in (('crop', 'Crop'), ('clip', 'Full frame')):
+        for kind, text in (('crop', 'What the AI sees'), ('clip', 'Full scene')):
             b = button(text, lambda checked=False, k=kind: self.switch_view(k), 'segment'); b.setCheckable(True)
-            b.setToolTip('Crop: what the AI sees · Full frame: the whole camera  (V)')
+            b.setToolTip(VIEW_TIP)
             self.segments[kind] = b; bar.addWidget(b)
         bar.addSpacing(12)
         self.play = button('Play', self.toggle_play, 'compact'); bar.addWidget(self.play); bar.addSpacing(4)
@@ -164,7 +186,7 @@ class TagView(QWidget):
         bar.addStretch()
         self.speed = QComboBox()
         for text, rate in (('0.5×', .5), ('1×', 1.), ('2×', 2.)): self.speed.addItem(text, rate)
-        self.speed.setCurrentIndex(1); self.speed.currentIndexChanged.connect(lambda: self.player.setPlaybackRate(self.speed.currentData()))
+        self.speed.setCurrentIndex(1); self.speed.currentIndexChanged.connect(self.speed_changed)
         bar.addWidget(self.speed)
         col.addLayout(bar)
         self.cards = {who: OpinionCard(who, self.theme) for who in ('old', 'owner', 'ai', 'teacher')}
@@ -182,7 +204,18 @@ class TagView(QWidget):
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         body = QWidget(); body.setObjectName('tagForm'); scroll.setWidget(body)
         form = QVBoxLayout(body); form.setContentsMargins(16, 14, 26, 14)  # room for the scrollbar drawn over the right edge; form.setSpacing(8)
-        head = QHBoxLayout(); head.addWidget(label('CATEGORY', 'eyebrow'))
+        words = QHBoxLayout(); words.addWidget(label('IN MY WORDS · any language', 'eyebrow')); words.addStretch()
+        self.convert_button = button('Convert  W', self.convert, 'compact')
+        self.convert_button.setToolTip('A text model turns your words into the form below as a suggestion: only your '
+                                       'words are sent, never the pictures (W)')
+        words.addWidget(self.convert_button); form.addLayout(words)
+        self.words = QPlainTextEdit(); self.words.setPlaceholderText('What you saw, in your own words: Hebrew, Arabic, '
+                                                                     'English…')
+        self.words.setFixedHeight(56); self.words.setAccessibleName('In my words')
+        self.words.textChanged.connect(lambda: self.set_field('tagger_words', self.words.toPlainText()))
+        form.addWidget(self.words)
+        self.schema_note = label('', 'muted', True); form.addWidget(self.schema_note)
+        head = QHBoxLayout(); self.form_title = label('CATEGORY', 'eyebrow'); head.addWidget(self.form_title)
         self.started_from = label('', 'muted'); self.started_from.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.started_from.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         head.addWidget(self.started_from, 1)
@@ -193,8 +226,10 @@ class TagView(QWidget):
         self.suggest_note = label('', 'muted', True); bar.addWidget(self.suggest_note, 1)
         self.discard_button = button('Discard', self.discard_suggestion, 'link'); bar.addWidget(self.discard_button)
         self.suggest_bar.hide(); form.addWidget(self.suggest_bar)
-        self.category_grid = QGridLayout(); self.category_grid.setHorizontalSpacing(6); self.category_grid.setVerticalSpacing(5)
-        form.addLayout(self.category_grid)
+        self.category_box = QWidget(); self.category_box.setObjectName('tagForm')
+        self.category_grid = QGridLayout(self.category_box); self.category_grid.setContentsMargins(0, 0, 0, 0)
+        self.category_grid.setHorizontalSpacing(6); self.category_grid.setVerticalSpacing(5)
+        form.addWidget(self.category_box)
         self.category_buttons = {}
         self.other_text = QLineEdit(); self.other_text.setPlaceholderText('What is it? (category other)')
         self.other_text.textChanged.connect(lambda t: self.set_field('other_text', t)); self.other_text.hide()
@@ -251,23 +286,30 @@ class TagView(QWidget):
         other = next(c for c in taxonomy['categories'] if c['id'] == 'other')
         b = CategoryButton({**other, 'group': '', 'name': 'none of the above: say what it is'}, self.theme); b.clicked.connect(lambda: self.set_category('other'))
         self.category_grid.addWidget(b, 11, 0, 1, 3); self.category_buttons['other'] = b
-        self.chips = {}
+        self.chips, self.parts = {}, {}
         for name, title, values, multi in (('raw_label', 'RAW LABEL · how serious is the scene itself', taxonomy['labels'], False),
                                            ('zone', 'ZONE', taxonomy['zones'], False),
                                            ('movement', 'MOVEMENT', taxonomy['movements'], False),
                                            ('flags', 'FLAGS', taxonomy['flags'], True),
                                            ('visibility', 'VISIBILITY', taxonomy['visibility'], False)):
-            self.fields_box.addWidget(label(title, 'eyebrow'))
+            title_label = label(title, 'eyebrow'); self.fields_box.addWidget(title_label)
             chips = ChipGroup(values, multi); chips.changed.connect(lambda n=name: self.chip_changed(n))
             self.fields_box.addWidget(chips); self.chips[name] = chips
-        self.fields_box.addWidget(label('APPEARANCE · to recognise them again, never face or body', 'eyebrow'))
+            self.parts[name] = (title_label, chips)
+            if name == 'raw_label':
+                self.fields_box.addWidget(self._legacy_box(taxonomy))
+        appearance_title = label('APPEARANCE · to recognise them again, never face or body', 'eyebrow')
+        self.fields_box.addWidget(appearance_title)
         self.appearance = QLineEdit(); self.appearance.setPlaceholderText('dark jacket, grey trousers, white van')
         self.appearance.setToolTip('Up to 4 short phrases, separated by commas: clothing colour and type, what they '
                                    'carry, a vehicle\'s colour and type')
         self.appearance.textChanged.connect(lambda t: self.set_field(
             'appearance', [p.strip() for p in t.split(',') if p.strip()]))
         self.fields_box.addWidget(self.appearance)
-        evidence = QHBoxLayout(); evidence.addWidget(label('EVIDENCE FRAME', 'eyebrow')); evidence.addSpacing(8)
+        self.parts['appearance'] = (appearance_title, self.appearance)
+        evidence_row = QWidget(); evidence_row.setObjectName('tagForm')
+        evidence = QHBoxLayout(evidence_row); evidence.setContentsMargins(0, 0, 0, 0)
+        evidence.addWidget(label('EVIDENCE FRAME', 'eyebrow')); evidence.addSpacing(8)
         self.evidence = label('none', 'muted'); self.evidence.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         evidence.addWidget(self.evidence, 1)
         mark = button('Mark  F', self.mark_evidence, 'link'); mark.setToolTip('This moment is the frame that shows best what happens (F)')
@@ -275,7 +317,57 @@ class TagView(QWidget):
         evidence.addWidget(button('Go to', self.go_to_evidence, 'link'))
         evidence.addWidget(button('Clear', lambda: (self.set_field('evidence_sec', None), self.set_field('evidence_frame', None),
                                                    self.render_evidence()), 'link'))
-        self.fields_box.addLayout(evidence)
+        self.fields_box.addWidget(evidence_row)
+        self.parts['evidence'] = (evidence_row,)
+        self.parts['category'] = (self.category_box,)
+        self.parts['other_text'] = ()
+        self.apply_schema(self.kind)
+
+    def _legacy_box(self, taxonomy):
+        """The legacy box prompt's own fields (box inference.py VLM_SCHEMA), beyond the summary and the raw label."""
+        box = QWidget(); box.setObjectName('tagForm'); col = QVBoxLayout(box); col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(6)
+        col.addWidget(label('LABEL · after the house notes: what the box acts on', 'eyebrow'))
+        self.label_chips = ChipGroup(taxonomy['labels'], False)
+        self.label_chips.changed.connect(lambda: self.set_field('label', self.label_chips.value()))
+        col.addWidget(self.label_chips)
+        self.serious = QCheckBox('Serious behaviour: a hidden face, trying doors, gates or car doors, looking into '
+                                 'windows or cars')
+        self.serious.toggled.connect(lambda v: self.set_field('serious_behaviour', v)); col.addWidget(self.serious)
+        counts = QHBoxLayout(); counts.setSpacing(8)
+        self.counts = {}
+        for name, text in (('people', 'People'), ('animals', 'Animals')):
+            counts.addWidget(label(text, 'muted'))
+            spin = QSpinBox(); spin.setRange(0, 50); spin.setAccessibleName(text)
+            spin.valueChanged.connect(lambda v, n=name: self.set_field(n, v)); counts.addWidget(spin)
+            self.counts[name] = spin
+        self.vehicle_moving = QCheckBox('A vehicle moves')
+        self.vehicle_moving.toggled.connect(lambda v: self.set_field('vehicle_moving', v))
+        counts.addWidget(self.vehicle_moving); counts.addStretch(); col.addLayout(counts)
+        self.fact_id = QLineEdit(); self.fact_id.setPlaceholderText('House note id used for the label (empty when none)')
+        self.fact_id.textChanged.connect(lambda t: self.set_field('applied_fact_id', t.strip())); col.addWidget(self.fact_id)
+        col.addWidget(label('WHY · the reason for the label, in English', 'eyebrow'))
+        self.why = QPlainTextEdit(); self.why.setFixedHeight(48)
+        self.why.textChanged.connect(lambda: self.set_field('why', self.why.toPlainText())); col.addWidget(self.why)
+        col.addWidget(label("SUMMARY FOR THE OWNER · in the owner's language (empty for English)", 'eyebrow'))
+        self.summary_owner = QPlainTextEdit(); self.summary_owner.setFixedHeight(48)
+        self.summary_owner.textChanged.connect(lambda: self.set_field('summary_owner', self.summary_owner.toPlainText()))
+        col.addWidget(self.summary_owner)
+        self.parts['legacy'] = (box,)
+        return box
+
+    def apply_schema(self, kind):
+        """Show the form of the clip's answer schema: the Eye's category form, or the legacy box prompt's fields."""
+        self.kind = kind if kind in ('eye', 'legacy') else 'eye'
+        for name, widgets in getattr(self, 'parts', {}).items():
+            visible = (name not in EYE_ONLY or self.kind == 'eye') and (name not in LEGACY_ONLY or self.kind == 'legacy')
+            for w in widgets:
+                w.setVisible(visible)
+        self.form_title.setText('CATEGORY' if self.kind == 'eye' else 'RAW LABEL AND THE BOX\'S ANSWER')
+        if self.kind == 'eye':
+            self.other_text.setVisible(bool(self.form and self.form.get('category') == 'other'))
+        else:
+            self.other_text.hide()
 
     def layout_cards(self, width=None):
         columns = 4 if (width or self.canvas.width()) > 860 else 2
@@ -302,7 +394,7 @@ class TagView(QWidget):
         keys = {'Ctrl+Return': self.save, 'Ctrl+Enter': self.save, 'Ctrl+S': self.save, 'Space': self.toggle_play,
                 ',': lambda: self.step(-1), '.': lambda: self.step(1), 'Left': lambda: self.seek_by(-1000),
                 'Right': lambda: self.seek_by(1000), 'V': lambda: self.switch_view('clip' if self.view == 'crop' else 'crop'),
-                'B': self.toggle_boxes,
+                'B': self.toggle_boxes, 'W': self.convert,
                 'F': self.mark_evidence, 'A': self.accept_teacher, 'G': self.suggest,
                 'C': lambda: self.needs_check.toggle(),
                 'X': lambda: self.delete.toggle(), 'J': lambda: self.move(1), 'K': lambda: self.move(-1),
@@ -413,16 +505,21 @@ class TagView(QWidget):
         tag = detail.get('tag')
         self.history.setText(f"Saved {len(detail['history'])} time(s) · last by {tag['by']} at {tag['at'][:16].replace('T', ' ')}"
                              if tag else '')
+        schema = detail.get('answer_schema') or {}
+        self.apply_schema(schema.get('kind', 'eye'))
+        version = detail.get('prompt_version') or ''
+        self.schema_note.setText((f'Prompt version {version}: ' if version else 'No prompt answered this clip: ')
+                                 + ('the Eye\'s category form' if self.kind == 'eye' else 'the box\'s legacy answer'))
         self.render_form()
         self.update_save_state()
         self.banner.hide()
         self.suggest_button.setEnabled(True)
-        if self.view not in [k for k, ok in detail['media'].items() if ok]:
-            self.view = 'crop' if detail['media'].get('crop') else 'clip'
+        if self.view not in [k for k in ('crop', 'clip') if self.can_show(k)]:
+            self.view = 'crop' if self.can_show('crop') else 'clip'
         reasons = detail.get('media_reasons') or {}
         for kind, b in self.segments.items():
-            b.setEnabled(bool(detail['media'].get(kind))); b.setChecked(kind == self.view)
-            b.setToolTip(reasons.get(kind) or 'Crop: what the AI sees · Full frame: the whole camera  (V)')
+            b.setEnabled(self.can_show(kind)); b.setChecked(kind == self.view)
+            b.setToolTip(VIEW_TIP if self.can_show(kind) else reasons.get(kind) or VIEW_TIP)
         self.load_media()
         self.load_boxes()
         if self.owner_start and self.owner_start[0] == key:
@@ -469,7 +566,7 @@ class TagView(QWidget):
 
     def render_boxes(self):
         overlay = self.canvas.overlay
-        overlay.message = ('Boxes show on the full frame  ·  V  (the AI sees the crop without them)'
+        overlay.message = ('Boxes show on the full scene  ·  V  (the AI sees its frames without them)'
                            if self.view == 'crop' and SESSION['boxes'] else None)
         self.boxes.setChecked(SESSION['boxes']); overlay.update()
 
@@ -477,13 +574,24 @@ class TagView(QWidget):
         SESSION['boxes'] = not SESSION['boxes']
         self.render_boxes()
 
+    def can_show(self, kind):
+        """The AI view needs something the AI saw (sent frames of an event, a crop or the clip); the full scene a clip."""
+        media = (self.detail or {}).get('media', {})
+        if kind == 'crop':
+            return bool(media.get('crop') or media.get('clip') or (self.detail or {}).get('item', {}).get('event_id'))
+        return bool(media.get(kind))
+
     def load_media(self):
-        self.player.stop(); self.player.setSource(QUrl())
+        self.player.stop(); self.player.setSource(QUrl()); self.ai_timer.stop()
+        self.ai, self.ai_images, self.ai_index = None, [], 0
         self.canvas.image = QImage(); self.canvas.message = 'Loading video…'; self.canvas.update()
-        if not self.detail or not self.detail['media'].get(self.view):
+        self.view_label.setText('' if self.view == 'crop' else FULL_SCENE)
+        if not self.detail or not self.can_show(self.view):
             self.show_video_message(self.missing_text()); return
         request = (self.key, self.view)
-        if not self.media_runner.start(lambda: (request, self.backend.tagging_media(*request))):
+        fetch = (lambda: self.backend.tagging_model_input(request[0])) if self.view == 'crop' else \
+            (lambda: self.backend.tagging_media(*request))
+        if not self.media_runner.start(lambda: (request, fetch())):
             self.pending_media = True
 
     def media_loaded(self, result, error):
@@ -502,12 +610,56 @@ class TagView(QWidget):
         (key, kind), access = result
         if key != self.key or kind != self.view:
             self.load_media(); return
+        if kind == 'crop':
+            self.show_ai(access); return
         self.player.setSource(QUrl(access['url'])); self.player.setPlaybackRate(self.speed.currentData())
         self.player.play(); self.player.pause()
 
+    # ------------------------------------------------------------------ what the AI saw
+    def show_ai(self, view):
+        """The model's input frames, stepped like a 1 fps video: exactly the pictures the box sent (or rendered like the
+        box), labelled with how they were made."""
+        images = []
+        for data in view.get('frames') or []:
+            image = QImage(); image.loadFromData(base64.b64decode(data))
+            if not image.isNull():
+                images.append(image)
+        self.ai, self.ai_images, self.ai_index = view, images, 0
+        self.view_label.setText(f"{view.get('label', '')}  ·  {view.get('source_title', '')}")
+        self.view_label.setToolTip(f"Prompt version: {view.get('prompt_version') or 'none'}")
+        if not images:
+            self.show_video_message('The AI saw no frames of this clip.'); return
+        self.ai_show()
+
+    def ai_show(self):
+        self.canvas.image = self.ai_images[self.ai_index]; self.canvas.update(); self.canvas.overlay.update()
+        times = (self.ai or {}).get('times') or []
+        t = times[self.ai_index] if self.ai_index < len(times) and times[self.ai_index] is not None else None
+        self.clock.setText(f'frame {self.ai_index + 1} / {len(self.ai_images)}' + (f'  ·  {t:.1f} s' if t is not None else ''))
+
+    def ai_step(self, delta, wrap=True):
+        if not self.ai_images:
+            return
+        index = self.ai_index + delta
+        if not 0 <= index < len(self.ai_images):
+            if not wrap:
+                self.ai_timer.stop(); self.play.setText('Play'); return
+            index = max(0, min(len(self.ai_images) - 1, index))
+        self.ai_index = index; self.ai_show()
+
+    def speed_changed(self):
+        self.player.setPlaybackRate(self.speed.currentData())
+        if self.ai_timer.isActive():
+            self.ai_timer.setInterval(self.ai_interval())
+
+    def ai_interval(self):
+        fps = float((self.ai or {}).get('sample_fps') or 1.0)
+        return max(50, int(1000 / fps / (self.speed.currentData() or 1.0)))
+
     def missing_text(self):
         """Why there is nothing to play, per video kind, and that the clip can still be tagged."""
-        media, reasons = (self.detail or {}).get('media', {}), (self.detail or {}).get('media_reasons', {})
+        reasons = (self.detail or {}).get('media_reasons', {})
+        media = {k: self.can_show(k) for k in ('clip', 'crop')}
         lines = [f"{KIND_NAMES[k]}: {'available' if media.get(k) else reasons.get(k) or 'not available'}"
                  for k in ('clip', 'crop')]
         return '\n'.join(['No video to play here.', *lines, 'You can still tag it from the answers below.'])
@@ -560,6 +712,21 @@ class TagView(QWidget):
             phrases = [p.strip() for p in self.appearance.text().split(',') if p.strip()]
             if phrases != list(f.get('appearance') or []):
                 self.appearance.setText(', '.join(f.get('appearance') or []))
+            if self.words.toPlainText() != (f.get('tagger_words') or ''):
+                self.words.setPlainText(f.get('tagger_words') or '')
+            if hasattr(self, 'label_chips'):
+                self.label_chips.set_value(f.get('label') or '')
+                self.serious.setChecked(bool(f.get('serious_behaviour')))
+                self.vehicle_moving.setChecked(bool(f.get('vehicle_moving')))
+                for name, spin in self.counts.items():
+                    spin.setValue(int(f.get(name) or 0))
+                if self.fact_id.text() != (f.get('applied_fact_id') or ''):
+                    self.fact_id.setText(f.get('applied_fact_id') or '')
+                for widget, name in ((self.why, 'why'), (self.summary_owner, 'summary_owner')):
+                    if widget.toPlainText() != (f.get(name) or ''):
+                        widget.setPlainText(f.get(name) or '')
+            if self.kind != 'eye':
+                self.other_text.hide()
             self.render_suggestion()
             self.needs_check.setChecked(bool(f.get('needs_check'))); self.delete.setChecked(bool(f.get('delete')))
             self.render_evidence()
@@ -657,7 +824,7 @@ class TagView(QWidget):
 
     # ------------------------------------------------------------------ video
     def switch_view(self, kind):
-        if not self.detail or not self.detail['media'].get(kind) or kind == self.view:
+        if not self.detail or not self.can_show(kind) or kind == self.view:
             return
         self.view = kind
         for k, b in self.segments.items():
@@ -668,6 +835,14 @@ class TagView(QWidget):
         self._resume_at = position
 
     def toggle_play(self):
+        if self.view == 'crop':
+            if self.ai_timer.isActive():
+                self.ai_timer.stop(); self.play.setText('Play')
+            elif self.ai_images:
+                if self.ai_index >= len(self.ai_images) - 1:
+                    self.ai_index = 0; self.ai_show()
+                self.ai_timer.start(self.ai_interval()); self.play.setText('Pause')
+            return
         if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             self.player.pause()
         elif not self.player.source().isEmpty():
@@ -677,6 +852,8 @@ class TagView(QWidget):
         return float((self.detail or {}).get('fps') or 7.0)
 
     def step(self, direction):
+        if self.view == 'crop':
+            self.ai_timer.stop(); self.play.setText('Play'); self.ai_step(direction); return
         if self.player.source().isEmpty():
             return
         self.player.pause()
@@ -684,6 +861,8 @@ class TagView(QWidget):
         self.player.setPosition(max(0, min(self.player.duration(), round(frame * 1000 / self.fps()))))
 
     def seek_by(self, ms):
+        if self.view == 'crop':
+            self.ai_step(1 if ms > 0 else -1); return
         if not self.player.source().isEmpty():
             self.player.setPosition(max(0, min(self.player.duration(), self.player.position() + ms)))
 
@@ -697,6 +876,9 @@ class TagView(QWidget):
         if self.form is None:
             return
         sec = round(self.player.position() / 1000, 3)
+        times = (self.ai or {}).get('times') or []
+        if self.view == 'crop' and self.ai_index < len(times) and times[self.ai_index] is not None:
+            sec = round(float(times[self.ai_index]), 3)      # the AI frame on screen, as a time in the clip
         self.form['evidence_sec'], self.form['evidence_frame'] = sec, round(sec * self.fps())
         self.render_evidence(); self.update_save_state()
 
@@ -708,9 +890,11 @@ class TagView(QWidget):
     def save(self):
         if self.form is None or not self.key:
             return
-        if not self.form.get('category') and not self.form.get('delete'):
+        if self.kind == 'eye' and not self.form.get('category') and not self.form.get('delete'):
             self.show_banner('Choose a category first (or mark the clip Delete). Old tags never had one, so it is '
                              'left for you to pick.'); return
+        if self.kind == 'legacy' and not self.form.get('raw_label') and not self.form.get('delete'):
+            self.show_banner('Choose the raw label first (or mark the clip Delete).'); return
         key, fields = self.key, deepcopy(self.form)
         if fields.get('suggested_by') and key in self.suggested:
             _, suggested, _ = self.suggested[key]
@@ -795,12 +979,43 @@ class TagView(QWidget):
                                                                   'then save' if draft else ''))
         self.discard_button.setVisible(draft)
 
+    # ------------------------------------------------------------------ "In my words" -> Convert
+    def convert(self):
+        if not self.key or self.form is None:
+            return
+        words = self.words.toPlainText().strip()
+        if not words:
+            self.words.setFocus(); self.show_banner('Write what you saw first, in any language, then Convert.'); return
+        key = self.key
+        self.convert_button.setEnabled(False); self.save_state.setText('Converting your words…')
+        if not self.side_runner.start(lambda: ('convert', key, self.backend.tagging_convert(key, words))):
+            self.convert_button.setEnabled(True)
+
+    def apply_conversion(self, key, answer):
+        """The words, restructured into the clip's schema, fill the form as a suggestion: the tagger checks and saves.
+        Saved with it: the words (ground truth), their language and the converting model."""
+        before = deepcopy(self.form)
+        for name, value in (answer.get('fields') or {}).items():
+            if name not in CONVERTED:
+                continue
+            if name == 'flags':
+                value = [f for f in value or [] if f in self.chips['flags'].buttons]
+            self.form[name] = value
+        self.form['tagger_language'], self.form['converted_by'] = answer.get('language', ''), answer.get('model', '')
+        self.raw_manual = bool(self.form.get('raw_label'))
+        self.suggested[key] = (answer.get('model', ''), {n: deepcopy(self.form.get(n)) for n in SUGGESTED}, before)
+        self.render_form(); self.update_save_state()
+        self.suggest_bar.show(); self.discard_button.show()
+        self.suggest_note.setText(f"Converted from your words by {answer.get('model', '')} · a suggestion: check "
+                                  'every field, then save')
+        self.save_state.setText('Your words are in the form: check it')
+
     def export(self):
         self.export_button.setEnabled(False)
         self.side_runner.start(lambda: ('export', None, self.backend.tagging_export()))
 
     def side_done(self, result, error):
-        self.export_button.setEnabled(True); self.suggest_button.setEnabled(True)
+        self.export_button.setEnabled(True); self.suggest_button.setEnabled(True); self.convert_button.setEnabled(True)
         if error:
             if isinstance(error, AuthError):
                 self.session_expired.emit(); return
@@ -813,6 +1028,8 @@ class TagView(QWidget):
                              f"and {c['untagged']} untagged left out) to {answer['training_path'].rsplit(chr(92), 2)[0]}")
         elif kind == 'suggest' and key == self.key:
             self.apply_suggestion(key, answer)
+        elif kind == 'convert' and key == self.key:
+            self.apply_conversion(key, answer)
         elif kind == 'teach' and key == self.key:
             self.save_state.setText(''); self.open_key(key)
 
@@ -829,7 +1046,7 @@ class TagView(QWidget):
         return dialog
 
     def hideEvent(self, event):
-        self.player.pause(); super().hideEvent(event)
+        self.player.pause(); self.ai_timer.stop(); super().hideEvent(event)
 
 
 def _same(a, b):

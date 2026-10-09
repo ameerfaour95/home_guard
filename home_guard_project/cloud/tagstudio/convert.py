@@ -8,7 +8,7 @@ The result fills the form as a suggestion; the tagger confirms it. What is saved
 The model is a setting: ``HG_CONVERT_MODEL`` (default ``google/gemini-3.1-flash-lite`` through OpenRouter, as the
 owner asked), ``HG_CONVERT_BASE_URL``, key ``OPENROUTER_API_KEY`` (api_key.env). Gemini's terms restrict using its
 output to train competing models; the output here is the human's own words restructured and confirmed by the human
-(docs/admin/tag-ai-convert.md). TLS verifies against the Windows certificate store, as Suggest does.
+(docs/admin/TAG_AI_CONVERT.md). TLS verifies against the Windows certificate store, as Suggest does.
 """
 from __future__ import annotations
 

@@ -518,10 +518,10 @@ def require_category(current: Optional[Tag], fields: Dict[str, Any]) -> None:
     merged = {**(current.fields if current else {}), **fields}
     if merged.get("delete"):
         return
-    if schema_kind(merged.get("prompt_version")) == EYE or "category" in fields or merged.get("category"):
+    if schema_kind(merged.get("prompt_version")) == EYE:
         if not merged.get("category"):
             raise StudioError(NEEDS_CATEGORY, 422)
-    elif not merged.get("raw_label"):
+    elif not merged.get("raw_label") and not merged.get("category"):
         raise StudioError(NEEDS_LABEL, 422)
 
 
