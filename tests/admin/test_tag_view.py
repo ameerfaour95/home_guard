@@ -59,7 +59,7 @@ def test_save_needs_a_category_or_a_flag(widgets, wait):
     v.form['category'] = ''; v.needs_check.setChecked(True); v.save()
     assert v.banner.isVisible() and 'category' in v.banner_text.text() and not v.save_runner.busy
     with pytest.raises(ValidationError, match='Choose a category'):
-        b.tagging_save(v.key, {'raw_label': 'suspicious'})                 # the server says the same
+        b.tagging_save('ds:yard_1791000007_trigger', {'raw_label': 'suspicious'})   # the server says the same
     v.delete.setChecked(True); v.save()
     wait(lambda: not v.save_runner.busy, 5)
 

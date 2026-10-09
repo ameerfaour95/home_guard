@@ -3238,6 +3238,12 @@
       },
       "TaggingClip": {
         "properties": {
+          "answer_schema": {
+            "additionalProperties": true,
+            "default": {},
+            "title": "Answer Schema",
+            "type": "object"
+          },
           "assessment": {
             "additionalProperties": true,
             "title": "Assessment",
@@ -3297,6 +3303,11 @@
           },
           "prefilled_from": {
             "title": "Prefilled From",
+            "type": "string"
+          },
+          "prompt_version": {
+            "default": "",
+            "title": "Prompt Version",
             "type": "string"
           },
           "tag": {

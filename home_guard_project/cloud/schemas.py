@@ -549,6 +549,8 @@ class TaggingClip(BaseModel):
     prefilled_from: str
     assessment: dict
     history: list[dict]
+    prompt_version: str = ""            # the clip's prompt version: the tag follows its answer schema
+    answer_schema: dict = {}            # {"kind": "legacy" | "eye", "name", "fields": the answer's fields in order}
 
 
 class TagSave(BaseModel):

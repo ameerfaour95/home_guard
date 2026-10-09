@@ -94,7 +94,9 @@ def test_save_is_append_only_and_validated(client, staff_factory, studio):
     key = f"ev:{ids['consenting']}"
     r = client.post("/v1/tagging/tag", headers=h, json={"key": key, "fields": {"category": "Q1"}})
     assert r.status_code == 422 and "category" in r.json()["detail"]
-    r = client.post("/v1/tagging/tag", headers=h, json={"key": key, "fields": {"raw_label": "suspicious"}})
+    # a dataset clip no prompt answered is tagged with the category form
+    r = client.post("/v1/tagging/tag", headers=h, json={"key": "ds:front_side_1771696865_trigger",
+                                                        "fields": {"raw_label": "suspicious"}})
     assert r.status_code == 422 and "Choose a category" in r.json()["detail"]
     r = client.post("/v1/tagging/tag", headers=h, json={"key": key, "fields": {
         "category": "N6", "zone": "yard", "description": "Two people walk along the wall to the car."}})
@@ -111,6 +113,7 @@ def test_save_is_append_only_and_validated(client, staff_factory, studio):
     with session_scope(client.app.state.engine) as s:
         rows = s.scalars(select(m.TagEvent).order_by(m.TagEvent.id)).all()
         assert [r.fields for r in rows][1] == {"needs_check": True} and rows[0].clip_id == STEM
+        assert rows[0].fields["prompt_version"] == "2026-10-03.test"     # the clip's prompt version, stored
     assert client.post("/v1/tagging/tag", headers=h, json={"key": "ds:nope", "fields": {}}).status_code == 404
 
 

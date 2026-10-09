@@ -60,7 +60,8 @@ def test_schema_by_prompt_version():
     assert ps.field_order(ps.PROMPT_VERSION) == ("summary", "label", "raw_label", "applied_fact_id",
                                                  "serious_behaviour", "people", "vehicle_moving", "animals", "why",
                                                  "summary_owner")
-    assert ps.field_order(None) == ps.field_order(ps.PROMPT_VERSION)
+    assert ps.field_order("v1") == ps.field_order(ps.PROMPT_VERSION)
+    assert ps.schema_kind(None) == ps.schema_kind("") == ps.EYE      # an old clip no prompt answered
     eye = ps.field_order(ps.EYE_PROMPT_VERSION + "+tf1")
     assert eye[:3] == ("summary", "category", "other_text") and eye[-1] == "why"
     assert ps.answer_schema(ps.EYE_PROMPT_VERSION)[1]["additionalProperties"] is False

@@ -194,6 +194,7 @@ class _MemoryStudio(TagStudio):
             clean = clean_fields(fields)
         except TagError as e:
             raise StudioError(str(e), 422) from None
+        clean = self.with_prompt_version(session, item, self.tags(session).get(key), clean)
         require_category(self.tags(session).get(key), clean)
         with self._lock:
             self._events.append(dict(key=key, at=now.strftime('%Y-%m-%dT%H:%M:%S.%fZ'), by=staff.name, fields=clean))

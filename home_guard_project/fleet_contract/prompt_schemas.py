@@ -116,9 +116,11 @@ EYE = "eye"
 
 
 def schema_kind(prompt_version: Optional[str]) -> str:
-    """EYE for an Eye prompt version (with or without "+<tracker facts>"), else LEGACY: the box's own prompt, also
-    for a clip without a recorded version (every clip before the Eye was answered with it or an older one)."""
-    return EYE if str(prompt_version or "").startswith(EYE_PROMPT_VERSION) else LEGACY
+    """EYE for an Eye prompt version (with or without "+<tracker facts>") and for a clip no prompt answered (an old
+    dataset clip: tagged with the studio's category form, the Eye's schema); LEGACY for any other recorded version
+    (the box's own Oct 3 prompt, or an older one with the same fields)."""
+    version = str(prompt_version or "")
+    return EYE if not version or version.startswith(EYE_PROMPT_VERSION) else LEGACY
 
 
 def answer_schema(prompt_version: Optional[str]) -> Tuple[str, Dict[str, Any]]:

@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from ...fleet_contract import taxonomy
+from ...fleet_contract.prompt_schemas import answer_schema, schema_kind
 from . import export as exporter
 from . import queue as work_queue
 from .config import StudioPaths
@@ -181,7 +182,13 @@ class TagStudio:
             form, prefilled = self.prefill(item), (OLD if OLD in item.opinions else "")
         fps = item.fps or (self.dataset.fps(item) if item.meta_path else None)
         status = self.media_status(item)
+        prompt_version = form.get("prompt_version") or (self.clip_meta(session, item).get("teacher") or {}).get(
+            "prompt_version") or ""
+        form["prompt_version"] = prompt_version
+        name, answer = answer_schema(prompt_version)
         return {
+            "prompt_version": prompt_version,
+            "answer_schema": {"kind": schema_kind(prompt_version), "name": name, "fields": list(answer["properties"])},
             "item": {**item.summary(), "info": item.info, "video_s3": item.video_s3, "crop_s3": item.crop_s3},
             "media": {kind: ok for kind, (ok, _) in status.items()},
             "media_reasons": {kind: why for kind, (_, why) in status.items()}, "fps": fps,
@@ -198,6 +205,7 @@ class TagStudio:
             clean = clean_fields(fields)
         except TagError as e:
             raise StudioError(str(e), 422) from None
+        clean = self.with_prompt_version(session, item, self.tags(session).get(key), clean)
         require_category(self.tags(session).get(key), clean)
         session.add(TagEvent(clip_key=key, clip_id=item.clip_id, fields=clean, staff_id=staff.id,
                              staff_name=staff.name, created_at=now))
@@ -227,6 +235,15 @@ class TagStudio:
             else:
                 out[kind] = (False, f"no {name} in the local copy")
         return out
+
+    def with_prompt_version(self, session, item: ClipItem, current: Optional[Tag],
+                            clean: Dict[str, Any]) -> Dict[str, Any]:
+        """Every saved tag carries the prompt version its schema follows: the one the form sent, else the tag's own,
+        else the clip's (meta ``teacher.prompt_version``); nothing is added for a clip no prompt answered."""
+        if clean.get("prompt_version") or (current is not None and current.fields.get("prompt_version")):
+            return clean
+        version = (self.clip_meta(session, item).get("teacher") or {}).get("prompt_version") or ""
+        return {**clean, "prompt_version": str(version)[:500]} if version else clean
 
     def clip_meta(self, session, item: ClipItem) -> Dict[str, Any]:
         """The clip's meta: an indexed event's newest revision, else the local copy's file; {} when none."""
@@ -459,13 +476,22 @@ class TagStudio:
 
 
 NEEDS_CATEGORY = "Choose a category before saving (or mark the clip Delete)"
+NEEDS_LABEL = "Choose the raw label before saving (or mark the clip Delete)"
 
 
 def require_category(current: Optional[Tag], fields: Dict[str, Any]) -> None:
-    """A saved tag always names a category, unless the clip is deleted: nothing is filled in for the tagger."""
+    """A saved tag always names a category, unless the clip is deleted: nothing is filled in for the tagger. A clip
+    answered with the legacy prompt (no category in its schema) needs its raw label instead."""
+    from ...fleet_contract.prompt_schemas import EYE, schema_kind  # noqa: PLC0415
+
     merged = {**(current.fields if current else {}), **fields}
-    if not merged.get("category") and not merged.get("delete"):
-        raise StudioError(NEEDS_CATEGORY, 422)
+    if merged.get("delete"):
+        return
+    if schema_kind(merged.get("prompt_version")) == EYE or "category" in fields or merged.get("category"):
+        if not merged.get("category"):
+            raise StudioError(NEEDS_CATEGORY, 422)
+    elif not merged.get("raw_label"):
+        raise StudioError(NEEDS_LABEL, 422)
 
 
 def _track_dict(t) -> Dict[str, Any]:
