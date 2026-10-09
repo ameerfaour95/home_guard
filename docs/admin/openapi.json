@@ -2785,6 +2785,14 @@
       "ModelInputView": {
         "description": "What the AI saw of a clip (tagstudio/model_view.py): the JPEG frames, base64, in the order the model got them.",
         "properties": {
+          "badges": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Badges",
+            "type": "array"
+          },
           "frames": {
             "items": {
               "type": "string"
@@ -2799,6 +2807,17 @@
           "label": {
             "title": "Label",
             "type": "string"
+          },
+          "max_side": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Side"
           },
           "prompt_version": {
             "default": "",
@@ -3348,6 +3367,14 @@
       },
       "TaggingClip": {
         "properties": {
+          "ai_badges": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Ai Badges",
+            "type": "array"
+          },
           "answer_schema": {
             "additionalProperties": true,
             "default": {},

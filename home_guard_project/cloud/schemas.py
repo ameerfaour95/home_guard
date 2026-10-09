@@ -554,6 +554,7 @@ class TaggingClip(BaseModel):
     history: list[dict]
     prompt_version: str = ""            # the clip's prompt version: the tag follows its answer schema
     answer_schema: dict = {}            # {"kind": "legacy" | "eye", "name", "fields": the answer's fields in order}
+    ai_badges: list[str] = []           # what happened to the AI call: "Rescued at 768 px", "AI failed", ...
 
 
 class TagSave(BaseModel):
@@ -629,6 +630,8 @@ class ModelInputView(BaseModel):
     record: dict
     frames: list[str]
     prompt_version: str = ""
+    max_side: Optional[int] = None      # the long-side cap the box applied (box.yaml vlm_max_side), when it did
+    badges: list[str] = []              # "Rescued at 768 px", "AI answer rescued", "AI failed"
 
 
 class TaggingExportRequest(BaseModel):

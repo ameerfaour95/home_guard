@@ -166,9 +166,14 @@ class TagView(QWidget):
         self.boxes.setToolTip('Show / hide the YOLO and tracker boxes on the full frame (B). The AI never sees them.')
         reasons.addWidget(self.boxes)
         col.addLayout(reasons)
+        view_row = QHBoxLayout(); view_row.setSpacing(6)
         self.view_label = label('', 'muted'); self.view_label.setObjectName('viewLabel')
         self.view_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        col.addWidget(self.view_label)
+        view_row.addWidget(self.view_label, 1)
+        self.ai_badges = []   # chips: what happened to the AI call (a rescue at a smaller size, no answer)
+        for _ in range(3):
+            chip = Pill(self.theme); chip.hide(); view_row.addWidget(chip); self.ai_badges.append(chip)
+        col.addLayout(view_row)
         self.canvas = VideoCanvas(self.theme, TrackOverlay); self.canvas.message = 'Select a clip'
         self.canvas.setMinimumHeight(220)
         col.addWidget(self.canvas, 3)
@@ -523,6 +528,7 @@ class TagView(QWidget):
         self.update_save_state()
         self.banner.hide()
         self.suggest_button.setEnabled(True)
+        self.show_ai_badges(detail.get('ai_badges') or [])
         if self.view not in [k for k in ('crop', 'clip') if self.can_show(k)]:
             self.view = 'crop' if self.can_show('crop') else 'clip'
         reasons = detail.get('media_reasons') or {}
@@ -643,6 +649,11 @@ class TagView(QWidget):
         if not images:
             self.show_video_message('The AI saw no frames of this clip.'); return
         self.ai_show()
+
+    def show_ai_badges(self, badges):
+        for chip, text in zip(self.ai_badges, list(badges) + [''] * len(self.ai_badges)):
+            chip.show_label(text, 'error' if text == 'AI failed' else 'warning')
+            chip.setToolTip('The box asked the model again on smaller pictures' if text.startswith('Rescued') else '')
 
     def ai_show(self):
         self.canvas.image = self.ai_images[self.ai_index]; self.canvas.update(); self.canvas.overlay.update()

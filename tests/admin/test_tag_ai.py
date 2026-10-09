@@ -103,3 +103,19 @@ def test_owner_words_from_the_inbox_are_sent_as_the_owners_and_the_server_decide
     # the demo cannot confirm this household's training consent: the owner's words never leave
     assert v.banner.isVisible() and "can't be sent to the converter" in v.banner_text.text()
     assert not v.form.get('converted_by')
+
+
+def test_the_rescue_chip_shows_on_tag_ai(widgets, wait):
+    b = DemoBackend()
+    real = b.tagging_clip
+    def clip(key):
+        detail = real(key)
+        detail['ai_badges'] = ['Rescued at 768 px', 'AI answer rescued'] if key == LEGACY_CLIP else []
+        return detail
+    b.tagging_clip = clip
+    v = TagView(b, 'admin'); widgets.append(v); v.resize(1366, 768); v.show(); v.open(LEGACY_CLIP)
+    wait(lambda: v.key == LEGACY_CLIP and v.detail is not None and not v.clip_runner.busy, 10)
+    shown = [c.text() for c in v.ai_badges if not c.isHidden()]
+    assert shown == ['Rescued at 768 px', 'AI answer rescued']
+    v.open_key(EYE_CLIP); wait(lambda: v.key == EYE_CLIP and not v.clip_runner.busy, 10)
+    assert all(c.isHidden() for c in v.ai_badges)

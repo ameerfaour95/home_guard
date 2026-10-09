@@ -105,3 +105,53 @@ def test_route_shows_the_model_input_with_consent_and_audit(client, staff_factor
         audit = session.scalar(select(m.AuditLog).where(m.AuditLog.action == "media_view").order_by(m.AuditLog.id.desc()))
         assert audit.detail == {"via": "tagging", "kind": "model_input", "source": "rendered"}
     assert client.post("/v1/tagging/model_input", headers=h, json={"key": "ds:nope"}).status_code == 404
+
+
+# ---------------------------------------------------------------- the box's long-side cap (vlm_max_side) and rescues
+
+def test_an_old_model_input_1_meta_renders_as_before(tmp_path):
+    crop = video(str(tmp_path / "big.mp4"), 6, size=(1600, 1200))
+    old = {"vlm_input": "crop", "model_input": {"version": "model-input-1", "vlm_input": "crop", "frame_indices": [0, 5],
+                                                 "times": [0.0, 1.0], "fps": 5.0, "sample_fps": 1.0, "step": 5,
+                                                 "size": [1600, 1200]}}
+    view = mv.build(old, (), crop, default_max_side=1024)     # a recorded model-input-1: no cap, whatever the default
+    assert view.source == mv.RECIPE and view.max_side == 0
+    assert mv._jpeg_size(view.frames[0]) == (1600, 1200) and "max" not in view.label
+
+
+def test_a_model_input_2_meta_with_max_side_is_capped(tmp_path):
+    crop = video(str(tmp_path / "big.mp4"), 6, size=(1600, 1200))
+    new = {"vlm_input": "crop", "model_input": {"version": "model-input-2", "vlm_input": "crop", "frame_indices": [0, 5],
+                                                 "times": [0.0, 1.0], "fps": 5.0, "sample_fps": 1.0, "step": 5,
+                                                 "size": [1024, 768], "max_side": 1024}}
+    view = mv.build(new, (), crop)
+    assert view.source == mv.RECIPE and view.max_side == 1024
+    assert mv._jpeg_size(view.frames[0]) == (1024, 768)
+    assert view.label == "What the AI sees: crop · 1 fps · 2 frames · 1024 max · 1024×768"
+    # rendered like the box (no frame list in the record): the same cap through render_model_input
+    rendered = mv.build({"vlm_crop": {"fps": 5.0}, "model_input": {"version": "model-input-2", "max_side": 1024}},
+                        (), crop)
+    assert rendered.source == mv.RENDERED and rendered.record["max_side"] == 1024
+    assert rendered.record["version"] == "model-input-2" and mv._jpeg_size(rendered.frames[0]) == (1024, 768)
+    # no record at all: the box's camera config when known, else none
+    assert mv.build({"vlm_crop": {"fps": 5.0}}, (), crop, default_max_side=800).max_side == 800
+    assert mv.build({"vlm_crop": {"fps": 5.0}}, (), crop).max_side == 0
+
+
+def test_ai_badges_name_rescues_and_failures():
+    assert mv.ai_badges({}) == []
+    assert mv.ai_badges({"model_input": {"rescue": {"max_side": 768, "answered": True}},
+                         "alert": {"vlm_rescued": True}}) == ["Rescued at 768 px", "AI answer rescued"]
+    assert mv.ai_badges({"teacher": {"model_input": {"rescue": {"max_side": 768}}}, "alert": {"vlm_failed": True}}) == [
+        "Rescued at 768 px", "AI failed"]
+
+
+def test_the_clip_detail_carries_the_ai_badges(client, staff_factory, studio):  # noqa: F811
+    s, ids = studio
+    _, _, _, h = staff_factory("admin")
+    meta = alert_meta("house2_ch2", STEM, label="suspicious", model_input={"version": "model-input-2", "max_side": 1024,
+                                                                           "rescue": {"max_side": 768, "answered": True}})
+    meta["alert"]["vlm_rescued"] = True
+    put_owner_clip(str(s.paths.dataset), "production_house2", meta, STEM)
+    clip = client.get("/v1/tagging/clip", headers=h, params={"key": f"ev:{ids['consenting']}"}).json()
+    assert clip["ai_badges"] == ["Rescued at 768 px", "AI answer rescued"]

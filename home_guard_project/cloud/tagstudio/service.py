@@ -208,7 +208,10 @@ class TagStudio:
         prompt_version = form.get("prompt_version") or self.prompt_version_of(session, item)
         form["prompt_version"] = prompt_version
         name, answer = answer_schema(prompt_version)
+        from .model_view import ai_badges  # noqa: PLC0415
+
         return {
+            "ai_badges": ai_badges(self.clip_meta(session, item)),
             "prompt_version": prompt_version,
             "answer_schema": {"kind": schema_kind(prompt_version), "name": name, "fields": list(answer["properties"])},
             "item": {**item.summary(), "info": item.info, "video_s3": item.video_s3, "crop_s3": item.crop_s3},
@@ -302,7 +305,7 @@ class TagStudio:
         if view is None:
             raise StudioError("Nothing the AI saw is saved for this clip: no frames, no crop and no clip", 404)
         prompt_version = (meta.get("teacher") or {}).get("prompt_version") or ""
-        return {**view.as_dict(), "key": key, "prompt_version": prompt_version}
+        return {**view.as_dict(), "key": key, "prompt_version": prompt_version, "badges": model_view.ai_badges(meta)}
 
     def _event_model_files(self, session, item: ClipItem, s3, work: str):
         """(sent frames, crop path, clip path) of an indexed event: the guard run's input frames (all or none) and
