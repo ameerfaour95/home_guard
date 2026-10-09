@@ -41,6 +41,13 @@ class AppearanceGuardTest(unittest.TestCase):
         for why in ("", "a man walks by", "אדם עומד ליד השער ומסתכל סביב"):
             self.assertFalse(appearance_only(why), why)
 
+    def test_hebrew_one_person_masked_is_lowered(self):
+        # 2026-10-09 08:03, pergola: the why "אדם אחד מסתיר את פניו במסכה" kept a suspicious because "אחד" (one)
+        # was missing from the Hebrew filler words; the English "one person wears a face mask" was already lowered.
+        self.assertTrue(appearance_only("אדם אחד מסתיר את פניו במסכה"))
+        self.assertTrue(appearance_only("אישה אחת לובשת מסכה"))
+        self.assertFalse(appearance_only("אדם אחד מסתיר את פניו במסכה ומנסה לפתוח את הדלת"))
+
 
 if __name__ == "__main__":
     unittest.main()
