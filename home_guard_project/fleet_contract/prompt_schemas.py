@@ -113,6 +113,9 @@ def response_format(intent: str) -> Dict[str, Any]:
 
 LEGACY = "legacy"
 EYE = "eye"
+# What a tag records for a clip the box's AI answered without recording its prompt version: before the Eye, the box
+# ran only the legacy prompt (Eye answers always record "eye-..."), so the legacy schema is assumed, and said so.
+LEGACY_ASSUMED = "legacy-assumed (prompt version not recorded)"
 
 
 def schema_kind(prompt_version: Optional[str]) -> str:

@@ -508,8 +508,11 @@ class TagView(QWidget):
         schema = detail.get('answer_schema') or {}
         self.apply_schema(schema.get('kind', 'eye'))
         version = detail.get('prompt_version') or ''
-        self.schema_note.setText((f'Prompt version {version}: ' if version else 'No prompt answered this clip: ')
-                                 + ('the Eye\'s category form' if self.kind == 'eye' else 'the box\'s legacy answer'))
+        form = 'the Eye\'s category form' if self.kind == 'eye' else 'the box\'s legacy answer'
+        if version.startswith('legacy-assumed'):
+            self.schema_note.setText(f'Prompt version not recorded (legacy assumed): {form}')
+        else:
+            self.schema_note.setText((f'Prompt version {version}: ' if version else 'No AI answered this clip: ') + form)
         self.render_form()
         self.update_save_state()
         self.banner.hide()

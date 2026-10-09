@@ -23,7 +23,7 @@ from . import export as exporter
 from . import queue as work_queue
 from .config import StudioPaths
 from .fields import FIELDS, Tag, TagError, clean_fields, empty_form, fold
-from .items import EMPTY, OLD, TEACHER, WHO, ClipItem
+from .items import AI, EMPTY, OLD, TEACHER, WHO, ClipItem
 from .sources import DatasetSource, OwnerFeedbackSource, event_items
 from .teacher import EvalResultsTeacher, OpenAICompatibleTeacher, TeacherRefused, first_suggestion
 
@@ -182,8 +182,7 @@ class TagStudio:
             form, prefilled = self.prefill(item), (OLD if OLD in item.opinions else "")
         fps = item.fps or (self.dataset.fps(item) if item.meta_path else None)
         status = self.media_status(item)
-        prompt_version = form.get("prompt_version") or (self.clip_meta(session, item).get("teacher") or {}).get(
-            "prompt_version") or ""
+        prompt_version = form.get("prompt_version") or self.prompt_version_of(session, item)
         form["prompt_version"] = prompt_version
         name, answer = answer_schema(prompt_version)
         return {
@@ -239,10 +238,10 @@ class TagStudio:
     def with_prompt_version(self, session, item: ClipItem, current: Optional[Tag],
                             clean: Dict[str, Any]) -> Dict[str, Any]:
         """Every saved tag carries the prompt version its schema follows: the one the form sent, else the tag's own,
-        else the clip's (meta ``teacher.prompt_version``); nothing is added for a clip no prompt answered."""
+        else the clip's (prompt_version_of); nothing is added for a clip no prompt answered."""
         if clean.get("prompt_version") or (current is not None and current.fields.get("prompt_version")):
             return clean
-        version = (self.clip_meta(session, item).get("teacher") or {}).get("prompt_version") or ""
+        version = self.prompt_version_of(session, item)
         return {**clean, "prompt_version": str(version)[:500]} if version else clean
 
     def clip_meta(self, session, item: ClipItem) -> Dict[str, Any]:
@@ -355,11 +354,21 @@ class TagStudio:
         return self._suggester
 
     def prompt_version_of(self, session, item: ClipItem) -> str:
-        """The prompt version a clip's tag follows: the saved tag's, else the clip's meta (teacher.prompt_version)."""
+        """The prompt version a clip's tag follows: the saved tag's, else the clip's meta (teacher.prompt_version),
+        else its AI run's; a clip the box's AI answered with no version recorded was answered by the legacy prompt
+        (LEGACY_ASSUMED: before the Eye it was the only one); "" only for a clip no AI answered."""
+        from ...fleet_contract.prompt_schemas import LEGACY_ASSUMED  # noqa: PLC0415
+
         tag = self.tags(session).get(item.key)
         if tag is not None and tag.fields.get("prompt_version"):
             return str(tag.fields["prompt_version"])
-        return str((self.clip_meta(session, item).get("teacher") or {}).get("prompt_version") or "")
+        meta = self.clip_meta(session, item)
+        ai = item.opinions.get(AI)
+        version = (meta.get("teacher") or {}).get("prompt_version") or (ai.detail.get("prompt_version") if ai else "")
+        if version:
+            return str(version)
+        answered = ai is not None or bool(meta.get("model_response")) or bool((meta.get("alert") or {}).get("label"))
+        return LEGACY_ASSUMED if answered else ""
 
     def converter(self):
         """The "In my words" converter (built once; ``convert_client`` is injected by tests and the demo)."""

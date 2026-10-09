@@ -40,7 +40,7 @@ def test_the_form_follows_the_prompt_version(widgets, wait):
     assert 'Prompt version 2026-10-03.demo' in v.schema_note.text() and v.form['prompt_version'] == '2026-10-03.demo'
     v.open_key(EYE_CLIP); wait(lambda: v.key == EYE_CLIP and not v.clip_runner.busy, 10)
     assert v.kind == 'eye' and not v.category_box.isHidden() and v.parts['legacy'][0].isHidden()
-    assert 'No prompt answered this clip' in v.schema_note.text()
+    assert 'No AI answered this clip' in v.schema_note.text()
 
 
 def test_in_my_words_converts_and_saves_the_words_as_ground_truth(widgets, wait):
@@ -65,3 +65,21 @@ def test_convert_needs_words(widgets, wait):
     v, _ = tag_view(widgets, wait, EYE_CLIP)
     v.convert()
     assert v.banner.isVisible() and 'Write what you saw' in v.banner_text.text() and not v.side_runner.busy
+
+
+def test_a_clip_with_an_ai_answer_but_no_version_opens_the_legacy_form(widgets, wait):
+    from home_guard_project.admin.tag_widgets import provenance_text
+    b = DemoBackend()
+    real = b.tagging_clip
+    def clip(key):
+        detail = real(key)
+        if key == EYE_CLIP:   # as the server answers for an AI-answered clip whose meta recorded no prompt version
+            detail['prompt_version'] = 'legacy-assumed (prompt version not recorded)'
+            detail['answer_schema'] = {'kind': 'legacy', 'name': 'legacy_alert', 'fields': []}
+        return detail
+    b.tagging_clip = clip
+    v = TagView(b, 'admin'); widgets.append(v); v.resize(1366, 768); v.show(); v.open(EYE_CLIP)
+    wait(lambda: v.key == EYE_CLIP and v.detail is not None and not v.clip_runner.busy, 10)
+    assert v.kind == 'legacy' and v.category_box.isHidden()
+    assert v.schema_note.text() == "Prompt version not recorded (legacy assumed): the box's legacy answer"
+    assert provenance_text('model', '') == 'Model · not recorded'

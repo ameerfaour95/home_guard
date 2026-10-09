@@ -337,7 +337,7 @@ def provenance_text(kind, who=''):
     """The chip text of a label's source: 'Owner · Telegram', 'Admin · Dana', 'Model · gpt-4o', 'YOLO weak',
     'Tracker', 'Dataset labels'; '' for an unknown kind."""
     text, _ = PROVENANCE.get(kind, ('', ''))
-    return text.format(who=who or 'unknown') if text else ''
+    return text.format(who=who or 'not recorded') if text else ''
 
 
 class ProvenanceChip(Pill):
