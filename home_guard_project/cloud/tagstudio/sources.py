@@ -291,7 +291,7 @@ class OwnerFeedbackSource:
             fps=meta.get("fps_estimated") if isinstance(meta.get("fps_estimated"), (int, float)) else None,
             info={"kind": meta.get("kind") or "", "num_persons": alert.get("people"), "site": site},
         )
-        detail = {"model": teacher.get("model") or alert.get("model") or "",
+        detail = {"model": teacher.get("model") or alert.get("model") or response.get("model") or "",
                   "prompt_version": teacher.get("prompt_version") or alert.get("prompt_version") or "",
                   "final_label": alert.get("final_label") or alert.get("label") or "", "why": alert.get("why") or "",
                   "kind": meta.get("kind") or ""}

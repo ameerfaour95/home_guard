@@ -43,3 +43,21 @@ def test_the_model_comes_from_the_teacher_or_the_alert(tmp_path):
     s = _studio(tmp_path / "a", teacher=None, alert=meta["alert"])
     ai = s.detail(None, f"of:production_house2/{STEM}")["opinions"]["ai"]
     assert ai["detail"]["model"] == "qwen/qwen3.5-9b"
+
+
+def test_the_model_can_come_from_the_response_record(tmp_path):
+    s = _studio(tmp_path, teacher=None, model_response={"summary": "x", "label": "normal", "model": "qwen/q9"})
+    assert s.detail(None, f"of:production_house2/{STEM}")["opinions"]["ai"]["detail"]["model"] == "qwen/q9"
+
+
+def test_a_legacy_assumed_tag_exports_as_the_legacy_answer(tmp_path):
+    from home_guard_project.cloud.tagstudio import export as ex
+    s = _studio(tmp_path, teacher=None)
+    key = f"of:production_house2/{STEM}"
+    s.save(None, SimpleNamespace(id=1, name="me"), key, {"raw_label": "normal", "description": "Two children play."},
+           datetime.now(timezone.utc))
+    training, _, _ = ex.build(s.items(None).values(), s.tags(None))
+    row = next(r for r in training if r["clip_id"] == STEM)
+    assert row["prompt_version"] == ps.LEGACY_ASSUMED
+    assert tuple(row["answer"]) == ps.field_order(ps.PROMPT_VERSION)
+    assert ex.check_sharegpt(ex.sharegpt_rows([dict(row, vlm_crop_s3_path="s3://b/c.mp4")])) == []
