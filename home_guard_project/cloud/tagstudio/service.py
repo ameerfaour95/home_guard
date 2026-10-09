@@ -411,10 +411,22 @@ class TagStudio:
                 cached = suggester.cached(key)
                 if cached is not None:
                     return {**cached, "cached": True}
+            version = self.prompt_version_of(session, item)
+            try:   # the frames the box sent the AI (or rendered like the box), not frames picked from the clip
+                view = self.model_input(session, key, s3)
+            except StudioError:
+                view = None
+            if view and view.get("frames"):
+                record = view.get("record") or {}
+                index = [i for i in record.get("frame_indices") or [] if isinstance(i, int)]
+                return suggester.suggest(key, None, camera=item.camera, refresh=refresh,
+                                         jpegs=[base64.b64decode(f) for f in view["frames"]],
+                                         frame_index=index if len(index) == len(view["frames"]) else [],
+                                         fps=item.fps or record.get("fps"), prompt_version=version)
             video = self.video_for(item, s3)
             if not video:
                 raise SuggestError("This clip has no video on this computer or in S3 to show the model")
-            return suggester.suggest(key, video, camera=item.camera, refresh=refresh)
+            return suggester.suggest(key, video, camera=item.camera, refresh=refresh, prompt_version=version)
         except SuggestError as e:
             raise StudioError(str(e), 409) from None
 

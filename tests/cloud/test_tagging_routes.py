@@ -259,6 +259,9 @@ def _frames(video):
 def test_suggest_fills_the_whole_tag_once_per_clip(client, staff_factory, studio):
     s, ids = studio
     _, _, _, h = staff_factory("admin")
+    # a clip the Eye answered: the suggestion follows the Eye's category form
+    put_owner_clip(str(s.paths.dataset), "production_house2", alert_meta(
+        "house2_ch2", STEM, label="suspicious", teacher={"model": "m", "prompt_version": "2026-10-06.eye-v3"}), STEM)
     fake = FakeModel({"summary": "A man walks to the gate, tries the latch and walks away.", "category": "s1",
                       "other_text": "", "zone": "gate", "movement": "approaching", "flags": ["touching_handle", "x"],
                       "people": 1, "vehicles": 0, "vehicle_moving": False, "animals": 0, "visibility": "clear",
@@ -296,6 +299,32 @@ def test_suggest_fills_the_whole_tag_once_per_clip(client, staff_factory, studio
     # a customer who withdrew consent: the model never sees the clip
     refused = client.post("/v1/tagging/suggest", headers=h, json={"key": f"ev:{ids['refusing']}"})
     assert refused.status_code == 403 and len(fake.calls) == 1
+
+
+def test_suggest_follows_a_legacy_clip_schema_and_sends_the_model_input(client, staff_factory, studio):
+    from home_guard_project.fleet_contract import prompt_schemas as ps
+    from .test_model_view import video
+    s, ids = studio
+    _, _, _, h = staff_factory("admin")
+    ds = str(s.paths.dataset)
+    meta = alert_meta("house2_ch2", STEM, label="suspicious", vlm_input="crop",
+                      vlm_crop={"fps": 5.0, "vlm_crop_path": f"vlm_crops/house2_ch2/2026-10-04/{STEM}.mp4"})
+    put_owner_clip(ds, "production_house2", meta, STEM)
+    video(os.path.join(ds, "owner_feedback", "production_house2", "vlm_crops", "house2_ch2", "2026-10-04",
+                       f"{STEM}.mp4"), 11)
+    fake = FakeModel({"summary": "A man looks into the car.", "label": "suspicious", "raw_label": "suspicious",
+                      "applied_fact_id": "", "serious_behaviour": True, "people": 1, "vehicle_moving": False,
+                      "animals": 0, "why": "He looks into a car.", "summary_owner": ""})
+    s.suggest_client = fake
+    r = client.post("/v1/tagging/suggest", headers=h, json={"key": f"ev:{ids['consenting']}"})
+    assert r.status_code == 200, r.text
+    got = r.json()
+    sent = fake.calls[0]
+    assert tuple(sent["response_format"]["json_schema"]["schema"]["properties"]) == ps.field_order(ps.PROMPT_VERSION)
+    # the frames the AI saw (rendered like the box from the saved crop: 3 at 1 fps), not 5 picked from the clip
+    assert sum(1 for part in sent["messages"][0]["content"] if part["type"] == "image_url") == 3
+    assert got["fields"]["why"] == "He looks into a car." and got["fields"]["serious_behaviour"] is True
+    assert got["prompt_version"].startswith("2026-10-09.studio-suggest-legacy")
 
 
 def test_suggest_says_why_it_cannot(client, staff_factory, studio, monkeypatch):
