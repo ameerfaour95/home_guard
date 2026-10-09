@@ -7,9 +7,10 @@ owner's rules:
 - Appearance alone (mask, hood, covered face, dark clothes, hat, sunglasses, a blurred or pixelated face) is never
   suspicious; only actions are. :func:`appearance_only` finds a "suspicious" whose reason names nothing but looks,
   and the guard loop lowers it to normal. It never touches an escalation.
-- A red for a weapon, a car break-in or violence that comes from one model answer gets a second look before it goes
-  out red (:func:`verify_class` picks the question). Clear serious things - a break-in through the house's door or
-  window, climbing in, fire or smoke, a person lying motionless (:func:`clear_class`) - go out at once.
+- A red for a weapon, a tool used as a weapon, a car break-in or violence that comes from one model answer gets a
+  second look before it goes out red (:func:`verify_class` picks the question). Clear serious things - a break-in
+  through the house's door or window, climbing in, fire or smoke, a person lying motionless (:func:`clear_class`) -
+  go out at once.
 
 Matching is on words, in English and Hebrew. English words are matched at a word start (so "hat" does not match
 "that"); Hebrew words as substrings, so a prefix letter (ב, ה, ו, ש, ל) still matches. Pure functions, no imports
@@ -136,6 +137,21 @@ _VEHICLE = r"(?:\bcars?\b|\bvehicles?\b|\btrucks?\b|\bvans?\b|רכב|מכוני�
 VERIFY_PATTERNS = {
     "weapon": _any([r"\bweapon", r"\bguns?\b", r"\bknife", r"\bknives", r"\brifle", r"\bpistol", r"\bfirearm",
                     r"\bmachete", r"נשק", r"אקדח", r"סכין", r"רובה"]),
+    # A long or blunt thing in a red (2026-10-09 13:25 ch6: pavers workers "holding a long metal bar" went out red):
+    # a bat or a pipe CAN be a weapon, so it is asked about, never just dropped. What is climbed or fixed to the house
+    # (a drainpipe, a light pole, window bars) is not a thing in someone's hands. Hebrew words that hide inside common
+    # words (מוט in מוטל "lying", לום in שלום / כלום, מקל in מקלט / מקלחת, אלה "these") only as whole words.
+    "tool_weapon": _any([
+        r"\bbars?\b(?! (?:on|of|over) (?:the |a )?windows?)", r"\brods?\b",
+        r"(?<!light )(?<!lamp )(?<!utility )(?<!flag )(?<!fence )(?<!street )(?<!power )\bpoles?\b",
+        r"(?<!drain )(?<!gutter )(?<!rain )(?<!water )\bpipes?\b", r"\bstick\b(?! (?:to|out|around|by|with)\b)",
+        r"\b(?:a|the|wooden|long|metal|big|large|thick|his|her|their|with|holding|carrying|swinging|waving) sticks\b",
+        r"\bbats?\b", r"\bclubs?\b", r"\bcrowbars?\b", r"\bhammers?\b", r"\bsledge", r"\baxes?\b", r"\bax\b",
+        r"\bshovels?\b", r"\bplanks?\b", r"\bbatons?\b",
+        r"(?<![א-ת])[בוהלמ]?ה?מוט(?:ות)?(?![א-ת])", r"צינור", r"(?<![א-ת])[בוהלמש]?ה?מקל(?:ות)?(?![א-ת])",
+        r"(?<![א-ת])(?:ב|עם |מחזיק |מחזיקה |אוחז |אוחזת |מניף |מניפה )אלה(?![א-ת])", r"(?<![א-ת])[בוה]?ה?אלת ",
+        r"מחבט", r"פטיש", r"גרזן", r"את חפירה", r"קרש", r"(?<![א-ת])[בוה]?ה?לום(?![א-ת])",
+    ]),
     # A car must be named: "smashed a window" alone may be the house's, and that goes out red at once.
     "vehicle": _any([rf"(?:\bsmash|\bshatter|\bbreak|\bbroke|\bforc|\bpry|ניפץ|מנפץ|שובר|שבר|פורץ|פריצה).{{0,40}}{_VEHICLE}",
                      rf"{_VEHICLE}.{{0,30}}(?:\bsmash|\bshatter|\bbroken into|\bbreak-in|\bforced|נופץ|נפרץ|פריצה)"]),
@@ -146,7 +162,7 @@ VERIFY_PATTERNS = {
                       r"אלימות", r"תוקף", r"תוקפים", r"קטטה", r"מתקוטט", r"מכה (?:אדם|גבר|אישה|ילד|אותו|אותה|את ה(?:גבר|אישה|ילד|אדם))",
                       r"מכים (?:אדם|גבר|אישה|אותו|אותה)", r"הכה (?:אדם|גבר|אישה|אותו|אותה)"]),
 }
-VERIFY_ORDER = ("weapon", "vehicle", "violence")
+VERIFY_ORDER = ("weapon", "tool_weapon", "vehicle", "violence")
 
 # Clear serious things go out red at once, even when a verify word is there too.
 CLEAR = _any([
@@ -162,6 +178,9 @@ CLEAR = _any([
 VERIFY_QUESTIONS = {
     "weapon": "Is a person holding a gun or knife as a weapon? Long tools, poles, boards, ladders and brooms are NOT "
               "weapons.",
+    "tool_weapon": "Is a person using the bar/pole/pipe/bat/tool to threaten or hit a person, or to break into a door, "
+                   "window or car? Carrying it, working with it, or using it on the ground or a structure as work is "
+                   "NOT.",
     "vehicle": "Is someone breaking into a vehicle (smashing a window, forcing a door)? Someone getting out of or into "
                "their own car normally is NOT.",
     "violence": "Is someone hitting or attacking another person?",
@@ -183,9 +202,42 @@ def verify_classes(text: str) -> List[str]:
 
 
 def verify_class(text: str) -> Optional[str]:
-    """The main second look an escalation needs (``weapon``, ``vehicle`` or ``violence``), or None."""
+    """The main second look an escalation needs (``weapon``, ``tool_weapon``, ``vehicle`` or ``violence``), or
+    None."""
     found = verify_classes(text)
     return found[0] if found else None
+
+
+# A tool's "no" names the tool by design ("a worker with a metal bar"), so its answer contradicts itself only when it
+# names what the tool did to a person or a way in: threatening, hitting, swinging at, breaking a door / window / car.
+# Words after a "not / no / without" are the model saying what it is NOT, so they are left out first.
+TOOL_ACT = _any([
+    r"\bthreat", r"\bmenac", r"\battack", r"\bassault", r"\bswing(?:s|ing)? (?:\w+ ){0,3}at\b",
+    r"\b(?:strik(?:e|es|ing)|struck|hit(?:s|ting)?|beat(?:s|ing)?) (?:a |an |the |another )?(?:man|woman|person|someone|him|her|child|people)",
+    r"(?:\bbreak|\bbroke|\bsmash|\bshatter|\bforc|\bpr(?:y|ies|ying|ied))\w* (?:\w+ ){0,4}(?:doors?|windows?|cars?|vehicles?|locks?|gates?|shutters?)\b",
+    r"\bbreak(?:ing)?[- ]in\b",
+    r"מאיים", r"איום", r"תוקף", r"מכה (?:אדם|גבר|אישה|ילד|אותו|אותה|את ה)", r"מניף (?:\S+ ){0,3}(?:על|לעבר|כלפי)",
+    r"(?:פורץ|פריצה|לפרוץ|שובר|לשבור|מנפץ|לנפץ|כופה).{0,30}(?:דלת|חלון|רכב|מכונית|מנעול|שער|תריס)",
+])
+_NEGATED = _any([r"\b(?:not|no|without|never|nobody|none|isn'?t|aren'?t)\b[^,.;:]*",
+                 r"(?<![א-ת])(?:לא|אין|ללא|בלי)(?![א-ת])[^,.;:]*"])
+
+
+def answer_names(classes: Sequence[str], what_it_is: str) -> bool:
+    """Does a second look's "no" name, in its own words, one of the *classes* it was asked about? Then it
+    contradicts itself and the red stays ("not confirmed: a physical altercation", eval_set_v2 Abuse004). For
+    ``tool_weapon`` naming the tool is not enough (:data:`TOOL_ACT`)."""
+    what = str(what_it_is or "")
+    for name in classes:
+        if name != "tool_weapon":
+            if name in verify_classes(what):
+                return True
+            continue
+        kept = _NEGATED.sub(" ", what)
+        if (TOOL_ACT.search(kept) or clear_class(kept)
+                or any(c != "tool_weapon" for c in verify_classes(kept))):
+            return True
+    return False
 
 
 def verify_question(classes: Sequence[str]) -> str:

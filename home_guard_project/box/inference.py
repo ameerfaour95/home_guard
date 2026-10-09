@@ -2202,8 +2202,8 @@ def appearance_only(text: str) -> bool:
 
 def second_look(backend: Any, frames: List[Any], classes: Sequence[str], lang: str,
                 timeout: Optional[float] = None) -> Dict[str, Any]:
-    """Ask *backend* once, on the alert's own frames, whether the red's reason (*classes*: weapon / vehicle /
-    violence) is really there; never longer than *timeout* seconds (VERIFY_TIMEOUT_SEC). Never raises.
+    """Ask *backend* once, on the alert's own frames, whether the red's reason (*classes*: weapon / tool_weapon /
+    vehicle / violence) is really there; never longer than *timeout* seconds (VERIFY_TIMEOUT_SEC). Never raises.
 
     The record (the clip's ``second_look``): ``answered`` (a usable yes/no came back), ``confirmed``,
     ``verified`` (answered AND confirmed: only then is the red's reminder scheduled), ``what_it_is``,
@@ -2756,12 +2756,12 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                 label = shown_label = "normal"
                 cmd = LABEL_COMMANDS[label]
                 decision.update(label=label, final_label=label, investigator="short visit")
-        # A red for a weapon, a car break-in or violence from one answer gets a second look first; clear serious
+        # A red for a weapon (or a tool used as one), a car break-in or violence from one answer gets a second look first; clear serious
         # things (a break-in into the house, climbing in, fire, a person lying still) go out at once.
         look: Optional[Dict[str, Any]] = None
         look_line = ""
         if label == "escalation":
-            from .alert_guards import verify_classes  # noqa: PLC0415
+            from .alert_guards import answer_names, verify_classes  # noqa: PLC0415
 
             classes = verify_classes(f"{why} {reason} {summary}")
             if classes:
@@ -2770,9 +2770,10 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                 log.info("[%s] second look (%s): %s", camera_name, ",".join(classes),
                          look.get("reason") or ("confirmed" if look["confirmed"] else f"not so: {look['what_it_is']}"))
                 # A "no" whose own words name the class ("not confirmed: a physical altercation") contradicts itself:
-                # the red stays (home-guard-32, eval_set_v2 Abuse004).
+                # the red stays (home-guard-32, eval_set_v2 Abuse004). Every class asked is checked; a tool's "no"
+                # must name what the tool did, not the tool (alert_guards.answer_names).
                 if (look["answered"] and look["confirmed"] is False
-                        and look.get("class") in verify_classes(str(look.get("what_it_is") or ""))):
+                        and answer_names(look.get("classes") or [look.get("class")], str(look.get("what_it_is") or ""))):
                     look = dict(look, confirmed=True, verified=True, reason="the answer itself names it")
                     decision["second_look"] = look
                 if look["answered"] and look["confirmed"] is False:

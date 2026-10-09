@@ -51,10 +51,60 @@ class VerifyClassTest(unittest.TestCase):
                 self.assertIsNone(g.verify_class(text))
 
     def test_no_second_look_for_other_reds(self):
-        for text in ("a man breaks the window", "hits the window with a hammer", "steals a bicycle",
-                     "a man gets out of his car", "ראש"):
+        for text in ("a man breaks the window", "steals a bicycle", "a man gets out of his car", "ראש"):
             with self.subTest(text=text):
                 self.assertIsNone(g.verify_class(text))
+
+    def test_a_long_or_blunt_thing_is_a_tool_weapon(self):
+        # 2026-10-09 13:25 ch6, the owner's pavers workers: a red for "a long metal bar" had no second look.
+        for text in ("A man lies on the ground while another person crawls nearby, holding a long metal bar.",
+                     "התנהגות חריגה: אדם נמצא על הקרקע ואדם אחר מחזיק מוט מתכתי ארוך לידו.",
+                     "swings a baseball bat", "a man with a crowbar at the door", "hits the window with a hammer",
+                     "holding a metal pipe", "a man with a wooden stick", "carrying an axe", "raises a shovel",
+                     "a wooden plank in his hand", "a club", "two iron rods", "a long pole",
+                     "מכה במקל", "אוחז אלה", "מחזיק פטיש", "מניף מחבט", "עם צינור", "גרזן", "את חפירה", "קרש עץ",
+                     "עם לום"):
+            with self.subTest(text=text):
+                self.assertEqual(g.verify_classes(text), ["tool_weapon"])
+
+    def test_words_that_only_look_like_a_tool(self):
+        for text in ("a man climbs the drain pipe", "sticks his hand through the gate", "near the light pole",
+                     "cuts the bars on the window", "a man lies on the ground", "אדם מוטל על הקרקע", "אומר שלום",
+                     "לא עושה כלום", "נכנס למקלחת", "ליד המקלט", "האנשים האלה מסתובבים", "שאלה", "robotic arm"):
+            with self.subTest(text=text):
+                self.assertNotIn("tool_weapon", g.verify_classes(text))
+
+    def test_a_gun_and_a_bar_get_both_questions(self):
+        self.assertEqual(g.verify_classes("a man with a knife and a metal pipe"), ["weapon", "tool_weapon"])
+        question = g.verify_question(["weapon", "tool_weapon"])
+        self.assertIn(g.VERIFY_QUESTIONS["weapon"], question)
+        self.assertIn(g.VERIFY_QUESTIONS["tool_weapon"], question)
+        self.assertIn("threaten or hit a person", g.VERIFY_QUESTIONS["tool_weapon"])
+        self.assertIn("as work is NOT", g.VERIFY_QUESTIONS["tool_weapon"])
+
+    def test_a_clear_class_still_goes_out_at_once(self):
+        for text in ("forcing the front door with a crowbar", "a man lying motionless next to a bat"):
+            with self.subTest(text=text):
+                self.assertEqual(g.verify_classes(text), [])
+
+    def test_a_tool_s_no_names_the_tool_without_contradicting_itself(self):
+        for what in ("a worker laying pavers with a metal bar", "פועל עובד עם מוט מתכת על הקרקע",
+                     "a metal bar used on the ground, not to threaten anyone", "מוט ברזל, ללא איום",
+                     "a man breaking paving stones with a hammer", ""):
+            with self.subTest(what=what):
+                self.assertFalse(g.answer_names(["tool_weapon"], what))
+
+    def test_a_tool_s_no_that_names_the_act_contradicts_itself(self):
+        for what in ("swinging the bar at another man", "hitting a person with a pipe", "threatening with a bat",
+                     "prying the car door with a crowbar", "מאיים עם מוט", "מכה אדם במקל", "פורץ את הדלת עם לום",
+                     "two men fighting with sticks", "a gun"):
+            with self.subTest(what=what):
+                self.assertTrue(g.answer_names(["tool_weapon"], what))
+
+    def test_the_other_classes_keep_their_own_contradiction_rule(self):
+        self.assertTrue(g.answer_names(["violence"], "a physical fight between two men"))
+        self.assertFalse(g.answer_names(["weapon"], "מוט ארוך"))
+        self.assertTrue(g.answer_names(["weapon", "tool_weapon"], "a man swinging a pipe at a woman"))
 
     def test_several_classes_one_question(self):
         self.assertEqual(g.verify_classes("a man with a knife smashes the car window"), ["weapon", "vehicle"])
