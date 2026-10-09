@@ -102,16 +102,20 @@ class CachedDetector:
 
 
 def render_arms(frames: Sequence[Any], detector: CachedDetector, base: vlm_crop.CropSettings,
-                k: int = ep.FRAME_COUNT) -> Dict[str, Dict[str, Any]]:
-    """{arm: {"frames": k pictures, "crops", "whole_frame", "fallback"}} for one clip's frames."""
+                k: int = ep.FRAME_COUNT, arms: Optional[Dict[str, Dict[str, Any]]] = None) -> Dict[str, Dict[str, Any]]:
+    """{arm: {"frames": k pictures, "crops", "whole_frame", "fallback"}} for one clip's frames.
+
+    *arms* maps an arm name to CropSettings overrides (``policy`` plus any field, e.g. a tighter window);
+    default the three standard arms. The whole-frame arm is always rendered."""
     scale = scale_of(frames[0])
     detector.start(frames)
     out: Dict[str, Dict[str, Any]] = {}
     whole_picks = ep.sample_indices(len(frames), k)
     out["whole"] = {"frames": [as_main_stream(frames[i], scale) for i in whole_picks], "crops": None,
                     "whole_frame": True, "fallback": None, "picks": whole_picks}
-    for arm, policy in POLICIES.items():
-        settings = dataclasses.replace(base, policy=policy, min_size=max(2, round(base.min_size * scale)))
+    for arm, overrides in (arms or {a: {"policy": p} for a, p in POLICIES.items()}).items():
+        settings = dataclasses.replace(base, **overrides)
+        settings = dataclasses.replace(settings, min_size=max(2, round(settings.min_size * scale)))
         r = vlm_crop.crop_clip(detector, settings, list(frames), 0.0, 1.0, list(frames), 0.0, name=arm)
         if r is None:
             out[arm] = dict(out["whole"], fallback="no_trigger_class_detection_or_usable_crop")
@@ -133,8 +137,9 @@ def clip_path(row: Dict[str, Any], dataset_dir: str, out_dir: str) -> str:
 
 
 def build(eval_dir: str, out_dir: str, dataset_dir: str, limit: Optional[int] = None,
-          device: Optional[str] = None) -> Dict[str, int]:
-    """Write the three arms of *eval_dir* into *out_dir*; clips already built are kept."""
+          device: Optional[str] = None, arms: Optional[Dict[str, Dict[str, Any]]] = None) -> Dict[str, int]:
+    """Write the arms of *eval_dir* into *out_dir* (default the three standard ones; *arms* as in
+    render_arms, recorded in ``arms_<names>.jsonl``); clips already built are kept."""
     from ultralytics import YOLO  # noqa: PLC0415
 
     from ..data_collection.config import load_config  # noqa: PLC0415
@@ -144,12 +149,13 @@ def build(eval_dir: str, out_dir: str, dataset_dir: str, limit: Optional[int] = 
     detector = CachedDetector(YOLO(cfg.YOLO_MODEL), device)
     with open(os.path.join(eval_dir, "manifest.jsonl"), encoding="utf-8") as f:
         rows = [json.loads(line) for line in f if line.strip()]
-    for arm in ARMS:
+    names = list(arms) if arms else [a for a in ARMS if a != "whole"]
+    for arm in names + ["whole"]:
         os.makedirs(os.path.join(out_dir, arm, ep.FRAMES_DIR), exist_ok=True)
         with open(os.path.join(out_dir, arm, "manifest.jsonl"), "w", encoding="utf-8") as f:
             for row in rows:
                 f.write(json.dumps(row, ensure_ascii=False) + "\n")
-    info_path = os.path.join(out_dir, "arms.jsonl")
+    info_path = os.path.join(out_dir, "arms.jsonl" if not arms else "arms_" + "_".join(names) + ".jsonl")
     done = set()
     if os.path.exists(info_path):
         with open(info_path, encoding="utf-8") as f:
@@ -167,13 +173,15 @@ def build(eval_dir: str, out_dir: str, dataset_dir: str, limit: Optional[int] = 
             log.warning("%s: could not read the clip", cid)
             counts["unreadable"] += 1
             continue
-        arms = render_arms(frames, detector, base)
-        for arm, got in arms.items():
+        rendered = render_arms(frames, detector, base, arms=arms)
+        for arm, got in rendered.items():
+            if arms and arm == "whole" and os.path.exists(os.path.join(out_dir, arm, ep.frame_paths(cid)[0])):
+                continue
             for rel, frame in zip(ep.frame_paths(cid), got["frames"]):
                 ep._write_jpeg(os.path.join(out_dir, arm, rel), frame)
         with open(info_path, "a", encoding="utf-8") as f:
             f.write(json.dumps({"clip_id": cid, "frames": len(frames), "scale": round(scale_of(frames[0]), 4),
-                                **{arm: {k: v for k, v in got.items() if k != "frames"} for arm, got in arms.items()}},
+                                **{arm: {k: v for k, v in got.items() if k != "frames"} for arm, got in rendered.items()}},
                                ensure_ascii=False) + "\n")
         counts["built"] += 1
         log.info("built %s", cid)
@@ -233,18 +241,23 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                    "$HOMEGUARD_DATASET_DIR, else home_guard_data/dataset).")
     b.add_argument("--limit", type=int, default=None)
     b.add_argument("--device", default=None)
+    b.add_argument("--arm", action="append", default=[], metavar="NAME=JSON",
+                   help="An extra arm instead of the standard ones, e.g. "
+                        "window2='{\"policy\": \"clip_window\", \"person_margin\": 0.25}' (CropSettings overrides). "
+                        "Repeatable.")
     c = sub.add_parser("compare")
     c.add_argument("--out", required=True)
-    c.add_argument("--a", required=True, choices=ARMS)
+    c.add_argument("--a", required=True)
     c.add_argument("--a-runs", nargs="+", required=True)
-    c.add_argument("--b", required=True, choices=ARMS)
+    c.add_argument("--b", required=True)
     c.add_argument("--b-runs", nargs="+", required=True)
     args = p.parse_args(argv)
     if args.cmd == "build":
         dataset = args.dataset or os.environ.get("HOMEGUARD_DATASET_DIR") or os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
             "home_guard_data", "dataset")
-        print(json.dumps(build(args.eval, args.out, dataset, args.limit, args.device)))
+        extra = {a.split("=", 1)[0]: json.loads(a.split("=", 1)[1]) for a in args.arm} or None
+        print(json.dumps(build(args.eval, args.out, dataset, args.limit, args.device, extra)))
     else:
         r = compare(args.out, (args.a, args.a_runs), (args.b, args.b_runs))
         print(json.dumps(r, indent=1, ensure_ascii=False))
