@@ -232,3 +232,51 @@ class InferenceHookTests(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+import test_guard_events as ge  # noqa: E402
+
+
+class WorkerOrderTest(ge.GuardCase):
+    """In the guard loop the context look runs FIRST: on the real worker clips the plain person_down look answers
+    "probably hurt" (2026-10-09 afternoon), so a consistent context answer must win and the plain look is skipped."""
+
+    def setUp(self):
+        super().setUp()
+        self.activities = am.ActivityBook(os.path.join(self.dir, "activity.json"))
+        day = dt.datetime.fromtimestamp(ge.T0)
+        self.activities.add([ge.DOOR], ["lying", "bending"], "החשמלאים שמתקינים לדים", (day.replace(hour=18)).timestamp(),
+                            ge.T0 - 600, cause_en="electricians installing LED lights", place="stairs",
+                            daily_from="07:00", daily_to="18:00")
+        patch = mock.patch.object(am, "_BOOK", self.activities)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def test_consistent_context_wins_and_the_red_is_kept_quiet(self):
+        asked = []
+        backend = ge.Backend(ge.SecondLookTest.DOWN, verify=lambda f, q, **k: asked.append(q) or {
+            "confirmed": True, "what_it_is": "worker lying on the stairs fitting lights", "evidence_frame": 2})
+        job = self.work(backend, ge.T0, camera=ge.DOOR)
+        self.assertEqual(len(asked), 1)                                    # the context look only
+        self.assertIn("electricians installing LED lights", asked[0])
+        self.assertEqual(job.alert["label"], "suspicious")
+        self.assertTrue(job.alert["activity_look"]["lowered"])
+        self.assertNotIn("second_look", job.alert)
+        self.assertEqual(self.assistant.sent, [])                          # kept, not sent
+        self.assertIn("owner explained", job.alert["not_sent_reason"])
+        self.assertEqual(self.assistant.reminders, [])
+
+    def test_not_consistent_falls_back_to_the_plain_look(self):
+        answers = iter([{"confirmed": False, "what_it_is": "a man on the ground", "evidence_frame": 1},
+                        {"confirmed": True, "what_it_is": "a man collapsed", "evidence_frame": 1}])
+        job = self.work(ge.Backend(ge.SecondLookTest.DOWN, verify=lambda f, q, **k: next(answers)), ge.T0,
+                        camera=ge.DOOR)
+        self.assertEqual(job.alert["label"], "escalation")
+        self.assertFalse(job.alert["activity_look"]["lowered"])
+        self.assertIn("second_look", job.alert)
+        self.assertTrue(self.assistant.sent[0]["text"].startswith("🔴"))
+
+    def test_another_camera_is_untouched(self):
+        verify = mock.Mock(return_value={"confirmed": False, "what_it_is": "a worker laying pavers", "evidence_frame": 1})
+        job = self.work(ge.Backend(ge.SecondLookTest.DOWN, verify=verify), ge.T0, camera=ge.CAM)
+        self.assertNotIn("activity_look", job.alert)
