@@ -5,8 +5,11 @@ description rules ("who, what, in order"; "No special activity." when nothing ha
 strict JSON schema, reduced to the fields a tag holds. The scene is judged WITHOUT the situation (no hour, no house
 state): a tag is context-free, the box adds the situation itself. Keep this in step with eye_prompt.py.
 
-The model is OpenAI-compatible (default: OpenRouter ``qwen/qwen3-vl-32b-instruct``; ``HG_SUGGEST_MODEL`` /
-``HG_SUGGEST_BASE_URL`` change it). Gemini is refused: its terms forbid training a competing model on its outputs.
+The model is OpenAI-compatible (default: OpenRouter ``qwen/qwen3.7-plus``; ``HG_SUGGEST_MODEL`` /
+``HG_SUGGEST_BASE_URL`` change it). When the provider no longer offers the model (404: OpenRouter deprecated
+``qwen/qwen3-vl-32b-instruct`` on 2026-10-09 and every Suggest failed with a 409), the next of FALLBACK_MODELS is
+asked, and the answer says which model gave it. Gemini is refused: its terms forbid training a competing model on its
+outputs.
 One answer per clip and model is cached (``suggestions.jsonl`` in the exports folder), so a clip is paid for once.
 """
 from __future__ import annotations
@@ -25,7 +28,9 @@ from . import evalfmt
 from .teacher import FORBIDDEN_TEACHERS, parse_raw
 
 PROMPT_VERSION = "2026-10-06.studio-suggest-v1 (eye-v3 alert_triage, context-free)"
-DEFAULT_MODEL = "qwen/qwen3-vl-32b-instruct"
+DEFAULT_MODEL = "qwen/qwen3.7-plus"          # OpenRouter's replacement for the deprecated qwen3-vl-32b-instruct
+# Vision models with strict structured output, asked in order when the one before is no longer offered (404).
+FALLBACK_MODELS = ("qwen/qwen3-vl-235b-a22b-instruct", "qwen/qwen3.5-27b")
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 CACHE_FILE = "suggestions.jsonl"
 FRAMES = 5   # what the box sends the Eye
@@ -235,11 +240,15 @@ class Suggester:
         self._client, self._frames_for = client, frames_for or sample
         self._lock = threading.Lock()
 
+    def models(self) -> List[str]:
+        """The configured model, then the fallbacks (each once)."""
+        return list(dict.fromkeys([self.config.model, *FALLBACK_MODELS]))
+
     def cached(self, key: str) -> Optional[Dict[str, Any]]:
         rows, _ = evalfmt.read_jsonl(self.cache_path)
-        found = None
+        models, found = set(self.models()), None
         for row in rows:
-            if row.get("key") == key and row.get("model") == self.config.model and isinstance(row.get("fields"), dict):
+            if row.get("key") == key and row.get("model") in models and isinstance(row.get("fields"), dict):
                 found = row
         return found
 
@@ -288,10 +297,22 @@ class Suggester:
             response_format = ({"type": "json_schema", "json_schema": {"name": "legacy_alert", "strict": True,
                                                                        "schema": ps.VLM_SCHEMA}}
                                if legacy else RESPONSE_FORMAT)
-            response = self._client.chat.completions.create(
-                model=self.config.model, messages=[{"role": "user", "content": content}], temperature=0,
-                response_format=response_format, extra_body=extra)
-            raw = response.choices[0].message.content or ""
+            raw, used, gone = "", None, []
+            for model in self.models():
+                try:
+                    response = self._client.chat.completions.create(
+                        model=model, messages=[{"role": "user", "content": content}], temperature=0,
+                        response_format=response_format, extra_body=extra)
+                except Exception as exc:  # noqa: BLE001 - only "no longer offered" moves on to the next model
+                    if getattr(exc, "status_code", None) == 404:
+                        gone.append(f"{model} ({str(exc)[:160]})")
+                        continue
+                    raise
+                raw, used = response.choices[0].message.content or "", model
+                break
+            if used is None:
+                raise SuggestError("The suggestion model is no longer offered by the provider: "
+                                   + "; ".join(gone)[:600] + ". Set HG_SUGGEST_MODEL to a current vision model.")
         except SuggestError:
             raise
         except Exception as exc:  # noqa: BLE001 - network, auth, quota: say what happened
@@ -306,7 +327,7 @@ class Suggester:
             fields = to_form(parsed, prompt_version)
         else:
             fields = to_fields(parsed, index, fps)
-        row = {"key": key, "model": self.config.model,
+        row = {"key": key, "model": used,
                "prompt_version": LEGACY_PROMPT_VERSION if legacy else PROMPT_VERSION,
                "at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "raw": raw, "fields": fields,
                "frames": len(data), "from_model_input": bool(jpegs)}

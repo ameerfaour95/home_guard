@@ -371,3 +371,90 @@ def test_captions_use_the_boxs_camera_names_with_the_channel_rule_for_an_old_id(
     # a dataset clip with no house: the box's channel rule, never the raw id
     ds = client.get("/v1/tagging/clip", headers=h, params={"key": "ds:front_side_1771696865_trigger"}).json()
     assert ds["item"]["camera_display"] == "Front side"
+
+
+# ---------------------------------------------------------------- Suggest regression (2026-10-09): the real request path
+
+class GoneThenAnswers:
+    """An OpenAI-shaped client with no fixed model (so the studio's configured model is asked first): the first model
+    asked answers 404 like a deprecated OpenRouter model, the next one answers."""
+
+    def __init__(self, answer, gone=1):
+        self.answer, self.gone, self.calls = answer, gone, []
+        self.chat = self.completions = self
+
+    def create(self, **kwargs):
+        import json
+        from types import SimpleNamespace
+
+        self.calls.append(kwargs)
+        if len(self.calls) <= self.gone:
+            err = RuntimeError("Error code: 404 - Qwen3 VL 32B Instruct was deprecated on Oct 9, 2026.")
+            err.status_code = 404
+            raise err
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(self.answer)))])
+
+
+LEGACY_ANSWER = {"summary": "A man stands near a car.", "label": "normal", "raw_label": "normal", "applied_fact_id": "",
+                 "serious_behaviour": False, "people": 1, "vehicle_moving": False, "animals": 0,
+                 "why": "Ordinary activity.", "summary_owner": ""}
+
+
+def _image_sizes(call):
+    import base64
+
+    import cv2
+    import numpy as np
+    out = []
+    for part in call["messages"][0]["content"]:
+        if part["type"] == "image_url":
+            data = base64.b64decode(part["image_url"]["url"].split(",", 1)[1])
+            img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+            out.append((img.shape[1], img.shape[0]))
+    return out
+
+
+def test_suggest_on_a_legacy_assumed_clip_through_the_route(client, staff_factory, studio):
+    from home_guard_project.cloud.tagstudio import suggest as sg
+    from home_guard_project.fleet_contract import prompt_schemas as ps
+    s, ids = studio
+    _, _, _, h = staff_factory("admin")
+    # the box's AI answered (alert + model_response) but recorded no prompt version: legacy assumed
+    put_owner_clip(str(s.paths.dataset), "production_house2", alert_meta("house2_ch2", STEM, teacher=None), STEM)
+    s.suggest_client, s.suggest_frames = GoneThenAnswers(LEGACY_ANSWER), _frames
+    r = client.post("/v1/tagging/suggest", headers=h, json={"key": f"ev:{ids['consenting']}", "refresh": True})
+    assert r.status_code == 200, r.text
+    got = r.json()
+    calls = s.suggest_client.calls
+    assert calls[0]["model"] == sg.SuggestConfig.resolve().model and calls[1]["model"] == sg.FALLBACK_MODELS[0]
+    assert got["model"] == sg.FALLBACK_MODELS[0]                         # the answer says who gave it
+    assert tuple(calls[1]["response_format"]["json_schema"]["schema"]["properties"]) == ps.field_order(ps.PROMPT_VERSION)
+    assert got["fields"]["why"] == "Ordinary activity." and got["prompt_version"].startswith("2026-10-09.studio-suggest-legacy")
+
+
+def test_suggest_on_a_model_input_2_clip_sends_the_capped_frames(client, staff_factory, studio):
+    from .test_model_view import video
+    s, ids = studio
+    _, _, _, h = staff_factory("admin")
+    ds = str(s.paths.dataset)
+    meta = alert_meta("house2_ch2", STEM, vlm_input="crop",
+                      vlm_crop={"fps": 5.0, "vlm_crop_path": f"vlm_crops/house2_ch2/2026-10-04/{STEM}.mp4"},
+                      model_input={"version": "model-input-2", "vlm_input": "crop", "frame_indices": [0, 5],
+                                   "times": [0.0, 1.0], "fps": 5.0, "sample_fps": 1.0, "step": 5,
+                                   "size": [1024, 768], "max_side": 1024})
+    put_owner_clip(ds, "production_house2", meta, STEM)
+    video(os.path.join(ds, "owner_feedback", "production_house2", "vlm_crops", "house2_ch2", "2026-10-04",
+                       f"{STEM}.mp4"), 6, size=(1600, 1200))
+    s.suggest_client = GoneThenAnswers(LEGACY_ANSWER, gone=0)
+    r = client.post("/v1/tagging/suggest", headers=h, json={"key": f"ev:{ids['consenting']}", "refresh": True})
+    assert r.status_code == 200, r.text
+    assert _image_sizes(s.suggest_client.calls[0]) == [(1024, 768), (1024, 768)]   # the box's own frames, capped
+
+
+def test_suggest_says_plainly_when_no_model_is_offered(client, staff_factory, studio):
+    s, ids = studio
+    _, _, _, h = staff_factory("admin")
+    s.suggest_client, s.suggest_frames = GoneThenAnswers(LEGACY_ANSWER, gone=99), _frames
+    r = client.post("/v1/tagging/suggest", headers=h, json={"key": f"ev:{ids['consenting']}", "refresh": True})
+    assert r.status_code == 409
+    assert "no longer offered" in r.json()["detail"] and "HG_SUGGEST_MODEL" in r.json()["detail"]
