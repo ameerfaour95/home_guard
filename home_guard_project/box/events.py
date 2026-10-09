@@ -135,6 +135,9 @@ class Session:
     # 2026-10-09: the cross-camera link as seen, in ``shadow`` too (``incident_from`` is written only when on): the
     # source camera's mark ("the workers at the pergola") covers this session through it (``_known_via_link``).
     cross_seen: Dict[str, Any] = field(default_factory=dict)
+    # 2026-10-09: when this session last told the owner "the AI check did not finish" (0: never), so the camera's
+    # next failed check minutes later does not send another one (EventBook.ai_failed_told).
+    ai_failed_told: float = 0.0
 
     def people_when_said(self, known_id: str) -> int:
         """People present in this session when the owner's words *known_id* were said here (0 when said elsewhere)."""
@@ -378,6 +381,15 @@ class EventBook:
         with self._lock:
             live = [k for k in self._known if k.live(now) and (not k.camera or k.camera == camera)]
             return live[-1] if live else None
+
+    def ai_failed_told(self, camera: str, now: float, within: float) -> float:
+        """When *camera* last told the owner "the AI check did not finish", in its open session or one closed
+        since (2026-10-09 11:35 and 11:37 at ch1: two sessions, the detector lost the person for over a minute in
+        between, and two such messages). 0.0 when not within *within* seconds before *now*."""
+        with self._lock:
+            told = [x.ai_failed_told for x in list(self._open.values()) + self._closed[-50:]
+                    if x.camera == camera and x.ai_failed_told and 0.0 <= now - x.ai_failed_told <= within]
+            return max(told, default=0.0)
 
     def known_covers(self, camera: str, now: float, people: Any = None) -> Optional[Known]:
         """The owner's mark that covers *camera* at *now* (live: inside its daily hours) for *people*, the detector's
@@ -756,13 +768,17 @@ class EventBook:
         return None
 
     def record_sent(self, session_id: str, label: str, people: Any, ts: float, alert_id: str = "",
-                    chat_id: Any = None, message_id: Any = None, entities: Optional[List[str]] = None) -> None:
+                    chat_id: Any = None, message_id: Any = None, entities: Optional[List[str]] = None,
+                    ai_failed: bool = False) -> None:
         """The alert of *session_id* reached the owner (call only after a successful delivery). *entities* are the
-        ids that were in view (``Decision.entities``): the owner now knows about them."""
+        ids that were in view (``Decision.entities``): the owner now knows about them. *ai_failed*: it was the
+        "the AI check did not finish" message (no model answered)."""
         with self._lock:
             s = next((x for x in self._open.values() if x.id == session_id), None)
             if s is None:
                 return
+            if ai_failed:
+                s.ai_failed_told = max(s.ai_failed_told, float(ts))
             if LEVELS.get(label, 0) > LEVELS[s.reported_level]:
                 s.reported_level = label
             s.reported_people = max(s.reported_people, _int(people))

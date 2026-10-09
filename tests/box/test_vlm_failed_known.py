@@ -93,6 +93,58 @@ class FailedCheckUnderMarkTest(GuardCase):
         self.assertNotIn("vlm_failed", job.alert)
 
 
+class FailedAgainTest(GuardCase):
+    """2026-10-09 ch1: "the AI check did not finish" at 11:35 and again at 11:37, two messages. One is enough."""
+
+    def failed(self, ts, camera=CAM):
+        with self.assertLogs("box.inference", "INFO") as logs:
+            job = self.work(Backend(None), ts, camera=camera)
+        return job, logs.output
+
+    def test_two_failed_checks_150_s_apart_are_one_message(self):
+        self.failed(AT_1112)
+        job, logs = self.failed(AT_1112 + 150)        # the detector saw nobody in between: a new event
+        self.assertEqual(len(self.assistant.sent), 1)
+        self.assertIs(job.alert["sent"], False)
+        self.assertTrue(job.alert["vlm_failed"])
+        self.assertTrue(job.alert["not_sent_reason"].startswith("AI check failed again in the same event"))
+        self.assertTrue(any(f"[{CAM}] not sent (AI check failed again in the same event" in m for m in logs), logs)
+        # Kept in its event: the story has the look.
+        self.assertEqual(self.book.session_of_alert(job.stem)["observations"][-1]["alert_id"], job.stem)
+
+    def test_inside_one_open_event(self):
+        self.failed(AT_1112)
+        for k in range(1, 15):
+            self.book.activity(CAM, AT_1112 + k * 10, people=1)
+        job, logs = self.failed(AT_1112 + 150)
+        self.assertEqual(len(self.assistant.sent), 1)
+        self.assertEqual(job.alert["not_sent_reason"], "AI check failed again in the same event")
+        self.assertEqual(self.book.session_of_alert(job.stem)["id"],
+                         self.book.session_of_alert(f"{CAM}_{int(AT_1112)}_alert")["id"])
+
+    def test_after_a_real_message_in_the_event(self):
+        self.work(Backend(answer("suspicious", people=1, why="tries the door handle")), AT_1112)
+        self.book.activity(CAM, AT_1112 + 30, people=1)
+        job, _ = self.failed(AT_1112 + 60)
+        self.assertEqual(len(self.assistant.sent), 1)
+        self.assertEqual(job.alert["not_sent_reason"], "AI check failed again in the same event")
+
+    def test_ten_minutes_later_it_is_news_again(self):
+        self.failed(AT_1112)
+        self.failed(AT_1112 + inf.AI_FAILED_REPEAT_SEC + 30)
+        self.assertEqual(len(self.assistant.sent), 2)
+
+    def test_another_camera_is_its_own(self):
+        self.failed(AT_1112)
+        self.failed(AT_1112 + 30, camera=DOOR)
+        self.assertEqual(len(self.assistant.sent), 2)
+
+    def test_an_answered_look_after_a_failed_one_is_judged_as_always(self):
+        self.failed(AT_1112)
+        self.work(Backend(answer("escalation", people=1, why="breaks into the house")), AT_1112 + 60)
+        self.assertEqual(len(self.assistant.sent), 2)
+
+
 class KnownCoversTest(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.mkdtemp()

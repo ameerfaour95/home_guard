@@ -863,6 +863,64 @@ def call_with_deadline(fn: Callable[[], Any], seconds: float, what: str = "the v
     return box.get("value")
 
 
+# 2026-10-09: four "both models failed" in under 1.5 h, every one on a big crop (1279-2161 px a side x 16 frames,
+# 25-53 Mpx: tens of thousands of image tokens). When no model answered and the frames are bigger than this, the
+# main model is asked once more with the same frames shrunk to this long side (aspect kept, INTER_AREA), within its
+# own budget. Only on that failure path: an answered call is never touched.
+VLM_RESCUE_MAX_SIDE = 768
+VLM_RESCUE_TIMEOUT_SEC = 20.0
+
+
+def shrink_to_max_side(frames: Sequence[Any], max_side: int) -> List[Any]:
+    """Each frame with its long side at most *max_side* (aspect kept, cv2.INTER_AREA); smaller frames as they are."""
+    import cv2  # noqa: PLC0415
+
+    out = []
+    for fr in frames:
+        h, w = fr.shape[:2]
+        if max(w, h) > max_side:
+            scale = max_side / float(max(w, h))
+            fr = cv2.resize(fr, (max(1, round(w * scale)), max(1, round(h * scale))), interpolation=cv2.INTER_AREA)
+        out.append(fr)
+    return out
+
+
+def _long_side(frames: Sequence[Any]) -> int:
+    sides = [max(int(f.shape[0]), int(f.shape[1])) for f in frames
+             if getattr(f, "shape", None) is not None and len(f.shape) >= 2]
+    return max(sides, default=0)
+
+
+def vlm_rescue(backend: Any, frames: Sequence[Any], camera_name: str, t_sec: int, start_hour: int, end_hour: int,
+               reason: str, **kwargs: Any) -> Optional[Tuple[str, Optional[Dict[str, Any]], Dict[str, Any]]]:
+    """No model answered: ask the main model once more with *frames* shrunk to VLM_RESCUE_MAX_SIDE, within
+    VLM_RESCUE_TIMEOUT_SEC. None when there is nothing to try (not an OpenAI-compatible model, or the frames are
+    already that small); else ``(raw, parsed, record)``, *record* for the meta's ``model_input.rescue``. Never
+    raises."""
+    primary = getattr(backend, "primary", backend)
+    if not isinstance(primary, GptBackend) or _long_side(frames) <= VLM_RESCUE_MAX_SIDE:
+        return None
+    record: Dict[str, Any] = {"max_side": VLM_RESCUE_MAX_SIDE, "reason": str(reason or "no model answered")[:300],
+                              "model": getattr(primary, "model_name", ""), "timeout_sec": VLM_RESCUE_TIMEOUT_SEC}
+    raw, parsed = "", None
+    started = time.monotonic()
+    try:
+        small = shrink_to_max_side(frames, VLM_RESCUE_MAX_SIDE)
+        record["size"] = [int(small[0].shape[1]), int(small[0].shape[0])] if small else None
+        raw, parsed = primary.analyze(small, camera_name, t_sec, start_hour, end_hour,
+                                      call_timeout=VLM_RESCUE_TIMEOUT_SEC, **kwargs)
+    except Exception as exc:  # noqa: BLE001 - the honest "AI check did not finish" alert goes out as before
+        record["error"] = f"{type(exc).__name__}: {exc}"[:300]
+    record["seconds"] = round(time.monotonic() - started, 1)
+    record["answered"] = isinstance(parsed, dict)
+    if record["answered"] and isinstance(backend, FallbackBackend):
+        backend._last = primary          # the record's model, prompt and frames are the rescue's
+    log.warning("[%s] VLM rescue at %d px: %s (%.1f s)", camera_name, VLM_RESCUE_MAX_SIDE,
+                "answered" if record["answered"] else f"failed ({record.get('error') or 'not a JSON object'})",
+                record["seconds"])
+    return raw, parsed, record
+
+
 class GptBackend:
     """Any OpenAI-compatible vision model (OpenAI, OpenRouter, Ollama, vLLM). Imports the client lazily."""
 
@@ -905,7 +963,8 @@ class GptBackend:
                 start_hour: int, end_hour: int, owner_language: str = "en",
                 facts: Sequence[Dict[str, Any]] = (), alert_ts: Optional[float] = None,
                 situation: Any = None, tracker_facts: str = "",
-                entities_line: str = "") -> Tuple[str, Optional[Dict[str, Any]]]:
+                entities_line: str = "", call_timeout: Optional[float] = None) -> Tuple[str, Optional[Dict[str, Any]]]:
+        """*call_timeout*: this call's own budget instead of the backend's (the 768 px rescue, VLM_RESCUE_TIMEOUT_SEC)."""
         if situation is None:
             moment = datetime.now() if alert_ts is None else datetime.fromtimestamp(alert_ts)
             # Only passed when there is a line, so a swapped-in build_prompt without the argument keeps working.
@@ -932,14 +991,15 @@ class GptBackend:
                 content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
         # A model that refused schemas once gets plain JSON from then on, whichever prompt is asked.
         fmt = schema_format if self._response_format.get("type") == "json_schema" else self._response_format
+        budget = {"timeout": call_timeout} if call_timeout is not None else {}
         try:
-            resp = self._complete(content, fmt)
+            resp = self._complete(content, fmt, **budget)
         except Exception as exc:  # noqa: BLE001
             # A model without structured output refuses the schema: ask for plain JSON from now on.
             if fmt.get("type") == "json_schema" and "response_format" in str(exc):
                 log.warning("%s does not take a JSON schema (%s); asking for a JSON object instead.", self._model, exc)
                 self._response_format = {"type": "json_object"}
-                resp = self._complete(content, self._response_format)
+                resp = self._complete(content, self._response_format, **budget)
             else:
                 raise
         raw = resp.choices[0].message.content or ""
@@ -1711,6 +1771,8 @@ class AlertJob:
     # The tracker's tracks with a box per look over the clip's own window (tracker.tracks_with_boxes), its looks and
     # the settings they were made with: the clip's .tracks.json (clip_tracks.py). None: no tracker data.
     track_boxes: Optional[Dict[str, Any]] = None
+    # Both models failed and the main model was asked again on smaller pictures (vlm_rescue): its record.
+    rescue: Dict[str, Any] = field(default_factory=dict)
 
 
 def _camera_streams(cfg: Any) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -1805,7 +1867,10 @@ def _model_input_record(job: Optional[AlertJob]) -> Optional[Dict[str, Any]]:
     rendered = getattr(job, "model_input", None)
     if rendered is None:
         return None
-    return {k: v for k, v in rendered.record().items() if k != "crops"}
+    record = {k: v for k, v in rendered.record().items() if k != "crops"}
+    if getattr(job, "rescue", None):
+        record["rescue"] = dict(job.rescue)      # what the 768 px rescue call was sent, and how it went
+    return record
 
 
 def _clip_extra(job: AlertJob) -> Dict[str, Any]:
@@ -2290,6 +2355,12 @@ def _keep_keyframe(session_id: str, job: Optional[AlertJob], frames: List[Any]) 
         log.debug("keyframe of event %s not kept: %s", session_id, exc)
 
 
+# After this camera told the owner "the AI check did not finish", another failed check within this long is kept in
+# its event, not sent (the event book may have closed and reopened the event in between: the detector lost the
+# person for over a minute). Anything the AI did answer is judged as always.
+AI_FAILED_REPEAT_SEC = 600.0
+
+
 def _detector_people(job: Optional[AlertJob]) -> int:
     """The most people the detector saw at once in this alert, without the AI: the tracker's ``people_together``
     or the crop's YOLO looks (COCO 0), whichever is more. 0: not counted."""
@@ -2330,12 +2401,22 @@ def _event_decision(camera: str, alert_ts: float, label: str, people: Optional[i
                                alert_id, **(entity_args or {}), **({"ground": ground} if ground else {}),
                                **({"baseline": baseline} if baseline else {}))
         if ai_failed and label not in LABELS:
+            import dataclasses  # noqa: PLC0415
+
             known = book.known_covers(camera, alert_ts, detector_people)
             if known is not None:
-                import dataclasses  # noqa: PLC0415
-
                 return dataclasses.replace(decision, notify=False, known_text=known.text,
                                            reason="AI check failed, but the owner said who is here")
+            # One "the AI check did not finish" is enough: not again in an event that already told the owner
+            # anything, nor minutes after this camera's last one (2026-10-09 ch1: 11:35 and 11:37, two messages).
+            session = book.session_of_alert(alert_id) or {}
+            if session.get("reported_level", "none") != "none":
+                return dataclasses.replace(decision, notify=False, reason="AI check failed again in the same event")
+            told = book.ai_failed_told(camera, alert_ts, AI_FAILED_REPEAT_SEC)
+            if told:
+                return dataclasses.replace(
+                    decision, notify=False,
+                    reason=f"AI check failed again in the same event (told {int(alert_ts - told)} s ago)")
         if label not in LABELS and not decision.notify and not (ground or {}).get("off_our_ground"):
             session = book.session_of_alert(alert_id) or {}
             if session.get("reported_level", "none") == "none":
@@ -2438,7 +2519,9 @@ def _record_event_sent(event_sent: Optional[Dict[str, Any]], message: Optional[T
     if EVENTS is None or not event_sent:
         return
     chat_id, message_id = message if message else (None, None)
-    extra = {"entities": list(event_sent["entities"])} if event_sent.get("entities") else {}
+    extra: Dict[str, Any] = {"entities": list(event_sent["entities"])} if event_sent.get("entities") else {}
+    if event_sent.get("ai_failed"):
+        extra["ai_failed"] = True
     try:
         EVENTS.record_sent(event_sent["session_id"], event_sent["label"], event_sent["people"], event_sent["ts"],
                            alert_id=event_sent["alert_id"], chat_id=chat_id, message_id=message_id, **extra)
@@ -2527,12 +2610,27 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
 
                 context["entities_line"] = roster["line"]
                 legacy_version = f"{legacy_version}+{ENTITIES_VERSION}"
+        asked_at = int(time.time())
+        failure = ""
         try:
-            raw, parsed = backend.analyze(frames, camera_name, int(time.time()),
+            raw, parsed = backend.analyze(frames, camera_name, asked_at,
                                           settings.alert_start_hour, settings.alert_end_hour, owner_language=lang, **context)
         except Exception as exc:  # noqa: BLE001 - an outage or the gateway's daily cap: the detector's alert still goes out
             log.warning("[%s] VLM call failed: %s", camera_name, exc)
             raw, parsed = "", None
+            failure = str(exc)
+        rescued = False
+        if not isinstance(parsed, dict):
+            # Both models failed: one more try of the main model on smaller pictures (VLM_RESCUE_MAX_SIDE).
+            rescue = vlm_rescue(backend, frames, camera_name, asked_at, settings.alert_start_hour,
+                                settings.alert_end_hour, failure or "the answer was not a JSON object",
+                                owner_language=lang, **context)
+            if rescue is not None:
+                if job is not None:
+                    job.rescue = rescue[2]
+                if rescue[2]["answered"]:
+                    raw, parsed = rescue[0], rescue[1]
+                    rescued = True
         answer, eye_record = parsed, {}
         # No model answered: the detector's alert still goes out, and says plainly that the AI check did not finish.
         ai_failed = not isinstance(answer, dict)
@@ -2553,6 +2651,8 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                     "serious_behaviour": serious is not False}
         if ai_failed:
             decision["vlm_failed"] = True
+        if rescued:
+            decision["vlm_rescued"] = True
         if job is not None and raw:
             # Everything a student model needs to learn this answer: the exact pictures,
             # the question, and the answer word for word.
@@ -2815,6 +2915,8 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                                   "people": people or 0, "ts": alert_ts, "alert_id": alert_id,
                                   "message_recorded": first is not None,
                                   "entities": list(getattr(event, "entities", None) or [])}
+                    if ai_failed:
+                        event_sent["ai_failed"] = True
                     _record_event_sent(event_sent, first)
                 if remind and assistant is not None and alert_ref and delivery(res)[0]:
                     try:
@@ -2841,6 +2943,12 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
             job.ready.set()
 
 
+# How long the clip writer waits for the worker's decision: the main model and the fallback (about 28 s each), the
+# 768 px rescue (about 23 s), then the investigator (20 s), a second look (15 s) and the owner's text. Before
+# 2026-10-09 it was 90 s, which the rescue path could pass; the held alert has its own video_wait timer either way.
+CLIP_WAIT_SEC = 180.0
+
+
 def _save_clip(job: AlertJob, frames: List[Any], production_dir: str, training_dir: str,
                assistant: Any = None) -> None:
     """Write the alert's clip once the worker has decided what the alert was. Never raises out.
@@ -2853,7 +2961,7 @@ def _save_clip(job: AlertJob, frames: List[Any], production_dir: str, training_d
     try:
         from .alert_clips import clip_file, false_positive_stem, write_alert_clip  # noqa: PLC0415
 
-        job.ready.wait(timeout=90)
+        job.ready.wait(timeout=CLIP_WAIT_SEC)
         alert = job.alert or {**empty_fact_decision(), "summary": "", "alert_command": "[none]", "alert_reason": "", "labels": job.labels}
         training_alert = dict(alert, label=alert.get("raw_label", alert.get("label", "")))
         clip_options = dict(fps=job.clip_fps, crop=job.crop, crop_settings=job.crop_settings, crop_fps=job.crop_fps)
