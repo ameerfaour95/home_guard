@@ -658,6 +658,18 @@ def _vlm_timeout(value: Any) -> float:
     return number
 
 
+def _vlm_max_side(value: Any) -> int:
+    """box.yaml ``vlm_max_side``: 0 (off, the default) or a long side of 256-4096 px; anything else is off."""
+    try:
+        number = int(value or 0)
+    except (TypeError, ValueError, OverflowError):
+        number = -1
+    if number != 0 and not 256 <= number <= 4096:
+        log.warning("Unusable vlm_max_side %r; the frames are sent at their own size.", value)
+        return 0
+    return number
+
+
 def _vlm_retries(value: Any) -> int:
     """box.yaml ``vlm_max_retries`` (0-3); anything else is the default."""
     try:
@@ -687,6 +699,7 @@ class AlertSettings:
     # about a minute (2026-10-09 ch1: two models x 3 tries x 30 s took 200 s and the owner got a bare alert).
     vlm_timeout_sec: float = VLM_TIMEOUT_SEC
     vlm_max_retries: int = VLM_MAX_RETRIES   # the SDK's own retries per model; the fallback is the real retry
+    vlm_max_side: int = 0           # long side of the frames sent, model_input.ModelInputConfig.max_side (0: off)
     alert_channel: str = "telegram"  # telegram | twilio | both
     dry_run: bool = False
     quiet_log: bool = False         # opt-in recording outside the owner's alert hours
@@ -729,6 +742,7 @@ class AlertSettings:
             vlm_fallback_model=str(g("vlm_fallback_model", "") or "").strip(),
             vlm_timeout_sec=_vlm_timeout(g("vlm_timeout_sec", VLM_TIMEOUT_SEC)),
             vlm_max_retries=_vlm_retries(g("vlm_max_retries", VLM_MAX_RETRIES)),
+            vlm_max_side=_vlm_max_side(g("vlm_max_side", 0)),
             alert_channel=str(g("alert_channel", "telegram")),
             dry_run=bool(g("notify_dry_run", False)),
             quiet_log=bool(g("quiet_log", False)),
@@ -1792,8 +1806,9 @@ def _camera_streams(cfg: Any) -> Tuple[Dict[str, Any], Dict[str, Any]]:
 
 
 def _prepare_alert(job: AlertJob, cfg: Any, detector: Any, sub_cap: Any, main_cap: Any,
-                   predict_args: Dict[str, Any]) -> Tuple[List[Any], List[Any]]:
-    """Freeze the completed window, then use the collector's crop and sampling verbatim.
+                   predict_args: Dict[str, Any], max_side: int = 0) -> Tuple[List[Any], List[Any]]:
+    """Freeze the completed window, then use the collector's crop and sampling verbatim. *max_side* (box.yaml
+    ``vlm_max_side``, 0: off) caps the long side of the frames sent (model_input.render_model_input).
 
     Called on the detection loop so the shared YOLO model is never used concurrently.
     Reader threads keep buffering while this per-alert work runs.
@@ -1852,12 +1867,13 @@ def _prepare_alert(job: AlertJob, cfg: Any, detector: Any, sub_cap: Any, main_ca
         job.input_meta = {"vlm_input": model_input.VLM_INPUT_CROP}
         job.model_input = model_input.render_model_input(
             main[0], {"vlm_input": model_input.VLM_INPUT_CROP, "fps": job.crop_fps, "crops": job.crop.crops,
-                      "crop_size": (job.crop.width, job.crop.height)}, model_input.config_from(cfg))
+                      "crop_size": (job.crop.width, job.crop.height)}, model_input.config_from(cfg, max_side))
     else:
         job.input_meta = {"vlm_input": model_input.VLM_INPUT_WHOLE, "vlm_fallback_reason": reason}
         log.warning("[%s] VLM whole_frame_fallback: %s", job.camera, reason)
         job.model_input = model_input.render_model_input(
-            sub_frames, {"vlm_input": model_input.VLM_INPUT_WHOLE, "fps": sub_fps}, model_input.config_from(cfg))
+            sub_frames, {"vlm_input": model_input.VLM_INPUT_WHOLE, "fps": sub_fps},
+            model_input.config_from(cfg, max_side))
     return job.model_input.frames, clip
 
 
@@ -1978,7 +1994,8 @@ def _start_due_alerts(pending: List[AlertJob], now: float, cfg: Any, detector: A
         if now < job.ts + POST_SECONDS:
             continue
         frames, clip = _prepare_alert(job, cfg, detector, streams[job.camera].sub_cap,
-                                      main_caps[job.camera], predict_args)
+                                      main_caps[job.camera], predict_args,
+                                      max_side=getattr(settings, "vlm_max_side", 0))
         _attach_tracker(job, trackers, now)   # after _prepare_alert, which sets the job's input_meta afresh
         _attach_track_boxes(job, trackers, clip, getattr(settings, "tracker_person_conf", None))
         pending.remove(job)
