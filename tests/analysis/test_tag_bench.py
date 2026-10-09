@@ -84,6 +84,15 @@ class ArmsTests(unittest.TestCase):
     def test_crime_category_cameras_are_never_named(self):
         self.assertEqual(tb.camera_of({"camera": "Abuse", "source": "uca"}), tb.GENERIC_CAMERA)
 
+    def test_lexical_swap_sees_actions_follow_the_tags(self):
+        b = {"P1": "opens the car door", "P2": "stands by the gate smoking"}
+        self.assertEqual(tb.lexical_swap(("P1", "P2"), b, {"P2": "opens the car door", "P1": "smoking at the gate"}),
+                         "followed")
+        self.assertEqual(tb.lexical_swap(("P1", "P2"), b, dict(b)), "ignored")
+        self.assertEqual(tb.lexical_swap(("P1", "P2"), {"P1": "walks", "P2": "walks"}, {"P1": "walks", "P2": "walks"}),
+                         "indistinct")
+        self.assertEqual(tb.lexical_swap(("P1", "P2"), b, {"P1": "walks"}), "indistinct")
+
     def test_swap_pair_prefers_people(self):
         self.assertEqual(tb.swap_pair(["P1", "P2", "CAR1", "CAR2"]), ("P1", "P2"))
         self.assertEqual(tb.swap_pair(["P1", "CAR1", "CAR2"]), ("CAR1", "CAR2"))

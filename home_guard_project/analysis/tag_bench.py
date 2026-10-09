@@ -14,7 +14,7 @@ input), so every human box lands on the sent frame in exact pixels. Arms:
   S  B's frames with the strings of one pair swapped (P1<->P2, else CAR1<->CAR2): a model that reads the
      tags must swap its per-entity answers
 
-Commands (python -m home_guard_project.analysis.tag_bench <cmd>): prepare | run | judge | score. Every step
+Commands (python -m home_guard_project.analysis.tag_bench <cmd>): prepare | run | judge | score | sheets. Every step
 resumes: answers already saved are not asked again.
 """
 from __future__ import annotations
@@ -629,6 +629,33 @@ def cmd_judge(args: argparse.Namespace) -> None:
     print(f"judge cost ${spent[0]:.4f}")
 
 
+_STOP = {"a", "an", "the", "and", "of", "to", "in", "on", "at", "is", "while", "with", "near", "object", "target",
+          "it", "its", "their", "his", "her", "from", "into", "by", "then"}
+
+
+def _words(text: str) -> set:
+    return {w for w in re.findall(r"[a-z0-9]+", text.lower()) if w not in _STOP}
+
+
+def _sim(a: str, b: str) -> float:
+    wa, wb = _words(a), _words(b)
+    return len(wa & wb) / len(wa | wb) if wa | wb else 0.0
+
+
+def lexical_swap(pair: Sequence[str], first: Dict[str, str], second: Dict[str, str], margin: float = 0.1) -> str:
+    """followed / ignored / indistinct by word overlap alone (no judge): do the actions move with the tag texts?"""
+    x, y = pair
+    if not all(k in d for d in (first, second) for k in (x, y)):
+        return "indistinct"
+    moved = _sim(second[y], first[x]) + _sim(second[x], first[y])
+    stayed = _sim(second[x], first[x]) + _sim(second[y], first[y])
+    if moved > stayed + margin:
+        return "followed"
+    if stayed > moved + margin:
+        return "ignored"
+    return "indistinct"
+
+
 def _alert(parsed: Optional[Dict[str, Any]]) -> bool:
     return inf.label_of(parsed) in ("suspicious", "escalation")
 
@@ -661,6 +688,13 @@ def score(out: str, model: str, runs: int = 2) -> Dict[str, Any]:
             if j:
                 by_pair[m["pair"][0]][str((j.get("parsed") or {}).get("verdict"))] += 1
     reading["by_pair"] = {k: dict(v) for k, v in by_pair.items()}
+    for r in rs:   # a judge-free cross-check: word overlap of the actions
+        lex = Counter()
+        for cid, m in man.items():
+            b, s = ans[("B", r)].get(cid), ans[("S", r)].get(cid)
+            if m["pair"] and b and s:
+                lex[lexical_swap(m["pair"], _pe(b["parsed"]), _pe(s["parsed"]))] += 1
+        reading[f"run{r}"]["lexical"] = dict(lex)
     res["label_reading"] = reading
 
     # 2. attribution
@@ -742,6 +776,20 @@ def _safe_int(d: Dict[str, Any], k: str) -> int:
         return 0
 
 
+def cmd_sheets(args: argparse.Namespace) -> None:
+    """Contact sheets of every arm for the clips named in --clips (comma-separated), for looking by eye."""
+    wanted = set(filter(None, args.clips.split(",")))
+    os.makedirs(os.path.join(args.out, "sheets"), exist_ok=True)
+    for clip in candidates(args.dataset)[0]:
+        if clip.row["clip_id"] not in wanted:
+            continue
+        r = render(clip, args.dataset)
+        for arm in ARMS:
+            if r is not None and (arm != "S" or r.swapped is not None):
+                cv2.imwrite(os.path.join(args.out, "sheets", f"{r.clip_id}_{arm}.jpg"),
+                            to.contact_sheet(frames_of(arm, r)), [int(cv2.IMWRITE_JPEG_QUALITY), 85])
+
+
 def cmd_score(args: argparse.Namespace) -> None:
     path = os.path.join(args.out, "scores.json")
     allres = json.load(open(path, encoding="utf-8")) if os.path.isfile(path) else {}
@@ -755,7 +803,7 @@ def cmd_score(args: argparse.Namespace) -> None:
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     p = argparse.ArgumentParser(prog="tag_bench", description=__doc__.split("\n")[0])
-    p.add_argument("cmd", choices=["prepare", "run", "judge", "score"])
+    p.add_argument("cmd", choices=["prepare", "run", "judge", "score", "sheets"])
     p.add_argument("--dataset", default=DATASET)
     p.add_argument("--out", default=OUT)
     p.add_argument("--model", default="qwen/qwen3.5-9b")
@@ -763,10 +811,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     p.add_argument("--runs", type=int, default=2)
     p.add_argument("--workers", type=int, default=8)
     p.add_argument("--limit", type=int, default=0)
+    p.add_argument("--clips", default="", help="sheets: comma-separated clip ids")
     p.add_argument("--cap", type=float, default=1.2, help="stop asking past this many dollars in one run")
     args = p.parse_args(argv)
     os.makedirs(args.out, exist_ok=True)
-    {"prepare": cmd_prepare, "run": cmd_run, "judge": cmd_judge, "score": cmd_score}[args.cmd](args)
+    {"prepare": cmd_prepare, "run": cmd_run, "judge": cmd_judge, "score": cmd_score, "sheets": cmd_sheets}[args.cmd](args)
     return 0
 
 
