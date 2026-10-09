@@ -93,6 +93,24 @@ class ArmsTests(unittest.TestCase):
                          "indistinct")
         self.assertEqual(tb.lexical_swap(("P1", "P2"), b, {"P1": "walks"}), "indistinct")
 
+    def test_the_blind_match_never_shows_tags_or_the_swap(self):
+        first = {"P1": "opens CAR1's door", "P2": "stands by the gate"}
+        second = {"P1": "stands near the gate", "P2": "opens the car door"}
+        self.assertIsNone(tb.gate(("P1", "P2"), first, second))
+        prompt, options = tb.match_prompt("clip", "P1", ("P1", "P2"), first, second)
+        self.assertNotIn("P1", prompt)
+        self.assertNotIn("CAR1", prompt)
+        self.assertNotIn("swap", prompt.lower())
+        self.assertEqual(sorted(options.values()), ["P1", "P2"])
+        self.assertEqual(tb.reading_verdict(("P1", "P2"), {"P1": "P2", "P2": "P1"}), "followed")
+        self.assertEqual(tb.reading_verdict(("P1", "P2"), {"P1": "P1", "P2": "P2"}), "ignored")
+        self.assertEqual(tb.reading_verdict(("P1", "P2"), {"P1": "P2", "P2": None}), "indistinct")
+
+    def test_the_gate_skips_pairs_that_cannot_tell(self):
+        same = {"P1": "walks along the driveway", "P2": "walks along the driveway"}
+        self.assertEqual(tb.gate(("P1", "P2"), same, same), "same_actions")
+        self.assertEqual(tb.gate(("P1", "P2"), {"P1": "walks", "P2": "runs"}, {"P1": "walks"}), "missing")
+
     def test_swap_pair_prefers_people(self):
         self.assertEqual(tb.swap_pair(["P1", "P2", "CAR1", "CAR2"]), ("P1", "P2"))
         self.assertEqual(tb.swap_pair(["P1", "CAR1", "CAR2"]), ("CAR1", "CAR2"))

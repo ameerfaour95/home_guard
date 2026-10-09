@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import base64
 import glob
+import hashlib
 import json
 import os
 import re
@@ -74,25 +75,18 @@ SCHEMA_TAGS: Dict[str, Any] = {
 }
 FORMAT_TAGS = {"type": "json_schema", "json_schema": {"name": "camera_report", "strict": True, "schema": SCHEMA_TAGS}}
 
-SWAP_JUDGE = """You compare two answers a vision model gave about the same security-camera clip.
-In answer 1 every person and vehicle carried its correct tag. Answer 2 was given on the SAME frames, except that the
-tag texts {x} and {y} were exchanged on screen: the one tagged {x} in answer 1 carries the text {y} in answer 2,
-and the one tagged {y} in answer 1 carries the text {x}.
-
-Answer 1:
-  {x}: {a1x}
-  {y}: {a1y}
-Answer 2:
-  {x}: {a2x}
-  {y}: {a2y}
-
-Decide which pattern answer 2 follows:
-- "followed": answer 2's {y} describes what answer 1's {x} does AND answer 2's {x} describes what answer 1's {y}
-  does (the actions moved with the tag texts).
-- "ignored": answer 2's {x} matches answer 1's {x} AND answer 2's {y} matches answer 1's {y} (the actions stayed).
-- "indistinct": the two actions in answer 1 are too similar to tell apart, an action is missing, or answer 2
-  matches neither pattern.
-Reply with JSON only: {{"verdict": "followed" | "ignored" | "indistinct", "reason": "<one short clause>"}}"""
+# Label reading is judged BLIND: the judge never hears of a swap. It is shown the plain answer's two actions as
+# options in a hashed order and one action from the other answer, and says which option it is about. (A first
+# design told the judge the tags were swapped and asked "followed or ignored?": on two plain runs, where nothing
+# was swapped, it still said "followed" 85 times in 179, so it was dropped.)
+MATCH_JUDGE = """Two descriptions say what two different people or vehicles in one video clip do:
+  Option 1: "{o1}"
+  Option 2: "{o2}"
+Another description, written separately, is about one of the two:
+  "{q}"
+Which option is about the same one? Judge by the action, the objects and the places, not by the wording.
+Reply with JSON only: {{"match": "1" | "2" | "unclear", "reason": "<short>"}}
+("unclear": both options fit equally well, or neither fits)."""
 
 ATTR_JUDGE = """You check a vision model's per-tag answers against a human annotator's ground truth for one
 security-camera clip. Every person and vehicle was tagged (P1, P2, CAR1, ...) on the frames from the human's own
@@ -565,10 +559,44 @@ def _pe(parsed: Optional[Dict[str, Any]]) -> Dict[str, str]:
     return out
 
 
-def swap_prompt(pair: Sequence[str], first: Dict[str, str], second: Dict[str, str]) -> str:
+_TAG_RE = re.compile(r"\b(P|CAR)\d+\b", re.I)
+
+
+def masked(text: str) -> str:
+    """*text* with every tag replaced by a neutral word, so tag strings cannot decide a match."""
+    return _TAG_RE.sub(lambda m: "a vehicle" if m.group(1).upper() == "CAR" else "another person", text)
+
+
+def gate(pair: Sequence[str], first: Dict[str, str], second: Dict[str, str]) -> Optional[str]:
+    """Why a pair cannot be judged ("missing" or "same_actions"), or None."""
     x, y = pair
-    return SWAP_JUDGE.format(x=x, y=y, a1x=first.get(x, "(missing)"), a1y=first.get(y, "(missing)"),
-                             a2x=second.get(x, "(missing)"), a2y=second.get(y, "(missing)"))
+    if not all(k in d and d[k] for d in (first, second) for k in (x, y)):
+        return "missing"
+    a, b = masked(first[x]), masked(first[y])
+    if a.strip().lower() == b.strip().lower() or _sim(a, b) >= 0.75:
+        return "same_actions"
+    return None
+
+
+def match_prompt(clip_id: str, eid: str, pair: Sequence[str], first: Dict[str, str],
+                 second: Dict[str, str]) -> Tuple[str, Dict[str, str]]:
+    """The blind question for *eid*'s action in *second*; and which option number is which id of *first*."""
+    x, y = pair
+    flip = int(hashlib.sha256(f"{clip_id}|{eid}".encode()).hexdigest(), 16) % 2 == 1
+    o1, o2 = (y, x) if flip else (x, y)
+    prompt = MATCH_JUDGE.format(o1=masked(first[o1]).replace('"', "'"), o2=masked(first[o2]).replace('"', "'"),
+                                q=masked(second[eid]).replace('"', "'"))
+    return prompt, {"1": o1, "2": o2}
+
+
+def reading_verdict(pair: Sequence[str], matched: Dict[str, Optional[str]]) -> str:
+    """followed / ignored / indistinct from what each of the second answer's two actions matched in the first."""
+    x, y = pair
+    if matched.get(x) == y and matched.get(y) == x:
+        return "followed"
+    if matched.get(x) == x and matched.get(y) == y:
+        return "ignored"
+    return "indistinct"
 
 
 def attr_prompt(m: Dict[str, Any], pe: Dict[str, str]) -> str:
@@ -580,6 +608,17 @@ def attr_prompt(m: Dict[str, Any], pe: Dict[str, str]) -> str:
 def harm_prompt(m: Dict[str, Any], parsed: Dict[str, Any]) -> str:
     return HARM_JUDGE.format(desc=m["description"].replace('"', "'"),
                              summary=str(parsed.get("summary") or "").replace('"', "'"))
+
+
+def match_jobs(cid: str, tag: str, pair: Sequence[str], first: Dict[str, str],
+               second: Dict[str, str]) -> List[Tuple[str, str, str, Dict[str, Any]]]:
+    if gate(pair, first, second):
+        return []
+    out = []
+    for eid in pair:
+        prompt, options = match_prompt(cid, eid, pair, first, second)
+        out.append(("match", f"{cid}|{tag}|{eid}", prompt, {"clip_id": cid, "options": options}))
+    return out
 
 
 def cmd_judge(args: argparse.Namespace) -> None:
@@ -594,8 +633,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
             b = ans[("B", r)].get(cid)
             s = ans[("S", r)].get(cid)
             if m["pair"] and b and s:
-                jobs.append(("swap", f"{cid}|B{r}-S{r}", swap_prompt(m["pair"], _pe(b["parsed"]), _pe(s["parsed"])),
-                             {"clip_id": cid, "run": r}))
+                jobs += match_jobs(cid, f"B{r}-S{r}", m["pair"], _pe(b["parsed"]), _pe(s["parsed"]))
             if b:
                 jobs.append(("attr", f"{cid}|B{r}", attr_prompt(m, _pe(b["parsed"])), {"clip_id": cid, "run": r}))
             for arm in ("A", "B"):
@@ -604,9 +642,8 @@ def cmd_judge(args: argparse.Namespace) -> None:
                     jobs.append(("harm", f"{cid}|{arm}{r}", harm_prompt(m, a["parsed"]),
                                  {"clip_id": cid, "arm": arm, "run": r}))
         b1, b2 = ans[("B", 1)].get(cid), ans[("B", 2)].get(cid) if 2 in runs else None
-        if m["pair"] and b1 and b2:   # the noise floor: two plain runs read as if the tags had been swapped
-            jobs.append(("swap_noise", f"{cid}|B1-B2", swap_prompt(m["pair"], _pe(b1["parsed"]), _pe(b2["parsed"])),
-                         {"clip_id": cid}))
+        if m["pair"] and b1 and b2:   # the noise floor: two plain runs, nothing swapped (expect "ignored")
+            jobs += match_jobs(cid, "B1-B2", m["pair"], _pe(b1["parsed"]), _pe(b2["parsed"]))
     jobs = [j for j in jobs if (j[0], j[1]) not in done]
     print(f"{len(jobs)} judgements to ask")
     c = client()
@@ -671,30 +708,37 @@ def score(out: str, model: str, runs: int = 2) -> Dict[str, Any]:
                            "clips_by_source": dict(Counter(m["source"] for m in man.values())),
                            "answers": {f"{a}{r}": len(ans[(a, r)]) for a in ARMS for r in rs}}
 
-    # 1. label reading
-    reading = {}
-    for r in rs:
-        v = Counter(str((judg.get(("swap", f"{cid}|B{r}-S{r}")) or {}).get("parsed", {}).get("verdict") or "none")
-                    for cid, m in man.items() if m["pair"] and ("swap", f"{cid}|B{r}-S{r}") in judg)
+    # 1. label reading (blind match judge; gate first)
+    def reading_of(first_arm: Tuple[str, int], second_arm: Tuple[str, int], tag: str) -> Dict[str, Any]:
+        v: Counter = Counter()
+        lex: Counter = Counter()
+        per_kind: Dict[str, Counter] = defaultdict(Counter)
+        for cid, m in man.items():
+            f, s2 = ans[first_arm].get(cid), ans[second_arm].get(cid)
+            if not (m["pair"] and f and s2):
+                continue
+            first, second = _pe(f["parsed"]), _pe(s2["parsed"])
+            why = gate(m["pair"], first, second)
+            if why:
+                verdict = why
+            else:
+                matched = {}
+                for eid in m["pair"]:
+                    j = judg.get(("match", f"{cid}|{tag}|{eid}"))
+                    got = str(((j or {}).get("parsed") or {}).get("match") or "")
+                    matched[eid] = (j or {}).get("options", {}).get(got)
+                verdict = reading_verdict(m["pair"], matched)
+                lex[lexical_swap(m["pair"], first, second)] += 1
+            v[verdict] += 1
+            per_kind[m["pair"][0]][verdict] += 1
         decided = v["followed"] + v["ignored"]
-        reading[f"run{r}"] = {**v, "rate": round(v["followed"] / decided, 3) if decided else None,
-                              "decided": decided}
-    noise = Counter(str((j.get("parsed") or {}).get("verdict")) for (k, _), j in judg.items() if k == "swap_noise")
-    reading["noise_B1_vs_B2"] = dict(noise)
-    by_pair = defaultdict(Counter)
-    for r in rs:
-        for cid, m in man.items():
-            j = judg.get(("swap", f"{cid}|B{r}-S{r}"))
-            if j:
-                by_pair[m["pair"][0]][str((j.get("parsed") or {}).get("verdict"))] += 1
-    reading["by_pair"] = {k: dict(v) for k, v in by_pair.items()}
-    for r in rs:   # a judge-free cross-check: word overlap of the actions
-        lex = Counter()
-        for cid, m in man.items():
-            b, s = ans[("B", r)].get(cid), ans[("S", r)].get(cid)
-            if m["pair"] and b and s:
-                lex[lexical_swap(m["pair"], _pe(b["parsed"]), _pe(s["parsed"]))] += 1
-        reading[f"run{r}"]["lexical"] = dict(lex)
+        return {**v, "pairs": sum(v.values()), "decided": decided,
+                "rate": round(v["followed"] / decided, 3) if decided else None,
+                "lexical_on_judged": dict(lex), "by_pair": {k: dict(c) for k, c in per_kind.items()}}
+
+    reading = {f"run{r}": reading_of(("B", r), ("S", r), f"B{r}-S{r}") for r in rs}
+    if len(rs) > 1:
+        reading["noise_B1_vs_B2"] = reading_of(("B", 1), ("B", 2), "B1-B2")
     res["label_reading"] = reading
 
     # 2. attribution
