@@ -247,7 +247,8 @@ Answer with ONLY this JSON:
 - entities: one item per id above that you can see, people first. A vehicle only when it matters (someone uses it,
   it moves, a door or trunk is open).
   - appearance: only what is visible, at most {WORDS_APPEARANCE - 2} words: man or woman only if clear, clothes and
-    colours, hat, hood, mask, what they carry. A vehicle: its type and colour.
+    colours, hat, hood, mask, what they carry; say "person" when not sure which. A vehicle: its type and colour.
+    If a person id's box is on something that is not a person (a lamp, a shadow, a plant), write "not a person".
   - action: what THIS id does in the frames, at most {WORDS_ACTION - 2} words, present tense. If you are not sure
     which one did it, write "" (empty). Never guess and never move an action from one id to another.
 - reason: why the owner is told, at most {WORDS_REASON - 4} words, from the alert check's words above; no new facts.
@@ -357,16 +358,46 @@ def _has(words: Sequence[str], vocabulary: Sequence[str]) -> List[str]:
     return found
 
 
+# A person line must say it is a person. 2026-10-09 17:44 ch1: the tracker followed the wall lamp as three people and
+# the owner read "P1, P2, P4 · מנורה שחורה על הקיר: נשארת על הקיר".
+PERSON_WORDS = re.compile(
+    r"\b(?:man|men|woman|women|person|persons|people|child|children|kid|kids|boy|boys|girl|girls|worker|workers|"
+    r"guy|guys|adult|adults|teen|teens|teenager|teenagers|individual|individuals|figure|figures|someone|somebody|"
+    r"male|female|pedestrian|courier|gardener|cyclist|officer|lady|gentleman)\b"
+    r"|גבר|אישה|אשה|אדם|אנשים|ילד|ילדה|ילדים|נער|נערה|עובד|עובדת|עובדים|פועל|פועלים|מישהו|דמות|בחור|בחורה",
+    re.IGNORECASE)
+NOT_A_PERSON = re.compile(r"\bnot an? (?:person|human|people)\b|\bno (?:person|one)\b|לא אדם|אין אדם", re.IGNORECASE)
+
+
+def _person_id(entity_id: str) -> bool:
+    return entity_id[:1] == "P" and entity_id[1:].isdigit()
+
+
+def not_a_person(item: Mapping[str, Any]) -> bool:
+    """A person id (P1) whose appearance names no person (a lamp, a shadow, a plant), or says "not a person". An
+    empty appearance is not evidence: the line stays."""
+    appearance = str(item.get("appearance") or "").strip()
+    if not _person_id(str(item.get("id") or "")) or not appearance:
+        return False
+    return bool(NOT_A_PERSON.search(appearance)) or not PERSON_WORDS.search(appearance)
+
+
 def guard(answer: Dict[str, Any], summary: str, why: str) -> Tuple[Dict[str, Any], List[str]]:
     """The answer with anything the alert's own words do not back taken out, and what was dropped.
 
     - a weapon word anywhere (scene, appearance, action, reason) only when the Eye's summary or why has one;
     - an action naming a serious act (break, steal, climb...) the summary / why do not, or an object neither they nor
-      that id's own appearance name, loses its action (the line keeps the appearance)."""
+      that id's own appearance name, loses its action (the line keeps the appearance);
+    - a person id whose appearance names no person (:func:`not_a_person`) is dropped whole and listed in the
+      answer's ``not_people``: it is left out of the message and of the people counted in it."""
     told = set(_has(_words(f"{summary} {why}"), WEAPONS + SERIOUS + OBJECTS))
+    answer = dict(answer)
+    not_people = [str(e.get("id")) for e in answer.get("entities") or [] if not_a_person(e)]
+    answer["entities"] = [e for e in answer.get("entities") or [] if str(e.get("id")) not in not_people]
     armed = bool(_has(_words(f"{summary} {why}"), WEAPONS))
-    dropped: List[str] = []
-    out = {"scene": answer.get("scene", ""), "reason": answer.get("reason", ""), "entities": []}
+    dropped: List[str] = [f"{i}: not a person" for i in not_people]
+    out = {"scene": answer.get("scene", ""), "reason": answer.get("reason", ""), "entities": [],
+           "not_people": not_people}
     for field in ("scene", "reason"):
         if out[field] and not armed and _has(_words(out[field]), WEAPONS):
             dropped.append(f"{field}: weapon word")

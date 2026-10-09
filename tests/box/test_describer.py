@@ -194,6 +194,50 @@ class AnswerTest(unittest.TestCase):
         self.assertEqual(ds.to_owner_language(checked, "en", None)["scene"], checked["scene"])
 
 
+class NotAPersonTest(unittest.TestCase):
+    """2026-10-09 17:44 ch1: the tracker followed the wall lamp as three people and the owner read
+    "P1, P2, P4 · מנורה שחורה על הקיר: נשארת על הקיר"."""
+
+    LAMP = {"scene": "Two people walk through the yard near the house", "reason": "Person in light clothing has covered face",
+            "entities": [{"id": "P1", "appearance": "Black lamp on the wall", "action": "Stays on the wall"},
+                         {"id": "P2", "appearance": "Black lamp on the wall", "action": "Stays on the wall"},
+                         {"id": "P3", "appearance": "Man in dark shirt and pants", "action": "Walks through the yard"},
+                         {"id": "P4", "appearance": "Black lamp on the wall", "action": "Stays on the wall"}]}
+
+    def test_a_person_line_that_names_no_person_is_dropped(self):
+        checked, dropped = ds.guard(self.LAMP, "Two people walk through the property.", "פנים מוסתרות")
+        self.assertEqual([e["id"] for e in checked["entities"]], ["P3"])
+        self.assertEqual(checked["not_people"], ["P1", "P2", "P4"])
+        self.assertIn("P1: not a person", dropped)
+        text = ds.compose("suspicious", "מצלמה 1", "17:43", "שני אנשים הולכים בחצר", [
+            {"id": "P3", "appearance": "גבר בחולצה ומכנסיים כהים", "action": "הולך בחצר"}], "", "he")
+        self.assertNotIn("P1", text)
+
+    def test_real_people_stay(self):
+        for appearance in ("Person in dark clothing", "Woman in patterned top and light pants", "man, dark shirt",
+                           "Person with obscured face, carrying large white bag", "a child in a red shirt",
+                           "Worker in an orange vest", "גבר בחולצה לבנה", "אישה עם כובע", "ילד", "עובד עם קסדה", ""):
+            with self.subTest(appearance=appearance):
+                self.assertFalse(ds.not_a_person({"id": "P1", "appearance": appearance}))
+        for appearance in ("Black lamp on the wall", "not a person", "a shadow on the wall", "מנורה שחורה על הקיר",
+                           "potted plant"):
+            with self.subTest(appearance=appearance):
+                self.assertTrue(ds.not_a_person({"id": "P2", "appearance": appearance}))
+        self.assertFalse(ds.not_a_person({"id": "CAR1", "appearance": "White sedan"}))   # a vehicle is no person
+
+    def test_the_update_neither_announces_nor_counts_them(self):
+        event = SimpleNamespace(reply_to={"message_id": 1}, counted_by="entities", fresh=["P1", "P3", "P4"],
+                                entities=["P1", "P3", "P4"], unmarked=False, known_text="")
+        book = mock.Mock()
+        book.session_of_alert.return_value = {}
+        with mock.patch.object(inf, "EVENTS", book):
+            text = inf._event_story(event, "a", 0.0, "he", described=["P3"], not_people=["P1", "P4"])
+            every = inf._event_story(event, "a", 0.0, "he", described=["P3"])
+        self.assertTrue(text.startswith("עוד אדם אחד הגיע (P3)"), text)
+        self.assertNotIn("P1", text)
+        self.assertTrue(every.startswith("עוד 3 אנשים הגיעו"), every)
+
+
 class BrokenEndingTest(unittest.TestCase):
     """2026-10-09 18:16 pergola: "למה הודעתי: ... עם שק לבן גדול. ה." and 18:22 ch6 "... ליד אבן" (from "... next to a
     stone wall"): the describer's reason was cut at 14 words mid-thought, and the translator kept the stump."""

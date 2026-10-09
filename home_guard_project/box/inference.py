@@ -2492,7 +2492,8 @@ def send_arrival_line(arrival: Dict[str, Any], box_settings: Dict[str, Any], env
         log.warning("arrival line not sent: %s", exc)
 
 
-def _event_story(event: Any, alert_id: str, alert_ts: float, lang: str, described: Sequence[str] = ()) -> str:
+def _event_story(event: Any, alert_id: str, alert_ts: float, lang: str, described: Sequence[str] = (),
+                 not_people: Sequence[str] = ()) -> str:
     """The first lines of an UPDATE in an event's thread when the tracker gave the event its entities (stage 2a): who
     is new (``story.new_people_line``), then the story so far (``story.story_line``); the new observation follows
     under them. "" for an event's first message or without entities: then the update reads as before. Never raises."""
@@ -2503,9 +2504,11 @@ def _event_story(event: Any, alert_id: str, alert_ts: float, lang: str, describe
         from .story import new_people_line, story_line  # noqa: PLC0415
 
         session = EVENTS.session_of_alert(alert_id) or {}
-        head = new_people_line(event.fresh, event.unmarked, event.known_text if event.unmarked else "", lang)
-        line = story_line(session, lang, now=alert_ts, in_view=event.entities, announced=event.fresh,
-                          described=described)
+        # Ids the describer saw were not people (a wall lamp the tracker followed) are neither new nor in view.
+        fresh = [i for i in event.fresh if i not in not_people]
+        in_view = [i for i in event.entities if i not in not_people]
+        head = new_people_line(fresh, event.unmarked, event.known_text if event.unmarked else "", lang)
+        line = story_line(session, lang, now=alert_ts, in_view=in_view, announced=fresh, described=described)
         return "\n".join(x for x in (head, line) if x)
     except Exception as exc:  # noqa: BLE001 - the update goes out as before
         log.warning("event story not written: %s", exc)
@@ -2601,7 +2604,8 @@ def _describe_alert(job: AlertJob, frames: List[Any], box_settings: Dict[str, An
         lines = list(top)
         if event is not None and getattr(event, "reply_to", None) is not None:
             story = _event_story(event, alert_id, alert_ts, lang,
-                                 described=[e["id"] for e in told["entities"]])
+                                 described=[e["id"] for e in told["entities"]],
+                                 not_people=(record.get("answer") or {}).get("not_people") or ())
             if story:
                 lines.append(story)
         text = owner_guard("\n".join(x for x in [*lines, base, *bottom] if x), camera, lang)
