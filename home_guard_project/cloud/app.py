@@ -10,7 +10,7 @@ from sqlalchemy.orm import sessionmaker
 
 from . import notice_delivery
 from .db import make_engine
-from .routes import annotations, audit, auth, chat, customers, events, fleet, media, studio, tagging
+from .routes import annotations, audit, auth, chat, customers, events, fleet, inbox, media, studio, tagging
 from .settings import Settings
 
 log = logging.getLogger(__name__)
@@ -93,7 +93,7 @@ def create_app(settings: Settings, s3=None, init_db: bool = True) -> FastAPI:
         from .manage import run_migrations
 
         run_migrations(settings.db_url)
-    for module in (auth, fleet, customers, events, media, chat, studio, annotations, audit, tagging):
+    for module in (auth, fleet, customers, events, media, chat, studio, annotations, audit, tagging, inbox):
         app.include_router(module.router, prefix="/v1")
     app.include_router(tagging.files, prefix="/v1")
     return app

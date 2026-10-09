@@ -13,9 +13,10 @@ from .models import decode, TokenPair, StaffOut, FleetResponse, CustomerOut, Eve
 from .demo_studio import DemoStudio
 from .demo_annotations import DemoAnnotations
 from .tagging_client import DemoTagging
+from .inbox_client import DemoInbox
 
 
-class DemoBackend(DemoTagging, DemoAnnotations, DemoStudio):
+class DemoBackend(DemoTagging, DemoAnnotations, DemoStudio, DemoInbox):
     def __init__(self, data_dir=None, role='admin'):
         self.data_dir = Path(data_dir) if data_dir else Path(__file__).parent / 'demo_data'
         self.role = role

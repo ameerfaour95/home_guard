@@ -30,7 +30,8 @@
           "enabled": true
         }
       ],
-      "source": "yolo"
+      "source": "yolo",
+      "entity": "P1"
     }
   ],
   "description": "A person follows a resident through the door without a key and lingers in the doorway checking the mailboxes, checked by hand.",
@@ -50,5 +51,6 @@
     320,
     180
   ],
-  "suggestions_used": true
+  "suggestions_used": true,
+  "preload_source": null
 }

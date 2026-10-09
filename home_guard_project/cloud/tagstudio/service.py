@@ -18,11 +18,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from ...fleet_contract import taxonomy
+from ...fleet_contract.prompt_schemas import answer_schema, schema_kind
 from . import export as exporter
 from . import queue as work_queue
 from .config import StudioPaths
 from .fields import FIELDS, Tag, TagError, clean_fields, empty_form, fold
-from .items import EMPTY, OLD, TEACHER, WHO, ClipItem
+from .items import AI, EMPTY, OLD, TEACHER, WHO, ClipItem
 from .sources import DatasetSource, OwnerFeedbackSource, event_items
 from .teacher import EvalResultsTeacher, OpenAICompatibleTeacher, TeacherRefused, first_suggestion
 
@@ -181,7 +182,12 @@ class TagStudio:
             form, prefilled = self.prefill(item), (OLD if OLD in item.opinions else "")
         fps = item.fps or (self.dataset.fps(item) if item.meta_path else None)
         status = self.media_status(item)
+        prompt_version = form.get("prompt_version") or self.prompt_version_of(session, item)
+        form["prompt_version"] = prompt_version
+        name, answer = answer_schema(prompt_version)
         return {
+            "prompt_version": prompt_version,
+            "answer_schema": {"kind": schema_kind(prompt_version), "name": name, "fields": list(answer["properties"])},
             "item": {**item.summary(), "info": item.info, "video_s3": item.video_s3, "crop_s3": item.crop_s3},
             "media": {kind: ok for kind, (ok, _) in status.items()},
             "media_reasons": {kind: why for kind, (_, why) in status.items()}, "fps": fps,
@@ -198,6 +204,7 @@ class TagStudio:
             clean = clean_fields(fields)
         except TagError as e:
             raise StudioError(str(e), 422) from None
+        clean = self.with_prompt_version(session, item, self.tags(session).get(key), clean)
         require_category(self.tags(session).get(key), clean)
         session.add(TagEvent(clip_key=key, clip_id=item.clip_id, fields=clean, staff_id=staff.id,
                              staff_name=staff.name, created_at=now))
@@ -227,6 +234,83 @@ class TagStudio:
             else:
                 out[kind] = (False, f"no {name} in the local copy")
         return out
+
+    def with_prompt_version(self, session, item: ClipItem, current: Optional[Tag],
+                            clean: Dict[str, Any]) -> Dict[str, Any]:
+        """Every saved tag carries the prompt version its schema follows: the one the form sent, else the tag's own,
+        else the clip's (prompt_version_of); nothing is added for a clip no prompt answered."""
+        if clean.get("prompt_version") or (current is not None and current.fields.get("prompt_version")):
+            return clean
+        version = self.prompt_version_of(session, item)
+        return {**clean, "prompt_version": str(version)[:500]} if version else clean
+
+    def clip_meta(self, session, item: ClipItem) -> Dict[str, Any]:
+        """The clip's meta: an indexed event's newest revision, else the local copy's file; {} when none."""
+        if item.event_id and session is not None:
+            from .. import labeling  # noqa: PLC0415
+
+            meta = labeling.meta_body(session, item.event_id)
+            if meta:
+                return meta
+        if item.meta_path:
+            try:
+                with open(item.meta_path, encoding="utf-8") as f:
+                    meta = json.load(f)
+                return meta if isinstance(meta, dict) else {}
+            except (OSError, ValueError):
+                return {}
+        return {}
+
+    def model_input(self, session, key: str, s3=None) -> Dict[str, Any]:
+        """What the AI saw of the clip (model_view.py: the frames the box sent, else its recipe, else rendered like
+        the box), with the clip's prompt version; 404 when there is nothing to show."""
+        import tempfile  # noqa: PLC0415
+
+        from . import model_view  # noqa: PLC0415
+
+        item, _ = self._item(session, key)
+        meta = self.clip_meta(session, item)
+        # a local copy first (no download), else the event's files in storage
+        sent = model_view.local_sent_frames(meta, item.meta_path) if item.meta_path else []
+        view = model_view.build(meta, sent, item.crop or None, item.video or None)
+        if view is None and item.event_id and session is not None and s3 is not None:
+            with tempfile.TemporaryDirectory(prefix="hg_model_input_") as work:
+                view = model_view.build(meta, *self._event_model_files(session, item, s3, work))
+        if view is None:
+            raise StudioError("Nothing the AI saw is saved for this clip: no frames, no crop and no clip", 404)
+        prompt_version = (meta.get("teacher") or {}).get("prompt_version") or ""
+        return {**view.as_dict(), "key": key, "prompt_version": prompt_version}
+
+    def _event_model_files(self, session, item: ClipItem, s3, work: str):
+        """(sent frames, crop path, clip path) of an indexed event: the guard run's input frames (all or none) and
+        the crop / clip videos downloaded into `work` (only what the view will need)."""
+        from sqlalchemy import select  # noqa: PLC0415
+
+        from ..models import AiRun, Artifact  # noqa: PLC0415
+
+        run = session.scalar(select(AiRun).where(AiRun.event_id == item.event_id, AiRun.purpose == "guard")
+                             .order_by(AiRun.id.desc()).limit(1))
+        ids = [i for i in (run.input_artifact_ids or []) if isinstance(i, int)] if run is not None else []
+        arts = {a.id: a for a in session.scalars(select(Artifact).where(Artifact.id.in_(ids)))} if ids else {}
+        sent: List[bytes] = []
+        if ids and all(i in arts and arts[i].available for i in ids):
+            try:
+                sent = [s3.get_bytes(arts[i].s3_key) for i in ids]
+            except Exception:  # noqa: BLE001 - unreadable frames: the view is rendered instead
+                sent = []
+        if sent:
+            return sent, None, None
+        paths = {}
+        for kind in ("crop", "clip"):
+            art = session.get(Artifact, item.artifacts[kind]) if kind in item.artifacts else None
+            if art is not None and art.available:
+                path = os.path.join(work, f"{kind}.mp4")
+                try:
+                    s3.download_to(art.s3_key, path)
+                    paths[kind] = path
+                except Exception:  # noqa: BLE001
+                    log.warning("could not fetch the %s of %s", kind, item.key)
+        return [], paths.get("crop"), paths.get("clip")
 
     def local_media(self, item: ClipItem, kind: str) -> Optional[str]:
         path = item.video if kind == "clip" else item.crop if kind == "crop" else ""
@@ -269,6 +353,47 @@ class TagStudio:
                                         frames_for=getattr(self, "suggest_frames", None))
         return self._suggester
 
+    def prompt_version_of(self, session, item: ClipItem) -> str:
+        """The prompt version a clip's tag follows: the saved tag's, else the clip's meta (teacher.prompt_version),
+        else its AI run's; a clip the box's AI answered with no version recorded was answered by the legacy prompt
+        (LEGACY_ASSUMED: before the Eye it was the only one); "" only for a clip no AI answered."""
+        from ...fleet_contract.prompt_schemas import LEGACY_ASSUMED  # noqa: PLC0415
+
+        tag = self.tags(session).get(item.key)
+        if tag is not None and tag.fields.get("prompt_version"):
+            return str(tag.fields["prompt_version"])
+        meta = self.clip_meta(session, item)
+        ai = item.opinions.get(AI)
+        version = (meta.get("teacher") or {}).get("prompt_version") or (ai.detail.get("prompt_version") if ai else "")
+        if version:
+            return str(version)
+        answered = ai is not None or bool(meta.get("model_response")) or bool((meta.get("alert") or {}).get("label"))
+        return LEGACY_ASSUMED if answered else ""
+
+    def converter(self):
+        """The "In my words" converter (built once; ``convert_client`` is injected by tests and the demo)."""
+        from .convert import ConvertConfig, Converter  # noqa: PLC0415
+
+        if getattr(self, "_converter", None) is None:
+            repo = Path(__file__).resolve().parents[3]
+            keys = [repo / "api_key.env", repo.parent / "home_guard" / "api_key.env",
+                    Path.home() / "Ameer" / "home_guard" / "api_key.env"]
+            config, client = ConvertConfig.resolve(key_files=keys), getattr(self, "convert_client", None)
+            if getattr(client, "model", None):
+                config = ConvertConfig(model=client.model, base_url="offline", api_key="")
+            self._converter = Converter(config, client=client)
+        return self._converter
+
+    def convert(self, session, key: str, words: str) -> Dict[str, Any]:
+        """The tagger's words as the clip's answer schema (a suggestion for the form; nothing is saved)."""
+        from .convert import ConvertError  # noqa: PLC0415
+
+        item, _ = self._item(session, key)
+        try:
+            return {**self.converter().convert(words, self.prompt_version_of(session, item)), "key": key}
+        except ConvertError as e:
+            raise StudioError(str(e), 409) from None
+
     def video_for(self, item: ClipItem, s3=None) -> Optional[str]:
         """A local copy of the clip's full-frame video (else its crop): this machine's file, or one downloaded once
         from S3 (read only) into the exports folder's media cache."""
@@ -295,10 +420,22 @@ class TagStudio:
                 cached = suggester.cached(key)
                 if cached is not None:
                     return {**cached, "cached": True}
+            version = self.prompt_version_of(session, item)
+            try:   # the frames the box sent the AI (or rendered like the box), not frames picked from the clip
+                view = self.model_input(session, key, s3)
+            except StudioError:
+                view = None
+            if view and view.get("frames"):
+                record = view.get("record") or {}
+                index = [i for i in record.get("frame_indices") or [] if isinstance(i, int)]
+                return suggester.suggest(key, None, camera=item.camera, refresh=refresh,
+                                         jpegs=[base64.b64decode(f) for f in view["frames"]],
+                                         frame_index=index if len(index) == len(view["frames"]) else [],
+                                         fps=item.fps or record.get("fps"), prompt_version=version)
             video = self.video_for(item, s3)
             if not video:
                 raise SuggestError("This clip has no video on this computer or in S3 to show the model")
-            return suggester.suggest(key, video, camera=item.camera, refresh=refresh)
+            return suggester.suggest(key, video, camera=item.camera, refresh=refresh, prompt_version=version)
         except SuggestError as e:
             raise StudioError(str(e), 409) from None
 
@@ -308,7 +445,7 @@ class TagStudio:
         from sqlalchemy import select  # noqa: PLC0415
 
         from ..models import ClipAnnotation  # noqa: PLC0415
-        from .boxes import dataset_tracks  # noqa: PLC0415
+        from .boxes import preload_tracks  # noqa: PLC0415
 
         item, _ = self._item(session, key)
         if item.origin != "dataset" or item.event_id:
@@ -318,7 +455,9 @@ class TagStudio:
         row = session.scalar(select(ClipAnnotation).where(ClipAnnotation.clip_key == key)
                              .order_by(ClipAnnotation.version.desc()).limit(1))
         old = item.opinions.get(OLD)
-        tracks = [_track_dict(t) for t in dataset_tracks(str(self.paths.dataset), item.clip_id, fps)]             if row is None else row.tracks or []
+        preload, source = ([], None) if row is not None else preload_tracks(
+            str(self.paths.dataset), item.clip_id, fps, (item.meta_path, item.video))
+        tracks = [_track_dict(t) for t in preload] if row is None else row.tracks or []
         # the label files number the clip's own frames; fps is an estimate, so the clip is at least that long
         last = max((k["frame"] for t in tracks for k in t.get("keyframes", [])), default=-1)
         frames = max(round(duration * fps) if duration else 0, last + 1) or None
@@ -327,7 +466,7 @@ class TagStudio:
         if row is None:
             return dict(common, version=0, status="new", tracks=tracks,
                         description=old.text if old else "", drop_clip=False, needs_review=False, author=None,
-                        updated_utc=None, suggestions_used=bool(tracks))
+                        updated_utc=None, suggestions_used=bool(tracks), preload_source=source)
         return dict(common, version=row.version, status=row.status, tracks=row.tracks or [],
                     description=row.description, drop_clip=row.drop_clip, needs_review=row.needs_review,
                     author=row.author_name, updated_utc=row.created_at,
@@ -378,9 +517,18 @@ class TagStudio:
         training, evals, counts = exporter.build(items.values(), self.tags(session), include_needs_check)
         out = str(out_dir or self.paths.exports)
         stamp = time.strftime("%Y%m%d-%H%M%S")
+        sharegpt = exporter.sharegpt_rows(training)
+        problems = exporter.check_sharegpt(sharegpt)
+        if problems:
+            raise StudioError("The training set would not load: " + "; ".join(problems[:3]), 500)
+        sharegpt_path = os.path.join(out, stamp, exporter.SHAREGPT_FILE)
+        os.makedirs(os.path.dirname(sharegpt_path), exist_ok=True)
+        with open(sharegpt_path, "w", encoding="utf-8", newline="\n") as f:
+            json.dump(sharegpt, f, ensure_ascii=False, indent=1)
+        counts["sharegpt"] = len(sharegpt)
         result = {"training_path": exporter.write_jsonl(os.path.join(out, stamp, exporter.TRAINING_FILE), training),
                   "eval_path": exporter.write_jsonl(os.path.join(out, stamp, exporter.EVAL_FILE), evals),
-                  "counts": counts}
+                  "sharegpt_path": sharegpt_path, "counts": counts}
         if frames_dir:
             by_clip = {i.clip_id: i for i in items.values()}
             result["frames"] = exporter.write_frames(
@@ -389,17 +537,27 @@ class TagStudio:
 
 
 NEEDS_CATEGORY = "Choose a category before saving (or mark the clip Delete)"
+NEEDS_LABEL = "Choose the raw label before saving (or mark the clip Delete)"
 
 
 def require_category(current: Optional[Tag], fields: Dict[str, Any]) -> None:
-    """A saved tag always names a category, unless the clip is deleted: nothing is filled in for the tagger."""
+    """A saved tag always names a category, unless the clip is deleted: nothing is filled in for the tagger. A clip
+    answered with the legacy prompt (no category in its schema) needs its raw label instead."""
+    from ...fleet_contract.prompt_schemas import EYE, schema_kind  # noqa: PLC0415
+
     merged = {**(current.fields if current else {}), **fields}
-    if not merged.get("category") and not merged.get("delete"):
-        raise StudioError(NEEDS_CATEGORY, 422)
+    if merged.get("delete"):
+        return
+    if schema_kind(merged.get("prompt_version")) == EYE:
+        if not merged.get("category"):
+            raise StudioError(NEEDS_CATEGORY, 422)
+    elif not merged.get("raw_label") and not merged.get("category"):
+        raise StudioError(NEEDS_LABEL, 422)
 
 
 def _track_dict(t) -> Dict[str, Any]:
     return {"track_id": t.track_id, "label": t.label, "source": t.source,
+            **({"entity": t.entity} if getattr(t, "entity", None) else {}),
             "keyframes": [{"frame": k.frame, "t_sec": k.t_sec, "xyxy": list(k.xyxy), "enabled": k.enabled}
                           for k in t.keyframes]}
 

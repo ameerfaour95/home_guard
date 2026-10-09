@@ -25,6 +25,9 @@ from ..schemas import (
     TaggingQueue,
     TaggingState,
     MediaAccess,
+    ModelInputView,
+    TagConversion,
+    TagConvertRequest,
     TeacherAnswer,
 )
 from ..tagstudio.config import StudioPaths
@@ -117,6 +120,37 @@ def tagging_media(body: TaggingMediaRequest, request: Request, staff: Staff = De
                      device_id=device.device_id if device is not None else None,
                      detail={"via": "tagging", "kind": body.kind}, ts=now)
     return MediaAccess(url=url, expires_utc=now + timedelta(seconds=MEDIA_TTL_SECONDS), mime="video/mp4")
+
+
+@router.post("/convert", response_model=TagConversion)
+def tagging_convert(body: TagConvertRequest, request: Request, staff: Staff = Depends(_admin),
+                    session: Session = SessionDep):
+    # only the tagger's words, the taxonomy and the schema leave the machine: never a picture
+    result = _call(studio_of(request).convert, session, body.key, body.words)
+    audit.record(session, staff.id, "tag_converted", target=body.key, reason="training",
+                 detail={"model": result["model"], "language": result["language"],
+                         "prompt_version": result["prompt_version"]}, ts=request.app.state.clock())
+    return {**result, "schema_name": result.pop("schema")}
+
+
+@router.post("/model_input", response_model=ModelInputView)
+def tagging_model_input(body: TaggingKey, request: Request, staff: Staff = Depends(_admin),
+                        session: Session = SessionDep):
+    # the pictures themselves: the same consent rule and audit as the videos
+    studio = studio_of(request)
+    item, _ = _call(studio._item, session, body.key)
+    customer, device = _household(session, item)
+    now: datetime = request.app.state.clock()
+    if customer is not None:
+        refusal = media_refusal(staff.role, "training", customer.consent_recordings, customer.consent_training)
+        if refusal is not None:
+            raise HTTPException(status_code=403, detail=refusal)
+    view = _call(studio.model_input, session, body.key, request.app.state.s3)
+    if customer is not None:
+        audit.record(session, staff.id, "media_view", target=item.clip_id, reason="training", customer_id=customer.id,
+                     device_id=device.device_id if device is not None else None,
+                     detail={"via": "tagging", "kind": "model_input", "source": view["source"]}, ts=now)
+    return view
 
 
 @files.get("/file/{token}", name="tagging_file", response_class=FileResponse)

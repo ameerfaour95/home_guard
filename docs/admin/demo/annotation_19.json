@@ -30,7 +30,8 @@
           "enabled": true
         }
       ],
-      "source": "yolo"
+      "source": "yolo",
+      "entity": "P1"
     }
   ],
   "description": "A teenager in a school uniform steps out of the cam-b42d16, locks it and walks toward the gate, checked by hand.",
@@ -50,5 +51,6 @@
     320,
     180
   ],
-  "suggestions_used": true
+  "suggestions_used": true,
+  "preload_source": null
 }

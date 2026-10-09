@@ -128,3 +128,20 @@ def test_a_newer_unsubmitted_version_keeps_weak_labels_out_and_uses_the_submitte
     export = _export(client, adm, labeled["cid"], formats=("yolo",))
     item = {i["event_id"]: i for i in _manifest(s3client, export)["items"]}[collect]
     assert item["annotation"] is None and item["yolo"]["source"] == "detector_weak_label"
+
+
+@needs_ffmpeg
+def test_yolo_export_bytes_are_the_same_with_and_without_entity(client, s3client, labeled):
+    adm, collect = labeled["adm"], labeled["collect"]
+
+    def labels():
+        export = _export(client, adm, labeled["cid"], formats=("yolo",))
+        item = next(i for i in _manifest(s3client, export)["items"] if i["event_id"] == collect)
+        prefix = f"{export['s3_prefix']}yolo/labels/{item['split']}/"
+        return {k.rsplit("/", 1)[1]: _get(s3client, k) for k in _keys(s3client, prefix) if f"/{collect}_f" in k}
+
+    without = labels()
+    _annotate(client, adm, collect, tracks=[dict(PERSON, entity="P1")], description="One person crosses the yard.")
+    assert client.get(f"/v1/events/{collect}/annotation", headers=adm).json()["tracks"][0]["entity"] == "P1"
+    with_entity = labels()
+    assert without and with_entity == without          # byte for byte: the name never enters a training label

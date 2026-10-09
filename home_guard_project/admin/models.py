@@ -196,6 +196,9 @@ class FeedbackOut:
     raw_text: str
     source: str
     received_utc: datetime
+    owner_label: str = ''   # the owner's Telegram tag: normal / suspicious / escalation / empty / other / rule_mismatch
+    owner_text: str = ''
+    transcript: str = ''
 
 
 @dataclass
@@ -387,6 +390,7 @@ class Track:
     label: str
     keyframes: list[Keyframe]
     source: Literal['human', 'yolo', 'suggestion'] = 'human'  # yolo: preloaded detector boxes nobody checked yet
+    entity: str | None = None  # 'P1', 'CAR2', 'A1': the object's stable name; never in a YOLO training label
 
 
 @dataclass
@@ -420,6 +424,39 @@ class AnnotationOut:
     suggestions_used: bool
     review_note: str = ''
     review_frame: int | None = None
+    preload_source: str | None = None  # 'tracker' / 'dataset' / 'yolo': what the unsaved boxes came from
+
+
+@dataclass
+class InboxItem:
+    """One owner answer from Telegram waiting in (or handled from) the Inbox (cloud /v1/inbox)."""
+    feedback_id: int
+    event_id: int
+    clip_key: str
+    customer_id: int
+    customer: str
+    site: str
+    camera: str
+    camera_name: str | None
+    received_utc: datetime | None
+    owner_label: str
+    owner_text: str
+    transcript: str
+    raw_text: str
+    note: str
+    verdict: str
+    source: str
+    tagged_by: str
+    model_label: str | None
+    model_summary: str
+    model: str | None
+    consent_training: bool
+    decision: str | None
+    decided_by: str | None
+    decided_utc: datetime | None
+    decision_note: str = ''
+    prompt_version: str | None = None   # the prompt the clip's AI answer came from
+    probably_not_label: bool = False    # the box's rule (feedback.not_a_judgement): a question / complaint / command
 
 
 @dataclass

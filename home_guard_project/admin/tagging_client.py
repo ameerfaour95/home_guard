@@ -77,6 +77,13 @@ class HttpTagging:
         return self._tag_json('POST', 'tagging/suggest', json=dict(key=key, refresh=refresh),
                               timeout=httpx.Timeout(180, connect=5))
 
+    def tagging_convert(self, key, words):
+        return self._tag_json('POST', 'tagging/convert', json=dict(key=key, words=words),
+                              timeout=httpx.Timeout(90, connect=5))
+
+    def tagging_model_input(self, key):
+        return self._tag_json('POST', 'tagging/model_input', json=dict(key=key), timeout=httpx.Timeout(90, connect=5))
+
     def clip_boxes(self, key):
         """The Label view's annotation of a dataset clip (not an indexed event)."""
         return decode(AnnotationOut, self._tag_json('GET', 'tagging/boxes', params=dict(key=key)))
@@ -128,6 +135,17 @@ class DemoTagging:
             studio.suggest_client = DemoSuggestClient()
         return _demo_call(lambda: studio.suggest(None, key, refresh))
 
+    def tagging_convert(self, key, words):
+        """The demo converts with a canned model (no network)."""
+        studio = self._tag_studio()
+        if getattr(studio, 'convert_client', None) is None:
+            studio.convert_client = DemoConvertClient()
+        result = _demo_call(lambda: studio.convert(None, key, words))
+        return {**result, 'schema_name': result.pop('schema')}
+
+    def tagging_model_input(self, key):
+        return _demo_call(lambda: self._tag_studio().model_input(None, key))
+
     def clip_boxes(self, key):
         studio = self._tag_studio()
         with studio._lock:
@@ -167,17 +185,18 @@ class _MemoryStudio(TagStudio):
         self._events, self._lock, self._boxes = [], RLock(), {}
 
     def clip_boxes(self, session, key):
-        from home_guard_project.cloud.tagstudio.boxes import dataset_tracks
+        from home_guard_project.cloud.tagstudio.boxes import preload_tracks
         from home_guard_project.cloud.tagstudio.service import _track_dict
 
         item, _ = self._item(session, key)
         fps = item.fps or 7.0
         frames = round(float(item.duration_sec or 0) * fps) or None
-        tracks = [_track_dict(t) for t in dataset_tracks(str(self.paths.dataset), item.clip_id, fps)]
+        preload, source = preload_tracks(str(self.paths.dataset), item.clip_id, fps, (item.meta_path, item.video))
+        tracks = [_track_dict(t) for t in preload]
         return dict(event_id=0, version=0, status='new', tracks=tracks, description='', ai_description='',
                     ai_status='none', ai_model=None, ai_prompt_version=None, drop_clip=False, needs_review=False,
                     author=None, updated_utc=None, fps=fps, frame_count=frames, frame_size=None,
-                    suggestions_used=bool(tracks))
+                    suggestions_used=bool(tracks), preload_source=source)
 
     def tags(self, session):
         with self._lock:
@@ -193,6 +212,7 @@ class _MemoryStudio(TagStudio):
             clean = clean_fields(fields)
         except TagError as e:
             raise StudioError(str(e), 422) from None
+        clean = self.with_prompt_version(session, item, self.tags(session).get(key), clean)
         require_category(self.tags(session).get(key), clean)
         with self._lock:
             self._events.append(dict(key=key, at=now.strftime('%Y-%m-%dT%H:%M:%S.%fZ'), by=staff.name, fields=clean))
@@ -200,6 +220,33 @@ class _MemoryStudio(TagStudio):
         rows = work_queue.build(items.values(), tags)
         next_key = next((i.key for i, a in rows if a.tier != work_queue.DONE and i.key != key), '')
         return dict(tag=tags[key].as_dict(), assessment=work_queue.assess(item, tags[key]).as_dict(), next_key=next_key)
+
+
+class DemoConvertClient:
+    """An OpenAI-shaped text model for "In my words" without the network (demo, screenshots, tests): it answers in the
+    schema it is asked for, from the words' first sentence."""
+
+    model = 'demo/gemini-3.1-flash-lite (offline)'
+
+    def __init__(self):
+        self.calls, self.chat, self.completions = [], self, self
+
+    def create(self, **kwargs):
+        import json
+        from types import SimpleNamespace
+        self.calls.append(kwargs)
+        schema = kwargs['response_format']['json_schema']['schema']
+        words = kwargs['messages'][0]['content'].split('"""')[1].strip()
+        guess = {'summary': 'A man walks to the back fence with a bag, looks over it and walks away.',
+                 'category': 'S2', 'raw_label': 'suspicious', 'label': 'suspicious', 'people': 1,
+                 'why': 'He looks over the fence into the yard.', 'zone': 'yard', 'movement': 'approaching',
+                 'summary_owner': words if any('\u0590' <= ch <= '\u05ff' for ch in words) else '',
+                 'visibility': 'clear', 'serious_behaviour': False}
+        answer = {}
+        for name, spec in schema['properties'].items():
+            default = {'integer': 0, 'boolean': False, 'array': []}.get(spec.get('type'), '')
+            answer[name] = guess.get(name, default)
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(answer)))])
 
 
 class DemoSuggestClient:

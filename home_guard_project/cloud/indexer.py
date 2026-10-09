@@ -57,7 +57,9 @@ COPY_NAME = {"production": "production", "dataset": "training"}
 INDEXED_AREAS = {"meta", "clips", "feedback", "status", "responses", "vlm_crops", "yolo_images", "yolo_labels"}
 # Second key segment of the indexed areas: a key there that parse_key rejects is an "invalid key layout".
 INDEXED_DIRS = {"meta", "clips", "feedback", "_status", "responses", "vlm_crops", "yolo"}
-EVENT_ROLES = ("original_video", "meta", "raw_answer", "teacher_frame", "crop_video", "yolo_image", "yolo_label")
+EVENT_ROLES = ("original_video", "meta", "raw_answer", "teacher_frame", "crop_video", "yolo_image", "yolo_label",
+               "tracks")
+TRACKS_SUFFIX = ".tracks.json"  # the box tracker's tracks of a clip (box clip_tracks.py), in responses/
 AI_RANK = {"none": 0, "fallback": 1, "failed": 2, "real": 3}
 DECISION_BACKFILL = 500  # events without a parsed event-layer decision rebuilt per pass (from stored revisions)
 FULL_SCAN_EVERY = timedelta(minutes=30)
@@ -102,7 +104,7 @@ def artifact_role(info: KeyInfo) -> Optional[str]:
     if area == "meta":
         return "meta" if key.endswith(".meta.json") else None
     if area == "responses":
-        return "raw_answer"
+        return "tracks" if key.endswith(TRACKS_SUFFIX) else "raw_answer"
     if area == "vlm_crops":
         return {".jpg": "teacher_frame", ".jpeg": "teacher_frame", ".mp4": "crop_video"}.get(info.ext.lower())
     if area == "yolo_images":
@@ -114,6 +116,18 @@ def artifact_role(info: KeyInfo) -> Optional[str]:
     if area == "status":
         return "status"
     return None
+
+
+def owner_answer(body: dict) -> dict:
+    """The owner's own answer in a box feedback file (box feedback.py ``record``), beyond what the shared contract's
+    parse_feedback keeps: the Telegram tag, his words, a voice transcript and who tagged (else the sender). Strings
+    only; anything else reads as ""."""
+    text = lambda name: body.get(name) if isinstance(body.get(name), str) else ""  # noqa: E731
+    sender = body.get("from")
+    sender = sender.get("name") if isinstance(sender, dict) else sender
+    return {"owner_label": text("owner_label").strip(), "owner_text": text("owner_text"),
+            "transcript": text("transcript"),
+            "tagged_by": text("tagged_by") or (sender if isinstance(sender, str) else "")}
 
 
 def _cut(value, n: int):
@@ -203,6 +217,7 @@ class _Run:
         self.body_names: set[tuple[str, str]] = set()  # names in the JSON bodies applied this pass (redact)
         self.cursors: dict[str, S3Cursor] = {}
         self.feedback: Optional[dict[str, Feedback]] = None
+        self.answers: dict[str, dict] = {}   # feedback key -> owner_answer() of the revision being applied
         self.events: dict[tuple[str, str], Event] = {}
         self.events_by_id: dict[int, Event] = {}
         self.dirty: set[tuple[str, str]] = set()  # (camera, stem) of events to rebuild
@@ -313,7 +328,12 @@ class _Run:
                 continue
             seen.add(obj.key)
             camera, stem = info.camera, info.stem
+            if role == "tracks":  # "<stem>.tracks.json": the key layout reads its stem as "<stem>.tracks"
+                stem = stem[:-len(".tracks")] if stem and stem.endswith(".tracks") else stem
             art = self.arts.get(obj.key)
+            if art is not None and art.role != role:  # indexed as a raw answer before the tracks role existed
+                art.role, art.stem, art.event_id = role, stem, None
+                art.etag = ""                         # a changed revision: re-linked to its event below
             if art is None:  # inserted (conflict-safe) once both prefixes are listed
                 art = Artifact(role=role, s3_key=obj.key, etag=obj.etag, bytes=obj.size,
                                mime=MIME.get(info.ext.lower()), available=True, provenance="box",
@@ -465,6 +485,7 @@ class _Run:
                     self.problem(key, "timestamp out of range: time_utc", etag)
                     continue
                 feedback.append((art, etag, rec))
+                self.answers[key] = owner_answer(body)
             else:
                 if not isinstance(body, dict):
                     self.problem(key, "invalid heartbeat body", etag)
@@ -498,6 +519,9 @@ class _Run:
             fb.verdict, fb.action = redact.verdict(rec.verdict) if rec.verdict else "", _cut(rec.action, 64)
             fb.note, fb.raw_text, fb.source = rec.note, rec.raw_text, _cut(rec.source, 64)
             fb.scope_camera = _cut(rec.scope_camera, 128)
+            answer = self.answers.get(art.s3_key) or owner_answer({})
+            fb.owner_label, fb.owner_text = _cut(answer["owner_label"], 32), answer["owner_text"]
+            fb.transcript, fb.tagged_by = answer["transcript"], _cut(answer["tagged_by"], 128)
             fb.received_at = rec.time_utc
             ev = by_stem.get(alert_stem) if alert_stem else None
             fb.event_id = ev.id if ev is not None else None

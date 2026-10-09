@@ -56,10 +56,12 @@ def test_keyboard_category_raw_label_and_save(widgets, wait):
 
 def test_save_needs_a_category_or_a_flag(widgets, wait):
     v, b = tag_view(widgets, wait)
-    v.form['category'] = ''; v.needs_check.setChecked(True); v.save()
-    assert v.banner.isVisible() and 'category' in v.banner_text.text() and not v.save_runner.busy
+    v.form['category'] = ''; v.form['raw_label'] = ''; v.needs_check.setChecked(True); v.save()
+    # the first clip was answered with the box's legacy prompt (no category): its raw label is what it needs
+    assert v.kind == 'legacy' and v.banner.isVisible() and 'raw label' in v.banner_text.text()
+    assert not v.save_runner.busy
     with pytest.raises(ValidationError, match='Choose a category'):
-        b.tagging_save(v.key, {'raw_label': 'suspicious'})                 # the server says the same
+        b.tagging_save('ds:yard_1791000007_trigger', {'raw_label': 'suspicious'})   # the server says the same
     v.delete.setChecked(True); v.save()
     wait(lambda: not v.save_runner.busy, 5)
 
@@ -90,6 +92,9 @@ def test_consent_refusal_shows_how_to_fix_it(widgets, wait):
         def tagging_media(self, key, kind):
             raise ConsentError("This customer withdrew consent for training use. If the customer agrees again, an admin "
                                "switches it back on on the customer's page.")
+
+        def tagging_model_input(self, key):
+            return self.tagging_media(key, 'model_input')
     v, _ = tag_view(widgets, wait, Refusing())
     wait(lambda: not v.media_runner.busy and v.banner.isVisible(), 5)
     assert 'withdrew consent' in v.canvas.message and "customer's page" in v.banner_text.text()
@@ -164,7 +169,7 @@ def test_missing_video_explains_why_and_the_clip_can_still_be_tagged(widgets, wa
                                        'crop': 'never uploaded to S3'}
             return detail
     v, b = tag_view(widgets, wait, NoVideo())
-    assert 'removed from S3' in v.canvas.message and 'Crop: never uploaded to S3' in v.canvas.message
+    assert 'removed from S3' in v.canvas.message and 'What the AI sees: never uploaded to S3' in v.canvas.message
     assert 'still tag it' in v.canvas.message and not v.media_runner.busy
     assert v.segments['clip'].toolTip().startswith('removed from S3')
     v.set_category('N10'); v.save()

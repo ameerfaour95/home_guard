@@ -24,11 +24,18 @@ FIELDS: Dict[str, str] = {
     "appearance": "phrases",          # up to 4 short phrases that recognise the person or vehicle again
     "suggested_by": "short_text",     # the model whose "Suggest tag" draft this tag started from ("" = none)
     "suggestion_use": "choice",       # "accepted" (saved as suggested) | "edited" | "" (no suggestion)
+    # the rest of the box's answer schemas (fleet_contract/prompt_schemas.py): a tag follows its clip's prompt version
+    "label": "choice", "applied_fact_id": "short_text", "serious_behaviour": "bool", "people": "int",
+    "vehicles": "int", "vehicle_moving": "bool", "animals": "int", "why": "text", "summary_owner": "text",
+    "prompt_version": "short_text",   # the clip's prompt version (meta teacher.prompt_version) the tag follows
+    "tagger_words": "text",           # "In my words": what the tagger wrote, any language (the ground truth)
+    "tagger_language": "short_text",  # its language, as detected
+    "converted_by": "short_text",     # the model that turned the words into the form ("" = none)
 }
 CHOICES: Dict[str, tuple] = {
     "category": taxonomy.CATEGORY_IDS, "zone": taxonomy.ZONES, "movement": taxonomy.MOVEMENTS,
     "visibility": taxonomy.VISIBILITY, "raw_label": taxonomy.LABELS, "flags": taxonomy.FLAGS,
-    "suggestion_use": ("accepted", "edited"),
+    "suggestion_use": ("accepted", "edited"), "label": taxonomy.LABELS,
 }
 MAX_PHRASES, MAX_PHRASE = 4, 60
 

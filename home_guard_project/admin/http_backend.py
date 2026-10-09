@@ -16,6 +16,7 @@ from dataclasses import asdict
 from .models import SavedFilter, CollectionOut, ExportOut, AuditPage, DensityOut, ReviewCount
 from .models import TokenPair, StaffOut, FleetResponse, CustomerOut, EventPage, EventDetail, EventSummary, DetectionsOut, MediaAccess, decode
 from .tagging_client import HttpTagging, ConsentError
+from .inbox_client import HttpInbox
 
 CONSENT_REFUSALS = ('This customer withdrew consent for training use', 'This customer withdrew consent for recordings access')
 
@@ -40,7 +41,7 @@ def tls_context():
     return context
 
 
-class HttpBackend(HttpTagging):
+class HttpBackend(HttpTagging, HttpInbox):
     def __init__(self, base_url: str, *, transport=None):
         origin = urlsplit(base_url)
         if (origin.scheme != 'https' and not (origin.scheme == 'http' and

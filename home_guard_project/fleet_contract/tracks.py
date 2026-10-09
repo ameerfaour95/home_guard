@@ -1,9 +1,15 @@
 """Box tracks and their interpolation (Label Studio VideoRectangle semantics, by time). Stdlib only.
 
 A Track is one object: a COCO label plus keyframes sorted by time. A keyframe with enabled=False hides the box from
-that keyframe until the next one. Between two keyframes the box moves linearly by TIME (never by frame count)."""
+that keyframe until the next one. Between two keyframes the box moves linearly by TIME (never by frame count).
+
+A track may name its object with an ``entity`` id: P1, P2 for people, CAR1 for vehicles, A1 for animals (the box's
+own entity names, box/entities.py), so "P1 stays P1" across saves. It is a name only: it never enters a YOLO
+training label (the exporters read label and boxes, nothing else). Old tracks have none (None)."""
 
 from __future__ import annotations
+
+import re
 
 from dataclasses import dataclass, field
 from typing import Optional
@@ -27,6 +33,45 @@ class Track:
     label: str
     keyframes: list = field(default_factory=list)
     source: str = "human"
+    entity: Optional[str] = None  # "P1", "CAR2", "A1": the object's stable name (see the module docstring)
+
+
+ENTITY_PATTERN = r"^(P|CAR|A)\d{1,3}$"
+ENTITY_MAX = 8
+_ENTITY = re.compile(ENTITY_PATTERN)
+ENTITY_PREFIX = {"person": "P", "car": "CAR", "motorcycle": "CAR", "bus": "CAR", "truck": "CAR",
+                 "bird": "A", "cat": "A", "dog": "A"}
+
+
+def valid_entity(value) -> bool:
+    return isinstance(value, str) and len(value) <= ENTITY_MAX and bool(_ENTITY.fullmatch(value))
+
+
+def entity_prefix(label: str) -> Optional[str]:
+    """P for a person, CAR for a vehicle, A for an animal; None for a class with no entity name (bicycle)."""
+    return ENTITY_PREFIX.get(label)
+
+
+def next_entity(tracks: list, label: str) -> Optional[str]:
+    """The next free entity id of *label*'s kind among *tracks* ("P3" after P1 and P2); None without a kind."""
+    prefix = entity_prefix(label)
+    if prefix is None:
+        return None
+    used = {getattr(t, "entity", None) for t in tracks}
+    n = 1
+    while f"{prefix}{n}" in used:
+        n += 1
+    return f"{prefix}{n}" if n < 1000 else None
+
+
+def fill_entities(tracks: list) -> list:
+    """Give every track without an entity (in order of first appearance) the next free id of its kind; kept ones stay.
+    Returns *tracks* (changed in place)."""
+    first = lambda t: min((k.t_sec for k in t.keyframes), default=float("inf"))  # noqa: E731
+    for tr in sorted(tracks, key=lambda t: (first(t), t.track_id)):
+        if not tr.entity:
+            tr.entity = next_entity(tracks, tr.label)
+    return tracks
 
 
 def frame_time(frame_index: int, fps: float) -> float:
@@ -222,6 +267,9 @@ def validate_tracks(tracks: list, duration_sec: float) -> list:
         who = f"track {tr.track_id}"
         if tr.label not in known:
             problems.append(f"{who}: unknown label {tr.label!r}")
+        entity = getattr(tr, "entity", None)
+        if entity is not None and not valid_entity(entity):
+            problems.append(f"{who}: entity {entity!r} must be P, CAR or A and 1-3 digits (P1, CAR2, A1)")
         times = [k.t_sec for k in tr.keyframes]
         if any(b <= a for a, b in zip(times, times[1:])):
             problems.append(f"{who}: keyframe times must be sorted and unique")

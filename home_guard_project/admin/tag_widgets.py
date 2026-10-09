@@ -15,6 +15,30 @@ WHO_TITLES = {'old': 'Old tag', 'owner': "Customer's answer", 'ai': 'AI label', 
 ORIGIN_TITLES = {'dataset': 'Old tags', 'customer': 'Customer', 'owner_feedback': 'Customer (local)'}
 
 
+def is_rtl(text):
+    """True when the text's first strong character is right-to-left (Hebrew, Arabic): its paragraph runs RTL."""
+    import unicodedata
+    for ch in text or '':
+        kind = unicodedata.bidirectional(ch)
+        if kind in ('R', 'AL'):
+            return True
+        if kind == 'L':
+            return False
+    return False
+
+
+class BidiElideDelegate(QStyledItemDelegate):
+    """Table cells that elide in the text's own direction: a Hebrew cell keeps its beginning and loses its end
+    ("זה הגנן ש…", never "…ש זה הגנן"), right-aligned like the language reads; Latin cells are unchanged."""
+
+    def initStyleOption(self, option, index):
+        super().initStyleOption(option, index)
+        option.textElideMode = Qt.TextElideMode.ElideRight
+        if is_rtl(option.text):
+            option.direction = Qt.LayoutDirection.RightToLeft
+            option.displayAlignment = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+
+
 def soft(color, alpha=46):
     c = QColor(color); c.setAlpha(alpha); return c
 
@@ -297,6 +321,39 @@ class Pill(QLabel):
         self.setVisible(bool(text))
 
 
+# Where a label came from (design principle 4): one chip vocabulary on every screen.
+PROVENANCE = {'owner': ('Owner · Telegram', 'warning'), 'admin': ('Admin · {who}', 'ok'),
+              'model': ('Model · {who}', 'action'), 'yolo': ('YOLO weak', 'muted'), 'tracker': ('Tracker', 'muted'),
+              'dataset': ('Dataset labels', 'muted')}
+# The short caption of a machine box nobody checked yet, by what it was preloaded from (AnnotationOut.preload_source).
+MACHINE_NAMES = {'tracker': 'Tracker', 'dataset': 'Dataset', 'yolo': 'YOLO'}
+
+
+def machine_name(source):
+    return MACHINE_NAMES.get(source or 'yolo', 'YOLO')
+
+
+def provenance_text(kind, who=''):
+    """The chip text of a label's source: 'Owner · Telegram', 'Admin · Dana', 'Model · gpt-4o', 'YOLO weak',
+    'Tracker', 'Dataset labels'; '' for an unknown kind."""
+    text, _ = PROVENANCE.get(kind, ('', ''))
+    return text.format(who=who or 'not recorded') if text else ''
+
+
+class ProvenanceChip(Pill):
+    """A small chip naming who made a label (see PROVENANCE)."""
+
+    def __init__(self, theme='dark', kind='', who=''):
+        super().__init__(theme)
+        self.kind = ''
+        self.setAccessibleName('Label source')
+        self.show_source(kind, who)
+
+    def show_source(self, kind, who=''):
+        self.kind = kind if kind in PROVENANCE else ''
+        self.show_label(provenance_text(kind, who), PROVENANCE.get(kind, ('', 'muted'))[1])
+
+
 class OpinionCard(QFrame):
     """What one party said: label, category, words, and where it came from."""
 
@@ -307,6 +364,7 @@ class OpinionCard(QFrame):
         layout = QVBoxLayout(self); layout.setContentsMargins(12, 10, 12, 10); layout.setSpacing(4)
         head = QHBoxLayout(); head.setSpacing(6)
         head.addWidget(label(WHO_TITLES[who].upper(), 'eyebrowMuted'))
+        self.source = ProvenanceChip(theme); head.addWidget(self.source)
         head.addStretch()
         self.label_pill, self.category_pill = Pill(theme), Pill(theme)
         head.addWidget(self.category_pill); head.addWidget(self.label_pill)
@@ -320,7 +378,7 @@ class OpinionCard(QFrame):
     def show_opinion(self, op, conflict=False, categories=None):
         self.setProperty('conflict', 'yes' if conflict else 'no'); self.style().unpolish(self); self.style().polish(self)
         if not op:
-            self.label_pill.hide(); self.category_pill.hide()
+            self.label_pill.hide(); self.category_pill.hide(); self.source.show_source('')
             self.text.setText({'old': 'No old tag for this clip.', 'owner': 'The customer has not answered.',
                                'ai': 'No AI answer recorded.', 'teacher': 'No teacher answer yet.'}[self.who])
             self.text.setProperty('empty', 'yes'); self.detail.setText('')
@@ -334,6 +392,8 @@ class OpinionCard(QFrame):
             self.category_pill.show_label(f'{cat} {name}'.strip(), 'action')
             self.text.setText(op.get('text') or '(no words)')
             d = op.get('detail') or {}
+            self.source.show_source(*{'owner': ('owner',), 'ai': ('model', d.get('model')),
+                                      'teacher': ('model', d.get('model'))}.get(self.who, ('',)))
             bits = {'owner': [d.get('verdict', '').replace('_', ' '), d.get('owner_label') and 'tag: ' + d['owner_label'],
                               d.get('from'), (op.get('at') or '')[:16].replace('T', ' ')],
                     'ai': [d.get('model'), d.get('prompt_version'), d.get('final_label') and d['final_label'] != effective

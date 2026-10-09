@@ -96,7 +96,10 @@
       "note": "It was a person but not at the door.",
       "raw_text": "It was a person but not at the door.",
       "source": "text",
-      "received_utc": "2026-10-02T15:25:17Z"
+      "received_utc": "2026-10-02T15:25:17Z",
+      "owner_label": "",
+      "owner_text": "",
+      "transcript": ""
     }
   ],
   "artifacts": [

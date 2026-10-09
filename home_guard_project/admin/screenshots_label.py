@@ -47,7 +47,7 @@ def main():
         tr.keyframes = [Keyframe(0, 0., start), Keyframe(70, 70/12, end)]
         v.doc.checkpoint(); v.seek(35); wait(lambda: v.doc.frame == 35)
         capture('interpolation')
-        v.description.setPlainText('A delivery person walks toward the front entrance, places a parcel beside the door, and leaves the camera view. No other people enter the scene.')
+        v.drop.setChecked(False)
         v.needs_review.setChecked(True); capture('text-edited')
         v.queue = [b.event(101)]; v.queue_index = 0; v.submit()
         wait(lambda: not v.writer.busy and v.doc.annotation.status == 'submitted')

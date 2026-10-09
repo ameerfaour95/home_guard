@@ -21,7 +21,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from home_guard_project.fleet_contract import tracks as ft
-from home_guard_project.fleet_contract.classes import COCO_NAMES, CONTIGUOUS, name_to_coco
+from home_guard_project.fleet_contract.classes import COCO_NAMES, coco_to_contiguous, name_to_coco
 
 from . import media
 from .models import (AiRun, Annotation, AnnotationHead, AnnotationReview, AnnotationSuggestion, Artifact,
@@ -135,12 +135,14 @@ def to_tracks(raw: Any) -> list[ft.Track]:
                            enabled=bool(k.get("enabled", True))) for k in tr.get("keyframes", [])]
         kfs.sort(key=lambda k: k.t_sec)
         out.append(ft.Track(track_id=str(tr["track_id"]), label=str(tr["label"]), keyframes=kfs,
-                            source=tr.get("source", "human")))
+                            source=tr.get("source", "human"), entity=tr.get("entity")))
     return out
 
 
 def track_dicts(tracks: list[ft.Track]) -> list[dict]:
+    """Tracks as stored / sent; ``entity`` only when the track has one (an old save keeps its exact shape)."""
     return [{"track_id": t.track_id, "label": t.label, "source": t.source,
+             **({"entity": t.entity} if getattr(t, "entity", None) else {}),
              "keyframes": [{"frame": k.frame, "t_sec": k.t_sec, "xyxy": list(k.xyxy), "enabled": k.enabled}
                            for k in t.keyframes]} for t in tracks]
 
@@ -275,18 +277,48 @@ def precompute_suggestions(session: Session, s3, now: Optional[datetime] = None,
     return stored
 
 
+TRACKS_CACHE: dict = {}  # (tracks.json key, etag) -> document or None
+
+
+def tracker_tracks(session: Session, s3, ev: Event, fps: Optional[float]) -> list[ft.Track]:
+    """The box tracker's tracks of the clip: its indexed ``responses/<camera>/<day>/<stem>.tracks.json`` (artifact
+    role "tracks"; box clip_tracks.py, the format of tagstudio/tracks_file.py), the kept training copy first; []
+    when there is none or it cannot be read. Read once per revision (etag): reopening a clip reads nothing."""
+    from .tagstudio import tracks_file  # noqa: PLC0415
+
+    if s3 is None:
+        return []
+    files = session.execute(select(Artifact.s3_key, Artifact.etag).where(
+        Artifact.event_id == ev.id, Artifact.role == "tracks", Artifact.available.is_(True))).all()
+    for key, etag in sorted(files, key=lambda r: (not r[0].startswith("dataset_"), r[0])):
+        if (key, etag) not in TRACKS_CACHE:
+            try:
+                doc = s3.get_json(key)
+            except Exception:  # noqa: BLE001 - unreadable: the weak labels are used instead
+                doc = None
+            if len(TRACKS_CACHE) > 5000:
+                TRACKS_CACHE.clear()
+            TRACKS_CACHE[(key, etag)] = doc if isinstance(doc, dict) else None
+        doc = TRACKS_CACHE[(key, etag)]
+        tracks = tracks_file.read_tracks(doc, fps) if doc else []
+        if tracks:
+            return tracks
+    return []
+
+
 def yolo_rows(tracks: list[ft.Track], t_sec: float) -> list[str]:
     """YOLO label rows (contiguous class ids, `cls xc yc w h` normalised) of every track visible at `t_sec`."""
     rows = []
     for label, box in ft.boxes_at(tracks, t_sec):
         coco = name_to_coco(label)
-        if coco is None:
+        index = coco_to_contiguous(coco) if coco is not None else None
+        if index is None:
             continue
         x1, y1, x2, y2 = (min(max(v, 0.0), 1.0) for v in box)
         w, h = x2 - x1, y2 - y1
         if w <= 0 or h <= 0:
             continue
-        rows.append(f"{CONTIGUOUS[coco]} {(x1 + x2) / 2:.6f} {(y1 + y2) / 2:.6f} {w:.6f} {h:.6f}")
+        rows.append(f"{index} {(x1 + x2) / 2:.6f} {(y1 + y2) / 2:.6f} {w:.6f} {h:.6f}")
     return rows
 
 

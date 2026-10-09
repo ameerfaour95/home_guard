@@ -8,7 +8,7 @@ from home_guard_project.cloud import models as m
 from home_guard_project.cloud.db import session_scope
 
 from . import builders as b
-from .test_event_routes import _event_id, s3client  # noqa: F401
+from .test_event_routes import NOW, _event_id, s3client  # noqa: F401
 from .test_studio import _seed
 
 
@@ -349,3 +349,104 @@ def test_media_loop_precomputes_suggestions_and_get_reads_no_label_file(client, 
     client.get(_url(eid), headers=h)
     assert reads.calls >= 1
     assert labeling.SUGGESTION_MODEL  # unchanged model tag for predictions
+
+
+# ---------------------------------------------------------------- the box tracker's tracks (tracks.json)
+
+def _tracks_doc():
+    import json
+    from pathlib import Path
+    doc = json.loads((Path(__file__).parent / "fixtures" / "tracks" /
+                      "ameer_week_0_1_ch2_1791439138_alert.tracks.json").read_text(encoding="utf-8"))
+    return json.dumps(doc).encode()
+
+
+@pytest.fixture()
+def fresh_tracks():
+    from home_guard_project.cloud import labeling
+    labeling.TRACKS_CACHE.clear()
+    yield
+    labeling.TRACKS_CACHE.clear()
+
+
+def test_new_annotation_prefers_the_tracker_tracks(client, staff_factory, s3client, fresh_tracks):
+    # the box writes it to responses/<camera>/<day>/<stem>.tracks.json (box clip_tracks.py)
+    tracks_key = b.COLLECT_META.replace("/meta/", "/responses/")[:-len(".meta.json")] + ".tracks.json"
+    _seed(client, s3client, all_frames=False, overrides={tracks_key: _tracks_doc()})
+    _, _, _, h = staff_factory("admin")
+    eid = _event_id(client, b.COLLECT_STEM)
+    with session_scope(client.app.state.engine) as s:     # indexed as the clip's tracks, not as a raw AI answer
+        art = s.scalar(select(m.Artifact).where(m.Artifact.s3_key == tracks_key))
+        assert (art.role, art.stem, art.event_id) == ("tracks", b.COLLECT_STEM, eid)
+    body = client.get(_url(eid), headers=h).json()
+    assert body["preload_source"] == "tracker" and body["suggestions_used"] is True
+    assert [(t["track_id"], t["label"], t["source"]) for t in body["tracks"]] == [
+        ("t-1", "person", "yolo"), ("t-2", "car", "yolo")]
+    # a human edit is a saved version: the clip never re-preloads over it
+    person = body["tracks"][0]
+    person["source"] = "human"
+    person["keyframes"][0]["xyxy"] = [0.1, 0.1, 0.2, 0.3]
+    r = _save(client, h, eid, tracks=[person])
+    assert r.status_code == 200, r.text
+    again = client.get(_url(eid), headers=h).json()
+    assert again["version"] == 1 and again["preload_source"] is None
+    assert [(t["label"], t["source"]) for t in again["tracks"]] == [("person", "human")]
+    assert again["tracks"][0]["keyframes"][0]["xyxy"] == [0.1, 0.1, 0.2, 0.3]
+
+
+def test_a_tracks_file_indexed_as_a_raw_answer_before_gets_its_role(client, staff_factory, s3client, fresh_tracks):
+    from home_guard_project.cloud.indexer import index_device
+    tracks_key = b.COLLECT_META.replace("/meta/", "/responses/")[:-len(".meta.json")] + ".tracks.json"
+    _seed(client, s3client, all_frames=False, overrides={tracks_key: _tracks_doc()})
+    with session_scope(client.app.state.engine) as s:
+        art = s.scalar(select(m.Artifact).where(m.Artifact.s3_key == tracks_key))
+        art.role, art.stem, art.event_id = "raw_answer", b.COLLECT_STEM + ".tracks", None   # the older indexer
+        dev_id = s.scalar(select(m.Device.id))
+    with session_scope(client.app.state.engine) as s:
+        index_device(s, client.app.state.s3, s.get(m.Device, dev_id), full_scan=True, now=NOW)
+    with session_scope(client.app.state.engine) as s:
+        art = s.scalar(select(m.Artifact).where(m.Artifact.s3_key == tracks_key))
+        assert (art.role, art.stem, art.event_id) == ("tracks", b.COLLECT_STEM, _event_id(client, b.COLLECT_STEM))
+
+
+def test_weak_labels_are_the_fallback_without_a_tracks_file(client, staff_factory, fresh_tracks, seeded_sparse):
+    _, _, _, h = staff_factory("admin")
+    body = client.get(_url(_event_id(client, b.COLLECT_STEM)), headers=h).json()
+    assert body["preload_source"] == "yolo" and {t["label"] for t in body["tracks"]} == {"person", "dog"}
+
+
+# ---------------------------------------------------------------- the entity name of a saved track (P1 stays P1)
+
+def test_entity_is_saved_validated_and_optional(client, staff_factory, seeded):
+    _, _, _, h = staff_factory("admin")
+    eid = _event_id(client, b.STEM)
+    named = dict(_track(), entity="P1")
+    r = _save(client, h, eid, tracks=[named, dict(_track("t2", "car"), entity="CAR1")])
+    assert r.status_code == 200, r.text
+    got = client.get(_url(eid), headers=h).json()["tracks"]
+    assert [(t["label"], t["entity"]) for t in got] == [("person", "P1"), ("car", "CAR1")]
+    for bad in ("X1", "P1234", "p1", "CAR12345"):
+        r = _save(client, h, eid, base=1, tracks=[dict(_track(), entity=bad)])
+        assert r.status_code == 422, (bad, r.text)
+    # an old save (no entity) still loads, and saves without one keep their exact shape
+    r = _save(client, h, eid, base=1, tracks=[_track()])
+    assert r.status_code == 200 and r.json()["tracks"][0]["entity"] is None
+    with session_scope(client.app.state.engine) as s:
+        row = s.scalar(select(m.Annotation).where(m.Annotation.event_id == eid, m.Annotation.version == 2))
+        assert "entity" not in row.tracks[0]
+
+
+def test_preloaded_tracks_carry_entities(client, staff_factory, seeded_sparse):
+    _, _, _, h = staff_factory("admin")
+    body = client.get(_url(_event_id(client, b.COLLECT_STEM)), headers=h).json()
+    assert {t["label"]: t["entity"] for t in body["tracks"]} == {"person": "P1", "dog": "A1"}
+
+
+def test_entity_never_reaches_a_yolo_label():
+    from home_guard_project.cloud import labeling
+    plain = [_track(), _track("t2", "car")]
+    named = [dict(plain[0], entity="P1"), dict(plain[1], entity="CAR7")]
+    a, b_ = labeling.to_tracks(plain), labeling.to_tracks(named)
+    for t in (0.0, 0.5, 1.0, 1.5, 2.0, 2.5):
+        assert labeling.label_text(labeling.yolo_rows(a, t)).encode() == labeling.label_text(
+            labeling.yolo_rows(b_, t)).encode()

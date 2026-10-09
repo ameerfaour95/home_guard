@@ -41,7 +41,8 @@
           "enabled": false
         }
       ],
-      "source": "yolo"
+      "source": "yolo",
+      "entity": "P1"
     }
   ],
   "description": "Tree branches sway in the wind and cast moving shadows; nothing else is visible.",
@@ -61,5 +62,6 @@
     320,
     180
   ],
-  "suggestions_used": true
+  "suggestions_used": true,
+  "preload_source": "yolo"
 }

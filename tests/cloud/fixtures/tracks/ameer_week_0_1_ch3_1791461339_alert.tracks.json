@@ -1,0 +1,375 @@
+{
+ "clip": "clips\\ameer_week_0_1_ch3\\2026-10-08\\ameer_week_0_1_ch3_1791461339_alert.mp4",
+ "camera": "ameer_week_0_1_ch3",
+ "start_local": "15:08",
+ "params": {
+  "weights": "C:/Users/ameer/Ameer/home_guard/yolo11s.pt",
+  "person": 0.8,
+  "conf": 0.7,
+  "every": 1,
+  "fresh_tracker_per_clip": true
+ },
+ "frames": 58,
+ "looks": [
+  {
+   "frame": 0,
+   "ts": 1791461336.267,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 1,
+   "ts": 1791461336.44,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 2,
+   "ts": 1791461336.612,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 3,
+   "ts": 1791461336.785,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 4,
+   "ts": 1791461336.957,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 5,
+   "ts": 1791461337.13,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 6,
+   "ts": 1791461337.302,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 7,
+   "ts": 1791461337.475,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 8,
+   "ts": 1791461337.647,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 9,
+   "ts": 1791461337.82,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 10,
+   "ts": 1791461337.992,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 11,
+   "ts": 1791461338.165,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 12,
+   "ts": 1791461338.337,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 13,
+   "ts": 1791461338.51,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 14,
+   "ts": 1791461338.682,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 15,
+   "ts": 1791461338.855,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 16,
+   "ts": 1791461339.027,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 17,
+   "ts": 1791461339.2,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 18,
+   "ts": 1791461339.373,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 19,
+   "ts": 1791461339.545,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 20,
+   "ts": 1791461339.718,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 21,
+   "ts": 1791461339.89,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 22,
+   "ts": 1791461340.063,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 23,
+   "ts": 1791461340.235,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 24,
+   "ts": 1791461340.408,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 25,
+   "ts": 1791461340.58,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 26,
+   "ts": 1791461340.753,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 27,
+   "ts": 1791461340.925,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 28,
+   "ts": 1791461341.098,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 29,
+   "ts": 1791461341.27,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 30,
+   "ts": 1791461341.443,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 31,
+   "ts": 1791461341.615,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 32,
+   "ts": 1791461341.788,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 33,
+   "ts": 1791461341.961,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 34,
+   "ts": 1791461342.133,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 35,
+   "ts": 1791461342.306,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 36,
+   "ts": 1791461342.478,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 37,
+   "ts": 1791461342.651,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 38,
+   "ts": 1791461342.823,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 39,
+   "ts": 1791461342.996,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 40,
+   "ts": 1791461343.168,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 41,
+   "ts": 1791461343.341,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 42,
+   "ts": 1791461343.513,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 43,
+   "ts": 1791461343.686,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 44,
+   "ts": 1791461343.858,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 45,
+   "ts": 1791461344.031,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 46,
+   "ts": 1791461344.203,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 47,
+   "ts": 1791461344.376,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 48,
+   "ts": 1791461344.548,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 49,
+   "ts": 1791461344.721,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 50,
+   "ts": 1791461344.894,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 51,
+   "ts": 1791461345.066,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 52,
+   "ts": 1791461345.239,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 53,
+   "ts": 1791461345.411,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 54,
+   "ts": 1791461345.584,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 55,
+   "ts": 1791461345.756,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 56,
+   "ts": 1791461345.929,
+   "detections": 0,
+   "tracks": []
+  },
+  {
+   "frame": 57,
+   "ts": 1791461346.101,
+   "detections": 0,
+   "tracks": []
+  }
+ ],
+ "tracks": [],
+ "stats": {
+  "person_tracks": 0,
+  "vehicle_tracks": 0,
+  "flickers": 0,
+  "fragments": [],
+  "duplicates": [],
+  "most_people_at_once": 0,
+  "returns_linked": 0,
+  "eye_people": 2,
+  "excess_vs_eye": -2
+ }
+}

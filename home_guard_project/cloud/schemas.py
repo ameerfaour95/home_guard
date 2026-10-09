@@ -207,6 +207,11 @@ class FeedbackOut(BaseModel):
     raw_text: str
     source: str
     received_utc: datetime
+    # the owner's Telegram tag (box feedback.py OWNER_LABELS), the owner's own words and a voice answer's
+    # transcript (0017); a labeler reads the tag only
+    owner_label: str = ""
+    owner_text: str = ""
+    transcript: str = ""
 
 
 class ArtifactOut(BaseModel):
@@ -416,6 +421,8 @@ class Track(BaseModel):
     # "yolo": preloaded detector boxes nobody has checked yet; "human" once a person edited (or kept) them;
     # "suggestion" is the older name of "yolo", still accepted
     source: Literal["human", "yolo", "suggestion"] = "human"
+    # the object's stable name: P1 / CAR1 / A1 (the box's entity ids); never part of a YOLO training label
+    entity: Optional[str] = Field(default=None, max_length=8, pattern=r"^(P|CAR|A)\d{1,3}$")
 
 
 class AnnotationIn(BaseModel):
@@ -447,6 +454,10 @@ class AnnotationOut(BaseModel):
     frame_count: Optional[int]
     frame_size: Optional[list[int]]
     suggestions_used: bool
+    # what a never-saved clip's boxes were preloaded from: "tracker" (the box tracker's <stem>.tracks.json, P1 stays
+    # P1), "dataset" (the unified dataset's labels), "yolo" (the box's weak YOLO labels linked by IoU); None when
+    # nothing was preloaded or the clip was saved since
+    preload_source: Optional[str] = None
 
 
 class ReviewDecision(BaseModel):
@@ -540,6 +551,8 @@ class TaggingClip(BaseModel):
     prefilled_from: str
     assessment: dict
     history: list[dict]
+    prompt_version: str = ""            # the clip's prompt version: the tag follows its answer schema
+    answer_schema: dict = {}            # {"kind": "legacy" | "eye", "name", "fields": the answer's fields in order}
 
 
 class TagSave(BaseModel):
@@ -580,6 +593,37 @@ class TaggingKey(BaseModel):
     key: str = Field(max_length=512)
 
 
+class TagConvertRequest(BaseModel):
+    key: str = Field(max_length=512)
+    words: str = Field(max_length=2000)
+
+
+class TagConversion(BaseModel):
+    """"In my words" restructured into the clip's answer schema (tagstudio/convert.py): a suggestion for the form."""
+    key: str
+    model: str
+    language: str
+    prompt_version: str
+    schema_name: str
+    fields: dict
+    raw: str
+
+
+class ModelInputView(BaseModel):
+    """What the AI saw of a clip (tagstudio/model_view.py): the JPEG frames, base64, in the order the model got them."""
+    key: str
+    label: str                          # "What the AI sees: crop · 1 fps · 10 frames · 384×384"
+    source: Literal["sent", "recipe", "rendered", "whole"]
+    source_title: str
+    vlm_input: str
+    times: list[Optional[float]]
+    size: Optional[list[int]]
+    sample_fps: float
+    record: dict
+    frames: list[str]
+    prompt_version: str = ""
+
+
 class TaggingExportRequest(BaseModel):
     include_needs_check: bool = False
 
@@ -588,7 +632,45 @@ class TaggingExportOut(BaseModel):
     training_path: str
     eval_path: str
     counts: dict[str, int]
+    sharegpt_path: str = ""             # LLaMA-Factory sharegpt rows: the tag as the box's JSON answer
 
 
 class TeacherAnswer(BaseModel):
     suggestion: Optional[dict] = None
+
+
+# ---------------------------------------------------------------- the Inbox: owner answers from Telegram (0017)
+
+class InboxItem(BaseModel):
+    feedback_id: int
+    event_id: int
+    clip_key: str                      # the Tag · AI key of the clip ("ev:<event id>")
+    customer_id: int
+    customer: str
+    site: str
+    camera: str
+    camera_name: Optional[str]         # the owner's name for the camera, when the box reported one
+    received_utc: Optional[datetime]
+    owner_label: str                   # normal / suspicious / escalation / empty / other / rule_mismatch, or ""
+    owner_text: str
+    transcript: str
+    raw_text: str
+    note: str
+    verdict: str
+    source: str
+    tagged_by: str
+    model_label: Optional[str]         # what the model said (the event's label) and its summary
+    model_summary: str
+    model: Optional[str]
+    prompt_version: Optional[str]      # the prompt the clip's AI answer came from (meta teacher.prompt_version)
+    probably_not_label: bool           # no tag, and the box's rule calls the words a question / complaint / command
+    consent_training: bool
+    decision: Optional[Literal["accepted", "fixed", "not_label"]]
+    decided_by: Optional[str]
+    decided_utc: Optional[datetime]
+    decision_note: str = ""
+
+
+class InboxDecisionIn(BaseModel):
+    decision: Literal["accepted", "fixed", "not_label"]
+    note: str = ""

@@ -389,3 +389,8 @@ def test_a_saved_tag_needs_a_category_unless_deleted():
         require_category(None, {"raw_label": "suspicious", "description": "x"})
     require_category(None, {"delete": True})
     require_category(Tag("k", {"category": "S2"}), {"needs_check": True})        # a later partial save is fine
+    # a clip answered with the legacy prompt has no category in its schema: its raw label is what it needs
+    legacy = "2026-10-03.tagged-rules-label-animals-why-owner-facts"
+    require_category(None, {"raw_label": "normal", "prompt_version": legacy})
+    with pytest.raises(StudioError, match="raw label"):
+        require_category(None, {"why": "x", "prompt_version": legacy})

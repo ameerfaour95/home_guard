@@ -246,6 +246,17 @@
             "title": "Needs Review",
             "type": "boolean"
           },
+          "preload_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preload Source"
+          },
           "review_frame": {
             "anyOf": [
               {
@@ -2267,6 +2278,16 @@
             "title": "Note",
             "type": "string"
           },
+          "owner_label": {
+            "default": "",
+            "title": "Owner Label",
+            "type": "string"
+          },
+          "owner_text": {
+            "default": "",
+            "title": "Owner Text",
+            "type": "string"
+          },
           "raw_text": {
             "title": "Raw Text",
             "type": "string"
@@ -2278,6 +2299,11 @@
           },
           "source": {
             "title": "Source",
+            "type": "string"
+          },
+          "transcript": {
+            "default": "",
+            "title": "Transcript",
             "type": "string"
           },
           "verdict": {
@@ -2398,6 +2424,235 @@
         "title": "HealthReason",
         "type": "object"
       },
+      "InboxDecisionIn": {
+        "properties": {
+          "decision": {
+            "enum": [
+              "accepted",
+              "fixed",
+              "not_label"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "note": {
+            "default": "",
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "title": "InboxDecisionIn",
+        "type": "object"
+      },
+      "InboxItem": {
+        "properties": {
+          "camera": {
+            "title": "Camera",
+            "type": "string"
+          },
+          "camera_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Camera Name"
+          },
+          "clip_key": {
+            "title": "Clip Key",
+            "type": "string"
+          },
+          "consent_training": {
+            "title": "Consent Training",
+            "type": "boolean"
+          },
+          "customer": {
+            "title": "Customer",
+            "type": "string"
+          },
+          "customer_id": {
+            "title": "Customer Id",
+            "type": "integer"
+          },
+          "decided_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided By"
+          },
+          "decided_utc": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided Utc"
+          },
+          "decision": {
+            "anyOf": [
+              {
+                "enum": [
+                  "accepted",
+                  "fixed",
+                  "not_label"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision"
+          },
+          "decision_note": {
+            "default": "",
+            "title": "Decision Note",
+            "type": "string"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "integer"
+          },
+          "feedback_id": {
+            "title": "Feedback Id",
+            "type": "integer"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "model_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Label"
+          },
+          "model_summary": {
+            "title": "Model Summary",
+            "type": "string"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "owner_label": {
+            "title": "Owner Label",
+            "type": "string"
+          },
+          "owner_text": {
+            "title": "Owner Text",
+            "type": "string"
+          },
+          "probably_not_label": {
+            "title": "Probably Not Label",
+            "type": "boolean"
+          },
+          "prompt_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Version"
+          },
+          "raw_text": {
+            "title": "Raw Text",
+            "type": "string"
+          },
+          "received_utc": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Received Utc"
+          },
+          "site": {
+            "title": "Site",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "tagged_by": {
+            "title": "Tagged By",
+            "type": "string"
+          },
+          "transcript": {
+            "title": "Transcript",
+            "type": "string"
+          },
+          "verdict": {
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feedback_id",
+          "event_id",
+          "clip_key",
+          "customer_id",
+          "customer",
+          "site",
+          "camera",
+          "camera_name",
+          "received_utc",
+          "owner_label",
+          "owner_text",
+          "transcript",
+          "raw_text",
+          "note",
+          "verdict",
+          "source",
+          "tagged_by",
+          "model_label",
+          "model_summary",
+          "model",
+          "prompt_version",
+          "probably_not_label",
+          "consent_training",
+          "decision",
+          "decided_by",
+          "decided_utc"
+        ],
+        "title": "InboxItem",
+        "type": "object"
+      },
       "IndexProblem": {
         "properties": {
           "reason": {
@@ -2516,6 +2771,100 @@
           "purpose"
         ],
         "title": "MediaAccessRequest",
+        "type": "object"
+      },
+      "ModelInputView": {
+        "description": "What the AI saw of a clip (tagstudio/model_view.py): the JPEG frames, base64, in the order the model got them.",
+        "properties": {
+          "frames": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Frames",
+            "type": "array"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "prompt_version": {
+            "default": "",
+            "title": "Prompt Version",
+            "type": "string"
+          },
+          "record": {
+            "additionalProperties": true,
+            "title": "Record",
+            "type": "object"
+          },
+          "sample_fps": {
+            "title": "Sample Fps",
+            "type": "number"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size"
+          },
+          "source": {
+            "enum": [
+              "sent",
+              "recipe",
+              "rendered",
+              "whole"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "source_title": {
+            "title": "Source Title",
+            "type": "string"
+          },
+          "times": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Times",
+            "type": "array"
+          },
+          "vlm_input": {
+            "title": "Vlm Input",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "source",
+          "source_title",
+          "vlm_input",
+          "times",
+          "size",
+          "sample_fps",
+          "record",
+          "frames"
+        ],
+        "title": "ModelInputView",
         "type": "object"
       },
       "PublishMissing": {
@@ -2784,6 +3133,71 @@
         "title": "StaffOut",
         "type": "object"
       },
+      "TagConversion": {
+        "description": "\"In my words\" restructured into the clip's answer schema (tagstudio/convert.py): a suggestion for the form.",
+        "properties": {
+          "fields": {
+            "additionalProperties": true,
+            "title": "Fields",
+            "type": "object"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "language": {
+            "title": "Language",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "prompt_version": {
+            "title": "Prompt Version",
+            "type": "string"
+          },
+          "raw": {
+            "title": "Raw",
+            "type": "string"
+          },
+          "schema_name": {
+            "title": "Schema Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "model",
+          "language",
+          "prompt_version",
+          "schema_name",
+          "fields",
+          "raw"
+        ],
+        "title": "TagConversion",
+        "type": "object"
+      },
+      "TagConvertRequest": {
+        "properties": {
+          "key": {
+            "maxLength": 512,
+            "title": "Key",
+            "type": "string"
+          },
+          "words": {
+            "maxLength": 2000,
+            "title": "Words",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "words"
+        ],
+        "title": "TagConvertRequest",
+        "type": "object"
+      },
       "TagSave": {
         "properties": {
           "fields": {
@@ -2889,6 +3303,12 @@
       },
       "TaggingClip": {
         "properties": {
+          "answer_schema": {
+            "additionalProperties": true,
+            "default": {},
+            "title": "Answer Schema",
+            "type": "object"
+          },
           "assessment": {
             "additionalProperties": true,
             "title": "Assessment",
@@ -2950,6 +3370,11 @@
             "title": "Prefilled From",
             "type": "string"
           },
+          "prompt_version": {
+            "default": "",
+            "title": "Prompt Version",
+            "type": "string"
+          },
           "tag": {
             "anyOf": [
               {
@@ -2986,6 +3411,11 @@
           },
           "eval_path": {
             "title": "Eval Path",
+            "type": "string"
+          },
+          "sharegpt_path": {
+            "default": "",
+            "title": "Sharegpt Path",
             "type": "string"
           },
           "training_path": {
@@ -3316,6 +3746,19 @@
       },
       "Track": {
         "properties": {
+          "entity": {
+            "anyOf": [
+              {
+                "maxLength": 8,
+                "pattern": "^(P|CAR|A)\\d{1,3}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entity"
+          },
           "keyframes": {
             "items": {
               "$ref": "#/components/schemas/Keyframe"
@@ -5086,6 +5529,277 @@
         ]
       }
     },
+    "/v1/inbox": {
+      "get": {
+        "operationId": "list_inbox_v1_inbox_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "from_utc",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From Utc"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to_utc",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To Utc"
+            }
+          },
+          {
+            "in": "query",
+            "name": "customer_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Customer Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "camera",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Camera"
+            }
+          },
+          {
+            "in": "query",
+            "name": "owner_label",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 32,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Owner Label"
+            }
+          },
+          {
+            "in": "query",
+            "name": "handled",
+            "required": false,
+            "schema": {
+              "default": "unhandled",
+              "enum": [
+                "all",
+                "handled",
+                "unhandled"
+              ],
+              "title": "Handled",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "before_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/InboxItem"
+                  },
+                  "title": "Response List Inbox V1 Inbox Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Inbox",
+        "tags": [
+          "inbox"
+        ]
+      }
+    },
+    "/v1/inbox/{feedback_id}/decision": {
+      "delete": {
+        "operationId": "reopen_v1_inbox__feedback_id__decision_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feedback_id",
+            "required": true,
+            "schema": {
+              "title": "Feedback Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxItem"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reopen",
+        "tags": [
+          "inbox"
+        ]
+      },
+      "post": {
+        "operationId": "decide_v1_inbox__feedback_id__decision_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feedback_id",
+            "required": true,
+            "schema": {
+              "title": "Feedback Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InboxDecisionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxItem"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Decide",
+        "tags": [
+          "inbox"
+        ]
+      }
+    },
     "/v1/index/problems": {
       "get": {
         "operationId": "index_problems_v1_index_problems_get",
@@ -5827,6 +6541,52 @@
         ]
       }
     },
+    "/v1/tagging/convert": {
+      "post": {
+        "operationId": "tagging_convert_v1_tagging_convert_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagConvertRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TagConversion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Tagging Convert",
+        "tags": [
+          "tagging"
+        ]
+      }
+    },
     "/v1/tagging/export": {
       "post": {
         "operationId": "tagging_export_v1_tagging_export_post",
@@ -5949,6 +6709,52 @@
           }
         ],
         "summary": "Tagging Media",
+        "tags": [
+          "tagging"
+        ]
+      }
+    },
+    "/v1/tagging/model_input": {
+      "post": {
+        "operationId": "tagging_model_input_v1_tagging_model_input_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaggingKey"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelInputView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Tagging Model Input",
         "tags": [
           "tagging"
         ]

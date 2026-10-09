@@ -41,6 +41,7 @@ from ..access import may_see_thumbnail
 from ..deps import TEXT_MAX, SessionDep, check_length, current_staff, id_in_range, require_id
 from ..models import (AiRun, AnnotationHead, Artifact, AuditLog, Camera, Collection, CollectionItem, Customer,
                       Device, Event, Feedback, IndexProblem, RawRevision, ReviewState, Staff)
+from ..inbox import OWNER_LABELS
 from ..s3 import ETagMismatch
 from ..schemas import (AiRunOut, ArtifactOut, Box, DensityOut, DensityRow, DetectionsOut, DispatchOut, EventDetail,
                        AiStatus, EventKind, EventPage, EventSession, EventSummary, FeedbackOut, FrameBoxes, ReviewCount,
@@ -657,7 +658,9 @@ def get_event(event_id: int, request: Request, staff: Staff = Depends(current_st
                             input_frame_artifact_ids=frame_ids(r)) for r in runs]
         feedback_out = [FeedbackOut(id=f.id, verdict=redact.verdict(f.verdict) if f.verdict else "", action=ident.text(f.action), note="",
                                     raw_text="", source=ident.text(f.source),
-                                    received_utc=f.received_at or fields["start_utc"]) for f in feedback]
+                                    received_utc=f.received_at or fields["start_utc"],
+                                    owner_label=f.owner_label if f.owner_label in OWNER_LABELS else "")
+                        for f in feedback]
         artifacts = [ArtifactOut(id=a.id, role=a.role, s3_key=labeler_artifact_ref(a.id), bytes=a.bytes,
                                  available=a.available, provenance=a.provenance,
                                  detail=_labeler_artifact_detail(a.detail, ident))
@@ -669,7 +672,8 @@ def get_event(event_id: int, request: Request, staff: Staff = Depends(current_st
                             raw_text_artifact_id=r.raw_artifact_id, input_frame_artifact_ids=frame_ids(r))
                    for r in runs]
         feedback_out = [FeedbackOut(id=f.id, verdict=f.verdict, action=f.action, note=f.note, raw_text=f.raw_text,
-                                    source=f.source, received_utc=f.received_at or fields["start_utc"])
+                                    source=f.source, received_utc=f.received_at or fields["start_utc"],
+                                    owner_label=f.owner_label, owner_text=f.owner_text, transcript=f.transcript)
                         for f in feedback]
         artifacts = [ArtifactOut(id=a.id, role=a.role, s3_key=a.s3_key, bytes=a.bytes, available=a.available,
                                  provenance=a.provenance, detail=a.detail if isinstance(a.detail, dict) else None)

@@ -98,6 +98,33 @@ Reply with EXACTLY ONE strict JSON object and nothing else.
 """.strip()
 
 
+LEGACY_PROMPT_VERSION = "2026-10-09.studio-suggest-legacy-v1 (box legacy answer, context-free)"
+
+
+def legacy_prompt(camera: str = "") -> str:
+    """The question for a clip answered with the box's legacy prompt: its answer fields (fleet_contract
+    prompt_schemas.VLM_SCHEMA), judged without the house notes or the hour, like the Eye variant above."""
+    head = prompt(camera).split("What a scene can be", 1)[0].strip()
+    return f"""
+{head}
+
+Fill the fields in this order:
+- "summary": what happens, in one to three short sentences (usually 10 to 25 words). If nobody is there and
+  nothing moves, write exactly "No special activity."
+- "label" and "raw_label" (the same: there are no house notes here): "normal" for ordinary activity, "suspicious"
+  when it is worth a look (trying a handle, looking into windows or cars, a face hidden on purpose while
+  approaching, hiding, climbing), "escalation" for danger or a crime (forced entry, theft, a weapon, violence).
+- "applied_fact_id": an empty string.
+- "serious_behaviour": true if anyone shows a hidden or covered face, tries doors, gates or car doors, or looks
+  into windows or cars; otherwise false.
+- "people", "vehicle_moving", "animals" (not birds): what is visible.
+- "why": the reason for the label, in English, one short sentence.
+- "summary_owner": an empty string.
+
+Reply with EXACTLY ONE strict JSON object and nothing else.
+""".strip()
+
+
 class SuggestError(RuntimeError):
     """The suggestion could not be made (no key, no network, refused model, unusable answer); the message says why."""
 
@@ -216,8 +243,16 @@ class Suggester:
                 found = row
         return found
 
-    def suggest(self, key: str, video: str, camera: str = "", refresh: bool = False) -> Dict[str, Any]:
-        """The suggestion for clip *key* (cached unless *refresh*): ``{key, model, at, fields, cached}``."""
+    def suggest(self, key: str, video: Optional[str], camera: str = "", refresh: bool = False,
+                jpegs: Sequence[bytes] = (), frame_index: Sequence[int] = (), fps: Optional[float] = None,
+                prompt_version: Optional[str] = None) -> Dict[str, Any]:
+        """The suggestion for clip *key* (cached unless *refresh*): ``{key, model, at, fields, cached}``.
+
+        *jpegs*: the model-input frames (model_view.py: what the box sent the AI), with each one's clip frame index
+        (*frame_index*) and the clip's *fps*; without them, frames are sampled from *video*. The answer follows the
+        schema of the clip's *prompt_version*: the box's legacy answer, else the Eye's category form."""
+        from ...fleet_contract import prompt_schemas as ps  # noqa: PLC0415
+
         if not refresh:
             row = self.cached(key)
             if row is not None:
@@ -225,17 +260,24 @@ class Suggester:
         if not self.config.api_key and self._client is None:
             raise SuggestError("No API key for the suggestion model: set OPENROUTER_API_KEY (api_key.env or the "
                                "Admin service's environment)")
-        frames, index, fps = self._frames_for(video)
-        if not frames:
-            raise SuggestError("The clip's video could not be read")
-        import cv2  # noqa: PLC0415
+        legacy = ps.schema_kind(prompt_version) == ps.LEGACY
+        if jpegs:
+            data, index, fps = [bytes(j) for j in jpegs], list(frame_index), fps or 7.0
+        else:
+            frames, index, fps = self._frames_for(video) if video else ([], [], 7.0)
+            import cv2  # noqa: PLC0415
 
-        content: List[Dict[str, Any]] = [{"type": "text", "text": prompt(camera)}]
-        for frame in frames:
-            ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
-            if ok:
-                content.append({"type": "image_url", "image_url": {
-                    "url": "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode("ascii")}})
+            data = []
+            for frame in frames:
+                ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
+                if ok:
+                    data.append(buf.tobytes())
+        if not data:
+            raise SuggestError("The clip's video could not be read")
+        content: List[Dict[str, Any]] = [{"type": "text", "text": legacy_prompt(camera) if legacy else prompt(camera)}]
+        for jpeg in data:
+            content.append({"type": "image_url", "image_url": {
+                "url": "data:image/jpeg;base64," + base64.b64encode(jpeg).decode("ascii")}})
         try:
             if self._client is None:
                 from openai import OpenAI  # noqa: PLC0415
@@ -243,9 +285,12 @@ class Suggester:
                 self._client = OpenAI(api_key=self.config.api_key, base_url=self.config.base_url, timeout=90,
                                       max_retries=1, http_client=_http_client())
             extra = {"reasoning": {"enabled": False}} if "openrouter.ai" in self.config.base_url else None
+            response_format = ({"type": "json_schema", "json_schema": {"name": "legacy_alert", "strict": True,
+                                                                       "schema": ps.VLM_SCHEMA}}
+                               if legacy else RESPONSE_FORMAT)
             response = self._client.chat.completions.create(
                 model=self.config.model, messages=[{"role": "user", "content": content}], temperature=0,
-                response_format=RESPONSE_FORMAT, extra_body=extra)
+                response_format=response_format, extra_body=extra)
             raw = response.choices[0].message.content or ""
         except SuggestError:
             raise
@@ -255,9 +300,16 @@ class Suggester:
         parsed = parse_raw(raw)
         if not parsed:
             raise SuggestError("The suggestion model's answer was not JSON")
-        row = {"key": key, "model": self.config.model, "prompt_version": PROMPT_VERSION,
-               "at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "raw": raw,
-               "fields": to_fields(parsed, index, fps)}
+        if legacy:
+            from .convert import to_form  # noqa: PLC0415
+
+            fields = to_form(parsed, prompt_version)
+        else:
+            fields = to_fields(parsed, index, fps)
+        row = {"key": key, "model": self.config.model,
+               "prompt_version": LEGACY_PROMPT_VERSION if legacy else PROMPT_VERSION,
+               "at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "raw": raw, "fields": fields,
+               "frames": len(data), "from_model_input": bool(jpegs)}
         with self._lock:
             os.makedirs(os.path.dirname(self.cache_path) or ".", exist_ok=True)
             with open(self.cache_path, "a", encoding="utf-8") as f:

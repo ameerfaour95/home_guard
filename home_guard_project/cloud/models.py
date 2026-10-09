@@ -203,6 +203,25 @@ class Feedback(Base):
     scope_camera: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     received_at: Mapped[Optional[datetime]] = mapped_column(TS, nullable=True)
     s3_key: Mapped[str] = mapped_column(String(1024), unique=True)
+    # the owner's tag from Telegram (box feedback.py OWNER_LABELS), the owner's own words, a voice answer's
+    # transcript and who tagged (0017; the box's feedback file already carried them)
+    owner_label: Mapped[str] = mapped_column(String(32), default="", server_default="")
+    owner_text: Mapped[str] = mapped_column(Text, default="", server_default="")
+    transcript: Mapped[str] = mapped_column(Text, default="", server_default="")
+    tagged_by: Mapped[str] = mapped_column(String(128), default="", server_default="")
+
+
+class InboxDecision(Base):
+    """What an admin did with one owner answer in the Inbox (0017): accepted as the starting point of a tag, opened to
+    fix, or not a label (a complaint or a question). One row per answer, the newest decision; audited."""
+    __tablename__ = "inbox_decisions"
+    feedback_id: Mapped[int] = mapped_column(ForeignKey("feedback.id", ondelete="CASCADE"), primary_key=True)
+    decision: Mapped[str] = mapped_column(String(16))
+    note: Mapped[str] = mapped_column(Text, default="", server_default="")
+    staff_id: Mapped[Optional[int]] = mapped_column(ForeignKey("staff.id", ondelete="SET NULL"), nullable=True)
+    staff_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    decided_at: Mapped[datetime] = mapped_column(TS)
+    prompt_version: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)  # the clip's AI prompt version
 
 
 class ReviewState(Base):
