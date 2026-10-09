@@ -287,6 +287,15 @@ _OFFERS_MARK = re.compile(r"(?<!\w)(?:אני\s+)?(?:יכול|יכולה|אוכל
                           r"\b(?:I\s+can|shall\s+I|should\s+I|want\s+me\s+to)\s+(?:mark|save|remember)\b", re.IGNORECASE)
 
 
+def hollow(answer: str) -> bool:
+    """Empathy only, also once the filler is gone ("אני מבין. בפעם הבאה אשתדל..." is "אני מבין." after the box's
+    own cleaning): never sent."""
+    if not isinstance(answer, str) or not answer.strip():
+        return False
+    cleaned = strip_boilerplate(answer)
+    return not cleaned.strip() or empty_reply(cleaned) or empty_reply(answer)
+
+
 def offers_mark(answer: str) -> bool:
     return isinstance(answer, str) and bool(_OFFERS_MARK.search(answer))
 
@@ -662,6 +671,37 @@ class OwnerAgentV2:
                           "daily_from": str(entry.get("daily_from") or ""), "daily_to": str(entry.get("daily_to") or "")}]})
         return ""
 
+    def _correct_time(self, ctx: ToolContext, text: str, now: float) -> Optional[str]:
+        """"מי אמר עד 23:59? ... הם עובדים עד 18:00" (2026-10-09): a statement with a new end time for the people
+        of ONE live mark corrects that mark in code - it replaces it, and the receipt says what it replaced. None
+        when the message is not that (the model reads it)."""
+        book = getattr(self.services, "events", None)
+        marks = km.live_marks(book, now)
+        if not marks:
+            return None
+        for sentence in reversed(re.split(r"(?<=[?!\n])|(?<=\.)\s", text)):     # a question keeps its "?"
+            until = km.until_from_words(sentence, now)
+            if until is None or "?" in sentence:
+                continue
+            mine = [k for k in marks if km.same_people(sentence, str(k.get("text") or ""))]
+            if len(mine) != 1:
+                return None
+            k = mine[0]
+            current = (km.until_from_words(str(k["daily_to"]), now) if k.get("daily_to")
+                       else float(k.get("until") or 0))
+            if current is not None and abs(current - until) < 60:
+                return None                     # nothing to correct: the model answers
+            word = next((w for w in sentence.split() if km.work_group(w) or km.same_people(w, str(k["text"]))), "")
+            if not word:
+                return None
+            args = {"who": str(k.get("text") or ""), "owner_words": word, "replaces": str(k["id"]),
+                    "camera": str(k.get("camera") or "") or "all"}
+            if k.get("camera"):
+                args["scope"] = "camera"
+            self._dispatch(ctx, "mark_known", args, True, ["mark_known"])
+            return "" if _kept_known(ctx.receipts) or ctx.clarification is not None else None
+        return None
+
     def _memory_answer(self, ctx: ToolContext, text: str, snapshot: Any, now: float) -> Optional[str]:
         """"מה אתה זוכר?" lists the live memories; "מה תייגתי היום?" lists today's tags of clips - two different
         things, answered in code."""
@@ -696,7 +736,7 @@ class OwnerAgentV2:
         rewrite with the reason; empathy that is still empty becomes a concrete status of what is live. None: the
         fast model's answer was empty - the big model answers the message."""
         marks = km.live_marks(getattr(self.services, "events", None), now)
-        empty = empty_reply(answer) and not any(r.status == DONE for r in ctx.receipts)
+        empty = hollow(answer) and not any(r.status == DONE for r in ctx.receipts)
         offer = bool(marks) and offers_mark(answer) and not any(r.tool == "mark_known" for r in ctx.receipts)
         if not empty and not offer:
             return answer
@@ -720,7 +760,7 @@ class OwnerAgentV2:
             return again
         if unbacked_claims(again, ctx.receipts):
             again = honest_answer(again, ctx.receipts, ctx.lang, ctx.text)
-        if (empty_reply(again) or not again.strip()) and not any(r.status == DONE for r in ctx.receipts):
+        if (hollow(again) or not again.strip()) and not any(r.status == DONE for r in ctx.receipts):
             return live_status(self.services, snapshot, ctx.lang, now)
         if bool(marks) and offers_mark(again) and not any(r.tool == "mark_known" for r in ctx.receipts):
             return live_status(self.services, snapshot, ctx.lang, now)
@@ -1308,6 +1348,14 @@ class OwnerAgentV2:
                 return self._undo(chat_id, house_out.undo, who)
             called += [r.tool for r in ctx.receipts]
         code_only = house_out.handled and not house_out.rest
+        if known_done is None and choice is None and snapshot is not None:
+            try:
+                known_done = self._correct_time(ctx, text, now)
+            except Exception as exc:  # noqa: BLE001 - the model still reads the message
+                log.warning("Time correction not done in code: %s", exc)
+                known_done = None
+            if known_done is not None:
+                called += [r.tool for r in ctx.receipts]
         if known_done is None and choice is None and snapshot is not None:
             try:
                 listed = self._memory_answer(ctx, text, snapshot, now)

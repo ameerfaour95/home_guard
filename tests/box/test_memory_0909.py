@@ -236,6 +236,23 @@ class CorrectionTest(Base):
         self.assertIn("בכל הבית", line)
         self.assertIn("(במקום רק בפרגולה", line)
 
+    def test_the_0934_correction_is_done_in_code(self) -> None:
+        old = self.events.mark_known(PERGOLA, "עובדים אצלי על הפרגולה", "Ameer",
+                                     dt.datetime(2026, 10, 9, 23, 59).timestamp(), now=NOW)
+        self.clock = dt.datetime(2026, 10, 9, 9, 34).timestamp()
+        big = Scripted([])                                                      # no model is needed
+        out = self.agent(big).handle("מי אנר עד 23:59? זה נשמע לך הגיוני? הם עובדים עד 18:00 משהו כזה", "-5", OWNER)
+        self.assertEqual(big.seen, [])
+        self.assertTrue(out.text.startswith("🧠 עדכנתי: עובדים אצלי על הפרגולה בפרגולה"), out.text)
+        self.assertIn("(במקום 23:59)", out.text)
+        (mark,) = self.events.list_known(self.clock)
+        self.assertNotEqual(mark["id"], old["id"])
+        self.assertEqual(mark["daily_to"], "18:00")
+        # A question about the time corrects nothing.
+        q = Scripted([reply("העובדים מסומנים עד 18:00.")])
+        self.agent(q).handle("הם עובדים עד 17:00?", "-5", OWNER)
+        self.assertEqual(self.events.list_known(self.clock)[0]["daily_to"], "18:00")
+
     def test_a_house_mark_is_not_narrowed_without_only(self) -> None:
         self.events.mark_known("", "העובדים", "Ameer", WEEK_END, now=NOW, daily_from="08:00", daily_to="18:00")
         ctx = self.ctx("שמור מידע\nהמידע זה עובדים אצלי על הפרגולה")
