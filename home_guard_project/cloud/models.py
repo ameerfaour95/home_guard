@@ -318,6 +318,13 @@ class OwnerNotice(Base):
     s3_key: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
     # True while the S3 notice object could not be written; cleared when a retry uploads it
     pending_upload: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    # push delivery to the box over SSH (cloud/notice_delivery.py, migration 0019): pending|delivered|failed|gave_up
+    delivery_state: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    delivery_since: Mapped[Optional[datetime]] = mapped_column(TS, nullable=True)
+    delivery_attempts: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    delivery_heartbeat_at: Mapped[Optional[datetime]] = mapped_column(TS, nullable=True)
+    last_delivery_error: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    delivery_body_sha: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 
 
 # ---------------------------------------------------------------- in-app labeling (migration 0011)
