@@ -133,7 +133,7 @@ class LabelCanvas(VideoCanvas):
             if tr.source in ('yolo', 'suggestion'): pen.setStyle(Qt.PenStyle.DashLine)
             p.setPen(pen); p.setBrush(Qt.BrushStyle.NoBrush); p.drawRect(r)
             caption = names.get(tr.track_id, tr.label) + (machine_tag(self.doc) if tr.source in ('yolo', 'suggestion') else '')
-            tag = QRectF(r.x(), max(self.display_rect()[1], r.y()-25), p.fontMetrics().horizontalAdvance(caption)+16, 25)
+            tag = QRectF(r.x(), max(0., self.display_rect()[1], r.y()-25), p.fontMetrics().horizontalAdvance(caption)+16, 25)
             p.fillRect(tag, color); p.setPen(QColor('#07181b')); p.drawText(tag, Qt.AlignmentFlag.AlignCenter, caption)
             if tr.track_id == self.doc.selected:
                 p.setPen(QPen(color, 1.5)); p.setBrush(QColor('#edf4f6'))
