@@ -2773,6 +2773,100 @@
         "title": "MediaAccessRequest",
         "type": "object"
       },
+      "ModelInputView": {
+        "description": "What the AI saw of a clip (tagstudio/model_view.py): the JPEG frames, base64, in the order the model got them.",
+        "properties": {
+          "frames": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Frames",
+            "type": "array"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "prompt_version": {
+            "default": "",
+            "title": "Prompt Version",
+            "type": "string"
+          },
+          "record": {
+            "additionalProperties": true,
+            "title": "Record",
+            "type": "object"
+          },
+          "sample_fps": {
+            "title": "Sample Fps",
+            "type": "number"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size"
+          },
+          "source": {
+            "enum": [
+              "sent",
+              "recipe",
+              "rendered",
+              "whole"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "source_title": {
+            "title": "Source Title",
+            "type": "string"
+          },
+          "times": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Times",
+            "type": "array"
+          },
+          "vlm_input": {
+            "title": "Vlm Input",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "source",
+          "source_title",
+          "vlm_input",
+          "times",
+          "size",
+          "sample_fps",
+          "record",
+          "frames"
+        ],
+        "title": "ModelInputView",
+        "type": "object"
+      },
       "PublishMissing": {
         "properties": {
           "event_id": {
@@ -6475,6 +6569,52 @@
           }
         ],
         "summary": "Tagging Media",
+        "tags": [
+          "tagging"
+        ]
+      }
+    },
+    "/v1/tagging/model_input": {
+      "post": {
+        "operationId": "tagging_model_input_v1_tagging_model_input_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaggingKey"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelInputView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Tagging Model Input",
         "tags": [
           "tagging"
         ]

@@ -228,6 +228,74 @@ class TagStudio:
                 out[kind] = (False, f"no {name} in the local copy")
         return out
 
+    def clip_meta(self, session, item: ClipItem) -> Dict[str, Any]:
+        """The clip's meta: an indexed event's newest revision, else the local copy's file; {} when none."""
+        if item.event_id and session is not None:
+            from .. import labeling  # noqa: PLC0415
+
+            meta = labeling.meta_body(session, item.event_id)
+            if meta:
+                return meta
+        if item.meta_path:
+            try:
+                with open(item.meta_path, encoding="utf-8") as f:
+                    meta = json.load(f)
+                return meta if isinstance(meta, dict) else {}
+            except (OSError, ValueError):
+                return {}
+        return {}
+
+    def model_input(self, session, key: str, s3=None) -> Dict[str, Any]:
+        """What the AI saw of the clip (model_view.py: the frames the box sent, else its recipe, else rendered like
+        the box), with the clip's prompt version; 404 when there is nothing to show."""
+        import tempfile  # noqa: PLC0415
+
+        from . import model_view  # noqa: PLC0415
+
+        item, _ = self._item(session, key)
+        meta = self.clip_meta(session, item)
+        # a local copy first (no download), else the event's files in storage
+        sent = model_view.local_sent_frames(meta, item.meta_path) if item.meta_path else []
+        view = model_view.build(meta, sent, item.crop or None, item.video or None)
+        if view is None and item.event_id and session is not None and s3 is not None:
+            with tempfile.TemporaryDirectory(prefix="hg_model_input_") as work:
+                view = model_view.build(meta, *self._event_model_files(session, item, s3, work))
+        if view is None:
+            raise StudioError("Nothing the AI saw is saved for this clip: no frames, no crop and no clip", 404)
+        prompt_version = (meta.get("teacher") or {}).get("prompt_version") or ""
+        return {**view.as_dict(), "key": key, "prompt_version": prompt_version}
+
+    def _event_model_files(self, session, item: ClipItem, s3, work: str):
+        """(sent frames, crop path, clip path) of an indexed event: the guard run's input frames (all or none) and
+        the crop / clip videos downloaded into `work` (only what the view will need)."""
+        from sqlalchemy import select  # noqa: PLC0415
+
+        from ..models import AiRun, Artifact  # noqa: PLC0415
+
+        run = session.scalar(select(AiRun).where(AiRun.event_id == item.event_id, AiRun.purpose == "guard")
+                             .order_by(AiRun.id.desc()).limit(1))
+        ids = [i for i in (run.input_artifact_ids or []) if isinstance(i, int)] if run is not None else []
+        arts = {a.id: a for a in session.scalars(select(Artifact).where(Artifact.id.in_(ids)))} if ids else {}
+        sent: List[bytes] = []
+        if ids and all(i in arts and arts[i].available for i in ids):
+            try:
+                sent = [s3.get_bytes(arts[i].s3_key) for i in ids]
+            except Exception:  # noqa: BLE001 - unreadable frames: the view is rendered instead
+                sent = []
+        if sent:
+            return sent, None, None
+        paths = {}
+        for kind in ("crop", "clip"):
+            art = session.get(Artifact, item.artifacts[kind]) if kind in item.artifacts else None
+            if art is not None and art.available:
+                path = os.path.join(work, f"{kind}.mp4")
+                try:
+                    s3.download_to(art.s3_key, path)
+                    paths[kind] = path
+                except Exception:  # noqa: BLE001
+                    log.warning("could not fetch the %s of %s", kind, item.key)
+        return [], paths.get("crop"), paths.get("clip")
+
     def local_media(self, item: ClipItem, kind: str) -> Optional[str]:
         path = item.video if kind == "clip" else item.crop if kind == "crop" else ""
         return path if path and os.path.isfile(path) else None

@@ -589,6 +589,21 @@ class TaggingKey(BaseModel):
     key: str = Field(max_length=512)
 
 
+class ModelInputView(BaseModel):
+    """What the AI saw of a clip (tagstudio/model_view.py): the JPEG frames, base64, in the order the model got them."""
+    key: str
+    label: str                          # "What the AI sees: crop · 1 fps · 10 frames · 384×384"
+    source: Literal["sent", "recipe", "rendered", "whole"]
+    source_title: str
+    vlm_input: str
+    times: list[Optional[float]]
+    size: Optional[list[int]]
+    sample_fps: float
+    record: dict
+    frames: list[str]
+    prompt_version: str = ""
+
+
 class TaggingExportRequest(BaseModel):
     include_needs_check: bool = False
 
