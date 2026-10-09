@@ -307,20 +307,32 @@ class ContextTest(Base):
         self.events.mark_known(PERGOLA, "העובדים על הפרגולה", "Ameer", dt.datetime(2026, 10, 9, 18, 0).timestamp(),
                                now=NOW)
         self.clock = dt.datetime(2026, 10, 9, 9, 45).timestamp()
-        big = Scripted([call("mark_known", who="העובדים", owner_words="שעובדים ליד הפרגולה", camera="all",
-                             until="18:00"), reply("")])
+        big = Scripted([reply("ההתרעה הייתה בכניסה הראשית.")])
         agent = self.agent(big)
         agent.note_alert("-5", dict(ALERT2))
-        out = agent.handle("אמרתי לך יא מטומטם שיש אנשים שעובדים ליד הפרגולה, יש אינטראקציה וזה טבעי", "-5", OWNER)
+        agent.handle("למה שלחת את זה?", "-5", OWNER)
         block = big.seen[0][0][-1]
         self.assertIn("[LIVE MARKS]", block)
         self.assertIn('"העובדים על הפרגולה" at פרגולה until 18:00', block)
         self.assertIn("[NOT COVERED]", block)
         self.assertIn("כניסה ראשית", block.split("[NOT COVERED]")[1])
-        self.assertTrue(out.text.startswith("צודק."), out.text)                # names the mistake...
-        self.assertIn("🧠 עדכנתי: העובדים בכל הבית", out.text)                  # ...and fixes it
-        self.assertIn("(במקום רק בפרגולה", out.text)
-        self.assertNotIn("אם תרצה", out.text)
+
+    def test_the_0945_complaint_names_the_mistake_and_fixes_it(self) -> None:
+        self.events.mark_known(PERGOLA, "העובדים על הפרגולה", "Ameer", dt.datetime(2026, 10, 9, 18, 0).timestamp(),
+                               now=NOW)
+        self.clock = dt.datetime(2026, 10, 9, 9, 45).timestamp()
+        big = Scripted([])                                                  # certain: fixed in code
+        agent = self.agent(big)
+        agent.note_alert("-5", dict(ALERT2))
+        out = agent.handle("אמרתי לך יא מטומטם שיש אנשים שעובדים ליד הפרגולה, יש אינטראקציה וזה טבעי", "-5", OWNER)
+        self.assertEqual(big.seen, [])
+        lines = out.text.split("\n")
+        self.assertEqual(lines[0], "צודק, סימנתי אותם רק בפרגולה.")         # names the mistake...
+        self.assertTrue(lines[1].startswith("🧠 עדכנתי: העובדים על הפרגולה בכל הבית"), lines[1])   # ...fixes it
+        self.assertIn("(במקום רק בפרגולה", lines[1])
+        (mark,) = self.events.list_known(self.clock)
+        self.assertEqual(mark["camera"], "")
+        self.assertFalse(self.events.decide(ENTRANCE, self.clock + 60, "suspicious", 2).notify)
 
     def test_an_offer_of_a_live_mark_is_rewritten(self) -> None:
         self.events.mark_known(PERGOLA, "העובדים", "Ameer", dt.datetime(2026, 10, 9, 18, 0).timestamp(), now=NOW)

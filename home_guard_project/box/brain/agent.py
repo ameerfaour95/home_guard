@@ -702,6 +702,37 @@ class OwnerAgentV2:
             return "" if _kept_known(ctx.receipts) or ctx.clarification is not None else None
         return None
 
+    def _fix_gap(self, ctx: ToolContext, text: str, snapshot: Any, alert: Optional[Dict[str, Any]],
+                 now: float) -> Optional[str]:
+        """09:45 (2026-10-09): the alert being discussed came from a camera no mark covers, a live mark of a work
+        crew exists, and the owner says it was those people ("אמרתי לך שיש אנשים שעובדים ליד הפרגולה"). What is
+        certain is fixed in code: the crew's mark becomes the whole house (they move around it), and the reply names
+        the mistake: "צודק, סימנתי רק בפרגולה." plus the 🧠 line. None otherwise (the model answers)."""
+        if "?" in text or ctx.state.prefs.get("group_scope") == "camera":
+            return None
+        marks = km.live_marks(getattr(self.services, "events", None), now)
+        camera, _ = _event_camera(ctx.state, snapshot, alert, now)
+        if not marks or not camera or any(km.covers(k, camera) for k in marks):
+            return None
+        handle = ctx.state.topic_event(now)
+        entry = ctx.state.handles.get(handle) if handle else None
+        if not alert and not (isinstance(entry, dict) and now - float(entry.get("ts") or 0) <= 1800):
+            return None                                   # only about a recent alert
+        crews = [k for k in marks if km.work_group(str(k.get("text") or "")) and km.same_people(text, str(k["text"]))]
+        if len(crews) != 1:
+            return None
+        k = crews[0]
+        word = next((w for w in text.split() if km.work_group(w)), "")
+        if not word:
+            return None
+        before = in_place(display(snapshot, str(k.get("camera") or ""), ctx.lang), ctx.lang)
+        self._dispatch(ctx, "mark_known", {"who": str(k.get("text") or ""), "owner_words": word, "camera": "all",
+                                           "replaces": str(k["id"])}, True, ["mark_known"])
+        if not _kept_known(ctx.receipts):
+            return None
+        ctx.state.prefs["group_scope"] = km.HOUSE
+        return t("you_are_right_only_at", ctx.lang, camera=before)
+
     def _memory_answer(self, ctx: ToolContext, text: str, snapshot: Any, now: float) -> Optional[str]:
         """"מה אתה זוכר?" lists the live memories; "מה תייגתי היום?" lists today's tags of clips - two different
         things, answered in code."""
@@ -1351,6 +1382,8 @@ class OwnerAgentV2:
         if known_done is None and choice is None and snapshot is not None:
             try:
                 known_done = self._correct_time(ctx, text, now)
+                if known_done is None:
+                    known_done = self._fix_gap(ctx, text, snapshot, alert, now)
             except Exception as exc:  # noqa: BLE001 - the model still reads the message
                 log.warning("Time correction not done in code: %s", exc)
                 known_done = None
@@ -1462,6 +1495,10 @@ class OwnerAgentV2:
                         # Never "I'll remember" / "רשמתי כהתרעה צפויה" without the receipt of that action: the
                         # claim goes, and one plain line says what was NOT done.
                         answer = honest_answer(answer, ctx.receipts, lang, ctx.text)
+                        if "known" in still and km.live_marks(getattr(self.services, "events", None), now):
+                            # "עדיין לא שמרתי מי הם" is false when they ARE remembered (2026-10-09 replay): say
+                            # what is live instead.
+                            answer = live_status(self.services, snapshot, lang, now)
                 if ctx.clarification is None and not _kept_known(ctx.receipts):
                     answer = self._second_look(ctx, model, messages, tier, usage, called, answer, snapshot, now)
                     if answer is None:              # the fast model's answer was empty empathy: the big one answers
