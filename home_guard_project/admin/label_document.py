@@ -145,12 +145,38 @@ class LabelDocument(QObject):
         return True
 
     def toggle_keyframe(self):
+        """K: removes the keyframe here, or adds one with the box seen here. Where the track shows no box (before its
+        first keyframe, after its end, inside a hidden O segment) the new keyframe copies the nearest keyframe's box
+        and makes the track visible from this frame: before the start or past the end the track is extended (the
+        span up to its nearest visible keyframe is interpolated, and a track that had ended still ends right after
+        the new keyframe); inside a hidden segment it shows from here on and the frames before stay hidden."""
         if self.keyframe():
             self.delete_keyframe()
         elif self.track:
             box = box_at(self.track, self.t_sec)
             if box:
                 self.put_box(box, self.track)
+            else:
+                self.extend_track(self.track)
+
+    def extend_track(self, track):
+        kfs = track.keyframes
+        if not kfs:
+            return
+        before = list(kfs)
+        shown = [k for k in kfs if k.enabled] or kfs
+        nearest = min(shown, key=lambda k: abs(k.t_sec - self.t_sec))
+        last_shown = max((k.t_sec for k in kfs if k.enabled), default=None)
+        if last_shown is not None and self.t_sec > last_shown:
+            # past the end: the end marker(s) after the last visible keyframe move to just after this frame
+            tail = [k for k in kfs if k.t_sec > last_shown]
+            if tail and all(not k.enabled and k.t_sec < self.t_sec for k in tail):
+                for k in tail:
+                    kfs.remove(k)
+                if self.frame+1 < self.frame_count:
+                    kfs.append(Keyframe(self.frame+1, self.time_for(self.frame+1), list(nearest.xyxy), False))
+        if not self.put_box(list(nearest.xyxy), track):   # one undo step for the whole extension
+            kfs[:] = before
 
     def set_enabled(self, enabled=None):
         tr = self.track
