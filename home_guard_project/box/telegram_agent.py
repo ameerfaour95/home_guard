@@ -611,6 +611,19 @@ class OwnerAssistant:
             return self._release(alert_id, "") or self._deliver(alert, text, image, silent, lang, reply_to=reply_to)
         return {"sent": True, "held": "waiting for the video"}
 
+    def update_held(self, alert_id: str, text: str) -> bool:
+        """Replace the text of an alert still waiting for its video (the alert message v2, describer.py). False when
+        it is not waiting (already sent, or never held): then the owner has the old text and nothing changes. The
+        hold's timer is not touched."""
+        if not text or not str(text).strip():
+            return False
+        with self._held_lock:
+            held = self._held.get(str(alert_id))
+            if held is None:
+                return False
+            held["text"] = str(text)
+            return True
+
     def _deliver(self, alert: Dict[str, Any], text: str, image: Optional[bytes], silent: bool, lang: str,
                  video: Optional[str] = None, reply_to: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         res = send_alert(self.cfg, self.index, alert, text, image, post=telegram_notify._http_post,
