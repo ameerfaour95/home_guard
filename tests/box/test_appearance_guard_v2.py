@@ -48,6 +48,11 @@ class AppearanceGuardTest(unittest.TestCase):
         self.assertTrue(appearance_only("אישה אחת לובשת מסכה"))
         self.assertFalse(appearance_only("אדם אחד מסתיר את פניו במסכה ומנסה לפתוח את הדלת"))
 
+    def test_hebrew_conduct_due_to_dark_suit_and_mask_is_lowered(self):
+        # 2026-10-09 21:34, pergola: "התנהלות", "חליפת" and "המסתירה" were not filler words.
+        self.assertTrue(appearance_only("התנהלות חשודה עקב חליפת בגדים כהה ומסכה המסתירה את הפנים"))
+        self.assertFalse(appearance_only("התנהלות חשודה עקב מסכה המסתירה את הפנים וניסיון לפתוח חלון"))
+
 
 if __name__ == "__main__":
     unittest.main()
