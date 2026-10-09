@@ -2763,7 +2763,7 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
         if label == "escalation":
             from .alert_guards import answer_names, verify_classes  # noqa: PLC0415
 
-            classes = verify_classes(f"{why} {reason} {summary}")
+            classes = verify_classes(f"{why} {reason} {summary}", reason=f"{why} {reason}")
             if classes:
                 look = second_look(backend, frames, classes, lang)
                 decision["second_look"] = look

@@ -164,6 +164,30 @@ VERIFY_PATTERNS = {
 }
 VERIFY_ORDER = ("weapon", "tool_weapon", "vehicle", "violence")
 
+# The tool question is only for a tool that is THERE - held, carried, lying near someone - not for a red that already
+# names what was done with it. eval_set_v2 (2026-10-09, qwen3.5-9b, 5 frames): asked the tool question, the second
+# look said "no" on 11 of 14 real tool alerts it was shown (a baton beating, a window pried with a tool, a glass door
+# smashed, a car window broken with a tool...). So when the red names an act - hitting, swinging, smashing, prying,
+# forcing, cutting, throwing, threatening, attacking, stealing, using it on a door, lock or car - there is no tool
+# question and the red goes on as before (its own vehicle / violence look, or out at once).
+TOOL_IN_USE = _any([
+    r"\bswing", r"\bswung", r"\bwield", r"\bbrandish", r"\bstrik", r"\bstruck", r"\bhit", r"\bbeat", r"\bbash",
+    r"\bsmash", r"\bshatter", r"\bbreak", r"\bbroke", r"\bpr(?:y|ies|ied|ying)\b", r"\bforc", r"\bcut",
+    r"\bthrow", r"\bthrew", r"\bthrown", r"\bthreat", r"\bmenac", r"\baggress", r"\bviolen", r"\battack", r"\bassault",
+    r"\bfight", r"\bdamag", r"\bvandal", r"\bsteal", r"\bstole", r"\btheft", r"\brob", r"\bburgl", r"\btamper",
+    r"\bpoint(?:s|ed|ing)? (?:\w+ ){0,3}at\b", r"\bjab", r"\bpok(?:e|es|ed|ing)\b", r"\bchas",
+    # ...or a red about something else (a theft, a getaway, a way in) where a tool is only one of the things seen
+    r"\bload", r"\bgrab", r"\bsnatch", r"\btak(?:e|es|ing|en)\b", r"\btook\b", r"\bremov", r"\bloot",
+    r"\bcarr\w* (?:\w+ ){0,5}(?:away|off|out of)\b", r"\bdriv\w* (?:\w+ ){0,2}away", r"\bflee", r"\bfled",
+    r"\bran away", r"\brun(?:s|ning)? (?:away|off)", r"\benter", r"\bclimb", r"\bsneak",
+    r"\b(?:us(?:e|es|ed|ing)|work(?:s|ed|ing)?) (?:\w+ ){0,5}on (?:the |a |an |its |his |her )?(?:\w+ )?"
+    r"(?:doors?|windows?|locks?|cars?|vehicles?|gates?|shutters?|handles?|motorcycles?|bikes?)",
+    r"מניף", r"הניף", r"מכה", r"מכים", r"היכה", r"הכה", r"חובט", r"תוקף", r"תקיפה", r"מאיים", r"איום", r"אלימות",
+    r"שובר", r"שבר", r"מנפץ", r"ניפץ", r"פורץ", r"פריצה", r"לפרוץ", r"חותך", r"זורק", r"זרק", r"גונב", r"גניבה",
+    r"משחית", r"ונדליזם", r"רודף", r"מכוון",
+    r"מעמיס", r"העמיס", r"חוטף", r"חטף", r"לוקח", r"לקח", r"בורח", r"ברח", r"נכנס", r"מטפס", r"מתגנב",
+])
+
 # Clear serious things go out red at once, even when a verify word is there too.
 CLEAR = _any([
     r"\bfire\b", r"\bflames?\b", r"\bsmoke\b", r"\blying motionless", r"\bunconscious", r"\bnot moving on the ground",
@@ -192,13 +216,21 @@ def clear_class(text: str) -> bool:
     return bool(CLEAR.search(str(text or "")))
 
 
-def verify_classes(text: str) -> List[str]:
+def verify_classes(text: str, reason: Optional[str] = None) -> List[str]:
     """Every second-look class *text* points to, in ``VERIFY_ORDER``; [] when it needs none (no verify word, or a
-    clear class that goes out at once)."""
+    clear class that goes out at once).
+
+    ``tool_weapon`` only when the tool is the red's reason and nothing was done with it: named in *reason* (the
+    model's why + alert_reason; *text* when *reason* is None or empty) while *text* names no act (:data:`TOOL_IN_USE`).
+    A tool only in the summary of a red that is about something else (a theft, a break-in) is left alone."""
     text = str(text or "")
     if clear_class(text):
         return []
-    return [name for name in VERIFY_ORDER if VERIFY_PATTERNS[name].search(text)]
+    found = [name for name in VERIFY_ORDER if name != "tool_weapon" and VERIFY_PATTERNS[name].search(text)]
+    why = str(reason or "").strip() or text
+    if VERIFY_PATTERNS["tool_weapon"].search(why) and not TOOL_IN_USE.search(text):
+        found.append("tool_weapon")
+    return [name for name in VERIFY_ORDER if name in found]
 
 
 def verify_class(text: str) -> Optional[str]:
