@@ -639,6 +639,37 @@ def _tracker_person_conf(value: Any) -> float:
     return number
 
 
+# The vision model's time budget per alert. On the 2026-10-03 eval (584 clips, Qwen3.5-9B and Qwen3-VL-8B on
+# OpenRouter) a call took 3.2 s median, 10.6 s p95, 19.7 s p99: 25 s cuts under 1% over to the fallback, and the main
+# model plus the fallback fit in about a minute. No SDK retries: a second try of the same model is the fallback's job.
+VLM_TIMEOUT_SEC = 25.0
+VLM_MAX_RETRIES = 0
+
+
+def _vlm_timeout(value: Any) -> float:
+    """box.yaml ``vlm_timeout_sec`` (5-120 s); anything else is the default."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        number = float("nan")
+    if not 5.0 <= number <= 120.0:
+        log.warning("Unusable vlm_timeout_sec %r; using %.0f.", value, VLM_TIMEOUT_SEC)
+        return VLM_TIMEOUT_SEC
+    return number
+
+
+def _vlm_retries(value: Any) -> int:
+    """box.yaml ``vlm_max_retries`` (0-3); anything else is the default."""
+    try:
+        number = int(value)
+    except (TypeError, ValueError, OverflowError):
+        number = -1
+    if not 0 <= number <= 3:
+        log.warning("Unusable vlm_max_retries %r; using %d.", value, VLM_MAX_RETRIES)
+        return VLM_MAX_RETRIES
+    return number
+
+
 @dataclass(frozen=True)
 class AlertSettings:
     alert_start_hour: int = 0
@@ -652,6 +683,10 @@ class AlertSettings:
     vlm_provider: str = "openai"        # providers.PROVIDERS: openai | openrouter | ollama | vllm | dashscope-intl
     vlm_fallback_provider: str = ""     # asked once when the main model fails (the other 4B Qwen)
     vlm_fallback_model: str = ""        # empty: no fallback
+    # One model's whole call, retries included, is capped at this; the main model and the fallback together fit in
+    # about a minute (2026-10-09 ch1: two models x 3 tries x 30 s took 200 s and the owner got a bare alert).
+    vlm_timeout_sec: float = VLM_TIMEOUT_SEC
+    vlm_max_retries: int = VLM_MAX_RETRIES   # the SDK's own retries per model; the fallback is the real retry
     alert_channel: str = "telegram"  # telegram | twilio | both
     dry_run: bool = False
     quiet_log: bool = False         # opt-in recording outside the owner's alert hours
@@ -692,6 +727,8 @@ class AlertSettings:
             vlm_provider=str(g("vlm_provider", "openai") or "openai").strip().lower(),
             vlm_fallback_provider=str(g("vlm_fallback_provider", "") or "").strip().lower(),
             vlm_fallback_model=str(g("vlm_fallback_model", "") or "").strip(),
+            vlm_timeout_sec=_vlm_timeout(g("vlm_timeout_sec", VLM_TIMEOUT_SEC)),
+            vlm_max_retries=_vlm_retries(g("vlm_max_retries", VLM_MAX_RETRIES)),
             alert_channel=str(g("alert_channel", "telegram")),
             dry_run=bool(g("notify_dry_run", False)),
             quiet_log=bool(g("quiet_log", False)),
@@ -787,11 +824,53 @@ def usage_of(resp: Any) -> Dict[str, int]:
             "completion_tokens": int(getattr(u, "completion_tokens", 0) or 0)}
 
 
+class VlmDeadline(TimeoutError):
+    """The vision model gave no answer within the call's whole time budget."""
+
+
+class VlmUnavailable(RuntimeError):
+    """Neither the main vision model nor its fallback answered; *reasons* says why, per model."""
+
+    def __init__(self, reasons: Sequence[str]) -> None:
+        self.reasons = list(reasons)
+        super().__init__("; ".join(self.reasons))
+
+
+# The HTTP timeout is per read, so an answer trickling in (or keep-alive bytes) could run past it: the whole call
+# also has a wall-clock cap, the timeout plus this much.
+DEADLINE_GRACE_SEC = 3.0
+
+
+def call_with_deadline(fn: Callable[[], Any], seconds: float, what: str = "the vision model") -> Any:
+    """``fn()``, or VlmDeadline after *seconds*. The late call is left to finish on its own daemon thread and its
+    answer is dropped; its exception is re-raised here when it fails in time."""
+    box: Dict[str, Any] = {}
+    done = threading.Event()
+
+    def run() -> None:
+        try:
+            box["value"] = fn()
+        except BaseException as exc:  # noqa: BLE001 - handed to the caller
+            box["error"] = exc
+        finally:
+            done.set()
+
+    threading.Thread(target=run, name="vlm-call", daemon=True).start()
+    if not done.wait(seconds):
+        raise VlmDeadline(f"{what} gave no answer in {seconds:.0f} s")
+    if "error" in box:
+        raise box["error"]
+    return box.get("value")
+
+
 class GptBackend:
     """Any OpenAI-compatible vision model (OpenAI, OpenRouter, Ollama, vLLM). Imports the client lazily."""
 
     def __init__(self, api_key: str, model: str = "gpt-4o", base_url: Optional[str] = None,
-                 extra_body: Optional[Dict[str, Any]] = None, timeout: float = 30.0) -> None:
+                 extra_body: Optional[Dict[str, Any]] = None, timeout: float = 30.0,
+                 max_retries: Optional[int] = None) -> None:
+        """*timeout* caps one call (HTTP timeout and wall clock); *max_retries* is the SDK's own retries (None: its
+        default of 2, each a full *timeout*)."""
         from openai import OpenAI  # noqa: PLC0415
 
         # Use the OS trust store so the call still works where TLS is
@@ -806,11 +885,14 @@ class GptBackend:
         except Exception:  # noqa: BLE001
             http_client = None
         kwargs: Dict[str, Any] = {"api_key": api_key, "timeout": timeout}
+        if max_retries is not None:
+            kwargs["max_retries"] = max_retries
         if base_url:
             kwargs["base_url"] = base_url
         if http_client:
             kwargs["http_client"] = http_client
         self._client = OpenAI(**kwargs)
+        self._timeout = timeout
         self._model = model
         self.model_name = model
         self.last_model = model         # who answered the last call (the gateway names its upstream)
@@ -877,7 +959,14 @@ class GptBackend:
         extra = getattr(self, "_extra_body", None)
         if extra:
             kwargs["extra_body"] = extra
-        return self._client.chat.completions.create(**kwargs)
+        budget = timeout if timeout is not None else getattr(self, "_timeout", None)
+        if not budget:
+            return self._client.chat.completions.create(**kwargs)
+        # The SDK's retries each get a full timeout: the wall clock covers all of them.
+        retries = getattr(self._client, "max_retries", 0)
+        tries = 1 + (max(0, retries) if isinstance(retries, int) else 0)
+        return call_with_deadline(lambda: self._client.chat.completions.create(**kwargs),
+                                  float(budget) * tries + DEADLINE_GRACE_SEC, getattr(self, "_model", "the model"))
 
     def verify(self, frames_bgr: List[Any], question: str, language: str = "English",
                timeout: float = 15.0) -> Optional[Dict[str, Any]]:
@@ -943,9 +1032,20 @@ class FallbackBackend:
             reason = "the answer was not a JSON object"
         except Exception as exc:  # noqa: BLE001 - any failure goes to the fallback
             reason = f"{type(exc).__name__}: {exc}"
-        log.warning("[%s] VLM fallback to %s: %s", camera_name, getattr(self.fallback, "model_name", "?"), reason)
+        fallback_name = getattr(self.fallback, "model_name", "?")
+        log.warning("[%s] VLM fallback to %s: %s", camera_name, fallback_name, reason)
         self._last = self.fallback
-        return self.fallback.analyze(frames_bgr, camera_name, t_sec, start_hour, end_hour, **kwargs)
+        first = f"{getattr(self.primary, 'model_name', '?')}: {reason}"
+        try:
+            raw, parsed = self.fallback.analyze(frames_bgr, camera_name, t_sec, start_hour, end_hour, **kwargs)
+        except Exception as exc:  # noqa: BLE001 - said once, plainly, then the caller's detector-only alert
+            reasons = [first, f"{fallback_name}: {type(exc).__name__}: {exc}"]
+            log.warning("[%s] VLM: both models failed (%s)", camera_name, "; ".join(reasons))
+            raise VlmUnavailable(reasons) from exc
+        if not isinstance(parsed, dict):
+            log.warning("[%s] VLM: both models failed (%s; %s: the answer was not a JSON object)",
+                        camera_name, first, fallback_name)
+        return raw, parsed
 
 
     def verify(self, frames_bgr: List[Any], question: str, language: str = "English",
@@ -975,9 +1075,10 @@ def verify_answer(parsed: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
             "evidence_frame": max(0, frame)}
 
 
-def build_gpt(provider: str, model: str, env: Mapping[str, str], timeout: float = 30.0) -> GptBackend:
+def build_gpt(provider: str, model: str, env: Mapping[str, str], timeout: float = 30.0,
+              max_retries: Optional[int] = None) -> GptBackend:
     key, base_url, extra_body = providers.resolve(provider, env, model)
-    return GptBackend(key, model, base_url=base_url, extra_body=extra_body, timeout=timeout)
+    return GptBackend(key, model, base_url=base_url, extra_body=extra_body, timeout=timeout, max_retries=max_retries)
 
 
 def make_backend(settings: AlertSettings, env: Dict[str, str]):
@@ -991,8 +1092,9 @@ def make_backend(settings: AlertSettings, env: Dict[str, str]):
         log.warning("Unknown vlm_backend '%s'; using NullBackend.", settings.vlm_backend)
         return NullBackend()
     primary = fallback = None
+    budget = {"timeout": settings.vlm_timeout_sec, "max_retries": settings.vlm_max_retries}
     try:
-        primary = build_gpt(settings.vlm_provider, settings.vlm_model, env)
+        primary = build_gpt(settings.vlm_provider, settings.vlm_model, env, **budget)
     except Exception as exc:  # noqa: BLE001
         log.warning("Vision model %s (%s) cannot be used: %s", settings.vlm_model, settings.vlm_provider, exc)
     wants_fallback = bool(settings.vlm_fallback_model) and (
@@ -1000,11 +1102,13 @@ def make_backend(settings: AlertSettings, env: Dict[str, str]):
     if wants_fallback:
         try:
             fallback = build_gpt(settings.vlm_fallback_provider or settings.vlm_provider,
-                                 settings.vlm_fallback_model, env)
+                                 settings.vlm_fallback_model, env, **budget)
         except Exception as exc:  # noqa: BLE001
             log.warning("Fallback vision model %s (%s) cannot be used: %s",
                         settings.vlm_fallback_model, settings.vlm_fallback_provider, exc)
     if primary is not None and fallback is not None:
+        log.info("Vision model %s, fallback %s; each call up to %.0f s, %d retries",
+                 settings.vlm_model, settings.vlm_fallback_model, settings.vlm_timeout_sec, settings.vlm_max_retries)
         return FallbackBackend(primary, fallback)
     if primary is not None:
         return primary
@@ -2379,6 +2483,8 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
             log.warning("[%s] VLM call failed: %s", camera_name, exc)
             raw, parsed = "", None
         answer, eye_record = parsed, {}
+        # No model answered: the detector's alert still goes out, and says plainly that the AI check did not finish.
+        ai_failed = not isinstance(answer, dict)
         if situation is not None:
             parsed, eye_record = _eye_answer(parsed, situation)
             if job is not None:
@@ -2394,6 +2500,8 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                     "final_label": label, "applied_fact_id": fact["id"] if fact else "",
                     "softened": softened, "fact_effect": fact["effect"] if fact else "",
                     "serious_behaviour": serious is not False}
+        if ai_failed:
+            decision["vlm_failed"] = True
         if job is not None and raw:
             # Everything a student model needs to learn this answer: the exact pictures,
             # the question, and the answer word for word.
@@ -2599,7 +2707,12 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                 # The owner reads the camera's name, never its id (camera_names.display_name).
                 shown_camera = camera_display(camera_name, lang)
                 told_text, owner_why = owner_summary(summary, summary_owner, lang), why
-                if messenger.uses_translator(box_settings, lang):
+                if ai_failed:
+                    from .alert_texts import ai_unavailable  # noqa: PLC0415
+
+                    # Already in the owner's language: nothing for the translator to do.
+                    told_text, owner_why = ai_unavailable(detected_fact_kinds(labels), lang, bool(image)), why if fact else ""
+                elif messenger.uses_translator(box_settings, lang):
                     # A house note's reason is already in the box language; only the model's own why is translated.
                     told = messenger.messenger_for(box_settings, env).to_owner(
                         {"summary": owner_guard(summary, camera_name, lang),
@@ -2627,7 +2740,8 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                 if passed:
                     graded = f"{passed}\n{graded}"
                 graded = owner_guard(graded, camera_name, lang)
-                plain = owner_guard(f"{shown_camera}: {alert_summary(label, summary)}", camera_name, lang)
+                plain = owner_guard(f"{shown_camera}: {told_text if ai_failed else alert_summary(label, summary)}",
+                                    camera_name, lang)
                 thread = {"reply_to": event.reply_to} if event is not None and event.reply_to else {}
                 res = dispatch_alert(box_settings, env, cmd, plain, owner_guard(reason, camera_name, lang),
                                      image=image or None, assistant=assistant, alert=alert_ref, graded=graded,
