@@ -108,5 +108,20 @@ class CheckTest(unittest.TestCase):
         self.assertEqual(self.calls, 0)
 
 
+class StartCheckTest(unittest.TestCase):
+    def test_runs_on_a_daemon_thread_after_the_delay_without_time_sleep(self) -> None:
+        from unittest import mock
+
+        seen = []
+        with mock.patch.object(me, "check", side_effect=lambda s: seen.append(s)),                 mock.patch.object(me.time, "sleep", side_effect=AssertionError("time.sleep used")):
+            t = me.start_check(BOX, every_sec=3600, first_after=0.0)
+            for _ in range(100):
+                if seen:
+                    break
+                t.join(0.02)
+        self.assertTrue(t.daemon)
+        self.assertEqual(seen, [BOX])
+
+
 if __name__ == "__main__":
     unittest.main()

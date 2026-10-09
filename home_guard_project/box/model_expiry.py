@@ -3,7 +3,7 @@
 OpenRouter lists each model's ``expiration_date`` (GET /api/v1/models). 2026-10-09: qwen/qwen3.5-9b (the Eye, the
 second look, the describer) was set to go on 2026-10-21 and google/gemini-2.5-flash-lite (the translator's racer) on
 2026-10-20, and qwen3-vl-32b went that day with no date at all, which broke the Admin's Suggest. So at inference
-start (and daily after), every OpenRouter model box.yaml names (or its defaults) is checked:
+start (a minute after, then daily), every OpenRouter model box.yaml names (or its defaults) is checked:
 
 - an ``expiration_date`` within WARN_DAYS days (or already past) -> a WARNING naming the role, model and date;
 - a model missing from the list -> a WARNING that it is not listed (retired, or the name is wrong).
@@ -164,14 +164,21 @@ def check(box_settings: Mapping[str, Any], cache_path: Optional[str] = None, now
         return []
 
 
-def start_check(box_settings: Mapping[str, Any], every_sec: float = CACHE_MAX_AGE_SEC) -> threading.Thread:
-    """:func:`check` now and then once a day, on a daemon thread (the fetch may take seconds offline)."""
+FIRST_CHECK_AFTER_SEC = 60.0
+
+
+def start_check(box_settings: Mapping[str, Any], every_sec: float = CACHE_MAX_AGE_SEC,
+                first_after: float = FIRST_CHECK_AFTER_SEC) -> threading.Thread:
+    """:func:`check` a minute after start (the cameras come up first) and then once a day, on a daemon thread.
+    It waits on an Event, not ``time.sleep``, so a test that drives the main loop's clock is not touched."""
     settings = dict(box_settings)
+    pause = threading.Event()
 
     def loop() -> None:
+        pause.wait(max(0.0, float(first_after)))
         while True:
             check(settings)
-            time.sleep(max(60.0, float(every_sec)))
+            pause.wait(max(60.0, float(every_sec)))
 
     t = threading.Thread(target=loop, name="model-expiry", daemon=True)
     t.start()
