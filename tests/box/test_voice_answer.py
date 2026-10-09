@@ -125,7 +125,7 @@ class VoiceAnswerTest(unittest.TestCase):
                          ("other", "it was the gardener", "voice", "it was the gardener"))
         (kept,) = self._saved(self.training)
         self.assertEqual(kept["training"]["answer"]["transcript"], "it was the gardener")
-        self.assertTrue(self.tg.texts()[-1].startswith("✓"))
+        self.assertTrue(self.tg.texts()[-1].startswith("🏷️"))
 
     def test_a_plain_voice_message_right_after_other_is_the_answer_too(self) -> None:
         inbox = self._inbox()

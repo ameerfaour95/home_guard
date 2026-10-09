@@ -89,9 +89,25 @@ class Known:
     people: int = 0              # how many were there when the owner said it (0 = not counted)
     camera: str = ""
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:10])
+    # 2026-10-09: a work crew's mark is a daily window ("HH:MM"-"HH:MM" local) on every day until ``until`` (7 days
+    # by default): their working hours are covered, the night and the hours before they come are not.
+    daily_from: str = ""
+    daily_to: str = ""
+    arrived_on: str = ""         # the local day ("YYYY-MM-DD") of the last "the workers arrived" line
+
+    def active(self, now: float) -> bool:
+        """Said and not over (a daily mark: on any of its days, inside its hours or not)."""
+        return self.at <= now < self.until
+
+    def in_window(self, now: float) -> bool:
+        if not (self.daily_from and self.daily_to):
+            return True
+        clock = datetime.fromtimestamp(now).strftime("%H:%M")
+        return self.daily_from <= clock < self.daily_to
 
     def live(self, now: float) -> bool:
-        return self.at <= now < self.until
+        """Covers *now*: active, and inside its daily hours when it has them."""
+        return self.active(now) and self.in_window(now)
 
 
 @dataclass
@@ -116,6 +132,9 @@ class Session:
     # entity`` there, ``to_entity`` here, ``gap_s``, ``score`` (the clothes' cosine or None), ``at``).
     incident_id: str = ""
     incident_from: Dict[str, Any] = field(default_factory=dict)
+    # 2026-10-09: the cross-camera link as seen, in ``shadow`` too (``incident_from`` is written only when on): the
+    # source camera's mark ("the workers at the pergola") covers this session through it (``_known_via_link``).
+    cross_seen: Dict[str, Any] = field(default_factory=dict)
 
     def people_when_said(self, known_id: str) -> int:
         """People present in this session when the owner's words *known_id* were said here (0 when said elsewhere)."""
@@ -149,9 +168,20 @@ class Decision:
     # Stage 3.3: the incident this alert continues (``id, camera, session, entity, to_entity, gap_s, score, mode``;
     # ``thread`` True when it replies in the first camera's thread, ``announce`` when this camera told nothing yet).
     incident: Dict[str, Any] = field(default_factory=dict)
+    # 2026-10-09: a daily mark kept this quiet for the first time on a later day: ``who, camera, at`` for the one
+    # low-key line "העובדים של הפרגולה הגיעו (07:40)" (once per day).
+    arrival: Dict[str, Any] = field(default_factory=dict)
 
     def record(self) -> Dict[str, Any]:
         return asdict(self)
+
+
+def _clock_ok(start: str, end: str) -> bool:
+    try:
+        a, b = datetime.strptime(start, "%H:%M"), datetime.strptime(end, "%H:%M")
+    except (TypeError, ValueError):
+        return False
+    return a < b and len(start) == len(end) == 5
 
 
 def _int(value: Any) -> int:
@@ -236,7 +266,8 @@ class EventBook:
         try:
             with open(self.known_path, encoding="utf-8") as f:
                 rows = json.load(f)
-            self._known = [Known(**r) for r in rows if isinstance(r, dict)]
+            fields = set(Known.__dataclass_fields__)
+            self._known = [Known(**{k: v for k, v in r.items() if k in fields}) for r in rows if isinstance(r, dict)]
         except (OSError, ValueError, TypeError):
             self._known = []
 
@@ -285,7 +316,8 @@ class EventBook:
                         entities=copy.deepcopy(old.entities) if old else [],
                         reported_entities=list(old.reported_entities) if old else [],
                         incident_id=old.incident_id if old else "",
-                        incident_from=dict(old.incident_from) if old else {})
+                        incident_from=dict(old.incident_from) if old else {},
+                        cross_seen=dict(old.cross_seen) if old else {})
             self._open[camera] = s
             return s
         if s is None:
@@ -348,8 +380,11 @@ class EventBook:
             return live[-1] if live else None
 
     def mark_known(self, camera: str, text: str, by: str, until: float, now: Optional[float] = None,
-                   people: Optional[int] = None) -> Dict[str, Any]:
-        """The owner said who is there. Returns a receipt; raises ValueError on a bad request."""
+                   people: Optional[int] = None, daily_from: str = "", daily_to: str = "") -> Dict[str, Any]:
+        """The owner said who is there. Returns a receipt; raises ValueError on a bad request. *daily_from* /
+        *daily_to* ("HH:MM", both or neither) make it a daily window on every day until *until*."""
+        if bool(daily_from) != bool(daily_to) or (daily_from and not _clock_ok(daily_from, daily_to)):
+            raise ValueError("a daily window needs a start and an end, HH:MM, start before end")
         now = time.time() if now is None else now
         text = str(text or "").strip()
         if not text:
@@ -359,7 +394,8 @@ class EventBook:
         with self._lock:
             s = self._open.get(camera)
             count = _int(people) if people is not None else (s.people_max if s else 0)
-            k = Known(text=text[:200], by=str(by or "owner"), at=now, until=until, people=count, camera=camera)
+            k = Known(text=text[:200], by=str(by or "owner"), at=now, until=until, people=count, camera=camera,
+                      daily_from=str(daily_from or ""), daily_to=str(daily_to or ""))
             self._known = [x for x in self._known if x.until > now] + [k]
             self._save_known()
             if s is not None:
@@ -369,7 +405,8 @@ class EventBook:
             log.info("known: %s on %s until %s (%d people)", k.text, camera or "all cameras",
                      datetime.fromtimestamp(until).strftime("%Y-%m-%d %H:%M"), count)
             return {"store": "events.known", "id": k.id, "camera": camera, "text": k.text, "until": until,
-                    "people": count, "undo_token": f"known:{k.id}"}
+                    "people": count, "undo_token": f"known:{k.id}", "daily_from": k.daily_from,
+                    "daily_to": k.daily_to}
 
     def cancel_known(self, known_id: str) -> bool:
         with self._lock:
@@ -380,10 +417,44 @@ class EventBook:
                 return True
             return False
 
-    def list_known(self, now: Optional[float] = None) -> List[Dict[str, Any]]:
+    def replace_known(self, old_ids: Any, camera: str, text: str, by: str, until: float,
+                      now: Optional[float] = None, people: Optional[int] = None, daily_from: str = "",
+                      daily_to: str = "") -> Dict[str, Any]:
+        """The owner corrected a mark (its time, camera or words, 2026-10-09: "מי אמר עד 23:59? ... עד 18:00" left
+        both marks live): the new mark is written and *old_ids* (one id or several) are removed, in one step. The
+        receipt is mark_known's plus ``replaced``: what each removed mark was. Raises ValueError like mark_known."""
+        ids = [old_ids] if isinstance(old_ids, str) else [str(i) for i in old_ids or ()]
         now = time.time() if now is None else now
         with self._lock:
-            return [asdict(k) for k in self._known if k.live(now)]
+            old = [asdict(k) for k in self._known if k.id in ids]
+            saved = self.mark_known(camera, text, by, until, now=now, people=people, daily_from=daily_from,
+                                    daily_to=daily_to)
+            self._known = [k for k in self._known if k.id not in ids or k.id == saved["id"]]
+            self._save_known()
+            for s in self._open.values():
+                s.known = [k for k in s.known if k.get("id") not in ids]
+            return dict(saved, replaced=old)
+
+    def list_known(self, now: Optional[float] = None) -> List[Dict[str, Any]]:
+        """The owner's marks not over yet (a daily one also outside its hours: it is still remembered)."""
+        now = time.time() if now is None else now
+        with self._lock:
+            return [asdict(k) for k in self._known if k.active(now)]
+
+    def _arrival(self, known: Optional[Known], camera: str, ts: float) -> Dict[str, Any]:
+        """The first quiet suspicious under a daily mark on a later day than it was said: the one line "they
+        arrived", once per day."""
+        if known is None or not known.daily_from:
+            return {}
+        day = datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
+        if day == datetime.fromtimestamp(known.at).strftime("%Y-%m-%d") or known.arrived_on == day:
+            return {}
+        known.arrived_on = day
+        try:
+            self._save_known()
+        except OSError as exc:
+            log.warning("arrival not saved: %s", exc)
+        return {"who": known.text, "camera": known.camera or camera, "at": ts, "known_id": known.id}
 
     # ---------- the policy ----------
     def _base_entities(self, camera: str, ts: float) -> List[Dict[str, Any]]:
@@ -454,6 +525,8 @@ class EventBook:
             if alert_id:
                 self._by_alert[alert_id] = s.id
             known = self.known_for(camera, ts)
+            if known is None and label == "suspicious":
+                known = self._known_via_link(s, ts)      # the workers marked at the camera they walked from
             new_people = max(0, count - s.reported_people)
             reply_to = s.first_message()
             lvl, reported = LEVELS[label], LEVELS[s.reported_level]
@@ -471,6 +544,8 @@ class EventBook:
 
             def make(notify: bool, reason: str, known_text: str = "", unmarked: bool = False) -> Decision:
                 reply, info = reply_to, dict(incident)
+                arrival = self._arrival(known, camera, ts) if (not notify and known_text and known is not None
+                                                                and label == "suspicious") else {}
                 if info:
                     info["announce"] = s.reported_level == "none"
                 if notify and label == "suspicious" and thread_to is not None and not s.messages:
@@ -478,7 +553,7 @@ class EventBook:
                     reply, info["thread"] = thread_to, True
                     reason = f"{reason}; continues the incident from {incident.get('camera')}: in its thread"
                 return Decision(notify, s.id, reason, reply, new_people, known_text, list(in_view), list(fresh),
-                                unmarked, "entities" if by_entities else "head-count", info)
+                                unmarked, "entities" if by_entities else "head-count", info, arrival)
 
             def no(reason: str, known_text: str = "") -> Decision:
                 return make(False, reason, known_text)
@@ -619,15 +694,34 @@ class EventBook:
                 if not said:
                     log.info("[%s] cross-camera: would link %s at %s -> %s here (%.0f s%s)", camera, e_a["id"],
                              src.camera, e_b["id"], pick["gap"], clothes)
+                if not s.cross_seen:
+                    s.cross_seen = dict(info, mode="shadow")
                 return dict(info, mode="shadow")
             incident_id = src.incident_id or uuid.uuid4().hex[:12]
             src.incident_id = incident_id
             s.incident_id, s.incident_from = incident_id, info
+            s.cross_seen = dict(info, mode="on")
             e_b.update(from_camera=src.camera, from_entity=e_a["id"], from_session=src.id)
             log.info("[%s] cross-camera: %s at %s is %s here (%.0f s%s): incident %s", camera, e_a["id"], src.camera,
                      e_b["id"], pick["gap"], clothes, incident_id)
             return dict(info, id=incident_id, mode="on")
         return {}
+
+    def _known_via_link(self, s: Session, ts: float) -> Optional[Known]:
+        """A mark of another camera that covers *s* because its people walked over (2026-10-09: the workers marked
+        at the pergola reached the main entrance 17 s later and it alerted). Only through a cross-camera link of
+        this session (``incident_from``, or ``cross_seen`` in shadow), and only for a mark live both when the link
+        was seen and now. Never for an escalation (the caller asks only for a suspicious)."""
+        link = s.incident_from or s.cross_seen
+        source = str((link or {}).get("camera") or "")
+        if not source or source == s.camera:
+            return None
+        try:
+            at = float(link.get("at") or ts)
+        except (TypeError, ValueError):
+            at = ts
+        live = [k for k in self._known if k.camera == source and k.live(ts) and k.live(at)]
+        return live[-1] if live else None
 
     @staticmethod
     def _one(found: List[Dict[str, Any]], acting_reid: bool, link: float, margin: float) -> Optional[Dict[str, Any]]:

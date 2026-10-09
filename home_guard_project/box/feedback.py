@@ -754,7 +754,37 @@ def save_feedback(
                         dict(record, training=training_record(alert, feedback, who, now, meta, meta_rel)))
         except Exception as exc:  # noqa: BLE001 - the answer is saved; its kept copy must not break the inbox
             log.warning("Could not keep the answer to %s for training: %s", alert_id, exc)
+    if feedback.owner_label in OWNER_LABELS and (alert or {}).get("alert_id"):
+        try:
+            supersede_tags(root_dir, str(alert_id), path, now, kept_dir)
+        except Exception as exc:  # noqa: BLE001 - the new tag is saved and is the newest either way
+            log.warning("Earlier tags of %s not marked superseded: %s", alert_id, exc)
     return path
+
+
+def supersede_tags(root_dir: str, alert_id: str, new_path: str, now: float, kept_dir: Optional[str] = None) -> int:
+    """A clip has ONE tag (owner, 2026-10-09: "שנה תיוג" changes it): every earlier tag record of *alert_id* (and
+    its kept training copy) gets ``superseded_by`` (the new record's file name) and ``superseded_utc``. Readers take
+    the newest record per clip, as they already do for an undo; this makes it explicit for any reader that lists
+    them all (the Admin Inbox, the training export). Returns how many were marked."""
+    marked = 0
+    stamp = dt.datetime.fromtimestamp(now, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    for old in _feedback_paths(root_dir, alert_id):
+        if os.path.abspath(old) == os.path.abspath(new_path):
+            continue
+        record = _read_json(old)
+        if record.get("owner_label") not in OWNER_LABELS or record.get("superseded_by"):
+            continue
+        record.update(superseded_by=os.path.basename(new_path), superseded_utc=stamp)
+        _write_json(old, record)
+        marked += 1
+        if kept_dir:
+            copy = os.path.join(kept_dir, os.path.relpath(old, root_dir))
+            kept = _read_json(copy) if os.path.isfile(copy) else {}
+            if kept:
+                kept.update(superseded_by=os.path.basename(new_path), superseded_utc=stamp)
+                _write_json(copy, kept)
+    return marked
 
 
 def _kept_answers_dir(root_dir: str, training_dir: Optional[str]) -> Optional[str]:

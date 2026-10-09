@@ -257,7 +257,8 @@ _NAMING = re.compile(r"(?<!\w)[ושה]?(?:תקרא|תקראי|לקרוא|קרא|
 _SENTENCES = re.compile(r"(?<=[.!?…\n])\s*")
 
 
-def honest_answer(answer: str, receipts: Sequence[Receipt], lang: str, request: str = "") -> str:
+def honest_answer(answer: str, receipts: Sequence[Receipt], lang: str, request: str = "",
+                  say_not_done: bool = True) -> str:
     """*answer* without the sentences that claim an action no receipt of this turn backs, plus one plain line
     saying what was NOT done ("לא רשמתי שום דבר על ההתראה"); "" when only the receipt lines should go out.
     *request* is the owner's message: a bare "save" claim on a naming request gets the camera-name line."""
@@ -269,7 +270,36 @@ def honest_answer(answer: str, receipts: Sequence[Receipt], lang: str, request: 
         return text
     kept = [part.strip() for part in _SENTENCES.split(text)
             if part.strip() and not unbacked_claims(part, receipts)]
+    if not say_not_done:
+        return " ".join(kept).strip()
     line = next((key for kind, key in _HONEST if kind in still), "")
     if not line and "save" in still:
         line = "not_saved_yet" if _NAMING.search(request or "") else "not_saved_any"
     return " ".join(kept + ([t(line, lang)] if line else [])).strip()
+
+
+# -- empty empathy (2026-10-09) ----------------------------------------------------------------------------------
+# "אני מבין אותך." / "אני מבין את התסכול שלך." went out three times in one morning, each the whole reply, while the
+# owner asked to be remembered and understood. A reply with no fact, no action and no question is never sent.
+_EMPATHY = re.compile(
+    r"(?<!\w)(?:ו?אני\s+)?(?:מבין|מבינה|מבינים)(?:\s+(?:אותך|אותכם|לגמרי|היטב|מאוד|את\s+(?:ה?תסכול|ה?כעס|ה?עצבים|"
+    r"ה?בלבול|ה?בעיה|ה?מצב|ה?טענה|ה?הבדל|מה\s+(?:שאתה|את)\s+(?:אומר|אומרת))(?:\s+שלך|\s+שלכם)?|ש(?:זה|אתה)\s+\S+))*|"
+    r"(?<!\w)(?:אני\s+)?(?:מצטער|מצטערת|סליחה|מתנצל|מתנצלת)(?:\s+(?:על|ש)\S*(?:\s+\S+){0,3})?|"
+    r"(?<!\w)(?:צודק|צודקת|אוקיי|אוקי|בסדר|הבנתי|ברור|כמובן|תודה)(?!\w)|"
+    r"(?<!\w)ו?(?:אני\s+)?(?:אשתדל|אשתפר|אנסה|אקח\s+(?:את\s+)?(?:זה\s+)?בחשבון)[^.!?\n]*|\bI(?:['’]ll| will)\s+(?:try|do\s+better)[^.!?\n]*|"
+    r"\bI\s+(?:completely\s+|totally\s+)?(?:understand|hear you|get it|see)(?:\s+(?:you|your\s+\w+|how\s+you\s+feel|"
+    r"that|why))?\b|\b(?:I['’]m|I am)\s+sorry(?:\s+(?:for|about)\s+(?:the\s+|that|this|your\s+)?\w*)?|"
+    r"\b(?:sorry|ok(?:ay)?|got it|understood|right|thanks?)\b",
+    re.IGNORECASE)
+
+
+def empty_reply(answer: str) -> bool:
+    """True for a reply that only empathises or acknowledges ("אני מבין אותך.", "I understand your frustration.") -
+    no fact, no action, no question. "" is not empty empathy (the receipts are the reply then)."""
+    if not isinstance(answer, str) or not answer.strip():
+        return False
+    if "?" in answer:
+        return False
+    rest = _EMPATHY.sub(" ", answer)
+    words = re.findall(r"[^\W\d_]{2,}|\d+", rest)
+    return len(words) == 0

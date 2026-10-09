@@ -1009,7 +1009,7 @@ class TelegramInbox:
             who = _who(query.get("from") or {})
             if code.startswith("kn:"):            # Cancel / All week under "these are my workers" (Memory Keeper)
                 parts = code.split(":")
-                if len(parts) != 3 or parts[1] not in ("x", "w") or not parts[2]:
+                if len(parts) != 3 or parts[1] not in ("x", "w", "d", "o") or not parts[2]:
                     log.warning("Ignoring malformed known-people callback")
                     return
                 self._note("owner", "button", _button_text(message, code, code), who["name"])
@@ -1102,6 +1102,16 @@ class TelegramInbox:
         if undo:
             row.append({"text": tr("undo_button", lang), "callback_data": undo})
         return self._edit_buttons(chat_id, message_id, {"inline_keyboard": [row]})
+
+    def _camera_name(self, alert: Dict[str, Any], lang: str) -> str:
+        """The family's name for the alert's camera (never its id)."""
+        camera = str(alert.get("camera") or "")
+        try:
+            from .camera_names import display_name  # noqa: PLC0415
+
+            return display_name(camera, lang) or camera
+        except Exception:  # noqa: BLE001
+            return camera
 
     def _alert_messages(self, chat_id: str, alert_id: str) -> List[int]:
         return [message_id for chat, message_id in self.index.messages(alert_id) if chat == str(chat_id)]
@@ -1298,7 +1308,14 @@ class TelegramInbox:
             self._note("owner", "message", text, who["name"], alert)
             self._mark_answered(alert)
             words = text[:MAX_TAG_TEXT_CHARS]
-            feedback = Feedback(verdict=verdict_for("other", str(alert.get("label") or "")), owner_label="other",
+            # A TAG of this clip (training data, 2026-10-09): "זה תקין ..." / "זה בסדר" / "לא חשוד" is the owner's
+            # normal, anything else their own description ("other"). It never changes what the box does; a lasting
+            # fact in it is a MEMORY, which the assistant asks about (agent.note_tag) and saves only once answered.
+            from .brain.known_memory import tag_label, tag_line  # noqa: PLC0415
+
+            label_for = getattr(self.agent, "tag_label_for", None) if getattr(self.agent, "version", 1) == 2 else None
+            label = label_for(alert, words) if callable(label_for) else tag_label(words)
+            feedback = Feedback(verdict=verdict_for(label, str(alert.get("label") or "")), owner_label=label,
                                 owner_text=words, tagged_by=who["name"] or str(user_id or ""),
                                 source="voice" if spoken else "text", request_id=request["request_id"],
                                 transcript=words if spoken else "")
@@ -1306,9 +1323,20 @@ class TelegramInbox:
                           training_dir=self.training_dir, archive_dir=self.archive_dir)
             self.pending.complete(request["request_id"])
             for alert_message in self._alert_messages(chat_id, alert_id):
-                self._receipt(chat_id, alert_message, "other", alert_id, lang)
-            self._say(chat_id, tr("tag_saved_explanation", lang, time=_clock_of(alert)),
-                      reply_to=message.get("message_id"), undo_data=self._undo_code(alert_id), lang=lang)
+                self._receipt(chat_id, alert_message, label, alert_id, lang)
+            ask = None
+            hook = getattr(self.agent, "note_tag", None) if getattr(self.agent, "version", 1) == 2 else None
+            if callable(hook):
+                try:
+                    ask = hook(chat_id, alert, words, who, label=label)
+                except Exception as exc:  # noqa: BLE001 - the tag is saved; the question is extra
+                    log.warning("Tag explanation not noted by the assistant: %s", exc)
+            line = tag_line(_clock_of(alert), self._camera_name(alert, lang), label, words, lang)
+            if ask is not None and getattr(ask, "text", ""):
+                line = f"{line}\n{ask.text}"
+            self._say(chat_id, line, reply_to=message.get("message_id"), undo_data=self._undo_code(alert_id),
+                      lang=lang, buttons=tuple(getattr(ask, "buttons", ()) or ()),
+                      question_token=str(getattr(ask, "question_token", "") or ""))
             return True
         except Exception as exc:  # noqa: BLE001 - a tag must never stop the inbox
             log.warning("Tag text not saved: %s", exc)

@@ -116,7 +116,7 @@ class KnownGuardTest(Base):
         for text in ("זה בסדר זה עובדים אצלי שעובדים על הפרגולה", "זה אחד אנשים שעובדים מחוץ לבית אמרתי לך כבר",
                      "זה אני", "these are my workers"):
             self.assertTrue(identifies_people(text), text)
-        out = mark_known(self.ctx("זה אני", alert=True), {"who": "עמיר", "owner_words": "זה אני"})
+        out = mark_known(self.ctx("זה אני עד 18:00", alert=True), {"who": "עמיר", "owner_words": "זה אני"})
         self.assertTrue(out["ok"], out)
         self.assertEqual(out["status"], DONE)
 

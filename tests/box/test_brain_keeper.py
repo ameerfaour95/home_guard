@@ -32,6 +32,8 @@ ALERT = {"alert_id": f"{PERGOLA}_1791000000_alert", "camera": PERGOLA, "ts": NOW
          "summary": "Two men work on the pergola with a ladder."}
 WORKERS = "זה בסדר זה עובדים אצלי שעובדים על הפרגולה"
 END_OF_DAY = dt.datetime(2026, 10, 7, 23, 59).timestamp()
+WORKERS_18 = "זה בסדר זה עובדים אצלי שעובדים רק בפרגולה עד 18:00"
+WEEK_END = dt.datetime(2026, 10, 13, 18, 0).timestamp()
 
 
 def call(name: str, **args: Any) -> ModelMessage:
@@ -112,22 +114,31 @@ class KeeperTest(unittest.TestCase):
     def test_said_on_an_alert_it_silences_that_camera_and_files_the_alert_as_expected(self) -> None:
         ctx = self.ctx(WORKERS, alert=True)
         out = mark_known(ctx, {"who": "העובדים על הפרגולה", "owner_words": "עובדים אצלי"})
+        self.assertFalse(out["ok"])                               # 2026-10-09: no time said - asked, never 23:59
+        self.assertEqual(ctx.clarification["choices"], ["16:00", "17:00", "18:00", "אחר…"])
+        self.assertEqual(self.events.list_known(NOW), [])
+        ctx = self.ctx(WORKERS_18, alert=True)
+        out = mark_known(ctx, {"who": "העובדים על הפרגולה", "owner_words": "עובדים אצלי"})
         self.assertTrue(out["ok"])
         (known,) = self.events.list_known(NOW)
-        self.assertEqual((known["camera"], known["text"], known["until"]), (PERGOLA, "העובדים על הפרגולה", END_OF_DAY))
-        self.assertEqual(self.verdicts(), ["expected"])
+        # A crew: their hours (first seen 09:50 -> from 09:00) every day for a week.
+        self.assertEqual((known["camera"], known["text"], known["until"], known["daily_from"], known["daily_to"]),
+                         (PERGOLA, "העובדים על הפרגולה", WEEK_END, "09:00", "18:00"))
+        self.assertEqual(self.verdicts(), ["expected"])                  # the alert's TAG (normal), its own line
+        self.assertEqual([r.tool for r in ctx.receipts], ["retag_clip", "mark_known"])
+        self.assertTrue(self.events.decide(PERGOLA, NOW + 13 * 3600, "suspicious", people=2).notify)  # the night
         decision = self.events.decide(PERGOLA, NOW + 600, "suspicious", people=2, alert_id="later")
         self.assertFalse(decision.notify)                               # the 142 alerts of 2026-10-07 stop
         self.assertTrue(self.events.decide(GATE, NOW + 600, "suspicious", people=1).notify)   # other cameras alert
         self.assertTrue(self.events.decide(PERGOLA, NOW + 700, "escalation", people=2).notify)  # never an escalation
 
     def test_without_an_alert_it_uses_the_topic_camera_or_asks_which_camera(self) -> None:
-        ctx = self.ctx("זה אני")
+        ctx = self.ctx("זה אני עד 18:00")
         out = mark_known(ctx, {"who": "עמיר", "owner_words": "זה אני"})
         self.assertFalse(out["ok"])
         self.assertEqual(ctx.clarification["choices"], [PERGOLA, GATE])   # buttons; the inbox shows their names
         self.assertEqual(self.events.list_known(NOW), [])
-        ctx = self.ctx("זה אני")
+        ctx = self.ctx("זה אני עד 18:00")
         ctx.state.set_topic_camera(GATE, "", NOW)
         self.assertTrue(mark_known(ctx, {"who": "עמיר", "owner_words": "זה אני"})["ok"])
         self.assertEqual(self.events.list_known(NOW)[0]["camera"], GATE)
@@ -169,24 +180,27 @@ class KeeperTest(unittest.TestCase):
 
     # -- the agent -----------------------------------------------------------------------------------------------
     def test_the_reply_is_the_keepers_receipt_only_with_cancel_and_week_buttons(self) -> None:
-        big = Scripted([call("mark_known", who="העובדים על הפרגולה", owner_words="עובדים אצלי"),
+        big = Scripted([call("mark_known", who="העובדים", owner_words="עובדים אצלי"),
                         reply("רשמתי את זה כהתרעה צפויה. אם יש משהו נוסף, אני כאן!")])
-        out = self.agent(big).handle(WORKERS, "-5", {"user_id": 1, "name": "Ameer"}, dict(ALERT), True)
-        self.assertEqual(out.text, "שמרתי: האנשים בפרגולה הם העובדים על הפרגולה, עד 23:59. "
-                                   "לא אשלח עליהם הודעות, חוץ מדבר חריג.")
+        out = self.agent(big).handle(WORKERS_18, "-5", {"user_id": 1, "name": "Ameer"}, dict(ALERT), True)
+        # Two lines, two stores: the clip's TAG (🏷️) and the MEMORY (🧠) with the week assumption said plainly.
+        self.assertEqual(out.text, "🏷️ תיוג לסרטון 09:50 (פרגולה): תקין: עובדים אצלי\n"
+                                   "🧠 זכרתי: העובדים בפרגולה, כל יום 09:00–18:00, עד יום ג׳ 13.10.")
         known_id = self.events.list_known(NOW)[0]["id"]
-        self.assertEqual(out.rows, ((("ביטול", f"kn:x:{known_id}"), ("כל השבוע", f"kn:w:{known_id}")),))
+        self.assertEqual(out.rows, ((("רק היום", f"kn:d:{known_id}"), ("שבוע ✓", f"kn:w:{known_id}"),
+                                     ("אחר…", f"kn:o:{known_id}")), (("↩ זיכרון", f"kn:x:{known_id}"),),
+                                    (("↩ תיוג", f"tu:{ALERT['alert_id']}"),)))
         self.assertIn("[OWNER SAYS WHO IS THERE]", big.seen[0][0][-1])
         self.assertIn("mark_known", big.seen[0][1])
 
     def test_cancel_and_all_week_buttons(self) -> None:
-        agent = self.agent(Scripted([call("mark_known", who="הגנן", owner_words="זה הגנן"), reply("")]))
-        agent.handle("זה הגנן", "-5", {"user_id": 1}, dict(ALERT), True)
+        agent = self.agent(Scripted([call("mark_known", who="השכן", owner_words="זה השכן"), reply("")]))
+        agent.handle("זה השכן עד 18:00", "-5", {"user_id": 1}, dict(ALERT), True)
         known_id = self.events.list_known(NOW)[0]["id"]
         week = agent.known_button("-5", "w", known_id, {"user_id": 1})
         (known,) = self.events.list_known(NOW)
         self.assertEqual(known["until"], NOW + 7 * 86400)
-        self.assertIn("שמרתי: האנשים בפרגולה הם הגנן", week.text)
+        self.assertIn("🧠 זכרתי: השכן בפרגולה", week.text)
         self.assertEqual(week.rows, ((("ביטול", f"kn:x:{known['id']}"),),))
         cancel = agent.known_button("-5", "x", known["id"], {"user_id": 1})
         self.assertEqual(cancel.text, "בוטל. אשלח שוב הודעות על פרגולה.")
@@ -230,7 +244,7 @@ class KeeperTest(unittest.TestCase):
         big = Scripted([reply("רשמתי את זה כהתרעה צפויה. תודה על ההבהרה!"), reply("רשמתי את זה כהתרעה צפויה.")])
         out = self.agent(big).handle("מדי פעם אני יוצא החוצה בלילה", "-5", {"user_id": 1})
         self.assertEqual(out.text, t("not_saved_verdict", "he"))
-        self.assertEqual(set(self.verdicts()), {"none"})                  # the words are kept, no verdict
+        self.assertEqual(self.verdicts(), [])           # conversation: in the chat log, never a feedback/ file
 
 
 class BuildTest(unittest.TestCase):

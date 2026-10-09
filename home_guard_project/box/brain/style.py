@@ -32,6 +32,17 @@ _BOILERPLATE = [re.compile(p, re.IGNORECASE) for p in (
     r"(?<!\w)תודה\s+על\s+ה(?:הבהרה|עדכון|מידע|שיתוף|פירוט|תשובה)",
     r"(?<!\w)(?:אשמח|שמח(?:ה)?)\s+לעזור",
     r"(?<!\w)אל\s+תהסס[וי]?",
+    # 2026-10-09 replay: "אם יש צורך בתיקון נוסף, אנא עדכן אותי", "אני מבין את התסכול שלך ואשתדל לשפר"
+    r"(?<!\w)ו?אם\s+(?:יש|יהיה)\s+צורך(?!\w)",
+    r"(?<!\w)אני\s+יכול(?:ה)?\s+לעזור(?!\w)",
+    r"(?<!\w)ה?אם\s+יש\s+(?:עוד\s+)?(?:משהו|דבר)\s+(?:נוסף|אחר)",
+    r"(?<!\w)ו?אם\s+יש\s+לך\s+(?:עוד\s+)?(?:מידע|שאלות|משהו)",
+    r"(?<!\w)אנא\s+(?:עדכן|עדכני|תעדכן)\s+אותי",
+    r"(?<!\w)(?:ו?אני\s+)?מבי(?:ן|נה)\s+את\s+ה?(?:תסכול|כעס)",
+    r"(?<!\w)ו?(?:אני\s+)?(?:אשתדל|אשתפר)(?!\w)",
+    r"(?<!\w)ו?(?:אני\s+)?אקח\s+(?:את\s+)?(?:זה\s+)?(?:\S+\s+)?בחשבון",
+    r"\bI\s+understand\s+your\s+frustration\b",
+    r"\bI(?:['’]ll| will)\s+(?:try|do\s+(?:my\s+best|better))\b",
     r"(?<!\w)רק\s+(?:תגיד|תכתוב|תודיע)",
     # English
     r"\bif\s+(?:there(?:['’]s| is)|you\s+(?:need|have|want|would like))\b[^.!?\n]*?"
@@ -63,10 +74,21 @@ def _clean_sentence(sentence: str) -> str:
     return head if head[-1:] in ".!?…" else head + "."
 
 
+# An opening that only empathises before the real answer ("אני מבין אותך. ההתראה הייתה בכניסה"): dropped when real
+# words follow (2026-10-09); a reply that is nothing else is the agent's to rewrite (claims.empty_reply).
+_LEADING_EMPATHY = re.compile(
+    r"^\s*(?:ו?אני\s+)?(?:מבין|מבינה)\s+(?:אותך|את\s+ה?(?:תסכול|כעס)(?:\s+שלך)?)\s*[.!,]\s*|"
+    r"^\s*I\s+(?:completely\s+)?understand(?:\s+(?:you|your\s+frustration|how\s+you\s+feel))?\s*[.!,]\s*",
+    re.IGNORECASE)
+
+
 def strip_boilerplate(text: str) -> str:
     """*text* without closing offers and empty thanks; may be "" when that is all it was."""
     if not isinstance(text, str) or not text.strip():
         return text if isinstance(text, str) else ""
+    rest = _LEADING_EMPATHY.sub("", text, count=1)
+    if rest != text and re.search(r"\w{2,}", rest):
+        text = rest
     lines: List[str] = []
     for line in text.split("\n"):
         if not line.strip():

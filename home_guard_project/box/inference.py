@@ -2321,6 +2321,29 @@ def _event_decision(camera: str, alert_ts: float, label: str, people: Optional[i
         return None
 
 
+def arrival_text(arrival: Dict[str, Any], lang: str) -> str:
+    """"העובדים של הפרגולה הגיעו (07:40)": the one low-key line when the owner's daily mark (a work crew's hours)
+    kept their first alert of a later day quiet (events.Decision.arrival, once per day)."""
+    from .brain.i18n import t  # noqa: PLC0415
+    from .brain.tools import in_place  # noqa: PLC0415
+
+    camera = in_place(camera_display(str(arrival.get("camera") or ""), lang), lang)
+    when = datetime.fromtimestamp(float(arrival.get("at") or time.time())).strftime("%H:%M")
+    return t("arrived_line", lang, who=str(arrival.get("who") or ""), camera=camera, time=when)
+
+
+def send_arrival_line(arrival: Dict[str, Any], box_settings: Dict[str, Any], env: Dict[str, str], lang: str) -> None:
+    """Send the arrival line without a sound. Never raises: it is only news."""
+    try:
+        from . import telegram_notify  # noqa: PLC0415
+
+        text = arrival_text(arrival, lang)
+        telegram_notify.send_message(telegram_notify.load_telegram_config(box_settings, env), text, silent=True)
+        log.info("arrival line sent: %s", text)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("arrival line not sent: %s", exc)
+
+
 def _event_story(event: Any, alert_id: str, alert_ts: float, lang: str) -> str:
     """The first lines of an UPDATE in an event's thread when the tracker gave the event its entities (stage 2a): who
     is new (``story.new_people_line``), then the story so far (``story.story_line``); the new observation follows
@@ -2654,6 +2677,8 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
             log.info("[%s] raised to suspicious: %s", camera_name, why)
         if event is not None and not event.notify:
             log.info("[%s] not sent (%s): %s", camera_name, event.reason, summary)
+            if getattr(event, "arrival", None):
+                send_arrival_line(event.arrival, box_settings, env, lang)
             if status is not None:
                 status.decision(camera_name, labels, summary, cmd, sent=False, error=event.reason, label=label)
             if job is not None:
