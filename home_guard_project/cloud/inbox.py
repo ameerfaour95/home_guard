@@ -11,8 +11,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import and_, or_, select
-from sqlalchemy.orm import Session
+from datetime import timezone
+
+from sqlalchemy import and_, exists, func, not_, or_, select
+from sqlalchemy.orm import Session, aliased
 
 from home_guard_project.fleet_contract.judgement import not_a_judgement
 
@@ -23,14 +25,30 @@ DECISIONS = ("accepted", "fixed", "not_label")
 MAX_LIMIT = 500
 
 
+EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+GENERAL = "%/feedback/_general/%"   # chat about no clip: the box no longer writes it; older files stay hidden
+
+
+def superseded():
+    """SQL: a tag row replaced by a later one. Explicitly (the box wrote ``superseded_by`` into it when the clip was
+    retagged), or because a newer, non-superseded tag of the same clip exists (an older box, or a rewrite not
+    uploaded yet). A clip has ONE current tag; rows without a tag word are never superseded by recency."""
+    later = aliased(Feedback)
+    newer = or_(func.coalesce(later.received_at, EPOCH) > func.coalesce(Feedback.received_at, EPOCH),
+                and_(func.coalesce(later.received_at, EPOCH) == func.coalesce(Feedback.received_at, EPOCH),
+                     later.id > Feedback.id))
+    return or_(Feedback.superseded_by != "",
+               and_(Feedback.owner_label.in_(OWNER_LABELS),
+                    exists().where(later.event_id == Feedback.event_id, later.owner_label.in_(OWNER_LABELS),
+                                   later.superseded_by == "", newer)))
+
+
 def answers_filter():
-    """Feedback rows that are an owner's answer about an alert: a tag, words or a voice answer, a verdict button, or
-    a typed reply the box took no action on (a question or a complaint, for "Not a label"); a pause or a search
-    alone is not."""
-    return (Feedback.event_id.is_not(None),
-            or_(Feedback.owner_label != "", Feedback.owner_text != "", Feedback.transcript != "",
-                Feedback.verdict.not_in(("", "none")),
-                and_(Feedback.raw_text != "", Feedback.action.in_(("", "none")))))
+    """Feedback rows the Inbox lists: an owner's CURRENT tag of a clip, a real tag word (box OWNER_LABELS). Action
+    records (a pause, a search), plain chat and the old _general files are never owner tags; a superseded tag is
+    history, shown under the tag that replaced it."""
+    return (Feedback.event_id.is_not(None), Feedback.owner_label.in_(OWNER_LABELS),
+            not_(Feedback.s3_key.like(GENERAL)), not_(superseded()))
 
 
 def query(session: Session, *, from_utc: Optional[datetime] = None, to_utc: Optional[datetime] = None,
@@ -72,17 +90,29 @@ def query(session: Session, *, from_utc: Optional[datetime] = None, to_utc: Opti
     return [(fb, ev, cu, dec, name, runs.get(ev.id)) for fb, ev, cu, dec, name in rows]
 
 
+def history(session: Session, event_ids: list[int]) -> dict[int, list[Feedback]]:
+    """{event id: the clip's earlier tags, replaced by a later one}, oldest first."""
+    if not event_ids:
+        return {}
+    out: dict[int, list[Feedback]] = {}
+    for fb in session.scalars(select(Feedback).where(Feedback.event_id.in_(event_ids),
+                                                      Feedback.owner_label.in_(OWNER_LABELS), superseded())
+                              .order_by(func.coalesce(Feedback.received_at, EPOCH), Feedback.id)):
+        out.setdefault(fb.event_id, []).append(fb)
+    return out
+
+
 def owner_words(fb: Feedback) -> str:
     """What the owner said in words: their text, else a voice answer's transcript, else a typed message."""
     return fb.owner_text or fb.transcript or fb.raw_text or ""
 
 
 def probably_not_label(fb: Feedback) -> bool:
-    """An answer without a tag whose words the box's own rule (feedback.not_a_judgement, vendored) calls a
-    question, a complaint or a command: most likely not about what the clip shows. A tag button is always a
-    judgement; so is a verdict button without words."""
-    words = owner_words(fb)
-    return not fb.owner_label and bool(words.strip()) and not_a_judgement(words)
+    """An "other" tag (or a word answer without a tag) whose words the box's own rule (feedback.not_a_judgement,
+    vendored) calls a question, a complaint or a command: most likely not about what the clip shows. A tag button
+    (normal / suspicious / escalation / empty / rule_mismatch) is always a judgement."""
+    words = fb.owner_text or fb.transcript or ("" if fb.owner_label else fb.raw_text) or ""
+    return fb.owner_label in ("", "other") and bool(words.strip()) and not_a_judgement(words)
 
 
 def decide(session: Session, feedback: Feedback, decision: str, note: str, staff_id: int, staff_name: str,

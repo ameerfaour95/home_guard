@@ -157,3 +157,11 @@ def test_http_client_sends_filters_and_decisions():
     except Exception as e:  # noqa: BLE001
         assert 'consent' in str(e)
     assert b.inbox_reopen(905).decision is None and seen[-1][0] == 'DELETE'
+
+
+def test_earlier_tags_show_as_history_under_the_current_one(widgets, wait):
+    s, _ = inbox(widgets, wait)
+    assert 899 not in [i.feedback_id for i in s.items]                 # a replaced tag is never a waiting item
+    s.table.selectRow(row_of(s, 903))
+    assert s.history.isVisible() and 'replaced by a later tag' in s.history.text() and 'suspicious' in s.history.text()
+    s.table.selectRow(row_of(s, 904)); assert not s.history.isVisible()

@@ -209,6 +209,9 @@ class Feedback(Base):
     owner_text: Mapped[str] = mapped_column(Text, default="", server_default="")
     transcript: Mapped[str] = mapped_column(Text, default="", server_default="")
     tagged_by: Mapped[str] = mapped_column(String(128), default="", server_default="")
+    # a retag supersedes the clip's earlier tag (box feedback.supersede_tags; 0020): the newer record's file name
+    superseded_by: Mapped[str] = mapped_column(String(255), default="", server_default="")
+    superseded_at: Mapped[Optional[datetime]] = mapped_column(TS, nullable=True)
 
 
 class InboxDecision(Base):

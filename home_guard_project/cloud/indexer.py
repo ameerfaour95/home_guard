@@ -127,7 +127,8 @@ def owner_answer(body: dict) -> dict:
     sender = sender.get("name") if isinstance(sender, dict) else sender
     return {"owner_label": text("owner_label").strip(), "owner_text": text("owner_text"),
             "transcript": text("transcript"),
-            "tagged_by": text("tagged_by") or (sender if isinstance(sender, str) else "")}
+            "tagged_by": text("tagged_by") or (sender if isinstance(sender, str) else ""),
+            "superseded_by": text("superseded_by").strip(), "superseded_utc": body.get("superseded_utc")}
 
 
 def _cut(value, n: int):
@@ -522,6 +523,8 @@ class _Run:
             answer = self.answers.get(art.s3_key) or owner_answer({})
             fb.owner_label, fb.owner_text = _cut(answer["owner_label"], 32), answer["owner_text"]
             fb.transcript, fb.tagged_by = answer["transcript"], _cut(answer["tagged_by"], 128)
+            fb.superseded_by = _cut(answer["superseded_by"], 255)
+            fb.superseded_at = parse_utc(answer["superseded_utc"]) if answer["superseded_by"] else None
             fb.received_at = rec.time_utc
             ev = by_stem.get(alert_stem) if alert_stem else None
             fb.event_id = ev.id if ev is not None else None

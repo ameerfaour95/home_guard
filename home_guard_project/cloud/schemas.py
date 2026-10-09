@@ -675,6 +675,9 @@ class InboxItem(BaseModel):
     decided_by: Optional[str]
     decided_utc: Optional[datetime]
     decision_note: str = ""
+    # the clip's earlier tags, each replaced by a later one: [{feedback_id, owner_label, owner_text, transcript,
+    # received_utc, superseded_by}], oldest first
+    history: list[dict] = []
 
 
 class InboxDecisionIn(BaseModel):

@@ -457,6 +457,7 @@ class InboxItem:
     decision_note: str = ''
     prompt_version: str | None = None   # the prompt the clip's AI answer came from
     probably_not_label: bool = False    # the box's rule (feedback.not_a_judgement): a question / complaint / command
+    history: list[dict] = field(default_factory=list)   # the clip's earlier tags, each replaced by a later one
 
 
 @dataclass

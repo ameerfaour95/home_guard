@@ -181,8 +181,9 @@ def answer_key(a: Dict[str, Any]) -> Tuple[str, str, str]:
 
 
 def owner_opinion(answers: Iterable[Dict[str, Any]], ai_label: str = "") -> Optional[Opinion]:
-    """The owner's latest answer that judges the alert; an Undo takes the answer back."""
-    unique = {answer_key(a): a for a in answers if isinstance(a, dict)}
+    """The owner's latest answer that judges the alert; an Undo takes the answer back; a tag a retag superseded
+    (``superseded_by``, box feedback.supersede_tags) is never the current one."""
+    unique = {answer_key(a): a for a in answers if isinstance(a, dict) and not a.get("superseded_by")}
     judged = sorted((a for a in unique.values() if _judges(a)), key=lambda a: str(a.get("time_utc") or ""))
     current: Optional[Dict[str, Any]] = None
     for answer in judged:
@@ -350,6 +351,7 @@ def event_items(session, bucket: str) -> List[ClipItem]:
         answers.setdefault(fb.event_id, []).append({
             "time_utc": body.get("time_utc") or _iso(fb.received_at), "verdict": fb.verdict or body.get("verdict"),
             "note": fb.note, "raw_text": fb.raw_text, "source": fb.source, "owner_label": body.get("owner_label") or "",
+            "superseded_by": body.get("superseded_by") or fb.superseded_by or "",
             "owner_text": body.get("owner_text") or "", "from": body.get("from")})
     items = []
     for ev, device, customer in rows:

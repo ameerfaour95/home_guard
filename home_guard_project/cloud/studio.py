@@ -428,9 +428,11 @@ def take_snapshot(session: Session, request: ExportRequest, *, labeler: bool, se
                                    .order_by(AiRun.id)):
             runs[run.event_id] = run  # the newest wins
         feedback: dict[int, list[dict]] = {}
+        from .inbox import superseded  # noqa: PLC0415 - one rule for the current tag of a clip
+
         for fb, rev in session.execute(select(Feedback, Artifact.applied_etag)
                                        .outerjoin(Artifact, Artifact.s3_key == Feedback.s3_key)
-                                       .where(Feedback.event_id.in_(ids)).order_by(Feedback.id)):
+                                       .where(Feedback.event_id.in_(ids), ~superseded()).order_by(Feedback.id)):
             feedback.setdefault(fb.event_id, []).append(_frozen_feedback(fb, rev))
         customers = dict(session.execute(select(Device.id, Device.customer_id)
                                          .where(Device.id.in_({ev.device_pk for ev in chunk}))).all())

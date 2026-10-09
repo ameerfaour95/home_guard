@@ -152,6 +152,9 @@ class InboxScreen(QWidget):
         self.model_chip = ProvenanceChip(self.theme); model.addWidget(self.model_chip); model.addStretch()
         col.addLayout(model)
         self.model_said = label('', '', True); col.addWidget(self.model_said)
+        self.history_title = label('EARLIER TAGS · replaced by a later tag (history, not waiting)', 'eyebrow')
+        col.addWidget(self.history_title)
+        self.history = label('', 'muted', True); col.addWidget(self.history)
         self.consent = label('', 'error', True); self.consent.hide(); col.addWidget(self.consent)
         col.addStretch()
         self.note = QLineEdit(); self.note.setPlaceholderText('Note (why it is not a label, what you fixed)')
@@ -251,6 +254,7 @@ class InboxScreen(QWidget):
             for w in (self.clip_meta, self.owner_said, self.owner_how, self.model_said, self.decision_text):
                 w.setText('')
             self.owner_pill.hide(); self.model_pill.hide(); self.model_chip.show_source(''); self.decision_chip.show_source('')
+            self.history_title.hide(); self.history.hide()
             self.consent.hide()
             return
         when = i.received_utc.astimezone().strftime('%Y-%m-%d %H:%M') if i.received_utc else ''
@@ -273,6 +277,11 @@ class InboxScreen(QWidget):
         self.model_said.setText(i.model_summary or '(no summary)')
         self.decision_chip.show_source('admin' if i.decision else '', i.decided_by)
         self.decision_text.setText(DECISION_TITLES.get(i.decision, '') + (f': {i.decision_note}' if i.decision_note else ''))
+        self.history_title.setVisible(bool(i.history)); self.history.setVisible(bool(i.history))
+        self.history.setText('\n'.join(
+            f"{(h.get('received_utc') or '')[:16].replace('T', ' ')}  ·  {OWNER_TAG_TITLES.get(h.get('owner_label') or '', h.get('owner_label'))}"
+            + (f"  ·  {h.get('owner_text') or h.get('transcript')}" if h.get('owner_text') or h.get('transcript') else '')
+            + '  ·  replaced by a later tag' for h in i.history))
         self.consent.setVisible(not i.consent_training)
         self.consent.setText(f'{i.customer} withdrew consent to training use: this answer cannot become a training '
                              'label.')

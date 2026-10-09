@@ -21,7 +21,13 @@ NOT_FOUND = "Answer not found"
 # Route functions carry no docstrings on purpose (they would become the OpenAPI description).
 
 
-def _item(fb, ev, cu, dec, camera_name, run) -> InboxItem:
+def _history(rows) -> list[dict]:
+    return [{"feedback_id": h.id, "owner_label": h.owner_label, "owner_text": h.owner_text, "transcript": h.transcript,
+             "received_utc": h.received_at.isoformat() if h.received_at else None,
+             "superseded_by": h.superseded_by or "a later tag"} for h in rows]
+
+
+def _item(fb, ev, cu, dec, camera_name, run, earlier=()) -> InboxItem:
     return InboxItem(feedback_id=fb.id, event_id=ev.id, clip_key=f"ev:{ev.id}", customer_id=cu.id, customer=cu.name,
                      site=ev.site, camera=ev.camera, camera_name=camera_name, received_utc=fb.received_at,
                      owner_label=fb.owner_label, owner_text=fb.owner_text, transcript=fb.transcript,
@@ -33,14 +39,14 @@ def _item(fb, ev, cu, dec, camera_name, run) -> InboxItem:
                      decision=dec.decision if dec is not None else None,
                      decided_by=dec.staff_name if dec is not None else None,
                      decided_utc=dec.decided_at if dec is not None else None,
-                     decision_note=dec.note if dec is not None else "")
+                     decision_note=dec.note if dec is not None else "", history=_history(earlier))
 
 
 def _one(session: Session, feedback_id: int):
     rows = [r for r in inbox.query(session, before_id=feedback_id + 1, limit=1) if r[0].id == feedback_id]
     if not rows:
         raise HTTPException(status_code=404, detail=NOT_FOUND)
-    return rows[0]
+    return (*rows[0], inbox.history(session, [rows[0][1].id]).get(rows[0][1].id, ()))
 
 
 @router.get("/inbox", response_model=list[InboxItem])
@@ -59,7 +65,8 @@ def list_inbox(request: Request, staff: Staff = Depends(require_role("admin")), 
                        before_id=before_id, limit=limit)
     audit.record(session, staff.id, "inbox_view", target="inbox", ts=request.app.state.clock(),
                  detail={"answers": len(rows), "customers": sorted({r[2].id for r in rows})})
-    return [_item(*r) for r in rows]
+    earlier = inbox.history(session, [r[1].id for r in rows])
+    return [_item(*r, earlier=earlier.get(r[1].id, ())) for r in rows]
 
 
 @router.post("/inbox/{feedback_id}/decision", response_model=InboxItem)
@@ -68,7 +75,7 @@ def decide(feedback_id: int, body: InboxDecisionIn, request: Request, staff: Sta
     check_length("note", body.note, NOTES_MAX)
     if not id_in_range(feedback_id):
         raise HTTPException(status_code=404, detail=NOT_FOUND)
-    fb, ev, cu, _, _, run = _one(session, feedback_id)
+    fb, ev, cu, _, _, run, _ = _one(session, feedback_id)
     if body.decision == "accepted" and not cu.consent_training:
         raise HTTPException(status_code=409, detail=f"{cu.name} has withdrawn consent to training use: this answer "
                                                     "cannot become a training label")
@@ -80,7 +87,8 @@ def decide(feedback_id: int, body: InboxDecisionIn, request: Request, staff: Sta
                  detail={"decision": body.decision, "event_id": ev.id, "owner_label": fb.owner_label,
                          "prompt_version": prompt_version,
                          "probably_not_label": inbox.probably_not_label(fb)})
-    return _item(*_one(session, feedback_id))
+    row = _one(session, feedback_id)
+    return _item(*row[:6], earlier=row[6])
 
 
 @router.delete("/inbox/{feedback_id}/decision", response_model=InboxItem)
@@ -89,10 +97,11 @@ def reopen(feedback_id: int, request: Request, staff: Staff = Depends(require_ro
     # back to the waiting list (an admin's mistake); audited like a decision
     if not id_in_range(feedback_id):
         raise HTTPException(status_code=404, detail=NOT_FOUND)
-    fb, ev, cu, dec, _, _ = _one(session, feedback_id)
+    fb, ev, cu, dec, _, _, _ = _one(session, feedback_id)
     if dec is not None:
         session.delete(dec)
         session.flush()
         audit.record(session, staff.id, "inbox_reopen", target=f"feedback/{fb.id}", customer_id=cu.id,
                      ts=request.app.state.clock(), detail={"was": dec.decision, "event_id": ev.id})
-    return _item(*_one(session, feedback_id))
+    row = _one(session, feedback_id)
+    return _item(*row[:6], earlier=row[6])
