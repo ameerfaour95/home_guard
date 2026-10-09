@@ -179,7 +179,10 @@ that ties everything together.
     "crop_region": [120, 80, 520, 480],
     "crop_resolution": [400, 400],
     "frames_written": 50,
-    "fps": 5.0
+    "fps": 5.0,
+    "crop_policy": "clip-window-1",
+    "per_frame_tracking": false,
+    "whole_frame": false
   }
 }
 ```
@@ -187,6 +190,12 @@ that ties everything together.
 - `model_response` -- scene description text (used by labeling pipeline as pre-annotation)
 - `model_raw_text_path` -- path to `.model_raw.txt` containing the same text
 - `vlm_crop` -- only present when VLM crop is generated (dataset_multi with main_stream enabled)
+- `vlm_crop.crop_policy` -- how the crop was framed. `clip-window-1` (default since 2026-10-09): ONE still window
+  for the whole clip, so `crop_region` is the window of every frame and `whole_frame` says the window covered over
+  half the frame and the whole frame was kept. `follow-1` (`per_frame_tracking: true`, and every clip before
+  2026-10-09, which has no `crop_policy`): a per-frame crop that pans and zooms with the person; `crop_region` is
+  only its first frame's box. Don't mix the two in one training set without a reason: the moving crop looks like
+  camera motion to a video model.
 
 ### UCA-specific fields
 

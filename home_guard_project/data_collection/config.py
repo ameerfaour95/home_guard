@@ -109,6 +109,12 @@ class Config:
     CROP_PADDING: float = 0.3
     CROP_MIN_SIZE: int = 384
     CROP_EMA_ALPHA: float = 0.3
+    # One still window per clip (vlm_crop.POLICY_CLIP_WINDOW) or the old per-frame follow crop (POLICY_FOLLOW).
+    CROP_POLICY: str = "clip_window"
+    CROP_WINDOW_PADDING: float = 0.1        # per side, fraction of the clip window's own width / height
+    CROP_PERSON_MARGIN: float = 0.5         # per side at least this many median box heights
+    CROP_MAX_ASPECT: float = 2.0            # the window is grown (more scene, never stretched) to at most 2:1
+    CROP_WHOLE_FRAME_ABOVE: float = 0.5     # a window over this fraction of the frame area: the whole frame
 
     # ── Trigger hysteresis ────────────────────────────────────────────────
     SCORE_MAX: float = 10.0
@@ -270,6 +276,11 @@ def load_config(
         CROP_PADDING=float(_deep_get(cfg_data, "main_stream", "crop_padding", default=0.3)),
         CROP_MIN_SIZE=int(_deep_get(cfg_data, "main_stream", "crop_min_size", default=384)),
         CROP_EMA_ALPHA=float(_deep_get(cfg_data, "main_stream", "crop_ema_alpha", default=0.3)),
+        CROP_POLICY=str(_deep_get(cfg_data, "main_stream", "crop_policy", default="clip_window")),
+        CROP_WINDOW_PADDING=float(_deep_get(cfg_data, "main_stream", "crop_window_padding", default=0.1)),
+        CROP_PERSON_MARGIN=float(_deep_get(cfg_data, "main_stream", "crop_person_margin", default=0.5)),
+        CROP_MAX_ASPECT=float(_deep_get(cfg_data, "main_stream", "crop_max_aspect", default=2.0)),
+        CROP_WHOLE_FRAME_ABOVE=float(_deep_get(cfg_data, "main_stream", "crop_whole_frame_above", default=0.5)),
 
         SCORE_MAX=float(_deep_get(cfg_data, "trigger", "score_max", default=10.0)),
         SCORE_REWARD=float(_deep_get(cfg_data, "trigger", "score_reward", default=3.0)),

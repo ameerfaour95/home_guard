@@ -336,6 +336,7 @@
     "meta": {
      "crop_min_size": 384,
      "crop_padding": 0.3,
+     "crop_policy": "follow-1",
      "crop_region": [
       0,
       0,
@@ -354,7 +355,8 @@
       704,
       576
      ],
-     "vlm_crop_path": "rel.mp4"
+     "vlm_crop_path": "rel.mp4",
+     "whole_frame": false
     },
     "size": [
      704,
@@ -566,6 +568,7 @@
     "meta": {
      "crop_min_size": 384,
      "crop_padding": 0.3,
+     "crop_policy": "follow-1",
      "crop_region": [
       0,
       100,
@@ -584,7 +587,8 @@
       704,
       576
      ],
-     "vlm_crop_path": "rel.mp4"
+     "vlm_crop_path": "rel.mp4",
+     "whole_frame": false
     },
     "size": [
      384,
@@ -802,6 +806,7 @@
     "meta": {
      "crop_min_size": 384,
      "crop_padding": 0.3,
+     "crop_policy": "follow-1",
      "crop_region": [
       0,
       264,
@@ -820,7 +825,8 @@
       1408,
       1152
      ],
-     "vlm_crop_path": "rel.mp4"
+     "vlm_crop_path": "rel.mp4",
+     "whole_frame": false
     },
     "size": [
      640,
@@ -1038,6 +1044,7 @@
     "meta": {
      "crop_min_size": 384,
      "crop_padding": 0.3,
+     "crop_policy": "follow-1",
      "crop_region": [
       320,
       192,
@@ -1056,7 +1063,8 @@
       704,
       576
      ],
-     "vlm_crop_path": "rel.mp4"
+     "vlm_crop_path": "rel.mp4",
+     "whole_frame": false
     },
     "size": [
      384,
@@ -1274,6 +1282,7 @@
     "meta": {
      "crop_min_size": 384,
      "crop_padding": 0.3,
+     "crop_policy": "follow-1",
      "crop_region": [
       0,
       10,
@@ -1292,7 +1301,8 @@
       704,
       576
      ],
-     "vlm_crop_path": "rel.mp4"
+     "vlm_crop_path": "rel.mp4",
+     "whole_frame": false
     },
     "size": [
      480,
@@ -1585,6 +1595,7 @@
     "meta": {
      "crop_min_size": 384,
      "crop_padding": 0.3,
+     "crop_policy": "follow-1",
      "crop_region": [
       0,
       51,
@@ -1603,7 +1614,8 @@
       640,
       480
      ],
-     "vlm_crop_path": "rel.mp4"
+     "vlm_crop_path": "rel.mp4",
+     "whole_frame": false
     },
     "size": [
      384,
@@ -1816,6 +1828,7 @@
     "meta": {
      "crop_min_size": 384,
      "crop_padding": 0.3,
+     "crop_policy": "follow-1",
      "crop_region": [
       78,
       120,
@@ -1834,7 +1847,8 @@
       704,
       576
      ],
-     "vlm_crop_path": "rel.mp4"
+     "vlm_crop_path": "rel.mp4",
+     "whole_frame": false
     },
     "size": [
      384,
@@ -2096,6 +2110,7 @@
     "meta": {
      "crop_min_size": 384,
      "crop_padding": 0.3,
+     "crop_policy": "follow-1",
      "crop_region": [
       26,
       41,
@@ -2114,7 +2129,8 @@
       640,
       480
      ],
-     "vlm_crop_path": "rel.mp4"
+     "vlm_crop_path": "rel.mp4",
+     "whole_frame": false
     },
     "size": [
      384,
@@ -2320,6 +2336,7 @@
     "meta": {
      "crop_min_size": 384,
      "crop_padding": 0.3,
+     "crop_policy": "follow-1",
      "crop_region": [
       364,
       173,
@@ -2338,7 +2355,8 @@
       1280,
       720
      ],
-     "vlm_crop_path": "rel.mp4"
+     "vlm_crop_path": "rel.mp4",
+     "whole_frame": false
     },
     "size": [
      384,
@@ -2662,6 +2680,7 @@
     "meta": {
      "crop_min_size": 384,
      "crop_padding": 0.3,
+     "crop_policy": "follow-1",
      "crop_region": [
       0,
       0,
@@ -2680,7 +2699,8 @@
       704,
       576
      ],
-     "vlm_crop_path": "rel.mp4"
+     "vlm_crop_path": "rel.mp4",
+     "whole_frame": false
     },
     "size": [
      383,

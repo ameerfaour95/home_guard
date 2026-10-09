@@ -27,9 +27,17 @@ main_stream:
   enabled: true
   store_fps: 5.0            # buffer FPS (5 fps = smooth enough for VLM video clips)
   jpeg_quality: 85          # JPEG quality for in-memory buffer (85 = ~150 KB/frame)
-  crop_padding: 0.3         # padding around trigger-class union bbox (fraction of bbox dims)
-  crop_min_size: 384        # minimum crop dimension in pixels
-  crop_ema_alpha: 0.3       # temporal smoothing factor for stable crops across frames
+  # clip_window: ONE still window per clip - the box around every trigger box of the whole clip, padded - so
+  # the person moves inside a still view (2026-10-09; a camera that pans and zooms with the person hides the
+  # real movement). follow: the old per-frame crop (crop_padding / crop_ema_alpha), kept for the A/B.
+  crop_policy: clip_window
+  crop_window_padding: 0.1  # clip_window: per side, fraction of the window's width / height ...
+  crop_person_margin: 0.5   # ... or at least this many median box heights, whichever is bigger
+  crop_max_aspect: 2.0      # clip_window: grown with more scene (never stretched) to at most 2:1
+  crop_whole_frame_above: 0.5  # clip_window: a window over this fraction of the frame sends the whole frame
+  crop_padding: 0.3         # follow: padding around trigger-class union bbox (fraction of bbox dims)
+  crop_min_size: 384        # minimum crop dimension in pixels (both policies)
+  crop_ema_alpha: 0.3       # follow: temporal smoothing factor for stable crops across frames
 
 # ── Trigger hysteresis ────────────────────────────────────────────────────────
 trigger:
