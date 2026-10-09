@@ -630,6 +630,7 @@ class TaggingExportOut(BaseModel):
     training_path: str
     eval_path: str
     counts: dict[str, int]
+    sharegpt_path: str = ""             # LLaMA-Factory sharegpt rows: the tag as the box's JSON answer
 
 
 class TeacherAnswer(BaseModel):

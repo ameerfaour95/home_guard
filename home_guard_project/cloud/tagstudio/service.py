@@ -508,9 +508,18 @@ class TagStudio:
         training, evals, counts = exporter.build(items.values(), self.tags(session), include_needs_check)
         out = str(out_dir or self.paths.exports)
         stamp = time.strftime("%Y%m%d-%H%M%S")
+        sharegpt = exporter.sharegpt_rows(training)
+        problems = exporter.check_sharegpt(sharegpt)
+        if problems:
+            raise StudioError("The training set would not load: " + "; ".join(problems[:3]), 500)
+        sharegpt_path = os.path.join(out, stamp, exporter.SHAREGPT_FILE)
+        os.makedirs(os.path.dirname(sharegpt_path), exist_ok=True)
+        with open(sharegpt_path, "w", encoding="utf-8", newline="\n") as f:
+            json.dump(sharegpt, f, ensure_ascii=False, indent=1)
+        counts["sharegpt"] = len(sharegpt)
         result = {"training_path": exporter.write_jsonl(os.path.join(out, stamp, exporter.TRAINING_FILE), training),
                   "eval_path": exporter.write_jsonl(os.path.join(out, stamp, exporter.EVAL_FILE), evals),
-                  "counts": counts}
+                  "sharegpt_path": sharegpt_path, "counts": counts}
         if frames_dir:
             by_clip = {i.clip_id: i for i in items.values()}
             result["frames"] = exporter.write_frames(

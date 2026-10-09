@@ -3413,6 +3413,11 @@
             "title": "Eval Path",
             "type": "string"
           },
+          "sharegpt_path": {
+            "default": "",
+            "title": "Sharegpt Path",
+            "type": "string"
+          },
           "training_path": {
             "title": "Training Path",
             "type": "string"
