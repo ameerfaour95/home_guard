@@ -21,7 +21,7 @@ def tag_view(widgets, wait, key):
 def test_the_ai_view_steps_the_model_input_and_full_scene_is_marked(widgets, wait):
     v, _ = tag_view(widgets, wait, LEGACY_CLIP)
     wait(lambda: not v.media_runner.busy and v.ai_images, 10)
-    assert v.view == 'crop' and v.segments['crop'].text() == 'What the AI sees'
+    assert v.view == 'crop' and v.segments['crop'].text() == 'AI view'
     assert v.view_label.text().startswith('What the AI sees: whole frame · 1 fps · 6 frames · 640×360')
     assert 'whole frames: no crop was saved' in v.view_label.text()
     assert v.canvas.image.size() == v.ai_images[0].size()

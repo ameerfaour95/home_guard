@@ -172,7 +172,7 @@ class TagView(QWidget):
         col.addWidget(self.canvas, 3)
         bar = QHBoxLayout(); bar.setSpacing(0)
         self.segments = {}
-        for kind, text in (('crop', 'What the AI sees'), ('clip', 'Full scene')):
+        for kind, text in (('crop', 'AI view'), ('clip', 'Full scene')):
             b = button(text, lambda checked=False, k=kind: self.switch_view(k), 'segment'); b.setCheckable(True)
             b.setToolTip(VIEW_TIP)
             self.segments[kind] = b; bar.addWidget(b)
