@@ -136,6 +136,51 @@ class VerifyClassTest(unittest.TestCase):
         self.assertEqual(g.verify_question(["violence"]), g.VERIFY_QUESTIONS["violence"])
         self.assertIn("NOT weapons", g.VERIFY_QUESTIONS["weapon"])
 
+    # 2026-10-09 14:03 ch6: the owner's pavers workers went out red for "a person lies on the ground".
+    DOWN_WHY = "אדם שוכב על הקרקע"
+    DOWN_SUMMARY = "A person lies on the ground while two others stand nearby. One person appears to be wearing a hat."
+
+    def test_a_person_down_gets_its_own_question(self):
+        self.assertEqual(g.verify_classes(f"{self.DOWN_WHY}  {self.DOWN_SUMMARY}", reason=f"{self.DOWN_WHY} "),
+                         ["person_down"])
+        for text in ("a man in a mask kneels on the ground", "two people crouching", "one lying on the pavement",
+                     "a person is on the ground", "a worker on his knees", "squatting in the yard", "אדם כורע על הקרקע",
+                     "פועל רכון", "גבר על הרצפה"):
+            with self.subTest(text=text):
+                self.assertEqual(g.verify_classes(text), ["person_down"])
+        question = g.VERIFY_QUESTIONS["person_down"]
+        for words in ("hurt, collapsed, unconscious", "attacked or held down", "to WORK", "laying tiles or pavers", "is NOT"):
+            self.assertIn(words, question)
+
+    def test_a_person_down_red_that_names_more_keeps_today_s_way(self):
+        # Lying motionless / unconscious is CLEAR (out at once); violence, a weapon, a break-in, a way in, hiding, night,
+        # a fall or an injury, a child, a theft or a robbery around it: no person-down question.
+        for text in ("a man lying motionless", "a person unconscious on the floor", "גבר שוכב ללא תנועה",
+                     "a person fell and lies on the ground", "a man is beaten while lying on the ground",
+                     "a man crouching by the car", "crouching near the window at night", "a child lying on the grass",
+                     "a man lies on the floor bleeding", "squatting at the door", "kneeling and picking the lock",
+                     "a person lying on the floor while another takes the cash", "two men kneel on top of a man, holding him down",
+                     "אדם שוכב על הקרקע ואחר מכה אותו", "גבר נפל ושוכב על הקרקע", "ילד שוכב על הדשא",
+                     "throwing items on the floor"):
+            with self.subTest(text=text):
+                self.assertNotIn("person_down", g.verify_classes(text))
+        self.assertEqual(g.verify_classes("a man with a knife kneels"), ["weapon"])
+        self.assertEqual(g.verify_classes("two men fight, one is on the ground"), ["violence"])
+
+    def test_the_person_down_must_be_the_reason(self):
+        self.assertEqual(g.verify_classes(f"wearing masks {self.DOWN_SUMMARY}", reason="wearing masks"), [])
+
+    def test_a_person_down_s_no_names_the_ground_without_contradicting_itself(self):
+        for what in ("a worker kneeling on the pavement laying pavers", "פועל כורע על הקרקע ומניח אבנים",
+                     "a person lying on the ground fixing a pipe", "not hurt, working on the ground",
+                     "a worker hitting pavers with a rubber mallet", ""):
+            with self.subTest(what=what):
+                self.assertFalse(g.answer_names(["person_down"], what))
+        for what in ("a man collapsed on the ground", "a person being held down", "an injured man", "a man fell",
+                     "two men fighting on the ground", "אדם פצוע על הקרקע", "גבר התמוטט"):
+            with self.subTest(what=what):
+                self.assertTrue(g.answer_names(["person_down"], what))
+
     def test_the_prompt_asks_for_strict_json(self):
         prompt = g.verify_prompt("Is it a gun?", 4)
         for part in ("Is it a gun?", '"confirmed"', '"what_it_is"', '"evidence_frame"', "1 to 4"):

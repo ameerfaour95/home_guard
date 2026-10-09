@@ -7,8 +7,8 @@ owner's rules:
 - Appearance alone (mask, hood, covered face, dark clothes, hat, sunglasses, a blurred or pixelated face) is never
   suspicious; only actions are. :func:`appearance_only` finds a "suspicious" whose reason names nothing but looks,
   and the guard loop lowers it to normal. It never touches an escalation.
-- A red for a weapon, a tool used as a weapon, a car break-in or violence that comes from one model answer gets a
-  second look before it goes out red (:func:`verify_class` picks the question). Clear serious things - a break-in
+- A red for a weapon, a tool used as a weapon, a car break-in, violence or a person down (lying, kneeling) that
+  comes from one model answer gets a second look before it goes out red (:func:`verify_class` picks the question). Clear serious things - a break-in
   through the house's door or window, climbing in, fire or smoke, a person lying motionless (:func:`clear_class`) -
   go out at once.
 
@@ -162,7 +162,56 @@ VERIFY_PATTERNS = {
                       r"אלימות", r"תוקף", r"תוקפים", r"קטטה", r"מתקוטט", r"מכה (?:אדם|גבר|אישה|ילד|אותו|אותה|את ה(?:גבר|אישה|ילד|אדם))",
                       r"מכים (?:אדם|גבר|אישה|אותו|אותה)", r"הכה (?:אדם|גבר|אישה|אותו|אותה)"]),
 }
-VERIFY_ORDER = ("weapon", "tool_weapon", "vehicle", "violence")
+# A person down - lying, on the ground, kneeling, crouching (2026-10-09 14:03 ch6: the owner's pavers workers went out
+# red for "a person lies on the ground while two others stand nearby"). Lying motionless / unconscious / not moving
+# is CLEAR and goes out at once; this is the rest, which may be work.
+PERSON_DOWN = _any([
+    r"\bl(?:ie|ies|ying|ay|ays|aying|ain)\b (?:\w+ ){0,3}?(?:on|in) (?:the |a )?(?:ground|floor|pavement|pavers?|sidewalk|"
+    r"road|grass|street|concrete|tiles?|dirt|asphalt)\b", r"\blying\b", r"\blies\b",
+    r"\b(?:person|man|woman|someone|somebody|worker|he|she|one|people|men|workers|they)\b (?:\w+ ){0,3}?on the "
+    r"(?:ground|floor|pavement)\b",       # a PERSON on the ground ("throwing items on the floor" is not, eval_set_v2)
+    r"\bkneel", r"\bknelt\b", r"\bcrouch", r"\bsquat", r"\bprone\b", r"\bon (?:his|her|their|all) (?:knees|back|stomach|fours)\b",
+    r"שוכב", r"(?:אדם|גבר|אישה|מישהו|פועל|עובד|אנשים|פועלים|הוא|היא)(?: \S+){0,2} על (?:הקרקע|הרצפה|האדמה|המדרכה)",
+    r"כורע", r"רכון", r"רכונה", r"רכונים", r"על הברכיים", r"על ברכיו",
+])
+# ...but not when the red names anything else: violence, a weapon, a break-in or theft, a way in (door, window, car,
+# fence), hiding, night, a fall or an injury, a child or an old person. Those reds go on as before (their own look,
+# or out at once).
+DOWN_ACT = _any([
+    r"\bfight", r"\battack", r"\bassault", r"\bhit\b", r"\bhits\b", r"\bhitting", r"\bbeat", r"\bpunch", r"\bkick",
+    r"\bstrik", r"\bstruck", r"\bslap", r"\bspray", r"\bbaton", r"\bcharg", r"\brun(?:s|ning)? (?:forward|toward|at)\b",
+    r"\bsurround", r"\bcorner(?:s|ed|ing)\b", r"\bhands? (?:raised|up)\b", r"\braises? (?:his |her |their )?hands",
+    r"\bstomp", r"\bpush", r"\bshov", r"\bknock", r"\bstruggl", r"\bwrestl", r"\bgrab", r"\bdrag", r"\bpin(?:s|ned|ning)?\b",
+    r"\bheld\b", r"\bhold(?:s|ing)? (?:\w+ ){0,2}down\b", r"\brestrain", r"\btie[sd]?\b", r"\btying", r"\bchok", r"\bstrangl",
+    r"\bthreat", r"\bviolen", r"\baggress", r"\babus", r"\brob", r"\bmug", r"\bsteal", r"\bstole", r"\btheft", r"\bthie",
+    r"\bburgl", r"\bbreak", r"\bbroke", r"\bsmash", r"\bforc", r"\bpr(?:y|ies|ied|ying)\b", r"\block", r"\btamper",
+    r"\bweapon", r"\bgun", r"\bknife", r"\bknives", r"\bpistol", r"\brifle",
+    r"\bdoors?\b", r"\bwindows?\b", r"\bgates?\b", r"\bfence", r"\bwall\b", r"\bcars?\b", r"\bvehicles?\b", r"\btrucks?\b",
+    r"\bvans?\b", r"\bmotorcycle", r"\bbikes?\b", r"\bclimb", r"\benter", r"\bpeek", r"\bpeer", r"\blook(?:s|ed|ing)? (?:in|into|inside|through)\b",
+    r"\bhid(?:e|es|ing|den)\b", r"\bsneak", r"\bnight\b",
+    r"\bfall", r"\bfell\b", r"\bcollaps", r"\bfaint", r"\bpass(?:es|ed)? out", r"\binjur", r"\bhurt", r"\bblood", r"\bbleed",
+    r"\bwound", r"\bpain\b", r"\bhelp", r"\bdistress", r"\bseizure", r"\bvictim", r"\bbody\b", r"\bdead\b", r"\blimp\b",
+    r"\bstill\b", r"\bmotionless", r"\bnot moving", r"\bunresponsive", r"\bimmobile", r"\bscream", r"\bcry", r"\bcries",
+    r"\bchild", r"\bkid\b", r"\bbaby", r"\btoddler", r"\belderly", r"\bold (?:man|woman|person)",
+    # ...or a theft, a robbery or a getaway around it (eval_set_v2 "as if the Eye had said 'lying on the ground'")
+    r"\blung", r"\bthrow", r"\bthrew", r"\bcut", r"\bload", r"\btak(?:e|es|ing|en)\b", r"\btook\b", r"\bflee", r"\bfled",
+    r"\bran\b", r"\brun(?:s|ning)? (?:away|off)", r"\bcarr\w* (?:\w+ ){0,5}(?:away|off|out)\b", r"\bstore\b", r"\bshop",
+    r"\bcounter\b", r"\bregister\b", r"\bcash", r"\bshutter", r"\bpower tool",
+    # ...or crouching OVER something (eval_set_v2: a burglar crouching to search the floor, kneeling to rummage
+    # through a bag, crouching over a scooter): that is about the thing, not a person down
+    r"\brummag", r"\bsearch", r"\bpick(?:s|ed|ing)? (?:\w+ ){0,3}up\b", r"\bpick(?:s|ed|ing)? up\b", r"\bhandl",
+    r"\binspect", r"\binteract", r"\badjust", r"\btamper", r"\bbags?\b", r"\bbackpack", r"\bpackage", r"\bparcel",
+    r"\bboxe?s?\b", r"\bbins?\b", r"\bcrate", r"\btrash", r"\bscooter", r"\bbicycle", r"\bcamera", r"\blens\b",
+    r"\bporch\b", r"\bentrance", r"\bsteps\b", r"\bstairs",
+    r"מחטט", r"מחפש", r"מרים", r"תיק", r"חבילה", r"קורקינט", r"אופניים", r"מצלמה", r"כניסה", r"מדרגות",
+    r"מכה", r"מכים", r"תוקף", r"תקיפה", r"אלימות", r"קטטה", r"דוחף", r"גורר", r"מחזיק אותו", r"כבול", r"שודד", r"גונב",
+    r"פורץ", r"נשק", r"סכין", r"אקדח", r"דלת", r"חלון", r"שער", r"גדר", r"רכב", r"מכונית", r"מטפס", r"מסתתר", r"מתחבא",
+    r"לילה", r"נפל", r"נופל", r"התמוטט", r"מתעלף", r"התעלף", r"פצוע", r"פציעה", r"(?<![א-ת])ה?דם(?![א-ת])", r"עזרה",
+    r"ללא תנועה", r"לא זז", r"ילד", r"תינוק", r"קשיש", r"צועק", r"בוכה",
+    r"לוקח", r"לקח", r"בורח", r"ברח", r"זורק", r"זרק", r"מעמיס", r"חותך", r"חנות", r"קופה",
+])
+
+VERIFY_ORDER = ("weapon", "tool_weapon", "vehicle", "violence", "person_down")
 
 # The tool question is only for a tool that is THERE - held, carried, lying near someone - not for a red that already
 # names what was done with it. eval_set_v2 (2026-10-09, qwen3.5-9b, 5 frames): asked the tool question, the second
@@ -208,6 +257,9 @@ VERIFY_QUESTIONS = {
     "vehicle": "Is someone breaking into a vehicle (smashing a window, forcing a door)? Someone getting out of or into "
                "their own car normally is NOT.",
     "violence": "Is someone hitting or attacking another person?",
+    "person_down": "Is the person on the ground hurt, collapsed, unconscious, or being attacked or held down? Kneeling "
+                   "or lying down to WORK (laying tiles or pavers, fixing something, using tools, moving between "
+                   "tasks) is NOT.",
 }
 
 
@@ -222,20 +274,27 @@ def verify_classes(text: str, reason: Optional[str] = None) -> List[str]:
 
     ``tool_weapon`` only when the tool is the red's reason and nothing was done with it: named in *reason* (the
     model's why + alert_reason; *text* when *reason* is None or empty) while *text* names no act (:data:`TOOL_IN_USE`).
-    A tool only in the summary of a red that is about something else (a theft, a break-in) is left alone."""
+    A tool only in the summary of a red that is about something else (a theft, a break-in) is left alone.
+
+    ``person_down`` the same way: a person lying, kneeling or crouching (:data:`PERSON_DOWN`) in *reason*, no other
+    class, and *text* names nothing else (:data:`DOWN_ACT`: violence, a weapon, a break-in, a way in, hiding, night, a
+    fall or an injury, a child)."""
     text = str(text or "")
     if clear_class(text):
         return []
-    found = [name for name in VERIFY_ORDER if name != "tool_weapon" and VERIFY_PATTERNS[name].search(text)]
+    found = [name for name in VERIFY_ORDER if name in VERIFY_PATTERNS and name != "tool_weapon"
+             and VERIFY_PATTERNS[name].search(text)]
     why = str(reason or "").strip() or text
     if VERIFY_PATTERNS["tool_weapon"].search(why) and not TOOL_IN_USE.search(text):
         found.append("tool_weapon")
+    if not found and PERSON_DOWN.search(why) and not DOWN_ACT.search(text):
+        found.append("person_down")
     return [name for name in VERIFY_ORDER if name in found]
 
 
 def verify_class(text: str) -> Optional[str]:
-    """The main second look an escalation needs (``weapon``, ``tool_weapon``, ``vehicle`` or ``violence``), or
-    None."""
+    """The main second look an escalation needs (``weapon``, ``tool_weapon``, ``vehicle``, ``violence`` or
+    ``person_down``), or None."""
     found = verify_classes(text)
     return found[0] if found else None
 
@@ -251,6 +310,17 @@ TOOL_ACT = _any([
     r"מאיים", r"איום", r"תוקף", r"מכה (?:אדם|גבר|אישה|ילד|אותו|אותה|את ה)", r"מניף (?:\S+ ){0,3}(?:על|לעבר|כלפי)",
     r"(?:פורץ|פריצה|לפרוץ|שובר|לשבור|מנפץ|לנפץ|כופה).{0,30}(?:דלת|חלון|רכב|מכונית|מנעול|שער|תריס)",
 ])
+# A person-down "no" names the ground by design ("a worker kneeling on the pavement laying pavers"), so it
+# contradicts itself only when it names harm: hurt, collapsed, unconscious, a fall, being attacked or held down.
+DOWN_HARM = _any([
+    r"\bhurt", r"\binjur", r"\bcollaps", r"\bunconscious", r"\bfaint", r"\bpass(?:es|ed)? out", r"\bfell\b",
+    r"\bfall(?:s|en)?\b", r"\bmotionless", r"\bunresponsive", r"\bnot moving", r"\bblood", r"\bbleed", r"\bin pain",
+    r"\battack", r"\bassault", r"\bbeat", r"\bhit(?:s|ting)? (?:\w+ ){0,2}(?:man|woman|person|him|her)", r"\bkick",
+    r"\bheld down", r"\bhold(?:s|ing)? (?:\w+ ){0,2}down", r"\bpinned", r"\brestrain", r"\bfight", r"\bstruggl",
+    r"פצוע", r"נפצע", r"התמוטט", r"מחוסר הכרה", r"התעלף", r"נפל", r"ללא תנועה", r"לא זז", r"(?<![א-ת])ה?דם(?![א-ת])",
+    r"מותקף", r"תוקף",
+    r"מכה", r"מוחזק", r"מחזיקים אותו",
+])
 _NEGATED = _any([r"\b(?:not|no|without|never|nobody|none|isn'?t|aren'?t)\b[^,.;:]*",
                  r"(?<![א-ת])(?:לא|אין|ללא|בלי)(?![א-ת])[^,.;:]*"])
 
@@ -258,16 +328,18 @@ _NEGATED = _any([r"\b(?:not|no|without|never|nobody|none|isn'?t|aren'?t)\b[^,.;:
 def answer_names(classes: Sequence[str], what_it_is: str) -> bool:
     """Does a second look's "no" name, in its own words, one of the *classes* it was asked about? Then it
     contradicts itself and the red stays ("not confirmed: a physical altercation", eval_set_v2 Abuse004). For
-    ``tool_weapon`` naming the tool is not enough (:data:`TOOL_ACT`)."""
+    ``tool_weapon`` naming the tool is not enough (:data:`TOOL_ACT`), for ``person_down`` naming the ground is not
+    enough (:data:`DOWN_HARM`)."""
     what = str(what_it_is or "")
+    own = {"tool_weapon": TOOL_ACT, "person_down": DOWN_HARM}
     for name in classes:
-        if name != "tool_weapon":
+        if name not in own:
             if name in verify_classes(what):
                 return True
             continue
         kept = _NEGATED.sub(" ", what)
-        if (TOOL_ACT.search(kept) or clear_class(kept)
-                or any(c != "tool_weapon" for c in verify_classes(kept))):
+        if (own[name].search(kept) or clear_class(kept)
+                or any(c not in own for c in verify_classes(kept))):
             return True
     return False
 
