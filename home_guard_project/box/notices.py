@@ -46,7 +46,7 @@ import tempfile
 import time
 from typing import Any, Dict, List, Optional, Sequence
 
-# Mirrored from HomeGuardAdmin home_guard_project/fleet_contract/notices.py (commit 527396c, "pins the whole
+# Mirrored from HomeGuardAdmin home_guard_project/fleet_contract/notices.py (commit 4bada96, "pins the whole
 # contract"), where the same values are kept (NOTICE_KINDS, and NOTICE_CLI with these arguments and MAX_B64). A new
 # kind is added there first; until this box
 # knows it, it is stored and shown as OTHER with the cloud's English message.
