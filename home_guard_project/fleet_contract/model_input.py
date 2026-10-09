@@ -21,6 +21,9 @@ import cv2
 import numpy as np
 
 MODEL_INPUT_VERSION = "model-input-1"
+# With a long-side cap on (ModelInputConfig.max_side, box.yaml ``vlm_max_side``) the pictures differ: their own
+# version. Off (0, the default) keeps MODEL_INPUT_VERSION and every byte as before.
+MODEL_INPUT_VERSION_MAX_SIDE = "model-input-2"
 
 VLM_INPUT_CROP = "crop"                     # the main-stream crop around the trigger detections
 VLM_INPUT_WHOLE = "whole_frame_fallback"    # whole sub-stream frames: no main stream or no usable crop
@@ -32,11 +35,16 @@ Crop = Tuple[int, int, int, int]            # x1, y1, x2, y2 in the clip frames'
 @dataclass(frozen=True)
 class ModelInputConfig:
     sample_fps: float = 1.0     # config vlm.sample_fps: frames a second sent to the model
+    # The long side of every sent frame at most this (aspect kept, INTER_AREA); 0 = off. 2026-10-09: union crops of
+    # 1279-2240 px x 16 frames made the vision model time out. On 41 real box clips over 1024 px, 1024 cut the
+    # calls over 25 s from 23/80 to 5/82 (768: 4/82), labels within the run-to-run noise (2026-10-09 A/B).
+    max_side: int = 0
 
 
-def config_from(cfg: Any) -> ModelInputConfig:
-    """The model-input settings of a data_collection Config (the box reads the same one)."""
-    return ModelInputConfig(sample_fps=float(cfg.VLM_SAMPLE_FPS))
+def config_from(cfg: Any, max_side: int = 0) -> ModelInputConfig:
+    """The model-input settings of a data_collection Config (the box reads the same one); *max_side* is box.yaml
+    ``vlm_max_side`` (0: off)."""
+    return ModelInputConfig(sample_fps=float(cfg.VLM_SAMPLE_FPS), max_side=max(0, int(max_side or 0)))
 
 
 @dataclass
@@ -52,6 +60,7 @@ class ModelInput:
     step: int                           # every step-th usable frame, from the first
     size: Optional[Tuple[int, int]]     # (width, height) of the sent frames; None when nothing is sent
     version: str = MODEL_INPUT_VERSION
+    max_side: int = 0                   # the long-side cap applied (0: none); in the record only when on
 
     def jpegs(self) -> List[bytes]:
         """The frames as the JPEG bytes the backend sends; a frame that cannot be encoded is skipped."""
@@ -59,7 +68,7 @@ class ModelInput:
 
     def record(self) -> Dict[str, Any]:
         """Everything but the pixels, JSON-safe."""
-        return {
+        record = {
             "version": self.version,
             "vlm_input": self.vlm_input,
             "frame_indices": list(self.frame_indices),
@@ -71,12 +80,24 @@ class ModelInput:
             "step": self.step,
             "size": list(self.size) if self.size is not None else None,
         }
+        if self.max_side:
+            record["max_side"] = self.max_side
+        return record
 
 
 def encode_jpeg(frame_bgr: Any) -> bytes:
     """JPEG-encode a BGR frame to raw bytes, as the backend sends it; b"" when it cannot be encoded."""
     ok, buf = cv2.imencode(".jpg", frame_bgr, [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY])
     return buf.tobytes() if ok else b""
+
+
+def fit_max_side(frame: np.ndarray, max_side: int) -> np.ndarray:
+    """*frame* with its long side at most *max_side* (aspect kept, cv2.INTER_AREA); a smaller frame as it is."""
+    h, w = frame.shape[:2]
+    if max_side <= 0 or max(w, h) <= max_side:
+        return frame
+    scale = max_side / float(max(w, h))
+    return cv2.resize(frame, (max(1, round(w * scale)), max(1, round(h * scale))), interpolation=cv2.INTER_AREA)
 
 
 def sample_step(fps: float, sample_fps: float) -> int:
@@ -158,6 +179,10 @@ def render_model_input(
         if cut else None
     if frames and crops is None:
         size = (int(frames[0].shape[1]), int(frames[0].shape[0]))
+    max_side = max(0, int(getattr(config, "max_side", 0) or 0))
+    if max_side and frames:
+        frames = [fit_max_side(f, max_side) for f in frames]
+        size = (int(frames[0].shape[1]), int(frames[0].shape[0]))
     return ModelInput(
         frames=frames,
         vlm_input=vlm_input,
@@ -169,5 +194,6 @@ def render_model_input(
         sample_fps=float(config.sample_fps),
         step=step,
         size=size if frames else None,
-        version=MODEL_INPUT_VERSION,
+        version=MODEL_INPUT_VERSION_MAX_SIDE if max_side else MODEL_INPUT_VERSION,
+        max_side=max_side,
     )
