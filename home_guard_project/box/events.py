@@ -89,9 +89,25 @@ class Known:
     people: int = 0              # how many were there when the owner said it (0 = not counted)
     camera: str = ""
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:10])
+    # 2026-10-09: a work crew's mark is a daily window ("HH:MM"-"HH:MM" local) on every day until ``until`` (7 days
+    # by default): their working hours are covered, the night and the hours before they come are not.
+    daily_from: str = ""
+    daily_to: str = ""
+    arrived_on: str = ""         # the local day ("YYYY-MM-DD") of the last "the workers arrived" line
+
+    def active(self, now: float) -> bool:
+        """Said and not over (a daily mark: on any of its days, inside its hours or not)."""
+        return self.at <= now < self.until
+
+    def in_window(self, now: float) -> bool:
+        if not (self.daily_from and self.daily_to):
+            return True
+        clock = datetime.fromtimestamp(now).strftime("%H:%M")
+        return self.daily_from <= clock < self.daily_to
 
     def live(self, now: float) -> bool:
-        return self.at <= now < self.until
+        """Covers *now*: active, and inside its daily hours when it has them."""
+        return self.active(now) and self.in_window(now)
 
 
 @dataclass
@@ -152,9 +168,20 @@ class Decision:
     # Stage 3.3: the incident this alert continues (``id, camera, session, entity, to_entity, gap_s, score, mode``;
     # ``thread`` True when it replies in the first camera's thread, ``announce`` when this camera told nothing yet).
     incident: Dict[str, Any] = field(default_factory=dict)
+    # 2026-10-09: a daily mark kept this quiet for the first time on a later day: ``who, camera, at`` for the one
+    # low-key line "העובדים של הפרגולה הגיעו (07:40)" (once per day).
+    arrival: Dict[str, Any] = field(default_factory=dict)
 
     def record(self) -> Dict[str, Any]:
         return asdict(self)
+
+
+def _clock_ok(start: str, end: str) -> bool:
+    try:
+        a, b = datetime.strptime(start, "%H:%M"), datetime.strptime(end, "%H:%M")
+    except (TypeError, ValueError):
+        return False
+    return a < b and len(start) == len(end) == 5
 
 
 def _int(value: Any) -> int:
@@ -239,7 +266,8 @@ class EventBook:
         try:
             with open(self.known_path, encoding="utf-8") as f:
                 rows = json.load(f)
-            self._known = [Known(**r) for r in rows if isinstance(r, dict)]
+            fields = set(Known.__dataclass_fields__)
+            self._known = [Known(**{k: v for k, v in r.items() if k in fields}) for r in rows if isinstance(r, dict)]
         except (OSError, ValueError, TypeError):
             self._known = []
 
@@ -352,8 +380,11 @@ class EventBook:
             return live[-1] if live else None
 
     def mark_known(self, camera: str, text: str, by: str, until: float, now: Optional[float] = None,
-                   people: Optional[int] = None) -> Dict[str, Any]:
-        """The owner said who is there. Returns a receipt; raises ValueError on a bad request."""
+                   people: Optional[int] = None, daily_from: str = "", daily_to: str = "") -> Dict[str, Any]:
+        """The owner said who is there. Returns a receipt; raises ValueError on a bad request. *daily_from* /
+        *daily_to* ("HH:MM", both or neither) make it a daily window on every day until *until*."""
+        if bool(daily_from) != bool(daily_to) or (daily_from and not _clock_ok(daily_from, daily_to)):
+            raise ValueError("a daily window needs a start and an end, HH:MM, start before end")
         now = time.time() if now is None else now
         text = str(text or "").strip()
         if not text:
@@ -363,7 +394,8 @@ class EventBook:
         with self._lock:
             s = self._open.get(camera)
             count = _int(people) if people is not None else (s.people_max if s else 0)
-            k = Known(text=text[:200], by=str(by or "owner"), at=now, until=until, people=count, camera=camera)
+            k = Known(text=text[:200], by=str(by or "owner"), at=now, until=until, people=count, camera=camera,
+                      daily_from=str(daily_from or ""), daily_to=str(daily_to or ""))
             self._known = [x for x in self._known if x.until > now] + [k]
             self._save_known()
             if s is not None:
@@ -373,7 +405,8 @@ class EventBook:
             log.info("known: %s on %s until %s (%d people)", k.text, camera or "all cameras",
                      datetime.fromtimestamp(until).strftime("%Y-%m-%d %H:%M"), count)
             return {"store": "events.known", "id": k.id, "camera": camera, "text": k.text, "until": until,
-                    "people": count, "undo_token": f"known:{k.id}"}
+                    "people": count, "undo_token": f"known:{k.id}", "daily_from": k.daily_from,
+                    "daily_to": k.daily_to}
 
     def cancel_known(self, known_id: str) -> bool:
         with self._lock:
@@ -385,7 +418,8 @@ class EventBook:
             return False
 
     def replace_known(self, old_ids: Any, camera: str, text: str, by: str, until: float,
-                      now: Optional[float] = None, people: Optional[int] = None) -> Dict[str, Any]:
+                      now: Optional[float] = None, people: Optional[int] = None, daily_from: str = "",
+                      daily_to: str = "") -> Dict[str, Any]:
         """The owner corrected a mark (its time, camera or words, 2026-10-09: "מי אמר עד 23:59? ... עד 18:00" left
         both marks live): the new mark is written and *old_ids* (one id or several) are removed, in one step. The
         receipt is mark_known's plus ``replaced``: what each removed mark was. Raises ValueError like mark_known."""
@@ -393,7 +427,8 @@ class EventBook:
         now = time.time() if now is None else now
         with self._lock:
             old = [asdict(k) for k in self._known if k.id in ids]
-            saved = self.mark_known(camera, text, by, until, now=now, people=people)
+            saved = self.mark_known(camera, text, by, until, now=now, people=people, daily_from=daily_from,
+                                    daily_to=daily_to)
             self._known = [k for k in self._known if k.id not in ids or k.id == saved["id"]]
             self._save_known()
             for s in self._open.values():
@@ -401,9 +436,25 @@ class EventBook:
             return dict(saved, replaced=old)
 
     def list_known(self, now: Optional[float] = None) -> List[Dict[str, Any]]:
+        """The owner's marks not over yet (a daily one also outside its hours: it is still remembered)."""
         now = time.time() if now is None else now
         with self._lock:
-            return [asdict(k) for k in self._known if k.live(now)]
+            return [asdict(k) for k in self._known if k.active(now)]
+
+    def _arrival(self, known: Optional[Known], camera: str, ts: float) -> Dict[str, Any]:
+        """The first quiet suspicious under a daily mark on a later day than it was said: the one line "they
+        arrived", once per day."""
+        if known is None or not known.daily_from:
+            return {}
+        day = datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
+        if day == datetime.fromtimestamp(known.at).strftime("%Y-%m-%d") or known.arrived_on == day:
+            return {}
+        known.arrived_on = day
+        try:
+            self._save_known()
+        except OSError as exc:
+            log.warning("arrival not saved: %s", exc)
+        return {"who": known.text, "camera": known.camera or camera, "at": ts, "known_id": known.id}
 
     # ---------- the policy ----------
     def _base_entities(self, camera: str, ts: float) -> List[Dict[str, Any]]:
@@ -493,6 +544,8 @@ class EventBook:
 
             def make(notify: bool, reason: str, known_text: str = "", unmarked: bool = False) -> Decision:
                 reply, info = reply_to, dict(incident)
+                arrival = self._arrival(known, camera, ts) if (not notify and known_text and known is not None
+                                                                and label == "suspicious") else {}
                 if info:
                     info["announce"] = s.reported_level == "none"
                 if notify and label == "suspicious" and thread_to is not None and not s.messages:
@@ -500,7 +553,7 @@ class EventBook:
                     reply, info["thread"] = thread_to, True
                     reason = f"{reason}; continues the incident from {incident.get('camera')}: in its thread"
                 return Decision(notify, s.id, reason, reply, new_people, known_text, list(in_view), list(fresh),
-                                unmarked, "entities" if by_entities else "head-count", info)
+                                unmarked, "entities" if by_entities else "head-count", info, arrival)
 
             def no(reason: str, known_text: str = "") -> Decision:
                 return make(False, reason, known_text)
