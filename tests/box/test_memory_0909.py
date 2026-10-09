@@ -248,6 +248,11 @@ class CorrectionTest(Base):
         (mark,) = self.events.list_known(self.clock)
         self.assertNotEqual(mark["id"], old["id"])
         self.assertEqual(mark["daily_to"], "18:00")
+        # The same time again is no correction: said plainly, no model, no other time offered.
+        again = Scripted([])
+        out = self.agent(again).handle("הם עובדים עד 18:00", "-5", OWNER)
+        self.assertEqual(again.seen, [])
+        self.assertTrue(out.text.startswith("נכון, עד 18:00 - כך זה שמור: עובדים אצלי על הפרגולה, כל יום"), out.text)
         # A question about the time corrects nothing.
         q = Scripted([reply("העובדים מסומנים עד 18:00.")])
         self.agent(q).handle("הם עובדים עד 17:00?", "-5", OWNER)

@@ -257,7 +257,8 @@ _NAMING = re.compile(r"(?<!\w)[ושה]?(?:תקרא|תקראי|לקרוא|קרא|
 _SENTENCES = re.compile(r"(?<=[.!?…\n])\s*")
 
 
-def honest_answer(answer: str, receipts: Sequence[Receipt], lang: str, request: str = "") -> str:
+def honest_answer(answer: str, receipts: Sequence[Receipt], lang: str, request: str = "",
+                  say_not_done: bool = True) -> str:
     """*answer* without the sentences that claim an action no receipt of this turn backs, plus one plain line
     saying what was NOT done ("לא רשמתי שום דבר על ההתראה"); "" when only the receipt lines should go out.
     *request* is the owner's message: a bare "save" claim on a naming request gets the camera-name line."""
@@ -269,6 +270,8 @@ def honest_answer(answer: str, receipts: Sequence[Receipt], lang: str, request: 
         return text
     kept = [part.strip() for part in _SENTENCES.split(text)
             if part.strip() and not unbacked_claims(part, receipts)]
+    if not say_not_done:
+        return " ".join(kept).strip()
     line = next((key for kind, key in _HONEST if kind in still), "")
     if not line and "save" in still:
         line = "not_saved_yet" if _NAMING.search(request or "") else "not_saved_any"

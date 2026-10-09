@@ -699,7 +699,10 @@ class OwnerAgentV2:
             current = (km.until_from_words(str(k["daily_to"]), now) if k.get("daily_to")
                        else float(k.get("until") or 0))
             if current is not None and abs(current - until) < 60:
-                return None                     # nothing to correct: the model answers
+                # Nothing to correct (09:34 in the fixed world: 18:00 is already saved) - say so, never offer
+                # another time.
+                return t("known_time_matches", ctx.lang, end=hhmm(until),
+                         marks=km.marks_text(book, ctx.snapshot, ctx.lang, now))
             word = next((w for w in sentence.split() if km.work_group(w) or km.same_people(w, str(k["text"]))), "")
             if not word:
                 return None
@@ -1554,11 +1557,14 @@ class OwnerAgentV2:
                                     still)
                         # Never "I'll remember" / "רשמתי כהתרעה צפויה" without the receipt of that action: the
                         # claim goes, and one plain line says what was NOT done.
-                        answer = honest_answer(answer, ctx.receipts, lang, ctx.text)
-                        if "known" in still and km.live_marks(getattr(self.services, "events", None), now):
-                            # "עדיין לא שמרתי מי הם" is false when they ARE remembered (2026-10-09 replay): say
-                            # what is live instead.
-                            answer = live_status(self.services, snapshot, lang, now)
+                        remembered = km.live_marks(getattr(self.services, "events", None), now)
+                        if remembered and ({"known", "save"} & set(still)):
+                            # "עדיין לא שמרתי מי הם" / "לא שמרתי כלום" is false when they ARE remembered (2026-10-09
+                            # replay): the claim goes, no "not saved" line, and what is live when nothing is left.
+                            answer = (honest_answer(answer, ctx.receipts, lang, ctx.text, say_not_done=False)
+                                      or live_status(self.services, snapshot, lang, now))
+                        else:
+                            answer = honest_answer(answer, ctx.receipts, lang, ctx.text)
                 if ctx.clarification is None and not _kept_known(ctx.receipts):
                     answer = self._second_look(ctx, model, messages, tier, usage, called, answer, snapshot, now)
                     if answer is None:              # the fast model's answer was empty empathy: the big one answers
