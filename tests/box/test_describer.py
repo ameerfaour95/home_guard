@@ -388,7 +388,7 @@ class DescribeTest(unittest.TestCase):
         self.assertEqual((empty["ok"], empty["error"]), (False, "nothing usable in the answer"))
 
     def test_settings(self):
-        self.assertEqual(ds.settings_of({}), (True, "openrouter", "qwen/qwen3.5-9b", 15.0))
+        self.assertEqual(ds.settings_of({}), (True, "openrouter", "qwen/qwen3.7-plus", 15.0))
         self.assertFalse(ds.settings_of({"alert_describer": "off"})[0])
         self.assertEqual(ds.settings_of({"describer_timeout_sec": 99})[3], 30.0)
         self.assertEqual(ds.settings_of({"describer_timeout_sec": 1})[3], 3.0)
