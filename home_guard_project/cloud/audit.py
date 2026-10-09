@@ -1,6 +1,7 @@
 """Append-only audit trail. The DB rejects UPDATE/DELETE on audit_log."""
 from __future__ import annotations
 
+import hashlib
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -62,14 +63,47 @@ def _notice_body(session: Session, row: OwnerNotice, device: Device, staff_name:
             "message": message}
 
 
-def _upload_notice(session: Session, s3, row: OwnerNotice, device: Device, staff_name: str) -> None:
-    """Write the notice object; a failure leaves the row `pending_upload` instead of failing the caller."""
+def staff_name_of(session: Session, row: OwnerNotice) -> str:
+    """The name a notice shows for the staff member who viewed (a removed one reads "Home Guard support")."""
+    return (session.scalar(select(Staff.name).where(Staff.id == row.staff_id))
+            if row.staff_id is not None else None) or "Home Guard support"
+
+
+def notice_body(session: Session, row: OwnerNotice, device: Device) -> dict[str, Any]:
+    """The notice object as written to S3 and pushed to the box, rebuilt from DB state."""
+    return _notice_body(session, row, device, staff_name_of(session, row))
+
+
+def notice_hash(body: dict[str, Any]) -> str:
+    """sha256 of the encoded body the box would receive (notice_delivery: a refused body is never re-sent)."""
+    return hashlib.sha256(notices.notice_b64(body).encode("ascii")).hexdigest()
+
+
+def _mark_for_delivery(row: OwnerNotice, body: dict[str, Any], now: datetime) -> None:
+    """A new or rewritten notice waits for push delivery to the box (cloud/notice_delivery.py). The same body already
+    delivered or refused by the box stays as it is; a notice that was not waiting starts its 7 days now."""
+    sha = notice_hash(body)
+    if row.delivery_state in ("delivered", "failed") and row.delivery_body_sha == sha:
+        return
+    if row.delivery_state != "pending":
+        row.delivery_since, row.delivery_attempts, row.delivery_heartbeat_at = now, 0, None
+        row.last_delivery_error = None
+    row.delivery_state, row.delivery_body_sha = "pending", sha
+
+
+def _upload_notice(session: Session, s3, row: OwnerNotice, device: Device,
+                   staff_name: str) -> Optional[dict[str, Any]]:
+    """Write the notice object; a failure leaves the row `pending_upload` instead of failing the caller. Returns the
+    body, or None when it could not be built."""
+    body = None
     try:
-        s3.put_json(row.s3_key, _notice_body(session, row, device, staff_name))
+        body = _notice_body(session, row, device, staff_name)
+        s3.put_json(row.s3_key, body)
         row.pending_upload = False
     except Exception as e:
         log.warning("owner notice %s could not be written to S3 (%s); kept for retry", row.id, type(e).__name__)
         row.pending_upload = True
+    return body
 
 
 def owner_notice(session: Session, s3, device: Device, staff: Staff, kind: str, cameras: list[str],
@@ -82,6 +116,9 @@ def owner_notice(session: Session, s3, device: Device, staff: Staff, kind: str, 
     failure only marks the row `pending_upload`. Every DB write that could fail is flushed before the put. If the
     surrounding transaction still rolls back after a successful put, that is harmless: the object only names the
     time window, and the next view rewrites it from DB state (same key while the window is open, a new key after).
+
+    The notice is also marked for push delivery to the box (delivery_state "pending"); the caller pushes it after its
+    commit (notice_delivery.schedule) and the notices loop retries it. Delivery never blocks the view.
     """
     notices.check_kind(kind)  # fleet_contract.notices.NOTICE_KINDS: kinds are data the owner's side branches on
     now = now or datetime.now(timezone.utc)
@@ -102,7 +139,9 @@ def owner_notice(session: Session, s3, device: Device, staff: Staff, kind: str, 
         row.s3_key = (f"fleet/{device.device_id}/notices/"
                       f"{datetime.fromtimestamp(ts, timezone.utc):%Y%m%dT%H%M%S}_{row.id}.json")
     session.flush()
-    _upload_notice(session, s3, row, device, staff.name)
+    body = _upload_notice(session, s3, row, device, staff.name)
+    if body is not None:
+        _mark_for_delivery(row, body, now)
     session.flush()
     return row
 
@@ -113,9 +152,9 @@ def retry_pending_notices(session: Session, s3, now: Optional[datetime] = None) 
     for row in session.scalars(select(OwnerNotice).where(OwnerNotice.pending_upload.is_(True))
                                .order_by(OwnerNotice.id).with_for_update()).all():
         device = session.get(Device, row.device_pk)
-        staff_name = (session.scalar(select(Staff.name).where(Staff.id == row.staff_id))
-                      if row.staff_id is not None else None) or "Home Guard support"
-        _upload_notice(session, s3, row, device, staff_name)
+        body = _upload_notice(session, s3, row, device, staff_name_of(session, row))
+        if body is not None and row.delivery_state is None:  # its body could not be built when it was viewed
+            _mark_for_delivery(row, body, now or datetime.now(timezone.utc))
         done += 0 if row.pending_upload else 1
     session.flush()
     return done

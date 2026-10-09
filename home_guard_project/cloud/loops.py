@@ -141,9 +141,10 @@ def _media_job(session, s3):
 
 
 def _notices_job(session, s3):
-    from . import audit
+    from . import audit, notice_delivery
 
     audit.retry_pending_notices(session, s3)
+    notice_delivery.deliver_pending(session)  # push to the boxes: new notices, and retries after a newer heartbeat
 
 
 def _exports_job(session, s3):

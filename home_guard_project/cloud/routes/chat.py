@@ -15,14 +15,14 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from home_guard_project.fleet_contract import health
 from home_guard_project.fleet_contract.camera_names import replace_ids
 
-from .. import audit
+from .. import audit, notice_delivery
 from ..access import media_refusal
 from ..deps import TEXT_MAX, SessionDep, check_length, require_id, require_role
 from ..models import Camera, Customer, Device, Staff
@@ -115,7 +115,8 @@ def _lines(s3, dev: Device, day: str, names: dict[str, str]) -> list[ChatLine]:
 
 
 @router.get("/customers/{customer_id}/chat", response_model=ChatDay)
-def chat(customer_id: int, request: Request, day: Optional[str] = None, q: Optional[str] = None,
+def chat(customer_id: int, request: Request, background_tasks: BackgroundTasks, day: Optional[str] = None,
+         q: Optional[str] = None,
          staff: Staff = Depends(require_role("admin", "support")), session: Session = SessionDep):
     # One day of the conversation (default: the newest day uploaded), or with `q` the matching lines of every
     # uploaded day (newest first, up to 14 per box). `days` lists the uploaded days, newest first.
@@ -143,14 +144,14 @@ def chat(customer_id: int, request: Request, day: Optional[str] = None, q: Optio
     audit.record(session, staff.id, "chat_view", target=f"chat/customer/{customer.id}", reason="review",
                  customer_id=customer.id, detail={"day": shown_day, "search": bool(needle), "messages": len(messages)},
                  ts=now)
-    for dev in devices:
-        if days_of[dev.id]:
-            audit.owner_notice(session, s3, dev, staff, kind="chat", cameras=[], now=now)
+    notices = [audit.owner_notice(session, s3, dev, staff, kind="chat", cameras=[], now=now)
+               for dev in devices if days_of[dev.id]]
+    notice_delivery.schedule(request, background_tasks, notices)  # pushed to the boxes after the commit
     return ChatDay(day=shown_day, days=days, messages=messages)
 
 
 @router.post("/customers/{customer_id}/chat/images/access", response_model=MediaAccess)
-def chat_image(customer_id: int, body: ChatImageRequest, request: Request,
+def chat_image(customer_id: int, body: ChatImageRequest, request: Request, background_tasks: BackgroundTasks,
                staff: Staff = Depends(require_role("admin", "support")), session: Session = SessionDep):
     # A presigned URL for a picture an alert sent in the chat (`image` as a chat line names it).
     customer = _customer(session, customer_id)
@@ -166,5 +167,6 @@ def chat_image(customer_id: int, body: ChatImageRequest, request: Request,
     audit.record(session, staff.id, "media_view", target=key, reason="review", customer_id=customer.id,
                  device_id=dev.device_id, detail={"role": "chat_image", "camera": None}, ts=now)
     url = s3.presign(key, URL_TTL_SECONDS)
-    audit.owner_notice(session, s3, dev, staff, kind="chat", cameras=[], now=now)
+    notice = audit.owner_notice(session, s3, dev, staff, kind="chat", cameras=[], now=now)
+    notice_delivery.schedule(request, background_tasks, [notice])
     return MediaAccess(url=url, expires_utc=now + timedelta(seconds=URL_TTL_SECONDS), mime="image/jpeg")

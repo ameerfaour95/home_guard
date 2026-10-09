@@ -282,3 +282,18 @@ def test_box_identity_reads_the_registration_when_the_heartbeat_has_no_box_id():
         OTHER_BOX, ["ts", "bh", "pc"])
     assert box_identity({"box_id": HOME_BOX, "host": "pc"}, {"box_id": OTHER_BOX}) == (HOME_BOX, ["pc"])
     assert box_identity(None, None) == ("", [])
+
+
+def test_current_site_for_names_the_live_site_of_an_old_row(client, staff_factory):
+    from home_guard_project.cloud.boxes import current_site_for
+    _setup(client)
+    _lineage_house(client, [
+        ("ameer_week_0_1", 0.1, {"box_id": HOME_BOX, "host": "DESKTOP-43DP1TI"}, None),
+        ("ameer_tes2", 49, {"host": "DESKTOP-43DP1TI"}, None),
+        ("other_house", 0.1, {"host": "other-box"}, None),
+    ])
+    with session_scope(client.app.state.engine) as s:
+        dev = {d.site: d for d in s.scalars(select(Device))}
+        assert current_site_for(s, dev["ameer_tes2"]) == "ameer_week_0_1"
+        assert current_site_for(s, dev["ameer_week_0_1"]) == "ameer_week_0_1"
+        assert current_site_for(s, dev["other_house"]) == "other_house"
