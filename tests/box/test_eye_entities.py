@@ -186,7 +186,8 @@ class WorkerTest(WorkerCase):
         self.assertEqual(len(self.assistant.sent), 2)
         update = self.assistant.sent[1]
         self.assertEqual(update["reply_to"]["message_id"], self.assistant.sent[0]["id"])
-        self.assertEqual(update["text"].splitlines()[:2], ["עוד אדם אחד הגיע (P2)", "P1 (קודם: A man walks by the gate) עדיין בתמונה."])
+        # 2026-10-09 message v2: the Eye's English is never quoted inside the Hebrew story line.
+        self.assertEqual(update["text"].splitlines()[:2], ["עוד אדם אחד הגיע (P2)", "בתמונה עכשיו: P1 ו-P2."])
         self.assertNotIn("P1", self.assistant.sent[0]["text"])         # the first message keeps today's format
 
     def test_workers_marked_then_a_new_one_is_not_theirs(self):

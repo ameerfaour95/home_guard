@@ -75,6 +75,12 @@ TAG_WAIT_SEC = 86400.0     # how long "Other…" waits for the owner's words, as
 TAG_IMPLICIT_SEC = 180.0
 CALLBACK_DATA_LIMIT = 64  # Telegram refuses a button whose callback data is longer (bytes)
 VIDEO_WAIT_SEC = 60.0  # an alert waits this long for its video; then it goes out with the picture
+# 2026-10-09 12:47-12:48: a 40 s "מה קורה" turn held the inbox; the owner's ✏️ taps waited unanswered (no spinner
+# stop, Telegram then refused the late answers with 400) and each one asked again. Now: the same button on the same
+# alert within TAP_REPEAT_SEC asks once, and while one update takes longer than BUSY_ACK_SEC the waiting taps are
+# answered from a side look at the queue (getUpdates without confirming), so their spinners stop at once.
+TAP_REPEAT_SEC = 60.0
+BUSY_ACK_SEC = 1.5
 
 # The buttons under an alert: (emoji, i18n key, callback code). The owner tags the clip with one of
 # OWNER_LABELS; "Other…" waits for their own words. Alerts sent before carry tag:escalation, tag:empty and
@@ -304,9 +310,16 @@ class PendingTags:
         return any(reply_to is None or str(reply_to) in e["prompt_ids"]
                    for _, e in self._mine(chat_id, user_id))
 
-    def cancel(self, chat_id: Any, user_id: Any) -> None:
-        """End every wait of *user_id* in *chat_id*."""
-        mine = self._mine(chat_id, user_id)
+    def asked_at(self, chat_id: Any, user_id: Any, alert_id: str, now: float) -> Optional[float]:
+        """When *user_id* was last asked for their words on *alert_id* and still waits (None: no open wait)."""
+        if self._purge(now):
+            self._save()
+        entry = self._pending.get(self._key(chat_id, user_id, alert_id))
+        return float(entry["ts"]) if entry else None
+
+    def cancel(self, chat_id: Any, user_id: Any, keep_alert: Optional[str] = None) -> None:
+        """End every wait of *user_id* in *chat_id* (but the one on *keep_alert*)."""
+        mine = [(k, e) for k, e in self._mine(chat_id, user_id) if keep_alert is None or e["alert_id"] != keep_alert]
         for key, _ in mine:
             del self._pending[key]
         if mine:
@@ -598,6 +611,19 @@ class OwnerAssistant:
             return self._release(alert_id, "") or self._deliver(alert, text, image, silent, lang, reply_to=reply_to)
         return {"sent": True, "held": "waiting for the video"}
 
+    def update_held(self, alert_id: str, text: str) -> bool:
+        """Replace the text of an alert still waiting for its video (the alert message v2, describer.py). False when
+        it is not waiting (already sent, or never held): then the owner has the old text and nothing changes. The
+        hold's timer is not touched."""
+        if not text or not str(text).strip():
+            return False
+        with self._held_lock:
+            held = self._held.get(str(alert_id))
+            if held is None:
+                return False
+            held["text"] = str(text)
+            return True
+
     def _deliver(self, alert: Dict[str, Any], text: str, image: Optional[bytes], silent: bool, lang: str,
                  video: Optional[str] = None, reply_to: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         res = send_alert(self.cfg, self.index, alert, text, image, post=telegram_notify._http_post,
@@ -860,6 +886,11 @@ class TelegramInbox:
         self.feedback_dir, self.offset_path = feedback_dir, offset_path
         self._post, self._post_multipart, self._now = post, post_multipart, now
         self._offset = self._load_offset()
+        # Callback ids already answered (Telegram takes one answer per tap); the busy watcher adds to it from its thread.
+        self._acked: deque = deque(maxlen=500)
+        self._acked_lock = threading.Lock()
+        self._label_taps: Dict[Tuple[str, str, str], Tuple[str, float]] = {}   # (chat, user, alert) -> last label, when
+        self.busy_ack_sec = BUSY_ACK_SEC
 
     # -- offset: which updates were already handled ---------------------------
     def _load_offset(self) -> int:
@@ -1002,10 +1033,7 @@ class TelegramInbox:
             return
         self._cancel_tag(chat_id, (query.get("from") or {}).get("id"))   # any other tap ends an "Other…" wait
         if getattr(self.agent, "version", 1) == 2 and code.startswith(("cl:", "u:", "hs:", "kn:")):
-            try:   # only stops the button's spinner: a dropped connection here must not lose the tap
-                self._post(self.cfg.bot_token, "answerCallbackQuery", {"callback_query_id": str(query.get("id"))})
-            except Exception as exc:  # noqa: BLE001
-                log.warning("Could not stop the button's spinner: %s", exc)
+            self._answer_callback(query)   # only stops the button's spinner: a failure here must not lose the tap
             who = _who(query.get("from") or {})
             if code.startswith("kn:"):            # Cancel / All week under "these are my workers" (Memory Keeper)
                 parts = code.split(":")
@@ -1041,6 +1069,7 @@ class TelegramInbox:
         feedback = button_feedback(code, self._now())
         answer = self._button_answer(feedback, self._language())
         tapped_alert = self.index.lookup(chat_id, message.get("message_id"))
+        self._answer_callback(query)        # stops the button's spinner at once; a late answer must not lose the tap
         self._note("owner", "button", BUTTON_LABELS.get(code, code), _who(query.get("from") or {})["name"], tapped_alert)
         if feedback:
             alert = tapped_alert
@@ -1048,9 +1077,7 @@ class TelegramInbox:
             self.mute.apply(feedback, self._now())
             save_feedback(self.feedback_dir, alert, feedback, "", _who(query.get("from") or {}), chat_id, self._now(),
                           training_dir=self.training_dir, archive_dir=self.archive_dir)
-        # Stops the button's spinner, then leaves a visible line in the chat.
-        self._post(self.cfg.bot_token, "answerCallbackQuery", {"callback_query_id": str(query.get("id"))})
-        self._say(chat_id, answer, reply_to=message.get("message_id"))
+        self._say(chat_id, answer, reply_to=message.get("message_id"))   # a visible line in the chat
 
     # -- tagging an alert ------------------------------------------------------------
     def _language(self) -> str:
@@ -1072,9 +1099,9 @@ class TelegramInbox:
             return tr("verdict_saved", lang, verdict=tr(f"verdict_{feedback.verdict}", lang))
         return tr("button_unused", lang)
 
-    def _cancel_tag(self, chat_id: str, user_id: Any) -> None:
+    def _cancel_tag(self, chat_id: str, user_id: Any, keep_alert: Optional[str] = None) -> None:
         try:
-            self.pending.cancel(chat_id, user_id)
+            self.pending.cancel(chat_id, user_id, keep_alert=keep_alert)
         except Exception as exc:  # noqa: BLE001
             log.warning("Pending tag not cancelled: %s", exc)
 
@@ -1116,11 +1143,24 @@ class TelegramInbox:
     def _alert_messages(self, chat_id: str, alert_id: str) -> List[int]:
         return [message_id for chat, message_id in self.index.messages(alert_id) if chat == str(chat_id)]
 
-    def _answer_callback(self, query: Dict[str, Any], text: str = "") -> None:
-        fields = {"callback_query_id": str(query.get("id"))}
+    def _answer_callback(self, query: Dict[str, Any], text: str = "") -> bool:
+        """Stop the tap's spinner (with a short toast *text*). A tap is answered once: a second answer, or one the busy
+        watcher already gave, is skipped. Never raises: Telegram refuses an answer that comes too late (HTTP 400) and
+        that must not undo what the tap did (2026-10-09 12:48: a 🟢 was saved but its receipt never shown)."""
+        qid = str(query.get("id"))
+        with self._acked_lock:
+            if qid in self._acked:
+                return False
+            self._acked.append(qid)
+        fields = {"callback_query_id": qid}
         if text:
             fields["text"] = text[:200]
-        self._post(self.cfg.bot_token, "answerCallbackQuery", fields)
+        try:
+            self._post(self.cfg.bot_token, "answerCallbackQuery", fields)
+            return True
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Could not stop the button's spinner: %s", exc)
+            return False
 
     def _ask_for_tag(self, chat_id: str, sender: Dict[str, Any], reply_to: Any, lang: str) -> Dict[str, Any]:
         """Ask the tapping person for their own words, as a forced reply only they are prompted for.
@@ -1202,6 +1242,12 @@ class TelegramInbox:
             alert_id = str(alert["alert_id"])
             self._mark_answered(alert)
             if label == "other":
+                asked = self.pending.asked_at(chat_id, user_id, alert_id, now)
+                if asked is not None and now - asked < TAP_REPEAT_SEC:
+                    # Already asked and still waiting: no second question, only a toast (2026-10-09: 11 taps, 11 asks).
+                    answered = True
+                    self._answer_callback(query, tr("tag_already_waiting", lang))
+                    return
                 self.pending.demote(chat_id, user_id)
                 try:
                     resp = self._ask_for_tag(chat_id, sender, message.get("message_id"), lang)
@@ -1217,11 +1263,20 @@ class TelegramInbox:
                 except Exception as exc:  # noqa: BLE001
                     log.warning("Could not stop the button's spinner: %s", exc)
                 return
-            self._cancel_tag(chat_id, user_id)
+            tap_key = (str(chat_id), str(user_id), alert_id)
+            last_label, last = self._label_taps.get(tap_key, ("", -1e18))
+            if last_label == label and 0 <= now - last < TAP_REPEAT_SEC:
+                answered = True             # the same tag again within a minute: saved already, nothing to repeat
+                self._answer_callback(query)
+                return
+            # A label ends the person's other waits; an open "Other…" on this very alert stays (they may still add words).
+            self._cancel_tag(chat_id, user_id, keep_alert=alert_id)
             feedback = Feedback(verdict=verdict_for(label, str(alert.get("label") or "")), owner_label=label,
                                 tagged_by=who["name"] or str(user_id or ""), source="button")
             save_feedback(self.feedback_dir, alert, feedback, "", who, chat_id, now,
                           training_dir=self.training_dir, archive_dir=self.archive_dir)
+            self._label_taps = {k: v for k, v in self._label_taps.items() if now - v[1] < TAP_REPEAT_SEC}
+            self._label_taps[tap_key] = (label, now)
             self._answer_callback(query)
             answered = True
             if not self._receipt(chat_id, message.get("message_id"), label, alert_id, lang):
@@ -1457,8 +1512,50 @@ class TelegramInbox:
                 self._save_offset()
             except Exception as exc:  # noqa: BLE001 - a disk failure must not discard the rest of this batch
                 log.warning("Could not save Telegram offset: %s", exc)
-            self.handle_update(update)
+            self._handle_watched(update)
         return len(updates)
+
+    def _handle_watched(self, update: Dict[str, Any]) -> None:
+        """Handle *update*; while it takes longer than ``busy_ack_sec`` (a 40 s assistant turn), the taps waiting
+        behind it get their spinner stopped by :meth:`_ack_waiting_taps`. They are still handled in order after it."""
+        done = threading.Event()
+        watcher = threading.Thread(target=self._watch_busy, args=(done,), name="busy-taps", daemon=True)
+        try:
+            watcher.start()
+        except Exception as exc:  # noqa: BLE001 - without the watcher the update is still handled
+            log.warning("Busy watcher not started: %s", exc)
+            watcher = None
+        try:
+            self.handle_update(update)
+        finally:
+            done.set()
+            if watcher is not None:
+                watcher.join(timeout=10.0)      # never two getUpdates at once (Telegram answers 409)
+
+    def _watch_busy(self, done: threading.Event) -> None:
+        while not done.wait(self.busy_ack_sec):
+            self._ack_waiting_taps()
+
+    def _ack_waiting_taps(self) -> int:
+        """Answer the taps waiting in Telegram's queue with a short "one moment" toast, without taking them off the
+        queue (no new offset): the inbox handles them next, as always. Returns how many were answered. Never raises."""
+        try:
+            resp = self._post(self.cfg.bot_token, "getUpdates",
+                              {"offset": str(self._offset), "timeout": "0",
+                               # the same list as the long poll: allowed_updates is sticky in Telegram
+                               "allowed_updates": json.dumps(["message", "callback_query"])}, timeout=5.0)
+        except Exception as exc:  # noqa: BLE001
+            log.debug("Busy look at the queue failed: %s", exc)
+            return 0
+        answered = 0
+        for update in (resp.get("result") if isinstance(resp, dict) else None) or []:
+            query = update.get("callback_query") if isinstance(update, dict) else None
+            if not isinstance(query, dict) or query.get("id") is None:
+                continue
+            chat_id = str(((query.get("message") or {}).get("chat") or {}).get("id"))
+            if self._allowed(chat_id) and self._answer_callback(query, tr("busy_ack", self._language())):
+                answered += 1
+        return answered
 
     def run(self, stop: Optional[threading.Event] = None) -> None:
         """Poll until *stop* is set. Network errors wait and retry."""

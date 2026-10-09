@@ -406,6 +406,10 @@ TEMPLATES: Dict[str, Dict[str, str]] = {
     "alert_escalation": {"en": "🔴 ESCALATION · {camera}", "he": "🔴 אירוע חמור · {camera}", "ar": "🔴 تصعيد · {camera}"},
     "alert_unclassified": {"en": "⚪ Activity · {camera}", "he": "⚪ פעילות · {camera}", "ar": "⚪ نشاط · {camera}"},
     "alert_why": {"en": "Why: {why}", "he": "למה: {why}", "ar": "السبب: {why}"},
+    # The alert message v2 (describer.py, owner 2026-10-09): what happens, one line per person, why the owner is told.
+    "msg_scene": {"en": "What's happening: {text}", "he": "מה קורה: {text}", "ar": "ما يحدث: {text}"},
+    "msg_reason": {"en": "Why I told you: {text}", "he": "למה הודעתי: {text}", "ar": "لماذا أبلغتك: {text}"},
+    "msg_more": {"en": "and {n} more", "he": "ועוד {n}", "ar": "و{n} آخرون"},
     "alert_reminder": {"en": "🔴 Reminder: nobody has answered this alert yet.",
                        "he": "🔴 תזכורת: אף אחד עוד לא ענה להתראה הזו.",
                        "ar": "🔴 تذكير: لم يرد أحد على هذا التنبيه بعد."},
@@ -448,6 +452,11 @@ TEMPLATES: Dict[str, Dict[str, str]] = {
     "tag_ask_failed": {"en": "Could not ask for the tag right now; tap Other… again.",
                        "he": "לא הצלחתי לבקש את התיוג כרגע; לחצו שוב על אחר…",
                        "ar": "تعذّر طلب الوسم الآن؛ اضغط على غير ذلك… مرة أخرى."},
+    # 2026-10-09 12:48: eleven taps on ✏️ while the assistant was busy each asked again. A repeat only gets this toast.
+    "tag_already_waiting": {"en": "Already waiting for your answer", "he": "כבר מחכה לתשובה שלך",
+                            "ar": "ما زلت أنتظر إجابتك"},
+    "busy_ack": {"en": "⏳ One moment, finishing an answer first", "he": "⏳ רגע, אני מסיים תשובה קודמת",
+                 "ar": "⏳ لحظة، أنهي إجابة سابقة أولاً"},
 }
 
 

@@ -551,7 +551,7 @@ def check_camera(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         return _result(_issue(ctx, "check_camera", FAILED, camera, {"camera": camera}, "camera_offline"))
     if not isinstance(shot["image"], str):
         raise ValueError("photo path must be a string")
-    sent = _service_result(ctx.services.deliver.photo(ctx.chat_id, shot["image"]))
+    sent = _service_result(ctx.services.deliver.photo(ctx.chat_id, shot["image"], caption=photo_caption(ctx, camera)))
     detail = {"camera": camera, "message_id": sent.get("message_id")}
     if _aka(ctx, camera):
         detail["aka"] = _aka(ctx, camera)
@@ -594,6 +594,17 @@ def check_camera(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
 LOOK_AROUND_PHOTOS = 2
 
 
+def photo_caption(ctx: ToolContext, camera: str, ts: Any = None) -> str:
+    """"פרגולה · 12:47": the camera's name (never its id) and when the picture was taken (2026-10-09: two photos came
+    with no word of where they were from)."""
+    try:
+        when = float(ts) if ts else float(ctx.services.now())
+        return f"{display(ctx.snapshot, camera, ctx.lang)} · {hhmm(when)}"
+    except Exception as exc:  # noqa: BLE001 - a caption must never stop the picture
+        log.debug("photo caption not made: %s", exc)
+        return ""
+
+
 @_safe_tool
 def look_around(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     """A live look at every camera that is on ("anything outside?", "what's around the house?" with no camera named).
@@ -630,7 +641,7 @@ def look_around(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         ctx.state.note_observation(handle, str(look.get("description") or ""))
         row["handle"] = handle
         if people and _media_sent(ctx) < LOOK_AROUND_PHOTOS and ctx.services.deliver is not None:
-            sent = _service_result(ctx.services.deliver.photo(ctx.chat_id, shot["image"]))
+            sent = _service_result(ctx.services.deliver.photo(ctx.chat_id, shot["image"], caption=photo_caption(ctx, cam)))
             _issue(ctx, "check_camera", DONE if sent.get("ok") else FAILED, cam,
                    {"camera": cam, "message_id": sent.get("message_id")}, "" if sent.get("ok") else "telegram")
             ctx.shown.append(handle)
@@ -709,7 +720,8 @@ def send_media(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         if not os.path.isfile(path):
             return _result(_issue(ctx, "send_media", FAILED, handle, {"kind": entry["kind"]}, "not_on_box"))
         if entry["kind"] == "photo":
-            sent = _service_result(ctx.services.deliver.photo(ctx.chat_id, path))
+            sent = _service_result(ctx.services.deliver.photo(
+                ctx.chat_id, path, caption=photo_caption(ctx, camera, entry.get("ts")) if camera else ""))
             return _result(_issue(ctx, "send_media", DONE if sent.get("ok") else FAILED, handle,
                                   {"kind": "photo", "camera": camera, "message_id": sent.get("message_id")},
                                   "" if sent.get("ok") else "telegram"))

@@ -70,7 +70,18 @@ class StoryTest(StoryCase):
         _, lines = self.step(T0 + 60, [trk(1, T0 - 2, T0 + 60), trk(2, T0 - 2, T0 + 60, start=(0.2, 0.8))],
                              per_entity=[{"id": "P2", "action": "שם את המטאטא בטנדר"}])
         self.assertIn("P2 (קודם: מנקה את הרצפה): שם את המטאטא בטנדר.", lines["he"])
-        self.assertIn("P1 (earlier: הולך ליד הכניסה) is still in view.", lines["en"])
+        # 2026-10-09 message v2: a note in another language is never quoted (no Hebrew inside an English line).
+        self.assertIn("P1 (קודם: הולך ליד הכניסה) עדיין בתמונה.", lines["he"])
+        self.assertEqual(lines["en"], "In view now: P1 and P2.")
+
+    def test_described_ids_get_only_their_moves_and_exits(self):
+        two = [trk(1, T0 - 2, T0), trk(2, T0 - 2, T0, start=(0.2, 0.8))]
+        self.step(T0, two, per_entity=[{"id": "P1", "action": "הולך ליד הכניסה"}, {"id": "P2", "action": "מנקה את הרצפה"}])
+        self.step(T0 + 60, [trk(1, T0 - 2, T0 + 60), trk(2, T0 - 2, T0 + 60, start=(0.2, 0.8))], send=False)
+        session = self.book.session_of_alert(f"a{int(T0 + 60)}")
+        line = story.story_line(session, "he", described=["P1", "P2"])
+        self.assertNotIn("P1", line)
+        self.assertNotIn("קודם", line)
 
     def test_an_ambiguous_return_is_never_the_one_who(self):
         two = [trk(1, T0 - 2, T0, start=(0.5, 0.8)), trk(2, T0 - 2, T0, start=(0.52, 0.8))]

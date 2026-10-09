@@ -1792,6 +1792,9 @@ class AlertJob:
     track_boxes: Optional[Dict[str, Any]] = None
     # Both models failed and the main model was asked again on smaller pictures (vlm_rescue): its record.
     rescue: Dict[str, Any] = field(default_factory=dict)
+    # The clip the model input was cut from: {"start", "end", "frames", "size": [w, h]} (the main stream for a crop,
+    # the sub stream for whole frames). Only read by the alert describer (describer.py) to place the tracker's boxes.
+    input_clock: Optional[Dict[str, Any]] = None
 
 
 def _camera_streams(cfg: Any) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -1869,17 +1872,28 @@ def _prepare_alert(job: AlertJob, cfg: Any, detector: Any, sub_cap: Any, main_ca
                 reason = "crop_error"
     # What the model sees comes from model_input alone: the crop's own boxes on the main stream, else whole sub frames.
     if job.crop is not None:
+        job.input_clock = _clock_of(main[0], main[1], main[2])
         job.input_meta = {"vlm_input": model_input.VLM_INPUT_CROP}
         job.model_input = model_input.render_model_input(
             main[0], {"vlm_input": model_input.VLM_INPUT_CROP, "fps": job.crop_fps, "crops": job.crop.crops,
                       "crop_size": (job.crop.width, job.crop.height)}, model_input.config_from(cfg, max_side))
     else:
+        job.input_clock = _clock_of(sub_frames, start, end)
         job.input_meta = {"vlm_input": model_input.VLM_INPUT_WHOLE, "vlm_fallback_reason": reason}
         log.warning("[%s] VLM whole_frame_fallback: %s", job.camera, reason)
         job.model_input = model_input.render_model_input(
             sub_frames, {"vlm_input": model_input.VLM_INPUT_WHOLE, "fps": sub_fps},
             model_input.config_from(cfg, max_side))
     return job.model_input.frames, clip
+
+
+def _clock_of(frames: Sequence[Any], start: Any, end: Any) -> Optional[Dict[str, Any]]:
+    """{"start", "end", "frames", "size"} of a clip, for AlertJob.input_clock; None when it cannot be read."""
+    try:
+        h, w = frames[0].shape[:2]
+        return {"start": float(start), "end": float(end), "frames": len(frames), "size": [int(w), int(h)]}
+    except Exception:  # noqa: BLE001 - only the describer reads it
+        return None
 
 
 def _model_input_record(job: Optional[AlertJob]) -> Optional[Dict[str, Any]]:
@@ -2478,7 +2492,7 @@ def send_arrival_line(arrival: Dict[str, Any], box_settings: Dict[str, Any], env
         log.warning("arrival line not sent: %s", exc)
 
 
-def _event_story(event: Any, alert_id: str, alert_ts: float, lang: str) -> str:
+def _event_story(event: Any, alert_id: str, alert_ts: float, lang: str, described: Sequence[str] = ()) -> str:
     """The first lines of an UPDATE in an event's thread when the tracker gave the event its entities (stage 2a): who
     is new (``story.new_people_line``), then the story so far (``story.story_line``); the new observation follows
     under them. "" for an event's first message or without entities: then the update reads as before. Never raises."""
@@ -2490,7 +2504,8 @@ def _event_story(event: Any, alert_id: str, alert_ts: float, lang: str) -> str:
 
         session = EVENTS.session_of_alert(alert_id) or {}
         head = new_people_line(event.fresh, event.unmarked, event.known_text if event.unmarked else "", lang)
-        line = story_line(session, lang, now=alert_ts, in_view=event.entities, announced=event.fresh)
+        line = story_line(session, lang, now=alert_ts, in_view=event.entities, announced=event.fresh,
+                          described=described)
         return "\n".join(x for x in (head, line) if x)
     except Exception as exc:  # noqa: BLE001 - the update goes out as before
         log.warning("event story not written: %s", exc)
@@ -2511,6 +2526,99 @@ def _incident_text(event: Any, camera: str, lang: str) -> str:
     except Exception as exc:  # noqa: BLE001 - the alert goes out without the line
         log.debug("[%s] incident line not written: %s", camera, exc)
         return ""
+
+
+def _held(res: Any) -> bool:
+    """Is the dispatched alert waiting for its video (telegram_agent.OwnerAssistant.send_alert)?"""
+    tg = (res or {}).get("telegram") if isinstance(res, dict) else None
+    inner = tg.get("telegram") if isinstance(tg, dict) else None
+    return bool(isinstance(inner, dict) and inner.get("held"))
+
+
+def _places(job: AlertJob) -> List[str]:
+    """The owner's area names the tracker saw this alert's people and vehicles in (scene map), first visit first."""
+    out: List[str] = []
+    record = getattr(job, "tracker", None) or {}
+    for one in list(record.get("people") or []) + list(record.get("vehicles") or []):
+        for name in list(one.get("path") or []) + list((one.get("seconds_per_area") or {}).keys()):
+            if isinstance(name, str) and name.strip() and name.strip() not in out:
+                out.append(name.strip())
+    return out[:4]
+
+
+def _describe_alert(job: AlertJob, frames: List[Any], box_settings: Dict[str, Any], env: Dict[str, str], lang: str,
+                    label: str, camera: str, shown_camera: str, alert_ts: float, summary: str, why: str,
+                    owner_why: str, why_by_code: bool, event: Any, alert_id: str, assistant: Any,
+                    top: Sequence[str] = (), bottom: Sequence[str] = ()) -> Dict[str, Any]:
+    """The alert message v2 for a SENT alert that is waiting for its video (describer.py): draw the tracker's ids on
+    the Eye's own frames, ask who is who, translate, compose, and replace the held text (OwnerAssistant.update_held).
+
+    Returns the record for the clip's meta (``describer``): ``used`` True when the owner gets the new text. The
+    alert's hold timer is never extended: it started at dispatch, and this runs within the describer's and the
+    translator's budgets (12 + 10 s of the 60 s video wait). Never raises; on any failure the held text stays."""
+    from . import describer as ds  # noqa: PLC0415
+
+    try:
+        on, *_ = ds.settings_of(box_settings)
+        rendered = getattr(job, "model_input", None)
+        if not on or rendered is None or not frames:
+            return {}
+        clock = job.input_clock or {}
+        tracks = (job.track_boxes or {}).get("tracks") or []
+        mapped: Dict[str, str] = {}
+        if EVENTS is not None:
+            from . import clip_tracks  # noqa: PLC0415
+
+            mapped = clip_tracks.entity_ids(EVENTS.session_of_alert(alert_id))
+        places = _places(job)
+        size = clock.get("size")
+        record = ds.describe(ds.describer_for(box_settings, env), frames, list(rendered.frame_indices),
+                             list(rendered.crops), clock, tracks, mapped, summary, why, places,
+                             tuple(size) if size else None, list(rendered.times))
+        record["used"] = False
+        if not record.get("ok"):
+            log.info("[%s] describer: %s (%.1f s); the alert keeps its text", camera, record.get("error"),
+                     record.get("seconds", 0.0))
+            return record
+        started = time.monotonic()
+        keep = [*record.get("ids", {}).keys(), *places, shown_camera]
+        told = ds.to_owner_language(record["answer"], lang, messenger.messenger_for(box_settings, env)
+                                    if lang != "en" else None, keep=keep)
+        record["translate_seconds"] = round(time.monotonic() - started, 2)
+        if told is None:
+            record["error"] = "the translation failed"
+            log.info("[%s] describer: the translation failed; the alert keeps its text", camera)
+            return record
+        record["told"] = told
+        if why_by_code:
+            reason = owner_why                       # the house's own reason (a note, coming onto our ground)
+        elif label in ("suspicious", "escalation"):
+            reason = told.get("reason") or owner_why
+        else:
+            reason = ""
+        clock_text = datetime.fromtimestamp(alert_ts).strftime("%H:%M")
+        base = ds.compose(label, shown_camera, clock_text, told.get("scene", ""), told["entities"], reason, lang)
+        lines = list(top)
+        if event is not None and getattr(event, "reply_to", None) is not None:
+            story = _event_story(event, alert_id, alert_ts, lang,
+                                 described=[e["id"] for e in told["entities"]])
+            if story:
+                lines.append(story)
+        text = owner_guard("\n".join(x for x in [*lines, base, *bottom] if x), camera, lang)
+        if assistant.update_held(alert_id, text):
+            record.update(used=True, message=text)
+            log.info("[%s] describer: %d ids in %.1f s (+%.1f s translation)", camera, len(told["entities"]),
+                     record.get("seconds", 0.0), record["translate_seconds"])
+            if EVENTS is not None:
+                EVENTS.note_entities(alert_id, {e["id"]: e.get("action") or "" for e in told["entities"]}, alert_ts,
+                                     label)
+        else:
+            record["error"] = "the alert was no longer waiting for its video"
+            log.info("[%s] describer: too late, the alert already went out", camera)
+        return record
+    except Exception as exc:  # noqa: BLE001 - the held alert goes out as it is
+        log.warning("[%s] describer failed: %s", camera, exc)
+        return {"ok": False, "used": False, "error": f"{type(exc).__name__}: {exc}"[:300]}
 
 
 def _first_message(res: Any) -> Optional[Tuple[str, int]]:
@@ -2861,6 +2969,7 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
             log.info("[%s] case memory chose the digest, which the box doesn't have yet; sending quietly", camera_name)
         case_line = case_note.text(lang) if case_note is not None else ""
         event_sent: Optional[Dict[str, Any]] = None
+        described: Dict[str, Any] = {}
         # Serialize softened deliveries so concurrent workers cannot both claim the first sound.
         with _SOFTENED_LOCK if softened else nullcontext():
             sound_key = (fact["id"], datetime.fromtimestamp(alert_ts).date().isoformat()) if softened else None
@@ -2927,6 +3036,16 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                 res = dispatch_alert(box_settings, env, cmd, plain, owner_guard(reason, camera_name, lang),
                                      image=image or None, assistant=assistant, alert=alert_ref, graded=graded,
                                      silent=silent, lang=lang, **thread)
+                # The alert message v2 (describer.py): while the alert waits for its video, a second call says who is
+                # who; its text replaces the held one. Any failure: the message above goes out unchanged.
+                if (job is not None and not ai_failed and not softened and delivery(res)[0] and _held(res)
+                        and callable(getattr(assistant, "update_held", None))):
+                    described = _describe_alert(
+                        job, frames, box_settings, env, lang, shown_label, camera_name, shown_camera, alert_ts,
+                        summary, why, owner_why, bool(fact) or decision.get("raised") == "came onto our ground",
+                        event, alert_id, assistant, top=[passed], bottom=[look_line, rarity_line, case_line])
+                    if described.get("used"):
+                        graded = described["message"]
                 if softened and delivery(res)[0]:
                     if sound_key not in _SOFTENED_DAYS:
                         while len(_SOFTENED_DAYS) >= _SOFTENED_DAYS_LIMIT:
@@ -2953,6 +3072,8 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
             sent, why_not = delivery(res)
             status.decision(camera_name, labels, summary, cmd, sent=sent, muted=muted, error=why_not, label=label)
         if job is not None:
+            if described:
+                job.input_meta["describer"] = described      # the clip's meta: what the describer saw and said
             job.alert = {**decision, "summary": summary, "alert_command": cmd, "alert_reason": reason,
                          "labels": job.labels, "muted": muted, "dispatch": res,
                          "why": why, "summary_owner": summary_owner, "silent": silent, "people": people,

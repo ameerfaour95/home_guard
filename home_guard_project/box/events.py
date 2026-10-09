@@ -790,6 +790,23 @@ class EventBook:
                 s.messages.append({"alert_id": alert_id, "chat_id": str(chat_id), "message_id": int(message_id),
                                    "ts": ts})
 
+    def note_entities(self, alert_id: str, notes: Dict[str, str], ts: float, label: str = "",
+                      source: str = "describer") -> List[str]:
+        """What the alert's describer said each id did (in the owner's language), kept on the event's entities so a
+        later update can continue the story ("P2 (קודם: רוכן לתוך הרכב) יצא מהתמונה"). Returns the ids noted."""
+        got: List[str] = []
+        with self._lock:
+            sid = self._by_alert.get(alert_id)
+            s = next((x for x in self._open.values() if x.id == sid), None)
+            if s is None:
+                return got
+            index = ent.by_id(s.entities)
+            for entity_id, text in (notes or {}).items():
+                if entity_id in index and str(text or "").strip():
+                    ent.add_note(index[entity_id], ts, str(text), label, source)
+                    got.append(entity_id)
+        return got
+
     # ---------- reading ----------
     def session_of_alert(self, alert_id: str) -> Optional[Dict[str, Any]]:
         with self._lock:
