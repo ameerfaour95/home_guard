@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional
 
 log = logging.getLogger("box.brain.style")
 
@@ -121,15 +121,60 @@ def replace_camera_ids(text: str, cameras: Iterable[str] = (), lang: Optional[st
     from ..camera_names import display_name, replace_ids  # noqa: PLC0415
 
     lang = _lang_of(text, lang)
-    out = replace_ids(text, [str(c) for c in cameras or () if c], lang)
+    cams = [str(c) for c in cameras or () if c]
+    out = replace_ids(text, cams, lang)
     out = _CAMERA_ID.sub(lambda m: display_name(m.group(0), lang), out)
     # "במצלמה ameer_x_ch6" became "במצלמה מצלמה 6": one "מצלמה" is enough.
     out = _DOUBLE_HE.sub(r"\1מצלמה", out)
-    return _DOUBLE_EN.sub(r"\1amera", out)
+    out = _DOUBLE_EN.sub(r"\1amera", out)
+    return name_numbered_cameras(out, cams)
 
 
 _DOUBLE_HE = re.compile(r"(?<!\w)([ובלמה]{0,2})מצלמה\s+מצלמה(?=\s+\d)")
 _DOUBLE_EN = re.compile(r"\b([Cc])amera\s+Camera(?=\s+\d)")
+# "מצלמה 3" / "במצלמה 3" / "Camera 3": what the box says for a camera WITHOUT a name. 2026-10-09 12:47 the assistant
+# wrote "במצלמה 3 ... במצלמה 6" for the pergola and the main entrance, which have names.
+_NUMBERED_HE = re.compile(r"(?<![\w])([ובלמהכש]{0,3})מצלמה\s+(\d+)(?!\d)")
+_NUMBERED_EN = re.compile(r"\b[Cc]amera\s+(\d+)(?!\d)")
+
+
+def channel_names(cameras: Iterable[str] = ()) -> Dict[str, str]:
+    """Channel number -> the family's name, for every camera (*cameras*, and the ids that have names) that has one.
+    A channel two cameras name differently (two old sites) is left out: no guessing."""
+    from ..camera_names import _load, channel_of, family_names  # noqa: PLC0415
+
+    aliases = _load(None)
+    found: Dict[str, set] = {}
+    for cam in {*(str(c) for c in cameras if c), *aliases}:
+        ch = channel_of(cam)
+        names = family_names(cam, aliases) if ch is not None else []
+        if names and names[-1].strip():
+            found.setdefault(ch, set()).add(names[-1].strip())
+    return {ch: next(iter(names)) for ch, names in found.items() if len(names) == 1}
+
+
+def _glue(prefix: str, name: str) -> str:
+    """Hebrew prefix letters + a name: "ב" + "הפרגולה" is "בפרגולה", "ה" + "הפרגולה" is "הפרגולה"."""
+    if prefix and name.startswith("ה") and prefix[-1] in "בלכה":
+        name = name[1:] if prefix[-1] != "ה" else name
+        prefix = prefix[:-1] if prefix[-1] == "ה" else prefix
+    return prefix + name
+
+
+def name_numbered_cameras(text: str, cameras: Iterable[str] = ()) -> str:
+    """*text* with "מצלמה N" / "Camera N" as the family's name for camera N when it has one (the last guard on any
+    outgoing text). A camera without a name keeps its number. Never raises."""
+    if not isinstance(text, str) or not text or not re.search(r"מצלמה|[Cc]amera", text):
+        return text
+    try:
+        names = channel_names(cameras)
+    except Exception as exc:  # noqa: BLE001 - the text goes out as it is
+        log.debug("camera names not read: %s", exc)
+        return text
+    if not names:
+        return text
+    out = _NUMBERED_HE.sub(lambda m: _glue(m.group(1), names[m.group(2)]) if m.group(2) in names else m.group(0), text)
+    return _NUMBERED_EN.sub(lambda m: names.get(m.group(1), m.group(0)), out)
 
 
 def clean_outgoing(text: str, cameras: Iterable[str] = (), lang: Optional[str] = None) -> str:

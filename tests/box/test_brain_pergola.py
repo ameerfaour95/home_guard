@@ -96,10 +96,16 @@ class PergolaTest(unittest.TestCase):
         self.assertIn("[RIGHT NOW]", block)                       # a live look, not a history search
         self.assertEqual(self.grabbed[-1], "camera_3")
 
+        captions = []
+        photo = self.deliver.photo
+        self.deliver.photo = lambda chat_id, path, caption="": captions.append(caption) or photo(chat_id, path, caption)
         third = agent.handle(PICTURE, "-5", {"user_id": 1})
         self.assertEqual(third.tools_called, ("check_camera",))
         self.assertEqual(self.grabbed[-1], "camera_3")            # the photo comes from camera 3
-        self.assertIn("(פרגולה)", third.text)                  # and the reply names it by the family's name
+        # The photo is captioned with the family's name (2026-10-09: no "✓ התמונה נשלחה" under an answer, the photo
+        # is right there).
+        self.assertTrue(captions[-1].startswith("פרגולה · "))
+        self.assertNotIn("✓", third.text)
         self.assertNotIn("camera_3", third.text)
 
     def test_a_remember_promise_without_a_save_becomes_not_saved_yet(self) -> None:

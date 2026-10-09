@@ -275,6 +275,15 @@ def event_session_line(services: Services, snapshot: Any, alert: Optional[Dict[s
         return ""
 
 
+def _photo_just_sent(receipt: Any) -> bool:
+    """A live picture or a saved photo that went out in this turn (its receipt line only repeats what the owner sees)."""
+    if getattr(receipt, "status", "") != DONE:
+        return False
+    tool = getattr(receipt, "tool", "")
+    detail = getattr(receipt, "detail", None) or {}
+    return tool == "check_camera" or (tool == "send_media" and detail.get("kind") == "photo")
+
+
 def _kept_known(receipts: Sequence[Receipt]) -> bool:
     """The Memory Keeper saved who is there this turn."""
     return any(r.tool == "mark_known" and r.status == DONE for r in receipts)
@@ -1612,8 +1621,11 @@ class OwnerAgentV2:
                                      token=uuid.uuid4().hex[:8])
             else:
                 # No closing offers ("אם יש משהו נוסף… אני כאן"), owner decision 2026-10-08.
-                reply_text = render_reply(t("unavailable", lang) if failed else strip_boilerplate(answer),
-                                          shown, lang, self.retention_days, snapshot)
+                said = t("unavailable", lang) if failed else strip_boilerplate(answer)
+                # A photo sent in this very turn is right there above the answer: no "✓ התמונה נשלחה" line under it
+                # (2026-10-09 12:47). Without an answer the receipt is the reply, as before.
+                lines = [r for r in shown if not _photo_just_sent(r)] if str(said or "").strip() else shown
+                reply_text = render_reply(said, lines, lang, self.retention_days, snapshot)
                 if not reply_text:
                     reply_text = t("unavailable" if failed else "nothing_done", lang)
                 elif not answer and is_complaint(text) and any(
