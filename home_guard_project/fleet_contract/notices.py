@@ -1,7 +1,5 @@
-"""Owner notices: what staff looked at, written by the cloud to fleet/<device_id>/notices/<time>_<id>.json and, the
-same body under the same file name, to the box's own prefix dataset_<site>/_notices/<time>_<id>.json (notice_key):
-the box can read its dataset_ prefix but not fleet/, and does not know its cloud device_id. <site> is the box's live
-site; a notice about one of its old site names is still written under the live one.
+"""Owner notices: what staff looked at, written by the cloud to fleet/<device_id>/notices/<time>_<id>.json (the
+cloud's record) and pushed to the box over Tailscale SSH (NOTICE_CLI below; the box never reads S3).
 
 Each notice is ``{"schema_version": 1, "id", "kind", "staff_name", "cameras", "from_utc", "to_utc", "message"}``.
 ``kind`` is data a consumer (the box, the owner's app) branches on; ``message`` is only the English sentence for
@@ -12,7 +10,6 @@ from __future__ import annotations
 
 import base64
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -35,23 +32,6 @@ def notice_message(kind: str, cameras: list[str], when: str) -> str:
         return f"Home Guard support viewed your chat with the assistant ({when})"
     names = "" if not cameras else cameras[0] if len(cameras) == 1 else ", ".join(cameras[:-1]) + " and " + cameras[-1]
     return f"Home Guard support viewed recordings{' from ' + names if names else ''} ({when})"
-
-
-def notice_file_name(ts: float, notice_id: int) -> str:
-    """``<YYYYmmddTHHMMSS>_<id>.json``: *ts* is the notice's first view (epoch seconds, UTC)."""
-    return f"{datetime.fromtimestamp(ts, timezone.utc):%Y%m%dT%H%M%S}_{notice_id}.json"
-
-
-def notices_prefix(site: str) -> str:
-    """The box's notices folder: ``dataset_<site>/_notices/``."""
-    if not site or "/" in site:
-        raise ValueError(f"bad site {site!r}")
-    return f"dataset_{site}/_notices/"
-
-
-def notice_key(site: str, ts: float, notice_id: int) -> str:
-    """Where the box finds a notice: ``dataset_<site>/_notices/<YYYYmmddTHHMMSS>_<id>.json``."""
-    return notices_prefix(site) + notice_file_name(ts, notice_id)
 
 
 # ---------------------------------------------------------------- push delivery to the box (agreed with the box side)

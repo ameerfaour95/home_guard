@@ -19,20 +19,6 @@ def test_an_unknown_kind_is_refused():
         notice_message("thumbnail", [], "10:05")
 
 
-def test_the_box_finds_its_notices_under_its_own_prefix():
-    from datetime import datetime, timezone
-
-    from home_guard_project.fleet_contract.notices import notice_file_name, notice_key, notices_prefix
-
-    ts = datetime(2026, 10, 9, 7, 5, 3, 900000, tzinfo=timezone.utc).timestamp()
-    assert notices_prefix("ameer_week_0_1") == "dataset_ameer_week_0_1/_notices/"
-    assert notice_file_name(ts, 42) == "20261009T070503_42.json"
-    assert notice_key("ameer_week_0_1", ts, 42) == "dataset_ameer_week_0_1/_notices/20261009T070503_42.json"
-    for bad in ("", "a/b"):
-        with pytest.raises(ValueError):
-            notices_prefix(bad)
-
-
 def test_the_push_command_is_the_one_agreed_with_the_box():
     import base64
     import json
