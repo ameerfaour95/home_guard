@@ -159,3 +159,19 @@ def test_provenance_chips(app):
     chip = ProvenanceChip(kind='owner')
     assert chip.text() == 'Owner · Telegram' and chip.kind == 'owner'
     chip.show_source(''); assert chip.isHidden()
+
+
+def test_tag_yolo_has_no_description_panel_only_tracks_and_clip_checks(widgets, wait):
+    from PySide6.QtWidgets import QPlainTextEdit
+    b = DemoBackend()
+    v = LabelView(b, b.role); widgets.append(v); v.resize(1366, 768); v.show(); v.open_event(101)
+    wait(lambda: v.doc is not None and not v.media.busy)
+    assert not [w for w in v.findChildren(QPlainTextEdit) if w.isVisible()]       # the description is Tag · AI's
+    assert v.track_list.count() == len(v.doc.tracks) and 'YOLO' in v.track_list.item(0).text()
+    v.track_list.itemClicked.emit(v.track_list.item(0))
+    assert v.doc.selected == v.track_list.item(0).data(Qt.ItemDataRole.UserRole)
+    assert v.track_name.text() == v.doc.display_name(v.doc.track) and v.track_source.text() == 'YOLO weak'
+    before = b.annotation(101).description
+    v.needs_review.setChecked(True); v.save(); wait(lambda: not v.writer.busy)
+    saved = b.annotation(101)
+    assert saved.needs_review and saved.description == before                  # carried through unchanged

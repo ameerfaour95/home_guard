@@ -147,7 +147,7 @@ def main():
             elif stage[0] == 8 and shell.label_page.doc and not shell.label_page.canvas.image.isNull():
                 view = shell.label_page
                 view.doc.accept_all(); view.doc.selected = view.doc.tracks[0].track_id
-                view.description.setPlainText('A person approaches the entrance. Verified in the packaged Label editor.')
+                view.needs_review.setChecked(True)   # an edit in the packaged Label editor (boxes and clip checks)
                 view.seek(36); stage[0] = 9
             elif stage[0] == 9 and shell.label_page.pending_frame is None:
                 view = shell.label_page

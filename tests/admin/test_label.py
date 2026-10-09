@@ -24,6 +24,11 @@ def document():
     return LabelDocument(a, 6)
 
 
+def edit_text(v, text):
+    """The clip's description, as Tag · AI would change it (Tag · YOLO carries it unchanged)."""
+    v.doc.set_text(text, v.doc.drop_clip, v.doc.needs_review)
+
+
 def view(widgets, wait, backend=None):
     b = backend or DemoBackend()
     v = LabelView(b, b.role); widgets.append(v); v.resize(1366, 768); v.show(); v.open_event(101)
@@ -80,12 +85,12 @@ def test_accept_history_text_class_keyframes(app):
 
 def test_autosave_debounce_and_save_button(widgets, wait):
     v = view(widgets, wait)
-    v.description.setPlainText('First edit')
-    QTest.qWait(1100); v.description.setPlainText('Second edit')
+    edit_text(v, 'First edit')
+    QTest.qWait(1100); edit_text(v, 'Second edit')
     QTest.qWait(1100); assert v.backend.annotation(101).version == 0
     wait(lambda: v.backend.annotation(101).version == 1)
     assert v.backend.annotation(101).description == 'Second edit'
-    v.description.setPlainText('Explicit save'); v.save_button.click()
+    edit_text(v, 'Explicit save'); v.save_button.click()
     wait(lambda: v.backend.annotation(101).version == 2)
     assert v.backend.annotation(101).status == 'edited'
 
@@ -119,8 +124,8 @@ def test_save_in_flight_preserves_later_edits(widgets, wait):
         def save_annotation(self, eid, value):
             gate.wait(3); return super().save_annotation(eid, value)
     v = view(widgets, wait, Slow())
-    v.description.setPlainText('sent'); v.save()
-    v.description.setPlainText('newer'); gate.set(); wait(lambda: not v.writer.busy)
+    edit_text(v, 'sent'); v.save()
+    edit_text(v, 'newer'); gate.set(); wait(lambda: not v.writer.busy)
     assert v.doc.dirty and v.doc.description == 'newer'
     v.save(); wait(lambda: not v.writer.busy)
     assert v.backend.annotation(101).description == 'newer' and not v.doc.dirty
@@ -129,14 +134,14 @@ def test_save_in_flight_preserves_later_edits(widgets, wait):
 def test_conflict_keep_and_reload(widgets, wait):
     v = view(widgets, wait)
     remote = AnnotationIn(0, [], 'Remote edit'); v.backend.save_annotation(101, remote)
-    v.description.setPlainText('Mine'); v.save(); wait(lambda: v.conflicted)
+    edit_text(v, 'Mine'); v.save(); wait(lambda: v.conflicted)
     assert v.conflict_bar.isVisible() and not v.autosave.isActive()
     v.resolve_conflict(True); wait(lambda: v.backend.annotation(101).version == 2)
     assert v.backend.annotation(101).description == 'Mine'
     v.backend.save_annotation(101, AnnotationIn(2, [], 'Remote again'))
-    v.description.setPlainText('Discard this'); v.save(); wait(lambda: v.conflicted)
+    edit_text(v, 'Discard this'); v.save(); wait(lambda: v.conflicted)
     v.resolve_conflict(False); wait(lambda: v.doc.annotation.version == 3)
-    assert v.description.toPlainText() == 'Remote again' and not v.doc.dirty
+    assert v.doc.description == 'Remote again' and not v.doc.dirty
 
 
 def test_switch_save_failure_and_submit_next(widgets, wait):
@@ -145,7 +150,7 @@ def test_switch_save_failure_and_submit_next(widgets, wait):
         def save_annotation(self, eid, value):
             if self.fail: raise ServerError()
             return super().save_annotation(eid, value)
-    v = view(widgets, wait, Failing()); v.description.setPlainText('Keep me')
+    v = view(widgets, wait, Failing()); edit_text(v, 'Keep me')
     next_index = v.queue_index+1
     if next_index == len(v.queue): next_index = 0
     v.open_index(next_index); wait(lambda: not v.writer.busy)
@@ -160,7 +165,7 @@ def test_switch_save_failure_and_submit_next(widgets, wait):
 
 def test_labeler_privacy_and_keyboard(widgets, wait):
     v = view(widgets, wait, DemoBackend(role='labeler'))
-    assert not v.ai_meta.isVisible() and not v.review_panel.isVisible()
+    assert not v.review_panel.isVisible() and not hasattr(v, 'ai_text')     # Tag · YOLO holds no description
     e = v.backend.event(101)
     assert e.customer_id == 0 and not e.raw_meta and all(r.prompt is None and r.raw_text_artifact_id is None for r in e.ai_runs)
     assert v.doc.annotation.ai_prompt_version is None
@@ -170,8 +175,10 @@ def test_labeler_privacy_and_keyboard(widgets, wait):
     v.doc.seek(0); v.canvas.setFocus(); QTest.keyClick(v.canvas, Qt.Key.Key_Right, Qt.KeyboardModifier.ShiftModifier)
     assert v.doc.frame == 5
     QTest.keyClick(v.canvas, Qt.Key.Key_9); assert v.doc.current_class == 'dog'
-    v.description.setFocus(); QTest.keyClicks(v.description, 'h c k 1')
-    assert 'h c k 1' in v.doc.description and v.doc.current_class == 'dog'
+    from PySide6.QtWidgets import QLineEdit
+    v.focus_changed(None, QLineEdit())         # typing in a text field never fires the one-letter keys
+    assert not v.shortcuts['K'].isEnabled() and v.shortcuts['Ctrl+S'].isEnabled()
+    v.focus_changed(None, None); assert v.shortcuts['K'].isEnabled()
 
 
 def test_review_history_and_publish(widgets, wait):
