@@ -2601,7 +2601,7 @@ def _describe_alert(job: AlertJob, frames: List[Any], box_settings: Dict[str, An
 
     Returns the record for the clip's meta (``describer``): ``used`` True when the owner gets the new text. The
     alert's hold timer is never extended: it started at dispatch, and this runs within the describer's and the
-    translator's budgets (12 + 10 s of the 60 s video wait). Never raises; on any failure the held text stays."""
+    translator's budgets (15 + 10 s of the 60 s video wait; describer_timeout_sec at most 30). Never raises; on any failure the held text stays."""
     from . import describer as ds  # noqa: PLC0415
 
     try:

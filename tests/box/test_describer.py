@@ -388,9 +388,18 @@ class DescribeTest(unittest.TestCase):
         self.assertEqual((empty["ok"], empty["error"]), (False, "nothing usable in the answer"))
 
     def test_settings(self):
-        self.assertEqual(ds.settings_of({}), (True, "openrouter", "qwen/qwen3.5-9b", 12.0))
+        self.assertEqual(ds.settings_of({}), (True, "openrouter", "qwen/qwen3.5-9b", 15.0))
         self.assertFalse(ds.settings_of({"alert_describer": "off"})[0])
         self.assertEqual(ds.settings_of({"describer_timeout_sec": 99})[3], 30.0)
+        self.assertEqual(ds.settings_of({"describer_timeout_sec": 1})[3], 3.0)
+        self.assertEqual(ds.settings_of({"describer_timeout_sec": "20"})[3], 20.0)
+        self.assertEqual(ds.settings_of({"describer_timeout_sec": "soon"})[3], 15.0)
+
+    def test_the_longest_describer_and_translator_still_fit_the_video_hold(self):
+        from home_guard_project.box.telegram_agent import VIDEO_WAIT_SEC
+        longest = ds.settings_of({"describer_timeout_sec": 999})[3]
+        self.assertLess(ds.DEFAULT_TIMEOUT_SEC + ds.TRANSLATE_TIMEOUT_SEC, VIDEO_WAIT_SEC)
+        self.assertLess(longest + ds.TRANSLATE_TIMEOUT_SEC, VIDEO_WAIT_SEC)
 
 
 class HeldTextTest(unittest.TestCase):
