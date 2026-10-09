@@ -147,8 +147,11 @@ def test_the_outgoing_payload_names_no_camera_house_or_customer(client, staff_fa
     r = client.post("/v1/tagging/convert", headers=h, json={"key": f"ev:{ids['consenting']}", "words": words})
     assert r.status_code == 200, r.text
     sent = json.dumps(fake.calls[-1], ensure_ascii=False)
-    for private in ("house2_ch2", "חניה", "House two", "house2", "production_house2"):
+    for private in ("house2_ch2", "House two", "house2", "production_house2"):
         assert private not in sent, private
+    # the camera's owner name never goes out in the words (the glossary may name the same Hebrew word as a term)
+    their_words = fake.calls[-1]["messages"][0]["content"].split('"""')[1]
+    assert "חניה" not in their_words and "חניה" not in r.json()["words_sent"]
     assert "a man walked to the gate" in sent and "camera" in sent and "the house" in sent
     body = r.json()
     assert body["words_sent"] in fake.calls[-1]["messages"][0]["content"]
