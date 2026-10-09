@@ -245,5 +245,39 @@ class WorkerTest(unittest.TestCase):
         self.assertEqual((sig["camera"], sig["category"], sig["eye_model"]), (CAM, "N4", "fake-eye"))
 
 
+class LearnFromTheOwnerTest(unittest.TestCase):
+    """2026-10-09: precedents of what the owner explained learn in shadow: no line under the alert, and a "would
+    quiet" for alerts his week-long memory already kept quiet (case_memory/link.py)."""
+
+    setUp, tearDown, run_worker, sent = WorkerTest.setUp, WorkerTest.tearDown, WorkerTest.run_worker, WorkerTest.sent
+
+    def test_a_shadow_note_adds_no_line_but_is_recorded(self) -> None:
+        note = CaseNote("shadow", "C1", "זיהיתי: החשמלאים. בפעם הבאה לא אתריע על זה, בסדר?",
+                        "I recognised: the electricians. Next time I won't alert for this, OK?",
+                        buttons=(texts.button("confirm", "C1"),), band="high", score=1.0, would_level="quiet")
+        job, assistant = self.run_worker(answer(), FakeMemory("alert", note), ts=NIGHT)
+        text, _ = self.sent(assistant)
+        self.assertNotIn("Next time", text)
+        self.assertEqual(job.alert["case_memory"], note.record())
+
+    def test_kept_quiet_by_the_owner_is_learned_without_a_judge(self) -> None:
+        seen = []
+
+        class Shadow:
+            def apply(self, event, decision, shadow_only=False):
+                seen.append((event.signature.actions, dict(decision), shadow_only))
+                return "quiet", None
+
+        cm.configure(Shadow())
+        decision = {"serious_behaviour": True, "activity_look": {"lowered": True}}
+        level, note, sig = inf._case_memory(None, CAM, DAY, answer(), "suspicious", "[send_message]", decision,
+                                            mock.Mock(model_name="m", last_model=""), "v",
+                                            "A man lies on the stairs.", shadow_only=True)
+        self.assertEqual((level, note), ("alert", None), "shadow only never changes the delivery")
+        ((actions, facts, shadow_only),) = seen
+        self.assertEqual((actions, shadow_only, facts["context_lowered"]), (("lying",), True, True))
+        self.assertEqual(sig["actions"], ["lying"])
+
+
 if __name__ == "__main__":
     unittest.main()

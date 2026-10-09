@@ -2219,9 +2219,14 @@ def start_case_memory(box_settings: Mapping[str, Any], env: Mapping[str, str]) -
 
 def _case_memory(job: Optional[AlertJob], camera: str, alert_ts: float, parsed: Optional[Dict[str, Any]],
                  label: str, cmd: str, decision: Dict[str, Any], backend: Any,
-                 prompt_version: str) -> Tuple[str, Any, Optional[Dict[str, Any]]]:
+                 prompt_version: str, text: str = "",
+                 shadow_only: bool = False) -> Tuple[str, Any, Optional[Dict[str, Any]]]:
     """``(delivery_level, note, signature)`` for an alert about to go out. Escalation and calls never reach
-    memory; without a configured memory, or on any failure, ``("alert", None, None)``: today's path."""
+    memory; without a configured memory, or on any failure, ``("alert", None, None)``: today's path.
+
+    *text* (why + reason + summary) gives the actions the owner may have explained (case_memory/link.py).
+    *shadow_only*: the alert was already kept quiet by the owner's week-long memory (an explained action, a known
+    mark); its precedent only logs "would quiet", for learning, with no judge call."""
     if label == "escalation" or cmd == "[call_owner]":
         return "alert", None, None
     try:
@@ -2234,15 +2239,39 @@ def _case_memory(job: Optional[AlertJob], camera: str, alert_ts: float, parsed: 
             observation=parsed, tracker=getattr(job, "tracker_facts", None) or None, label=label,
             cameras_in_incident=getattr(job, "incident_cameras", 0) or 1,
             eye_model=getattr(backend, "last_model", "") or getattr(backend, "model_name", ""),
-            prompt_version=prompt_version)
-        level, note = apply_case_memory(event, {"final_label": label, "alert_command": cmd,
-                                                "serious_behaviour": decision["serious_behaviour"]})
+            prompt_version=prompt_version, text=text)
+        facts = {"final_label": label, "alert_command": cmd, "serious_behaviour": decision["serious_behaviour"]}
+        if (decision.get("activity_look") or {}).get("lowered") is True:
+            facts["context_lowered"] = True     # a red the owner's context look already lowered
+        if shadow_only:
+            level, note = apply_case_memory(event, facts, shadow_only=True)
+            return "alert", note, event.signature.to_dict()
+        level, note = apply_case_memory(event, facts)
         if level not in ("alert", "quiet", "digest"):
             level = "alert"
         return level, note, event.signature.to_dict()
     except Exception as exc:  # noqa: BLE001 - memory must never stop or soften an alert by failing
         log.warning("[%s] case memory failed; alerting as usual: %s", camera, exc)
         return "alert", None, None
+
+
+def start_case_keeper(assistant: Any) -> bool:
+    """The case memory's keeper thread (brain/case_chat.py): older owner memories get their precedent, the one
+    question about an explained action's future days is asked once, the nightly routine run (box.yaml
+    ``routine_proposals``, off by default). Never raises; without the v2 assistant it does not start."""
+    try:
+        agent = getattr(getattr(assistant, "inbox", None), "agent", None)
+        if getattr(agent, "version", 1) != 2:
+            return False
+        from .boxconfig import load_box_settings  # noqa: PLC0415
+        from .brain import case_chat  # noqa: PLC0415
+
+        cfg = getattr(assistant, "cfg", None)
+        chats = [str(c) for c in (getattr(cfg, "chat_ids", None) or ())]
+        return case_chat.start(agent, getattr(assistant, "deliverer", None), chats, load_box_settings) is not None
+    except Exception as exc:  # noqa: BLE001 - alerts go on without it
+        log.warning("Case memory keeper not started: %s", exc)
+        return False
 
 
 def appearance_only(text: str) -> bool:
@@ -3077,6 +3106,12 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
             log.info("[%s] raised to suspicious: %s", camera_name, why)
         if event is not None and not event.notify:
             log.info("[%s] not sent (%s): %s", camera_name, event.reason, summary)
+            shadow_note = None
+            if decision.get("activity_fact") or getattr(event, "known_text", ""):
+                # Kept quiet by the owner's week-long memory: its long-term precedent learns ("would quiet").
+                _, shadow_note, _ = _case_memory(job, camera_name, alert_ts, parsed, label, cmd, decision, backend,
+                                                 eye_record.get("prompt_version", legacy_version),
+                                                 f"{why} {reason} {summary}", shadow_only=True)
             if getattr(event, "arrival", None):
                 send_arrival_line(event.arrival, box_settings, env, lang)
             if status is not None:
@@ -3085,7 +3120,8 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                 job.alert = {**decision, "summary": summary, "alert_command": cmd, "alert_reason": reason,
                              "labels": job.labels, "muted": False, "why": why, "summary_owner": summary_owner,
                              "people": people, "sent": False, "event": event.record(),
-                             "not_sent_reason": event.reason, "dispatch": {"sent": False, "reason": event.reason}}
+                             "not_sent_reason": event.reason, "dispatch": {"sent": False, "reason": event.reason},
+                             "case_memory": shadow_note.record() if shadow_note is not None else None}
             return
         # Attach the most recent frame of the clip as the alert snapshot.
         image = b""
@@ -3100,10 +3136,10 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
         if not muted:
             level, case_note, case_signature = _case_memory(
                 job, camera_name, alert_ts, parsed, label, cmd, decision, backend,
-                eye_record.get("prompt_version", legacy_version))
+                eye_record.get("prompt_version", legacy_version), f"{why} {reason} {summary}")
         if level == "digest":
             log.info("[%s] case memory chose the digest, which the box doesn't have yet; sending quietly", camera_name)
-        case_line = case_note.text(lang) if case_note is not None else ""
+        case_line = case_note.owner_text(lang) if case_note is not None else ""   # shadow: logged, no line
         event_sent: Optional[Dict[str, Any]] = None
         described: Dict[str, Any] = {}
         # Serialize softened deliveries so concurrent workers cannot both claim the first sound.
@@ -3509,6 +3545,7 @@ def run() -> int:
         assistant = telegram_agent.start(box_settings, env, list(cameras))
     except Exception as exc:  # noqa: BLE001
         log.warning("Owner assistant not started (%s); alerts go out without feedback buttons.", exc)
+    start_case_keeper(assistant)
 
     log.info("Watching %d camera(s): %s", len(cameras), ", ".join(cameras))
     started = time.time()   # no camera counts as offline before it had a minute to deliver its first picture
