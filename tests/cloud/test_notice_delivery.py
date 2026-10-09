@@ -70,9 +70,11 @@ def test_a_view_pushes_the_notice_to_the_box_after_the_commit(client, staff_fact
     _view(client, h)
     assert len(ssh.calls) == 1
     argv = ssh.calls[0]
-    assert argv[:7] == ["ssh", "-i", argv[2], "-o", "BatchMode=yes", "-o", "ConnectTimeout=15"]
-    assert argv[2].endswith("homeguard_box") and argv[7] == "boxuser@box-test"
-    assert argv[8].startswith(r"cd /d C:\home_guard && .venv\Scripts\python.exe -m home_guard_project.box notices add")
+    assert argv[:9] == ["ssh", "-i", argv[2], "-o", "BatchMode=yes", "-o", "ConnectTimeout=15",
+                        "-o", "StrictHostKeyChecking=accept-new"]
+    assert argv[10] == "UserKnownHostsFile=" + notices.notice_known_hosts().as_posix()
+    assert argv[2].endswith("homeguard_box") and argv[-2] == "boxuser@box-test"
+    assert argv[-1].startswith(r"cd /d C:\home_guard && .venv\Scripts\python.exe -m home_guard_project.box notices add")
     fleet_key = s3client.list_objects_v2(Bucket=b.BUCKET, Prefix=f"fleet/{device_id}/notices/")["Contents"][0]["Key"]
     pushed = ssh.body()
     assert pushed == _body(s3client, fleet_key) and pushed["schema_version"] == 1 and pushed["kind"] == "recording"
@@ -110,6 +112,8 @@ def test_unreachable_stays_pending_and_is_retried_on_the_next_heartbeat(client, 
     attempts = _attempts(client)
     assert [a[0] for a in attempts] == ["retry", "delivered"]
     assert attempts[0][1]["ok"] is False and attempts[0][1]["exit"] == 255
+    with session_scope(client.app.state.engine) as s:
+        assert notice_delivery.host_key_changed_boxes(s) == set()  # unreachable is not a key change
     assert attempts[0][1]["error"].startswith("ssh: connect to host")
 
 
@@ -186,7 +190,7 @@ def test_the_notice_reaches_the_box_by_box_id_across_a_site_rename(client, staff
                            ["Front side"], NOW)
     ssh = FakeSSH(ADDED)
     assert _loop(client, ssh) == 1
-    assert ssh.calls[0][7] == "ameer@desktop-43dp1ti"
+    assert ssh.calls[0][-2] == "ameer@desktop-43dp1ti"
     assert _attempts(client)[0][3] == new_device_id  # audited against the box's live row
 
 
@@ -211,3 +215,58 @@ def test_a_box_without_a_tailscale_host_waits(client, staff_factory, s3client):
     assert ssh.calls == [] and _notice(client).delivery_state == "pending"
     assert _notice(client).last_delivery_error == "no_target: the box has no tailscale host"
     assert _attempts(client)[0][0] == "no_target"
+
+
+KEY_CHANGED = (255, "", "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\r\n"
+                        "@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @\r\n"
+                        "Host key verification failed.\r\n")
+
+
+def _fleet_row(client, h, device_id):
+    return next(d for d in client.get("/v1/fleet", headers=h).json()["devices"] if d["device_id"] == device_id)
+
+
+def test_a_changed_host_key_fails_the_notice_and_warns_on_the_box(client, staff_factory, s3client):
+    dev_pk, device_id = _house(client, s3client, host="desktop-43dp1ti")
+    _, _, _, h = staff_factory("support")
+    _, _, _, admin = staff_factory("admin")
+    client.app.state.notice_runner = ssh = FakeSSH(KEY_CHANGED)
+    _view(client, h)
+    row = _notice(client)
+    assert (row.delivery_state, row.last_delivery_error) == ("failed", "host key changed for desktop-43dp1ti")
+    [(outcome, detail, _, audited)] = _attempts(client)
+    assert (outcome, audited, detail["ok"], detail["exit"]) == ("host_key_changed", device_id, False, 255)
+    assert detail["error"] == "host key changed for desktop-43dp1ti"
+    with session_scope(client.app.state.engine) as s:
+        s.get(m.Device, dev_pk).last_heartbeat_at = NOW + timedelta(minutes=4)
+    _loop(client, ssh, NOW + timedelta(minutes=5))
+    assert len(ssh.calls) == 1  # not a silent retry
+    fleet = _fleet_row(client, admin, device_id)
+    warning = next(r for r in fleet["reasons"] if r["code"] == "notice_host_key")
+    assert warning["severity"] == "warning" and warning["message"] == notice_delivery.HOST_KEY_WARNING
+    assert warning["message"].startswith("Notices can't reach the box: its SSH host key changed.")
+    assert fleet["verdict"] in ("warning", "critical", "offline")
+    # the key was reset: the next notice gets through and the warning goes away
+    ssh.answers = [ADDED]
+    a2 = _art(client, b.FP_CLIP)
+    _set_camera(client, a2, "driveway")
+    client.clock = NOW + timedelta(minutes=10)
+    _view(client, h, b.FP_CLIP)
+    assert _notice(client).delivery_state == "delivered"
+    assert not any(r["code"] == "notice_host_key" for r in _fleet_row(client, admin, device_id)["reasons"])
+
+
+def test_the_real_runner_makes_the_dedicated_known_hosts_file(tmp_path, monkeypatch):
+    import subprocess
+
+    hosts = tmp_path / ".homeguard" / "box_known_hosts"
+    monkeypatch.setattr(notices, "notice_known_hosts", lambda: hosts)
+    seen = []
+
+    def fake_run(argv, **kw):
+        seen.append(argv)
+        return subprocess.CompletedProcess(argv, 0, b'{"result":"added","id":1}', b"")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert notice_delivery.ssh_run(["ssh", "x"]) == (0, '{"result":"added","id":1}', "")
+    assert hosts.is_file() and hosts.read_bytes() == b"" and seen == [["ssh", "x"]]
