@@ -174,9 +174,10 @@ PERSON_DOWN = _any([
     r"שוכב", r"(?:אדם|גבר|אישה|מישהו|פועל|עובד|אנשים|פועלים|הוא|היא)(?: \S+){0,2} על (?:הקרקע|הרצפה|האדמה|המדרכה)",
     r"כורע", r"רכון", r"רכונה", r"רכונים", r"על הברכיים", r"על ברכיו",
 ])
-# ...but not when the red names anything else: violence, a weapon, a break-in or theft, a way in (door, window, car,
+# ...but not when the red names anything else: violence, a weapon, a break-in or theft, a way in (door, window, gate,
 # fence), hiding, night, a fall or an injury, a child or an old person. Those reds go on as before (their own look,
-# or out at once).
+# or out at once). These words count anywhere in the red; a car or a bag (DOWN_THING) only where it is said about the
+# person on the ground.
 DOWN_ACT = _any([
     r"\bfight", r"\battack", r"\bassault", r"\bhit\b", r"\bhits\b", r"\bhitting", r"\bbeat", r"\bpunch", r"\bkick",
     r"\bstrik", r"\bstruck", r"\bslap", r"\bspray", r"\bbaton", r"\bcharg", r"\brun(?:s|ning)? (?:forward|toward|at)\b",
@@ -186,8 +187,7 @@ DOWN_ACT = _any([
     r"\bthreat", r"\bviolen", r"\baggress", r"\babus", r"\brob", r"\bmug", r"\bsteal", r"\bstole", r"\btheft", r"\bthie",
     r"\bburgl", r"\bbreak", r"\bbroke", r"\bsmash", r"\bforc", r"\bpr(?:y|ies|ied|ying)\b", r"\block", r"\btamper",
     r"\bweapon", r"\bgun", r"\bknife", r"\bknives", r"\bpistol", r"\brifle",
-    r"\bdoors?\b", r"\bwindows?\b", r"\bgates?\b", r"\bfence", r"\bwall\b", r"\bcars?\b", r"\bvehicles?\b", r"\btrucks?\b",
-    r"\bvans?\b", r"\bmotorcycle", r"\bbikes?\b", r"\bclimb", r"\benter", r"\bpeek", r"\bpeer", r"\blook(?:s|ed|ing)? (?:in|into|inside|through)\b",
+    r"\bdoors?\b", r"\bwindows?\b", r"\bgates?\b", r"\bfence", r"\bwall\b", r"\bclimb", r"\benter", r"\bpeek", r"\bpeer", r"\blook(?:s|ed|ing)? (?:in|into|inside|through)\b",
     r"\bhid(?:e|es|ing|den)\b", r"\bsneak", r"\bnight\b",
     r"\bfall", r"\bfell\b", r"\bcollaps", r"\bfaint", r"\bpass(?:es|ed)? out", r"\binjur", r"\bhurt", r"\bblood", r"\bbleed",
     r"\bwound", r"\bpain\b", r"\bhelp", r"\bdistress", r"\bseizure", r"\bvictim", r"\bbody\b", r"\bdead\b", r"\blimp\b",
@@ -196,20 +196,61 @@ DOWN_ACT = _any([
     # ...or a theft, a robbery or a getaway around it (eval_set_v2 "as if the Eye had said 'lying on the ground'")
     r"\blung", r"\bthrow", r"\bthrew", r"\bcut", r"\bload", r"\btak(?:e|es|ing|en)\b", r"\btook\b", r"\bflee", r"\bfled",
     r"\bran\b", r"\brun(?:s|ning)? (?:away|off)", r"\bcarr\w* (?:\w+ ){0,5}(?:away|off|out)\b", r"\bstore\b", r"\bshop",
-    r"\bcounter\b", r"\bregister\b", r"\bcash", r"\bshutter", r"\bpower tool",
-    # ...or crouching OVER something (eval_set_v2: a burglar crouching to search the floor, kneeling to rummage
-    # through a bag, crouching over a scooter): that is about the thing, not a person down
-    r"\brummag", r"\bsearch", r"\bpick(?:s|ed|ing)? (?:\w+ ){0,3}up\b", r"\bpick(?:s|ed|ing)? up\b", r"\bhandl",
-    r"\binspect", r"\binteract", r"\badjust", r"\btamper", r"\bbags?\b", r"\bbackpack", r"\bpackage", r"\bparcel",
-    r"\bboxe?s?\b", r"\bbins?\b", r"\bcrate", r"\btrash", r"\bscooter", r"\bbicycle", r"\bcamera", r"\blens\b",
+    r"\bcounter\b", r"\bregister\b", r"\bcash", r"\bshutter", r"\bpower tool", r"\btamper",
+    r"\bdriv\w* (?:\w+ ){0,2}(?:away|off)\b", r"\bspeed(?:s|ing)? (?:away|off)\b", r"\bcamera", r"\blens\b",
     r"\bporch\b", r"\bentrance", r"\bsteps\b", r"\bstairs",
-    r"מחטט", r"מחפש", r"מרים", r"תיק", r"חבילה", r"קורקינט", r"אופניים", r"מצלמה", r"כניסה", r"מדרגות",
+    r"מצלמה", r"כניסה", r"מדרגות", r"נמלט", r"נוסע משם", r"נסע משם",
     r"מכה", r"מכים", r"תוקף", r"תקיפה", r"אלימות", r"קטטה", r"דוחף", r"גורר", r"מחזיק אותו", r"כבול", r"שודד", r"גונב",
-    r"פורץ", r"נשק", r"סכין", r"אקדח", r"דלת", r"חלון", r"שער", r"גדר", r"רכב", r"מכונית", r"מטפס", r"מסתתר", r"מתחבא",
+    r"פורץ", r"נשק", r"סכין", r"אקדח", r"דלת", r"חלון", r"שער", r"גדר", r"מטפס", r"מסתתר", r"מתחבא",
     r"לילה", r"נפל", r"נופל", r"התמוטט", r"מתעלף", r"התעלף", r"פצוע", r"פציעה", r"(?<![א-ת])ה?דם(?![א-ת])", r"עזרה",
     r"ללא תנועה", r"לא זז", r"ילד", r"תינוק", r"קשיש", r"צועק", r"בוכה",
     r"לוקח", r"לקח", r"בורח", r"ברח", r"זורק", r"זרק", r"מעמיס", r"חותך", r"חנות", r"קופה",
 ])
+# A thing: crouching OVER it, lying under it, rummaging in it (eval_set_v2: a burglar crouching to search the floor,
+# kneeling to rummage through a bag, crouching over a scooter) is about the thing, not a person down. Counted only in
+# what is said about the person on the ground (:func:`down_scope`): 2026-10-09 14:41 / 15:44 ch6, the pavers workers
+# went out red with no look because ANOTHER man "stands next to a white car" / "walks past him carrying a bag".
+# Interacting with the person on the ground is what the look itself asks about, so it is not a thing.
+DOWN_THING = _any([
+    r"\bcars?\b", r"\bvehicles?\b", r"\btrucks?\b", r"\bvans?\b", r"\bmotorcycle", r"\bbikes?\b",
+    r"\brummag", r"\bsearch", r"\bpick(?:s|ed|ing)? (?:\w+ ){0,3}up\b", r"\bpick(?:s|ed|ing)? up\b", r"\bhandl",
+    r"\binspect", r"\binteract\w*(?! with (?:the |a |an |another |that |this )?(?:\w+ )?(?:person|man|woman|worker|"
+    r"him|her|them|people|men)\b)", r"\badjust", r"\bbags?\b", r"\bbackpack", r"\bpackage", r"\bparcel",
+    r"\bboxe?s?\b", r"\bbins?\b", r"\bcrate", r"\btrash", r"\bscooter", r"\bbicycle",
+    r"מחטט", r"מחפש", r"מרים", r"תיק", r"חבילה", r"קורקינט", r"אופניים", r"רכב", r"מכונית",
+])
+# Where one person's words end and another's begin: a sentence end, a dash, or "while / and / as / with / ," before
+# a new person ("while another man", "and two others", Hebrew "ואדם אחר", "בעוד", "בזמן ש"). A plain "and" goes on
+# with the same person ("crouches and searches the floor"), and so does a sentence that starts with "he / she / they".
+_NEW_PERSON = (r"(?:another|the other|the others|others|someone|somebody|a second|one of them|"
+               r"(?:a|an|the|one|two|three|four|some|several|second|other)\s+(?:[\w-]+\s+){0,3}?"
+               r"(?:man|men|woman|women|person|people|persons|worker|workers|guy|guys|individual|individuals|figure|"
+               r"figures|boy|girl|others?)\b)")
+_HE_NEW_PERSON = r"(?:אדם|גבר|אישה|מישהו|פועל|עובד|אנשים|גברים|פועלים|עובדים|שני|שניים|שלושה|אחר|אחד|אחת|אחרים)"
+_CLAUSE_BREAK = re.compile(
+    r"[.!?;:]+(?:\s+|$)|\s+[-–—]+\s+"
+    rf"|,\s*(?={_NEW_PERSON}|{_HE_NEW_PERSON}(?![א-ת]))"
+    rf"|\s+(?:while|whilst|whereas|and|as|but|with)\s+(?={_NEW_PERSON})"
+    rf"|\s+(?=(?:בעוד|בזמן ש|כאשר|ו(?!אחר כך){_HE_NEW_PERSON}(?![א-ת])))", _FLAGS)
+# Bent over something counts as the person down too ("bends down near the rear of the white car").
+_BENT = _any([r"\bb(?:end|ends|ending|ent)\b", r"\bstoop", r"\blean(?:s|ed|ing)? (?:over|into|down|in)\b",
+              r"\breach(?:es|ed|ing)? (?:into|under|inside)\b", r"מתכופף", r"התכופף", r"רוכן", r"גוהר"])
+_SAME_PERSON = re.compile(r"\s*(?:he|she|they|his|her|their|him|then|הוא|היא|הם|הן|ואז|אז)(?![\w])", _FLAGS)
+
+
+def down_scope(text: str) -> str:
+    """What *text* says about the person on the ground: the clauses that name a person down (:data:`PERSON_DOWN`) or
+    bent over something, each with the sentences after it that go on with "he / she / they". Another person's clause ("while another man
+    walks past carrying a bag") is left out."""
+    kept: List[str] = []
+    inside = False
+    for part in _CLAUSE_BREAK.split(str(text or "")):
+        if not part or not part.strip():
+            continue
+        inside = bool(PERSON_DOWN.search(part) or _BENT.search(part)) or (inside and bool(_SAME_PERSON.match(part)))
+        if inside:
+            kept.append(part.strip())
+    return " | ".join(kept)
 
 VERIFY_ORDER = ("weapon", "tool_weapon", "vehicle", "violence", "person_down")
 
@@ -278,7 +319,8 @@ def verify_classes(text: str, reason: Optional[str] = None) -> List[str]:
 
     ``person_down`` the same way: a person lying, kneeling or crouching (:data:`PERSON_DOWN`) in *reason*, no other
     class, and *text* names nothing else (:data:`DOWN_ACT`: violence, a weapon, a break-in, a way in, hiding, night, a
-    fall or an injury, a child)."""
+    fall or an injury, a child), nor a thing (:data:`DOWN_THING`: a car, a bag) in what it says about the person on
+    the ground (:func:`down_scope`) - another man by a car or with a bag does not count."""
     text = str(text or "")
     if clear_class(text):
         return []
@@ -288,7 +330,13 @@ def verify_classes(text: str, reason: Optional[str] = None) -> List[str]:
     if VERIFY_PATTERNS["tool_weapon"].search(why) and not TOOL_IN_USE.search(text):
         found.append("tool_weapon")
     if not found and PERSON_DOWN.search(why) and not DOWN_ACT.search(text):
-        found.append("person_down")
+        # The why and the summary apart (the why's last clause must not run into the summary's first). A summary that
+        # names no person down cannot say which person the why meant: all of it counts, as before.
+        head, rest = (why, text[len(why):]) if reason and text.startswith(why) else ("", text)
+        about = [down_scope(head)] if head else []
+        about.append(down_scope(rest) if PERSON_DOWN.search(rest) else rest)
+        if not DOWN_THING.search(" | ".join(about)):
+            found.append("person_down")
     return [name for name in VERIFY_ORDER if name in found]
 
 

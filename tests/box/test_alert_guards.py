@@ -167,6 +167,36 @@ class VerifyClassTest(unittest.TestCase):
         self.assertEqual(g.verify_classes("a man with a knife kneels"), ["weapon"])
         self.assertEqual(g.verify_classes("two men fight, one is on the ground"), ["violence"])
 
+    def test_another_man_s_car_or_bag_does_not_block_the_look(self):
+        # 2026-10-09 14:41 / 15:44 ch6, the pavers workers: a red with no look because ANOTHER man stood by a car or
+        # walked past with a bag (DOWN_ACT matched "car", "bag", "רכב" anywhere in the red).
+        lives = [("התנהגות חשודה - אדם עומד ליד רכב ואדם אחר שוכב על הקרקע",
+                  "A man in dark clothing and a cap stands next to a white car while another person lies on the ground. "
+                  "The standing man appears to be interacting with the person on the ground."),
+                 ("אדם שוכב על הקרקע ואדם אחר עובר עליו",
+                  "A man lies on the ground while another man walks past him carrying a bag and approaches a car.")]
+        for why, summary in lives:
+            with self.subTest(why=why):
+                self.assertEqual(g.verify_classes(f"{why}  {summary}", reason=f"{why} "), ["person_down"])
+        for text in ("a man lies on the ground while another man walks past carrying a bag",
+                     "a man stands by a car while another person kneels on the ground",
+                     "a worker kneels on the pavers, and two others stand by a van", "אדם עומד ליד רכב ואדם אחר שוכב על הקרקע"):
+            with self.subTest(text=text):
+                self.assertEqual(g.verify_classes(text), ["person_down"])
+
+    def test_the_person_on_the_ground_s_own_thing_still_blocks_the_look(self):
+        for text in ("a man crouching over a bag", "a man lying under a car", "a man kneels and searches the floor",
+                     "A man lies on the ground. He is rummaging in a bag.", "אדם שוכב מתחת לרכב", "גבר כורע ליד תיק",
+                     "a man is beaten while lying on the ground", "a person lying on the floor while another takes the cash",
+                     "a man lies on the ground while another man runs to a car and drives away"):
+            with self.subTest(text=text):
+                self.assertNotIn("person_down", g.verify_classes(text))
+        # A summary that names no one down cannot say whose car it is: all of it counts, as before.
+        self.assertEqual(g.verify_classes("lying on the ground A person bends down near the rear of the white car.",
+                                          reason="lying on the ground"), [])
+        self.assertEqual(g.verify_classes("lying on the ground A person walks toward a parked car.",
+                                          reason="lying on the ground"), [])
+
     def test_the_person_down_must_be_the_reason(self):
         self.assertEqual(g.verify_classes(f"wearing masks {self.DOWN_SUMMARY}", reason="wearing masks"), [])
 
