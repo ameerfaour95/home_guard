@@ -470,10 +470,86 @@ _NORMAL = re.compile(r"(?<![א-ת])(?:תקין|תקינה|זה בסדר|הכל �
                      r"\b(?:normal|fine|false alarm|not suspicious|all good|nothing wrong|no problem)\b", re.IGNORECASE)
 
 
-def tag_label(text: str) -> str:
-    """The owner's label in a clip explanation: "normal" when it says the scene is fine ("זה תקין", "זה בסדר",
-    "לא חשוד"), else "other" (their own description)."""
-    return "normal" if _NORMAL.search(str(text or "")) else "other"
+# Words that make a scene not ordinary, whatever is marked: a tag with them is the owner's own description ("other").
+_ALARM = re.compile(r"(?<![א-ת])[ושהבלמכ]{0,2}(?:חשוד|חשודה|חשודים|גנב|גנבים|גניבה|פורץ|פורצים|פריצה|פרץ|מסכה|רעול|"
+                    r"נשק|אקדח|סכין|ברח|בורח|זר|זרים|לא מכיר|לא מוכר|לא מוכרים|מתגנב|שבר|שובר|איום|מאיים|תוקף|אלים)"
+                    r"(?![א-ת])|\b(?:suspicious|thief|thieves|steal\w*|burglar\w*|break(?:ing)? in|mask\w*|weapon|gun|"
+                    r"knife|stranger\w*|unknown|sneak\w*|threat\w*|attack\w*)\b", re.IGNORECASE)
+
+
+def tag_label(text: str, covered: bool = False) -> str:
+    """The owner's label in a clip explanation or a corrected tag, from its meaning: "normal" when it says the scene
+    is fine ("זה תקין", "לא חשוד"), or - with *covered*, a live mark of the owner's people on that camera at that
+    time - when it describes ordinary activity with no alarm word ("אדם עם כובע עובד ליד הכניסה"): the text is then
+    the corrected description of a normal scene. "other" only when the meaning is unclear."""
+    text = str(text or "")
+    if _NORMAL.search(text):
+        return "normal"
+    if covered and text.strip() and not _ALARM.search(text):
+        return "normal"
+    return "other"
+
+
+def covered_at(book: Any, camera: str, ts: float, now: Optional[float] = None) -> bool:
+    """A mark of the owner's people (live *now*) covers *camera* at *ts*: its camera or the whole house, and for a
+    crew's daily window its hours on any of its days - from the day it was said, so the 08:01 clip of the workers
+    marked at 09:23 is covered too."""
+    for k in live_marks(book, max(float(now or ts), ts)):
+        if not covers(k, camera) or ts >= float(k.get("until") or 0):
+            continue
+        start, end = str(k.get("daily_from") or ""), str(k.get("daily_to") or "")
+        moment = dt.datetime.fromtimestamp(ts)
+        if start and end:
+            if (moment.date() >= dt.datetime.fromtimestamp(float(k.get("at") or 0)).date()
+                    and start <= moment.strftime("%H:%M") < end):
+                return True
+        elif float(k.get("at") or 0) - 3600 <= ts:
+            return True
+    return False
+
+
+def who_where(who: str, camera: str, snapshot: Any, lang: str) -> str:
+    """"העובדים בכל הבית" / "העובדים בפרגולה" - and only "עובדים אצלי על הפרגולה" when the words already name the
+    camera (never "על הפרגולה בפרגולה")."""
+    from .i18n import t  # noqa: PLC0415
+    from .registry import display  # noqa: PLC0415
+
+    who = " ".join(str(who or "").split())
+    if not camera:
+        return f"{who} {t('known_where_house', lang)}".strip()
+    name = display(snapshot, camera, lang)
+    names = {_in_place(name, lang)}
+    try:
+        cam = snapshot.camera(camera) if snapshot is not None else None
+        names |= {_in_place(a, lang) for a in (cam.aliases if cam is not None else ())}
+    except Exception:  # noqa: BLE001
+        pass
+    if any(n and n in who for n in names):
+        return who
+    return f"{who} {t('known_where_camera', lang, camera=_in_place(name, lang))}".strip()
+
+
+_ASKS_HISTORY = re.compile(r"(?<![א-ת])(?:קורא|קוראת|בודק|בודקת|זוכר|זוכרת|לוקח)[^.?!\n]{0,40}"
+                           r"(?:היסטורי|הסטורי|זיכרון|זכרון|זהרון|שיחה|בחשבון)|"
+                           r"\b(?:read|check|remember)\w*\b[^.?!\n]{0,40}\b(?:history|memory|conversation|chat)\b",
+                           re.IGNORECASE)
+_TAG_WORD = re.compile(r"(?<![א-ת])[ולשה]?(?:תיוג|התיוג|תייג|תג)(?![א-ת])|\btag\w*\b", re.IGNORECASE)
+_MEMORY_WORD = re.compile(r"(?<![א-ת])[ולשה]?(?:תזכור|לזכור|שתזכור|זיכרון|זכרון|הזכרון|הזיכרון|זהרון)(?![א-ת])|"
+                          r"\b(?:remember|memory)\b", re.IGNORECASE)
+_ACTION_WORD = re.compile(r"(?<![א-ת])[ו]?(?:שמור|תשמור|שנה|תשנה|תמחק|מחק|save|change|delete)(?![א-ת])", re.IGNORECASE)
+
+
+def asks_history(text: str) -> bool:
+    """"אתה לא קורא את היסטוריית השיחה? אתה לא בודק מה יש בזיכרון?"."""
+    return bool(_ASKS_HISTORY.search(str(text or "")))
+
+
+def explains_split(text: str) -> bool:
+    """The owner explains that a tag and a memory are two things (09:30: "לא התכוונתי שזה התיוג ... התכוונתי שתזכור
+    את זה"), not asking and not asking for an action."""
+    text = str(text or "")
+    return (bool(_TAG_WORD.search(text) and _MEMORY_WORD.search(text)) and not _QUESTION.search(text)
+            and not _ACTION_WORD.search(text))
 
 
 def tag_line(time: str, camera_name: str, label: str, words: str, lang: str) -> str:
@@ -511,10 +587,8 @@ def memory_text(book: Any, snapshot: Any, lang: str, now: float, facts: Sequence
 
     rows = []
     for k in live_marks(book, now):
-        camera = str(k.get("camera") or "")
-        where = t("known_where_house", lang) if not camera else t(
-            "known_where_camera", lang, camera=_in_place(where_text(snapshot, camera, lang), lang))
-        rows.append(f"🧠 {k.get('text')} {where}: {mark_when(k, now, lang)}")
+        rows.append(f"🧠 {who_where(str(k.get('text') or ''), str(k.get('camera') or ''), snapshot, lang)}: "
+                    f"{mark_when(k, now, lang)}")
     rows += [f"🧠 {f}" for f in facts if f]
     if not rows:
         return f"{t('memory_list_none', lang)}\n{t('memory_tags_note', lang)}"
@@ -526,39 +600,62 @@ def _in_place(name: str, lang: str) -> str:
     return name[1:] if str(lang).startswith("he") and len(name) > 2 and name.startswith("ה") else name
 
 
-def tags_today(roots: Sequence[str], snapshot: Any, lang: str, now: float) -> str:
-    """Today's tags of clips (feedback/ records with the owner's label), oldest first."""
+def today_tags(roots: Sequence[str], now: float) -> List[Dict[str, Any]]:
+    """Today's tags of clips, ONE per clip (the newest; a superseded record is never one), oldest first:
+    ``{at, alert_ts, camera, label, text}``."""
     import glob  # noqa: PLC0415
     import json  # noqa: PLC0415
     import os  # noqa: PLC0415
 
-    from .i18n import t  # noqa: PLC0415
-    from .registry import display  # noqa: PLC0415
-
     day = dt.datetime.fromtimestamp(now).strftime("%Y-%m-%d")
-    seen, rows = set(), []
-    for root in roots:
+    latest: Dict[str, Dict[str, Any]] = {}
+    for root in dict.fromkeys(roots):
         for path in glob.glob(os.path.join(glob.escape(root), "feedback", "*", day, "*.feedback.json")):
             try:
                 with open(path, encoding="utf-8") as f:
                     rec = json.load(f)
             except (OSError, ValueError):
                 continue
-            label = str(rec.get("owner_label") or "")
             alert = rec.get("alert") if isinstance(rec.get("alert"), dict) else {}
-            if not label or not alert.get("alert_id"):
+            label = str(rec.get("owner_label") or "")
+            if not label or not alert.get("alert_id") or rec.get("superseded_by"):
                 continue
-            stamp = os.path.basename(path).rsplit("_", 1)[-1].split(".", 1)[0]
             try:
-                when = dt.datetime.fromtimestamp(float(alert.get("ts") or 0)).strftime("%H:%M")
-            except (TypeError, ValueError, OverflowError, OSError):
-                when = "?"
-            line = tag_line(when, display(snapshot, str(alert.get("camera") or ""), lang), label,
-                            str(rec.get("owner_text") or ""), lang)
-            key = (alert.get("alert_id"), stamp)
-            if key not in seen:
-                seen.add(key)
-                rows.append((stamp, line))
-    if not rows:
-        return t("tags_list_none", lang)
-    return t("tags_list", lang, rows="\n".join(line for _, line in sorted(rows)))
+                stamp = int(os.path.basename(path).rsplit("_", 1)[-1].split(".", 1)[0]) / 1000.0
+            except ValueError:
+                stamp = 0.0
+            row = {"at": stamp, "alert_ts": float(alert.get("ts") or 0), "camera": str(alert.get("camera") or ""),
+                   "label": label, "text": str(rec.get("owner_text") or ""), "alert_id": str(alert["alert_id"])}
+            if row["alert_id"] not in latest or latest[row["alert_id"]]["at"] < stamp:
+                latest[row["alert_id"]] = row
+    return sorted(latest.values(), key=lambda r: r["at"])
+
+
+def tags_today(roots: Sequence[str], snapshot: Any, lang: str, now: float) -> str:
+    """Today's tags of clips, one line per clip."""
+    from .i18n import t  # noqa: PLC0415
+    from .registry import display  # noqa: PLC0415
+
+    rows = [tag_line(_hhmm(r["alert_ts"]), display(snapshot, r["camera"], lang), r["label"], r["text"], lang)
+            for r in today_tags(roots, now)]
+    return t("tags_list", lang, rows="\n".join(rows)) if rows else t("tags_list_none", lang)
+
+
+def tag_said(row: Dict[str, Any], snapshot: Any, lang: str) -> str:
+    """"ב-09:22 תייגתי את הסרטון של 08:01 (פרגולה) כתקין"."""
+    from .i18n import TEMPLATES, t  # noqa: PLC0415
+    from .registry import display  # noqa: PLC0415
+
+    key = f"label_{row['label']}"
+    camera = display(snapshot, row["camera"], lang)
+    if key in TEMPLATES:
+        return t("history_tag", lang, at=_hhmm(row["at"]), time=_hhmm(row["alert_ts"]), camera=camera,
+                 label=t(key, lang))
+    return t("history_tag_text", lang, at=_hhmm(row["at"]), time=_hhmm(row["alert_ts"]), camera=camera,
+             text=row["text"])
+
+
+def marks_text(book: Any, snapshot: Any, lang: str, now: float) -> str:
+    """"העובדים בכל הבית, כל יום 08:00–18:00, עד יום ה׳ 15.10; ..."."""
+    return "; ".join(f"{who_where(str(k.get('text') or ''), str(k.get('camera') or ''), snapshot, lang)}, "
+                     f"{mark_when(k, now, lang)}" for k in live_marks(book, now))

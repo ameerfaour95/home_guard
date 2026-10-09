@@ -1313,7 +1313,8 @@ class TelegramInbox:
             # fact in it is a MEMORY, which the assistant asks about (agent.note_tag) and saves only once answered.
             from .brain.known_memory import tag_label, tag_line  # noqa: PLC0415
 
-            label = tag_label(words)
+            label_for = getattr(self.agent, "tag_label_for", None) if getattr(self.agent, "version", 1) == 2 else None
+            label = label_for(alert, words) if callable(label_for) else tag_label(words)
             feedback = Feedback(verdict=verdict_for(label, str(alert.get("label") or "")), owner_label=label,
                                 owner_text=words, tagged_by=who["name"] or str(user_id or ""),
                                 source="voice" if spoken else "text", request_id=request["request_id"],

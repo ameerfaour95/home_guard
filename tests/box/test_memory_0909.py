@@ -220,7 +220,7 @@ class CorrectionTest(Base):
         self.assertEqual(dt.datetime.fromtimestamp(live[0]["until"]).strftime("%H:%M"), "18:00")
         from home_guard_project.box.brain.render import receipt_line
         line = receipt_line(ctx.receipts[-1], "he", snapshot=Registry().snapshot())
-        self.assertTrue(line.startswith("🧠 עדכנתי: העובדים על הפרגולה בפרגולה"), line)
+        self.assertTrue(line.startswith("🧠 עדכנתי: העובדים על הפרגולה, כל יום"), line)   # the place once
         self.assertIn("(במקום 23:59)", line)
 
     def test_widening_to_the_house_replaces_and_keeps_the_time(self) -> None:
@@ -243,7 +243,7 @@ class CorrectionTest(Base):
         big = Scripted([])                                                      # no model is needed
         out = self.agent(big).handle("מי אנר עד 23:59? זה נשמע לך הגיוני? הם עובדים עד 18:00 משהו כזה", "-5", OWNER)
         self.assertEqual(big.seen, [])
-        self.assertTrue(out.text.startswith("🧠 עדכנתי: עובדים אצלי על הפרגולה בפרגולה"), out.text)
+        self.assertTrue(out.text.startswith("🧠 עדכנתי: עובדים אצלי על הפרגולה, כל יום"), out.text)
         self.assertIn("(במקום 23:59)", out.text)
         (mark,) = self.events.list_known(self.clock)
         self.assertNotEqual(mark["id"], old["id"])
@@ -384,10 +384,11 @@ class TagAndMemoryTest(Base):
         agent = self.agent(big)
         agent.note_alert("-5", dict(ALERT))
         out = agent.handle(text, "-5", OWNER)
-        self.assertIn("🏷️ תיוג לסרטון 08:01 (פרגולה): אדם עם חולצה לבנה", out.text)
+        # A normal scene under the workers' mark, with the corrected description.
+        self.assertIn("🏷️ תיוג לסרטון 08:01 (פרגולה): תקין: אדם עם חולצה לבנה", out.text)
         self.assertIn("🧠 זכרתי: העובדים בפרגולה", out.text)
         (tag,) = self.feedback()
-        self.assertEqual((tag["owner_label"], tag["owner_text"][:8]), ("other", "אדם עם ח"))
+        self.assertEqual((tag["owner_label"], tag["verdict"], tag["owner_text"][:8]), ("normal", "expected", "אדם עם ח"))
         self.assertEqual(len(self.events.list_known(NOW)), 1)
 
     def test_routing_tag_memory_both_neither(self) -> None:
@@ -429,6 +430,86 @@ class TagAndMemoryTest(Base):
         tags = agent.handle("מה תייגתי היום?", "-5", OWNER)
         self.assertIn("🏷️ תיוג לסרטון 08:01 (פרגולה): תקין: " + EXPLAIN, tags.text)
         self.assertNotIn("🧠", tags.text)
+
+
+class LeadReviewTest(Base):
+    """The lead's five fixes (2026-10-09): a retag replaces, the label from meaning, names not ids, no parroting,
+    and the 09:30 explanation acknowledged with both receipts."""
+
+    def file(self, alert, label, text, at):
+        from home_guard_project.box.feedback import Feedback, save_feedback
+        return save_feedback(self.root, dict(alert), Feedback(verdict="expected", owner_label=label, owner_text=text),
+                             text, OWNER, "-5", at)
+
+    def test_a_retag_supersedes_the_earlier_tag(self) -> None:
+        first = self.file(ALERT, "normal", EXPLAIN, NOW)
+        second = self.file(ALERT, "normal", "אדם עם חולצה לבנה ליד הטנדר", NOW + 600)
+        with open(first, encoding="utf-8") as f:
+            old = json.load(f)
+        with open(second, encoding="utf-8") as f:
+            new = json.load(f)
+        self.assertEqual(old["superseded_by"], os.path.basename(second))
+        self.assertNotIn("superseded_by", new)
+        rows = km.today_tags([self.root], NOW + 700)
+        self.assertEqual([r["text"] for r in rows], ["אדם עם חולצה לבנה ליד הטנדר"])   # one line per clip
+        text = km.tags_today([self.root], Registry().snapshot(), "he", NOW + 700)
+        self.assertEqual(text.count("🏷️"), 1)
+
+    def test_the_label_comes_from_the_meaning(self) -> None:
+        retag = "אדם עם חולצה לבנה נמצא ליד הטנדר נראה שהוא לוקח משהו מהמטען"
+        hat = "אדם עם כובע עובד ליד הכניסה, כאשר אדם אחר ליד האוטו שלו עם הדלת פתוחה"
+        self.assertEqual((km.tag_label(retag), km.tag_label(hat)), ("other", "other"))   # nothing marked: unclear
+        self.events.mark_known("", "העובדים", "Ameer", WEEK_END, now=NOW + 60, daily_from="08:00", daily_to="18:00")
+        self.assertTrue(km.covered_at(self.events, PERGOLA, ALERT["ts"], NOW + 600))     # 08:01, marked at 09:23
+        self.assertTrue(km.covered_at(self.events, ENTRANCE, ALERT2["ts"], NOW + 1500))
+        self.assertFalse(km.covered_at(self.events, ENTRANCE, dt.datetime(2026, 10, 9, 22, 0).timestamp(), NOW))
+        self.clock = NOW + 600                                                  # 09:32, the retag
+        agent = self.agent()
+        self.assertEqual(agent.tag_label_for(dict(ALERT), retag), "normal")
+        self.assertEqual(agent.tag_label_for(dict(ALERT2), hat), "normal")
+        self.assertEqual(agent.tag_label_for(dict(ALERT2), "אדם רעול פנים ליד הדלת"), "other")   # an alarm word
+
+    def test_names_never_ids_and_the_place_once(self) -> None:
+        from unittest.mock import patch
+        from home_guard_project.box.inference import arrival_text
+        names = {PERGOLA: ["פרגולה"], ENTRANCE: ["כניסה ראשית"]}
+        with patch("home_guard_project.box.camera_names._load", lambda aliases: aliases or names):
+            line = arrival_text({"who": "העובדים", "camera": PERGOLA, "at": NOW}, "he")
+        self.assertEqual(line, "העובדים של הפרגולה הגיעו (09:22)")
+        snap = Registry().snapshot()
+        self.assertEqual(km.who_where("עובדים אצלי על הפרגולה", PERGOLA, snap, "he"), "עובדים אצלי על הפרגולה")
+        self.assertEqual(km.who_where("העובדים", PERGOLA, snap, "he"), "העובדים בפרגולה")
+        self.assertEqual(km.who_where("העובדים", "", snap, "he"), "העובדים בכל הבית")
+
+    def test_a_repeated_reply_is_rephrased(self) -> None:
+        same = "העובדים כבר מסומנים בכל הבית עד 18:00, כך שלא אשלח התרעות עליהם עד אז."
+        agent = self.agent(Scripted([reply(same)]))
+        agent.handle("נו?", "-5", OWNER)
+        big = Scripted([reply(same), reply("אחרי 18:00 אתריע עליהם כרגיל.")])
+        agent.model = big
+        out = agent.handle("ומה אחרי 18:00", "-5", OWNER)
+        self.assertEqual(out.text, "אחרי 18:00 אתריע עליהם כרגיל.")
+        self.assertIn("already sent this same answer", big.seen[1][0][-1])
+
+    def test_do_you_read_the_history_is_yes_with_proof(self) -> None:
+        self.events.mark_known("", "העובדים", "Ameer", WEEK_END, now=NOW, daily_from="08:00", daily_to="18:00")
+        self.file(ALERT, "normal", EXPLAIN, NOW)
+        big = Scripted([])
+        out = self.agent(big).handle("אתה לא קורא את היסטורית השיחה ? אתה לא בודק מה יש בזהרון?", "-5", OWNER)
+        self.assertEqual(big.seen, [])
+        self.assertEqual(out.text, "כן. בזיכרון: העובדים בכל הבית, כל יום 08:00–18:00, עד יום ה׳ 15.10. "
+                                   "ב-09:22 תייגתי את הסרטון של 08:01 (פרגולה) כתקין.")
+
+    def test_the_0930_explanation_is_acknowledged_with_both_receipts(self) -> None:
+        self.events.mark_known("", "העובדים", "Ameer", WEEK_END, now=NOW, daily_from="08:00", daily_to="18:00")
+        self.file(ALERT, "normal", EXPLAIN, NOW)
+        text = ("לא התכוונתי שזה התיוג וההסבר הנכון התכוונתי שתזכור את זה ותבין את הסיטואציה צריך לריד בין תיוג "
+                "נכון לבין אנטרקציה איתי בשביל הזכרון שלך")
+        out = self.agent(Scripted([])).handle(text, "-5", OWNER)
+        self.assertEqual(out.text, "נכון, זה שני דברים: 🏷️ התיוג לסרטון 08:01 (פרגולה) נשמר, 🧠 ובזיכרון: העובדים "
+                                   "בכל הבית, כל יום 08:00–18:00, עד יום ה׳ 15.10.")
+        self.assertFalse(km.explains_split("מה ההבדל בין שמור את המידע לתיוג"))
+        self.assertFalse(km.explains_split("שמור מידע ושנה תיוג, תזכור את העובדים"))
 
 
 class DailyWindowTest(Base):

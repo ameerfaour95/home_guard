@@ -296,6 +296,20 @@ def hollow(answer: str) -> bool:
     return not cleaned.strip() or empty_reply(cleaned) or empty_reply(answer)
 
 
+def repeats(state: ChatState, answer: str, last: int = 3) -> bool:
+    """*answer* (as it would be sent) equals, or nearly equals, one of the bot's last *last* replies (2026-10-09
+    replay: the same sentence at 09:34, 09:45 and 09:46)."""
+    import difflib  # noqa: PLC0415
+
+    norm = lambda x: " ".join(strip_boilerplate(str(x or "")).split())  # noqa: E731
+    mine = norm(answer)
+    if len(mine) < 12:
+        return False
+    replies = [norm(turn.get("reply")) for turn in state.turns if isinstance(turn, dict)
+               and turn.get("kind") not in ("alert",) and turn.get("reply")][-last:]
+    return any(r and (r == mine or difflib.SequenceMatcher(None, r, mine).ratio() >= 0.9) for r in replies)
+
+
 def offers_mark(answer: str) -> bool:
     return isinstance(answer, str) and bool(_OFFERS_MARK.search(answer))
 
@@ -335,13 +349,8 @@ def live_status(services: Services, snapshot: Any, lang: str, now: float) -> str
     marks = km.live_marks(getattr(services, "events", None), now)
     if not marks:
         return f"{t('live_status_none', lang)} {t('live_status_ask', lang)}"
-    rows = []
-    for k in marks:
-        camera = str(k.get("camera") or "")
-        where = (t("known_where_house", lang) if not camera
-                 else t("known_where_camera", lang, camera=in_place(display(snapshot, camera, lang), lang)))
-        rows.append(f"{k.get('text')} {where}, {km.mark_when(k, now, lang)}")
-    return f"{t('live_status', lang, marks='; '.join(rows))} {t('live_status_ask', lang)}"
+    return f"{t('live_status', lang, marks=km.marks_text(getattr(services, 'events', None), snapshot, lang, now))} " \
+           f"{t('live_status_ask', lang)}"
 
 
 def _tag_undo_rows(ctx: ToolContext, lang: str) -> Tuple[Tuple[Tuple[str, str], ...], ...]:
@@ -737,6 +746,30 @@ class OwnerAgentV2:
         """"מה אתה זוכר?" lists the live memories; "מה תייגתי היום?" lists today's tags of clips - two different
         things, answered in code."""
         lang = ctx.lang
+        book = getattr(self.services, "events", None)
+        try:
+            roots = list(self.services.roots()) if self.services.roots else []
+        except Exception:  # noqa: BLE001
+            roots = []
+        roots = list(dict.fromkeys([self.services.feedback_dir, *roots]))
+        if km.asks_history(text):
+            # 09:46: "אתה לא קורא את היסטוריית השיחה? אתה לא בודק מה יש בזיכרון?" - yes, with the proof.
+            marks = km.marks_text(book, snapshot, lang, now)
+            lines = [t("history_yes", lang, marks=marks) if marks else t("history_yes_none", lang)]
+            lines += [km.tag_said(r, snapshot, lang) for r in km.today_tags(roots, now)[-2:]]
+            return " ".join(lines)
+        if km.explains_split(text):
+            # 09:30: the owner explains that a tag and a memory are two things - agreed, with both receipts.
+            tags = km.today_tags(roots, now)
+            marks = km.marks_text(book, snapshot, lang, now)
+            if tags or marks:
+                parts = [t("split_ack", lang)]
+                if tags:
+                    r = tags[-1]
+                    parts.append(t("split_tag", lang, time=hhmm(r["alert_ts"]),
+                                   camera=display(snapshot, r["camera"], lang)))
+                parts.append(t("split_memory", lang, marks=marks) if marks else t("split_memory_none", lang))
+                return " ".join(parts)
         if km.asks_tags(text):
             try:
                 roots = list(self.services.roots()) if self.services.roots else [self.services.feedback_dir]
@@ -769,15 +802,21 @@ class OwnerAgentV2:
         marks = km.live_marks(getattr(self.services, "events", None), now)
         empty = hollow(answer) and not any(r.status == DONE for r in ctx.receipts)
         offer = bool(marks) and offers_mark(answer) and not any(r.tool == "mark_known" for r in ctx.receipts)
-        if not empty and not offer:
+        repeat = repeats(ctx.state, answer)
+        if not empty and not offer and not repeat:
             return answer
         if tier == FAST:
             return None
-        log.warning("memory guard: %s; one rewrite", "empty empathy" if empty else "offers a live mark")
+        log.warning("memory guard: %s; one rewrite",
+                    "empty empathy" if empty else "offers a live mark" if offer else "repeats an earlier reply")
         messages.append({"role": "assistant", "content": answer})
+        why = ("Your answer has no fact, no action and no question; it is never sent. " if empty else
+               "Your answer offers to mark people who are ALREADY marked ([LIVE MARKS]). " if offer else
+               "You already sent this same answer a moment ago; a repeated sentence reads robotic. Answer what the "
+               "owner asks in THIS message, in other words - if they ask whether you read the history or check "
+               "the memory, say yes and prove it with what is in memory and what they said today. ")
         messages.append({"role": "user", "content": (
-            "[BOX] " + ("Your answer has no fact, no action and no question; it is never sent. " if empty else
-                        "Your answer offers to mark people who are ALREADY marked ([LIVE MARKS]). ")
+            "[BOX] " + why
             + "Read [LIVE MARKS], [OWNER SAID TODAY] and [NOT COVERED]. Say what is live and what the real gap is, "
               "and fix it now with its tool when the owner asked for it (a correction of a mark is mark_known: it "
               "replaces the old one) - or ask ONE concrete question. When the owner complains, name the concrete "
@@ -795,7 +834,28 @@ class OwnerAgentV2:
             return live_status(self.services, snapshot, ctx.lang, now)
         if bool(marks) and offers_mark(again) and not any(r.tool == "mark_known" for r in ctx.receipts):
             return live_status(self.services, snapshot, ctx.lang, now)
+        if repeats(ctx.state, again):
+            status = live_status(self.services, snapshot, ctx.lang, now)
+            return status if not repeats(ctx.state, status) else again
         return again
+
+    def tag_label_for(self, alert: Dict[str, Any], words: str) -> str:
+        """The label of the owner's ✏️ words for this clip, from their meaning (km.tag_label): ordinary activity at a
+        camera and time that a live mark of the owner's people covers is "normal". Never raises."""
+        try:
+            alert = _object(alert)
+            now = _finite(self._now())
+            try:
+                snapshot = self.registry.snapshot()
+                camera = current_camera(snapshot, str(alert.get("camera") or "")) or str(alert.get("camera") or "")
+            except Exception:  # noqa: BLE001
+                camera = str(alert.get("camera") or "")
+            covered = km.covered_at(getattr(self.services, "events", None), camera,
+                                    _finite(alert.get("ts") or now), now)
+            return km.tag_label(words, covered)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Tag label not read from the memory: %s", exc)
+            return km.tag_label(words)
 
     def note_tag(self, chat_id: Any, alert: Dict[str, Any], words: str,
                  who: Optional[Dict[str, Any]] = None, label: str = "") -> Optional[AgentReply]:
@@ -835,7 +895,7 @@ class OwnerAgentV2:
                 state.set_topic_event(handle, now)
                 if camera:
                     state.set_topic_camera(camera, "", now)
-                label = label or km.tag_label(words)
+                label = label or self.tag_label_for(alert, words)
                 name = display(snapshot, camera, lang) if camera else ""
                 tag = {"line": km.tag_line(hhmm(ts), name, label, words, lang), "alert_id": str(alert["alert_id"]),
                        "label": label}

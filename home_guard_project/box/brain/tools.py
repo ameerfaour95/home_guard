@@ -1493,10 +1493,10 @@ def known_line(receipt: Receipt, lang: str, snapshot: Any = None) -> str:
     mark = {"until": _finite(d["until_ts"]), "daily_from": str(d.get("daily_from") or ""),
             "daily_to": str(d.get("daily_to") or "")}
     who = str(d.get("who") or "")
-    where = known_where(snapshot, camera, lang)
+    who, where = km.who_where(who, camera, snapshot, lang), ""      # never "על הפרגולה בפרגולה"
     when = km.mark_when(mark, at, lang)
     if d.get("already"):
-        return t("mem_already", lang, who=who, where=where, when=when)
+        return _tidy(t("mem_already", lang, who=who, where=where, when=when))
     replaced = [r for r in d.get("replaced") or [] if isinstance(r, dict)]
     if replaced:
         olds = []
@@ -1514,8 +1514,12 @@ def known_line(receipt: Receipt, lang: str, snapshot: Any = None) -> str:
                 parts.append(dt.datetime.fromtimestamp(old["until"]).strftime("%H:%M") if same_day
                              else km.mark_when(old, at, lang))
             olds.append(", ".join(parts) if parts else when)
-        return t("mem_updated", lang, who=who, where=where, when=when, old=", ".join(dict.fromkeys(olds)))
-    return t("mem_saved", lang, who=who, where=where, when=when)
+        return _tidy(t("mem_updated", lang, who=who, where=where, when=when, old=", ".join(dict.fromkeys(olds))))
+    return _tidy(t("mem_saved", lang, who=who, where=where, when=when))
+
+
+def _tidy(text: str) -> str:
+    return re.sub(r"\s+,", ",", re.sub(r" {2,}", " ", text))
 
 
 def known_rows(receipts: Sequence[Receipt], lang: str) -> Tuple[Tuple[Tuple[str, str], ...], ...]:
@@ -1789,7 +1793,9 @@ def retag_clip(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     if not quoted_from(tag, ctx.text):
         return _err("Not saved: tag must be the owner's new description of the clip, copied exactly from this "
                     "message (two words or more).")
-    return _result(file_tag(ctx, entry, km.tag_label(tag), tag, now),
+    covered = km.covered_at(ctx.services.events, current_camera(ctx.snapshot, str(entry.get("camera") or ""))
+                            or str(entry.get("camera") or ""), _finite(entry.get("ts") or now), now)
+    return _result(file_tag(ctx, entry, km.tag_label(tag, covered), tag, now),
                    note="The box writes the confirmation of the new tag.")
 
 
