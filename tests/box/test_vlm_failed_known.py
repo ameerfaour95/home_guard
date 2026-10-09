@@ -5,6 +5,7 @@ alert goes out as before (box/inference.py _event_decision, box/events.py EventB
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 from datetime import datetime
 
 import numpy as np
@@ -12,7 +13,7 @@ import numpy as np
 from home_guard_project.box import inference as inf
 from home_guard_project.box.events import KNOWN_EXTRA_PEOPLE, EventBook
 
-from test_guard_events import CAM, DOOR, Backend, GuardCase, answer
+from test_guard_events import CAM, DOOR, T0, Backend, GuardCase, answer
 
 DAY = datetime(2026, 10, 9, 0, 0).timestamp()
 AT_1112 = DAY + 11 * 3600 + 12 * 60
@@ -25,6 +26,12 @@ def mark(book, camera=CAM, people=3, now=DAY + 7 * 3600):
 
 
 class FailedCheckUnderMarkTest(GuardCase):
+    def setUp(self):
+        super().setUp()
+        patcher = mock.patch.object(inf, "AI_FAILED_NOTIFY", True)   # these test the "on" behaviour
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def run_failed(self, ts, detector_people=2, looks=None):
         job = inf.AlertJob(camera=CAM, stem=f"{CAM}_{int(ts)}_alert", ts=ts, labels=["person"],
                            input_meta={"vlm_input": "crop"})
@@ -96,6 +103,13 @@ class FailedCheckUnderMarkTest(GuardCase):
 class FailedAgainTest(GuardCase):
     """2026-10-09 ch1: "the AI check did not finish" at 11:35 and again at 11:37, two messages. One is enough."""
 
+    def setUp(self):
+        super().setUp()
+        patcher = mock.patch.object(inf, "AI_FAILED_NOTIFY", True)   # these test the "on" behaviour
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+
     def failed(self, ts, camera=CAM):
         with self.assertLogs("box.inference", "INFO") as logs:
             job = self.work(Backend(None), ts, camera=camera)
@@ -143,6 +157,22 @@ class FailedAgainTest(GuardCase):
         self.failed(AT_1112)
         self.work(Backend(answer("escalation", people=1, why="breaks into the house")), AT_1112 + 60)
         self.assertEqual(len(self.assistant.sent), 2)
+
+
+class FailedCheckDefaultOffTest(GuardCase):
+    """The owner, 2026-10-09 12:55: a message that says only "a person, the AI check did not finish" is not wanted.
+    By default (ai_failed_notify off) a clip no model answered is kept and logged, never sent."""
+
+    def test_nothing_is_sent_when_no_model_answered(self):
+        job = inf.AlertJob(camera=CAM, stem=f"{CAM}_{int(T0)}_alert", ts=T0, labels=["person"],
+                           input_meta={"vlm_input": "crop"})
+        job.tracker = {"people_together": 1}
+        with self.assertLogs("box.inference", "INFO") as logs:
+            inf._worker(Backend(None), {"alert_channel": "telegram"}, {}, inf.AlertSettings(), CAM,
+                        [np.zeros((4, 4, 3), np.uint8)] * 4, self.assistant, job)
+        self.assertTrue(job.ready.is_set())
+        self.assertEqual(self.assistant.sent, [])
+        self.assertTrue(any("ai_failed_notify off" in line for line in logs.output), logs.output)
 
 
 class KnownCoversTest(unittest.TestCase):

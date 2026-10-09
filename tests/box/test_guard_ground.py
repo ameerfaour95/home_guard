@@ -62,6 +62,7 @@ class GroundGuardTest(GuardCase):
         self.assertEqual(len(self.assistant.sent), 1)
         self.assertNotIn("ground", job.alert)
 
+    @mock.patch.object(inf, "AI_FAILED_NOTIFY", True)
     def test_an_unanswered_look_off_our_ground_is_not_forced_out(self):
         job = self.work_with(Backend(None), STAYS_THERE)
         self.assertEqual(self.assistant.sent, [])

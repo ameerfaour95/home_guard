@@ -111,6 +111,7 @@ class AnsweredCallUntouchedTest(unittest.TestCase):
 
 
 class RescueTest(unittest.TestCase):
+    @mock.patch.object(inf, "AI_FAILED_NOTIFY", True)
     def test_both_failed_then_the_main_model_answers_at_768(self) -> None:
         primary = Model(timeout, lambda r: ok_response(r, RESCUED))
         fallback = Model(timeout)

@@ -167,6 +167,10 @@ FACTS_PROVIDER: Optional[Callable] = None
 # not start - sends every alert as before; with it, one ongoing activity per camera is one event and only a change
 # reaches the owner (owner decision 2026-10-08).
 EVENTS: Any = None
+# box.yaml ``ai_failed_notify`` (default off): when no model answered (and the 768 rescue failed too), is the owner
+# sent the detector's alert? The owner, 2026-10-09 12:55: "got a weird message ... we didn't agree on this" - off:
+# the clip is kept and logged, nothing is sent. On: once per event, as before.
+AI_FAILED_NOTIFY = False
 # Every camera id this box knows (run() fills it): the last guard swaps any of them in an owner text for its name.
 KNOWN_CAMERAS: Tuple[str, ...] = ()
 # What is usual at each camera (baseline.Historian, task 2.9), started by run() (start_baseline). None - tests, tools -
@@ -354,7 +358,8 @@ def owner_guard(text: str, camera: str, lang: str) -> str:
 def start_events(box_settings: Mapping[str, Any]) -> Any:
     """Start the box's event book (events.py) once, in the state folder; box.yaml ``notify_normal`` (default off)
     lets the first normal of an event be a message. Never raises: without a book alerts go out as before."""
-    global EVENTS
+    global EVENTS, AI_FAILED_NOTIFY
+    AI_FAILED_NOTIFY = _on_off(box_settings.get("ai_failed_notify", False), "ai_failed_notify")
     try:
         from . import events  # noqa: PLC0415
 
@@ -2420,6 +2425,9 @@ def _event_decision(camera: str, alert_ts: float, label: str, people: Optional[i
         if ai_failed and label not in LABELS:
             import dataclasses  # noqa: PLC0415
 
+            if not AI_FAILED_NOTIFY:
+                return dataclasses.replace(decision, notify=False,
+                                           reason="AI check failed: kept, not sent (ai_failed_notify off)")
             known = book.known_covers(camera, alert_ts, detector_people)
             if known is not None:
                 return dataclasses.replace(decision, notify=False, known_text=known.text,
