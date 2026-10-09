@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-VERSION = 1
+VERSION = 2  # 2: the AI call's flags (vlm_failed, vlm_rescued, rescue_max_side); older records are re-read
 _TEXT_MAX = 300
 
 
@@ -59,6 +59,7 @@ def decision_of(meta: Any) -> dict:
     out["muted"] = bool(alert.get("muted"))
     out["false_positive"] = bool(alert.get("false_positive"))
     out["command"] = _text(alert.get("alert_command"), 32)
+    out.update(ai_flags(meta))
     for name in ("downgraded", "raised", "investigator"):
         if _text(pick(name)):
             out[name] = _text(pick(name), 120)
@@ -79,6 +80,42 @@ def decision_of(meta: Any) -> dict:
         out["ground"] = {k: where[k] for k in ("on", "entered", "off_our_ground") if k in where
                          and isinstance(where[k], (str, bool))}
     return out
+
+
+def ai_flags(meta: Any) -> dict:
+    """What happened to the clip's AI call (the box's meta): ``vlm_failed`` (no answer), ``vlm_rescued`` (an answer
+    rescued), ``rescue_max_side`` (asked again on pictures capped at that many pixels; 0 for none). The flags sit in
+    ``alert`` or at the top level; the rescue in ``model_input.rescue``, else ``teacher.model_input.rescue``."""
+    meta = _dict(meta)
+    flags = {**meta, **_dict(meta.get("alert"))}
+    side = 0
+    for rec in (meta.get("model_input"), _dict(meta.get("teacher")).get("model_input")):
+        rescue = _dict(rec).get("rescue") if isinstance(rec, dict) else None
+        value = _dict(rescue).get("max_side")
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
+            side = int(value)
+            break
+    return {"vlm_failed": bool(flags.get("vlm_failed")), "vlm_rescued": bool(flags.get("vlm_rescued")),
+            "rescue_max_side": side}
+
+
+def ai_flag_texts(flags: Any) -> list[str]:
+    """The flags as staff read them (Tag · AI's chips, the events' decision tooltip): "Rescued at 768 px",
+    "AI answer rescued", "AI failed"; [] for an ordinary call."""
+    flags = _dict(flags)
+    out = []
+    if flags.get("rescue_max_side"):
+        out.append(f"Rescued at {int(flags['rescue_max_side'])} px")
+    if flags.get("vlm_rescued"):
+        out.append("AI answer rescued")
+    if flags.get("vlm_failed"):
+        out.append("AI failed")
+    return out
+
+
+def rescued(decision: Any) -> bool:
+    d = _dict(decision)
+    return bool(d.get("vlm_rescued") or d.get("rescue_max_side"))
 
 
 def session_id(decision: Any) -> str:

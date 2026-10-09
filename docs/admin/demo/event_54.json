@@ -31,6 +31,7 @@
   "outcome": null,
   "outcome_code": null,
   "would_raise": false,
+  "ai_flags": [],
   "clip_start_local": "2026-10-01 22:10:04",
   "duration_sec": 4.0,
   "fps": 5.0,

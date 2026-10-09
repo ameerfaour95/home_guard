@@ -34,7 +34,8 @@
       "session_id": null,
       "outcome": null,
       "outcome_code": null,
-      "would_raise": false
+      "would_raise": false,
+      "ai_flags": []
     },
     {
       "id": 43,
@@ -73,7 +74,8 @@
       "session_id": null,
       "outcome": null,
       "outcome_code": null,
-      "would_raise": false
+      "would_raise": false,
+      "ai_flags": []
     },
     {
       "id": 79,
@@ -109,7 +111,8 @@
       "session_id": null,
       "outcome": null,
       "outcome_code": null,
-      "would_raise": false
+      "would_raise": false,
+      "ai_flags": []
     },
     {
       "id": 26,
@@ -146,7 +149,8 @@
       "session_id": null,
       "outcome": null,
       "outcome_code": null,
-      "would_raise": false
+      "would_raise": false,
+      "ai_flags": []
     },
     {
       "id": 6,
@@ -183,7 +187,8 @@
       "session_id": null,
       "outcome": null,
       "outcome_code": null,
-      "would_raise": false
+      "would_raise": false,
+      "ai_flags": []
     },
     {
       "id": 21,
@@ -220,7 +225,8 @@
       "session_id": null,
       "outcome": null,
       "outcome_code": null,
-      "would_raise": false
+      "would_raise": false,
+      "ai_flags": []
     }
   ],
   "next_cursor": null,

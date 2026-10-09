@@ -71,7 +71,10 @@ class TimelineScreen(QWidget):
                    'reviewed': [('Any review', None), ('Unreviewed', False), ('Reviewed', True)],
                    'flagged': [('Any flag', None), ('Flagged', True), ('Unflagged', False)],
                    # the baseline in shadow mode records what it would do: these clips it would have raised
-                   'would_raise': [('Any decision', None), ('Would raise: rare for this camera', True)]}
+                   # the box's decision: the baseline in shadow mode (these clips it would have raised) and
+                   # what happened to the AI call (no answer; an answer rescued or asked again on smaller pictures)
+                   'decision': [('Any decision', None), ('Would raise: rare for this camera', 'would_raise'),
+                                ('AI failed', 'vlm_failed'), ('AI rescued', 'vlm_rescued')]}
         for key, values in choices.items():
             combo = QComboBox(); combo.setAccessibleName(key)
             combo.setMinimumWidth(96)  # sized to its text, but may narrow so the row fits the 1200-pixel minimum window
@@ -171,12 +174,19 @@ class TimelineScreen(QWidget):
     def query(self):
         start, end = self.start, self.end
         filters = {k: v.currentData() for k, v in self.filters.items() if v.currentData() is not None}
+        flag = filters.pop('decision', None)
+        if flag == 'would_raise':
+            filters['would_raise'] = True
+        elif flag:
+            filters['vlm'] = flag.removeprefix('vlm_')  # 'failed' | 'rescued'
         if self.cell:
             camera, hour = self.cell
             filters['camera'] = camera; start, end = max(start, hour), min(end, hour+timedelta(hours=1))
         if self.role != 'labeler' and '/' in (filters.get('camera') or ''):
             filters['site'], filters['camera'] = filters['camera'].split('/', 1)
-        query = dict(filters, filter=self.saved_filter, from_utc=start.isoformat(), to_utc=end.isoformat())
+        # with_total: the footer counts every match (e.g. the AI failures of one camera on one day), not the page
+        query = dict(filters, filter=self.saved_filter, from_utc=start.isoformat(), to_utc=end.isoformat(),
+                     with_total=True)
         if self.role != 'labeler':
             query.update(customer_id=self.customer_id, q=self.search.text().strip() or None)
         return query
@@ -214,7 +224,9 @@ class TimelineScreen(QWidget):
         self.older.setEnabled(bool(self.cursor))
         self.older.setText('Load older' if self.cursor else 'End of range')
         self.stack.setCurrentWidget(self.table if self.model.rows else self.empty)
-        self.count.setText(f'{len(self.model.rows)} events loaded' + (' · More available' if self.cursor else ' · All in view'))
+        total = getattr(page, 'total', None)
+        self.count.setText((f'{total}{"+" if page.total_capped else ""} matching  ·  ' if total is not None else '')
+                           + f'{len(self.model.rows)} events loaded' + (' · More available' if self.cursor else ' · All in view'))
         self.apply_groups()
         if self.model.rows and not append:
             self.table.setCurrentIndex(self.model.index(0, 0))

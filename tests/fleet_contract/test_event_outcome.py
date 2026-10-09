@@ -53,8 +53,9 @@ def test_lowered_second_look_and_baseline_shadow():
 
 
 def test_old_metas_and_the_top_level_copies():
+    plain = {"vlm_failed": False, "vlm_rescued": False, "rescue_max_side": 0}
     assert decision_of({"alert": {"alert_command": "[none]"}}) == {
-        "v": 1, "sent": None, "not_sent_reason": "", "muted": False, "false_positive": False, "command": "[none]"}
+        "v": 2, "sent": None, "not_sent_reason": "", "muted": False, "false_positive": False, "command": "[none]", **plain}
     assert outcome(decision_of({"alert": {"alert_command": "[none]"}})) == ("", "")
     assert outcome(decision_of(_meta(dispatch={"sent": True}))) == ("sent", "Sent")
     assert outcome(decision_of(_meta(dispatch={"sent": False, "reason": "Forbidden"}))) == ("undelivered", "Not delivered (Forbidden)")
@@ -62,5 +63,24 @@ def test_old_metas_and_the_top_level_copies():
     assert outcome(decision_of(_meta(muted=True, sent=False))) == ("muted", "Not sent: camera muted by the owner")
     top = decision_of({"baseline": {"mode": "shadow", "would_raise": True}, "alert": {}})
     assert would_raise(top)
-    assert decision_of(None) == {"v": 1, "sent": None, "not_sent_reason": "", "muted": False, "false_positive": False,
-                                 "command": ""}
+    assert decision_of(None) == {"v": 2, "sent": None, "not_sent_reason": "", "muted": False, "false_positive": False,
+                                 "command": "", **plain}
+
+
+def test_the_ai_call_flags_one_rule_with_tag_ai():
+    """alert.vlm_failed / vlm_rescued (or at the top level) and model_input.rescue (or teacher.model_input.rescue)."""
+    from home_guard_project.cloud.tagstudio.model_view import ai_badges
+    from home_guard_project.fleet_contract.event_outcome import ai_flag_texts, ai_flags, rescued
+    failed = {"alert": {"vlm_failed": True, "alert_command": "[none]"}}
+    saved = {"vlm_rescued": True, "teacher": {"model_input": {"rescue": {"max_side": 768, "reason": "too large"}}}}
+    for meta, flags, texts in (
+            (failed, {"vlm_failed": True, "vlm_rescued": False, "rescue_max_side": 0}, ["AI failed"]),
+            (saved, {"vlm_failed": False, "vlm_rescued": True, "rescue_max_side": 768},
+             ["Rescued at 768 px", "AI answer rescued"]),
+            ({"model_input": {"rescue": {"max_side": 512}}, "alert": {}},
+             {"vlm_failed": False, "vlm_rescued": False, "rescue_max_side": 512}, ["Rescued at 512 px"]),
+            ({"alert": {}}, {"vlm_failed": False, "vlm_rescued": False, "rescue_max_side": 0}, [])):
+        decided = decision_of(meta)
+        assert {k: decided[k] for k in flags} == flags == ai_flags(meta)
+        assert ai_flag_texts(decided) == texts == ai_badges(meta)  # Tag · AI's chips: the same rule
+    assert rescued(decision_of(saved)) and not rescued(decision_of(failed))

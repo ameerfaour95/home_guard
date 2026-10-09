@@ -66,18 +66,10 @@ class ModelView:
 def ai_badges(meta: Mapping[str, Any]) -> List[str]:
     """What happened to the clip's AI call, as staff read it: "Rescued at 768 px" (the box asked again on smaller
     pictures), "AI answer rescued", "AI failed"; [] for an ordinary call."""
-    out = []
-    for rec in (meta.get("model_input"), (meta.get("teacher") or {}).get("model_input")):
-        rescue = rec.get("rescue") if isinstance(rec, dict) else None
-        if isinstance(rescue, dict) and rescue.get("max_side"):
-            out.append(f"Rescued at {int(rescue['max_side'])} px")
-            break
-    flags = {**(meta if isinstance(meta, dict) else {}), **(meta.get("alert") or {})}
-    if flags.get("vlm_rescued"):
-        out.append("AI answer rescued")
-    if flags.get("vlm_failed"):
-        out.append("AI failed")
-    return out
+    # one rule for Tag · AI and the events' decision (fleet_contract.event_outcome.ai_flags)
+    from home_guard_project.fleet_contract.event_outcome import ai_flag_texts, ai_flags  # noqa: PLC0415
+
+    return ai_flag_texts(ai_flags(meta))
 
 
 def recipe(meta: Mapping[str, Any]) -> Optional[Dict[str, Any]]:

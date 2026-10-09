@@ -227,7 +227,8 @@ def _summary_fields(session: Session, viewer: _Viewer, ev: Event, customer_id: i
 def _outcome_fields(ev: Event, shown, private: bool) -> dict[str, Any]:
     code, text = event_outcome.outcome(ev.decision, private=private) if isinstance(ev.decision, dict) else ("", "")
     return dict(session_id=ev.session_id, outcome=shown(text) or None, outcome_code=code or None,
-                would_raise=ev.would_raise)
+                would_raise=ev.would_raise,
+                ai_flags=event_outcome.ai_flag_texts(ev.decision) if isinstance(ev.decision, dict) else [])
 
 
 def annotation_statuses(session: Session, ids: list[int]) -> dict[int, str]:
@@ -287,6 +288,7 @@ def list_events(
     filter: Optional[str] = None,
     collection_id: Optional[int] = None,
     would_raise: Optional[bool] = None,
+    vlm: Optional[Literal["failed", "rescued"]] = None,
     with_total: bool = False,
     cursor: Optional[str] = None,
     limit: int = Query(100, ge=1, le=500),
@@ -331,6 +333,11 @@ def list_events(
         conds.append(_reviewed.is_(reviewed))
     if flagged is not None:
         conds.append(_flagged.is_(flagged))
+    if vlm == "failed":  # the AI call gave no answer (alert.vlm_failed)
+        conds.append(Event.decision["vlm_failed"].as_boolean().is_(True))
+    elif vlm == "rescued":  # an answer rescued, or asked again on smaller pictures
+        conds.append(or_(Event.decision["vlm_rescued"].as_boolean().is_(True),
+                         func.coalesce(Event.decision["rescue_max_side"].as_integer(), 0) > 0))
     if would_raise is not None:  # the baseline in shadow mode: "would raise: rare for this camera"
         conds.append(Event.would_raise.is_(True) if would_raise else Event.would_raise.isnot(True))
     if filter is not None:

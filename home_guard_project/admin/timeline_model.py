@@ -108,8 +108,8 @@ class TimelineModel(QAbstractTableModel):
                 c = e.completeness
                 return '\n'.join(['Video saved' if c.video else 'No video saved', provenance(c.boxes), ai_status(c.ai),
                                    'No video copy remains' if c.expired else 'Video retention active'])
-            if col == 3:
-                return e.outcome or decision(e.alert_command)  # the full outcome, also when the cell wraps it
+            if col == 3:  # the full outcome, also when the cell wraps it, and what happened to the AI call
+                return '\n'.join([e.outcome or decision(e.alert_command), *e.ai_flags])
             return (f'{camera_name(e)}\n{local_time(e.start_utc, e.timezone)}\n{e.summary}'
                     + (f'\n{e.outcome}' if e.outcome else ''))
         if role == Qt.ItemDataRole.DisplayRole:

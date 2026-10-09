@@ -33,6 +33,7 @@
   "outcome": "Dismissed: the AI saw nothing to alert on",
   "outcome_code": "dismissed",
   "would_raise": false,
+  "ai_flags": [],
   "clip_start_local": null,
   "duration_sec": 4.0,
   "fps": 5.0,

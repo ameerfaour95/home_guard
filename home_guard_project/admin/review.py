@@ -89,7 +89,8 @@ class ReviewScreen(QWidget):
         # each combo's first item names it ('All kinds', 'All cameras', ...): no separate captions, so the whole
         # sidebar fits a 768-pixel screen
         for key, combo in self.timeline.filters.items():
-            combo.setToolTip({'ai': 'AI state', 'verdict': 'Owner answer'}.get(key, key.title()))
+            combo.setToolTip({'ai': 'AI state', 'verdict': 'Owner answer',
+                              'decision': "The box's decision and its AI call"}.get(key, key.title()))
             if key == 'camera' and role == 'labeler':
                 combo.hide(); continue  # a labeler's cameras are pseudonyms
             filters.addWidget(combo)

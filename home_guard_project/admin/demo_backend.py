@@ -150,6 +150,10 @@ class DemoBackend(DemoTagging, DemoAnnotations, DemoStudio, DemoInbox):
             items = [e for e in items if filters['verdict'] in e.owner_verdicts]
         if filters.get('would_raise') is not None:
             items = [e for e in items if bool(e.would_raise) == bool(filters['would_raise'])]
+        if filters.get('vlm') == 'failed':
+            items = [e for e in items if 'AI failed' in e.ai_flags]
+        elif filters.get('vlm') == 'rescued':
+            items = [e for e in items if any(f != 'AI failed' for f in e.ai_flags)]
         for key, lower in [('from_utc', True), ('to_utc', False)]:
             if filters.get(key):
                 boundary = datetime.fromisoformat(str(filters[key]).replace('Z', '+00:00'))

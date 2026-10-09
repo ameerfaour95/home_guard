@@ -343,8 +343,8 @@ def test_clips_of_one_event_are_one_expandable_row(widgets, wait):
     screen.group_toggle.setChecked(True); screen.toggle_group(lead, False)
     screen.reveal(members[-1])
     assert not table.isRowHidden(members[-1])
-    combo = screen.filters['would_raise']
-    combo.setCurrentIndex(combo.findData(True)); wait(lambda: not screen.runner.busy)
+    combo = screen.filters['decision']
+    combo.setCurrentIndex(combo.findData('would_raise')); wait(lambda: not screen.runner.busy)
     assert [e.would_raise for e in model.rows] == [True]
 
 
@@ -424,3 +424,33 @@ def test_event_rows_say_event_and_the_outcome_is_in_the_tooltip(widgets, wait):
     member = next(i for i in model.members[model.key(lead)][1:] if model.rows[i].kind not in ('paused', 'trigger', 'random'))
     assert model.index(member, kind).data() == 'Event'  # never 'Dismissed by AI' beside a held outcome
     assert model.index(member, decided).data(Qt.ItemDataRole.ToolTipRole) == 'Kept in the event, not sent (normal)'
+
+
+def test_ai_failed_and_rescued_filter_count_and_tooltip(widgets, wait):
+    from PySide6.QtCore import Qt
+    from home_guard_project.admin.timeline import TimelineScreen
+    from home_guard_project.admin.timeline_model import HEADERS
+    queries = []
+
+    class Flags(DemoBackend):
+        def events(self, **filters):
+            queries.append(dict(filters))
+            page = super().events(**{k: v for k, v in filters.items() if k != 'vlm'})
+            for i, e in enumerate(page.items):
+                e.ai_flags = ['AI failed'] if i % 4 == 1 else ['Rescued at 768 px'] if i % 4 == 2 else []
+            if filters.get('vlm') == 'failed':
+                page.items = [e for e in page.items if 'AI failed' in e.ai_flags]
+                page.total = len(page.items)
+            return page
+    screen = TimelineScreen(Flags()); widgets.append(screen); screen.resize(1100, 600); screen.show()
+    screen.open(1, 'Asia/Jerusalem'); wait(lambda: bool(screen.model.rows) and not screen.runner.busy)
+    combo = screen.filters['decision']
+    assert [combo.itemText(i) for i in range(combo.count())] == [
+        'Any decision', 'Would raise: rare for this camera', 'AI failed', 'AI rescued']
+    combo.setCurrentIndex(combo.findData('vlm_failed')); wait(lambda: not screen.runner.busy and queries[-1].get('vlm'))
+    assert queries[-1]['vlm'] == 'failed' and queries[-1]['with_total'] is True and 'decision' not in queries[-1]
+    assert screen.model.rows and all(e.ai_flags == ['AI failed'] for e in screen.model.rows)
+    assert screen.count.text().startswith(f'{len(screen.model.rows)} matching')
+    tip = screen.model.index(0, HEADERS.index('AI decision')).data(Qt.ItemDataRole.ToolTipRole)
+    assert tip.split('\n')[-1] == 'AI failed'
+    combo.setCurrentIndex(combo.findData('vlm_rescued')); wait(lambda: not screen.runner.busy and queries[-1].get('vlm') == 'rescued')

@@ -37,7 +37,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Optional
 
-from sqlalchemy import and_, exists, or_, select, tuple_
+from sqlalchemy import and_, exists, func, or_, select, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -61,7 +61,7 @@ EVENT_ROLES = ("original_video", "meta", "raw_answer", "teacher_frame", "crop_vi
                "tracks")
 TRACKS_SUFFIX = ".tracks.json"  # the box tracker's tracks of a clip (box clip_tracks.py), in responses/
 AI_RANK = {"none": 0, "fallback": 1, "failed": 2, "real": 3}
-DECISION_BACKFILL = 500  # events without a parsed event-layer decision rebuilt per pass (from stored revisions)
+DECISION_BACKFILL = 500  # events whose event-layer decision is missing or older than event_outcome.VERSION, per pass
 FULL_SCAN_EVERY = timedelta(minutes=30)
 PRODUCTION_RETENTION = timedelta(days=14)
 INVALID_JSON = "_invalid_json"  # RawRevision body marker for an object that is not storable JSON
@@ -778,9 +778,12 @@ class _Run:
             rows = self.load_feedback()
             self.dirty_ids |= {rows[a.s3_key].event_id for a, _, _ in feedback
                                if a.s3_key in rows and rows[a.s3_key].event_id is not None}
-        # events indexed before the event layer was read (migration 0018): rebuilt from stored revisions, a chunk a pass
+        # events indexed before the event layer was read (0018), or before its record grew (event_outcome.VERSION):
+        # rebuilt from stored revisions, a chunk a pass
         self.dirty_ids |= set(self.session.scalars(select(Event.id).where(
-            Event.device_pk == self.device.id, Event.decision.is_(None)).order_by(Event.id).limit(DECISION_BACKFILL)))
+            Event.device_pk == self.device.id,
+            or_(Event.decision.is_(None), func.coalesce(Event.decision["v"].as_integer(), 0) < event_outcome.VERSION))
+            .order_by(Event.id).limit(DECISION_BACKFILL)))
         self.load_events(self.dirty, self.dirty_ids, stems)
         self.apply_feedback(feedback)
         self.rebuild_all()

@@ -167,6 +167,7 @@ class EventSummary(BaseModel):
     outcome: Optional[str] = None
     outcome_code: Optional[str] = None
     would_raise: Optional[bool] = None
+    ai_flags: list[str] = []  # what happened to the AI call: "Rescued at 768 px", "AI answer rescued", "AI failed"
 
 
 class EventSession(BaseModel):

@@ -34,7 +34,8 @@
       "session_id": null,
       "outcome": "Dismissed: the AI saw nothing to alert on",
       "outcome_code": "dismissed",
-      "would_raise": false
+      "would_raise": false,
+      "ai_flags": []
     },
     {
       "id": 83,
@@ -73,7 +74,8 @@
       "session_id": null,
       "outcome": null,
       "outcome_code": null,
-      "would_raise": false
+      "would_raise": false,
+      "ai_flags": []
     },
     {
       "id": 11,
@@ -112,7 +114,8 @@
       "session_id": null,
       "outcome": null,
       "outcome_code": null,
-      "would_raise": false
+      "would_raise": false,
+      "ai_flags": []
     },
     {
       "id": 58,
@@ -151,7 +154,8 @@
       "session_id": null,
       "outcome": "Dismissed: the AI saw nothing to alert on",
       "outcome_code": "dismissed",
-      "would_raise": false
+      "would_raise": false,
+      "ai_flags": []
     },
     {
       "id": 57,
@@ -190,7 +194,8 @@
       "session_id": null,
       "outcome": null,
       "outcome_code": null,
-      "would_raise": false
+      "would_raise": false,
+      "ai_flags": []
     },
     {
       "id": 55,
@@ -229,7 +234,8 @@
       "session_id": null,
       "outcome": null,
       "outcome_code": null,
-      "would_raise": false
+      "would_raise": false,
+      "ai_flags": []
     },
     {
       "id": 76,
@@ -268,7 +274,8 @@
       "session_id": null,
       "outcome": "Dismissed: the AI saw nothing to alert on",
       "outcome_code": "dismissed",
-      "would_raise": false
+      "would_raise": false,
+      "ai_flags": []
     },
     {
       "id": 20,
@@ -307,7 +314,8 @@
       "session_id": null,
       "outcome": null,
       "outcome_code": null,
-      "would_raise": false
+      "would_raise": false,
+      "ai_flags": []
     },
     {
       "id": 2,
@@ -346,7 +354,8 @@
       "session_id": null,
       "outcome": "Dismissed: the AI saw nothing to alert on",
       "outcome_code": "dismissed",
-      "would_raise": false
+      "would_raise": false,
+      "ai_flags": []
     },
     {
       "id": 1,
@@ -385,7 +394,8 @@
       "session_id": null,
       "outcome": "Dismissed: the AI saw nothing to alert on",
       "outcome_code": "dismissed",
-      "would_raise": false
+      "would_raise": false,
+      "ai_flags": []
     },
     {
       "id": 19,
@@ -421,7 +431,8 @@
       "session_id": null,
       "outcome": null,
       "outcome_code": null,
-      "would_raise": false
+      "would_raise": false,
+      "ai_flags": []
     },
     {
       "id": 88,
@@ -459,7 +470,8 @@
       "session_id": null,
       "outcome": null,
       "outcome_code": null,
-      "would_raise": false
+      "would_raise": false,
+      "ai_flags": []
     },
     {
       "id": 87,
@@ -496,7 +508,8 @@
       "session_id": null,
       "outcome": null,
       "outcome_code": null,
-      "would_raise": false
+      "would_raise": false,
+      "ai_flags": []
     }
   ],
   "next_cursor": null,

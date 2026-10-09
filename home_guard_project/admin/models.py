@@ -152,6 +152,7 @@ class EventSummary:
     outcome: str | None = field(default=None, kw_only=True)
     outcome_code: str | None = field(default=None, kw_only=True)
     would_raise: bool | None = field(default=None, kw_only=True)
+    ai_flags: list[str] = field(default_factory=list, kw_only=True)  # "Rescued at 768 px", "AI failed", ...
 
 
 @dataclass

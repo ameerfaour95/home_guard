@@ -33,6 +33,7 @@
   "outcome": "Not sent: camera muted by the owner",
   "outcome_code": "muted",
   "would_raise": false,
+  "ai_flags": [],
   "clip_start_local": "2026-10-02 18:44:35",
   "duration_sec": 4.0,
   "fps": 5.0,

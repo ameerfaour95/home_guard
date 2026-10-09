@@ -1486,6 +1486,14 @@
       },
       "EventDetail": {
         "properties": {
+          "ai_flags": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Ai Flags",
+            "type": "array"
+          },
           "ai_runs": {
             "items": {
               "$ref": "#/components/schemas/AiRunOut"
@@ -1870,6 +1878,14 @@
       },
       "EventSummary": {
         "properties": {
+          "ai_flags": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Ai Flags",
+            "type": "array"
+          },
           "alert_command": {
             "anyOf": [
               {
@@ -4832,6 +4848,26 @@
                 }
               ],
               "title": "Would Raise"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vlm",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "failed",
+                    "rescued"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Vlm"
             }
           },
           {
