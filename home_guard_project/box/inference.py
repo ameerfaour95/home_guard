@@ -2264,6 +2264,42 @@ def second_look(backend: Any, frames: List[Any], classes: Sequence[str], lang: s
     return record
 
 
+def _explained_red(backend: Any, frames: List[Any], camera: str, alert_ts: float, text: str, lang: str,
+                   decision: Dict[str, Any], label: str, cmd: str) -> Tuple[str, str]:
+    """activity_memory (2026-10-09): the owner explained this action at this camera ("the lying down at the stairs
+    is the electricians"). A red naming it gets a second look WITH those words first; consistent: lowered to
+    suspicious (which the same memory then keeps quiet). ``(label, cmd)``; the red stays on anything else."""
+    from .activity_memory import red_look  # noqa: PLC0415
+
+    look = red_look(backend, frames, camera, alert_ts, text, lang, timeout=VERIFY_TIMEOUT_SEC)
+    if look is None:
+        return label, cmd
+    decision["activity_look"] = look
+    log.info("[%s] activity look (%s): %s", camera, look.get("cause"),
+             "consistent: lowered" if look.get("lowered") else look.get("reason") or f"not so: {look.get('what_it_is')}")
+    if not look.get("lowered"):
+        return label, cmd
+    decision.update(label="suspicious", final_label="suspicious", lowered_by="owner explained the action")
+    return "suspicious", LABEL_COMMANDS["suspicious"]
+
+
+def _explained_suspicious(event: Any, camera: str, alert_ts: float, text: str, decision: Dict[str, Any]) -> Any:
+    """A suspicious whose action the owner explained here, inside its window: kept, not sent (like a known mark)."""
+    from .activity_memory import explained, quiet_reason  # noqa: PLC0415
+
+    fact = explained(camera, alert_ts, text)
+    if fact is None:
+        return event
+    import dataclasses  # noqa: PLC0415
+
+    decision["activity_fact"] = fact.id
+    try:
+        return dataclasses.replace(event, notify=False, reason=quiet_reason(fact), known_text=fact.cause)
+    except Exception as exc:  # noqa: BLE001 - a decision of another shape: it goes out as before
+        log.warning("[%s] activity memory not applied: %s", camera, exc)
+        return event
+
+
 def _alert_ground(job: Optional[AlertJob], camera: str, reason: str) -> Dict[str, Any]:
     """Where the alert's people were by the camera's scene map (ground.py), with ``action`` (the Eye's reason names
     something done): ``ground.Ground.record()`` plus ``action``, or {} without a map, without tracks, or on any
@@ -2864,6 +2900,10 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                 label = shown_label = "normal"
                 cmd = LABEL_COMMANDS[label]
                 decision.update(label=label, final_label=label, investigator="short visit")
+        if label == "escalation":
+            label, cmd = _explained_red(backend, frames, camera_name, alert_ts, f"{why} {reason} {summary}", lang,
+                                        decision, label, cmd)
+            shown_label = label
         # A red for a weapon (or a tool used as one), a car break-in, violence or a person down from one answer gets a second look first; clear serious
         # things (a break-in into the house, climbing in, fire, a person lying still) go out at once.
         look: Optional[Dict[str, Any]] = None
@@ -2925,6 +2965,8 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                                                    usual if usual.get("raise") and label == "normal" else None,
                                                    ai_failed=ai_failed,
                                                    detector_people=_detector_people(job) if ai_failed else 0)
+        if label == "suspicious" and event is not None and event.notify:
+            event = _explained_suspicious(event, camera_name, alert_ts, f"{why} {reason} {summary}", decision)
         rarity_line = ""
         if usual.get("raise") and (event is None or event.notify):
             rarity_line = str((usual.get("text_he") if lang == "he" else usual.get("text_en")) or "")
