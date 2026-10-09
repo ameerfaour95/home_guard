@@ -65,6 +65,7 @@ class TagView(QWidget):
         self.form, self.saved_form, self.drafts = None, None, {}
         self.suggested = {}   # clip key -> (model, the fields as suggested, the form before the suggestion)
         self.owner_start = None   # (clip key, fields) from the Inbox: the owner's answer starts that clip's tag
+        self.words_origin = ('staff', None)   # whose words are in "In my words": the tagger's, or an owner answer (id)
         self.view, self.raw_manual, self.chord = 'crop', False, None
         self.categories = {}
         self.state_runner, self.queue_runner, self.clip_runner, self.media_runner, self.save_runner, self.side_runner = \
@@ -481,6 +482,7 @@ class TagView(QWidget):
         if key != self.wanted:
             self.open_key(self.wanted); return
         self.key, self.detail = key, detail
+        self.words_origin = ('staff', None)
         self.saved_form = deepcopy(detail['form'])
         self.form = deepcopy(self.drafts.pop(key, None) or detail['form'])
         self.raw_manual = bool(detail['tag'] and detail['tag']['fields'].get('raw_label'))
@@ -538,6 +540,10 @@ class TagView(QWidget):
         self.open(key)
 
     def apply_owner(self, fields):
+        fields = dict(fields)
+        feedback_id = fields.pop('_feedback_id', None)
+        if fields.get('tagger_words'):
+            self.words_origin = (fields.get('words_source') or 'owner_answer', feedback_id)
         for name, value in fields.items():
             if name == 'notes' and self.form.get('notes'):
                 value = self.form['notes'] + '\n' + value
@@ -993,9 +999,10 @@ class TagView(QWidget):
         words = self.words.toPlainText().strip()
         if not words:
             self.words.setFocus(); self.show_banner('Write what you saw first, in any language, then Convert.'); return
-        key = self.key
+        key, (source, feedback_id) = self.key, self.words_origin
         self.convert_button.setEnabled(False); self.save_state.setText('Converting your words…')
-        if not self.side_runner.start(lambda: ('convert', key, self.backend.tagging_convert(key, words))):
+        if not self.side_runner.start(lambda: ('convert', key, self.backend.tagging_convert(key, words, source,
+                                                                                            feedback_id))):
             self.convert_button.setEnabled(True)
 
     def apply_conversion(self, key, answer):
@@ -1009,6 +1016,8 @@ class TagView(QWidget):
                 value = [f for f in value or [] if f in self.chips['flags'].buttons]
             self.form[name] = value
         self.form['tagger_language'], self.form['converted_by'] = answer.get('language', ''), answer.get('model', '')
+        self.form['converted_model'] = answer.get('model_id') or answer.get('model', '')
+        self.form['words_source'] = answer.get('words_source') or 'staff'
         self.raw_manual = bool(self.form.get('raw_label'))
         self.suggested[key] = (answer.get('model', ''), {n: deepcopy(self.form.get(n)) for n in SUGGESTED}, before)
         self.render_form(); self.update_save_state()

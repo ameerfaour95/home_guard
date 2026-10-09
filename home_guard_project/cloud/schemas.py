@@ -596,6 +596,9 @@ class TaggingKey(BaseModel):
 class TagConvertRequest(BaseModel):
     key: str = Field(max_length=512)
     words: str = Field(max_length=2000)
+    # whose words they are; the server checks it (customer words need that customer's training consent)
+    words_source: Literal["staff", "owner_answer", "transcript"] = "staff"
+    feedback_id: Optional[int] = None   # the owner answer the words came from (owner_answer / transcript)
 
 
 class TagConversion(BaseModel):
@@ -607,6 +610,9 @@ class TagConversion(BaseModel):
     schema_name: str
     fields: dict
     raw: str
+    model_id: str = ""                  # the exact model id that answered
+    words_source: str = "staff"         # whose words, as the server decided
+    words_sent: str = ""                # the words as sent: camera, house and customer names replaced
 
 
 class ModelInputView(BaseModel):

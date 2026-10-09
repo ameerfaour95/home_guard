@@ -77,8 +77,9 @@ class HttpTagging:
         return self._tag_json('POST', 'tagging/suggest', json=dict(key=key, refresh=refresh),
                               timeout=httpx.Timeout(180, connect=5))
 
-    def tagging_convert(self, key, words):
-        return self._tag_json('POST', 'tagging/convert', json=dict(key=key, words=words),
+    def tagging_convert(self, key, words, words_source='staff', feedback_id=None):
+        return self._tag_json('POST', 'tagging/convert', json=dict(key=key, words=words, words_source=words_source,
+                                                                   feedback_id=feedback_id),
                               timeout=httpx.Timeout(90, connect=5))
 
     def tagging_model_input(self, key):
@@ -135,12 +136,12 @@ class DemoTagging:
             studio.suggest_client = DemoSuggestClient()
         return _demo_call(lambda: studio.suggest(None, key, refresh))
 
-    def tagging_convert(self, key, words):
+    def tagging_convert(self, key, words, words_source='staff', feedback_id=None):
         """The demo converts with a canned model (no network)."""
         studio = self._tag_studio()
         if getattr(studio, 'convert_client', None) is None:
             studio.convert_client = DemoConvertClient()
-        result = _demo_call(lambda: studio.convert(None, key, words))
+        result = _demo_call(lambda: studio.convert(None, key, words, words_source, feedback_id))
         return {**result, 'schema_name': result.pop('schema')}
 
     def tagging_model_input(self, key):
@@ -174,6 +175,8 @@ def _demo_call(operation):
     try:
         return operation()
     except StudioError as e:
+        if e.status == 403:
+            raise ConsentError(str(e)) from None
         raise ValidationError(str(e)) from None
 
 

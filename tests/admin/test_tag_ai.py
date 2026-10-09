@@ -83,3 +83,23 @@ def test_a_clip_with_an_ai_answer_but_no_version_opens_the_legacy_form(widgets, 
     assert v.kind == 'legacy' and v.category_box.isHidden()
     assert v.schema_note.text() == "Prompt version not recorded (legacy assumed): the box's legacy answer"
     assert provenance_text('model', '') == 'Model · not recorded'
+
+
+def test_owner_words_from_the_inbox_are_sent_as_the_owners_and_the_server_decides(widgets, wait):
+    from home_guard_project.admin.inbox import owner_prefill
+    b = DemoBackend()
+    sent = []
+    real = b.tagging_convert
+    def convert(key, words, words_source='staff', feedback_id=None):
+        sent.append((words_source, feedback_id)); return real(key, words, words_source, feedback_id)
+    b.tagging_convert = convert
+    item = next(i for i in b.inbox(handled='all') if i.feedback_id == 904)
+    v = TagView(b, 'admin'); widgets.append(v); v.resize(1366, 768); v.show()
+    v.open_from_owner(LEGACY_CLIP, owner_prefill(item))
+    wait(lambda: v.key == LEGACY_CLIP and not v.clip_runner.busy and v.form and v.form.get('tagger_words'), 10)
+    assert v.words.toPlainText() == item.transcript and v.words_origin == ('transcript', 904)
+    v.convert(); wait(lambda: not v.side_runner.busy, 10)
+    assert sent == [('transcript', 904)]
+    # the demo cannot confirm this household's training consent: the owner's words never leave
+    assert v.banner.isVisible() and "can't be sent to the converter" in v.banner_text.text()
+    assert not v.form.get('converted_by')

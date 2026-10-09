@@ -31,11 +31,14 @@ FIELDS: Dict[str, str] = {
     "tagger_words": "text",           # "In my words": what the tagger wrote, any language (the ground truth)
     "tagger_language": "short_text",  # its language, as detected
     "converted_by": "short_text",     # the model that turned the words into the form ("" = none)
+    "converted_model": "short_text",  # the exact model id that answered (the provider's own id for that call)
+    "words_source": "choice",         # whose words: "staff" (the tagger's own), "owner_answer", "transcript"
 }
 CHOICES: Dict[str, tuple] = {
     "category": taxonomy.CATEGORY_IDS, "zone": taxonomy.ZONES, "movement": taxonomy.MOVEMENTS,
     "visibility": taxonomy.VISIBILITY, "raw_label": taxonomy.LABELS, "flags": taxonomy.FLAGS,
     "suggestion_use": ("accepted", "edited"), "label": taxonomy.LABELS,
+    "words_source": ("staff", "owner_answer", "transcript"),
 }
 MAX_PHRASES, MAX_PHRASE = 4, 60
 

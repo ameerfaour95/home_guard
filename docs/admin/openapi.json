@@ -3153,6 +3153,11 @@
             "title": "Model",
             "type": "string"
           },
+          "model_id": {
+            "default": "",
+            "title": "Model Id",
+            "type": "string"
+          },
           "prompt_version": {
             "title": "Prompt Version",
             "type": "string"
@@ -3163,6 +3168,16 @@
           },
           "schema_name": {
             "title": "Schema Name",
+            "type": "string"
+          },
+          "words_sent": {
+            "default": "",
+            "title": "Words Sent",
+            "type": "string"
+          },
+          "words_source": {
+            "default": "staff",
+            "title": "Words Source",
             "type": "string"
           }
         },
@@ -3180,6 +3195,17 @@
       },
       "TagConvertRequest": {
         "properties": {
+          "feedback_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feedback Id"
+          },
           "key": {
             "maxLength": 512,
             "title": "Key",
@@ -3188,6 +3214,16 @@
           "words": {
             "maxLength": 2000,
             "title": "Words",
+            "type": "string"
+          },
+          "words_source": {
+            "default": "staff",
+            "enum": [
+              "staff",
+              "owner_answer",
+              "transcript"
+            ],
+            "title": "Words Source",
             "type": "string"
           }
         },

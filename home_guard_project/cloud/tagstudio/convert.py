@@ -3,7 +3,13 @@ schema, in exactly the field order of the clip's prompt version (fleet_contract/
 strict json_schema. Only the words, the taxonomy and the schema are sent: never a picture, never the clip.
 
 The result fills the form as a suggestion; the tagger confirms it. What is saved is the tagger's own words
-(``tagger_words``, with ``tagger_language``) as the ground truth, the confirmed structured tag and ``converted_by``.
+(``tagger_words``, with ``tagger_language`` and ``words_source``) as the ground truth, the confirmed structured tag,
+``converted_by`` (the model setting) and ``converted_model`` (the exact model id that answered).
+
+Privacy (the reviewer, 2026-10-09): words that came from a customer (an owner's answer, a transcript) are sent only
+when that customer agreed to training use; the server decides where the words came from (service.convert). Before
+any call, camera ids and names, the house / site and the customer's name are replaced (:func:`redact`): only the
+cleaned words, the taxonomy and the schema leave the machine.
 
 The model is a setting: ``HG_CONVERT_MODEL`` (default ``google/gemini-3.1-flash-lite`` through OpenRouter, as the
 owner asked), ``HG_CONVERT_BASE_URL``, key ``OPENROUTER_API_KEY`` (api_key.env). Gemini's terms restrict using its
@@ -61,6 +67,20 @@ def language(text: str) -> str:
     return "en"
 
 
+_CAMERA_ID = re.compile(r"\b[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*_ch\d+\b|\b(?:production|dataset)_[A-Za-z0-9_]+\b")
+
+
+def redact(words: str, cameras: Sequence[str] = (), places: Sequence[str] = ()) -> str:
+    """*words* with every camera id or name replaced by "camera" and every house, site or customer name by "the house"
+    (longest first, any case), and anything shaped like a camera id (``<site>_ch6``) or a storage prefix as well."""
+    out = str(words or "")
+    terms = [(t, "camera") for t in cameras] + [(t, "the house") for t in places]
+    for term, repl in sorted({(str(t).strip(), r) for t, r in terms if t and len(str(t).strip()) >= 2},
+                             key=lambda tr: -len(tr[0])):
+        out = re.sub(re.escape(term), repl, out, flags=re.IGNORECASE)
+    return _CAMERA_ID.sub("camera", out)
+
+
 def prompt(words: str, prompt_version: Optional[str]) -> str:
     kind = ps.schema_kind(prompt_version)
     fields = ", ".join(ps.field_order(prompt_version))
@@ -113,11 +133,14 @@ class Converter:
     def __init__(self, config: ConvertConfig, client: Any = None):
         self.config, self._client = config, client
 
-    def convert(self, words: str, prompt_version: Optional[str]) -> Dict[str, Any]:
-        """``{model, language, prompt_version, schema, fields}`` for *words*."""
+    def convert(self, words: str, prompt_version: Optional[str], cameras: Sequence[str] = (),
+                places: Sequence[str] = ()) -> Dict[str, Any]:
+        """``{model, model_id, language, prompt_version, schema, fields, words_sent}`` for *words*, sent with the
+        camera names in *cameras* and the house / customer names in *places* replaced (:func:`redact`)."""
         words = str(words or "").strip()
         if not words:
             raise ConvertError("Write what you saw first")
+        sent = redact(words, cameras, places)
         if not self.config.api_key and self._client is None:
             raise ConvertError("No API key for the converter: set OPENROUTER_API_KEY (api_key.env or the Admin "
                                "service's environment)")
@@ -129,7 +152,7 @@ class Converter:
                 self._client = OpenAI(api_key=self.config.api_key, base_url=self.config.base_url, timeout=60,
                                       max_retries=1, http_client=_http_client())
             response = self._client.chat.completions.create(
-                model=self.config.model, messages=[{"role": "user", "content": prompt(words, prompt_version)}],
+                model=self.config.model, messages=[{"role": "user", "content": prompt(sent, prompt_version)}],
                 temperature=0,
                 response_format={"type": "json_schema", "json_schema": {"name": name, "strict": True, "schema": schema}})
             raw = response.choices[0].message.content or ""
@@ -138,5 +161,8 @@ class Converter:
         parsed = parse_raw(raw)
         if not parsed:
             raise ConvertError("The converter's answer was not JSON")
-        return {"model": self.config.model, "language": language(words), "prompt_version": prompt_version or "",
-                "schema": name, "fields": to_form(parsed, prompt_version), "raw": json.dumps(parsed, ensure_ascii=False)}
+        model_id = getattr(response, "model", None)
+        return {"model": self.config.model, "model_id": model_id if isinstance(model_id, str) and model_id
+                else self.config.model, "language": language(words), "prompt_version": prompt_version or "",
+                "schema": name, "fields": to_form(parsed, prompt_version), "raw": json.dumps(parsed, ensure_ascii=False),
+                "words_sent": sent}

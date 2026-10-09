@@ -58,7 +58,11 @@ def owner_prefill(item):
               'other': {'category': 'other', 'other_text': owner_words(item)[:200]}}.get(label, {})
     words = owner_words(item)
     said = f'Owner · Telegram{" (" + label + ")" if label else ""}: {words}' if words else f'Owner · Telegram: {label}'
-    return dict(fields, notes=said)
+    out = dict(fields, notes=said)
+    if words:   # the owner's words can be converted, as the owner's (the server checks the customer's consent)
+        source = 'transcript' if item.transcript and words == item.transcript else 'owner_answer'
+        out.update(tagger_words=words, words_source=source, _feedback_id=item.feedback_id)
+    return out
 
 
 class InboxScreen(QWidget):

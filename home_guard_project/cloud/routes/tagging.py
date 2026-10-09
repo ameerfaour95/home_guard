@@ -125,11 +125,13 @@ def tagging_media(body: TaggingMediaRequest, request: Request, staff: Staff = De
 @router.post("/convert", response_model=TagConversion)
 def tagging_convert(body: TagConvertRequest, request: Request, staff: Staff = Depends(_admin),
                     session: Session = SessionDep):
-    # only the tagger's words, the taxonomy and the schema leave the machine: never a picture
-    result = _call(studio_of(request).convert, session, body.key, body.words)
+    # only the cleaned words, the taxonomy and the schema leave the machine: never a picture, a camera, a house or a
+    # customer name; a customer's words only with that customer's training consent (service.convert decides)
+    result = _call(studio_of(request).convert, session, body.key, body.words, body.words_source, body.feedback_id)
     audit.record(session, staff.id, "tag_converted", target=body.key, reason="training",
-                 detail={"model": result["model"], "language": result["language"],
-                         "prompt_version": result["prompt_version"]}, ts=request.app.state.clock())
+                 detail={"model": result["model"], "model_id": result["model_id"], "language": result["language"],
+                         "prompt_version": result["prompt_version"], "words_source": result["words_source"]},
+                 ts=request.app.state.clock())
     return {**result, "schema_name": result.pop("schema")}
 
 

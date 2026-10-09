@@ -122,7 +122,10 @@ def test_owner_prefill_and_camera_titles():
         item.owner_label = tag
         assert owner_prefill(item)['raw_label'] == raw and 'category' not in owner_prefill(item)
     item.owner_label, item.raw_text = '', 'why so many alerts?'
-    assert owner_prefill(item) == {'notes': 'Owner · Telegram: why so many alerts?'}
+    assert owner_prefill(item) == {'notes': 'Owner · Telegram: why so many alerts?', 'tagger_words': 'why so many alerts?',
+                                   'words_source': 'owner_answer', '_feedback_id': item.feedback_id}
+    item.raw_text, item.transcript = '', 'it was the gardener'
+    assert owner_prefill(item)['words_source'] == 'transcript'
     item.camera_name, item.camera = None, 'ameer_week_0_1_ch6'
     assert camera_title(item) == 'Camera 6'
     item.camera_name = 'מצלמה 6'

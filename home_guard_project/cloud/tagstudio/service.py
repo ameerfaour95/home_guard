@@ -23,7 +23,7 @@ from . import export as exporter
 from . import queue as work_queue
 from .config import StudioPaths
 from .fields import FIELDS, Tag, TagError, clean_fields, empty_form, fold
-from .items import AI, EMPTY, OLD, TEACHER, WHO, ClipItem
+from .items import AI, EMPTY, OLD, OWNER, TEACHER, WHO, ClipItem
 from .sources import DatasetSource, OwnerFeedbackSource, event_items
 from .teacher import EvalResultsTeacher, OpenAICompatibleTeacher, TeacherRefused, first_suggestion
 
@@ -384,15 +384,98 @@ class TagStudio:
             self._converter = Converter(config, client=client)
         return self._converter
 
-    def convert(self, session, key: str, words: str) -> Dict[str, Any]:
-        """The tagger's words as the clip's answer schema (a suggestion for the form; nothing is saved)."""
+    def convert(self, session, key: str, words: str, words_source: str = "staff",
+                feedback_id: Optional[int] = None) -> Dict[str, Any]:
+        """The tagger's words as the clip's answer schema (a suggestion for the form; nothing is saved).
+
+        Customer words (an owner's answer, a transcript) are sent only with that customer's training consent (403
+        otherwise). The server decides: words claimed as the staff's own that contain the owner's answer to this
+        clip are the owner's. Camera names, the house and the customer's name never leave (convert.redact)."""
         from .convert import ConvertError  # noqa: PLC0415
 
         item, _ = self._item(session, key)
+        source = self.words_source_of(session, item, words, words_source, feedback_id)
+        customer = self.household_of(session, item)
+        if source != "staff":
+            if customer is None:
+                raise StudioError("This clip's customer is not known here, so their consent to training use cannot be "
+                                  "checked: their words can't be sent to the converter", 403)
+            if not customer["consent_training"]:
+                raise StudioError("This customer hasn't agreed to training use, so their words can't be sent to the "
+                                  "converter", 403)
+        cameras, places = self.private_terms(session, item, customer)
         try:
-            return {**self.converter().convert(words, self.prompt_version_of(session, item)), "key": key}
+            result = self.converter().convert(words, self.prompt_version_of(session, item), cameras, places)
         except ConvertError as e:
             raise StudioError(str(e), 409) from None
+        return {**result, "key": key, "words_source": source}
+
+    def owner_texts(self, session, item: ClipItem) -> List[str]:
+        """What the clip's owner said about it: the owner card's words and every answer row's words."""
+        texts = []
+        owner = item.opinions.get(OWNER)
+        if owner is not None:
+            texts += [owner.text, str(owner.detail.get("owner_text") or ""), str(owner.detail.get("raw_text") or "")]
+        if session is not None and item.event_id:
+            from sqlalchemy import select  # noqa: PLC0415
+
+            from ..models import Feedback  # noqa: PLC0415
+
+            for fb in session.scalars(select(Feedback).where(Feedback.event_id == item.event_id)):
+                texts += [fb.owner_text, fb.transcript, fb.raw_text, fb.note]
+        return [t.strip() for t in texts if isinstance(t, str) and len(t.strip()) >= 4]
+
+    def words_source_of(self, session, item: ClipItem, words: str, claimed: str, feedback_id: Optional[int]) -> str:
+        """Where the words came from, decided here: the claimed source, checked against the answer it names, and
+        "owner_answer" whenever the words carry the owner's own answer to this clip, whatever the client said."""
+        claimed = claimed if claimed in ("staff", "owner_answer", "transcript") else "staff"
+        if claimed != "staff" and feedback_id is not None and session is not None:
+            from ..models import Feedback  # noqa: PLC0415
+
+            fb = session.get(Feedback, feedback_id)
+            if fb is None or fb.event_id != item.event_id:
+                raise StudioError("That owner answer is not about this clip", 422)
+        folded = " ".join(str(words or "").split()).casefold()
+        if claimed == "staff" and any(" ".join(t.split()).casefold() in folded for t in self.owner_texts(session, item)):
+            return "owner_answer"
+        return claimed
+
+    def household_of(self, session, item: ClipItem) -> Optional[Dict[str, Any]]:
+        """{name, site, consent_training, device_pk} of a customer clip's household; None for our own dataset clips
+        or a household this database does not know."""
+        site = item.info.get("site") or (item.source if item.origin != "dataset" else "")
+        if item.origin == "dataset" and not item.event_id:
+            return None
+        if session is not None and site:
+            from sqlalchemy import select  # noqa: PLC0415
+
+            from ..models import Customer, Device  # noqa: PLC0415
+
+            device = session.scalar(select(Device).where(Device.site == site))
+            customer = session.get(Customer, device.customer_id) if device is not None else None
+            if customer is not None:
+                return {"name": customer.name, "site": site, "consent_training": bool(customer.consent_training),
+                        "device_pk": device.id}
+        if "consent_training" in item.info:
+            return {"name": item.info.get("customer") or "", "site": site,
+                    "consent_training": bool(item.info.get("consent_training")), "device_pk": None}
+        return None
+
+    def private_terms(self, session, item: ClipItem, customer: Optional[Dict[str, Any]]):
+        """(camera ids and names, house / site / customer names) the converter must never see."""
+        cameras = {item.camera}
+        places = {item.source, item.batch, item.info.get("site") or "", item.info.get("customer") or ""}
+        if customer is not None:
+            places |= {customer["name"], customer["site"]}
+            places |= {part for part in str(customer["name"]).split() if len(part) >= 3}
+            if session is not None and customer.get("device_pk"):
+                from sqlalchemy import select  # noqa: PLC0415
+
+                from ..models import Camera  # noqa: PLC0415
+
+                for cam in session.scalars(select(Camera).where(Camera.device_pk == customer["device_pk"])):
+                    cameras |= {cam.name, cam.display_name or ""}
+        return sorted(t for t in cameras if t), sorted(t for t in places if t)
 
     def video_for(self, item: ClipItem, s3=None) -> Optional[str]:
         """A local copy of the clip's full-frame video (else its crop): this machine's file, or one downloaded once
