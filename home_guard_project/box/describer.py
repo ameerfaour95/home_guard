@@ -59,6 +59,7 @@ WORDS_APPEARANCE = 10
 WORDS_ACTION = 10
 WORDS_SCENE = 22
 WORDS_REASON = 14
+REASON_HARD_WORDS = 28   # a longer reason is kept whole up to here (cut only at a full stop): its end is often the why
 
 # Words the describer may not bring in on its own. A weapon word only when the Eye's summary or why has one.
 WEAPONS = ("weapon", "gun", "pistol", "rifle", "shotgun", "firearm", "knife", "knives", "blade", "machete", "crowbar",
@@ -271,10 +272,9 @@ def parse(raw: str, ids: Mapping[str, str]) -> Dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError("the answer is not a JSON object")
 
-    def clean(value: Any, words: int) -> str:
+    def clean(value: Any, words: int, whole: bool = False) -> str:
         s = " ".join(str(value or "").split()).strip().strip('"').rstrip(".").strip()
-        parts = s.split(" ")
-        return " ".join(parts[:words]) if s else ""
+        return cut_words(s, words, whole)
 
     seen, items = set(), []
     for item in data.get("entities") or []:
@@ -288,7 +288,57 @@ def parse(raw: str, ids: Mapping[str, str]) -> Dict[str, Any]:
                       "action": clean(item.get("action"), WORDS_ACTION)})
     items.sort(key=lambda x: _order(x["id"]))
     return {"scene": clean(data.get("scene"), WORDS_SCENE), "entities": items,
-            "reason": clean(data.get("reason"), WORDS_REASON)}
+            "reason": clean(data.get("reason"), REASON_HARD_WORDS, whole=True)}
+
+
+# Words a cut text must not end on ("... next to a stone", "... bag. The").
+_DANGLING = set("""a an the of to and or with without near next by at in on from into onto while as his her their its
+is are was were be appears appear seems that this which who""".split())
+
+
+def cut_words(text: str, words: int, whole: bool = False) -> str:
+    """*text* in at most *words* words, never ending mid-thought. Cut at the last full stop inside the limit when there
+    is one, else after the last word that is not a dangling "the / a / next to". *whole*: a text that does not fit
+    and has no full stop inside the limit is "" (the caller has its own fallback). 2026-10-09 18:16 / 18:22: the
+    reason, cut at 14 words, ended "... bag. The" ("... ה." in Hebrew) and "... next to a stone" ("ליד אבן")."""
+    s = " ".join(str(text or "").split()).strip()
+    parts = s.split(" ") if s else []
+    if len(parts) <= words:
+        return s
+    kept = " ".join(parts[:words])
+    stop = max(kept.rfind(". "), kept.rfind("! "), kept.rfind("? "), kept.rfind(".") if kept.endswith(".") else -1)
+    if stop > 0:
+        return kept[:stop].strip()
+    if whole:
+        return ""
+    head = parts[:words]
+    while head and head[-1].lower().strip(",;:") in _DANGLING:
+        head.pop()
+    return " ".join(head).rstrip(",;:")
+
+
+# A dangling piece after the last full stop: one or two letters ("... גדול. ה.", "... bag. Th").
+_TAIL_FRAGMENT = re.compile(r"(?<=[.!?])\s+[^\s.!?]{1,2}[.!?]?\s*$")
+
+
+def tidy_translation(text: str) -> str:
+    """The translator's line without a dangling 1-2 letter fragment after its last full stop."""
+    s = " ".join(str(text or "").split()).strip()
+    return _TAIL_FRAGMENT.sub("", s).strip()
+
+
+def translated_reason_ok(source: str, told: str) -> bool:
+    """Is the translated reason whole? False when it ends mid-word (a lone letter, a dangling Hebrew prefix) or is
+    far shorter than its source (fewer than 40% of the words of a source of 6+ words; good Hebrew runs 50-100% of the
+    English words, measured on 2026-10-09's messages, so the 60% first asked for would drop good lines)."""
+    told_words = str(told or "").rstrip(".!? ").split()
+    if not told_words:
+        return False
+    last = told_words[-1]
+    if len(last) == 1 and last.isalpha():
+        return False
+    source_words = str(source or "").split()
+    return not (len(source_words) >= 6 and len(told_words) < 0.4 * len(source_words))
 
 
 def _words(text: str) -> List[str]:
@@ -413,7 +463,11 @@ def to_owner_language(answer: Mapping[str, Any], lang: str, messenger: Any, keep
     told = messenger.translate(fields, lang, keep=tuple(keep), timeout=timeout) if messenger is not None else None
     if not told:
         return None
-    return {"scene": told.get("scene", ""), "reason": told.get("reason", ""),
+    told = {k: tidy_translation(v) for k, v in told.items()}
+    reason = told.get("reason", "")
+    if reason and not translated_reason_ok(fields.get("reason", ""), reason):
+        reason = ""                                      # the caller's own why goes out instead
+    return {"scene": told.get("scene", ""), "reason": reason,
             "entities": [{"id": e["id"], "appearance": told.get(f"{e['id']}.appearance", ""),
                           "action": told.get(f"{e['id']}.action", "")} for e in answer.get("entities") or []]}
 
