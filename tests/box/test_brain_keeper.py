@@ -32,7 +32,7 @@ ALERT = {"alert_id": f"{PERGOLA}_1791000000_alert", "camera": PERGOLA, "ts": NOW
          "summary": "Two men work on the pergola with a ladder."}
 WORKERS = "זה בסדר זה עובדים אצלי שעובדים על הפרגולה"
 END_OF_DAY = dt.datetime(2026, 10, 7, 23, 59).timestamp()
-WORKERS_18 = "זה בסדר זה עובדים אצלי שעובדים על הפרגולה עד 18:00"
+WORKERS_18 = "זה בסדר זה עובדים אצלי שעובדים רק בפרגולה עד 18:00"
 WEEK_END = dt.datetime(2026, 10, 13, 18, 0).timestamp()
 
 

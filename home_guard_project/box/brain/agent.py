@@ -579,6 +579,7 @@ class OwnerAgentV2:
         args = dict(pending.get("args") or {})
         need = [n for n in pending.get("need") or [] if n in ("until", "scope", "confirm")]
         choices = pending.get("choices") if isinstance(pending.get("choices"), list) else []
+        asked_about = need[0] if need else ""      # a tapped button answers this question only
         lang = ctx.lang
         if km.declined(text) or (choice is not None and "confirm" in need and choice[1] == 1):
             return t("known_not_marked", lang)
@@ -597,7 +598,7 @@ class OwnerAgentV2:
             progress = True
         if "scope" in need:
             scope: Optional[str] = None
-            if choice is not None and need[0] == "scope":
+            if choice is not None and asked_about == "scope":
                 scope = km.HOUSE if choice[1] == 0 else (str(args.get("camera") or "") or None)
             else:
                 scope = km.scope_from_words(text, snapshot)
@@ -781,7 +782,7 @@ class OwnerAgentV2:
                         need.append("until")
                     pref = state.prefs.get("group_scope")
                     if km.work_group(words):
-                        said = km.scope_from_words(words, snapshot)
+                        said = km.scope_from_words(words, snapshot, strict=True)
                         if said == km.HOUSE or (said is None and pref == km.HOUSE):
                             args["camera"], args["scope"] = "all", "house"
                         elif said is None and pref is None:

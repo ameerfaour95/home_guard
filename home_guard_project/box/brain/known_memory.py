@@ -153,15 +153,13 @@ def until_from_words(text: str, now: float) -> Optional[float]:
     hour), "כל השבוע", "עד מחר". None when they give none - "today" alone is not a time (owner, 2026-10-09: "מי אמר
     עד 23:59?"): the box asks."""
     text = str(text or "")
-    m = _CLOCK.search(text)
-    if m:
-        return _at(now, int(m.group(1)), int(m.group(2)))
-    m = _UNTIL_HOUR.search(text)
-    if m:
-        return _hour_today(now, int(m.group(1)), m.group(2) or "")
-    m = _UNTIL_HE_WORD.search(text)
-    if m:
-        return _hour_today(now, _HE_HOURS[m.group(1)], m.group(2) or "")
+    # The LAST time said wins: "מי אמר עד 23:59? ... הם עובדים עד 18:00" corrects to 18:00.
+    found = [(m.start(), _at(now, int(m.group(1)), int(m.group(2)))) for m in _CLOCK.finditer(text)]
+    found += [(m.start(), _hour_today(now, int(m.group(1)), m.group(2) or "")) for m in _UNTIL_HOUR.finditer(text)]
+    found += [(m.start(), _hour_today(now, _HE_HOURS[m.group(1)], m.group(2) or ""))
+              for m in _UNTIL_HE_WORD.finditer(text)]
+    if found:
+        return max(found)[1]
     m = _HOURS_FOR.search(text)
     if m:
         hours = int(m.group(1) or m.group(2))
@@ -188,12 +186,15 @@ _NO = re.compile(r"^\s*(?:לא|לא צריך|אל תזכור|אל תסמן|no|no
 HOUSE = "house"
 
 
-def scope_from_words(text: str, snapshot: Any = None) -> Optional[str]:
+def scope_from_words(text: str, snapshot: Any = None, strict: bool = False) -> Optional[str]:
     """``"house"`` when the owner said the whole house / all the cameras; a camera when they named exactly one
-    ("רק בפרגולה"); None otherwise."""
+    ("רק בפרגולה"); None otherwise. *strict*: a camera only with "רק" / "only" ("עובדים על הפרגולה" says where they
+    were, not that the mark is for that camera alone)."""
     text = str(text or "")
     if _HOUSE.search(text):
         return HOUSE
+    if strict and not _ONLY.search(text):
+        return None
     if snapshot is not None:
         try:
             from .registry import mentioned_cameras  # noqa: PLC0415
@@ -427,7 +428,7 @@ def last_day_from_words(text: str, now: float) -> Optional[dt.date]:
     if m:
         ahead = (_HE_DAYS[m.group(1)] - today.weekday()) % 7
         return today + dt.timedelta(days=ahead)
-    if one_day(text) or re.search(r"(?<![א-ת])היום(?![א-ת])|\btoday\b", text, re.IGNORECASE):
+    if one_day(text):                       # "רק היום"; a bare "היום" still means a crew's usual week
         return today
     if re.search(r"(?<![א-ת])מחר(?![א-ת])|\btomorrow\b", text, re.IGNORECASE):
         return today + dt.timedelta(days=1)

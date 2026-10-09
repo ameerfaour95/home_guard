@@ -1509,9 +1509,8 @@ def known_line(receipt: Receipt, lang: str, snapshot: Any = None) -> str:
             old = {"until": _finite(r.get("until") or mark["until"]), "daily_from": str(r.get("daily_from") or ""),
                    "daily_to": str(r.get("daily_to") or "")}
             if abs(old["until"] - mark["until"]) >= 60 or old["daily_from"] != mark["daily_from"]:
-                same_day = (not old["daily_from"] and not mark["daily_from"]
-                            and dt.datetime.fromtimestamp(old["until"]).date()
-                            == dt.datetime.fromtimestamp(mark["until"]).date())
+                same_day = (not old["daily_from"] and dt.datetime.fromtimestamp(old["until"]).date()
+                            == dt.datetime.fromtimestamp(at).date())
                 parts.append(dt.datetime.fromtimestamp(old["until"]).strftime("%H:%M") if same_day
                              else km.mark_when(old, at, lang))
             olds.append(", ".join(parts) if parts else when)
@@ -1654,7 +1653,7 @@ def mark_known(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     wanted = [wanted] if isinstance(wanted, str) else [str(x) for x in wanted or () if x]
     old = [k for k in marks if k.get("id") in wanted] or km.pick(marks, who, camera)
     # A work crew moves around the house: asked once (house-wide first), and the answer is kept for this chat.
-    said_scope = km.scope_from_words(ctx.text, ctx.snapshot)
+    said_scope = km.scope_from_words(ctx.text, ctx.snapshot, strict=True)
     crew = km.work_group(f"{who} {ctx.text}")
     need: List[str] = []
     prefs = ctx.state.prefs if isinstance(ctx.state.prefs, dict) else {}
@@ -1688,7 +1687,7 @@ def mark_known(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
                       "daily_to": end.strftime("%H:%M") if end.date() == dt.datetime.fromtimestamp(now).date()
                       else daily_old[-1]["daily_to"]}
         else:
-            entry = ctx.state.resolve(str(ctx.alert_handle or "")) if ctx.alert_handle else None
+            entry = ctx.state.resolve(str(ctx.alert_handle or ctx.state.topic_event(now) or ""))
             window = km.crew_window(book, seen_at, until, now,
                                     fallback=_finite(entry.get("ts")) if isinstance(entry, dict) and entry.get("ts")
                                     else None) or {}
