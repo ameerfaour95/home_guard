@@ -23,8 +23,10 @@ class Provider:
 PROVIDERS: Dict[str, Provider] = {
     "openai": Provider("openai", None, "OPENAI_API_KEY"),
     # Hybrid Qwen models think by default; the task does not need it and it costs money and seconds.
+    # ``usage.include``: the answer's usage carries the call's real cost in dollars (``usage.cost``), which the
+    # usage ledger records as usd_source "provider" (usage_ledger.py, 2026-10-09).
     "openrouter": Provider("openrouter", "https://openrouter.ai/api/v1", "OPENROUTER_API_KEY",
-                           {"reasoning": {"enabled": False}}),
+                           {"reasoning": {"enabled": False}, "usage": {"include": True}}),
     # The laptop GPU (research runs of the 4B/3B/7B models). Ollama ignores ``think: false`` on its
     # OpenAI endpoint; ``reasoning_effort: none`` turns Qwen3.5's thinking off (1,000+ tokens -> ~100).
     "ollama": Provider("ollama", "http://localhost:11434/v1", None, {"reasoning_effort": "none"},

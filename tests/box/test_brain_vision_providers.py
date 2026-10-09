@@ -41,7 +41,7 @@ class VisionProviderTest(unittest.TestCase):
         self.assertEqual((made["timeout"], made["max_retries"]), (30.0, 1))
         sent = client.chat.completions.create.call_args.kwargs
         self.assertEqual(sent["model"], "qwen/qwen3.5-9b")
-        self.assertEqual(sent["extra_body"], {"reasoning": {"enabled": False}})
+        self.assertEqual(sent["extra_body"], {"reasoning": {"enabled": False}, "usage": {"include": True}})
         self.assertEqual(vision.model_name, "qwen/qwen3.5-9b")
 
     def test_a_missing_key_or_an_unknown_provider_is_no_vision_and_a_warning(self) -> None:
