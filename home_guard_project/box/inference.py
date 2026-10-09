@@ -2203,7 +2203,7 @@ def appearance_only(text: str) -> bool:
 def second_look(backend: Any, frames: List[Any], classes: Sequence[str], lang: str,
                 timeout: Optional[float] = None) -> Dict[str, Any]:
     """Ask *backend* once, on the alert's own frames, whether the red's reason (*classes*: weapon / tool_weapon /
-    vehicle / violence) is really there; never longer than *timeout* seconds (VERIFY_TIMEOUT_SEC). Never raises.
+    vehicle / violence / person_down) is really there; never longer than *timeout* seconds (VERIFY_TIMEOUT_SEC). Never raises.
 
     The record (the clip's ``second_look``): ``answered`` (a usable yes/no came back), ``confirmed``,
     ``verified`` (answered AND confirmed: only then is the red's reminder scheduled), ``what_it_is``,
@@ -2756,7 +2756,7 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                 label = shown_label = "normal"
                 cmd = LABEL_COMMANDS[label]
                 decision.update(label=label, final_label=label, investigator="short visit")
-        # A red for a weapon (or a tool used as one), a car break-in or violence from one answer gets a second look first; clear serious
+        # A red for a weapon (or a tool used as one), a car break-in, violence or a person down from one answer gets a second look first; clear serious
         # things (a break-in into the house, climbing in, fire, a person lying still) go out at once.
         look: Optional[Dict[str, Any]] = None
         look_line = ""
@@ -2782,7 +2782,9 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                     label = shown_label = "suspicious"
                     cmd = LABEL_COMMANDS[label]
                     decision.update(label=label, final_label=label)
-                    look_line = second_look_line(look["class"], look["what_it_is"], look["evidence_frame"], lang)
+                    # A person down who was working reads as "not violence" (alert_texts has no line of its own).
+                    kind = "violence" if look["class"] == "person_down" else look["class"]
+                    look_line = second_look_line(kind, look["what_it_is"], look["evidence_frame"], lang)
         # The reminder ("nobody answered") only for a red that is sure: verified, or a clear class.
         remind = label == "escalation" and (look is None or bool(look.get("verified")))
         log.info("[%s] alert=%s label=%s summary=%s", camera_name, cmd, label, summary)

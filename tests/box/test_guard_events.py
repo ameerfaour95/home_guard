@@ -387,6 +387,34 @@ class SecondLookTest(GuardCase):
         self.assertEqual((job.alert["label"], job.alert["alert_command"]), ("escalation", "[call_owner]"))
         self.assertEqual(self.assistant.reminders, [job.stem])
 
+    # 2026-10-09 14:03 ch6: the owner's pavers workers went out red for "a person lies on the ground".
+    DOWN = answer("escalation", people=3, why="אדם שוכב על הקרקע",
+                  summary="A person lies on the ground while two others stand nearby. One person appears to be wearing "
+                          "a hat.")
+
+    def test_a_person_down_at_work_is_a_suspicious(self):
+        asked = []
+        backend = Backend(self.DOWN, verify=lambda f, q, **k: asked.append(q) or {
+            "confirmed": False, "what_it_is": "a worker kneeling on the pavement laying pavers", "evidence_frame": 2})
+        self.lang = "en"
+        job = self.work(backend, T0, box={"alert_channel": "telegram"})
+        self.assertIn("hurt, collapsed, unconscious", asked[0])
+        self.assertEqual((job.alert["label"], job.alert["alert_command"]), ("suspicious", "[send_message]"))
+        self.assertEqual(job.alert["second_look"]["classes"], ["person_down"])
+        self.assertIn("Second look: a worker kneeling on the pavement laying pavers (frame 2), not violence",
+                      self.assistant.sent[0]["text"])
+        self.assertEqual(self.assistant.reminders, [])
+
+    def test_a_person_down_who_is_hurt_or_unsure_stays_red(self):
+        for verify in (lambda f, q, **k: {"confirmed": True, "what_it_is": "a man collapsed", "evidence_frame": 1},
+                       lambda f, q, **k: {"confirmed": False, "what_it_is": "a man collapsed on the ground",
+                                          "evidence_frame": 1},
+                       lambda f, q, **k: None):
+            with self.subTest(verify=verify):
+                self.assistant = Assistant()
+                job = self.work(Backend(self.DOWN, verify=verify), T0)
+                self.assertEqual((job.alert["label"], job.alert["alert_command"]), ("escalation", "[call_owner]"))
+
     def test_a_backend_without_a_second_look_keeps_the_red(self):
         job = self.work(Backend(self.WEAPON), T0)
         self.assertEqual(job.alert["label"], "escalation")
