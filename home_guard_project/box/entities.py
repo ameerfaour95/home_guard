@@ -329,6 +329,34 @@ def people(entities: Sequence[Dict[str, Any]], ids: Iterable[str]) -> List[Dict[
     return [index[i] for i in ids if i in index and index[i].get("kind") == "person"]
 
 
+def appearance_said(entities: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """What the clothes said about these entities (read only; stage 3.2), for the assistant's "are these the same
+    people?": ``{"entity", "what": "link" | "split", "other", "score", "acted"}``. A link: the clothes match a lost
+    person (``reid_shadow`` would-link in shadow, ``links`` by appearance when on). A split: geometry joined a track
+    to *other* but the clothes clearly differ (shadow ``reid_shadow`` split, ``not_of`` when on)."""
+    out: List[Dict[str, Any]] = []
+    for e in entities or ():
+        if not isinstance(e, dict) or e.get("kind") != "person":
+            continue
+        shadow = e.get("reid_shadow") if isinstance(e.get("reid_shadow"), dict) else {}
+        try:
+            if shadow.get("would") == "link" and shadow.get("to"):
+                out.append({"entity": e["id"], "what": "link", "other": str(shadow["to"]),
+                            "score": float(shadow.get("score") or 0.0), "acted": False})
+            elif shadow.get("would") == "split" and shadow.get("from"):
+                out.append({"entity": e["id"], "what": "split", "other": str(shadow["from"]),
+                            "score": float(shadow.get("score") or 0.0), "acted": False})
+            if e.get("linked_by") == "appearance":
+                out.append({"entity": e["id"], "what": "link", "other": e["id"],
+                            "score": float(e.get("link_score") or 0.0), "acted": True})
+            for other in e.get("not_of") or ():
+                out.append({"entity": e["id"], "what": "split", "other": str(other),
+                            "score": float(e.get("veto_score") or 0.0), "acted": True})
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
+
+
 def label_present(entities: Sequence[Dict[str, Any]], now: float, text: str, known_id: str,
                   recent_sec: float = KNOWN_RECENT_SEC) -> List[str]:
     """The owner said who is there: every entity in view (or seen in the last *recent_sec*) gets their words."""

@@ -584,6 +584,7 @@ def check_camera(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
             return dict(out, description_error="the picture could not be described")
         out.update(description=look["description"], quality=look["quality"], people=look["people"])
         ctx.state.note_observation(handle, look["description"])
+        _note_people(ctx, handle, look["people"])
         if ctx.mode == GUARD:
             out.update(label=look.get("label", ""), why=look.get("why", ""))
     else:
@@ -593,6 +594,14 @@ def check_camera(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
 
 
 LOOK_AROUND_PHOTOS = 2
+
+
+def _note_people(ctx: ToolContext, handle: str, people: Any) -> None:
+    """How many people the look counted, on the photo's handle: "why no explanation?" and "are these the same
+    people?" (look_explain.py, same_people.py) read which photo showed whom."""
+    entry = ctx.state.handles.get(handle)
+    if isinstance(entry, dict) and isinstance(people, int) and not isinstance(people, bool):
+        entry["people"] = max(0, people)
 
 
 def photo_caption(ctx: ToolContext, camera: str, ts: Any = None) -> str:
@@ -649,6 +658,7 @@ def look_around(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
             row.update(label=look.get("label", ""), why=look.get("why", ""))
         handle = ctx.state.add_handle("photo", shot["image"], cam, ctx.services.now())
         ctx.state.note_observation(handle, str(look.get("description") or ""))
+        _note_people(ctx, handle, people)
         row["handle"] = handle
         if people and _media_sent(ctx) < LOOK_AROUND_PHOTOS and ctx.services.deliver is not None:
             # 2026-10-09 13:00 "יש מישהו בחוץ?": two photos and no word. Each one says what it shows.

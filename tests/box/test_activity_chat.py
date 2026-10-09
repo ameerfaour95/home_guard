@@ -221,8 +221,20 @@ class HumanRepliesTest(Base):
     def test_same_people_needs_evidence(self) -> None:
         big = Scripted([call("reply", answer="כן, אני בטוח. אלה אותם עובדים מהבוקר.")])
         out = self.say(self.agent(big), "אלה אותם אנשים שעבדו מהבוקר או שהתחלפו?", T(13, 5, 16))
-        self.assertEqual(out.text, t("same_unsure", "he"))
-        self.assertIn("[SAME PEOPLE EVIDENCE]", "\n".join(big.seen[0]))
+        # Answered in code from the box's own evidence (same_people.py): nothing seen today, the mark as his word.
+        self.assertTrue(out.text.startswith("לא בטוח, לא ראיתי היום אנשים בפרגולה"), out.text)
+        self.assertIn("לפי מה שאמרת", out.text)
+        self.assertEqual(big.seen, [])
+        # With no camera to read the evidence of, the model answers and the guard still drops a bare "I'm sure".
+        lone_big = Scripted([call("reply", answer="כן, אני בטוח. אלה אותם עובדים מהבוקר.")])
+        lone = OwnerAgentV2(lone_big, Registry(lambda: self.clock), ChatMemory(os.path.join(self.root, ".conv2")),
+                            ReceiptBook(os.path.join(self.root, ".receipts2"), now=lambda: self.clock),
+                            Services(roots=lambda: [self.root], desc_dir=os.path.join(self.root, ".desc"),
+                                     feedback_dir=self.root, work_dir=os.path.join(self.root, ".live"), mute=None,
+                                     deliver=None, read_settings=lambda: {"owner_language": "he"},
+                                     now=lambda: self.clock), now=lambda: self.clock)
+        self.assertEqual(self.say(lone, "אלה אותם אנשים?", T(13, 5, 16)).text, t("same_unsure", "he"))
+        self.assertIn("[SAME PEOPLE EVIDENCE]", "\n".join(lone_big.seen[0]))
         self.assertTrue(rg.asks_same_people("אלה אותם אנשים?"))
         self.assertFalse(rg.overclaims_same("נראה שכן לפי הבגדים", []))
 

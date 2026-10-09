@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from ..feedback import Feedback, is_complaint, save_feedback
-from . import activity_chat, house, reply_guard
+from . import activity_chat, house, look_explain, reply_guard, same_people
 from . import known_memory as km
 from .claims import empty_reply, honest_answer, unbacked_claims
 from .grounding import evidence_text, ungrounded_details
@@ -346,7 +346,10 @@ def _last_photo_camera(state: ChatState, now: float, within: float = 900.0) -> s
         photos = [state.handles.get(h) for h in turn.get("handles") or []]
         photos = [p for p in photos if isinstance(p, dict) and p.get("kind") == "photo" and p.get("camera")]
         if photos:
-            return str(photos[-1]["camera"])
+            # The picture with the most people (2026-10-09 replay: a 10 s video of the empty path at camera 1, while
+            # the pergola photo had the workers); a tie: the last one sent.
+            count = lambda p: p.get("people") if isinstance(p.get("people"), int) else 0  # noqa: E731
+            return str(max(enumerate(photos), key=lambda x: (count(x[1]), x[0]))[1]["camera"])
     return ""
 
 
@@ -799,6 +802,22 @@ class OwnerAgentV2:
             return None
         ctx.state.prefs["group_scope"] = km.HOUSE
         return t("you_are_right_only_at", ctx.lang, camera=before)
+
+    def _evidence_answer(self, ctx: ToolContext, text: str, alert: Optional[Dict[str, Any]], threaded: bool,
+                         snapshot: Any, now: float, usage: Dict[str, List[int]]) -> Optional[str]:
+        """"Are these the same people?" / "are you sure?" (same_people.py) and "why no explanation?" after photos
+        (look_explain.py). None: not such a message, or nothing to answer from (the models then read it)."""
+        events = getattr(self.services, "events", None)
+        state = ctx.state
+        same = reply_guard.asks_same_people(text)
+        if same or (same_people.asks_sure(text) and same_people.follows_same_question(state, now)):
+            camera = same_people.camera_in_question(state, alert, now)
+            if not camera or events is None:
+                return None
+            return same_people.answer(events, snapshot, camera, now, ctx.lang, sure=not same)
+        if look_explain.asks_explanation(text) and not _ASKS_VIDEO.search(text) and not (threaded or alert):
+            return look_explain.answer(self.model, state, snapshot, events, now, ctx.lang, usage)
+        return None
 
     def _memory_answer(self, ctx: ToolContext, text: str, snapshot: Any, now: float) -> Optional[str]:
         """"מה אתה זוכר?" lists the live memories; "מה תייגתי היום?" lists today's tags of clips - two different
@@ -1510,6 +1529,14 @@ class OwnerAgentV2:
                 return self._undo(chat_id, house_out.undo, who)
             called += [r.tool for r in ctx.receipts]
         code_only = house_out.handled and not house_out.rest
+        if known_done is None and choice is None and snapshot is not None and not code_only:
+            # "אלה אותם אנשים?" / "אתה בטוח?" from evidence, and "למה אתה לא נותן הסבר?" from the photos just sent
+            # (2026-10-09 13:02 and 13:05): answered in code, never a question back or an unbacked "כן, אני בטוח".
+            try:
+                known_done = self._evidence_answer(ctx, text, alert, threaded, snapshot, now, usage)
+            except Exception as exc:  # noqa: BLE001 - the model still gets the message
+                log.warning("Evidence answer not made: %s", exc)
+                known_done = None
         if known_done is None and choice is None and snapshot is not None and not code_only:
             # The owner explains an action seen in an alert, in plain text (activity_memory, 2026-10-09): saved in
             # code, answered in one line about THAT explanation (never baseline counts or the marks' status).
