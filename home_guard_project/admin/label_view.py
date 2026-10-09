@@ -5,7 +5,7 @@ the clip's tracks with their provenance and the clip's training checks; the scen
 A clip's saved description is carried through every save unchanged."""
 from copy import deepcopy
 from time import monotonic
-from PySide6.QtCore import Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import Qt, QTimer, QUrl, Signal, QBuffer, QByteArray, QIODevice
 from PySide6.QtGui import QShortcut, QKeySequence, QImage
 from PySide6.QtMultimedia import QMediaPlayer, QVideoSink, QMediaMetaData
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter, QPlainTextEdit,
@@ -65,6 +65,13 @@ class LabelView(QWidget):
         self.conflicted, self.submit_pending, self.saved_at = False, False, None
         self.pending_frame, self.pending_copy = None, None
         self.loader, self.writer, self.reader, self.media = [TaskRunner(self) for _ in range(4)]
+        # every frame decoded once, in the background, when a clip opens (frame_cache.py): steps are lookups
+        self.frames, self.frames_for, self.refine = None, None, None
+        self.cacher = TaskRunner(self); self.cacher.finished.connect(self.frames_decoded)
+        self.play_timer = QTimer(self); self.play_timer.timeout.connect(self.play_cached)
+        self.media_buffer = None
+        # the first decoded frame goes on screen as soon as it exists (the player's own first frame may be later)
+        self.first_frame = QTimer(self); self.first_frame.setInterval(15); self.first_frame.timeout.connect(self.show_first)
         self.loader.finished.connect(self.loaded); self.writer.finished.connect(self.saved)
         self.reader.finished.connect(self.read_done); self.media.finished.connect(self.media_loaded)
         # a seek the decoder never answers exactly (another frame's timestamp, or none while paused) settles anyway
@@ -124,6 +131,7 @@ class LabelView(QWidget):
         hint.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter); tools.addWidget(hint, 1)
         column.addLayout(tools)
         self.canvas = LabelCanvas(theme); self.canvas.selected.connect(self.selection_changed)
+        self.canvas.zoom_changed.connect(self.zoomed)
         self.canvas.interaction_started.connect(self.player.pause); column.addWidget(self.canvas, 1)
         transport = QHBoxLayout(); self.play = button('Play', self.toggle_play); transport.addWidget(self.play)
         transport.addWidget(button('‹', lambda: self.step(-1))); transport.addWidget(button('›', lambda: self.step(1)))
@@ -285,6 +293,8 @@ class LabelView(QWidget):
         self.request_media()
 
     def install(self, annotation):
+        self.frames, self.frames_for, self.refine = None, None, None
+        if hasattr(self, 'play_timer'): self.play_timer.stop(); self.play.setText('Play')
         if self.doc: self.doc.deleteLater()
         self.doc = LabelDocument(annotation, self.recording.duration_sec, self)
         self.pending_frame, self.pending_copy = None, None
@@ -302,15 +312,111 @@ class LabelView(QWidget):
         if getattr(self.recording, 'clip_key', None):
             from types import SimpleNamespace
             key = self.recording.clip_key
-            self.media.start(lambda: SimpleNamespace(**self.backend.tagging_media(key, 'clip'))); return
+            self.media.start(lambda: self.fetched(SimpleNamespace(**self.backend.tagging_media(key, 'clip')))); return
         video = next((a for role in ('original_video', 'clip', 'rendition') for a in self.recording.artifacts if a.available and a.role == role), None)
         if not video: self.media_error(); return
-        self.media.start(lambda: self.backend.artifact_access(video.id, 'training' if self.role == 'labeler' else 'review'))
+        self.media.start(lambda: self.fetched(self.backend.artifact_access(video.id, 'training' if self.role == 'labeler' else 'review')))
 
-    def media_loaded(self, access, error):
+    def fetched(self, access):
+        """Worker thread: the media grant plus the clip's bytes (one download for the player and the frame cache)."""
+        from .frame_cache import fetch
+        return access, fetch(self.backend, access.url)
+
+    def media_loaded(self, result, error):
         if self.media_dirty or self.media_event != self.recording.id: self.request_media(); return
         if error: self.show_error(error); self.media_error(); return
-        self.player.setSource(QUrl(access.url)); self.player.play(); self.player.pause()
+        access, data = result
+        if data:   # the downloaded bytes, from memory
+            buffer = QBuffer(self); buffer.setData(QByteArray(data)); buffer.open(QIODevice.OpenModeFlag.ReadOnly)
+            self.player.setSourceDevice(buffer, QUrl('label.mp4'))
+            if self.media_buffer is not None: self.media_buffer.deleteLater()
+            self.media_buffer = buffer
+        else:
+            self.player.setSource(QUrl(access.url))
+        self.player.play(); self.player.pause()
+        self.decode_frames(data or access.url)
+
+    # ------------------------------------------------------------------ the frame cache
+    def decode_frames(self, url):
+        from .frame_cache import decode
+        self.frames, self.frames_for = None, self.recording.id
+        token = self.recording.id
+
+        def started(clip):      # worker thread: frames show up as they decode
+            if self.frames_for == token: self.frames = clip
+        if not self.cacher.start(lambda: (token, decode(url, lambda: self.frames_for != token or closing.is_set(), token=token,
+                                                         started=started))):
+            self.pending_decode = url
+        self.first_frame.start()
+
+    def show_first(self):
+        if not self.doc or self.frames_for is None or not self.canvas.image.isNull():
+            self.first_frame.stop(); return
+        if self.pending_frame is None and self.cached(self.doc.frame) is not None:
+            self.first_frame.stop(); self.show_cached(self.doc.frame)
+
+    def frames_decoded(self, result, error):
+        pending, self.pending_decode = getattr(self, 'pending_decode', None), None
+        if pending is not None and self.recording is not None:
+            self.decode_frames(pending); return
+        if error or not result: return
+        token, clip = result
+        if clip is None or not self.doc or token != self.frames_for: return
+        self.show_first()
+        self.frames = clip
+        self.position_changed()
+
+    def cached(self, frame):
+        """*frame* from the cache when it has decoded (and belongs to the open clip), else None."""
+        clip = self.frames
+        if clip is None or clip.token != self.frames_for or self.frames_for is None: return None
+        return clip.get(frame)
+
+    def zoomed(self):
+        """Zoomed in on a cached (screen-sized) frame: fetch the full-size one so the detail is real."""
+        if (self.doc and self.canvas.zoom > 1.0 and not self.play_timer.isActive()
+                and self.canvas.image is self.cached(self.doc.frame)):
+            self.refine_frame(self.doc.frame)
+
+    def frames_ready(self):
+        return self.frames is not None and self.frames.done and self.frames.token == self.frames_for
+
+    def play_cached(self):
+        """One playback tick from the cache (the player is not used for playback once frames are in)."""
+        if not self.doc or self.doc.frame+1 >= self.doc.frame_count or self.cached(self.doc.frame+1) is None:
+            self.stop_cached(); return
+        self.show_cached(self.doc.frame+1)
+
+    def stop_cached(self):
+        if self.play_timer.isActive():
+            self.play_timer.stop(); self.play.setText('Play')
+            if self.doc: self.show_cached(self.doc.frame)       # the paused frame refines when zoomed
+
+    def show_cached(self, frame):
+        """A frame step from the cache: no decoder round trip; a zoomed view gets the full-size frame on top."""
+        self.pending_frame = None; self.seek_watchdog.stop()
+        self.canvas.image = self.cached(frame); self.canvas.setEnabled(True)
+        self.doc.frame_size = list(self.frames.size)
+        self.doc.seek(frame, self.doc.time_for(frame))
+        self.apply_pending_copy()
+        self.refine = None
+        if self.canvas.zoom > 1.0 and not self.play_timer.isActive():
+            self.refine_frame(frame)
+
+    def refine_frame(self, frame):
+        """Ask the decoder for *frame* at full size, shown when it arrives if the view is still on it."""
+        if self.player.source().isEmpty() or self.frames is None or self.frames.scale >= 1.0: return
+        if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState: return
+        self.refine = frame
+        start = self.doc.time_for(frame)
+        span = self.doc.time_for(frame+1)-start if frame+1 < self.doc.frame_count else 1/self.doc.fps
+        self.player.setPosition(round((start+span/2)*1000))
+
+    def apply_pending_copy(self):
+        if self.pending_copy:
+            track_id, box = self.pending_copy; self.pending_copy = None
+            track = next((tr for tr in self.doc.tracks if tr.track_id == track_id), None)
+            if track: self.doc.put_box(box, track)
 
     def media_error(self):
         self.canvas.message = 'Recording unavailable. Reopen this clip to retry.'; self.canvas.update()
@@ -325,6 +431,13 @@ class LabelView(QWidget):
         self.doc.frame_size = [image.width(), image.height()]
         t = frame.startTime()/1_000_000 if frame.startTime() >= 0 else self.player.position()/1000
         native_frame = frame_at(t, self.doc.fps)
+        if self.refine is not None and self.player.playbackState() != QMediaPlayer.PlaybackState.PlayingState:
+            if abs(native_frame - self.refine) <= 1 and self.doc.frame == self.refine:
+                self.canvas.image = image; self.refine = None; self.canvas.update()
+            return                                 # the full-size copy of the cached frame on screen
+        if (self.pending_frame is None and self.cached(self.doc.frame) is not None
+                and self.player.playbackState() != QMediaPlayer.PlaybackState.PlayingState):
+            return                                 # a late decoder frame never moves a view the cache already serves
         if self.pending_frame is not None:
             if abs(native_frame - self.pending_frame) > 1:
                 return  # A decoder can deliver an earlier seek's frame while scrubbing.
@@ -341,10 +454,7 @@ class LabelView(QWidget):
         if image is not None: self.canvas.image = image
         self.canvas.setEnabled(True)
         self.doc.seek(frame, t_sec)
-        if self.pending_copy:
-            track_id, box = self.pending_copy; self.pending_copy = None
-            track = next((tr for tr in self.doc.tracks if tr.track_id == track_id), None)
-            if track: self.doc.put_box(box, track)
+        self.apply_pending_copy()
 
     def seek_timed_out(self):
         """No decoded frame answered the seek: nudge the paused decoder once (play, pause), then settle anyway."""
@@ -363,6 +473,9 @@ class LabelView(QWidget):
         if not self.doc: return
         self.player.pause()
         frame = max(0, min(self.doc.frame_count-1, frame))
+        if self.cached(frame) is not None:
+            if self.play_timer.isActive(): self.play_timer.stop(); self.play.setText('Play')
+            self.show_cached(frame); return
         if self.player.source().isEmpty():
             self.doc.seek(frame); return
         if frame == self.doc.frame and self.pending_frame is None: return
@@ -379,6 +492,12 @@ class LabelView(QWidget):
         if self.doc: self.seek((self.pending_frame if self.pending_frame is not None else self.doc.frame)+delta)
 
     def toggle_play(self):
+        if self.play_timer.isActive(): self.stop_cached(); return
+        if (self.player.playbackState() != QMediaPlayer.PlaybackState.PlayingState and self.doc
+                and self.cached(self.doc.frame) is not None):
+            if self.doc.frame+1 >= self.doc.frame_count or self.cached(self.doc.frame+1) is None:
+                self.show_cached(0)                                            # at the end: from the start
+            self.play_timer.start(max(10, round(1000/(self.doc.fps or 7)))); self.play.setText('Pause'); return
         if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState: self.player.pause()
         else: self.player.play()
 

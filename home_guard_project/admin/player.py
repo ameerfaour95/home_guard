@@ -122,11 +122,29 @@ class VideoCanvas(QWidget):
         self.overlay.setGeometry(self.rect())
         super().resizeEvent(event)
 
+    def scaled(self, rect):
+        """The picture scaled to *rect*'s size once (smooth), reused by every repaint at that size: a drag repaints the
+        canvas on each mouse move, and scaling a 2592x1520 frame each time is what made it lag."""
+        size = (round(rect.width()), round(rect.height()))
+        key = (self.image.cacheKey(), size)
+        if getattr(self, '_scaled_key', None) != key:
+            if size[0] * size[1] > 4096 * 4096:          # deep zoom: let the painter scale the visible part
+                return None
+            self._scaled = QPixmap.fromImage(self.image.scaled(size[0], size[1], Qt.AspectRatioMode.IgnoreAspectRatio,
+                                                               Qt.TransformationMode.SmoothTransformation))
+            self._scaled_key = key
+        return self._scaled
+
     def paintEvent(self, event):
         p = QPainter(self); p.fillRect(self.rect(), QColor('#070c10'))
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         if not self.image.isNull():
-            p.drawImage(QRectF(*self.display_rect()), self.image)
+            rect = QRectF(*self.display_rect())
+            pixmap = self.scaled(rect)
+            if pixmap is not None:
+                p.drawPixmap(rect.topLeft(), pixmap)
+            else:
+                p.drawImage(rect, self.image)
         else:
             p.setPen(QColor('#a0adb8')); p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self.message)
 

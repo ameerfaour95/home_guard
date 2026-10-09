@@ -99,6 +99,7 @@ def test_native_decoder_seek_and_copy_use_presentation_time(widgets, wait):
     v = view(widgets, wait)
     wait(lambda: not v.canvas.image.isNull())
     original = v.canvas.image.copy()
+    v.frames_for = None                     # the decoder path (before the frame cache is in)
     v.seek(36)
     assert v.pending_frame == 36 and not v.canvas.isEnabled()
     wait(lambda: v.pending_frame is None)

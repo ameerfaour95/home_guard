@@ -125,6 +125,7 @@ def test_clicking_a_keyframe_dot_jumps_to_its_frame_and_never_moves_it(widgets, 
 
 def test_a_seek_does_not_stay_stuck_when_the_decoder_answers_off_by_one(widgets, wait):
     v = view(widgets, wait)
+    v.frames_for = None                     # the decoder path (before the frame cache is in)
     v.seek(30)
     assert v.pending_frame == 30
     v.settle_seek(t_sec=31 / v.doc.fps)                              # a decoded frame a frame later than asked
