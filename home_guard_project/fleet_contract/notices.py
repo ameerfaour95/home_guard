@@ -38,7 +38,9 @@ def notice_message(kind: str, cameras: list[str], when: str) -> str:
 # The box has no S3 read access: the cloud runs this over Tailscale SSH. Body: the notice object above
 # (schema_version, id and kind are required; the box replaces by id, so a re-push of the same id is safe).
 NOTICE_CLI = r"cd /d C:\home_guard && .venv\Scripts\python.exe -m home_guard_project.box notices add --b64 {b64} --json"
-NOTICE_SSH_OPTIONS = ("-o", "BatchMode=yes", "-o", "ConnectTimeout=15")
+# accept-new: the first contact with a box pins its host key (in the dedicated file below, never the founder's
+# ~/.ssh/known_hosts); a later change of that key is refused by ssh and reported (notice_host_key_changed)
+NOTICE_SSH_OPTIONS = ("-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "StrictHostKeyChecking=accept-new")
 MAX_B64 = 7000  # the box refuses longer --b64 values (cmd line limit); the cloud refuses them before sending
 
 
@@ -59,10 +61,29 @@ def notice_command(body: dict[str, Any]) -> str:
     return NOTICE_CLI.format(b64=b64)
 
 
-def notice_ssh_argv(ssh_user: str, host: str, body: dict[str, Any], key: Optional[Path] = None) -> list[str]:
-    """``ssh -i ~/.ssh/homeguard_box -o BatchMode=yes -o ConnectTimeout=15 <user>@<host> "<NOTICE_CLI>"``."""
+def notice_known_hosts() -> Path:
+    """The box host keys the notice push pinned: ``~/.homeguard/box_known_hosts``."""
+    return Path.home() / ".homeguard" / "box_known_hosts"
+
+
+def notice_ssh_argv(ssh_user: str, host: str, body: dict[str, Any], key: Optional[Path] = None,
+                    known_hosts: Optional[Path] = None) -> list[str]:
+    """``ssh -i ~/.ssh/homeguard_box -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new
+    -o UserKnownHostsFile=<~/.homeguard/box_known_hosts> <user>@<host> "<NOTICE_CLI>"``."""
     key = key if key is not None else Path.home() / ".ssh" / "homeguard_box"
-    return ["ssh", "-i", str(key), *NOTICE_SSH_OPTIONS, f"{ssh_user}@{host}", notice_command(body)]
+    hosts_file = (known_hosts if known_hosts is not None else notice_known_hosts()).as_posix()
+    if " " in hosts_file:
+        hosts_file = f'"{hosts_file}"'  # ssh reads the -o value like a config line
+    return ["ssh", "-i", str(key), *NOTICE_SSH_OPTIONS, "-o", f"UserKnownHostsFile={hosts_file}",
+            f"{ssh_user}@{host}", notice_command(body)]
+
+
+def notice_host_key_changed(returncode: Optional[int], stderr: str) -> bool:
+    """ssh refused the box because its host key is not the pinned one (with accept-new an unknown key is pinned, so
+    a verification failure means the key changed: a reinstalled box, or someone else at that address)."""
+    text = stderr or ""
+    return returncode not in (0, None) and (
+        "REMOTE HOST IDENTIFICATION HAS CHANGED" in text or "Host key verification failed" in text)
 
 
 def notice_reply(returncode: Optional[int], stdout: str) -> tuple[str, dict[str, Any]]:
