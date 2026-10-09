@@ -116,6 +116,9 @@ class Session:
     # entity`` there, ``to_entity`` here, ``gap_s``, ``score`` (the clothes' cosine or None), ``at``).
     incident_id: str = ""
     incident_from: Dict[str, Any] = field(default_factory=dict)
+    # 2026-10-09: the cross-camera link as seen, in ``shadow`` too (``incident_from`` is written only when on): the
+    # source camera's mark ("the workers at the pergola") covers this session through it (``_known_via_link``).
+    cross_seen: Dict[str, Any] = field(default_factory=dict)
 
     def people_when_said(self, known_id: str) -> int:
         """People present in this session when the owner's words *known_id* were said here (0 when said elsewhere)."""
@@ -285,7 +288,8 @@ class EventBook:
                         entities=copy.deepcopy(old.entities) if old else [],
                         reported_entities=list(old.reported_entities) if old else [],
                         incident_id=old.incident_id if old else "",
-                        incident_from=dict(old.incident_from) if old else {})
+                        incident_from=dict(old.incident_from) if old else {},
+                        cross_seen=dict(old.cross_seen) if old else {})
             self._open[camera] = s
             return s
         if s is None:
@@ -380,6 +384,22 @@ class EventBook:
                 return True
             return False
 
+    def replace_known(self, old_ids: Any, camera: str, text: str, by: str, until: float,
+                      now: Optional[float] = None, people: Optional[int] = None) -> Dict[str, Any]:
+        """The owner corrected a mark (its time, camera or words, 2026-10-09: "מי אמר עד 23:59? ... עד 18:00" left
+        both marks live): the new mark is written and *old_ids* (one id or several) are removed, in one step. The
+        receipt is mark_known's plus ``replaced``: what each removed mark was. Raises ValueError like mark_known."""
+        ids = [old_ids] if isinstance(old_ids, str) else [str(i) for i in old_ids or ()]
+        now = time.time() if now is None else now
+        with self._lock:
+            old = [asdict(k) for k in self._known if k.id in ids]
+            saved = self.mark_known(camera, text, by, until, now=now, people=people)
+            self._known = [k for k in self._known if k.id not in ids or k.id == saved["id"]]
+            self._save_known()
+            for s in self._open.values():
+                s.known = [k for k in s.known if k.get("id") not in ids]
+            return dict(saved, replaced=old)
+
     def list_known(self, now: Optional[float] = None) -> List[Dict[str, Any]]:
         now = time.time() if now is None else now
         with self._lock:
@@ -454,6 +474,8 @@ class EventBook:
             if alert_id:
                 self._by_alert[alert_id] = s.id
             known = self.known_for(camera, ts)
+            if known is None and label == "suspicious":
+                known = self._known_via_link(s, ts)      # the workers marked at the camera they walked from
             new_people = max(0, count - s.reported_people)
             reply_to = s.first_message()
             lvl, reported = LEVELS[label], LEVELS[s.reported_level]
@@ -619,15 +641,34 @@ class EventBook:
                 if not said:
                     log.info("[%s] cross-camera: would link %s at %s -> %s here (%.0f s%s)", camera, e_a["id"],
                              src.camera, e_b["id"], pick["gap"], clothes)
+                if not s.cross_seen:
+                    s.cross_seen = dict(info, mode="shadow")
                 return dict(info, mode="shadow")
             incident_id = src.incident_id or uuid.uuid4().hex[:12]
             src.incident_id = incident_id
             s.incident_id, s.incident_from = incident_id, info
+            s.cross_seen = dict(info, mode="on")
             e_b.update(from_camera=src.camera, from_entity=e_a["id"], from_session=src.id)
             log.info("[%s] cross-camera: %s at %s is %s here (%.0f s%s): incident %s", camera, e_a["id"], src.camera,
                      e_b["id"], pick["gap"], clothes, incident_id)
             return dict(info, id=incident_id, mode="on")
         return {}
+
+    def _known_via_link(self, s: Session, ts: float) -> Optional[Known]:
+        """A mark of another camera that covers *s* because its people walked over (2026-10-09: the workers marked
+        at the pergola reached the main entrance 17 s later and it alerted). Only through a cross-camera link of
+        this session (``incident_from``, or ``cross_seen`` in shadow), and only for a mark live both when the link
+        was seen and now. Never for an escalation (the caller asks only for a suspicious)."""
+        link = s.incident_from or s.cross_seen
+        source = str((link or {}).get("camera") or "")
+        if not source or source == s.camera:
+            return None
+        try:
+            at = float(link.get("at") or ts)
+        except (TypeError, ValueError):
+            at = ts
+        live = [k for k in self._known if k.camera == source and k.live(ts) and k.live(at)]
+        return live[-1] if live else None
 
     @staticmethod
     def _one(found: List[Dict[str, Any]], acting_reid: bool, link: float, margin: float) -> Optional[Dict[str, Any]]:
