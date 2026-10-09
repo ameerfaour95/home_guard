@@ -139,7 +139,7 @@ class KeyboardTest(unittest.TestCase):
         rows = self._rows(feedback_keyboard("en"))
         self.assertEqual([[b["callback_data"] for b in row] for row in rows],
                          [["tag:suspicious", "tag:normal", "tag:other"]])
-        self.assertEqual([[b["text"] for b in row] for row in rows], [["🟡 Suspicious", "🟢 Normal", "✏️ Other…"]])
+        self.assertEqual([[b["text"] for b in row] for row in rows], [["🟡 Suspicious", "🟢 Normal", "🏷️ Other tag"]])
 
     def test_the_ai_label_gets_a_tick(self) -> None:
         texts = [b["text"] for row in self._rows(feedback_keyboard("en", ai_label="suspicious")) for b in row]
@@ -151,20 +151,21 @@ class KeyboardTest(unittest.TestCase):
     def test_hebrew_texts(self) -> None:
         texts = [b["text"] for row in self._rows(feedback_keyboard("he", ai_label="normal")) for b in row]
         self.assertEqual(texts, [
-            f"🟡 {t('btn_tag_suspicious', 'he')}", f"✓ 🟢 {t('btn_tag_normal', 'he')}", f"✏️ {t('btn_tag_other', 'he')}",
+            f"🟡 {t('btn_tag_suspicious', 'he')}", f"✓ 🟢 {t('btn_tag_normal', 'he')}", f"🏷️ {t('btn_tag_other', 'he')}",
         ])
         self.assertNotEqual(t("btn_tag_normal", "he"), t("btn_tag_normal", "en"))
 
     def test_the_english_strings(self) -> None:
         self.assertEqual([t(k, "en") for k in ("btn_tag_normal", "btn_tag_suspicious", "btn_tag_escalation",
                                                "btn_tag_empty", "btn_tag_other")],
-                         ["Normal", "Suspicious", "Escalation", "Nothing there", "Other…"])
-        self.assertEqual(t("tag_ask_text", "en"), "What's happening in the clip? Write or send a voice message.")
+                         ["Normal", "Suspicious", "Escalation", "Nothing there", "Other tag"])
+        self.assertEqual(t("tag_ask_text", "en"), "What's the right tag for this clip? (for the detection model, not "
+                                                  "my memory) Write or send a voice message.")
         self.assertEqual(t("tag_saved", "en", label="Normal"), "✓ Saved as Normal.")
         self.assertEqual(t("tag_receipt", "en", label="Normal"), "✓ Saved: Normal")
         self.assertEqual(t("tag_saved_explanation", "en", time="02:14"), "✓ Saved your explanation for the 02:14 clip.")
         self.assertEqual(t("tag_undone", "en"), "Tag removed.")
-        self.assertEqual(t("tag_expired", "en"), "That tag request expired; tap Other… again.")
+        self.assertEqual(t("tag_expired", "en"), "That tag request expired; tap Other tag again.")
 
     def test_a_hebrew_alert_gets_hebrew_tag_buttons_with_the_ai_tick(self) -> None:
         # A Hebrew alert whose VLM parse failed still shows an English summary under a Hebrew header;
@@ -409,7 +410,7 @@ class InboxTaggingTest(unittest.TestCase):
         self.assertEqual(self._training_meta()["owner_feedback"][-1]["owner_text"], "two kids on bikes")
         said = self.tg.sent("sendMessage")[-1]
         clock = dt.datetime.fromtimestamp(ALERT["ts"]).strftime("%H:%M")
-        self.assertTrue(said["fields"]["text"].startswith(f"🏷️ Tag for the {clock} clip"))   # a TAG line
+        self.assertTrue(said["fields"]["text"].startswith(f"🏷️ Saved as the tag of the {clock} clip"))   # a TAG line
         self.assertEqual(callback_codes(said), [f"tu:{ALERT_ID}"])
         (receipt,) = self.tg.sent("editMessageReplyMarkup")              # the alert shows it too
         self.assertEqual((receipt["fields"]["message_id"], callback_codes(receipt)), ("77", ["tag:noop", f"tu:{ALERT_ID}"]))

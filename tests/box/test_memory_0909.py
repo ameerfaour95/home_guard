@@ -101,74 +101,21 @@ class Base(unittest.TestCase):
 
 
 class ExplanationTest(Base):
-    """Point 2 and the owner's additions: the ✏️ explanation is a TAG, and the box draws the conclusion (workers,
-    here today, likely all week) and asks only what it cannot know - at most two short button questions."""
+    """Superseded by the owner on 2026-10-09 18:15: the words after "🏷️ תיוג אחר" are a TAG for the detection model
+    only - never a memory and never a question about one. A plain reply to the alert is the memory (activity_chat,
+    test_activity_chat.py)."""
 
-    def test_the_explanation_asks_naturally_then_saves_one_short_receipt(self) -> None:
+    def test_the_tag_answer_asks_nothing_and_saves_no_memory(self) -> None:
         agent = self.agent()
-        self.clock = dt.datetime(2026, 10, 9, 9, 21).timestamp()
-        q1 = agent.note_tag("-5", dict(ALERT), EXPLAIN, OWNER, label="normal")
-        self.assertEqual(q1.text, "אה, הם של הפרגולה? עד איזו שעה הם עובדים?")
-        self.assertEqual(q1.buttons, ("16:00", "17:00", "18:00", "אחר…"))
-        self.assertEqual(self.events.list_known(self.clock), [])               # nothing saved before the answer
-        q2 = self.tap(agent, q1, 2)                                             # [18:00]
-        self.assertEqual(q2.text, "והם עובדים רק בפרגולה, או בכל הבית?")
-        self.assertEqual(q2.buttons, ("כל הבית", "רק פרגולה"))
-        done = self.tap(agent, q2, 0)                                           # [כל הבית]
-        self.assertEqual(done.buttons, ())                                      # no third question
-        lines = done.text.split("\n")
-        self.assertEqual(lines[0], "אוקי תודה, רשמתי.")
-        self.assertEqual(lines[1], "🏷️ תיוג לסרטון 08:01 (פרגולה): תקין: " + EXPLAIN)
-        self.assertEqual(lines[2], "🧠 זכרתי: העובדים בכל הבית, כל יום 08:00–18:00, עד יום ה׳ 15.10.")
-        (mark,) = self.events.list_known(self.clock)
-        self.assertEqual((mark["camera"], mark["daily_from"], mark["daily_to"], mark["until"]),
-                         ("", "08:00", "18:00", WEEK_END))
-        codes = [c for row in done.rows for _, c in row]
-        self.assertIn(f"tu:{ALERT['alert_id']}", codes)                         # the tag's own undo
-        self.assertIn(f"kn:x:{mark['id']}", codes)                              # the memory's own undo
-        self.assertIn(f"kn:d:{mark['id']}", codes)                              # [רק היום]
-        # The workers walk to the main entrance at 09:43: covered (house-wide, inside their hours).
-        self.assertFalse(self.events.decide(ENTRANCE, ALERT2["ts"] + 60, "suspicious", 2).notify)
-        state = agent.memory.load("-5")
-        self.assertEqual(state.prefs.get("group_scope"), "house")              # asked once, kept
-
-    def test_the_owner_types_the_time(self) -> None:
-        agent = self.agent()
-        q1 = agent.note_tag("-5", dict(ALERT), EXPLAIN, OWNER)
-        other = self.tap(agent, q1, 3)                                          # [אחר…]
-        self.assertEqual(other.text, t("ask_type_time", "he"))
-        q2 = agent.handle("עד 18", "-5", OWNER)
-        self.assertEqual(q2.text, "והם עובדים רק בפרגולה, או בכל הבית?")
-        done = self.tap(agent, q2, 1)                                           # [רק פרגולה]
-        self.assertIn("🧠 זכרתי: העובדים בפרגולה, כל יום 08:00–18:00", done.text)
-        self.assertEqual(self.events.list_known(NOW)[0]["camera"], PERGOLA)
-
-    def test_what_the_owner_already_said_is_never_asked(self) -> None:
-        agent = self.agent()
-        q = agent.note_tag("-5", dict(ALERT), "עובדים אצלי בכל הבית עד 18:00", OWNER)
-        self.assertEqual(q.buttons, ("כן", "לא"))                              # one obvious answer: one confirm
-        self.assertIn("עד 18:00", q.text)
-        done = self.tap(agent, q, 0)
-        self.assertIn("🧠 זכרתי: העובדים בכל הבית", done.text)
-
-    def test_a_one_off_or_a_marked_crew_asks_nothing(self) -> None:
-        agent = self.agent()
-        self.assertIsNone(agent.note_tag("-5", dict(ALERT), "זה הדוור", OWNER))
-        self.assertIsNone(agent.note_tag("-5", dict(ALERT), "שני גברים ליד הטנדר", OWNER))
-        self.events.mark_known(PERGOLA, "העובדים", "Ameer", WEEK_END, now=NOW - 60)
-        self.assertIsNone(agent.note_tag("-5", dict(ALERT), EXPLAIN, OWNER))
-        # The explanation is in the chat history: a later turn sees it (the 09:30 "אתה לא קורא?").
-        state = agent.memory.load("-5")
-        self.assertEqual(state.turns[-1]["kind"], "tag")
-        self.assertIn("✏️ " + EXPLAIN, state.turns[-1]["text"])
-
-    def test_a_no_saves_nothing(self) -> None:
-        agent = self.agent()
-        q1 = agent.note_tag("-5", dict(ALERT), EXPLAIN, OWNER)
-        out = agent.handle("לא", "-5", OWNER)
-        self.assertEqual(out.text, t("known_not_marked", "he"))
+        for words in (EXPLAIN, "עובדים אצלי בכל הבית עד 18:00", "זה הדוור"):
+            self.assertIsNone(agent.note_tag("-5", dict(ALERT), words, OWNER, label="normal"))
         self.assertEqual(self.events.list_known(NOW), [])
-        self.assertIsNotNone(q1)
+        state = agent.memory.load("-5")
+        self.assertIsNone(state.pending)
+        # The tag is in the chat history as a tag (a later turn sees it).
+        self.assertEqual(state.turns[-1]["kind"], "tag")
+        self.assertIn("🏷️ זה הדוור", state.turns[-1]["text"])
+        self.assertIn("TAG only", " ".join(state.turns[-1]["receipts"]))
 
 
 class NoInventedTimeTest(Base):
@@ -390,7 +337,7 @@ class TagAndMemoryTest(Base):
         agent.note_alert("-5", dict(ALERT))
         out = agent.handle(text, "-5", OWNER)
         # A normal scene under the workers' mark, with the corrected description.
-        self.assertIn("🏷️ תיוג לסרטון 08:01 (פרגולה): תקין: אדם עם חולצה לבנה", out.text)
+        self.assertIn("🏷️ נשמר כתיוג לסרטון 08:01 (פרגולה): תקין: אדם עם חולצה לבנה", out.text)
         self.assertIn("🧠 זכרתי: העובדים בפרגולה", out.text)
         (tag,) = self.feedback()
         self.assertEqual((tag["owner_label"], tag["verdict"], tag["owner_text"][:8]), ("normal", "expected", "אדם עם ח"))
@@ -433,7 +380,7 @@ class TagAndMemoryTest(Base):
         save_feedback(self.root, dict(ALERT), Feedback(verdict="expected", owner_label="normal", owner_text=EXPLAIN),
                       EXPLAIN, OWNER, "-5", NOW)
         tags = agent.handle("מה תייגתי היום?", "-5", OWNER)
-        self.assertIn("🏷️ תיוג לסרטון 08:01 (פרגולה): תקין: " + EXPLAIN, tags.text)
+        self.assertIn("🏷️ נשמר כתיוג לסרטון 08:01 (פרגולה): תקין: " + EXPLAIN, tags.text)
         self.assertNotIn("🧠", tags.text)
 
 

@@ -184,7 +184,7 @@ class KeeperTest(unittest.TestCase):
                         reply("רשמתי את זה כהתרעה צפויה. אם יש משהו נוסף, אני כאן!")])
         out = self.agent(big).handle(WORKERS_18, "-5", {"user_id": 1, "name": "Ameer"}, dict(ALERT), True)
         # Two lines, two stores: the clip's TAG (🏷️) and the MEMORY (🧠) with the week assumption said plainly.
-        self.assertEqual(out.text, "🏷️ תיוג לסרטון 09:50 (פרגולה): תקין: עובדים אצלי\n"
+        self.assertEqual(out.text, "🏷️ נשמר כתיוג לסרטון 09:50 (פרגולה): תקין: עובדים אצלי\n"
                                    "🧠 זכרתי: העובדים בפרגולה, כל יום 09:00–18:00, עד יום ג׳ 13.10.")
         known_id = self.events.list_known(NOW)[0]["id"]
         self.assertEqual(out.rows, ((("רק היום", f"kn:d:{known_id}"), ("שבוע ✓", f"kn:w:{known_id}"),

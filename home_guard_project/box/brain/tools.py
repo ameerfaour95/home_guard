@@ -88,6 +88,7 @@ class Services:
     alert_settings: Any = None
     house: Any = None          # house_state.HouseStateStore: the one writer of the house state (brain/house.py)
     events: Any = None         # events.EventBook: sessions per camera and the owner's "these are my workers"
+    activities: Any = None     # activity_memory.ActivityBook: what an action means at a camera (the owner's words)
 
 
 @dataclass
@@ -605,6 +606,15 @@ def photo_caption(ctx: ToolContext, camera: str, ts: Any = None) -> str:
         return ""
 
 
+def first_sentence(text: Any, limit: int = 120) -> str:
+    """The first sentence of a description, for a photo's caption ("אדם בחולצה לבנה עובר ליד רכב כסוף")."""
+    text = " ".join(str(text or "").split())
+    if not text:
+        return ""
+    head = re.split(r"(?<=[.!?])\s", text, maxsplit=1)[0].rstrip(".")
+    return head if len(head) <= limit else head[:limit - 1].rsplit(" ", 1)[0] + "…"
+
+
 @_safe_tool
 def look_around(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     """A live look at every camera that is on ("anything outside?", "what's around the house?" with no camera named).
@@ -641,7 +651,9 @@ def look_around(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         ctx.state.note_observation(handle, str(look.get("description") or ""))
         row["handle"] = handle
         if people and _media_sent(ctx) < LOOK_AROUND_PHOTOS and ctx.services.deliver is not None:
-            sent = _service_result(ctx.services.deliver.photo(ctx.chat_id, shot["image"], caption=photo_caption(ctx, cam)))
+            # 2026-10-09 13:00 "יש מישהו בחוץ?": two photos and no word. Each one says what it shows.
+            caption = " · ".join(x for x in (photo_caption(ctx, cam), first_sentence(look.get("description"))) if x)
+            sent = _service_result(ctx.services.deliver.photo(ctx.chat_id, shot["image"], caption=caption))
             _issue(ctx, "check_camera", DONE if sent.get("ok") else FAILED, cam,
                    {"camera": cam, "message_id": sent.get("message_id")}, "" if sent.get("ok") else "telegram")
             ctx.shown.append(handle)

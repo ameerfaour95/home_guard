@@ -73,7 +73,7 @@ class KeyboardTest(unittest.TestCase):
         self.assertEqual(codes(feedback_keyboard("en")), [["tag:suspicious", "tag:normal", "tag:other"]])
         texts = [b["text"] for row in json.loads(feedback_keyboard("en", ai_label="normal"))["inline_keyboard"]
                  for b in row]
-        self.assertEqual(texts, ["🟡 Suspicious", "✓ 🟢 Normal", "✏️ Other…"])
+        self.assertEqual(texts, ["🟡 Suspicious", "✓ 🟢 Normal", "🏷️ Other tag"])
 
     def test_an_alert_a_house_rule_raised_gets_the_rule_button(self) -> None:
         self.assertEqual(codes(feedback_keyboard("en", rule=True)),

@@ -68,7 +68,7 @@ ACTIONS: Dict[str, Dict[str, Any]] = {
         r"יושב(?:ת|ים)? על (?:הקרקע|הרצפה|המדרגות|האדמה)"])},
     "working_ground": {"he": "העבודה על הקרקע", "short": "עבודה על הקרקע", "en": "working on the ground", "re": _any([
         r"\bwork\w* (?:\w+ ){0,2}on the (?:ground|floor|pavement|stairs|steps)", r"עובד(?:ת|ים)? על (?:הקרקע|הרצפה|המדרגות)"])},
-    "holding_tool": {"he": "כלי העבודה ביד", "short": "כלי עבודה ביד", "en": "holding a tool or a long bar", "re": _any([
+    "holding_tool": {"he": "הכלים ביד", "short": "כלים ביד", "en": "holding a tool or a long bar", "re": _any([
         r"\b(?:hold|carr|grip)\w* (?:\w+ ){0,4}(?:bars?|rods?|poles?|pipes?|tools?|sticks?|planks?|cables?|wires?)\b",
         r"\b(?:metal|long|iron) (?:bar|rod|pole|pipe)\b",
         r"(?:מחזיק|מחזיקה|מחזיקים|נושא|נושאים|סוחב|אוחז)\S* (?:\S+ ){0,3}(?:מוט|צינור|כלי|קרש|מקל|כבל|חוט)",
@@ -247,7 +247,8 @@ class ActivityBook:
 
     def add(self, cameras: Iterable[str], actions: Iterable[str], cause: str, until: float, now: float,
             **extra: Any) -> ActivityFact:
-        acts = [a for a in dict.fromkeys(actions) if a in ACTIONS]
+        wanted = set(actions)
+        acts = [a for a in ACTION_KEYS if a in wanted]
         if not acts:
             raise ValueError("an activity fact needs at least one known action")
         if not str(cause or "").strip():
@@ -278,7 +279,7 @@ class ActivityBook:
                 if key in ("id", "history") or key not in ActivityFact.__dataclass_fields__:
                     continue
                 if key == "actions":
-                    value = [a for a in dict.fromkeys(value) if a in ACTIONS] or fact.actions
+                    value = [a for a in ACTION_KEYS if a in set(value)] or fact.actions
                 setattr(fact, key, value)
             fact.history = (fact.history + [{"at": now, "before": before}])[-10:]
             self._save(now)

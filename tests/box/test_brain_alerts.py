@@ -59,7 +59,7 @@ class GradedAlertTest(unittest.TestCase):
         self.assertTrue(posts[1]["text"].endswith(t("feedback_question", "he")))
         labels = [b["text"] for row in json.loads(feedback_keyboard("en"))["inline_keyboard"] for b in row]
         # Task 18b: the tag buttons replaced the four verdict buttons; plan 8: three of them, no pause.
-        self.assertEqual(labels, ["🟡 Suspicious", "🟢 Normal", "✏️ Other…"])
+        self.assertEqual(labels, ["🟡 Suspicious", "🟢 Normal", "🏷️ Other tag"])
 
     def test_dispatch_uses_the_graded_text_and_silence(self) -> None:
         seen = {}

@@ -83,11 +83,12 @@ TAP_REPEAT_SEC = 60.0
 BUSY_ACK_SEC = 1.5
 
 # The buttons under an alert: (emoji, i18n key, callback code). The owner tags the clip with one of
-# OWNER_LABELS; "Other…" waits for their own words. Alerts sent before carry tag:escalation, tag:empty and
+# OWNER_LABELS; "🏷️ תיוג אחר" (tag:other) waits for their own words - a TAG for the detection model only (owner,
+# 2026-10-09 18:15); a plain reply to the alert, without that button, is for the assistant's memory. Alerts sent before carry tag:escalation, tag:empty and
 # fb:mute60, which are still accepted.
 _ALERT_BUTTONS = (
     (("🟡", "btn_tag_suspicious", "tag:suspicious"), ("🟢", "btn_tag_normal", "tag:normal"),
-     ("✏️", "btn_tag_other", "tag:other")),
+     ("🏷️", "btn_tag_other", "tag:other")),
 )
 # Under an alert that a house rule (an owner's "raise" note) made suspicious.
 _RULE_BUTTON = ("📏", "btn_tag_rule_mismatch", "tag:rule_mismatch")

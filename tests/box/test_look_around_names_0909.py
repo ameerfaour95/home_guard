@@ -78,7 +78,15 @@ class CaptionTest(unittest.TestCase):
         self.deliver = Deliver()
         look_around(self.ctx("מה קורה", vision=Vision({PERGOLA: 1, ENTRANCE: 2})), {})
         clock = dt.datetime.fromtimestamp(NOW).strftime("%H:%M")
-        self.assertEqual([c for _, c in self.deliver.photos], [f"פרגולה · {clock}", f"כניסה ראשית · {clock}"])
+        # ...and what it shows (13:00: "יש מישהו בחוץ?" got two photos and no word).
+        self.assertEqual([c for _, c in self.deliver.photos],
+                         [f"פרגולה · {clock} · 1 people", f"כניסה ראשית · {clock} · 2 people"])
+
+    def test_no_answer_after_a_look_around_gets_one_summary_line(self) -> None:
+        from home_guard_project.box.brain.agent import _look_summary  # noqa: PLC0415
+
+        rows = '{"ok": true, "cameras": [{"camera": "פרגולה", "description": "אדם בחולצה לבנה עובר ליד רכב. עוד."},'                ' {"camera": "כניסה ראשית", "description": "שני אנשים ליד רכב לבן"}]}'
+        self.assertEqual(_look_summary(["{}", rows]), "פרגולה: אדם בחולצה לבנה עובר ליד רכב; כניסה ראשית: שני אנשים ליד רכב לבן.")
 
 
 class NoPhotoReceiptTest(unittest.TestCase):
