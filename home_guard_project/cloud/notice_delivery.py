@@ -8,7 +8,10 @@ delivery_state "pending" (audit.owner_notice sets it on every new or rewritten b
   rewrite with a new body is a new attempt;
 - anything else (ssh exit 255, a timeout, no tailscale host) stays pending. The next attempt waits for a newer
   heartbeat from the box (delivery_heartbeat_at), so an unreachable box is not hammered; after 7 days of waiting the
-  notice is given up (gave_up).
+  notice is given up (gave_up);
+- the box's SSH host key changed (it is pinned on first contact, notices.NOTICE_SSH_OPTIONS): failed, with
+  last_delivery_error "host key changed for <host>", never a silent retry. The box's Fleet row warns
+  (host_key_changed_boxes) until a delivery to it gets through again.
 Every attempt and the give-up are audited ("notice_delivery"); the detail never holds the notice text. The
 last failure's reason is kept on the row (last_delivery_error).
 
@@ -22,7 +25,7 @@ import subprocess
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Iterable, Optional
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from home_guard_project.fleet_contract import notices
@@ -43,8 +46,18 @@ ERROR_MAX = 200
 Runner = Callable[[list[str]], tuple[Optional[int], str, str]]
 
 
+HOST_KEY_WARNING = ("Notices can't reach the box: its SSH host key changed. Check the box was reinstalled, then "
+                    "reset its key (remove its line from ~/.homeguard/box_known_hosts)")
+
+
 def ssh_run(argv: list[str]) -> tuple[Optional[int], str, str]:
     """The real runner: ssh with the laptop's box key (~/.ssh/homeguard_box), never prompting (BatchMode)."""
+    try:  # the dedicated known_hosts file (notices.notice_known_hosts), made on first use
+        hosts = notices.notice_known_hosts()
+        hosts.parent.mkdir(parents=True, exist_ok=True)
+        hosts.touch(exist_ok=True)
+    except OSError:
+        log.warning("could not create %s; ssh will try to create it", notices.notice_known_hosts())
     try:
         r = subprocess.run(argv, capture_output=True, timeout=SSH_TIMEOUT, stdin=subprocess.DEVNULL)
     except subprocess.TimeoutExpired:
@@ -101,6 +114,13 @@ def deliver_notice(session: Session, row: OwnerNotice, runner: Runner, now: date
         _record(session, row, box, now, "no_target", error="the box has no tailscale host")
         return "no_target"
     code, out, err = runner(notices.notice_ssh_argv(box.ssh_user, host, body))
+    if notices.notice_host_key_changed(code, err):
+        row.delivery_state = "failed"
+        _record(session, row, box, now, "host_key_changed", host=host, exit=code,
+                error=f"host key changed for {host}")
+        row.last_delivery_error = f"host key changed for {host}"[:255]
+        log.warning("owner notice %s: the SSH host key of %s changed; not retried", row.id, host)
+        return "host_key_changed"
     outcome, reply = notices.notice_reply(code, out)
     error = str(reply.get("error", ""))[:ERROR_MAX]
     if outcome == "delivered":
@@ -132,7 +152,7 @@ def deliver_pending(session: Session, now: Optional[datetime] = None, runner: Op
         outcome = deliver_notice(session, row, runner, now, force=notice_ids is not None)
         if outcome == "delivered":
             done += 1
-        elif outcome in ("retry", "no_target"):
+        elif outcome in ("retry", "no_target", "host_key_changed"):
             unreachable.add(box.id)
         session.flush()
     return done
@@ -155,3 +175,12 @@ def schedule(request, background_tasks, rows: Iterable[Optional[OwnerNotice]]) -
     ids = [r.id for r in rows if r is not None and r.delivery_state == "pending"]
     if runner is not None and ids:
         background_tasks.add_task(deliver_now, request.app.state.engine, ids, runner, request.app.state.clock)
+
+
+def host_key_changed_boxes(session: Session) -> set[str]:
+    """device_ids of the boxes whose newest push that reached ssh's host check ended in "host_key_changed" (a later
+    delivered or box-rejected push means the key was reset). Audited attempts are under the box's live row."""
+    return {device_id for device_id, outcome in session.execute(text(
+        "SELECT DISTINCT ON (device_id) device_id, reason FROM audit_log "
+        "WHERE action = 'notice_delivery' AND reason IN ('delivered', 'rejected', 'host_key_changed') "
+        "AND device_id IS NOT NULL ORDER BY device_id, id DESC")).all() if outcome == "host_key_changed"}

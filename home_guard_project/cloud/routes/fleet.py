@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from home_guard_project.fleet_contract import health
 from home_guard_project.fleet_contract.legacy import parse_heartbeat
 
-from .. import audit, redact
+from .. import audit, notice_delivery, redact
 from ..boxes import box_identity, box_lineage  # noqa: F401  (box_identity: imported from here by tests)
 from ..deps import TEXT_MAX, SessionDep, check_length, require_id, require_role
 from ..models import Camera, Customer, Device, Event, Feedback, Staff
@@ -114,6 +114,7 @@ def build_summaries(session: Session, now: datetime, customer_id: Optional[int] 
         Feedback.received_at >= now - timedelta(days=7)).group_by(Feedback.device_pk)).all())
     inventory = camera_inventory(session, now, [r[0] for r in rows])
     replaced, old_sites = box_lineage(session)
+    key_changed = notice_delivery.host_key_changed_boxes(session)
 
     out: list[DeviceSummary] = []
     for dev, cust_name, name_source in rows:
@@ -127,6 +128,10 @@ def build_summaries(session: Session, now: datetime, customer_id: Optional[int] 
                                         names={c.camera: c.owner_name for c in cams if c.owner_name})
         else:
             v, reasons = health.verdict(hb, now)
+        if dev.device_id in key_changed and dev.id not in replaced:  # owner notices cannot be pushed to it
+            reasons.append({"code": "notice_host_key", "message": notice_delivery.HOST_KEY_WARNING,
+                            "severity": "warning"})
+            v = min(v, "warning", key=_SEVERITY_RANK.__getitem__)
         current_cams = [c for c in cams if c.current]
         stale = sum(1 for c in current_cams if c.in_heartbeat and health.camera_stale(c.heartbeat_newest, now))
         out.append(DeviceSummary(
