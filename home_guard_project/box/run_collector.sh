@@ -32,6 +32,10 @@ export MKL_NUM_THREADS="${MKL_NUM_THREADS:-$OMP_NUM_THREADS}"
 
 # Lines such as "[h264 @ 000001f0] error while decoding MB 59 17" from the video decoder.
 DECODER_NOISE='^\[[A-Za-z0-9_]+ @ [0-9a-fA-Fx]+\]'
+# Our own log line ("2026-10-09 10:12:43,001 WARNING ..."). The decoder writes its messages in pieces on the same
+# pipe, so one of ours can land inside one of its lines; such a line is kept. Dropping it lost about one log line in
+# ten (2026-10-08: the 22:06 "alert=" line; 2026-10-09: the "VLM fallback to" line of the ch1 timeout).
+LOG_STAMP='[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9],[0-9][0-9][0-9] [A-Z]'
 
 # CAMERAS_YAML and LOG_DIR come from _common.sh (the box's layout, see paths.py).
 ALIVE_FILE="$LOG_DIR/collector.alive"
@@ -133,9 +137,11 @@ while true; do
     collector_log="$LOG_DIR/collector-$(date +%F).log"
     log "Starting $mode (overlay: $HOME_GUARD_CONFIG_OVERLAY, layout: $HG_LAYOUT)" >> "$RUNNER_LOG"
     # The video decoder prints a line for every damaged frame, which would bury
-    # the real log lines and grow the file without limit. Drop those lines.
+    # the real log lines and grow the file without limit. Drop those lines, but
+    # never one that carries a line of ours (LOG_STAMP).
     "$PY" -u "${entry[@]}" \
-        > >(grep --line-buffered -a -v -E "$DECODER_NOISE" >> "$collector_log") 2>&1 &
+        > >(NOISE="$DECODER_NOISE" STAMP="$LOG_STAMP" LC_ALL=C \
+              awk '$0 !~ ENVIRON["NOISE"] || $0 ~ ENVIRON["STAMP"] { print; fflush() }' >> "$collector_log") 2>&1 &
     child=$!
     cat "/proc/$child/winpid" > "$PID_FILE" 2>/dev/null || echo "$child" > "$PID_FILE"
 
