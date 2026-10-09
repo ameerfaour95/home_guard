@@ -1715,6 +1715,10 @@ class OwnerAgentV2:
                 # A photo sent in this very turn is right there above the answer: no "✓ התמונה נשלחה" line under it
                 # (2026-10-09 12:47). Without an answer the receipt is the reply, as before.
                 lines = [r for r in shown if not _photo_just_sent(r)] if str(said or "").strip() else shown
+                if any(_photo_just_sent(r) for r in shown):
+                    # 13:00 replay: two photos went out, and an extra media call the turn's limit refused added
+                    # "✗ שליחת הסרטון לא הצליח: אפשר לשלוח עד 3" under the answer - noise, nothing the owner asked.
+                    lines = [r for r in lines if not (r.status == FAILED and r.reason == "too_many")]
                 reply_text = render_reply(said, lines, lang, self.retention_days, snapshot)
                 if not reply_text:
                     reply_text = t("unavailable" if failed else "nothing_done", lang)

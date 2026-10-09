@@ -300,6 +300,9 @@ def handle(model: Any, ctx: Any, activities: Any, events_book: Any, alert_handle
         place = place if place in am.PLACES else next(iter(am.places_in(text)), "")
         place_words = str(got.get("place_words") or "")[:60]
         cause = " ".join(str(got.get("cause") or "").split())[:120] or " ".join(text.split())[:120]
+        for said_place in {p for p in (am.PLACES.get(place, {}).get("he"), str(got.get("place_words") or "").strip()) if p}:
+            if cause.endswith(" " + said_place):         # "...את הלדים במדרגות" + "במדרגות של הכניסה": once
+                cause = cause[: -len(said_place) - 1].rstrip()
         cause_en = " ".join(str(got.get("cause_en") or "").split())[:160]
         by = str((ctx.speaker or {}).get("name") or "owner")
         fact_id = str(got.get("fact") or "")
