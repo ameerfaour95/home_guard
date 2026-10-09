@@ -58,6 +58,8 @@ GLOSSARY: Dict[str, Dict[str, str]] = {
         "yard": "חצר",
         "front door": "דלת הכניסה",
         "package": "חבילה",
+        "pickup truck": "טנדר",
+        "hat": "כובע",
         "weapon": "נשק",
         "crowbar": "מוט ברזל",
     },
@@ -79,6 +81,13 @@ _RESPONSE_FORMAT: Dict[str, Any] = {
 
 _NUMBER = re.compile(r"\d+")
 _SCRIPT = {"he": re.compile(r"[֐-׿]"), "ar": re.compile(r"[؀-ۿ]")}
+
+
+def foreign_script(text: str, lang: str) -> bool:
+    """Does *text*, meant to be in *lang*, carry letters of the OTHER owner language? 2026-10-09 09:43 the
+    vision model's own Hebrew read "אדם בقبعة עובר ... שמתקען": Arabic words inside a Hebrew alert."""
+    others = [rx for code, rx in _SCRIPT.items() if code != lang]
+    return lang in _SCRIPT and any(rx.search(str(text or "")) for rx in others)
 
 
 class TranslationError(Exception):
@@ -129,6 +138,8 @@ def check(source: Mapping[str, str], answer: Any, lang: str, keep: Sequence[str]
         script = _SCRIPT.get(lang)
         if script and not script.search(value) and script.search(src) is None:
             raise TranslationError(f"{field} is still in English")
+        if foreign_script(value, lang):
+            raise TranslationError(f"{field} mixes in another language's letters")
         out[field] = value
     return out
 

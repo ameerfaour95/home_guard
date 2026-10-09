@@ -469,6 +469,10 @@ def owner_summary(summary: str, summary_owner: str, lang: str) -> str:
         return summary
     if (text.startswith("<") and text.endswith(">")) or text.strip("<>.\"' ").lower() in _PLACEHOLDERS:
         return summary
+    from .messenger import foreign_script  # noqa: PLC0415 - messenger imports this module
+
+    if foreign_script(text, lang):      # Hebrew with Arabic words in it (2026-10-09): the English is clearer
+        return summary
     return text
 
 

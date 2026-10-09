@@ -233,5 +233,27 @@ class WorkerWiringTest(unittest.TestCase):
         self.assertEqual(text, graded_alert_text("suspicious", "gate", "גבר ליד השער.", "tries the gate", "he"))
 
 
+class ForeignScriptTest(unittest.TestCase):
+    """2026-10-09 09:43: the vision model's Hebrew carried Arabic words ("אדם בقبعة ... שמתקען")."""
+
+    MIXED = "אדם בقبعة עובר ליד אדם אחר שמתקען לתוך דלת רכב פתוחה."
+
+    def test_mixed_letters_are_found(self) -> None:
+        self.assertTrue(msg.foreign_script(self.MIXED, "he"))
+        self.assertFalse(msg.foreign_script(HE["summary"], "he"))
+        self.assertFalse(msg.foreign_script("Camera 6 at 14:05", "he"))
+        self.assertTrue(msg.foreign_script("رجل عند הבוابة", "ar"))
+        self.assertFalse(msg.foreign_script(self.MIXED, "en"))
+
+    def test_the_translator_answer_with_arabic_is_refused(self) -> None:
+        with self.assertRaises(msg.TranslationError):
+            msg.check(EN, {"summary": self.MIXED, "why": "מנסה לפתוח את השער"}, "he")
+
+    def test_the_model_own_mixed_hebrew_falls_back_to_english(self) -> None:
+        english = "A person in a hat walks past a man leaning into an open car door."
+        self.assertEqual(inf.owner_summary(english, self.MIXED, "he"), english)
+        self.assertEqual(inf.owner_summary(english, HE["summary"], "he"), HE["summary"])
+
+
 if __name__ == "__main__":
     unittest.main()
