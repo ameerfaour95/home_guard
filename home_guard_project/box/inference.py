@@ -2893,8 +2893,13 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                     # A person down who was working reads as "not violence" (alert_texts has no line of its own).
                     kind = "violence" if look["class"] == "person_down" else look["class"]
                     look_line = second_look_line(kind, look["what_it_is"], look["evidence_frame"], lang)
-        # The reminder ("nobody answered") only for a red that is sure: verified, or a clear class.
-        remind = label == "escalation" and (look is None or bool(look.get("verified")))
+        # The reminder ("nobody answered") only for a red that is sure (owner, 2026-10-08): a second look confirmed it,
+        # or a clear class that needs no look (fire, a break-in into the house, climbing in, motionless). A red with no
+        # look at all is not sure: 2026-10-09 14:08 / 14:43 / 14:46 / 15:50 reminded the owner of his own workers.
+        from .alert_guards import clear_class  # noqa: PLC0415
+
+        remind = label == "escalation" and (bool(look is not None and look.get("verified"))
+                                            or clear_class(f"{why} {reason} {summary}"))
         log.info("[%s] alert=%s label=%s summary=%s", camera_name, cmd, label, summary)
         muted = bool(assistant is not None and assistant.is_muted(camera_name))
         alert_id = job.stem if job is not None else f"{camera_name}_{int(alert_ts)}"

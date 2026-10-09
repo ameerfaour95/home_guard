@@ -160,15 +160,16 @@ class GradedAlertWiringTest(unittest.TestCase):
 
     def test_an_escalation_is_loud_in_the_box_language_and_reminded(self) -> None:
         assistant = _Assistant()
-        backend, job = self._work({"summary": "A man breaks the window.", "label": "escalation", "people": 1,
-                                   "why": "breaks in", "summary_owner": "גבר שובר את החלון."}, assistant, "he")
-        expected = graded_alert_text("escalation", "gate", "גבר שובר את החלון.", "breaks in", "he")
+        # A clear class (a break-in into the house): the reminder needs no second look (2026-10-09).
+        backend, job = self._work({"summary": "A man breaks into the house.", "label": "escalation", "people": 1,
+                                   "why": "breaks in", "summary_owner": "גבר פורץ לבית."}, assistant, "he")
+        expected = graded_alert_text("escalation", "gate", "גבר פורץ לבית.", "breaks in", "he")
         self.assertEqual(backend.languages, ["he"])
         (sent,) = assistant.sent
         self.assertEqual((sent["text"], sent["silent"], sent["lang"]), (expected, False, "he"))
         self.assertEqual(assistant.reminders, [("gate_100_alert", expected, "he")])
         self.assertEqual((job.alert["why"], job.alert["summary_owner"], job.alert["silent"], job.alert["people"]),
-                         ("breaks in", "גבר שובר את החלון.", False, 1))
+                         ("breaks in", "גבר פורץ לבית.", False, 1))
         self.assertEqual(job.alert["alert_command"], "[call_owner]")
 
     def test_a_normal_scene_is_silent_and_never_reminded(self) -> None:
