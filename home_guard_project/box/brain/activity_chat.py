@@ -62,6 +62,16 @@ def asks_to_tag(text: str) -> bool:
     return bool(_TAG.search(str(text or "")))
 
 
+_STOP_REPEATING = re.compile(r"(?<![א-ת])(?:לא צריך|אין צורך|אל ת|די|תפסיק|מספיק)\s*(?:\S+\s+){0,2}?ל?(?:חזור|לחזור|תחזור|חוזר)|"
+                             r"\b(?:stop|no need to|don'?t)\s+(?:\w+\s+){0,2}?repeat", re.IGNORECASE)
+
+
+def stop_repeating(text: str) -> bool:
+    """"הבנתי, אתה לא צריך לחזור על זה" (13:55:40): a short "בסדר." - never the thing again."""
+    text = str(text or "")
+    return "?" not in text and bool(_STOP_REPEATING.search(text))
+
+
 def is_ack(text: str) -> bool:
     """"סבבה", "בסדר הבנתי", "תודה", "👍": an acknowledgement and nothing else."""
     return bool(_ACK.match(str(text or "")))
@@ -170,7 +180,8 @@ Answer with ONE JSON object and nothing else:
  "actions": ["<from ACTIONS: what the owner says is normal, or what the alert shows that he explains>"],
  "place": "<from PLACES, or empty>",
  "place_words": "<the owner's own words for the place, or empty>",
- "cause": "<short, in the owner's language, from his words: who and what work, e.g. החשמלאים שמתקינים לדים>",
+ "cause": "<a short noun phrase in the owner's language, from his words: who and what work, e.g. החשמלאים
+           שמתקינים לדים - never a copy of his whole message>",
  "cause_en": "<the same in English>",
  "who_mark": "<the id of a live mark when he says these are those people, else empty>",
  "until": "<HH:MM only if he said until when, else empty>"}

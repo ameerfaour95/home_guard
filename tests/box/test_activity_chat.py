@@ -245,6 +245,22 @@ class GuardUnitTest(unittest.TestCase):
         for words in ("בסדר, אבל למה?", "הבנתי אתה לא צריך לחזור על זה", "סבבה תשלח תמונה"):
             self.assertFalse(ac.is_ack(words), words)
 
+    def test_stop_repeating(self) -> None:
+        self.assertTrue(ac.stop_repeating("הבנתי אתה לא צריך לחזור על זה"))
+        self.assertTrue(ac.stop_repeating("די לחזור על זה"))
+        self.assertFalse(ac.stop_repeating("למה אתה חוזר על זה?"))
+        self.assertFalse(ac.stop_repeating("על ידי החשמלאים"))
+
+    def test_the_video_is_of_the_last_picture(self) -> None:
+        from home_guard_project.box.brain.agent import _last_photo_camera  # noqa: PLC0415
+
+        state = ChatState()
+        h1 = state.add_handle("photo", "a.jpg", PERGOLA, T(13, 1))
+        h2 = state.add_handle("photo", "b.jpg", ENTRANCE, T(13, 1))
+        state.add_turn("1", "יש מישהו בחוץ?", "...", [h1, h2], [], T(13, 1))
+        self.assertEqual(_last_photo_camera(state, T(13, 2)), ENTRANCE)
+        self.assertEqual(_last_photo_camera(state, T(13, 30)), "")             # too long ago
+
     def test_definite_hebrew(self) -> None:
         self.assertEqual(ac.definite_he("כניסה ראשית"), "הכניסה הראשית")
         self.assertEqual(ac.definite_he("הפרגולה"), "הפרגולה")

@@ -373,16 +373,44 @@ def place_text(fact: ActivityFact, lang: str = "he") -> str:
 
 
 def context_question(fact: ActivityFact) -> str:
-    """The red's second look with the owner's context (a "true" lowers the red; unclear is false and keeps it)."""
+    """The red's second look with the owner's context (a "true" lowers the red; unclear is false and keeps it).
+
+    Worded on the real reds of 2026-10-09 (qwen3.5-9b, 5 frames): the bare "consistent? answer false if anyone looks
+    hurt..." got "no" on all three, even while describing the work itself; naming what the work looks like and the
+    privacy filter's see-through outlines got the 14:03 "people working on the ground"."""
     cause = fact.cause_en or fact.cause
     where = place_text(fact, "en")
-    return (f'The owner of the house said: "{cause}". So {actions_text(fact.actions, "en")}'
-            f'{" " + where if where else ""} here is part of that work. Is what you see consistent with that work? '
-            "Answer false if anyone looks hurt, unconscious or in pain, is attacked, threatened or held down, or if "
-            "something is being broken into or stolen.")
+    acts = [a for a in fact.actions if a != "car_door"]
+    return (f'The owner of the house told us: "{cause}"{" " + where if where else ""} here, and while they work this '
+            f'means {actions_text(acts, "en")}. People may look blurred or like see-through outlines: that is a '
+            "privacy filter. Is what you see consistent with that work - people lying, kneeling or bending on the "
+            "ground while others stand or walk by calmly? Answer false on a clear sign of trouble: someone hurt, "
+            "bleeding or unconscious, someone hitting, kicking or holding another person down, people rushing to "
+            "help someone, or something being broken into or stolen.")
+
+
+# A "no" that names harm or worry keeps the red (checked on its words without what follows a "not").
+WORRY = _any([r"\bfall", r"\bfell\b", r"\bmedical", r"\bwound", r"\binjur", r"\bhurt", r"\bcollaps", r"\bfaint",
+              r"\bunconscious", r"\bhelp", r"\bdistress", r"\bpain\b", r"\bemergenc", r"\bambulance", r"\bvictim",
+              r"\baggress", r"\bthreat", r"\bfight", r"\battack", r"\bassault",
+              r"נופל", r"(?<![א-ת])נפל", r"נפגע", r"פגוע", r"פצוע", r"רפואי", r"עזרה", r"מעולף", r"התמוטט", r"כאב",
+              r"תוקף", r"מאיים", r"אלימות"])
+
+
+def only_the_work(fact: ActivityFact, what_it_is: str) -> bool:
+    """A "not consistent" whose own words describe just the explained work ("a person lying on the ground and
+    another person standing nearby", 15:44) and no harm, worry or break-in contradicts itself, like alert_guards'
+    answer_names. Any harm word, or no explained action named, and the red stays."""
+    from .alert_guards import _NEGATED  # noqa: PLC0415
+
+    what = str(what_it_is or "")
+    kept = _NEGATED.sub(" ", what)
+    named = (set(actions_in(kept)) - {"car_door"}) & set(fact.actions)
+    return bool(named) and not WORRY.search(what) and not _harm(what) and not BREAK_IN.search(kept)
 
 
 VERIFY_TIMEOUT_SEC = 15.0
+LOOK_FRAMES = 5
 
 
 def red_look(backend: Any, frames: List[Any], camera: str, ts: float, text: str, lang: str = "he",
@@ -414,11 +442,15 @@ def red_look(backend: Any, frames: List[Any], camera: str, ts: float, text: str,
             return record
         timeout = VERIFY_TIMEOUT_SEC if timeout is None else timeout
         box: Dict[str, Any] = {}
+        frames = list(frames or [])
+        if len(frames) > LOOK_FRAMES:                         # spread over the clip, as worded and tested
+            frames = [frames[int(i * (len(frames) - 1) / (LOOK_FRAMES - 1))] for i in range(LOOK_FRAMES)]
+        record["frames"] = len(frames)
 
         def call() -> None:
+            # English: the answer is read by code (only_the_work), never shown to the owner.
             try:
-                box["answer"] = verify(frames, question, language="Hebrew" if lang == "he" else "English",
-                                       timeout=timeout)
+                box["answer"] = verify(frames, question, language="English", timeout=timeout)
             except TypeError:
                 try:
                     box["answer"] = verify(frames, question)
@@ -445,10 +477,13 @@ def red_look(backend: Any, frames: List[Any], camera: str, ts: float, text: str,
                           evidence_frame=answer.get("evidence_frame") or 0)
             from .alert_guards import _NEGATED  # noqa: PLC0415
 
-            if answer["confirmed"] and not _harm(what) and not BREAK_IN.search(_NEGATED.sub(" ", what)):
+            if answer["confirmed"] and not _harm(what) and not WORRY.search(what) \
+                    and not BREAK_IN.search(_NEGATED.sub(" ", what)):
                 record["lowered"] = True
             elif answer["confirmed"]:
                 record["reason"] = "the answer itself names harm"
+            elif only_the_work(fact, what):
+                record.update(lowered=True, reason="the no only describes the explained work")
         return record
     except Exception as exc:  # noqa: BLE001 - the red goes out as it is
         log.warning("[%s] activity look failed; the red stays: %s", camera, exc)

@@ -335,6 +335,21 @@ def _look_summary(results: Sequence[str]) -> str:
     return ""
 
 
+_ASKS_VIDEO = re.compile(r"(?<![א-ת])[והשב]?(?:סרטון|וידאו|וידיאו|קליפ)(?![א-ת])|\b(?:video|clip)\b", re.IGNORECASE)
+
+
+def _last_photo_camera(state: ChatState, now: float, within: float = 900.0) -> str:
+    """The camera of the last live picture sent in the chat (the last turn that showed one, these 15 minutes)."""
+    for turn in reversed(state.turns):
+        if not isinstance(turn, dict) or now - float(turn.get("ts") or 0) > within:
+            continue
+        photos = [state.handles.get(h) for h in turn.get("handles") or []]
+        photos = [p for p in photos if isinstance(p, dict) and p.get("kind") == "photo" and p.get("camera")]
+        if photos:
+            return str(photos[-1]["camera"])
+    return ""
+
+
 def _asked_last(state: ChatState) -> bool:
     """The bot's last reply asked something ("רוצה סרטון?"): a "סבבה" now may be the answer, not an ack."""
     for turn in reversed(state.turns):
@@ -873,7 +888,8 @@ class OwnerAgentV2:
         if ctx.clarification is not None or _kept_known(ctx.receipts):
             return again
         if unbacked_claims(again, ctx.receipts):
-            again = honest_answer(again, ctx.receipts, ctx.lang, ctx.text)
+            # "עדיין לא שמרתי מי הם" is false while they ARE remembered (2026-10-09 13:02 replay).
+            again = honest_answer(again, ctx.receipts, ctx.lang, ctx.text, say_not_done=not marks)
         if (hollow(again) or not again.strip()) and not any(r.status == DONE for r in ctx.receipts):
             return live_status(self.services, snapshot, ctx.lang, now)
         if bool(marks) and offers_mark(again) and not any(r.tool == "mark_known" for r in ctx.receipts):
@@ -1470,6 +1486,8 @@ class OwnerAgentV2:
         elif choice is None and pending is None and activity_chat.is_ack(text) and not _asked_last(state):
             # "סבבה" / "בסדר הבנתי" / "תודה" (2026-10-09 13:55: answered with the memory status, twice): 👍.
             known_done = t("ack_short", lang)
+        elif choice is None and pending is None and activity_chat.stop_repeating(text):
+            known_done = t("ack_other", lang)            # "הבנתי, אתה לא צריך לחזור על זה": "בסדר." and nothing more
         if snapshot is not None and known_done is None:
             try:
                 known_done = self._complete_known(ctx, pending, text, choice, snapshot, now)
@@ -1640,6 +1658,16 @@ class OwnerAgentV2:
             if not code_only and ctx.clarification is None and "look_around" in called and not str(answer).strip():
                 # 13:00 "יש מישהו בחוץ?": photos and no word. One summary line from what each camera showed.
                 answer = _look_summary(ctx.results)
+            if not code_only and _ASKS_VIDEO.search(text) and not any(
+                    r.tool in ("record_clip", "send_media", "check_camera") and r.status == DONE for r in ctx.receipts):
+                # 13:02 "או מביא סרטון למה תמונה?" got "מאיזו מצלמה?": the video of the picture just sent, at once.
+                camera = _last_photo_camera(state, now)
+                if camera:
+                    ctx.clarification = None
+                    called.append("record_clip")
+                    self._dispatch(ctx, "record_clip", {"camera": camera, "seconds": 10}, True, ["record_clip"])
+                    if any(r.tool == "record_clip" and r.status == DONE for r in ctx.receipts):
+                        answer = ""
             if (not code_only or known_done is not None) and asks_retag(text) and not any(
                     r.tool == "retag_clip" and r.status == DONE for r in ctx.receipts):
                 # "שמור מידע ושנה תיוג / התיוג זה ..." (2026-10-09): the tag change was dropped; it is done in code.

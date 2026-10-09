@@ -155,14 +155,40 @@ class RedLookTests(Base):
         look = am.red_look(backend, ["f"], CH6, at(14, 3), RED_1403, "he", activities=self.book)
         self.assertTrue(look["lowered"])
         self.assertIn("electricians installing LED lights", backend.calls[0])
-        self.assertIn("Answer false if anyone looks hurt", backend.calls[0])
+        self.assertIn("Answer false on a clear sign of trouble: someone hurt", backend.calls[0])
 
     def test_not_consistent_unsure_or_no_answer_keeps_the_red(self):
         self.electricians()
-        for backend in (Backend({"confirmed": False, "what_it_is": "a person on the ground"}), Backend(None),
+        for backend in (Backend({"confirmed": False, "what_it_is": "a man collapsed on the ground"}), Backend(None),
                         Backend(error=RuntimeError("429")), Backend({"confirmed": "yes"})):
             look = am.red_look(backend, ["f"], CH6, at(14, 3), RED_1403, "he", activities=self.book)
             self.assertFalse(look["lowered"])
+
+    def test_a_no_that_only_describes_the_work_contradicts_itself(self):
+        # 15:44, qwen3.5-9b: "not consistent" - "A person lying on the ground and another person standing nearby".
+        self.electricians()
+        cases = {"A person lying on the ground and another person standing nearby": True,
+                 "a person lying on the ground while another stands over them": True,
+                 "A person lying on the ground, possibly due to a fall or medical issue": False,
+                 "A person lying on the ground with a visible wound on their arm": False,
+                 "two men arguing near the car": False,
+                 "a man kicks a person lying on the ground": False}
+        for what, lowered in cases.items():
+            look = am.red_look(Backend({"confirmed": False, "what_it_is": what}), ["f"], CH6, at(14, 3), RED_1403, "he",
+                               activities=self.book)
+            self.assertEqual(look["lowered"], lowered, what)
+
+    def test_at_most_five_frames_spread_over_the_clip(self):
+        self.electricians()
+        seen = []
+
+        class Counting(Backend):
+            def verify(self, frames, question, language="English", timeout=15.0):
+                seen.append(list(frames))
+                return {"confirmed": True, "what_it_is": "work"}
+
+        am.red_look(Counting(), list(range(15)), CH6, at(14, 3), RED_1403, "he", activities=self.book)
+        self.assertEqual(seen[0], [0, 3, 7, 10, 14])
 
     def test_a_late_answer_keeps_the_red(self):
         self.electricians()
@@ -267,7 +293,7 @@ class WorkerOrderTest(ge.GuardCase):
         self.assertEqual(self.assistant.reminders, [])
 
     def test_not_consistent_falls_back_to_the_plain_look(self):
-        answers = iter([{"confirmed": False, "what_it_is": "a man on the ground", "evidence_frame": 1},
+        answers = iter([{"confirmed": False, "what_it_is": "a man fell and lies still", "evidence_frame": 1},
                         {"confirmed": True, "what_it_is": "a man collapsed", "evidence_frame": 1}])
         job = self.work(ge.Backend(ge.SecondLookTest.DOWN, verify=lambda f, q, **k: next(answers)), ge.T0,
                         camera=ge.DOOR)
