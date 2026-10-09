@@ -2214,6 +2214,13 @@ def appearance_only(text: str) -> bool:
     return only(text)
 
 
+def presence_only(why: str, summary: str = "") -> bool:
+    """alert_guards.presence_only: the why says only that someone walks or stands there, the summary names no action."""
+    from .alert_guards import presence_only as only  # noqa: PLC0415
+
+    return only(why, summary)
+
+
 def second_look(backend: Any, frames: List[Any], classes: Sequence[str], lang: str,
                 timeout: Optional[float] = None) -> Dict[str, Any]:
     """Ask *backend* once, on the alert's own frames, whether the red's reason (*classes*: weapon / tool_weapon /
@@ -2528,7 +2535,8 @@ def send_arrival_line(arrival: Dict[str, Any], box_settings: Dict[str, Any], env
         log.warning("arrival line not sent: %s", exc)
 
 
-def _event_story(event: Any, alert_id: str, alert_ts: float, lang: str, described: Sequence[str] = ()) -> str:
+def _event_story(event: Any, alert_id: str, alert_ts: float, lang: str, described: Sequence[str] = (),
+                 not_people: Sequence[str] = ()) -> str:
     """The first lines of an UPDATE in an event's thread when the tracker gave the event its entities (stage 2a): who
     is new (``story.new_people_line``), then the story so far (``story.story_line``); the new observation follows
     under them. "" for an event's first message or without entities: then the update reads as before. Never raises."""
@@ -2539,9 +2547,11 @@ def _event_story(event: Any, alert_id: str, alert_ts: float, lang: str, describe
         from .story import new_people_line, story_line  # noqa: PLC0415
 
         session = EVENTS.session_of_alert(alert_id) or {}
-        head = new_people_line(event.fresh, event.unmarked, event.known_text if event.unmarked else "", lang)
-        line = story_line(session, lang, now=alert_ts, in_view=event.entities, announced=event.fresh,
-                          described=described)
+        # Ids the describer saw were not people (a wall lamp the tracker followed) are neither new nor in view.
+        fresh = [i for i in event.fresh if i not in not_people]
+        in_view = [i for i in event.entities if i not in not_people]
+        head = new_people_line(fresh, event.unmarked, event.known_text if event.unmarked else "", lang)
+        line = story_line(session, lang, now=alert_ts, in_view=in_view, announced=fresh, described=described)
         return "\n".join(x for x in (head, line) if x)
     except Exception as exc:  # noqa: BLE001 - the update goes out as before
         log.warning("event story not written: %s", exc)
@@ -2637,7 +2647,8 @@ def _describe_alert(job: AlertJob, frames: List[Any], box_settings: Dict[str, An
         lines = list(top)
         if event is not None and getattr(event, "reply_to", None) is not None:
             story = _event_story(event, alert_id, alert_ts, lang,
-                                 described=[e["id"] for e in told["entities"]])
+                                 described=[e["id"] for e in told["entities"]],
+                                 not_people=(record.get("answer") or {}).get("not_people") or ())
             if story:
                 lines.append(story)
         text = owner_guard("\n".join(x for x in [*lines, base, *bottom] if x), camera, lang)
@@ -2881,6 +2892,13 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
             label = shown_label = "normal"
             cmd = LABEL_COMMANDS[label]
             decision.update(label=label, final_label=label, downgraded="appearance only")
+        # Presence alone (someone walking or standing, a place, a colour) is not suspicious either (2026-10-09 18:22
+        # ch6 "הולך לאורך המסלול"): the why is held to every token, the summary only searched for an action.
+        if label == "suspicious" and not fact and presence_only(f"{why} {reason}", summary):
+            log.info("[%s] suspicious only for presence (%s); normal", camera_name, why or reason)
+            label = shown_label = "normal"
+            cmd = LABEL_COMMANDS[label]
+            decision.update(label=label, final_label=label, downgraded="presence only")
         # Lingering is a question of time, which the tracker measures (stage 2b): a "suspicious" only for loitering /
         # standing / looking around waits up to 20 s for the investigator. A house note's verdict and an escalation
         # are left alone.
@@ -2933,8 +2951,13 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                     # A person down who was working reads as "not violence" (alert_texts has no line of its own).
                     kind = "violence" if look["class"] == "person_down" else look["class"]
                     look_line = second_look_line(kind, look["what_it_is"], look["evidence_frame"], lang)
-        # The reminder ("nobody answered") only for a red that is sure: verified, or a clear class.
-        remind = label == "escalation" and (look is None or bool(look.get("verified")))
+        # The reminder ("nobody answered") only for a red that is sure (owner, 2026-10-08): a second look confirmed it,
+        # or a clear class that needs no look (fire, a break-in into the house, climbing in, motionless). A red with no
+        # look at all is not sure: 2026-10-09 14:08 / 14:43 / 14:46 / 15:50 reminded the owner of his own workers.
+        from .alert_guards import clear_class  # noqa: PLC0415
+
+        remind = label == "escalation" and (bool(look is not None and look.get("verified"))
+                                            or clear_class(f"{why} {reason} {summary}"))
         log.info("[%s] alert=%s label=%s summary=%s", camera_name, cmd, label, summary)
         muted = bool(assistant is not None and assistant.is_muted(camera_name))
         alert_id = job.stem if job is not None else f"{camera_name}_{int(alert_ts)}"

@@ -151,6 +151,23 @@ class EventsTest(GuardCase):
         self.assertEqual(len(self.assistant.sent), 2)
         self.assertEqual(self.assistant.reminders, [f"{CAM}_{int(T0 + 60)}_alert"])   # a clear class
 
+    def test_a_red_with_no_look_gets_no_reminder(self):
+        # 2026-10-09 14:08 / 14:43 / 14:46 / 15:50: every red with no second look got "nobody answered yet" 5 min
+        # later. Owner (2026-10-08): the reminder only for a verified red, or a clear class that needs no look.
+        verify = mock.Mock()
+        job = self.work(Backend(answer("escalation", why="approaching the car, opening the door, trying to take items",
+                                       summary="A person opens the door of a white car."), verify=verify), T0)
+        verify.assert_not_called()
+        self.assertEqual(job.alert["label"], "escalation")
+        self.assertTrue(self.assistant.sent[0]["text"].startswith("🔴"))
+        self.assertEqual(self.assistant.reminders, [])
+        for k, why in enumerate(("smoke and flames at the gate", "a man lying motionless on the ground",
+                                 "climbing in through the window"), 1):
+            with self.subTest(why=why):
+                self.assistant = Assistant()
+                job = self.work(Backend(answer("escalation", why=why), verify=verify), T0 + 7200 * k)
+                self.assertEqual(self.assistant.reminders, [job.stem])
+
     def test_case_memory_runs_only_when_the_event_sends(self):
         with mock.patch.object(inf, "_case_memory", return_value=("alert", None, None)) as memory:
             self.work(Backend(answer("normal")), T0)
@@ -247,6 +264,18 @@ class AppearanceTest(GuardCase):
         # eval_set_v2 smartbench_0248: why "hooded sweatshirt", summary "moving a bicycle near the house" = a theft.
         job = self.work(Backend(answer("suspicious", why="Person wearing a hooded sweatshirt",
                                        summary="A person appears to be moving a bicycle near the house.")), T0)
+        self.assertEqual(job.alert["label"], "suspicious")
+        self.assertNotIn("downgraded", job.alert)
+
+    def test_someone_walking_by_is_normal(self):
+        # 2026-10-09 18:22 ch6 went out 🟡 for "walks along the path".
+        job = self.work(Backend(answer("suspicious", why="הולך לאורך המסלול",
+                                       summary="A person appears to be walking along a paved path next to a stone wall "
+                                               "and a black fence. The individual is wearing dark clothing.")), T0)
+        self.assertEqual((job.alert["label"], job.alert["downgraded"]), ("normal", "presence only"))
+        job = self.work(Backend(answer("suspicious", why="אדם נראה הולך על שביל הכניסה עם שק לבן גדול",
+                                       summary="A person walks across the driveway carrying a large white bag.")),
+                        T0 + 600)
         self.assertEqual(job.alert["label"], "suspicious")
         self.assertNotIn("downgraded", job.alert)
 

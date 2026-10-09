@@ -528,3 +528,69 @@ class JoinAndScoreTest(unittest.TestCase):
         (only,) = t.snapshot(T0, T0 + 1)
         self.assertEqual(only["max_conf"], 0.85)
         self.assertEqual(t.facts(T0, T0 + 1).people[0].max_conf, 0.85)
+
+
+class FixtureTest(unittest.TestCase):
+    """2026-10-09 17:44 ch1: the tracker followed the wall lamp as people (P1, P2, P4 of the clip's .tracks.json: boxes
+    still to 0.001 for 611 s, max 0.71-0.78) and the owner read "P1, P2, P4 · מנורה שחורה על הקיר"."""
+
+    LAMPS = ((0.5156, 0.1559, 0.5328, 0.2113), (0.6096, 0.0364, 0.6232, 0.0791), (0.3145, 0.4242, 0.3473, 0.5135))
+    WALKER = ((0.368, 0.0861, 0.4109, 0.2319), (0.3041, 0.1475, 0.3541, 0.3309), (0.2674, 0.1872, 0.3279, 0.3967))
+
+    @staticmethod
+    def lamp(box, i: int, conf: float):
+        jitter = 0.0003 * (i % 3)
+        return (0, conf, box[0] + jitter, box[1], box[2] + jitter, box[3])
+
+    def feed(self, t: tr.CameraTracker, seconds: float, confs=(0.62, 0.71, 0.66, 0.78), start: float = T0) -> float:
+        n = int(seconds * 2)
+        for i in range(n):
+            t.update(start + i * 0.5, [self.lamp(b, i, confs[(i + k) % len(confs)]) for k, b in enumerate(self.LAMPS)])
+        return start + (n - 1) * 0.5
+
+    def test_the_lamp_is_no_person_after_a_minute(self) -> None:
+        t = tr.CameraTracker("ch1")
+        end = self.feed(t, 120)
+        for k, box in enumerate(self.WALKER):                     # the real person walks past while the lamps stay
+            t.update(end + 0.5 + k * 0.5, [(0, 0.9) + box] + [self.lamp(b, k, 0.7) for b in self.LAMPS])
+        snap = t.snapshot(end - 5, end + 2)
+        self.assertEqual(len(snap), 1)
+        self.assertGreater(snap[0]["max_conf"], 0.85)
+        self.assertEqual(len(t.facts(end - 5, end + 2).people), 1)
+        shown = [x["shown"] for x in t.tracks_with_boxes(end - 5, end + 2)]
+        self.assertEqual(sorted(shown), [False, False, False, True])   # kept for labeling, never shown
+
+    def test_a_lamp_lost_and_found_at_the_same_spot_is_one_stay(self) -> None:
+        t = tr.CameraTracker("ch1")
+        end = self.feed(t, 50)
+        again = end + 10                                          # lost (4 s), back at the very same spot
+        last = self.feed(t, 15, start=again)
+        snap = t.snapshot(again, last)
+        self.assertEqual(snap, [])                                # 50 s + 15 s of one still, unsure "person"
+
+    def test_real_people_standing_still_stay_people(self) -> None:
+        # Sure at least once (a person close by, standing a long time) ...
+        t = tr.CameraTracker("ch1")
+        self.feed(t, 120, confs=(0.62, 0.71, 0.86))
+        self.assertEqual(len(t.snapshot(T0, T0 + 120)), 3)
+        # ... or a high mean score ...
+        t = tr.CameraTracker("ch1")
+        self.feed(t, 120, confs=(0.77, 0.78, 0.79))
+        self.assertEqual(len(t.snapshot(T0, T0 + 120)), 3)
+        # ... or still only for a short while, or moving a little: all people.
+        t = tr.CameraTracker("ch1")
+        self.feed(t, 40)
+        self.assertEqual(len(t.snapshot(T0, T0 + 40)), 3)
+        t = tr.CameraTracker("ch1")
+        walk(t, T0, line_points((0.3, 0.6), (0.33, 0.6), 240), make=lambda x, y: person(x, y, conf=0.6))
+        self.assertEqual(len(t.snapshot(T0, T0 + 120)), 1)
+
+    def test_entities_skip_a_fixture_like_a_parked_car(self) -> None:
+        from home_guard_project.box import entities as en
+        tracks = [{"id": 1, "kind": "person", "first_seen": T0, "last_seen": T0 + 600, "moved": 0.001, "active": True,
+                   "fixture": True, "first_foot": (0.52, 0.21), "last_foot": (0.52, 0.21)},
+                  {"id": 2, "kind": "person", "first_seen": T0 + 590, "last_seen": T0 + 600, "moved": 0.2,
+                   "active": True, "first_foot": (0.4, 0.2), "last_foot": (0.3, 0.4)}]
+        ents: list = []
+        self.assertEqual(en.ingest(ents, tracks, T0 + 600), ["P1"])
+        self.assertEqual(len(ents), 1)

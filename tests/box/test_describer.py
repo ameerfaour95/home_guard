@@ -194,6 +194,104 @@ class AnswerTest(unittest.TestCase):
         self.assertEqual(ds.to_owner_language(checked, "en", None)["scene"], checked["scene"])
 
 
+class NotAPersonTest(unittest.TestCase):
+    """2026-10-09 17:44 ch1: the tracker followed the wall lamp as three people and the owner read
+    "P1, P2, P4 · מנורה שחורה על הקיר: נשארת על הקיר"."""
+
+    LAMP = {"scene": "Two people walk through the yard near the house", "reason": "Person in light clothing has covered face",
+            "entities": [{"id": "P1", "appearance": "Black lamp on the wall", "action": "Stays on the wall"},
+                         {"id": "P2", "appearance": "Black lamp on the wall", "action": "Stays on the wall"},
+                         {"id": "P3", "appearance": "Man in dark shirt and pants", "action": "Walks through the yard"},
+                         {"id": "P4", "appearance": "Black lamp on the wall", "action": "Stays on the wall"}]}
+
+    def test_a_person_line_that_names_no_person_is_dropped(self):
+        checked, dropped = ds.guard(self.LAMP, "Two people walk through the property.", "פנים מוסתרות")
+        self.assertEqual([e["id"] for e in checked["entities"]], ["P3"])
+        self.assertEqual(checked["not_people"], ["P1", "P2", "P4"])
+        self.assertIn("P1: not a person", dropped)
+        text = ds.compose("suspicious", "מצלמה 1", "17:43", "שני אנשים הולכים בחצר", [
+            {"id": "P3", "appearance": "גבר בחולצה ומכנסיים כהים", "action": "הולך בחצר"}], "", "he")
+        self.assertNotIn("P1", text)
+
+    def test_real_people_stay(self):
+        for appearance in ("Person in dark clothing", "Woman in patterned top and light pants", "man, dark shirt",
+                           "Person with obscured face, carrying large white bag", "a child in a red shirt",
+                           "Worker in an orange vest", "גבר בחולצה לבנה", "אישה עם כובע", "ילד", "עובד עם קסדה", ""):
+            with self.subTest(appearance=appearance):
+                self.assertFalse(ds.not_a_person({"id": "P1", "appearance": appearance}))
+        for appearance in ("Black lamp on the wall", "not a person", "a shadow on the wall", "מנורה שחורה על הקיר",
+                           "potted plant"):
+            with self.subTest(appearance=appearance):
+                self.assertTrue(ds.not_a_person({"id": "P2", "appearance": appearance}))
+        self.assertFalse(ds.not_a_person({"id": "CAR1", "appearance": "White sedan"}))   # a vehicle is no person
+
+    def test_the_update_neither_announces_nor_counts_them(self):
+        event = SimpleNamespace(reply_to={"message_id": 1}, counted_by="entities", fresh=["P1", "P3", "P4"],
+                                entities=["P1", "P3", "P4"], unmarked=False, known_text="")
+        book = mock.Mock()
+        book.session_of_alert.return_value = {}
+        with mock.patch.object(inf, "EVENTS", book):
+            text = inf._event_story(event, "a", 0.0, "he", described=["P3"], not_people=["P1", "P4"])
+            every = inf._event_story(event, "a", 0.0, "he", described=["P3"])
+        self.assertTrue(text.startswith("עוד אדם אחד הגיע (P3)"), text)
+        self.assertNotIn("P1", text)
+        self.assertTrue(every.startswith("עוד 3 אנשים הגיעו"), every)
+
+
+class BrokenEndingTest(unittest.TestCase):
+    """2026-10-09 18:16 pergola: "למה הודעתי: ... עם שק לבן גדול. ה." and 18:22 ch6 "... ליד אבן" (from "... next to a
+    stone wall"): the describer's reason was cut at 14 words mid-thought, and the translator kept the stump."""
+
+    RAW_1816 = ("A person appears to walk across the driveway carrying a large white bag. The person's face is obscured "
+                "by a hood or mask.")
+    RAW_1822 = "A person appears to be walking along a paved path next to a stone wall and a black fence."
+
+    def test_a_long_reason_is_kept_whole_or_cut_at_a_full_stop(self):
+        ids = {"P1": "person"}
+        for raw in (self.RAW_1816, self.RAW_1822):
+            with self.subTest(raw=raw):
+                parsed = ds.parse(json.dumps({"scene": "", "entities": [], "reason": raw}), ids)
+                self.assertEqual(parsed["reason"], raw.rstrip("."))
+        too_long = " ".join(["word"] * 30) + ". " + "x " * 5
+        self.assertEqual(ds.parse(json.dumps({"reason": too_long}), ids)["reason"], "")       # no stop inside: none
+        cut = ds.parse(json.dumps({"reason": "A man walks by. " + " ".join(["more"] * 30)}), ids)["reason"]
+        self.assertEqual(cut, "A man walks by")
+
+    def test_a_cut_never_ends_on_a_dangling_word(self):
+        self.assertEqual(ds.cut_words(self.RAW_1822, 14), "A person appears to be walking along a paved path next to a stone")
+        self.assertEqual(ds.cut_words("A person walks along the long path next to the big stone wall", 12),
+                         "A person walks along the long path next to the big stone")
+        self.assertEqual(ds.cut_words("A man stands next to the", 4), "A man stands")
+        self.assertEqual(ds.cut_words(self.RAW_1816, 14),
+                         "A person appears to walk across the driveway carrying a large white bag")
+
+    def test_the_translator_s_stray_letters_are_dropped(self):
+        self.assertEqual(ds.tidy_translation("אדם נראה הולך על שביל הכניסה עם שק לבן גדול. ה."),
+                         "אדם נראה הולך על שביל הכניסה עם שק לבן גדול.")
+        self.assertEqual(ds.tidy_translation("אדם נראה הולך על שביל הכניסה עם שק לבן גדול. ה"),
+                         "אדם נראה הולך על שביל הכניסה עם שק לבן גדול.")
+        self.assertEqual(ds.tidy_translation("גבר עומד ליד השער. הוא מסתכל."), "גבר עומד ליד השער. הוא מסתכל.")
+
+    def test_a_broken_translated_reason_gives_way_to_the_fallback(self):
+        class Messenger:
+            def __init__(self, reason):
+                self.reason = reason
+
+            def translate(self, fields, lang, keep=(), timeout=None):
+                return {k: (self.reason if k == "reason" else f"ע {v}") for k, v in fields.items()}
+
+        answer = {"scene": "A person walks along a paved path", "entities": [],
+                  "reason": "A person appears to be walking along a paved path next to a stone wall"}
+        self.assertEqual(ds.to_owner_language(answer, "he", Messenger("אדם נראה הולך בשביל מרוצף ליד קיר אבן"))["reason"],
+                         "אדם נראה הולך בשביל מרוצף ליד קיר אבן")
+        for broken in ("אדם נראה הולך בשביל ה", "אדם הולך", "אדם נראה הולך בשביל מרוצף ליד קיר אבן. ה."):
+            with self.subTest(broken=broken):
+                told = ds.to_owner_language(answer, "he", Messenger(broken))
+                want = "" if broken != "אדם נראה הולך בשביל מרוצף ליד קיר אבן. ה." else "אדם נראה הולך בשביל מרוצף ליד קיר אבן."
+                self.assertEqual(told["reason"], want)
+                self.assertEqual(told["scene"], "ע A person walks along a paved path")
+
+
 class TranslateFieldsTest(unittest.TestCase):
     def test_every_field_in_one_call_with_its_own_budget_and_none_on_failure(self):
         from home_guard_project.box.messenger import Messenger

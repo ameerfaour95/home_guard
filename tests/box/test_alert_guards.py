@@ -30,6 +30,51 @@ class AppearanceOnlyTest(unittest.TestCase):
 
     def test_inference_exposes_the_guard(self):
         self.assertTrue(inf.appearance_only("wearing a hoodie"))
+        self.assertTrue(inf.presence_only("walking along the path", "A person walks along the path."))
+
+    def test_colours_and_places_are_harmless(self):
+        # 2026-10-09 17:44 ch1 and 18:00 pergola went out 🟡 for looks: "בהירים", a balcony, a patio were unknown words.
+        lives = ["אדם בבגדים בהירים עם פנים מכוסות", "אדם עם קפוצ'ון הולך על המרפסת",
+                 "פנים מוסתרות על ידי בגד Two people, one in dark clothing and one in light clothing, walk through the "
+                 "property. The person in light clothing appears to have a covered face.",
+                 "הופעת אדם עם כובע ומעיל עם קפל A person in a hooded sweatshirt walks across the patio. A man in a cap "
+                 "stands nearby and watches the person walk away.",
+                 "a man in a white hoodie walks across the yard", "גבר עם כובע אפור בחצר", "masked person on the porch"]
+        for why in lives:
+            with self.subTest(why=why):
+                self.assertTrue(g.appearance_only(why))
+        for why in ("a man in a white hoodie walks to the entrance", "a masked man walks into the house",
+                    "a hooded man walks toward the house", "רעול פנים ליד השער", "masked man by the door at night",
+                    "masked person carrying a bag across the yard", "גבר עם כובע לבן נכנס לחצר"):
+            with self.subTest(why=why):
+                self.assertFalse(g.appearance_only(why))
+
+
+class PresenceOnlyTest(unittest.TestCase):
+    S_1822 = ("A person appears to be walking along a paved path next to a stone wall and a black fence. The individual "
+              "is wearing dark clothing.")
+    S_1816 = ("A person appears to walk across the driveway carrying a large white bag. The person's face is obscured by "
+              "a hood or mask.")
+
+    def test_someone_walking_by_is_not_suspicious(self):
+        # 2026-10-09 18:22 ch6 went out 🟡 for "a person seems to walk on a paved path by a stone (wall)".
+        for why in ("הולך לאורך המסלול", "אדם נראה הולך בשביל מרוצף ליד אבן", "a person walking along the path",
+                    "person standing in the yard"):
+            with self.subTest(why=why):
+                self.assertTrue(g.presence_only(why, self.S_1822))
+
+    def test_anything_more_keeps_the_label(self):
+        # 18:16 pergola: a large white sack by the entrance path stays suspicious (an unknown word, and an entrance).
+        self.assertFalse(g.presence_only("אדם נראה הולך על שביל הכניסה עם שק לבן גדול", self.S_1816))
+        self.assertFalse(g.presence_only("אדם נראה הולך על שביל", self.S_1816))                    # the summary's bag
+        for why, summary in (("walking along the path", "A person walks to the gate and tries the handle."),
+                             ("walking along the path", "A hooded person walks toward the camera."),
+                             ("walking along the path", "A person climbs over the fence."),
+                             ("walking along the path at night", ""), ("walking around the house", ""),
+                             ("התנהגות חשודה", ""), ("", "A person walks by."), ("a man walks to the door", ""),
+                             ("אדם הולך לכיוון הבית", ""), ("אדם הולך ומציץ לחלון", "")):
+            with self.subTest(why=why, summary=summary):
+                self.assertFalse(g.presence_only(why, summary))
 
 
 class VerifyClassTest(unittest.TestCase):
@@ -166,6 +211,36 @@ class VerifyClassTest(unittest.TestCase):
                 self.assertNotIn("person_down", g.verify_classes(text))
         self.assertEqual(g.verify_classes("a man with a knife kneels"), ["weapon"])
         self.assertEqual(g.verify_classes("two men fight, one is on the ground"), ["violence"])
+
+    def test_another_man_s_car_or_bag_does_not_block_the_look(self):
+        # 2026-10-09 14:41 / 15:44 ch6, the pavers workers: a red with no look because ANOTHER man stood by a car or
+        # walked past with a bag (DOWN_ACT matched "car", "bag", "רכב" anywhere in the red).
+        lives = [("התנהגות חשודה - אדם עומד ליד רכב ואדם אחר שוכב על הקרקע",
+                  "A man in dark clothing and a cap stands next to a white car while another person lies on the ground. "
+                  "The standing man appears to be interacting with the person on the ground."),
+                 ("אדם שוכב על הקרקע ואדם אחר עובר עליו",
+                  "A man lies on the ground while another man walks past him carrying a bag and approaches a car.")]
+        for why, summary in lives:
+            with self.subTest(why=why):
+                self.assertEqual(g.verify_classes(f"{why}  {summary}", reason=f"{why} "), ["person_down"])
+        for text in ("a man lies on the ground while another man walks past carrying a bag",
+                     "a man stands by a car while another person kneels on the ground",
+                     "a worker kneels on the pavers, and two others stand by a van", "אדם עומד ליד רכב ואדם אחר שוכב על הקרקע"):
+            with self.subTest(text=text):
+                self.assertEqual(g.verify_classes(text), ["person_down"])
+
+    def test_the_person_on_the_ground_s_own_thing_still_blocks_the_look(self):
+        for text in ("a man crouching over a bag", "a man lying under a car", "a man kneels and searches the floor",
+                     "A man lies on the ground. He is rummaging in a bag.", "אדם שוכב מתחת לרכב", "גבר כורע ליד תיק",
+                     "a man is beaten while lying on the ground", "a person lying on the floor while another takes the cash",
+                     "a man lies on the ground while another man runs to a car and drives away"):
+            with self.subTest(text=text):
+                self.assertNotIn("person_down", g.verify_classes(text))
+        # A summary that names no one down cannot say whose car it is: all of it counts, as before.
+        self.assertEqual(g.verify_classes("lying on the ground A person bends down near the rear of the white car.",
+                                          reason="lying on the ground"), [])
+        self.assertEqual(g.verify_classes("lying on the ground A person walks toward a parked car.",
+                                          reason="lying on the ground"), [])
 
     def test_the_person_down_must_be_the_reason(self):
         self.assertEqual(g.verify_classes(f"wearing masks {self.DOWN_SUMMARY}", reason="wearing masks"), [])

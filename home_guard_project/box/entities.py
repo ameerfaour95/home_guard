@@ -35,6 +35,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set,
 REATTACH_SEC = 120.0             # a lost entity is still "the same one" when a lone candidate starts within this
 REATTACH_DISTANCE = 0.15         # picture widths from its last foot point (as tracker.RETURN_DISTANCE)
 PARKED_DISTANCE = 0.03           # as scene_map.PARKED_DISTANCE: a vehicle that moved less is parked, never an entity
+# (a "person" the tracker found to be a fixture - tracker.STATIC_PERSON_*, a wall lamp - is never one either)
 KNOWN_RECENT_SEC = 120.0         # the owner's "these are my workers" covers who was seen this recently
 NOTES_KEPT = 12
 NOTE_CHARS = 120
@@ -278,6 +279,8 @@ def ingest(entities: List[Dict[str, Any]], tracks: Iterable[Dict[str, Any]], now
         if not_before is not None and float(t["last_seen"]) < not_before:
             continue
         if kind == "vehicle" and float(t.get("moved", 0.0)) < PARKED_DISTANCE:
+            continue
+        if kind == "person" and t.get("fixture"):        # a wall lamp read as a person (tracker.STATIC_PERSON_*)
             continue
         key = track_key(t)
         e = by_key.get(key)

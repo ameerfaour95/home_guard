@@ -59,6 +59,7 @@ WORDS_APPEARANCE = 10
 WORDS_ACTION = 10
 WORDS_SCENE = 22
 WORDS_REASON = 14
+REASON_HARD_WORDS = 28   # a longer reason is kept whole up to here (cut only at a full stop): its end is often the why
 
 # Words the describer may not bring in on its own. A weapon word only when the Eye's summary or why has one.
 WEAPONS = ("weapon", "gun", "pistol", "rifle", "shotgun", "firearm", "knife", "knives", "blade", "machete", "crowbar",
@@ -246,7 +247,8 @@ Answer with ONLY this JSON:
 - entities: one item per id above that you can see, people first. A vehicle only when it matters (someone uses it,
   it moves, a door or trunk is open).
   - appearance: only what is visible, at most {WORDS_APPEARANCE - 2} words: man or woman only if clear, clothes and
-    colours, hat, hood, mask, what they carry. A vehicle: its type and colour.
+    colours, hat, hood, mask, what they carry; say "person" when not sure which. A vehicle: its type and colour.
+    If a person id's box is on something that is not a person (a lamp, a shadow, a plant), write "not a person".
   - action: what THIS id does in the frames, at most {WORDS_ACTION - 2} words, present tense. If you are not sure
     which one did it, write "" (empty). Never guess and never move an action from one id to another.
 - reason: why the owner is told, at most {WORDS_REASON - 4} words, from the alert check's words above; no new facts.
@@ -271,10 +273,9 @@ def parse(raw: str, ids: Mapping[str, str]) -> Dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError("the answer is not a JSON object")
 
-    def clean(value: Any, words: int) -> str:
+    def clean(value: Any, words: int, whole: bool = False) -> str:
         s = " ".join(str(value or "").split()).strip().strip('"').rstrip(".").strip()
-        parts = s.split(" ")
-        return " ".join(parts[:words]) if s else ""
+        return cut_words(s, words, whole)
 
     seen, items = set(), []
     for item in data.get("entities") or []:
@@ -288,7 +289,57 @@ def parse(raw: str, ids: Mapping[str, str]) -> Dict[str, Any]:
                       "action": clean(item.get("action"), WORDS_ACTION)})
     items.sort(key=lambda x: _order(x["id"]))
     return {"scene": clean(data.get("scene"), WORDS_SCENE), "entities": items,
-            "reason": clean(data.get("reason"), WORDS_REASON)}
+            "reason": clean(data.get("reason"), REASON_HARD_WORDS, whole=True)}
+
+
+# Words a cut text must not end on ("... next to a stone", "... bag. The").
+_DANGLING = set("""a an the of to and or with without near next by at in on from into onto while as his her their its
+is are was were be appears appear seems that this which who""".split())
+
+
+def cut_words(text: str, words: int, whole: bool = False) -> str:
+    """*text* in at most *words* words, never ending mid-thought. Cut at the last full stop inside the limit when there
+    is one, else after the last word that is not a dangling "the / a / next to". *whole*: a text that does not fit
+    and has no full stop inside the limit is "" (the caller has its own fallback). 2026-10-09 18:16 / 18:22: the
+    reason, cut at 14 words, ended "... bag. The" ("... ה." in Hebrew) and "... next to a stone" ("ליד אבן")."""
+    s = " ".join(str(text or "").split()).strip()
+    parts = s.split(" ") if s else []
+    if len(parts) <= words:
+        return s
+    kept = " ".join(parts[:words])
+    stop = max(kept.rfind(". "), kept.rfind("! "), kept.rfind("? "), kept.rfind(".") if kept.endswith(".") else -1)
+    if stop > 0:
+        return kept[:stop].strip()
+    if whole:
+        return ""
+    head = parts[:words]
+    while head and head[-1].lower().strip(",;:") in _DANGLING:
+        head.pop()
+    return " ".join(head).rstrip(",;:")
+
+
+# A dangling piece after the last full stop: one or two letters ("... גדול. ה.", "... bag. Th").
+_TAIL_FRAGMENT = re.compile(r"(?<=[.!?])\s+[^\s.!?]{1,2}[.!?]?\s*$")
+
+
+def tidy_translation(text: str) -> str:
+    """The translator's line without a dangling 1-2 letter fragment after its last full stop."""
+    s = " ".join(str(text or "").split()).strip()
+    return _TAIL_FRAGMENT.sub("", s).strip()
+
+
+def translated_reason_ok(source: str, told: str) -> bool:
+    """Is the translated reason whole? False when it ends mid-word (a lone letter, a dangling Hebrew prefix) or is
+    far shorter than its source (fewer than 40% of the words of a source of 6+ words; good Hebrew runs 50-100% of the
+    English words, measured on 2026-10-09's messages, so the 60% first asked for would drop good lines)."""
+    told_words = str(told or "").rstrip(".!? ").split()
+    if not told_words:
+        return False
+    last = told_words[-1]
+    if len(last) == 1 and last.isalpha():
+        return False
+    source_words = str(source or "").split()
+    return not (len(source_words) >= 6 and len(told_words) < 0.4 * len(source_words))
 
 
 def _words(text: str) -> List[str]:
@@ -307,16 +358,46 @@ def _has(words: Sequence[str], vocabulary: Sequence[str]) -> List[str]:
     return found
 
 
+# A person line must say it is a person. 2026-10-09 17:44 ch1: the tracker followed the wall lamp as three people and
+# the owner read "P1, P2, P4 · מנורה שחורה על הקיר: נשארת על הקיר".
+PERSON_WORDS = re.compile(
+    r"\b(?:man|men|woman|women|person|persons|people|child|children|kid|kids|boy|boys|girl|girls|worker|workers|"
+    r"guy|guys|adult|adults|teen|teens|teenager|teenagers|individual|individuals|figure|figures|someone|somebody|"
+    r"male|female|pedestrian|courier|gardener|cyclist|officer|lady|gentleman)\b"
+    r"|גבר|אישה|אשה|אדם|אנשים|ילד|ילדה|ילדים|נער|נערה|עובד|עובדת|עובדים|פועל|פועלים|מישהו|דמות|בחור|בחורה",
+    re.IGNORECASE)
+NOT_A_PERSON = re.compile(r"\bnot an? (?:person|human|people)\b|\bno (?:person|one)\b|לא אדם|אין אדם", re.IGNORECASE)
+
+
+def _person_id(entity_id: str) -> bool:
+    return entity_id[:1] == "P" and entity_id[1:].isdigit()
+
+
+def not_a_person(item: Mapping[str, Any]) -> bool:
+    """A person id (P1) whose appearance names no person (a lamp, a shadow, a plant), or says "not a person". An
+    empty appearance is not evidence: the line stays."""
+    appearance = str(item.get("appearance") or "").strip()
+    if not _person_id(str(item.get("id") or "")) or not appearance:
+        return False
+    return bool(NOT_A_PERSON.search(appearance)) or not PERSON_WORDS.search(appearance)
+
+
 def guard(answer: Dict[str, Any], summary: str, why: str) -> Tuple[Dict[str, Any], List[str]]:
     """The answer with anything the alert's own words do not back taken out, and what was dropped.
 
     - a weapon word anywhere (scene, appearance, action, reason) only when the Eye's summary or why has one;
     - an action naming a serious act (break, steal, climb...) the summary / why do not, or an object neither they nor
-      that id's own appearance name, loses its action (the line keeps the appearance)."""
+      that id's own appearance name, loses its action (the line keeps the appearance);
+    - a person id whose appearance names no person (:func:`not_a_person`) is dropped whole and listed in the
+      answer's ``not_people``: it is left out of the message and of the people counted in it."""
     told = set(_has(_words(f"{summary} {why}"), WEAPONS + SERIOUS + OBJECTS))
+    answer = dict(answer)
+    not_people = [str(e.get("id")) for e in answer.get("entities") or [] if not_a_person(e)]
+    answer["entities"] = [e for e in answer.get("entities") or [] if str(e.get("id")) not in not_people]
     armed = bool(_has(_words(f"{summary} {why}"), WEAPONS))
-    dropped: List[str] = []
-    out = {"scene": answer.get("scene", ""), "reason": answer.get("reason", ""), "entities": []}
+    dropped: List[str] = [f"{i}: not a person" for i in not_people]
+    out = {"scene": answer.get("scene", ""), "reason": answer.get("reason", ""), "entities": [],
+           "not_people": not_people}
     for field in ("scene", "reason"):
         if out[field] and not armed and _has(_words(out[field]), WEAPONS):
             dropped.append(f"{field}: weapon word")
@@ -413,7 +494,11 @@ def to_owner_language(answer: Mapping[str, Any], lang: str, messenger: Any, keep
     told = messenger.translate(fields, lang, keep=tuple(keep), timeout=timeout) if messenger is not None else None
     if not told:
         return None
-    return {"scene": told.get("scene", ""), "reason": told.get("reason", ""),
+    told = {k: tidy_translation(v) for k, v in told.items()}
+    reason = told.get("reason", "")
+    if reason and not translated_reason_ok(fields.get("reason", ""), reason):
+        reason = ""                                      # the caller's own why goes out instead
+    return {"scene": told.get("scene", ""), "reason": reason,
             "entities": [{"id": e["id"], "appearance": told.get(f"{e['id']}.appearance", ""),
                           "action": told.get(f"{e['id']}.action", "")} for e in answer.get("entities") or []]}
 
@@ -487,7 +572,10 @@ def describe(describer: Describer, frames: Sequence[Any], frame_indices: Sequenc
     try:
         sizes = [(int(f.shape[1]), int(f.shape[0])) for f in frames]
         ts = sent_frame_times(frame_indices, clock)
-        ids = assign_ids([t for t in tracks if t.get("kind") in ("person", "vehicle")], mapped)
+        # A "person" the tracker found to be a fixture (tracker.STATIC_PERSON_*: a wall lamp) is not drawn; parked
+        # vehicles still are (the owner may need "CAR1 · טנדר לבן: חונה").
+        ids = assign_ids([t for t in tracks if t.get("kind") == "vehicle"
+                          or (t.get("kind") == "person" and t.get("shown", True))], mapped)
         per_frame = keep_relevant(place_marks(tracks, ids, ts, crops, sizes, source_size))
         picked = pick_frames(per_frame, max_frames)
         drawn = draw_frames(frames, per_frame, picked, list(model_times) or [None] * len(frames), max_side)
