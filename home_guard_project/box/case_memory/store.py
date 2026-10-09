@@ -118,7 +118,20 @@ def window_inside(inner: Tuple[str, str], outer: Tuple[str, str]) -> bool:
 
 def narrows(old: Scope, new: Scope) -> bool:
     """True when every event *new* admits, *old* admitted too (a narrowing is always safe to apply)."""
-    if new.camera != old.camera or new.people != old.people or new.vehicles != old.vehicles:
+    if new.camera != old.camera:
+        return False
+    if old.people_range or new.people_range:
+        if not (old.people_range and new.people_range):
+            return False
+        (o_low, o_high), (n_low, n_high) = old.people_range[:2], new.people_range[:2]
+        if n_low < o_low or (o_high and (not n_high or n_high > o_high)):
+            return False
+    elif new.people != old.people or new.vehicles != old.vehicles:
+        return False
+    if old.actions or new.actions:
+        if not (old.actions and new.actions and set(new.actions) <= set(old.actions)) or new.place != old.place:
+            return False
+    if old.until is not None and (new.until is None or new.until > old.until):
         return False
     if not window_inside(new.hours, old.hours):
         return False
@@ -193,6 +206,9 @@ class CaseStore:
         expecting: Dict[str, Dict[str, Any]] = {}
         routines: Dict[str, Dict[str, Any]] = {}
         matches: List[Dict[str, Any]] = []
+        asked: Dict[str, Dict[str, Any]] = {}
+        seen_after: List[Dict[str, Any]] = []
+        proposals: Dict[str, Dict[str, Any]] = {}
         damaged = False
         for item in self.backend.read_events():
             event = item.get("event")
@@ -211,6 +227,16 @@ class CaseStore:
                 elif event == "expecting_cancel":
                     if item.get("id") in expecting:
                         expecting[item["id"]]["cancelled"] = True
+                elif event == "asked":
+                    asked[str(item["key"])] = {**(item.get("info") or {}), "key": str(item["key"]), "ts": ts,
+                                               "answer": "", "answered_at": None}
+                elif event == "asked_answer":
+                    if str(item.get("key")) in asked and not asked[str(item["key"])]["answer"]:
+                        asked[str(item["key"])].update(answer=str(item.get("answer") or ""), answered_at=ts,
+                                                       by=str(item.get("by") or ""))
+                elif event == "routine_seen":
+                    proposals[str(item["rid"])] = {"rid": str(item["rid"]), "mode": str(item.get("mode") or ""),
+                                                   "proposal": dict(item["proposal"]), "ts": ts}
                 elif event == "routine_answer":
                     routines[str(item["key"])] = {"yes": bool(item.get("yes")), "ts": ts,
                                                   "case_id": item.get("case_id", "")}
@@ -250,7 +276,24 @@ class CaseStore:
                             raise ValueError("bad effect")
                         case.effect = item["effect"]
                     elif event == "narrow":
+                        case.history = (case.history + [{"ts": ts, "op": "narrow", "before": case.scope.to_dict(),
+                                                         "reason": str(item.get("reason") or "")}])[-20:]
                         case.scope = Scope.from_dict(item["scope"])
+                    elif event == "revise":
+                        # The owner's own words changed what this memory covers (Mem0's UPDATE): applied, with the
+                        # old scope kept in the history.
+                        case.history = (case.history + [{"ts": ts, "op": "update", "before": case.scope.to_dict(),
+                                                         "reason": str(item.get("reason") or "")}])[-20:]
+                        case.scope = Scope.from_dict(item["scope"])
+                        if item.get("title") is not None:
+                            case.title = str(item["title"])
+                        if item.get("note") is not None:
+                            case.note = str(item["note"])
+                        if isinstance(item.get("source"), dict):
+                            case.source = {**case.source, **item["source"]}
+                    elif event == "seen_after_end":
+                        seen_after.append(dict(item))
+                        continue
                     elif event == "widen_proposed":
                         widen[str(item["wid"])] = {"wid": str(item["wid"]), "id": case.id, "scope": item["scope"],
                                                    "by": item.get("by", ""), "ts": ts, "answer": ""}
@@ -286,7 +329,8 @@ class CaseStore:
             log.warning("Skipped damaged case memory events")
         for case in cases.values():
             case.status = self._status(case, paused.get(case.id, False))
-        return {"cases": cases, "widen": widen, "expecting": expecting, "routines": routines, "matches": matches}
+        return {"cases": cases, "widen": widen, "expecting": expecting, "routines": routines, "matches": matches,
+                "asked": asked, "seen_after": seen_after, "proposals": proposals}
 
     # -- reads ----------------------------------------------------------------------------------------------------
     def cases(self, camera: Optional[str] = None, include_invalid: bool = False) -> List[Case]:
@@ -325,6 +369,23 @@ class CaseStore:
         with _LOCK:
             return self._fold()["routines"]
 
+    def asked(self, key: str) -> Optional[Dict[str, Any]]:
+        """A question the box asked the owner once (``note_asked``), with its ``answer`` ("" while open)."""
+        with _LOCK:
+            return self._fold()["asked"].get(str(key))
+
+    def seen_after_end(self, case_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Events that fit a case in everything but its end (a crew's week that is over): the same kind of event
+        on a later day, which asks the owner once whether it goes on."""
+        with _LOCK:
+            items = self._fold()["seen_after"]
+        return [m for m in items if case_id is None or m.get("id") == case_id]
+
+    def routine_proposals(self) -> Dict[str, Dict[str, Any]]:
+        """Routine proposals the nightly run made (``rid`` -> ``{rid, mode, proposal, ts}``)."""
+        with _LOCK:
+            return self._fold()["proposals"]
+
     # -- writes ---------------------------------------------------------------------------------------------------
     def _next_id(self, prefix: str, taken: Iterable[str]) -> str:
         numbers = [int(x[len(prefix):]) for x in taken if x.startswith(prefix) and x[len(prefix):].isdigit()]
@@ -340,7 +401,7 @@ class CaseStore:
             fresh = Case.from_dict({**case.to_dict(), "id": case_id, "status": SHADOW, "confirmations": 0,
                                     "contradictions": 0, "streak": 0, "created_by": by,
                                     "created_at": case.created_at or self._now(), "invalid_at": None,
-                                    "invalid_reason": "", "merged_into": "", "revision": 1})
+                                    "invalid_reason": "", "merged_into": "", "revision": 1, "history": []})
             if not self._append("case_add", case=fresh.to_dict(), by=by):
                 return None
         return self.get(case_id)
@@ -380,7 +441,7 @@ class CaseStore:
             return self._append("matched", id=case_id, event_id=event_id, level=level, band=band,
                                 score=round(float(score), 4), shadow=bool(shadow), verdict=verdict)
 
-    def narrow(self, case_id: str, scope: Scope, by: str) -> Optional[Case]:
+    def narrow(self, case_id: str, scope: Scope, by: str, reason: str = "") -> Optional[Case]:
         """Apply an owner correction at once. Refuses anything that is not a narrowing (use propose_widen)."""
         with _LOCK:
             case = self.get(case_id)
@@ -388,7 +449,44 @@ class CaseStore:
                 return None
             if not narrows(case.scope, scope):
                 raise ValueError("not a narrowing; a wider scope needs the owner's approval (propose_widen)")
-            return self._case_event("narrow", case_id, scope=scope.to_dict(), by=by)
+            return self._case_event("narrow", case_id, scope=scope.to_dict(), by=by, reason=reason)
+
+    def revise(self, case_id: str, scope: Scope, by: str, reason: str, title: Optional[str] = None,
+               note: Optional[str] = None, source: Optional[Dict[str, Any]] = None) -> Optional[Case]:
+        """The owner's own words changed this memory (an explained action got another action, its end moved, a
+        mark was corrected): applied at once, the old scope kept in ``history``. Only an owner message or tap gets
+        here; a widening the box inferred by itself still goes through ``propose_widen``."""
+        if not by:
+            raise ValueError("only the owner changes a case")
+        return self._case_event("revise", case_id, scope=scope.to_dict(), by=by, reason=str(reason)[:200],
+                                title=title, note=note, source=dict(source) if source else None)
+
+    def log_seen_after_end(self, case_id: str, event_id: str, event_ts: float) -> bool:
+        """An event that fits *case_id* in everything but its end. A log line: never changes the case."""
+        with _LOCK:
+            return self._append("seen_after_end", id=case_id, event_id=event_id, event_ts=float(event_ts))
+
+    def note_asked(self, key: str, **info: Any) -> bool:
+        """The box asked the owner once (*key*: what about); ``asked(key)`` then says so, and holds the answer."""
+        with _LOCK:
+            return self._append("asked", key=str(key), info=info)
+
+    def answer_asked(self, key: str, answer: str, by: str) -> bool:
+        if not by:
+            raise ValueError("only the owner answers")
+        with _LOCK:
+            return self._append("asked_answer", key=str(key), answer=str(answer), by=by)
+
+    def note_routine(self, proposal: Dict[str, Any], mode: str) -> Optional[str]:
+        """A nightly routine proposal, logged once (``shadow``) or sent (``on``). Returns its id (``R1``...)."""
+        with _LOCK:
+            state = self._fold()
+            if any(p["proposal"].get("key") == proposal.get("key") for p in state["proposals"].values()):
+                return None
+            rid = self._next_id("R", state["proposals"])
+            if not self._append("routine_seen", rid=rid, mode=str(mode), proposal=dict(proposal)):
+                return None
+        return rid
 
     def propose_widen(self, case_id: str, scope: Scope, by: str = "") -> Optional[Dict[str, Any]]:
         """A wider scope waits for the owner's yes. Returns ``{wid, id, diff}``."""

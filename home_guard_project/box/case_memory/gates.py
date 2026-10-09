@@ -21,21 +21,46 @@ FAMILIES = {"N1": "transit", "N2": "transit", "N3": "door", "N4": "door", "N5": 
             "N7": "vehicle", "N8": "animals", "N9": "guard", "N10": "nothing"}
 
 NIGHT_PHASE = "late_night"
+ENDED = "the case ended"   # its end (a crew's week) is over: logged as seen again, never a match
+
+# An explained action (activity_memory) excuses the flags that ARE that action: the owner said the lying and
+# kneeling on the stairs is the electricians' work, so the Eye's "crouching" there is not a risk sign. Every other
+# risk flag still vetoes (a handle, a covered face, a flashlight, running, carrying away, a weapon).
+ACTION_FLAGS = {"crouching": ("lying", "kneeling", "bending", "crawling", "sitting_ground", "working_ground"),
+                "tool_in_hand": ("holding_tool", "ladder", "digging")}
+# S categories an explained action can be: loitering (S4), in a private area (S6), hiding (S8: lying on the stairs).
+# Testing access, peeping, casing, a covered face, a watching vehicle and tampering never are.
+ACTION_CATEGORIES = ("S4", "S6", "S8")
 
 
-def veto(sig: Signature, label: str = "", alert_command: str = "") -> List[str]:
-    """Why memory must not be consulted for this event (empty list: it may be)."""
+def veto(sig: Signature, label: str = "", alert_command: str = "", explained: Sequence[str] = (),
+         context_lowered: bool = False) -> List[str]:
+    """Why memory must not be consulted for this event (empty list: it may be).
+
+    *explained*: the actions a case of an explained action covers (activity_memory). Then, and only when the
+    event's words name one of them, the flags that are those actions and the S categories in ACTION_CATEGORIES are
+    excused; the words must name nothing activity_memory.red_blocked refuses (harm, a weapon, a break-in, a car door).
+    *context_lowered*: the red was already lowered by the second look WITH the owner's context (inference
+    ``activity_look``); then its E category and "serious behaviour" are what that look ruled on. An escalation or a
+    call is never excused."""
     reasons = []
     final = (label or sig.label or "").lower()
+    named = bool(explained) and bool(set(sig.actions) & set(explained))
     if final == "escalation" or alert_command == "[call_owner]":
         reasons.append("escalation or call")
+    if explained and not named:
+        reasons.append("the explained actions are not named")
+    if explained and sig.blocked:
+        reasons.append(f"the words name {sig.blocked}")
     group = tx.group_of(sig.category)
-    if group in ("S", "E"):
+    excused_category = named and (sig.category in ACTION_CATEGORIES or (group == "E" and context_lowered))
+    if group in ("S", "E") and not excused_category:
         reasons.append(f"category {sig.category}")
-    risky = sorted(set(sig.flags) & RISK_FLAGS)
+    excused = {f for f, acts in ACTION_FLAGS.items() if named and set(acts) & set(explained)}
+    risky = sorted(set(sig.flags) & RISK_FLAGS - excused)
     if risky:
         reasons.append("flags " + ",".join(risky))
-    if sig.serious_behaviour:
+    if sig.serious_behaviour and not (named and context_lowered):
         reasons.append("serious behaviour")
     if sig.cameras_in_incident >= 2 and (sig.phase == NIGHT_PHASE or sig.house_state in ("away", "home_asleep")):
         reasons.append("multi-camera incident at night or while away")
@@ -91,10 +116,23 @@ def gate_failures(case: Case, sig: Signature, hour_margin_min: int = 15, max_pat
         out.append(f"house is {sig.house_state}")
     if sig.phase == NIGHT_PHASE and not s.night:
         out.append("night is not in scope")
-    if sig.people != s.people:
-        out.append(f"{sig.people} people, the case has {s.people}")
-    if sig.vehicles != s.vehicles:
-        out.append(f"{sig.vehicles} vehicles, the case has {s.vehicles}")
+    if s.until is not None and sig.ts > s.until:
+        out.append(ENDED)
+    if s.people_range:
+        low, high = (tuple(s.people_range) + (0,))[:2]
+        if sig.people < max(1, low) or (high and sig.people > high):
+            out.append(f"{sig.people} people, the case has {low}-{high or 'any'}")
+    else:
+        if sig.people != s.people:
+            out.append(f"{sig.people} people, the case has {s.people}")
+        if sig.vehicles != s.vehicles:
+            out.append(f"{sig.vehicles} vehicles, the case has {s.vehicles}")
+    if s.actions:
+        if not set(sig.actions) & set(s.actions):
+            out.append("none of the explained actions is named")
+        other_ways = [w for w in sig.ways if w != s.place]
+        if other_ways:
+            out.append(f"names another way in: {','.join(other_ways)}")
     if sig.category == tx.OTHER:
         out.append("category other")
     elif s.categories:
@@ -132,5 +170,6 @@ def hours_around(minute: int, before: int = 30, after: int = 30, round_to: int =
     return hhmm(start), hhmm(end)
 
 
-__all__ = ["RISK_FLAGS", "FAMILIES", "veto", "gate_failures", "in_window", "path_distance", "edit_distance",
+__all__ = ["RISK_FLAGS", "ACTION_FLAGS", "ACTION_CATEGORIES", "ENDED", "FAMILIES", "veto",
+           "gate_failures", "in_window", "path_distance", "edit_distance",
            "circular_distance", "family", "default_max_dwell", "hours_around", "minutes_of"]

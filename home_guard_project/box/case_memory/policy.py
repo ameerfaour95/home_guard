@@ -21,11 +21,11 @@ from __future__ import annotations
 import logging
 import random
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 from . import texts
-from .gates import gate_failures, veto
+from .gates import ENDED, gate_failures, veto
 from .judge import SAME, SIMILAR, JudgeVerdict, decide
 from .ladder import SHADOW_STAGE, TrustLadder
 from .models import ALERT, DIGEST, QUIET, Case, Signature
@@ -63,9 +63,10 @@ class CaseEvent:
     def build(cls, event_id: str, camera: str, ts: float, observation: Optional[Mapping[str, Any]] = None,
               tracker: Optional[Mapping[str, Any]] = None, situation: Optional[Mapping[str, Any]] = None,
               label: str = "", cameras_in_incident: int = 1, eye_model: str = "",
-              prompt_version: str = "") -> "CaseEvent":
+              prompt_version: str = "", text: str = "") -> "CaseEvent":
+        """*text*: the alert's words (why + reason + summary), read for the actions an owner may have explained."""
         return cls(event_id, build_signature(camera, ts, observation, tracker, situation, label,
-                                             cameras_in_incident, eye_model, prompt_version))
+                                             cameras_in_incident, eye_model, prompt_version, text))
 
     @classmethod
     def coerce(cls, value: Union["CaseEvent", Mapping[str, Any]], label: str = "") -> "CaseEvent":
@@ -74,7 +75,8 @@ class CaseEvent:
         v = dict(value)
         return cls.build(str(v.get("event_id") or v.get("alert_id") or ""), str(v["camera"]), float(v["ts"]),
                          v.get("observation"), v.get("tracker"), v.get("situation"), label or v.get("label", ""),
-                         int(v.get("cameras_in_incident") or 1), v.get("eye_model", ""), v.get("prompt_version", ""))
+                         int(v.get("cameras_in_incident") or 1), v.get("eye_model", ""), v.get("prompt_version", ""),
+                         str(v.get("text") or ""))
 
 
 @dataclass(frozen=True)
@@ -93,6 +95,11 @@ class CaseNote:
 
     def text(self, lang: str) -> str:
         return self.text_he if lang == "he" else self.text_en
+
+    def owner_text(self, lang: str) -> str:
+        """The line the owner reads under the alert. A shadow note has none: shadow logs "would quiet" and asks
+        nothing until its buttons exist (owner rules: no new message types, no question without buttons)."""
+        return "" if self.kind == "shadow" else self.text(lang)
 
     def digest(self, lang: str) -> str:
         return self.digest_he if lang == "he" else self.digest_en
@@ -147,8 +154,10 @@ class CaseMemory:
             log.warning("Case memory embedding failed: %s", exc)
             return None
 
-    def band_of(self, detail: ScoreDetail) -> str:
-        if detail.score >= self.config.high and all(k in detail.components for k in self.config.high_requires):
+    def band_of(self, detail: ScoreDetail, case: Optional[Case] = None) -> str:
+        # An explained action's case has no path: its named actions stand in for it.
+        requires = ("actions",) if case is not None and case.scope.actions else self.config.high_requires
+        if detail.score >= self.config.high and all(k in detail.components for k in requires):
             return HIGH
         if detail.score >= self.config.mid:
             return MID
@@ -177,8 +186,15 @@ class CaseMemory:
                                digest_he=texts.digest_line(case, sig, "he"), digest_en=texts.digest_line(case, sig, "en"),
                                would_level=level, **common), False
 
+    def _fits_but_its_end(self, case: Case, sig: Signature) -> bool:
+        """The same kind of event after the case's end, at any hour: what it did fits, only the end (and the
+        hour) do not."""
+        whole = replace(case, scope=replace(case.scope, until=None, hours=("00:00", "00:00")))
+        return not gate_failures(whole, sig, self.config.hour_margin_min, self.config.max_path_distance)
+
     # -- the decision ---------------------------------------------------------------------------------------------
-    def assess(self, event: Union[CaseEvent, Mapping[str, Any]], decision: Mapping[str, Any]) -> Assessment:
+    def assess(self, event: Union[CaseEvent, Mapping[str, Any]], decision: Mapping[str, Any],
+               use_judge: bool = True) -> Assessment:
         label, command = _decision_label(decision)
         ev = CaseEvent.coerce(event, label)
         sig = ev.signature
@@ -187,35 +203,53 @@ class CaseMemory:
         if decision.get("serious_behaviour") is True and not sig.serious_behaviour:
             sig = Signature(**{**sig.__dict__, "serious_behaviour": True})
         reasons = veto(sig, label, command)
-        if reasons:
-            return Assessment(ALERT, vetoed=tuple(reasons))
-        if label not in ("normal", "suspicious"):
-            return Assessment(ALERT, vetoed=(f"label {label or 'missing'}",))
         cases = self.store.live_cases(sig.camera)
+        explained_only = False
+        if reasons:
+            # Only a case of an explained action (activity_memory) may still look: the flags and S categories that
+            # ARE the explained action, and a red its context look already lowered, are what the owner explained.
+            lowered = decision.get("context_lowered") is True
+            cases = [c for c in cases if c.scope.actions and label in ("normal", "suspicious")
+                     and not veto(sig, label, command, explained=c.scope.actions, context_lowered=lowered)]
+            if not cases:
+                return Assessment(ALERT, vetoed=tuple(reasons))
+            explained_only = True
+        elif label not in ("normal", "suspicious"):
+            return Assessment(ALERT, vetoed=(f"label {label or 'missing'}",))
+        else:
+            cases = [c for c in cases if not c.scope.actions
+                     or not veto(sig, label, command, explained=c.scope.actions)]
         failures = {c.id: gate_failures(c, sig, self.config.hour_margin_min, self.config.max_path_distance)
                     for c in cases}
         gated = [c for c in cases if not failures[c.id]]
         gated_out = {k: v for k, v in failures.items() if v}
+        if self.log_matches:
+            for c in cases:
+                if ENDED in failures[c.id] and self._fits_but_its_end(c, sig):
+                    self.store.log_seen_after_end(c.id, ev.event_id, sig.ts)   # the keeper asks once
         if not gated:
             return Assessment(ALERT, gated_out=gated_out)
         ranked = rank(gated, sig, self._embedding(sig), self.config.weights, self.config.time_sigma_min)
         summary = tuple((c.id, round(d.score, 4)) for c, d in ranked)
         best_case, best = ranked[0]
-        band = self.band_of(best)
+        band = self.band_of(best, best_case)
         base = dict(gated_out=gated_out, ranked=summary, band=band)
 
-        if label == "suspicious":
+        if label == "suspicious" and not best_case.scope.actions:
             if band == LOW:
                 return Assessment(ALERT, **base)
             note = CaseNote("context", best_case.id, texts.context_text(best_case, "he"),
                             texts.context_text(best_case, "en"), band=band, score=best.score)
             return Assessment(ALERT, note=note, **base)
+        if label == "suspicious":
+            # Only an explained action may lower a suspicious: the judge never sees the other cases for it.
+            ranked = [(c, d) for c, d in ranked if c.scope.actions]
 
         verdict: Optional[JudgeVerdict] = None
         matched: Optional[Tuple[Case, ScoreDetail]] = None
         if band == HIGH:
             matched = (best_case, best)
-        elif band == MID:
+        elif band == MID and use_judge:
             pool = ranked if len(cases) <= self.config.few_cases else ranked[:self.config.top_k]
             verdict, _ = decide(self.judge, sig, pool, self.config.judge_timeout, self.rng)
             by_id = {c.id: (c, d) for c, d in pool}
@@ -233,19 +267,29 @@ class CaseMemory:
 
         case, detail = matched
         level, note, shadow = self._note_for_match(case, sig, band, detail.score, verdict)
+        if (label == "suspicious" or explained_only) and level == DIGEST:
+            level = QUIET                     # an explained action's suspicious: at most a quiet message
+            note = replace(note, would_level=QUIET)
         if self.log_matches:
             self.store.log_match(case.id, ev.event_id, note.would_level or level, band, detail.score, shadow,
                                  verdict.verdict if verdict else "")
+        if shadow:
+            log.info("[%s] case memory, shadow: would quiet (case %s, score %.2f): %s", sig.camera, case.id,
+                     detail.score, texts.case_title(case, "en"))
         return Assessment(level, note=note, verdict=verdict, matched=case.id, shadow=shadow, **base)
 
-    def apply(self, event: Union[CaseEvent, Mapping[str, Any]],
-              decision: Mapping[str, Any]) -> Tuple[str, Optional[CaseNote]]:
-        """``(delivery_level, note)``. Any failure inside is logged and means ``alert`` with no note."""
+    def apply(self, event: Union[CaseEvent, Mapping[str, Any]], decision: Mapping[str, Any],
+              shadow_only: bool = False) -> Tuple[str, Optional[CaseNote]]:
+        """``(delivery_level, note)``. Any failure inside is logged and means ``alert`` with no note.
+        *shadow_only*: an event the box already kept quiet for another reason (a live explained action, a known
+        mark): matches are logged for learning, no judge is asked, and the level is always ``alert``."""
         label, command = _decision_label(decision)
         if label == "escalation" or command == "[call_owner]":
             return ALERT, None
         try:
-            result = self.assess(event, decision)
+            result = self.assess(event, decision, use_judge=not shadow_only)
+            if shadow_only:
+                return ALERT, result.note
         except Exception as exc:  # noqa: BLE001 - memory must never stop or soften an alert by failing
             log.warning("Case memory failed; alerting as usual: %s", exc)
             return ALERT, None
@@ -270,13 +314,13 @@ def current() -> Optional[CaseMemory]:
 
 
 def apply_case_memory(event: Union[CaseEvent, Mapping[str, Any]], decision: Mapping[str, Any],
-                      memory: Optional[CaseMemory] = None) -> Tuple[str, Optional[CaseNote]]:
+                      memory: Optional[CaseMemory] = None, shadow_only: bool = False) -> Tuple[str, Optional[CaseNote]]:
     """``(delivery_level, note)`` for one event the box is about to deliver. Without a configured memory,
-    ``("alert", None)``: exactly today's behaviour."""
+    ``("alert", None)``: exactly today's behaviour. *shadow_only*: see :meth:`CaseMemory.apply`."""
     mem = memory or _MEMORY
     if mem is None:
         return ALERT, None
-    return mem.apply(event, decision)
+    return mem.apply(event, decision, shadow_only=True) if shadow_only else mem.apply(event, decision)
 
 
 def make_default(store_path: Optional[str] = None, env: Optional[Mapping[str, str]] = None,

@@ -15,10 +15,12 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
 from ..embeddings import cosine
-from .gates import circular_distance, path_distance
+from .gates import circular_distance, in_window, path_distance
 from .models import Case, Example, Signature, window_minutes
 
-DEFAULT_WEIGHTS: Mapping[str, float] = {"path": 0.35, "text": 0.25, "time": 0.20, "dwell": 0.10, "appearance": 0.10}
+# "actions" plays the path's part for a case of an explained action (activity_memory): computed only for those.
+DEFAULT_WEIGHTS: Mapping[str, float] = {"path": 0.35, "text": 0.25, "time": 0.20, "dwell": 0.10, "appearance": 0.10,
+                                        "actions": 0.35}
 TIME_SIGMA_MIN = 20.0
 
 
@@ -60,13 +62,28 @@ def combine(components: Mapping[str, Optional[float]], weights: Mapping[str, flo
     return sum(weights[k] * max(0.0, min(1.0, v)) for k, v in used.items()) / total
 
 
+def actions_score(case: Case, sig: Signature) -> Optional[float]:
+    """For a case of an explained action: the share of the actions the event names that the owner explained."""
+    if not case.scope.actions or not sig.actions:
+        return None
+    return len(set(sig.actions) & set(case.scope.actions)) / len(set(sig.actions))
+
+
+def _time(case: Case, sig: Signature, ex_minute: int, sigma: float) -> float:
+    """Closeness to the example's minute; for an explained action, a work window: anywhere inside it is as good."""
+    if case.scope.actions and in_window(sig.minute, case.scope.hours):
+        return 1.0
+    return time_score(sig.minute, ex_minute, sigma)
+
+
 def score_example(case: Case, example: Example, sig: Signature, embedding: Optional[Sequence[float]],
                   weights: Mapping[str, float] = DEFAULT_WEIGHTS, sigma: float = TIME_SIGMA_MIN) -> ScoreDetail:
     ex = example.signature
     parts: Dict[str, Optional[float]] = {
         "path": 1.0 - path_distance(sig.path, ex.path) if sig.path and ex.path else None,
         "text": cosine(embedding, example.embedding) if embedding and example.embedding else None,
-        "time": time_score(sig.minute, ex.minute, sigma),
+        "time": _time(case, sig, ex.minute, sigma),
+        "actions": actions_score(case, sig),
         "dwell": dwell_score(sig.dwell_s, ex.dwell_s),
         # The owner's confirmed words win; "the clothes change" (no words) leaves appearance out.
         "appearance": jaccard(sig.appearance, case.recognise) if case.recognise else None,
@@ -81,7 +98,9 @@ def score_scope(case: Case, sig: Signature, weights: Mapping[str, float] = DEFAU
                 sigma: float = TIME_SIGMA_MIN) -> ScoreDetail:
     """For a case with no examples (should not happen): the window's centre and the scope's path."""
     start, length = window_minutes(case.scope.hours)
-    parts = {"time": time_score(sig.minute, (start + length // 2) % 1440, sigma)}
+    parts = {"time": _time(case, sig, (start + length // 2) % 1440, sigma)}
+    if actions_score(case, sig) is not None:
+        parts["actions"] = actions_score(case, sig)
     if sig.path and case.scope.path:
         parts["path"] = 1.0 - path_distance(sig.path, case.scope.path)
     return ScoreDetail(score=combine(parts, weights), components=parts)

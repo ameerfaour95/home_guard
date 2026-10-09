@@ -94,6 +94,8 @@ Notes for the integrator:
 
 ## 2. Assistant (brain/ Telegram, owner: the assistant-v2 session)
 
+The interview and the alert buttons below are still not wired; what is wired is section 2b.
+
 Every write takes `by=<owner id>`. Call these only after the existing verified-owner check. Group members who
 aren't the owner can't create, confirm or widen anything (this is the defence against memory poisoning).
 
@@ -115,6 +117,46 @@ aren't the owner can't create, confirm or widen anything (this is the defence ag
 `store` here is `case_memory.current().store`, or `CaseStore.at(default_path())`. Button callbacks need to be
 encoded compactly (for example `cm:<action>:<case_id>`, under Telegram's 64-byte limit). Look up the alert id
 from the message map the assistant already keeps.
+
+## 2b. The owner's own memories write precedents (`link.py`, `brain/case_chat.py`, 2026-10-09)
+
+**Status: built on branch `case-memory-link`, shadow.** Until now nothing created cases. Now every week-long memory
+the owner makes in the chat also writes a precedent through the Keeper:
+
+| Week-long memory (acts today) | Precedent it writes (`link.py`) |
+|---|---|
+| An explained action (`activity_memory.ActivityFact`, `brain/activity_chat.py`) | camera, the fact's daily window (or its one day), every day until the fact's end, `actions` and `place`, a head-count range (any), the owner's words, `effect: quiet`, `source.origin: activity` |
+| A known mark (`events.Known`, `tools.mark_known`, the mark buttons) | per camera it covers (a house-wide mark: every camera), its window and end, people up to its count + 2, `source.origin: known` |
+| Older ones saved before the link | `link.sync`, every keeper round (idempotent, written as their own author's) |
+
+- **Keeper ops** (`keeper.remember`): ADD; UPDATE the precedent of the same fact or mark (the owner's own words,
+  applied at once, the old scope kept in `case.history`); NOOP when nothing changed; REINFORCE one the owner
+  explains again from a new source (one confirmation a day, the end follows the newest). Cancel / "זה נגמר" /
+  moved camera / corrected mark: `invalid_at` + reason, never deleted. "Not them" (`on_button not_them` with the
+  event) narrows at once (the hours short of it, or the head-count limit) and steps the ladder back. A widening the
+  box infers (`widen_for_event`, `correct`) still waits for a yes.
+- **Explained-action cases in the policy.** The event's words (why + reason + summary, `CaseEvent.build(text=)`)
+  give `signature.actions`, `ways` and `blocked` (activity_memory's patterns). Gates: one of the case's actions
+  named, no other way in than its place, the head-count range, its end. The veto excuses only the flags that ARE
+  the explained actions (`crouching`, `tool_in_hand`) and S4/S6/S8; with `context_lowered` (the red's context look
+  already lowered it) also the E category and serious behaviour. Never: escalation / call, a harm, weapon,
+  break-in or car-door word, any other risk flag. Score: the share of the named actions that are explained stands in
+  for the path, and anywhere inside the work window is a full time score. A suspicious is lowered at most to quiet.
+- **Shadow is a log.** A shadow match logs `would quiet (case C1, score 1.00)` and a journal `matched` line; the
+  owner reads nothing (`CaseNote.owner_text` is empty for shadow). `inference._case_memory(..., text, shadow_only=True)`
+  also runs for an alert the owner's week-long memory already kept quiet (an explained action or a known mark): no
+  judge, the delivery never changes. After its end, the same kind of event (any hour) is logged `seen_after_end`.
+- **One question** (`link.questions_due`, sent by the keeper thread `case_chat.start`, every 5 min, started by
+  `inference.start_case_keeper`): an explained action of more than one day, on its last day at 18:00 (or its end
+  when earlier); or one that ended and came back on a later day. Once per explanation (`store.note_asked`).
+  Buttons ride `kn:x:ce.<w|e|s>.<fact id>`: another week (fact + precedent, a confirmation), it's over (fact
+  cancelled, precedent invalid), standing (no end, weekdays, the same hours, a confirmation). A second tap sends
+  nothing.
+- **Routines** (`link.nightly_routines`): box.yaml `routine_proposals: off|shadow|on`, **off** by default. Shadow logs
+  each new proposal once (`routine_seen`); on sends it once with `kn:x:ce.<ry|rn>.<R id>`. Not on until the owner
+  has seen an example.
+- **"מה אתה זוכר?"** lists the precedents under their own heading after the week-long items; one whose week-long
+  memory is still live shows only what the long term adds (its learning state), never its hours again.
 
 ## 3. Moving into facts.py (after `assistant-v2` merges)
 

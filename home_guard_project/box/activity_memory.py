@@ -268,12 +268,14 @@ class ActivityBook:
                      fact.cause, dt.datetime.fromtimestamp(fact.until).strftime("%a %H:%M"))
             return fact
 
-    def update(self, fact_id: str, now: float, **changes: Any) -> Optional[ActivityFact]:
+    def update(self, fact_id: str, now: float, allow_ended: bool = False, **changes: Any) -> Optional[ActivityFact]:
         """Changes one live fact (more actions, another camera or place, a new end); the old values go to its
-        history. None when there is no such live fact."""
+        history. None when there is no such live fact. *allow_ended*: also one whose end just passed (not cancelled),
+        for the owner's "another week" (case_memory/link.py)."""
         with self._lock:
             self._load()
-            fact = next((f for f in self._facts if f.id == fact_id and f.live(now)), None)
+            fact = next((f for f in self._facts if f.id == fact_id
+                         and (f.live(now) or (allow_ended and not f.cancelled_at))), None)
             if fact is None:
                 return None
             before = {k: getattr(fact, k) for k in changes if k in ActivityFact.__dataclass_fields__}

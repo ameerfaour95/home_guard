@@ -101,14 +101,29 @@ def template(sig: Signature) -> str:
         f"appearance={', '.join(sig.appearance) or 'none'}",
         f"dwell={dwell_bucket(sig.dwell_s)}",
     ]
+    if sig.actions:                      # only when the words name one: older templates stay as they were
+        parts.append(f"actions={', '.join(sig.actions)}")
     return "; ".join(parts)
+
+
+def words_of(text: str) -> Dict[str, Any]:
+    """What an alert's words (why + reason + summary) name, by activity_memory's patterns: ``actions``, ``ways``
+    (the ways in) and ``blocked`` (why an explained action could never cover it). Empty for no text."""
+    text = str(text or "").strip()
+    if not text:
+        return {"actions": (), "ways": (), "blocked": ""}
+    from .. import activity_memory as am  # noqa: PLC0415
+
+    return {"actions": tuple(am.actions_in(text)), "ways": tuple(p for p in am.places_in(text) if p in am.WAY_IN),
+            "blocked": am.red_blocked(text)}
 
 
 def build_signature(camera: str, ts: float, observation: Optional[Mapping[str, Any]] = None,
                     tracker: Optional[Mapping[str, Any]] = None, situation: Optional[Mapping[str, Any]] = None,
                     label: str = "", cameras_in_incident: int = 1, eye_model: str = "",
-                    prompt_version: str = "") -> Signature:
-    """The signature of one event. *label* is the box's label after the priors (``decision["final_label"]``);
+                    prompt_version: str = "", text: str = "") -> Signature:
+    """The signature of one event. *text* is the alert's words (why + reason + summary): the actions and ways in
+    they name (activity_memory), for the cases that remember an explained action. *label* is the box's label after the priors (``decision["final_label"]``);
     when empty, the Eye's ``label`` is used.
 
     *observation* may be the Eye's processed answer (``eye_prompt.postprocess``) as is: the cleaned values in its
@@ -144,7 +159,7 @@ def build_signature(camera: str, ts: float, observation: Optional[Mapping[str, A
         people=_int(people), vehicles=_int(vehicles), animals=_int(obs.get("animals")), flags=flags,
         appearance=clean_appearance(obs.get("appearance")), label=final,
         serious_behaviour=obs.get("serious_behaviour") is True, cameras_in_incident=max(1, _int(cameras_in_incident, 1)),
-        eye_model=str(eye_model or ""), prompt_version=str(prompt_version or ""),
+        eye_model=str(eye_model or ""), prompt_version=str(prompt_version or ""), **words_of(text),
     )
     return Signature(**{**sig.__dict__, "template": template(sig)})
 

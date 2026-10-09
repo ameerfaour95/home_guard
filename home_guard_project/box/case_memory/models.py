@@ -68,17 +68,23 @@ class Signature:
     eye_model: str = ""
     prompt_version: str = ""
     template: str = ""
+    # 2026-10-09 (activity_memory): what the alert's words name. ``actions`` are activity_memory.ACTIONS keys
+    # (lying, kneeling, bending...), ``ways`` the ways in it names (door, window, gate, fence, roof), ``blocked`` why
+    # an explained action could never cover it (activity_memory.red_blocked: harm, a weapon, a break-in, a car door).
+    actions: Tuple[str, ...] = ()
+    ways: Tuple[str, ...] = ()
+    blocked: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         out = asdict(self)
-        for key in ("path", "flags", "appearance"):
+        for key in ("path", "flags", "appearance", "actions", "ways"):
             out[key] = list(out[key])
         return out
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Signature":
         data = _known(cls, data)
-        for key in ("path", "flags", "appearance"):
+        for key in ("path", "flags", "appearance", "actions", "ways"):
             data[key] = tuple(data.get(key) or ())
         return cls(**data)
 
@@ -98,10 +104,16 @@ class Scope:
     exit_edge: str = ""
     categories: Tuple[str, ...] = ()  # allowed category ids; compared by family (gates.FAMILIES)
     max_dwell_s: Optional[float] = None
+    # An explained ACTION (activity_memory, 2026-10-09): the event's words must name one of these actions, and no
+    # way in other than *place*. With actions, the people gate is a range (a crew's head-count jumps around).
+    actions: Tuple[str, ...] = ()
+    place: str = ""
+    people_range: Tuple[int, ...] = ()   # (low, high): low <= people <= high, high 0 = no upper bound; () = exact
+    until: Optional[float] = None        # valid until (a crew's week); None = standing
 
     def to_dict(self) -> Dict[str, Any]:
         out = asdict(self)
-        for key in ("hours", "weekdays", "house_states", "path", "categories"):
+        for key in ("hours", "weekdays", "house_states", "path", "categories", "actions", "people_range"):
             out[key] = list(out[key])
         return out
 
@@ -109,9 +121,13 @@ class Scope:
     def from_dict(cls, data: Dict[str, Any]) -> "Scope":
         data = _known(cls, data)
         data["hours"] = tuple(data.get("hours") or ("00:00", "00:00"))
-        for key in ("weekdays", "house_states", "path", "categories"):
+        for key in ("weekdays", "house_states", "path", "categories", "actions", "people_range"):
             if key in data:
                 data[key] = tuple(data[key] or ())
+        if data.get("people_range"):
+            data["people_range"] = tuple(int(x) for x in data["people_range"][:2])
+        if data.get("until") is not None:
+            data["until"] = float(data["until"])
         return cls(**data)
 
 
@@ -165,6 +181,7 @@ class Case:
     invalid_reason: str = ""
     merged_into: str = ""
     revision: int = 1
+    history: List[Dict[str, Any]] = field(default_factory=list)   # {ts, op, before, reason}: never forgotten
 
     @property
     def camera(self) -> str:
@@ -184,7 +201,7 @@ class Case:
             "source": dict(self.source), "last_confirmed_at": self.last_confirmed_at,
             "last_seen_at": self.last_seen_at, "review_asked_at": self.review_asked_at,
             "invalid_at": self.invalid_at, "invalid_reason": self.invalid_reason, "merged_into": self.merged_into,
-            "revision": self.revision,
+            "revision": self.revision, "history": [dict(h) for h in self.history],
         }
 
     @classmethod
@@ -198,6 +215,7 @@ class Case:
         kept["recognise"] = tuple(kept.get("recognise") or ())
         kept["negatives"] = list(kept.get("negatives") or [])
         kept["source"] = dict(kept.get("source") or {})
+        kept["history"] = [dict(h) for h in kept.get("history") or [] if isinstance(h, dict)]
         return cls(scope=scope, examples=examples, **kept)
 
 

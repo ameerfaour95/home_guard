@@ -8,15 +8,21 @@
 - Forgetting: a case not seen for 30 days pauses with one question, "still relevant?".
 - Transparency: "what do you remember about the gate?" lists the cases with a delete button each.
 - Buttons: one dispatcher for the buttons the policy and the listings attach.
+- Owner memories from the chat (2026-10-09, :func:`remember`): an explained action or a known mark becomes a
+  precedent too. ADD a new one; UPDATE the one from the same source (its fact or mark: the owner's own words, applied
+  at once with the old scope in ``history``) or leave it (NOOP); REINFORCE one the owner explains again from a new
+  source (one confirmation a day: the trust ladder's step). "Not them" narrows at once; a widening the box infers
+  by itself still waits for a yes.
 """
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass, replace
+from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from . import texts
-from .gates import circular_distance
+from .gates import circular_distance, in_window
 from .interviewer import Outcome
 from .models import Case, Example, Scope, Signature, hhmm, window_minutes
 from .store import CaseStore, narrows, scope_diff
@@ -215,7 +221,10 @@ def on_button(store: CaseStore, action: str, case_id: str, by: str, event_id: st
     if action == "confirm":
         return store.confirm(case_id, by, event_id, example)
     if action == "not_them":
-        return store.contradict(case_id, by, event_id)
+        out = store.contradict(case_id, by, event_id)
+        if out is not None and example is not None:
+            out = narrow_for_event(store, case_id, example.signature, by) or out
+        return out
     if action == "keep_alerting":
         return store.keep_alerting(case_id, by)
     if action == "keep":
@@ -229,6 +238,117 @@ def on_button(store: CaseStore, action: str, case_id: str, by: str, event_id: st
     raise ValueError(f"unknown action {action!r}")
 
 
+# -- owner memories from the chat: one model for the week-long and the long-term (2026-10-09) -----------------------
+
+def _day(ts: Optional[float]) -> Any:
+    return datetime.fromtimestamp(float(ts or 0)).date()
+
+
+def same_source(case: Case, draft: Case) -> bool:
+    """*draft* comes from the same owner memory as *case*: the same explained-action fact, or the same mark (or one
+    it replaces)."""
+    a, b = case.source or {}, draft.source or {}
+    if not a.get("origin") or a.get("origin") != b.get("origin"):
+        return False
+    if a["origin"] == "activity":
+        return bool(a.get("fact_id")) and (a.get("fact_id") == b.get("fact_id")
+                                           or a.get("fact_id") in (b.get("facts") or ()))
+    if a["origin"] == "known":
+        ids = {b.get("known_id"), *(b.get("replaces") or ())}
+        return bool(a.get("known_id")) and a.get("known_id") in ids
+    return False
+
+
+def same_activity(case: Case, draft: Case, same_people: Optional[Callable[[str, str], bool]] = None) -> bool:
+    """*draft* explains the same thing as *case* from a new source (another day's explanation of the same work at
+    the same camera, the same people marked again)."""
+    a, b = case.scope, draft.scope
+    if a.camera != b.camera or window_gap(a.hours, b.hours) > MERGE_GAP_MIN:
+        return False
+    if a.actions or b.actions:
+        return bool(set(a.actions) & set(b.actions)) and (a.place == b.place or not a.place or not b.place)
+    if (case.source or {}).get("origin") != "known" or (draft.source or {}).get("origin") != "known":
+        return False
+    same = same_people or (lambda x, y: " ".join(x.split()) == " ".join(y.split()))
+    return bool(case.title and draft.title and same(case.title, draft.title))
+
+
+def remember(store: CaseStore, draft: Case, by: str, now: Optional[float] = None,
+             same_people: Optional[Callable[[str, str], bool]] = None) -> SaveResult:
+    """Keep one precedent per owner memory (Mem0's ADD / UPDATE / NOOP, Zep's history): ``saved``, ``updated``,
+    ``narrowed``, ``unchanged``, ``reinforced`` or ``failed``. Only the owner (*by*) gets here."""
+    if not by:
+        raise ValueError("only the owner's words make a memory")
+    now = time.time() if now is None else now
+    live = store.live_cases(draft.camera)
+    for case in live:
+        if same_source(case, draft):
+            return _update(store, case, draft, by)
+    for case in live:
+        if same_activity(case, draft, same_people):
+            return _reinforce(store, case, draft, by, now)
+    saved = store.add(draft, by)
+    return SaveResult("saved" if saved else "failed", case=saved)
+
+
+def _update(store: CaseStore, case: Case, draft: Case, by: str) -> SaveResult:
+    source = {**case.source, **{k: v for k, v in draft.source.items() if k != "replaces" and v not in ("", None)}}
+    if draft.scope == case.scope and (draft.title or case.title) == case.title and source == case.source:
+        return SaveResult("unchanged", case=case, target=case)
+    if narrows(case.scope, draft.scope) and draft.scope != case.scope and (draft.title or case.title) == case.title \
+            and source == case.source:
+        out = store.narrow(case.id, draft.scope, by, reason="the owner's correction")
+        return SaveResult("narrowed" if out else "failed", case=out, target=out)
+    out = store.revise(case.id, draft.scope, by, reason="the owner's words", title=draft.title or None,
+                       note=draft.note or None, source=source)
+    return SaveResult("updated" if out else "failed", case=out, target=out)
+
+
+def _reinforce(store: CaseStore, case: Case, draft: Case, by: str, now: float) -> SaveResult:
+    """The owner explained it again from a new source: one confirmation a day, and the end follows the newest."""
+    out: Optional[Case] = case
+    newest = max(case.created_at or 0.0, case.last_confirmed_at or 0.0)
+    if _day(newest) < _day(now):
+        out = store.confirm(case.id, by, str(draft.source.get("alert_id") or ""),
+                            draft.examples[0] if draft.examples else None) or out
+    scope = case.scope
+    if scope.until is not None and (draft.scope.until is None or draft.scope.until > scope.until):
+        scope = replace(scope, until=draft.scope.until)
+    facts = list(dict.fromkeys([*(case.source.get("facts") or ()), case.source.get("fact_id"),
+                                draft.source.get("fact_id")]))
+    source = {k: v for k, v in {"fact_id": draft.source.get("fact_id") or case.source.get("fact_id"),
+                                "facts": [f for f in facts if f],
+                                "known_id": draft.source.get("known_id") or case.source.get("known_id")}.items() if v}
+    if scope != case.scope or any(case.source.get(k) != v for k, v in source.items()):
+        out = store.revise(case.id, scope, by, reason="explained again", source=source) or out
+    return SaveResult("reinforced", case=out, target=out)
+
+
+def narrow_for_event(store: CaseStore, case_id: str, sig: Signature, by: str) -> Optional[Case]:
+    """ "Not them" narrows at once where the event shows how: an event in the outer third of the hours cuts the
+    window short of it; one with the most people the case allows lowers that limit. Otherwise only the ladder steps
+    back (``contradict``)."""
+    case = store.get(case_id)
+    if case is None:
+        return None
+    s = case.scope
+    start, length = window_minutes(s.hours)
+    new = s
+    if length < 1440 and in_window(sig.minute, s.hours):
+        offset = (sig.minute - start) % 1440
+        if offset >= length * 2 / 3 and offset >= 10:
+            new = replace(s, hours=(s.hours[0], hhmm(sig.minute)))
+        elif offset <= length / 3 and length - offset - 1 >= 10:
+            new = replace(s, hours=(hhmm(sig.minute + 1), s.hours[1]))
+    if new == s and s.people_range and len(s.people_range) == 2:
+        low, high = s.people_range
+        if high and sig.people == high and high - 1 >= max(1, low):
+            new = replace(s, people_range=(low, high - 1))
+    if new == s or not narrows(s, new):
+        return None
+    return store.narrow(case_id, new, by, reason=f"not them ({hhmm(sig.minute)}, {sig.people} people)")
+
+
 def describe_diff(diff: Dict[str, Tuple[Any, Any]]) -> str:
     """ "hours: 07:10-08:10 -> 07:10-09:00" lines for a widening proposal."""
     lines = []
@@ -240,4 +360,4 @@ def describe_diff(diff: Dict[str, Tuple[Any, Any]]) -> str:
 
 __all__ = ["SaveResult", "save_interview", "confirm_merge", "correct", "widen_for_event", "due_reviews",
            "remember_listing", "on_button", "union_scope", "union_window", "window_gap", "mergeable",
-           "describe_diff", "scope_diff"]
+           "describe_diff", "scope_diff", "remember", "same_source", "same_activity", "narrow_for_event"]
