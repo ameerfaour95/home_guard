@@ -267,6 +267,18 @@ class AppearanceTest(GuardCase):
         self.assertEqual(job.alert["label"], "suspicious")
         self.assertNotIn("downgraded", job.alert)
 
+    def test_someone_walking_by_is_normal(self):
+        # 2026-10-09 18:22 ch6 went out 🟡 for "walks along the path".
+        job = self.work(Backend(answer("suspicious", why="הולך לאורך המסלול",
+                                       summary="A person appears to be walking along a paved path next to a stone wall "
+                                               "and a black fence. The individual is wearing dark clothing.")), T0)
+        self.assertEqual((job.alert["label"], job.alert["downgraded"]), ("normal", "presence only"))
+        job = self.work(Backend(answer("suspicious", why="אדם נראה הולך על שביל הכניסה עם שק לבן גדול",
+                                       summary="A person walks across the driveway carrying a large white bag.")),
+                        T0 + 600)
+        self.assertEqual(job.alert["label"], "suspicious")
+        self.assertNotIn("downgraded", job.alert)
+
     def test_a_mask_with_an_action_stays_suspicious(self):
         job = self.work(Backend(answer("suspicious", why="a masked man tries the door handle")), T0)
         self.assertEqual(job.alert["label"], "suspicious")

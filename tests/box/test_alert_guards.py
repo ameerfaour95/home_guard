@@ -30,6 +30,51 @@ class AppearanceOnlyTest(unittest.TestCase):
 
     def test_inference_exposes_the_guard(self):
         self.assertTrue(inf.appearance_only("wearing a hoodie"))
+        self.assertTrue(inf.presence_only("walking along the path", "A person walks along the path."))
+
+    def test_colours_and_places_are_harmless(self):
+        # 2026-10-09 17:44 ch1 and 18:00 pergola went out 🟡 for looks: "בהירים", a balcony, a patio were unknown words.
+        lives = ["אדם בבגדים בהירים עם פנים מכוסות", "אדם עם קפוצ'ון הולך על המרפסת",
+                 "פנים מוסתרות על ידי בגד Two people, one in dark clothing and one in light clothing, walk through the "
+                 "property. The person in light clothing appears to have a covered face.",
+                 "הופעת אדם עם כובע ומעיל עם קפל A person in a hooded sweatshirt walks across the patio. A man in a cap "
+                 "stands nearby and watches the person walk away.",
+                 "a man in a white hoodie walks across the yard", "גבר עם כובע אפור בחצר", "masked person on the porch"]
+        for why in lives:
+            with self.subTest(why=why):
+                self.assertTrue(g.appearance_only(why))
+        for why in ("a man in a white hoodie walks to the entrance", "a masked man walks into the house",
+                    "a hooded man walks toward the house", "רעול פנים ליד השער", "masked man by the door at night",
+                    "masked person carrying a bag across the yard", "גבר עם כובע לבן נכנס לחצר"):
+            with self.subTest(why=why):
+                self.assertFalse(g.appearance_only(why))
+
+
+class PresenceOnlyTest(unittest.TestCase):
+    S_1822 = ("A person appears to be walking along a paved path next to a stone wall and a black fence. The individual "
+              "is wearing dark clothing.")
+    S_1816 = ("A person appears to walk across the driveway carrying a large white bag. The person's face is obscured by "
+              "a hood or mask.")
+
+    def test_someone_walking_by_is_not_suspicious(self):
+        # 2026-10-09 18:22 ch6 went out 🟡 for "a person seems to walk on a paved path by a stone (wall)".
+        for why in ("הולך לאורך המסלול", "אדם נראה הולך בשביל מרוצף ליד אבן", "a person walking along the path",
+                    "person standing in the yard"):
+            with self.subTest(why=why):
+                self.assertTrue(g.presence_only(why, self.S_1822))
+
+    def test_anything_more_keeps_the_label(self):
+        # 18:16 pergola: a large white sack by the entrance path stays suspicious (an unknown word, and an entrance).
+        self.assertFalse(g.presence_only("אדם נראה הולך על שביל הכניסה עם שק לבן גדול", self.S_1816))
+        self.assertFalse(g.presence_only("אדם נראה הולך על שביל", self.S_1816))                    # the summary's bag
+        for why, summary in (("walking along the path", "A person walks to the gate and tries the handle."),
+                             ("walking along the path", "A hooded person walks toward the camera."),
+                             ("walking along the path", "A person climbs over the fence."),
+                             ("walking along the path at night", ""), ("walking around the house", ""),
+                             ("התנהגות חשודה", ""), ("", "A person walks by."), ("a man walks to the door", ""),
+                             ("אדם הולך לכיוון הבית", ""), ("אדם הולך ומציץ לחלון", "")):
+            with self.subTest(why=why, summary=summary):
+                self.assertFalse(g.presence_only(why, summary))
 
 
 class VerifyClassTest(unittest.TestCase):

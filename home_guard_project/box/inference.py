@@ -2214,6 +2214,13 @@ def appearance_only(text: str) -> bool:
     return only(text)
 
 
+def presence_only(why: str, summary: str = "") -> bool:
+    """alert_guards.presence_only: the why says only that someone walks or stands there, the summary names no action."""
+    from .alert_guards import presence_only as only  # noqa: PLC0415
+
+    return only(why, summary)
+
+
 def second_look(backend: Any, frames: List[Any], classes: Sequence[str], lang: str,
                 timeout: Optional[float] = None) -> Dict[str, Any]:
     """Ask *backend* once, on the alert's own frames, whether the red's reason (*classes*: weapon / tool_weapon /
@@ -2849,6 +2856,13 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
             label = shown_label = "normal"
             cmd = LABEL_COMMANDS[label]
             decision.update(label=label, final_label=label, downgraded="appearance only")
+        # Presence alone (someone walking or standing, a place, a colour) is not suspicious either (2026-10-09 18:22
+        # ch6 "הולך לאורך המסלול"): the why is held to every token, the summary only searched for an action.
+        if label == "suspicious" and not fact and presence_only(f"{why} {reason}", summary):
+            log.info("[%s] suspicious only for presence (%s); normal", camera_name, why or reason)
+            label = shown_label = "normal"
+            cmd = LABEL_COMMANDS[label]
+            decision.update(label=label, final_label=label, downgraded="presence only")
         # Lingering is a question of time, which the tracker measures (stage 2b): a "suspicious" only for loitering /
         # standing / looking around waits up to 20 s for the investigator. A house note's verdict and an escalation
         # are left alone.

@@ -36,7 +36,7 @@ APPEARANCE = _any([
     r"\bcover(?:ed|ing|s)? (?:his |her |their |the )?faces?", r"\bfaces? (?:is |are |was |were )?(?:covered|hidden|obscured|concealed|not visible)",
     r"\b(?:hidden|obscured|concealed) faces?", r"\bhid(?:es|ing)? (?:his|her|their) faces?",
     r"מסכה", r"מסיכה", r"קפוצ['׳]?ון", r"ברדס", r"פנים מכוסות", r"פנים מוסתרות", r"פניו מכוסות", r"פניו מוסתרות",
-    r"מכסה את פניו", r"כיסוי ראש", r"בגדים כהים", r"לבוש כהה", r"כובע", r"משקפי שמש", r"פיקסל", r"מפוקסל", r"מטושטש", r"רעול",
+    r"מכסה את פניו", r"כיסוי ראש", r"כיסוי פנים", r"בגדים כהים", r"לבוש כהה", r"כובע", r"משקפי שמש", r"פיקסל", r"מפוקסל", r"מטושטש", r"רעול",
 ])
 
 # Anything here keeps the "suspicious": an action, or night (walking around the property at night stays suspicious).
@@ -68,6 +68,11 @@ garments pants shirt long sleeve sleeves pixelated pixelation pixels blurry blur
 cannot be seen unidentified unknown unrecognizable worker workers suspicious suspiciously behavior behaviour appearance presence
 present noted observed seen visible stands standing stood walks walking walked passes passing passed past by near
 nearby next wall frame scene view area outside here there phone looking looks look at talking talks
+walk stand pass across through along away have has had watches watching watch watched
+light lighter white grey gray blue red green brown beige yellow orange pink purple navy khaki colorful colourful
+patterned striped plain bright coat coats vest shorts shoes sneakers trousers jeans top dress skirt
+balcony porch patio yard backyard courtyard driveway path pathway walkway paved garden lawn grass house home
+property sidewalk pavement stone tiles
 """.split())
 _BENIGN_HE = set("""
 אדם אנשים גבר גברים אישה נשים מישהו דמות דמויות ילד ילדה אחד אחת שני שניים שלושה עם בלי לבוש לבושה לובש לובשת לבושים
@@ -78,6 +83,10 @@ _BENIGN_HE = set("""
 התנהגות חשודה חשוד הופעת הופעה נוכחות עומד עומדת עומדים הולך הולכת הולכים עובר עוברת עוברים ליד קיר
 בתמונה בפריים באזור בחוץ כאן שם טלפון מסתכל מסתכלת מדבר מדברת
 עובד עובדים עובדת פועל פועלים מפוקסלות מפוקסלים מפוקסלת מטושטשים מטושטשת
+בהיר בהירה בהירים בהירות לבן לבנה לבנים לבנות אפור אפורה אפורים כחול כחולה כחולים אדום אדומה אדומים ירוק ירוקה
+ירוקים צבעוני צבעונית צבעוניים מודפסת מודפס מעיל מעילים קפל חולצה חולצות מכנסיים מכנסי נעליים
+מרפסת חצר שביל שבילים חניה חנייה פטיו דשא בית גינה מסלול מרוצף מרוצפת אבן אבנים מדרכה ריצוף
+לאורך דרך הולכת נראה נראית נראים נראו
 """.split())
 _TOKEN = re.compile(r"[A-Za-z]+|[א-ת]+")
 _HE_PREFIXES = ("ו", "ה", "ב", "ל", "ש", "מ", "כ")
@@ -102,6 +111,45 @@ def appearance_only(text: str) -> bool:
     if not APPEARANCE.search(text) or ACTION.search(text):
         return False
     return all(_benign(tok) for tok in _TOKEN.findall(text))
+
+
+# Presence: someone is there, walking or standing (2026-10-09 18:22 ch6: "הולך לאורך המסלול" went out 🟡).
+PRESENCE = _any([
+    r"\bwalk", r"\bstand", r"\bstood\b", r"\bpass(?:es|ed|ing)?\b", r"\bpresen", r"\bvisible\b", r"\bseen\b",
+    r"הולך", r"הולכת", r"הולכים", r"עומד", r"עומדת", r"עומדים", r"עובר", r"עוברת", r"עוברים", r"נוכחות", r"נראה", r"נראית",
+])
+# What in the summary keeps the label: any ACTION, or a carried thing, a try, a way in, a run (the summary is too long
+# for the every-token rule, so here it is only searched for these).
+SUMMARY_ACTION = _any([
+    r"\bcarr(?:y|ies|ied|ying)\b", r"\bbags?\b", r"\bsacks?\b", r"\bbackpack", r"\bpackage", r"\bparcel", r"\bboxe?s?\b",
+    r"\bload", r"\bgrab", r"\bopen", r"\btr(?:y|ies|ied|ying)\b", r"\benter", r"\bran\b", r"\brun", r"\bflee", r"\bfled",
+    r"\bjump", r"\bthrow", r"\bthrew", r"\bpick", r"\bhold", r"\bremov", r"\bsearch", r"\brummag", r"\bvehicle", r"\bcars?\b",
+    r"\bapproach", r"\baround\b", r"\bflashlight", r"\btorch", r"\bphotograph", r"\bfilm", r"\bweapon", r"\bknife", r"\bgun",
+    # ...or comes toward the house or the camera (eval_set_v2 Security_smartbench_0908: hooded people "walk toward
+    # the camera" were window-peepers)
+    r"\btowards?\b", r"\bcamera", r"\binto\b", r"\bup to\b", r"\bclose to\b", r"\bcloser\b",
+    r"לכיוון", r"מתקרב", r"מצלמה", r"נושא", r"סוחב", r"שק", r"תיק", r"פותח", r"מנסה", r"רץ", r"בורח",
+])
+
+
+# A fence or a wall the person walks NEXT TO is where they are, not what they do ("walking along a paved path next to
+# a stone wall and a black fence", 18:22). A gate, a door, a window - or behind / over a fence - still count.
+_BOUNDARY = r"(?:the |a |an )?(?:[\w-]+ ){0,2}?(?:fences?|walls?)\b"
+_BOUNDARY_PLACE = re.compile(rf"\b(?:next to|near|along(?:side)?|beside|by|past) {_BOUNDARY}(?:,? and {_BOUNDARY})*",
+                             _FLAGS)
+
+
+def presence_only(why: str, summary: str = "") -> bool:
+    """True when the Eye's *why* says only that someone is there - walking or standing (PRESENCE), with places,
+    colours, clothes and filler - and names nothing else: every token benign (the deny-by-default rule of
+    :func:`appearance_only`), no ACTION in the why, and no ACTION or SUMMARY_ACTION in the *summary*. Such a
+    "suspicious" is lowered to normal like an appearance-only one. Only the why is held to every token (the summary is
+    too long for that). Empty why, or a why that names no presence, is False."""
+    why = str(why or "").replace("'", "").replace("׳", "").replace('"', " ")
+    summary = _BOUNDARY_PLACE.sub(" ", str(summary or ""))
+    if not PRESENCE.search(why) or ACTION.search(why) or ACTION.search(summary) or SUMMARY_ACTION.search(summary):
+        return False
+    return all(_benign(tok) for tok in _TOKEN.findall(why))
 
 
 # ---------- lingering: the investigator watches the tracker before it goes out (stage 2b, 2026-10-08) ----------
