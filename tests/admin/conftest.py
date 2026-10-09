@@ -8,7 +8,7 @@ from shiboken6 import isValid
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import QThreadPool
+from PySide6.QtCore import QCoreApplication, QEvent, QThreadPool
 from home_guard_project.admin.theme import apply_theme
 
 
@@ -44,3 +44,4 @@ def widgets(app):
             widget.close()
             widget.deleteLater()
     app.processEvents()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)   # really gone: no timers outlive the test

@@ -43,7 +43,8 @@ class LabelCanvas(VideoCanvas):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents)
         self.setAccessibleName('Video annotation canvas: drag to draw, move or resize a box; wheel to zoom')
-        QApplication.instance().installEventFilter(self)   # Space held = pan (Space alone still plays / pauses)
+        # Space held = pan (Space alone still plays / pauses): an app-wide filter, only while the canvas is shown, so a
+        # hidden or closed canvas never sees (or slows down) the rest of the app's events
 
     # ------------------------------------------------------------------ zoom and pan (image coordinates kept)
     def fit_rect(self):
@@ -93,6 +94,12 @@ class LabelCanvas(VideoCanvas):
         if event.type() == QEvent.Type.NativeGesture and event.gestureType() == Qt.NativeGestureType.ZoomNativeGesture:
             self.zoom_to(self.zoom*(1+event.value()), event.position()); return True   # a trackpad pinch
         return super().event(event)
+
+    def showEvent(self, event):
+        QApplication.instance().installEventFilter(self); super().showEvent(event)
+
+    def hideEvent(self, event):
+        QApplication.instance().removeEventFilter(self); self.space_held = False; super().hideEvent(event)
 
     def eventFilter(self, obj, event):
         if event.type() in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease) and event.key() == Qt.Key.Key_Space \

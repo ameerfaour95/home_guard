@@ -153,3 +153,21 @@ def test_a_new_clip_drops_the_old_frames(widgets, wait):
     v.install(v.doc.annotation)
     assert v.frames is None and v.cached(0) is None and not v.play_timer.isActive()
     assert old is not None
+
+
+def test_a_closed_view_leaves_nothing_running(widgets, wait, app):
+    """Timers, the player and the app-wide Space filter must not outlive a closed Tag · YOLO view (2026-10-10: leaked
+    1 s clocks and filters from earlier tests slowed later ones until a sign-in test timed out)."""
+    from PySide6.QtCore import QEvent, QTimer
+    from PySide6.QtGui import QKeyEvent
+    from PySide6.QtCore import Qt
+    v = view(widgets, wait)
+    assert v.clock.isActive()
+    v.toggle_play(); assert v.play_timer.isActive()
+    v.close()
+    assert not any(t.isActive() for t in v.findChildren(QTimer) if t is not v.autosave)
+    assert v.player.source().isEmpty() and v.frames_for is None
+    v.canvas.space_held = False                                          # a hidden canvas no longer filters keys
+    app.sendEvent(app, QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Space, Qt.KeyboardModifier.NoModifier))
+    assert not v.canvas.space_held
+    v.show(); assert v.clock.isActive()                                  # shown again: its clock runs again

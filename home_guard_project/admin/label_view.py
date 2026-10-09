@@ -79,7 +79,7 @@ class LabelView(QWidget):
         self.seek_watchdog.timeout.connect(self.seek_timed_out); self.seek_nudged = False
         self.autosave = QTimer(self); self.autosave.setSingleShot(True); self.autosave.setInterval(2000)
         self.autosave.timeout.connect(self.save)
-        self.clock = QTimer(self); self.clock.setInterval(1000); self.clock.timeout.connect(self.update_save_state); self.clock.start()
+        self.clock = QTimer(self); self.clock.setInterval(1000); self.clock.timeout.connect(self.update_save_state)   # runs while shown
         self.player = QMediaPlayer(self); self.sink = QVideoSink(self); self.player.setVideoSink(self.sink)
         self.sink.videoFrameChanged.connect(self.frame_decoded)
         self.player.errorOccurred.connect(lambda *_: self.media_error())
@@ -717,5 +717,18 @@ class LabelView(QWidget):
     def help(self):
         self.show_dialog('Keyboard shortcuts', '\n\n'.join(f'{key}   —   {text}' for key, text in HELP))
 
+    def showEvent(self, event):
+        self.clock.start(); super().showEvent(event)
+
     def hideEvent(self, event):
-        self.player.pause(); self.save(); super().hideEvent(event)
+        self.player.pause(); self.save(); self.clock.stop(); self.first_frame.stop()
+        if self.play_timer.isActive(): self.stop_cached()
+        super().hideEvent(event)
+
+    def closeEvent(self, event):
+        """Closed for good: nothing of it keeps running (timers, the player, the frame decode)."""
+        for timer in (self.clock, self.first_frame, self.play_timer, self.seek_watchdog):
+            timer.stop()
+        self.frames_for = None                                  # the background decode stops at its next frame
+        self.player.stop(); self.player.setSource(QUrl())
+        super().closeEvent(event)
