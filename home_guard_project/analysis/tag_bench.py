@@ -13,6 +13,7 @@ input), so every human box lands on the sent frame in exact pixels. Arms:
   B  the same frames with the tags drawn (tag_overlay), the legacy prompt + TAGS_RULE (per_entity)
   S  B's frames with the strings of one pair swapped (P1<->P2, else CAR1<->CAR2): a model that reads the
      tags must swap its per-entity answers
+  M  B's frames (tags drawn) with A's prompt unchanged: is any harm from the marks or from the extra task?
 
 Commands (python -m home_guard_project.analysis.tag_bench <cmd>): prepare | run | judge | score | sheets. Every step
 resumes: answers already saved are not asked again.
@@ -51,7 +52,7 @@ OUT = r"C:/Users/ameer/Ameer/home_guard_data/eval/tag_bench"
 KEY_FILE = os.path.expanduser("~/.homeguard/api_key.env.bak-20261006-2338")
 JUDGE_MODEL = "openai/gpt-4o-mini"
 SAMPLE_FPS = 1.0
-ARMS = ("A", "B", "S")
+ARMS = ("A", "B", "S", "M")
 GENERIC_CAMERA = "camera_1"      # uca/smarthome camera fields are crime categories ("Abuse"): never shown
 
 TAGS_RULE = (
@@ -355,13 +356,15 @@ def camera_of(row: Dict[str, Any]) -> str:
 def prompt_of(arm: str, clip: Clip, ids: Sequence[str]) -> Tuple[str, Dict[str, Any]]:
     """The arm's prompt and response format. A is the box's legacy prompt byte for byte."""
     base = inf.build_prompt(camera_of(clip.row), 0, local_time_of(clip.meta), 0, 0, owner_language="en")
-    if arm == "A":
+    if arm in ("A", "M"):
         return base, inf.VLM_RESPONSE_FORMAT
     return base + "\n\n" + TAGS_RULE.format(ids=", ".join(id_order(ids))), FORMAT_TAGS
 
 
 def frames_of(arm: str, r: Rendered) -> List[np.ndarray]:
-    return r.sent.frames if arm == "A" else r.tagged.frames if arm == "B" else r.swapped.frames  # type: ignore[union-attr]
+    if arm == "A":
+        return r.sent.frames
+    return r.swapped.frames if arm == "S" else r.tagged.frames  # type: ignore[union-attr]
 
 
 def _complete(c: Any, model: str, content: List[Dict[str, Any]], fmt: Optional[Dict[str, Any]],
@@ -636,7 +639,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 jobs += match_jobs(cid, f"B{r}-S{r}", m["pair"], _pe(b["parsed"]), _pe(s["parsed"]))
             if b:
                 jobs.append(("attr", f"{cid}|B{r}", attr_prompt(m, _pe(b["parsed"])), {"clip_id": cid, "run": r}))
-            for arm in ("A", "B"):
+            for arm in ("A", "B", "M"):
                 a = ans[(arm, r)].get(cid)
                 if a:
                     jobs.append(("harm", f"{cid}|{arm}{r}", harm_prompt(m, a["parsed"]),
@@ -766,9 +769,11 @@ def score(out: str, model: str, runs: int = 2) -> Dict[str, Any]:
 
     # 3. harm
     harm: Dict[str, Any] = {}
-    for arm in ("A", "B"):
+    for arm in ("A", "B", "M"):
         for r in rs:
             got = ans[(arm, r)]
+            if not got:
+                continue
             tp = fn = fp = tn = 0
             inv = mis = 0
             for cid, m in man.items():
@@ -789,22 +794,24 @@ def score(out: str, model: str, runs: int = 2) -> Dict[str, Any]:
                                  "quiet_ok": tn, "invented": inv, "missed_actions": mis,
                                  "people_count": sum(int(_safe_int((got.get(cid) or {}).get("parsed", {}), "people"))
                                                      for cid in man if cid in got)}
-    red = []
-    for cid, m in man.items():
-        if not m["alert"]:
+    for arm in ("B", "M"):
+        if not any(ans[(arm, r)] for r in rs):
             continue
-        a_caught = all(_alert((ans[("A", r)].get(cid) or {}).get("parsed")) for r in rs
-                       if cid in ans[("A", r)]) and all(cid in ans[("A", r)] for r in rs)
-        b_missed = [r for r in rs if cid in ans[("B", r)] and not _alert(ans[("B", r)][cid]["parsed"])]
-        if a_caught and b_missed:
-            red.append({"clip_id": cid, "B_runs_missed": b_missed})
-    harm["red_flags_both_A_caught_B_missed"] = red
-    gained = []
-    for cid, m in man.items():
-        if m["alert"] and all(cid in ans[("B", r)] and _alert(ans[("B", r)][cid]["parsed"]) for r in rs) and \
-                not any(_alert((ans[("A", r)].get(cid) or {}).get("parsed")) for r in rs):
-            gained.append(cid)
-    harm["both_B_caught_no_A_caught"] = gained
+        red, gained = [], []
+        for cid, m in man.items():
+            if not m["alert"]:
+                continue
+            a_runs = [ans[("A", r)].get(cid) for r in rs]
+            x_runs = [ans[(arm, r)].get(cid) for r in rs]
+            a_caught = all(a is not None and _alert(a["parsed"]) for a in a_runs)
+            missed = [r for r, x in zip(rs, x_runs) if x is not None and not _alert(x["parsed"])]
+            if a_caught and missed:
+                red.append({"clip_id": cid, f"{arm}_runs_missed": missed})
+            if all(x is not None and _alert(x["parsed"]) for x in x_runs) and \
+                    not any(a is not None and _alert(a["parsed"]) for a in a_runs):
+                gained.append(cid)
+        harm[f"red_flags_both_A_caught_{arm}_missed"] = red
+        harm[f"both_{arm}_caught_no_A_caught"] = gained
     harm["human_alerts"] = sum(1 for m in man.values() if m["alert"])
     res["harm"] = harm
     res["parse_failures"] = {f"{a}{r}": sum(1 for row in read_jsonl(answers_path(out, model, a, r))
