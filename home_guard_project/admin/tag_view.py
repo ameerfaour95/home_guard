@@ -25,6 +25,7 @@ from .player import VideoCanvas, TrackOverlay, SESSION
 from .tag_widgets import (QueueModel, QueueDelegate, CategoryButton, ChipGroup, OpinionCard, Pill, TIER_TOKENS,
                           TIER_TITLES)
 from .workers import TaskRunner
+from .tag_widgets import camera_caption
 from .widgets.common import label, button
 
 TIERS = [('open', 'To do'), ('contradiction', 'Contradictions'), ('check', 'To check'), ('untagged', 'Untagged'),
@@ -487,9 +488,12 @@ class TagView(QWidget):
         self.form = deepcopy(self.drafts.pop(key, None) or detail['form'])
         self.raw_manual = bool(detail['tag'] and detail['tag']['fields'].get('raw_label'))
         item = detail['item']
-        bits = [item.get('camera'), item.get('source'), item.get('date'), item.get('local_time'),
+        bits = [item.get('source'), item.get('date'), item.get('local_time'),
                 f"{item['duration_sec']:.1f} s" if item.get('duration_sec') else '']
-        self.title.setText(item['clip_id'] + '    ' + '  ·  '.join(b for b in bits if b))
+        # the owner's camera name (the box's camera_list, an old id by its channel), never the raw id; it stays in the
+        # tooltip for support
+        self.title.setText(camera_caption(item) + '    ' + '  ·  '.join(b for b in bits if b))
+        self.title.setToolTip(f"{item['clip_id']}  ·  camera id {item.get('camera') or '?'}")
         a = detail['assessment']
         self.tier_pill.show_label(TIER_TITLES.get(a['tier_name'], a['tier_name']), TIER_TOKENS.get(a['tier_name'], 'muted'))
         needs = (item.get('info') or {}).get('needs_check')

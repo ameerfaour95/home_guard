@@ -206,3 +206,12 @@ def test_suggest_tag_fills_a_draft_and_the_save_says_accepted_or_edited(widgets,
     v.save(); wait(lambda: v.key != second and not v.queue_runner.busy and not v.clip_runner.busy, 10)
     fields = b.tagging_clip(second)['tag']['fields']
     assert fields['suggestion_use'] == 'edited' and fields['suggested_by'].startswith('demo/')
+
+
+def test_captions_never_show_a_raw_camera_id():
+    from home_guard_project.admin.tag_widgets import camera_caption, queue_title
+    row = {'clip_id': 'ameer_tes2_ch2_1791091199_alert', 'camera': 'ameer_tes2_ch2', 'camera_display': 'חניה',
+           'date': '2026-10-04', 'local_time': '08:19:55'}
+    assert camera_caption(row) == 'חניה' and queue_title(row) == 'חניה  ·  10-04 08:19'
+    assert camera_caption({'camera': 'ameer_tes2_ch2'}) == 'Camera 2'        # no name known: the channel rule
+    assert 'ameer_tes2' not in queue_title({'camera': 'ameer_tes2_ch2'})

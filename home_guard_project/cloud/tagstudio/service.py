@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from ...fleet_contract import taxonomy
+from ...fleet_contract import health, taxonomy
 from ...fleet_contract.prompt_schemas import answer_schema, schema_kind
 from . import export as exporter
 from . import queue as work_queue
@@ -84,12 +84,34 @@ class TagStudio:
                 match.merge(item)
             else:
                 out[item.key] = item
+        names = self.camera_names(session, {i.info.get("site") or (i.source if i.origin != "dataset" else "")
+                                            for i in out.values()})
         for item in out.values():
+            site = item.info.get("site") or (item.source if item.origin != "dataset" else "")
+            item.info["camera_display"] = health.camera_label(item.camera, names.get(site)) if item.camera else ""
             item.info["has_media"] = any(ok for ok, _ in self.media_status(item).values())
             item.opinions.pop(TEACHER, None)
             op = first_suggestion(self.teachers, item)
             if op is not None:
                 item.opinions[TEACHER] = op
+        return out
+
+    def camera_names(self, session, sites) -> Dict[str, Dict[str, str]]:
+        """{site: {camera id: the owner's name}}: the box's heartbeat camera_list, else a Camera.display_name (as the
+        Chat tab reads them); health.camera_label maps an old id to the current camera on its channel."""
+        if session is None:
+            return {}
+        from sqlalchemy import select  # noqa: PLC0415
+
+        from ..models import Camera, Device  # noqa: PLC0415
+
+        out: Dict[str, Dict[str, str]] = {}
+        for dev in session.scalars(select(Device).where(Device.site.in_(sorted(s for s in sites if s)))):
+            names = {cam: shown.strip() for cam, shown in session.execute(
+                select(Camera.name, Camera.display_name).where(Camera.device_pk == dev.id)).all()
+                if shown and shown.strip()}
+            names.update({c["id"]: c["name"] for c in health.camera_list(dev.last_heartbeat) or () if c["name"]})
+            out[dev.site] = names
         return out
 
     def tags(self, session) -> Dict[str, Tag]:
@@ -137,7 +159,8 @@ class TagStudio:
                 continue
             if origin and item.origin != origin:
                 continue
-            if text and not any(text in s.lower() for s in (item.clip_id, item.camera, item.source, item.batch)):
+            if text and not any(text in s.lower() for s in (item.clip_id, item.camera, item.source, item.batch,
+                                                             str(item.info.get("camera_display") or ""))):
                 continue
             labels = {who: {"label": op.effective_label(), "category": op.category, "disputes_ai": op.disputes_ai}
                       for who, op in item.opinions.items() if who in WHO}

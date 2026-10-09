@@ -3561,6 +3561,11 @@
             "title": "Camera",
             "type": "string"
           },
+          "camera_display": {
+            "default": "",
+            "title": "Camera Display",
+            "type": "string"
+          },
           "clip_id": {
             "title": "Clip Id",
             "type": "string"

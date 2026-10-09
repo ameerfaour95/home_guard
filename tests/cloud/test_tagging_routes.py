@@ -1,5 +1,6 @@
 """/v1/tagging: the studio over the database (indexed customer events + their answers) and the local dataset; tags as
 append-only tag_events; media grants with consent; exports to local files; admin only."""
+import json
 import os
 import uuid
 from datetime import datetime, timezone
@@ -346,3 +347,27 @@ def test_event_annotation_preloads_the_dataset_yolo_boxes_first(client, staff_fa
     _yolo(str(s.paths.dataset), "house2_ch2", STEM, {f: [(0, 0.5, 0.5, 0.2, 0.4)] for f in range(0, 30, 5)})
     body = client.get(f"/v1/events/{ids['consenting']}/annotation", headers=h).json()
     assert [(t["label"], t["source"]) for t in body["tracks"]] == [("person", "yolo")]
+
+
+def test_captions_use_the_boxs_camera_names_with_the_channel_rule_for_an_old_id(client, staff_factory, studio):
+    """The house was renamed: the box's heartbeat lists newsite_ch2 as "חניה"; the clip still carries house2_ch2."""
+    s, ids = studio
+    _, _, _, h = staff_factory("admin")
+    with session_scope(client.app.state.engine) as session:
+        dev = session.scalar(select(m.Device).where(m.Device.site == "house2"))
+        dev.last_heartbeat = {"camera_list": [{"id": "newsite_ch2", "name": "חניה", "channel": 2, "enabled": True}]}
+        fb = session.scalar(select(m.Feedback).where(m.Feedback.event_id == ids["consenting"]))
+        fb.owner_label = "empty"
+    key = f"ev:{ids['consenting']}"
+    clip = client.get("/v1/tagging/clip", headers=h, params={"key": key}).json()
+    assert clip["item"]["camera"] == "house2_ch2" and clip["item"]["camera_display"] == "חניה"
+    row = next(r for r in client.get("/v1/tagging/queue?tier=all", headers=h).json()["items"] if r["key"] == key)
+    assert row["camera_display"] == "חניה"
+    assert [i["camera_name"] for i in client.get("/v1/inbox", headers=h).json()] == ["חניה"]
+    client.post("/v1/tagging/tag", headers=h, json={"key": key, "fields": {"raw_label": "normal", "description": "x"}})
+    out = client.post("/v1/tagging/export", headers=h, json={}).json()
+    line = next(json.loads(x) for x in open(out["training_path"], encoding="utf-8") if STEM in x)
+    assert line["camera_name"] == "house2_ch2" and line["camera_display"] == "חניה"   # raw id kept for traceability
+    # a dataset clip with no house: the box's channel rule, never the raw id
+    ds = client.get("/v1/tagging/clip", headers=h, params={"key": "ds:front_side_1771696865_trigger"}).json()
+    assert ds["item"]["camera_display"] == "Front side"

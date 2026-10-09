@@ -54,7 +54,7 @@ def answers_filter():
 def query(session: Session, *, from_utc: Optional[datetime] = None, to_utc: Optional[datetime] = None,
           customer_id: Optional[int] = None, camera: Optional[str] = None, owner_label: Optional[str] = None,
           handled: Optional[bool] = None, before_id: Optional[int] = None, limit: int = 200) -> list[tuple]:
-    """[(feedback, event, customer, decision or None, camera display name or None, guard AI run or None)], newest
+    """[(feedback, event, customer, decision or None, the camera's name for staff, guard AI run or None)], newest
     first. `handled`: True = decided, False = waiting, None = both. `owner_label` "" = answers without a tag."""
     q = (select(Feedback, Event, Customer, InboxDecision, Camera.display_name)
          .join(Event, Event.id == Feedback.event_id)
@@ -87,7 +87,15 @@ def query(session: Session, *, from_utc: Optional[datetime] = None, to_utc: Opti
                                    .order_by(AiRun.id)):
             if run.status == "real" or run.event_id not in runs:
                 runs[run.event_id] = run
-    return [(fb, ev, cu, dec, name, runs.get(ev.id)) for fb, ev, cu, dec, name in rows]
+    from .audit import camera_label  # noqa: PLC0415 - the owner's name, the channel rule for an old id
+
+    labels: dict = {}
+    def label(ev):
+        key = (ev.device_pk, ev.camera)
+        if key not in labels:
+            labels[key] = camera_label(session, ev.device_pk, ev.camera)
+        return labels[key]
+    return [(fb, ev, cu, dec, label(ev), runs.get(ev.id)) for fb, ev, cu, dec, _ in rows]
 
 
 def history(session: Session, event_ids: list[int]) -> dict[int, list[Feedback]]:

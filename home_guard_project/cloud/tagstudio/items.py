@@ -77,6 +77,7 @@ class ClipItem:
     def summary(self) -> Dict[str, Any]:
         return {"key": self.key, "clip_id": self.clip_id, "origin": self.origin, "source": self.source,
                 "batch": self.batch, "camera": self.camera, "date": self.date, "duration_sec": self.duration_sec,
+                "camera_display": self.info.get("camera_display") or "",
                 "local_time": self.local_time, "sort_ts": self.sort_ts, "event_id": self.event_id}
 
     def merge(self, other: "ClipItem") -> None:

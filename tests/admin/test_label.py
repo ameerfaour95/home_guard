@@ -276,7 +276,8 @@ def test_dataset_clip_opens_in_the_label_view(widgets, wait):
     v = LabelView(b, b.role); widgets.append(v); v.resize(1366, 768); v.show()
     v.open_clip('ds:front_door_1791000001_trigger')
     wait(lambda: v.doc is not None and not v.loader.busy and not v.media.busy)
-    assert v.boxes_note.text() == 'No YOLO boxes for this clip' and v.title.text().endswith('front_door_1791000001_trigger')
+    assert v.boxes_note.text() == 'No YOLO boxes for this clip' and 'Front door' in v.title.text()
+    assert 'front_door_1791000001' not in v.title.text()           # the camera's name, never the raw clip id
     v.doc.put_box([.2, .2, .4, .6]); v.save(); wait(lambda: not v.writer.busy)
     saved = b.clip_boxes('ds:front_door_1791000001_trigger')
     assert saved.version == 1 and [t.label for t in saved.tracks] == [v.doc.current_class]

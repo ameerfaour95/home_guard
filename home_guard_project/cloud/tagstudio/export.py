@@ -83,7 +83,8 @@ def training_record(item: ClipItem, d: Dict[str, Any]) -> Dict[str, Any]:
         "video_s3_path": item.video_s3,
         "vlm_crop_s3_path": item.crop_s3,
         "description": d["description"],
-        "camera_name": item.camera,
+        "camera_name": item.camera,                              # the raw id, for training traceability
+        "camera_display": item.info.get("camera_display") or "",  # what staff read: the owner's name, else Camera N
         "duration_sec": round(float(item.duration_sec), 2) if item.duration_sec is not None else None,
         "num_persons": item.info.get("num_persons"),
         "num_cars": item.info.get("num_cars"),

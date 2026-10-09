@@ -20,6 +20,24 @@ from .label_canvas import LabelCanvas, TrackTimeline
 from .player import SESSION
 from .tag_widgets import ProvenanceChip, machine_name
 from .models import ReviewDecision
+from .formatting import camera_name
+
+
+def clip_caption(key):
+    """A dataset clip's title: its camera by the box's channel rule and its time, never the raw id ("ds:<clip id>")."""
+    from home_guard_project.fleet_contract.health import camera_label
+    from home_guard_project.fleet_contract.keys import stem_kind
+    stem = key.split(':', 1)[-1].rsplit('/', 1)[-1]
+    parts = stem.rsplit('_', 2)
+    camera = parts[0] if len(parts) == 3 and parts[1].isdigit() else stem
+    when = ''
+    try:
+        from datetime import datetime
+        ts = stem_kind(stem)[1]
+        when = datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M') if ts else ''
+    except Exception:  # noqa: BLE001 - the time is a caption only
+        pass
+    return f'{camera_label(camera)}  ·  {when}' if when else camera_label(camera)
 
 STALE_REVIEW = 'This clip changed since you opened it — reload'
 
@@ -227,7 +245,7 @@ class LabelView(QWidget):
         if error: self.show_error(error); self.set_ready(bool(self.doc)); return
         if self.loading_kind == 'queue':
             self.queue, eid = result; self.clip_picker.clear()
-            for i, e in enumerate(self.queue): self.clip_picker.addItem(f'{i+1} / {len(self.queue)}   ·   {e.camera}   ·   #{e.id}')
+            for i, e in enumerate(self.queue): self.clip_picker.addItem(f'{i+1} / {len(self.queue)}   ·   {camera_name(e)}   ·   #{e.id}')
             if self.queue:
                 self.open_index(next((i for i, e in enumerate(self.queue) if e.id == eid), 0))
             else:
@@ -243,13 +261,13 @@ class LabelView(QWidget):
                                              duration_sec=(annotation.frame_count / annotation.fps)
                                              if annotation.frame_count and annotation.fps else None)
             self.install(annotation)
-            self.title.setText(f'Label  ·  {self.recording.camera}')
+            self.title.setText(f'Label  ·  {clip_caption(key)}')
             self.canvas.image = QImage(); self.canvas.message = 'Loading recording…'
             self.canvas.frame_size = tuple(annotation.frame_size or [640, 360])
             self.request_media(); return
         event, annotation = result
         self.recording = event; self.install(annotation)
-        self.title.setText(f'Label  ·  {event.camera}  ·  #{event.id}')
+        self.title.setText(f'Label  ·  {camera_name(event)}  ·  #{event.id}')
         self.canvas.image = QImage(); self.canvas.message = 'Loading recording…'; self.canvas.frame_size = tuple(annotation.frame_size or [640, 360])
         self.request_media()
 

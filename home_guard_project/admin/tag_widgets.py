@@ -15,6 +15,23 @@ WHO_TITLES = {'old': 'Old tag', 'owner': "Customer's answer", 'ai': 'AI label', 
 ORIGIN_TITLES = {'dataset': 'Old tags', 'customer': 'Customer', 'owner_feedback': 'Customer (local)'}
 
 
+def camera_caption(row):
+    """What a clip's camera is called on screen: the server's camera_display (the owner's name, else "Camera N"),
+    else the channel rule on the id; never the raw id (ameer_tes2_ch2)."""
+    from home_guard_project.fleet_contract.health import camera_label
+    shown = row.get('camera_display') or (row.get('info') or {}).get('camera_display')
+    if shown:
+        return shown
+    camera = row.get('camera') or ''
+    return camera_label(camera) if camera else 'Camera'
+
+
+def queue_title(row):
+    """A queue row's title: the camera's name and when ("מטבח  ·  10-04 08:19"); the clip id is in the tooltip."""
+    when = ' '.join(b for b in ((row.get('date') or '')[5:], (row.get('local_time') or '')[:5]) if b)
+    return f"{camera_caption(row)}  ·  {when}" if when else camera_caption(row)
+
+
 def is_rtl(text):
     """True when the text's first strong character is right-to-left (Hebrew, Arabic): its paragraph runs RTL."""
     import unicodedata
@@ -112,7 +129,7 @@ class QueueDelegate(QStyledItemDelegate):
             tx = x + 12
         p.setPen(QColor(t['text']))
         p.drawText(QRect(tx, r.y() + 8, w - ow - 10 - (tx - x), 18), Qt.AlignmentFlag.AlignVCenter,
-                   QFontMetrics(font).elidedText(row['clip_id'], Qt.TextElideMode.ElideMiddle, w - ow - 10 - (tx - x)))
+                   QFontMetrics(font).elidedText(queue_title(row), Qt.TextElideMode.ElideRight, w - ow - 10 - (tx - x)))
         p.setFont(small); p.setPen(QColor(t['muted']))
         p.drawText(QRect(x + w - ow, r.y() + 8, ow, 18), Qt.AlignmentFlag.AlignVCenter, origin)
         if not row.get('has_media', True):

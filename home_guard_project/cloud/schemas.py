@@ -521,6 +521,7 @@ class TaggingQueueItem(BaseModel):
     source: str = ""
     batch: str = ""
     camera: str = ""
+    camera_display: str = ""            # what staff read: the box's camera name (an old id by its channel)
     date: str = ""
     duration_sec: Optional[float] = None
     local_time: Optional[str] = None
