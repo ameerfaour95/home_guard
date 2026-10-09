@@ -46,8 +46,9 @@ import tempfile
 import time
 from typing import Any, Dict, List, Optional, Sequence
 
-# Mirrored from HomeGuardAdmin home_guard_project/fleet_contract/notices.py, where home-guard-32 pins the same
-# (NOTICE_KINDS, and NOTICE_CLI with these arguments and MAX_B64). A new kind is added there first; until this box
+# Mirrored from HomeGuardAdmin home_guard_project/fleet_contract/notices.py (commit 527396c, "pins the whole
+# contract"), where the same values are kept (NOTICE_KINDS, and NOTICE_CLI with these arguments and MAX_B64). A new
+# kind is added there first; until this box
 # knows it, it is stored and shown as OTHER with the cloud's English message.
 NOTICE_KINDS = ("recording", "chat")
 NOTICE_CLI = ("notices", "add", "--b64", "<BASE64>", "--json")   # after: python -m home_guard_project.box
