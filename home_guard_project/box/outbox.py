@@ -253,6 +253,54 @@ def copy_chat_feed(feed_path: str, site_outbox: str, state_path: str) -> int:
     return copied
 
 
+USAGE_DIR = "usage"               # in the site outbox: usage/<YYYY-MM-DD>.jsonl (usage_ledger.py)
+USAGE_STATE_NAME = "usage_upload_state.json"
+
+
+def copy_usage_ledger(usage_dir: str, site_outbox: str, state_path: str) -> int:
+    """Copy the AI usage ledger's day files (usage_ledger.py, ``<state_dir>/usage/<day>.jsonl``) into *site_outbox*
+    ``usage/`` for the uploader, as the chat goes: a day file is copied whole whenever it grew since the last copy
+    (the uploader re-sends a file whose size changed), and a day already copied at its size is never copied again,
+    so the archive's retention deleting an old copy does not bring it back. Progress is ``{day: size}`` in
+    *state_path*. Returns the files copied; never raises (the clips' upload goes on)."""
+    try:
+        names = sorted(n for n in os.listdir(usage_dir) if n.endswith(".jsonl"))
+    except OSError:
+        return 0
+    try:
+        with open(state_path, encoding="utf-8") as f:
+            state = {str(k): int(v) for k, v in (json.load(f).get("sizes") or {}).items()}
+    except (OSError, ValueError, TypeError, AttributeError):
+        state = {}
+    copied = 0
+    try:
+        for name in names:
+            src = os.path.join(usage_dir, name)
+            size = os.path.getsize(src)
+            if size <= state.get(name, -1):
+                continue
+            dst = os.path.join(site_outbox, USAGE_DIR, name)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            with open(src, "rb") as f:
+                data = f.read(size)          # what is there now; a line still being appended waits for the next run
+            data = data[: data.rfind(b"\n") + 1]
+            tmp = dst + ".tmp"
+            with open(tmp, "wb") as f:
+                f.write(data)
+            os.replace(tmp, dst)
+            state[name] = len(data)
+            copied += 1
+        if copied:
+            os.makedirs(os.path.dirname(state_path) or ".", exist_ok=True)
+            tmp = state_path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"sizes": state, "updated": time.time()}, f)
+            os.replace(tmp, state_path)
+    except OSError as exc:
+        log.warning("AI usage ledger not copied to the outbox (will retry next run): %s", exc)
+    return copied
+
+
 def move_finished_clips(
     live_dir: str,
     outbox_dir: str,

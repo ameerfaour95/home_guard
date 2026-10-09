@@ -62,7 +62,8 @@ from .registration import (
     update_site,
     write_registration,
 )
-from .outbox import CHAT_STATE_NAME, ORPHAN_AGE_SEC, copy_chat_feed, move_feedback, move_finished_clips, move_orphans
+from .outbox import (CHAT_STATE_NAME, ORPHAN_AGE_SEC, USAGE_STATE_NAME, copy_chat_feed, copy_usage_ledger, move_feedback,
+                     move_finished_clips, move_orphans)
 
 log = logging.getLogger("box")
 
@@ -89,6 +90,7 @@ def run_upload(
     keep_local: bool = False,
     chat_feed: Optional[str] = None,
     chat_state: Optional[str] = None,
+    usage_dir: Optional[str] = None,
 ) -> Tuple[int, int]:
     """Move finished clips to the outbox and upload it. Returns ``(clips_moved, files_moved)``.
 
@@ -102,6 +104,10 @@ def run_upload(
     *chat_state*, default ``chat_upload_state.json`` next to the feed). Give it
     only with *keep_local*: a day file grows all day and is re-sent whole, so it
     must stay on the box after its upload.
+
+    With *usage_dir* (the AI usage ledger, usage_ledger.py) its day files are
+    copied the same way to the site outbox's ``usage/<day>.jsonl`` (outbox.copy_usage_ledger;
+    progress in ``usage_upload_state.json`` in *usage_dir*). Also only with *keep_local*.
     """
     os.makedirs(outbox_dir, exist_ok=True)
     site_outbox = os.path.join(outbox_dir, cfg.site)
@@ -117,6 +123,10 @@ def run_upload(
         copied = copy_chat_feed(chat_feed, site_outbox, state)
         if copied:
             log.info("Copied %d Telegram message(s) to the outbox.", copied)
+    if usage_dir:
+        days = copy_usage_ledger(usage_dir, site_outbox, os.path.join(usage_dir, USAGE_STATE_NAME))
+        if days:
+            log.info("Copied %d day(s) of the AI usage ledger to the outbox.", days)
 
     uploaded_any = False
     for site in _site_dirs(outbox_dir):
@@ -275,6 +285,9 @@ def _status(cfg: BoxConfig) -> dict:
     from .box_identity import box_id  # noqa: PLC0415
 
     status["box_id"] = box_id()           # the same across site renames (box_identity.py)
+    from . import usage_ledger  # noqa: PLC0415
+
+    status["usage_today"] = usage_ledger.usage_today()    # {agent: {calls, usd}, "total": ...} (usage_ledger.py)
     status["stopped"] = control.is_stopped()
     status["registration"] = registration_status(load_registration())
     if status["stopped"]:
@@ -410,14 +423,16 @@ def main() -> None:
         run_upload(cfg, LIVE_DIR, OUTBOX_DIR, s3_cfg.bucket, s3_cfg.workers, uploader=s3_run)
         # Clips saved in inference mode are kept two weeks, on the box (so the owner can
         # ask for them) and in an S3 folder the bucket empties after the same time. The
-        # Telegram conversation goes with them (production_<site>/chat/), for the Admin Center.
-        from . import paths  # noqa: PLC0415
+        # Telegram conversation goes with them (production_<site>/chat/), for the Admin Center, and
+        # so does the AI usage ledger (production_<site>/usage/, docs/contracts/usage_ledger.md).
+        from . import paths, usage_ledger  # noqa: PLC0415
         from .chat_feed import FEED_NAME  # noqa: PLC0415
 
         run_upload(
             cfg, PRODUCTION_LIVE_DIR, PRODUCTION_ARCHIVE_DIR, s3_cfg.bucket, s3_cfg.workers,
             uploader=s3_run, prefix_for=production_prefix, keep_local=True,
             chat_feed=os.path.join(paths.logs_dir(), FEED_NAME),
+            usage_dir=usage_ledger.default_dir(),
         )
 
     key = put_heartbeat(_status(cfg), s3_cfg.bucket, s3_prefix(cfg.site))
