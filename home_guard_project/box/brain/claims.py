@@ -283,6 +283,7 @@ _EMPATHY = re.compile(
     r"ה?בלבול|ה?בעיה|ה?מצב|ה?טענה|ה?הבדל|מה\s+(?:שאתה|את)\s+(?:אומר|אומרת))(?:\s+שלך|\s+שלכם)?|ש(?:זה|אתה)\s+\S+))*|"
     r"(?<!\w)(?:אני\s+)?(?:מצטער|מצטערת|סליחה|מתנצל|מתנצלת)(?:\s+(?:על|ש)\S*(?:\s+\S+){0,3})?|"
     r"(?<!\w)(?:צודק|צודקת|אוקיי|אוקי|בסדר|הבנתי|ברור|כמובן|תודה)(?!\w)|"
+    r"(?<!\w)ו?(?:אני\s+)?(?:אשתדל|אשתפר|אנסה)[^.!?\n]*|\bI(?:['’]ll| will)\s+(?:try|do\s+better)[^.!?\n]*|"
     r"\bI\s+(?:completely\s+|totally\s+)?(?:understand|hear you|get it|see)(?:\s+(?:you|your\s+\w+|how\s+you\s+feel|"
     r"that|why))?\b|\b(?:I['’]m|I am)\s+sorry(?:\s+(?:for|about)\s+(?:the\s+|that|this|your\s+)?\w*)?|"
     r"\b(?:sorry|ok(?:ay)?|got it|understood|right|thanks?)\b",

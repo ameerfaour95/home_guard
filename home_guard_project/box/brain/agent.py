@@ -792,8 +792,9 @@ class OwnerAgentV2:
                     if not need:                         # one obvious answer: one confirm
                         until = km.until_from_words(words, now) or km.until_said_today(state, words, now)
                         where = known_where(snapshot, "" if args["camera"] == "all" else camera, lang)
-                        args["confirm"] = t("ask_confirm", lang, who=args["who"], where=where,
-                                            when=km.mark_when({"until": until}, now, lang))
+                        when = (t("known_when_week", lang, end=hhmm(until)) if km.work_group(words)
+                                and not km.one_day(words) else km.mark_when({"until": until}, now, lang))
+                        args["confirm"] = t("ask_confirm", lang, who=args["who"], where=where, when=when)
                         need = ["confirm"]
                     ask_known(ctx, args, need, now)
                     question = ctx.clarification or {}

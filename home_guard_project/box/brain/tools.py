@@ -1664,6 +1664,10 @@ def mark_known(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
             need.append("scope")
     if crew and said_scope is not None:
         prefs["group_scope"] = km.HOUSE if said_scope == km.HOUSE else "camera"
+    if not house_wide and any(not k.get("camera") for k in old) and said_scope in (None, km.HOUSE):
+        # A whole-house mark of these people stays whole-house: only the owner's "רק ב..." narrows it (2026-10-09
+        # replay: "המידע זה עובדים אצלי על הפרגולה" said where they work, not "only the pergola").
+        house_wide = True
     if house_wide:
         camera = ""
         old = [k for k in marks if k.get("id") in wanted] or km.pick(marks, who, "")

@@ -236,6 +236,25 @@ class CorrectionTest(Base):
         self.assertIn("בכל הבית", line)
         self.assertIn("(במקום רק בפרגולה", line)
 
+    def test_a_house_mark_is_not_narrowed_without_only(self) -> None:
+        self.events.mark_known("", "העובדים", "Ameer", WEEK_END, now=NOW, daily_from="08:00", daily_to="18:00")
+        ctx = self.ctx("שמור מידע\nהמידע זה עובדים אצלי על הפרגולה")
+        out = mark_known(ctx, {"who": "העובדים", "owner_words": "עובדים אצלי", "camera": "פרגולה", "scope": "camera"})
+        self.assertTrue(out["ok"], out)
+        self.assertTrue(ctx.receipts[-1].detail.get("already"))              # "🧠 כבר זוכר", nothing narrowed
+        (mark,) = self.events.list_known(NOW)
+        self.assertEqual(mark["camera"], "")
+        ctx = self.ctx("העובדים רק בפרגולה")
+        mark_known(ctx, {"who": "העובדים", "owner_words": "העובדים רק בפרגולה", "camera": "פרגולה"})
+        self.assertEqual(self.events.list_known(NOW)[0]["camera"], PERGOLA)  # the owner's "רק" does narrow
+
+    def test_filler_and_promises_are_dropped(self) -> None:
+        self.assertEqual(strip_boilerplate("העובדים מסומנים בכל הבית עד 18:00. אם יש צורך בתיקון נוסף, אנא עדכן "
+                                           "אותי."), "העובדים מסומנים בכל הבית עד 18:00.")
+        self.assertEqual(strip_boilerplate("העובדים מסומנים. אני מבין את התסכול שלך ואשתדל לשפר."),
+                         "העובדים מסומנים.")
+        self.assertTrue(empty_reply("אני מבין. אני אשתדל להיות יותר ברור ולשאול שאלות כשצריך."))
+
     def test_the_same_mark_again_is_already_saved(self) -> None:
         self.events.mark_known(PERGOLA, "השכן", "Ameer", dt.datetime(2026, 10, 9, 18, 0).timestamp(), now=NOW)
         ctx = self.ctx("זה השכן עד 18:00")

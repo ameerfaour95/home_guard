@@ -228,6 +228,8 @@ TEMPLATES: Dict[str, Dict[str, str]] = {
                     "ar": "🧠 أتذكر ذلك مسبقًا: {who} {where}، {when}."},
     "known_when_daily": {"en": "every day {start}-{end}, until {day}", "he": "כל יום {start}–{end}, עד {day}",
                          "ar": "كل يوم {start}-{end}، حتى {day}"},
+    "known_when_week": {"en": "every day until {end}, this week", "he": "כל יום עד {end}, השבוע",
+                        "ar": "كل يوم حتى {end}، هذا الأسبوع"},
     "known_when_today": {"en": "today until {end}", "he": "היום עד {end}", "ar": "اليوم حتى {end}"},
     "known_when_until": {"en": "until {end}", "he": "עד {end}", "ar": "حتى {end}"},
     "known_all_cameras": {"en": "all the cameras", "he": "כל הבית", "ar": "كل البيت"},
