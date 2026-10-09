@@ -20,8 +20,10 @@ from __future__ import annotations
 
 import json
 import logging
+import queue
 import re
 import threading
+import time
 from collections import OrderedDict
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
@@ -35,6 +37,10 @@ DEFAULT_PROVIDER = "openrouter"
 # it inside the timeout; 3.5 Flash Lite cannot ("reasoning mandatory") and costs more.
 DEFAULT_MODEL = "google/gemini-3.1-flash-lite"
 DEFAULT_TIMEOUT_SEC = 4.0
+HEDGE_AFTER_SEC = 3.0      # Messenger.translate: a second call races a first one this slow ...
+# ... on another model, so one provider's slow minute does not sink both (2026-10-09: the same request on 3.1 Flash
+# Lite took 1.7-7 s and over 10 s on 4 of 8; 2.5 Flash Lite answered the same JSON in about 1 s, same Hebrew).
+HEDGE_MODEL = "google/gemini-2.5-flash-lite"
 CACHE_SIZE = 256
 
 LANGUAGE_NAMES = {"he": "Hebrew", "ar": "Arabic"}
@@ -221,7 +227,7 @@ class Messenger:
 
     def __init__(self, client: Any, model: str = DEFAULT_MODEL, timeout: float = DEFAULT_TIMEOUT_SEC,
                  extra_body: Optional[Dict[str, Any]] = None, cache_size: int = CACHE_SIZE,
-                 unavailable: str = "") -> None:
+                 unavailable: str = "", hedge_model: str = HEDGE_MODEL) -> None:
         self._client = client
         self.model = model
         self.timeout = float(timeout)
@@ -230,6 +236,7 @@ class Messenger:
         self._cache_size = max(0, int(cache_size))
         self._lock = threading.Lock()
         self.unavailable = unavailable
+        self.hedge_model = hedge_model or model
         self.last_usage = {"prompt_tokens": 0, "completion_tokens": 0}
 
     def to_owner(self, texts: Mapping[str, str], lang: str, keep: Sequence[str] = ()) -> Dict[str, str]:
@@ -262,9 +269,13 @@ class Messenger:
         return {**told, "source": "translator"}
 
     def translate(self, texts: Mapping[str, str], lang: str, keep: Sequence[str] = (),
-                  timeout: Optional[float] = None) -> Optional[Dict[str, str]]:
-        """Every field of *texts* (any keys) in *lang*, in one call, or None on ANY failure: the caller keeps what
-        it had (the describer's lines are only an improvement). English passes through. Never raises."""
+                  timeout: Optional[float] = None, hedge_after: float = HEDGE_AFTER_SEC) -> Optional[Dict[str, str]]:
+        """Every field of *texts* (any keys) in *lang*, or None on ANY failure: the caller keeps what it had (the
+        describer's lines are only an improvement). English passes through. Never raises.
+
+        One call; when it has not answered after *hedge_after* seconds, or its answer breaks the contract, a second
+        identical call races it, and the first good answer within *timeout* wins (2026-10-09 replay: the same request
+        took 1.7-7 s, and over 10 s on 4 of 8)."""
         source = {str(k): str(v or "").strip() for k, v in texts.items()}
         if lang == "en":
             return dict(source)
@@ -273,24 +284,67 @@ class Messenger:
         try:
             if self._client is None:
                 raise TranslationError(self.unavailable or "no translator")
-            raw = self._ask(source, lang, tuple(n for n in keep if n), timeout=timeout, fields=True)
-            return check_fields(source, _parse(raw), lang, keep)
+            return self._hedged(source, lang, tuple(n for n in keep if n),
+                                self.timeout if timeout is None else float(timeout), hedge_after)
         except Exception as exc:  # noqa: BLE001
             log.warning("Translation of %d fields to %s failed (%s: %s).", len(source), lang, type(exc).__name__, exc)
             return None
 
+    def _hedged(self, source: Dict[str, str], lang: str, keep: Sequence[str], budget: float,
+                hedge_after: float) -> Dict[str, str]:
+        """The first checked answer of at most two racing calls within *budget*; the last error otherwise."""
+        answers: "queue.Queue[Tuple[str, Any]]" = queue.Queue()
+        start = time.monotonic()
+
+        def call(model: str) -> None:
+            try:
+                left = max(0.5, budget - (time.monotonic() - start))
+                raw = self._ask(source, lang, keep, timeout=left, fields=True, model=model)
+                answers.put(("ok", check_fields(source, _parse(raw), lang, keep)))
+            except Exception as exc:  # noqa: BLE001 - handed to the waiting caller
+                answers.put(("error", exc))
+
+        threading.Thread(target=call, args=(self.model,), name="messenger-1", daemon=True).start()
+        started, failed, last_error = 1, 0, None
+        while True:
+            elapsed = time.monotonic() - start
+            if elapsed >= budget:
+                raise TimeoutError(f"no answer within {budget:g}s")
+            wait = budget - elapsed
+            if started == 1:
+                wait = min(wait, max(0.0, hedge_after - elapsed))
+            try:
+                kind, value = answers.get(timeout=wait)
+            except queue.Empty:
+                if started == 1:
+                    started = 2
+                    threading.Thread(target=call, args=(self.hedge_model,), name="messenger-2", daemon=True).start()
+                    continue
+                raise TimeoutError(f"no answer within {budget:g}s") from None
+            if kind == "ok":
+                return value
+            failed, last_error = failed + 1, value
+            if failed >= started:
+                if started == 1 and time.monotonic() - start < budget - 1.0:
+                    started = 2           # a broken answer: one more try within the budget
+                    threading.Thread(target=call, args=(self.hedge_model,), name="messenger-2", daemon=True).start()
+                    continue
+                raise last_error
+
     def _ask(self, source: Mapping[str, str], lang: str, keep: Sequence[str], timeout: Optional[float] = None,
-             fields: bool = False) -> str:
+             fields: bool = False, model: str = "") -> str:
         """The model's raw answer; TimeoutError once *timeout* has passed (the call is left to finish
         on its own daemon thread, the client's own timeout ends it soon after)."""
         prompt = build_fields_prompt(lang, keep) if fields else build_prompt(lang, keep)
         kwargs: Dict[str, Any] = dict(
-            model=self.model, temperature=0, max_tokens=900 if fields else 400,
+            model=model or self.model, temperature=0, max_tokens=900 if fields else 400,
             response_format={"type": "json_object"} if fields else _RESPONSE_FORMAT,
             messages=[{"role": "system", "content": prompt},
                       {"role": "user", "content": json.dumps(dict(source), ensure_ascii=False)}])
         if self._extra_body:
             kwargs["extra_body"] = self._extra_body
+        if timeout is not None:
+            kwargs["timeout"] = float(timeout)     # the client's own HTTP timeout is the alert's 4 s
         box: Dict[str, Any] = {}
 
         def call() -> None:
@@ -371,7 +425,8 @@ def messenger_for(box_settings: Mapping[str, Any], env: Mapping[str, str]) -> Me
         if found is None:
             try:
                 client, extra = build_client(provider, env, timeout, model)
-                found = Messenger(client, model, timeout, extra)
+                hedge = str(box_settings.get("messenger_hedge_model") or HEDGE_MODEL).strip()
+                found = Messenger(client, model, timeout, extra, hedge_model=hedge)
             except Exception as exc:  # noqa: BLE001
                 log.warning("Translator %s (%s) cannot be used: %s; alerts fall back to the model's own text.",
                             model, provider, exc)

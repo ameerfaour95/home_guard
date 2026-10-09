@@ -162,12 +162,15 @@ class AnswerTest(unittest.TestCase):
             "למה הודעתי: אדם עם פנים מוסתרות ליד רכב פתוח."])
 
     def test_unsure_ids_give_the_appearance_only_and_more_than_four_are_counted(self):
-        many = [{"id": f"P{i}", "appearance": "גבר בחולצה כהה", "action": ""} for i in range(1, 7)]
+        many = [{"id": f"P{i}", "appearance": f"גבר בחולצה {i}", "action": ""} for i in range(1, 7)]
         text = ds.compose("normal", "פרגולה", "11:12", "", many, "", "he").split("\n")
         self.assertEqual(text[0], "🟢 נראה תקין · פרגולה · 11:12")
-        self.assertEqual(text[1:5], [f"P{i} · גבר בחולצה כהה" for i in range(1, 5)])
+        self.assertEqual(text[1:5], [f"P{i} · גבר בחולצה {i}" for i in range(1, 5)])
         self.assertEqual(text[5], "ועוד 2")
         self.assertEqual(len(text), 6)                                       # no reason line without a reason
+        same = [{"id": f"P{i}", "appearance": "אדם בבגדים כהים", "action": "הולך לאורך הקיר"} for i in (1, 2, 3)]
+        self.assertEqual(ds.compose("normal", "מצלמה 1", "11:26", "", same, "", "he").split("\n")[1],
+                         "P1, P2, P3 · אדם בבגדים כהים: הולך לאורך הקיר.")
         english = ds.compose("escalation", "Gate", "02:10", "A man climbs the gate", [], "Climbing in", "en")
         self.assertEqual(english.split("\n"), ["🔴 ESCALATION · Gate · 02:10", "What's happening: A man climbs the gate.",
                                                "Why I told you: Climbing in."])
@@ -189,6 +192,57 @@ class AnswerTest(unittest.TestCase):
         self.assertIn("P1.action", m.seen[0])
         self.assertIsNone(ds.to_owner_language(checked, "he", Messenger(None)))
         self.assertEqual(ds.to_owner_language(checked, "en", None)["scene"], checked["scene"])
+
+
+class TranslateFieldsTest(unittest.TestCase):
+    def test_every_field_in_one_call_with_its_own_budget_and_none_on_failure(self):
+        from home_guard_project.box.messenger import Messenger
+
+        good = json.dumps({"scene": "שני אנשים ליד רכב", "P1.action": "עובר ליד הרכב"}, ensure_ascii=False)
+        client, calls = reply(good)
+        told = Messenger(client).translate({"scene": "Two men by a car", "P1.action": "walks past the car"}, "he",
+                                           keep=("P1",), timeout=6.0)
+        self.assertEqual(told, {"scene": "שני אנשים ליד רכב", "P1.action": "עובר ליד הרכב"})
+        self.assertAlmostEqual(calls.kwargs[0]["timeout"], 6.0, places=1)
+        self.assertIn("SAME keys", calls.kwargs[0]["messages"][0]["content"])
+        english, _ = reply(json.dumps({"scene": "Two men", "P1.action": "walks"}))
+        self.assertIsNone(Messenger(english).translate({"scene": "Two men", "P1.action": "walks"}, "he"))
+        self.assertIsNone(Messenger(None).translate({"scene": "Two men"}, "he"))
+        self.assertEqual(Messenger(None).translate({"scene": "Two men"}, "en"), {"scene": "Two men"})
+
+    def test_a_slow_or_broken_first_call_is_raced_by_a_second(self):
+        from home_guard_project.box.messenger import Messenger
+
+        good = json.dumps({"scene": "שני אנשים"}, ensure_ascii=False)
+
+        def client(first_delay, first_content):
+            n = {"calls": 0}
+
+            def create(**kwargs):
+                n["calls"] += 1
+                n.setdefault("models", []).append(kwargs["model"])
+                if n["calls"] == 1:
+                    time.sleep(first_delay)
+                    content = first_content
+                else:
+                    content = good
+                return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
+                                       usage=None, model="m")
+
+            return SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create))), n
+
+        slow, n = client(3.0, good)
+        started = time.monotonic()
+        self.assertEqual(Messenger(slow).translate({"scene": "Two men"}, "he", timeout=5.0, hedge_after=0.2),
+                         {"scene": "שני אנשים"})
+        self.assertLess(time.monotonic() - started, 1.5)
+        self.assertEqual(n["models"], ["google/gemini-3.1-flash-lite", "google/gemini-2.5-flash-lite"])   # another model
+        broken, n = client(0.0, "not json")
+        self.assertEqual(Messenger(broken).translate({"scene": "Two men"}, "he", timeout=5.0, hedge_after=2.0),
+                         {"scene": "שני אנשים"})
+        self.assertEqual(n["calls"], 2)
+        never, _ = client(3.0, "not json")
+        self.assertIsNone(Messenger(never).translate({"scene": "Two men"}, "he", timeout=0.5, hedge_after=10.0))
 
 
 class DescribeTest(unittest.TestCase):

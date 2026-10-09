@@ -48,7 +48,7 @@ DESCRIBER_VERSION = "describer-1"
 DEFAULT_PROVIDER = "openrouter"
 DEFAULT_MODEL = "qwen/qwen3.5-9b"
 DEFAULT_TIMEOUT_SEC = 12.0
-TRANSLATE_TIMEOUT_SEC = 6.0
+TRANSLATE_TIMEOUT_SEC = 10.0   # 2026-10-09 replay: Gemini Flash Lite took over 6 s on 3 of 8 field sets
 MAX_FRAMES = 8           # of the Eye's frames, spread over those with marks: enough to see who does what, inside 12 s
 MAX_SIDE = 768           # the long side of each drawn copy (the Eye's own frames are untouched)
 MAX_GAP_SEC = 1.0        # a track is drawn on a frame at most this far from its nearest look ...
@@ -367,11 +367,21 @@ def compose(label: str, camera: str, clock: str, scene: str, entities: Sequence[
     lines = [head]
     if scene.strip():
         lines.append(t("msg_scene", lang, text=_sentence(scene)))
-    shown = list(entities)[:max_lines]
-    for e in shown:
-        lines.append(entity_line(str(e["id"]), str(e.get("appearance") or ""), str(e.get("action") or "")))
-    if len(entities) > len(shown):
-        lines.append(t("msg_more", lang, n=len(entities) - len(shown)))
+    # Ids the describer said exactly the same of share one line ("P1, P2 · אדם בבגדים כהים: הולך לאורך הקיר.").
+    groups: List[Tuple[List[str], str, str]] = []
+    for e in entities:
+        appearance, action = str(e.get("appearance") or "").strip(), str(e.get("action") or "").strip()
+        same = next((g for g in groups if g[1] == appearance and g[2] == action), None)
+        if same is not None:
+            same[0].append(str(e["id"]))
+        else:
+            groups.append(([str(e["id"])], appearance, action))
+    shown = groups[:max_lines]
+    for ids, appearance, action in shown:
+        lines.append(entity_line(", ".join(ids), appearance, action))
+    hidden = sum(len(g[0]) for g in groups[len(shown):])
+    if hidden:
+        lines.append(t("msg_more", lang, n=hidden))
     if reason.strip():
         lines.append(t("msg_reason", lang, text=_sentence(reason)))
     return "\n".join(lines)
@@ -487,6 +497,9 @@ def describe(describer: Describer, frames: Sequence[Any], frame_indices: Sequenc
         record.update(frames_sha=frames_sha(jpegs), frames=len(jpegs), picked=list(picked),
                       ids=dict(sorted(kinds.items(), key=lambda x: _order(x[0]))),
                       marks=[[{"id": i, "box": list(b)} for i, _, b in per_frame[k]] for k in picked],
+                      # what a replay needs to redraw them exactly (the clip meta keeps only the union crop)
+                      crops=[list(crops[k]) if k < len(crops) and crops[k] is not None else None for k in picked],
+                      clock=dict(clock), source_size=list(source_size) if source_size else None,
                       prompt=prompt)
         if not jpegs:
             raise ValueError("no frame to send")
