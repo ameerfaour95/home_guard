@@ -413,3 +413,40 @@ def test_weak_labels_are_the_fallback_without_a_tracks_file(client, staff_factor
     _, _, _, h = staff_factory("admin")
     body = client.get(_url(_event_id(client, b.COLLECT_STEM)), headers=h).json()
     assert body["preload_source"] == "yolo" and {t["label"] for t in body["tracks"]} == {"person", "dog"}
+
+
+# ---------------------------------------------------------------- the entity name of a saved track (P1 stays P1)
+
+def test_entity_is_saved_validated_and_optional(client, staff_factory, seeded):
+    _, _, _, h = staff_factory("admin")
+    eid = _event_id(client, b.STEM)
+    named = dict(_track(), entity="P1")
+    r = _save(client, h, eid, tracks=[named, dict(_track("t2", "car"), entity="CAR1")])
+    assert r.status_code == 200, r.text
+    got = client.get(_url(eid), headers=h).json()["tracks"]
+    assert [(t["label"], t["entity"]) for t in got] == [("person", "P1"), ("car", "CAR1")]
+    for bad in ("X1", "P1234", "p1", "CAR12345"):
+        r = _save(client, h, eid, base=1, tracks=[dict(_track(), entity=bad)])
+        assert r.status_code == 422, (bad, r.text)
+    # an old save (no entity) still loads, and saves without one keep their exact shape
+    r = _save(client, h, eid, base=1, tracks=[_track()])
+    assert r.status_code == 200 and r.json()["tracks"][0]["entity"] is None
+    with session_scope(client.app.state.engine) as s:
+        row = s.scalar(select(m.Annotation).where(m.Annotation.event_id == eid, m.Annotation.version == 2))
+        assert "entity" not in row.tracks[0]
+
+
+def test_preloaded_tracks_carry_entities(client, staff_factory, seeded_sparse):
+    _, _, _, h = staff_factory("admin")
+    body = client.get(_url(_event_id(client, b.COLLECT_STEM)), headers=h).json()
+    assert {t["label"]: t["entity"] for t in body["tracks"]} == {"person": "P1", "dog": "A1"}
+
+
+def test_entity_never_reaches_a_yolo_label():
+    from home_guard_project.cloud import labeling
+    plain = [_track(), _track("t2", "car")]
+    named = [dict(plain[0], entity="P1"), dict(plain[1], entity="CAR7")]
+    a, b_ = labeling.to_tracks(plain), labeling.to_tracks(named)
+    for t in (0.0, 0.5, 1.0, 1.5, 2.0, 2.5):
+        assert labeling.label_text(labeling.yolo_rows(a, t)).encode() == labeling.label_text(
+            labeling.yolo_rows(b_, t)).encode()

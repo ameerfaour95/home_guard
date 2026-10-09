@@ -6,7 +6,8 @@ Two writers, one format: the box writes the live tracker's tracks of every alert
 "tracks": [{"id", "kind", "cls" (COCO id), "first_seen", "last_seen", "hits", "confirmed", "prev_id", "returns",
 "boxes": [{"frame", "ts", "box": xyxy}]}]}``, boxes normalised, ``ts`` epoch seconds. The live file adds
 ``source``, ``params``, ``clip_start_ts`` / ``clip_end_ts``, per track ``shown`` (False: a parked vehicle),
-``max_conf`` and ``entity`` (the event's P1 / CAR1), and a box's ``frame`` is the clip frame nearest its look (the
+``max_conf`` and ``entity`` (the event's P1 / CAR1, kept as the track's ``entity``), and a box's ``frame`` is the
+clip frame nearest its look (the
 live tracker looks 1-3 times a second, so its boxes are sparse).
 
 Read here the way the box's entity layer reads it (box/entities.py): a track the tracker linked as a return
@@ -108,10 +109,16 @@ def read_tracks(doc: Dict[str, Any], fps: Optional[float] = None, confirmed_only
         pts = [points[f] for f in sorted(points)]
         if not pts:
             continue
-        built.append((pts[0][1], label, _keyframes(pts, looks, frames_total, time_of)))
+        entity = next((t["entity"] for t in sorted(chain, key=lambda t: t.get("first_seen") or 0)
+                       if ft.valid_entity(t.get("entity"))), None)
+        built.append((pts[0][1], label, _keyframes(pts, looks, frames_total, time_of), entity))
     built.sort(key=lambda b: b[0])
-    return [ft.Track(track_id=f"t-{n}", label=label, keyframes=kfs, source="yolo")
-            for n, (_, label, kfs) in enumerate(built, start=1)]
+    tracks, named = [], set()
+    for n, (_, label, kfs, entity) in enumerate(built, start=1):
+        entity = entity if entity not in named else None     # one name, one object
+        named.add(entity)
+        tracks.append(ft.Track(track_id=f"t-{n}", label=label, keyframes=kfs, source="yolo", entity=entity))
+    return tracks
 
 
 def _keyframes(pts: List[tuple], looks: List[int], frames_total: Optional[int], time_of) -> List[ft.Keyframe]:

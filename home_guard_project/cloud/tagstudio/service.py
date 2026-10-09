@@ -548,6 +548,7 @@ def require_category(current: Optional[Tag], fields: Dict[str, Any]) -> None:
 
 def _track_dict(t) -> Dict[str, Any]:
     return {"track_id": t.track_id, "label": t.label, "source": t.source,
+            **({"entity": t.entity} if getattr(t, "entity", None) else {}),
             "keyframes": [{"frame": k.frame, "t_sec": k.t_sec, "xyxy": list(k.xyxy), "enabled": k.enabled}
                           for k in t.keyframes]}
 

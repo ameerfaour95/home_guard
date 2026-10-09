@@ -421,6 +421,8 @@ class Track(BaseModel):
     # "yolo": preloaded detector boxes nobody has checked yet; "human" once a person edited (or kept) them;
     # "suggestion" is the older name of "yolo", still accepted
     source: Literal["human", "yolo", "suggestion"] = "human"
+    # the object's stable name: P1 / CAR1 / A1 (the box's entity ids); never part of a YOLO training label
+    entity: Optional[str] = Field(default=None, max_length=8, pattern=r"^(P|CAR|A)\d{1,3}$")
 
 
 class AnnotationIn(BaseModel):

@@ -39,8 +39,12 @@ def test_names_follow_the_box_entities():
     tracks = [Track('a', 'truck', [kf(5, [.5, .5, .6, .6])]), Track('b', 'person', [kf(2, [.1, .1, .2, .2])]),
               Track('c', 'car', [kf(1, [.3, .3, .4, .4])]), Track('d', 'dog', [kf(0, [.7, .7, .8, .8])]),
               Track('e', 'person', [kf(9, [.1, .5, .2, .6])])]
-    assert track_names(tracks) == {'d': 'dog #1', 'c': 'car CAR1', 'b': 'person P1', 'a': 'truck CAR2',
+    assert track_names(tracks) == {'d': 'dog A1', 'c': 'car CAR1', 'b': 'person P1', 'a': 'truck CAR2',
                                    'e': 'person P2'}
+    # a saved entity wins, and the others never take its name
+    tracks[4].entity = 'P1'
+    assert track_names(tracks)['e'] == 'person P1' and track_names(tracks)['b'] == 'person P2'
+    assert track_names([Track('x', 'bicycle', [kf(0, [.1, .1, .2, .2])])]) == {'x': 'bicycle #1'}
 
 
 def test_split_at_the_current_frame_and_merge_back():
@@ -175,3 +179,26 @@ def test_tag_yolo_has_no_description_panel_only_tracks_and_clip_checks(widgets, 
     v.needs_review.setChecked(True); v.save(); wait(lambda: not v.writer.busy)
     saved = b.annotation(101)
     assert saved.needs_review and saved.description == before                  # carried through unchanged
+
+
+def test_entities_stay_stable_through_split_merge_new_boxes_and_saves(widgets, wait):
+    p = Track('t-1', 'person', [kf(0, [.1, .1, .2, .3]), kf(20, [.5, .1, .6, .3])], 'yolo', 'P1')
+    c = Track('t-2', 'car', [kf(0, [.6, .6, .9, .9])], 'yolo')                 # an old save: no entity yet
+    d = document([p, c])
+    assert [t.entity for t in d.tracks] == ['P1', 'CAR1'] and not d.dirty     # named once, on load
+    d.selected = 't-1'; d.seek(10, 1.0)
+    new = d.split()
+    assert new.entity == 'P2' and d.tracks[0].entity == 'P1'                  # a fresh name, never a copy
+    assert d.display_names()[new.track_id] == 'person P2'
+    d.merge(); assert [t.entity for t in d.tracks] == ['P1', 'CAR1']          # the first keeps its name
+    d.selected = None; d.current_class = 'person'; d.seek(5, .5); d.put_box([.3, .3, .4, .6])
+    assert d.track.entity == 'P2'                                             # a new box: the next free id
+    d.change_class('dog'); assert d.track.entity == 'A1'                      # its kind changed: a name of that kind
+    # through a real save and reload: the names come back as they were
+    b = DemoBackend()
+    v = LabelView(b, b.role); widgets.append(v); v.resize(1366, 768); v.show(); v.open_event(101)
+    wait(lambda: v.doc is not None and not v.media.busy)
+    names = {t.track_id: t.entity for t in v.doc.tracks}
+    assert all(names.values())
+    v.doc.accept_all(); v.save(); wait(lambda: not v.writer.busy)
+    assert sorted(t.entity for t in b.annotation(101).tracks) == sorted(names.values())

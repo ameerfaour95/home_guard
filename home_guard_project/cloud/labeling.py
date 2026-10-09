@@ -135,12 +135,14 @@ def to_tracks(raw: Any) -> list[ft.Track]:
                            enabled=bool(k.get("enabled", True))) for k in tr.get("keyframes", [])]
         kfs.sort(key=lambda k: k.t_sec)
         out.append(ft.Track(track_id=str(tr["track_id"]), label=str(tr["label"]), keyframes=kfs,
-                            source=tr.get("source", "human")))
+                            source=tr.get("source", "human"), entity=tr.get("entity")))
     return out
 
 
 def track_dicts(tracks: list[ft.Track]) -> list[dict]:
+    """Tracks as stored / sent; ``entity`` only when the track has one (an old save keeps its exact shape)."""
     return [{"track_id": t.track_id, "label": t.label, "source": t.source,
+             **({"entity": t.entity} if getattr(t, "entity", None) else {}),
              "keyframes": [{"frame": k.frame, "t_sec": k.t_sec, "xyxy": list(k.xyxy), "enabled": k.enabled}
                            for k in t.keyframes]} for t in tracks]
 

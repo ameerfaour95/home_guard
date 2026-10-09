@@ -2,7 +2,8 @@
 from copy import deepcopy
 from uuid import uuid4
 from PySide6.QtCore import QObject, Signal
-from home_guard_project.fleet_contract.tracks import box_at, boxes_at, frame_time, validate_tracks
+from home_guard_project.fleet_contract.tracks import (box_at, boxes_at, entity_prefix, fill_entities, frame_time,
+                                                     next_entity, validate_tracks)
 from .models import Track, Keyframe, AnnotationIn
 
 CLASSES = ('person', 'bicycle', 'car', 'motorcycle', 'bus', 'truck', 'bird', 'cat', 'dog')
@@ -12,16 +13,24 @@ EPS = 1e-6
 
 
 def track_names(tracks):
-    """track id -> "person P1", "truck CAR2", "dog #1": people and vehicles numbered per kind like the box names
-    them, other classes per class; in order of first appearance in the clip. The internal id stays in the data (and
-    in tooltips) only."""
+    """track id -> "person P1", "truck CAR2", "dog A1", "bicycle #1": a track's saved entity when it has one, else
+    the next free id of its kind (in order of first appearance) so names never clash; a class without an entity kind
+    is numbered per class. The internal id stays in the data (and in tooltips) only."""
     names, counts = {}, {}
+    taken = {getattr(t, 'entity', None) for t in tracks} - {None}
     first = lambda t: min((k.t_sec for k in t.keyframes), default=float('inf'))  # noqa: E731
     for tr in sorted(tracks, key=lambda t: (first(t), t.track_id)):
-        prefix = KIND_PREFIX.get(tr.label)
-        group = prefix or tr.label
-        counts[group] = counts.get(group, 0) + 1
-        names[tr.track_id] = f'{tr.label} {prefix}{counts[group]}' if prefix else f'{tr.label} #{counts[group]}'
+        entity, prefix = getattr(tr, 'entity', None), entity_prefix(tr.label)
+        if not entity and prefix:
+            n = 1
+            while f'{prefix}{n}' in taken:
+                n += 1
+            entity = f'{prefix}{n}'; taken.add(entity)
+        if entity:
+            names[tr.track_id] = f'{tr.label} {entity}'
+        else:
+            counts[tr.label] = counts.get(tr.label, 0) + 1
+            names[tr.track_id] = f'{tr.label} #{counts[tr.label]}'
     return names
 
 
@@ -52,7 +61,7 @@ class LabelDocument(QObject):
         self.selected, self.current_class = None, CLASSES[0]
         self.hidden = set()   # track ids hidden from view (H): display only, never saved
         self.preload_source = getattr(annotation, 'preload_source', None)  # 'tracker' / 'yolo': who drew the unchecked boxes
-        self.tracks = deepcopy(annotation.tracks)
+        self.tracks = fill_entities(deepcopy(annotation.tracks))   # an older save gets its names once, then keeps them
         self.description, self.drop_clip, self.needs_review = annotation.description, annotation.drop_clip, annotation.needs_review
         self.history = [self.snapshot()]
         self.history_index = 0
@@ -123,7 +132,7 @@ class LabelDocument(QObject):
         if (x2-x1)*self.frame_size[0] < 4-1e-6 or (y2-y1)*self.frame_size[1] < 4-1e-6:
             return False
         if track is None:
-            track = Track(uuid4().hex[:8], self.current_class, [])
+            track = Track(uuid4().hex[:8], self.current_class, [], entity=next_entity(self.tracks, self.current_class))
             self.tracks.append(track)
         k = self.keyframe(track)
         if k:
@@ -192,7 +201,9 @@ class LabelDocument(QObject):
         if box is None or not before:
             return None
         after = [k for k in tr.keyframes if k.t_sec > self.t_sec + EPS]
-        new = Track(uuid4().hex[:8], tr.label, [Keyframe(self.frame, self.t_sec, list(box), True)] + after, 'human')
+        tr.entity = tr.entity or next_entity(self.tracks, tr.label)
+        new = Track(uuid4().hex[:8], tr.label, [Keyframe(self.frame, self.t_sec, list(box), True)] + after, 'human',
+                    next_entity(self.tracks, tr.label))   # a new object: a fresh name, never a copy
         tr.keyframes = before + [Keyframe(self.frame, self.t_sec, list(box), False)]
         tr.source = 'human'
         self.tracks.append(new); self.selected = new.track_id
@@ -229,6 +240,7 @@ class LabelDocument(QObject):
                 by_frame[k.frame] = k
         keep.keyframes = sorted(by_frame.values(), key=lambda k: k.t_sec)
         keep.source = 'human'
+        keep.entity = keep.entity or gone.entity           # the first track's name: P1 stays P1
         self.tracks.remove(gone); self.hidden.discard(gone.track_id); self.selected = keep.track_id
         self.checkpoint()
         return True
@@ -236,6 +248,8 @@ class LabelDocument(QObject):
     def change_class(self, name):
         self.current_class = name
         if self.track:
+            if entity_prefix(name) != entity_prefix(self.track.label):   # a person turned car: a name of its kind
+                self.track.entity = next_entity([t for t in self.tracks if t is not self.track], name)
             self.track.label, self.track.source = name, 'human'
             box = box_at(self.track, self.t_sec)
             if box:

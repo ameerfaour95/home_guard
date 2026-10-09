@@ -14,6 +14,8 @@ from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
+from home_guard_project.fleet_contract import tracks as ft
+
 from .. import audit, labeling, pseudonym, tagging
 from ..deps import NOTES_MAX, SessionDep, check_length, current_staff, require_id, require_role
 from ..models import Annotation, AnnotationHead, AnnotationReview, Event, Staff, TaggingPublish
@@ -101,6 +103,7 @@ def preloaded_tracks(session: Session, request: Request, ev: Event, fps) -> tupl
         tracks = labeling.suggestions(session, request.app.state.s3, ev, fps, _now(request))
     for tr in tracks:
         tr.source = "yolo"
+    ft.fill_entities(tracks)          # the tracker's own P1 / CAR1 kept; every other object named P/CAR/A in order
     return tracks, (source if tracks else None)
 
 

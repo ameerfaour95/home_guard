@@ -163,6 +163,6 @@ def preload_tracks(dataset: str, clip_id: str, fps: Optional[float],
 
     tracks = local_tracks(paths, fps)
     if tracks:
-        return tracks, "tracker"
-    tracks = dataset_tracks(dataset, clip_id, fps)
+        return ft.fill_entities(tracks), "tracker"
+    tracks = ft.fill_entities(dataset_tracks(dataset, clip_id, fps))
     return tracks, ("dataset" if tracks else None)

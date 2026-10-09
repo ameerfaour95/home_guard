@@ -106,3 +106,13 @@ def test_found_next_to_meta_or_video(tmp_path):
     video.parent.mkdir()
     shutil.copy(FIXTURES / f"{name}.tracks.json", video.parent / f"{name}.tracks.json")
     assert [t.label for t in tf.local_tracks([str(meta), str(video)], 7.0)] == ["person", "car"]
+
+
+def test_live_entity_ids_become_the_tracks_entity_and_replays_are_named_in_order():
+    from home_guard_project.cloud.tagstudio.boxes import preload_tracks  # noqa: F401
+    from home_guard_project.fleet_contract.tracks import fill_entities
+    live = tf.read_tracks(_live_doc(), 7.0)
+    assert [(t.label, t.entity) for t in live] == [("person", "P1"), ("car", None)]
+    assert [t.entity for t in fill_entities(live)] == ["P1", "CAR1"]
+    replay = fill_entities(tf.read_tracks(_doc("ameer_week_0_1_ch3_1791355310_alert"), 7.0))
+    assert [(t.label, t.entity) for t in replay] == [("car", "CAR1"), ("person", "P1"), ("person", "P2")]

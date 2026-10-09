@@ -390,6 +390,7 @@ class Track:
     label: str
     keyframes: list[Keyframe]
     source: Literal['human', 'yolo', 'suggestion'] = 'human'  # yolo: preloaded detector boxes nobody checked yet
+    entity: str | None = None  # 'P1', 'CAR2', 'A1': the object's stable name; never in a YOLO training label
 
 
 @dataclass
