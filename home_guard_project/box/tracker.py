@@ -150,6 +150,7 @@ class _Track:
     returns: int = 0                    # earlier visits in the chain within RETURN_SEC
     followed: bool = False              # a later track already counts as this one coming back
     max_conf: float = 0.0               # the best detector score of any of its looks
+    last_conf: float = 0.0              # the detector score of its latest look (reid.py picks its best looks)
     moved: float = 0.0                  # farthest its foot point got from the first one (picture widths)
     boxes: List[Tuple[float, Box]] = field(default_factory=list)   # (ts, box) per look, thinned like the points
 
@@ -173,6 +174,7 @@ class _Track:
     def add(self, ts: float, box: Box, conf: float = 0.0) -> None:
         self.box, self.last_seen, self.hits = box, ts, self.hits + 1
         self.max_conf = max(self.max_conf, float(conf))
+        self.last_conf = float(conf)
         foot = sm.foot_point(box)
         self.moved = max(self.moved, math.hypot(foot[0] - self.points[0][1], foot[1] - self.points[0][2]))
         self.points.append((ts,) + foot)
@@ -527,7 +529,7 @@ class CameraTracker:
                 if di in used_d or len(self._active) >= MAX_ACTIVE:
                     continue
                 track = _Track(self._next_id, kind, cls_id, box, ts, ts, [(ts,) + feet[di]], max_conf=confs[di],
-                               boxes=[(ts, box)])
+                               boxes=[(ts, box)], last_conf=confs[di])
                 self._next_id += 1
                 self._active.append(track)
                 seen.append(track.id)
@@ -727,6 +729,14 @@ class CameraTracker:
         with self._lock:
             return [(ts, ids) for ts, ids in self._looks if t0 <= ts <= t1]
 
+    def person_looks(self, ts: float) -> List[Dict[str, Any]]:
+        """The people boxed in the look at *ts* (the last ``update``), for the appearance memory (reid.py): ``id,
+        first_seen, box`` (normalised x1, y1, x2, y2), ``conf`` (this look's detector score) and ``confirmed``."""
+        with self._lock:
+            return [{"id": t.id, "first_seen": t.first_seen, "box": t.box, "conf": t.last_conf,
+                     "confirmed": t.confirmed}
+                    for t in self._active if t.kind == "person" and t.last_seen == float(ts)]
+
 
 class TrackerRegistry:
     """One tracker per camera, and each camera's scene map re-read at most every *refresh_sec* (the owner may
@@ -786,3 +796,6 @@ class TrackerRegistry:
 
     def looks_between(self, camera: str, t0: float, t1: float) -> List[Tuple[float, Tuple[int, ...]]]:
         return self.get(camera).looks_between(t0, t1)
+
+    def person_looks(self, camera: str, ts: float) -> List[Dict[str, Any]]:
+        return self.get(camera).person_looks(ts)

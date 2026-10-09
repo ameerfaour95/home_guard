@@ -11,6 +11,12 @@ its tracks onto the event session's entities with short owner-facing ids.
   foot point, re-attaches when it is the only such candidate. With two or more candidates it is a NEW entity with
   ``maybe_of`` naming them: ambiguous people are never merged, and the story never claims continuity for them.
 - Ids restart at P1 in a new session; a rolled-over session (events.py ``parent``) keeps its entities and ids.
+- With an ``Appearance`` (stage 3.2, reid.py: clothing embeddings, same day only) a new person track with no geometric
+  re-attach (beyond REATTACH_SEC, or ambiguous) re-links to a lost person of the session when the clothes match
+  (cosine >= ``link``, better than the second candidate by ``margin``, time and place plausible): ``linked_by:
+  "appearance"``. When geometry would re-attach but the clothes match less than ``veto`` it is a NEW entity
+  (``not_of``): a weak match never merges two people. In ``shadow`` mode nothing changes; ``Appearance.said`` and
+  the entity's ``reid_shadow`` say what it would have done.
 
 Entities are plain dicts stored in ``events.Session.entities`` (so a session still round-trips through JSON):
 ``id, kind, tracks`` (tracker keys ``"<id>@<first_seen>"``), ``track_ids, first_seen, last_seen, state``
@@ -23,7 +29,8 @@ left by), ``mapped``, ``owner_label`` and ``known_ids`` (from the owner's own wo
 from __future__ import annotations
 
 import math
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 REATTACH_SEC = 120.0             # a lost entity is still "the same one" when a lone candidate starts within this
 REATTACH_DISTANCE = 0.15         # picture widths from its last foot point (as tracker.RETURN_DISTANCE)
@@ -38,6 +45,45 @@ ROSTER_HEAD = "PEOPLE/VEHICLES IN VIEW (from the tracker): "
 ROSTER_RULE = ("These ids are the box's own names for who it follows; use them only in per_entity to say what each "
                "one does. Count people from the frames, not from this list.")
 ROSTER_LIMIT = 300
+# Stage 3.2, appearance (reid.py); box.yaml reid_link / reid_margin / reid_veto override the first three.
+REID_LINK = 0.70                 # cosine to re-link a lost person by clothes ...
+REID_MARGIN = 0.08               # ... better than the second candidate by this much
+REID_VETO = 0.35                 # geometry would re-attach, the clothes match less: a new entity
+REID_MAX_GAP_SEC = 3600.0        # time plausible: a lost person is a re-link candidate this long after last seen
+REID_PLACE_GATE = 0.35           # place plausible: starts this close to where they were lost, or at a picture edge
+
+
+@dataclass
+class Appearance:
+    """What the clothes say (reid.Reid.appearance): ``score(track, entity)`` is the cosine of a new track's look and
+    an entity's look, None when either has no embedding yet. ``mode`` "on" acts; "shadow" only records, in ``said``
+    (``{"what": "link" | "veto", "track", "entity", "to", "score", "acted"}``) and on the entity (``reid_shadow``)."""
+
+    score: Callable[[Dict[str, Any], Dict[str, Any]], Optional[float]]
+    mode: str = "shadow"
+    link: float = REID_LINK
+    margin: float = REID_MARGIN
+    veto: float = REID_VETO
+    max_gap_sec: float = REID_MAX_GAP_SEC
+    said: List[Dict[str, Any]] = field(default_factory=list)
+
+    @property
+    def acting(self) -> bool:
+        return self.mode == "on"
+
+    def lines(self) -> List[str]:
+        """Log lines: ``reid: would link P3->P1 (0.78)``, ``reid: linked track 17->P1 (0.78)``, ``reid: would keep P1
+        apart from P1 (0.21)``, ``reid: kept P3 apart from P1 (0.21)``."""
+        out = []
+        for item in self.said:
+            acted = bool(item.get("acted"))
+            if item["what"] == "link":
+                verb = "linked" if acted else "would link"
+                out.append(f"reid: {verb} {item['entity']}->{item['to']} ({item['score']:.2f})")
+            else:
+                verb = "kept" if acted else "would keep"
+                out.append(f"reid: {verb} {item['entity']} apart from {item['to']} ({item['score']:.2f})")
+        return out
 
 
 def track_key(track: Dict[str, Any]) -> str:
@@ -71,7 +117,7 @@ def new_entity(entities: Sequence[Dict[str, Any]], kind: str, ts: float) -> Dict
     return {"id": _next_id(entities, kind), "kind": kind, "tracks": [], "track_ids": [], "first_seen": ts,
             "last_seen": ts, "state": ACTIVE, "path": [], "mapped": False, "first_foot": None, "last_foot": None,
             "owner_label": "", "known_ids": [], "notes": [], "maybe_of": [], "told_at": 0.0, "told_area": "",
-            "told_gone": 0.0, "areas": {}, "edges": {}}
+            "told_gone": 0.0, "areas": {}, "edges": {}, "entry_edge": "", "exit_edge": ""}
 
 
 def _candidates(entities: Sequence[Dict[str, Any]], track: Dict[str, Any], reattach_sec: float,
@@ -89,24 +135,122 @@ def _candidates(entities: Sequence[Dict[str, Any]], track: Dict[str, Any], reatt
     return out
 
 
+def _score(appearance: Optional[Appearance], track: Dict[str, Any], e: Dict[str, Any]) -> Optional[float]:
+    if appearance is None or track.get("kind") != "person" or e.get("kind") != "person":
+        return None
+    try:
+        value = appearance.score(track, e)
+    except Exception:  # noqa: BLE001 - no appearance: geometry decides as before
+        return None
+    return None if value is None else float(value)
+
+
+def _plausible(e: Dict[str, Any], track: Dict[str, Any], appearance: Appearance) -> bool:
+    """A lost person this new track could be by time and place: lost before it started, not too long ago, and it
+    starts near where they were lost or comes in at a picture edge."""
+    if e.get("kind") != "person" or e.get("last_foot") is None:
+        return False
+    gap = float(track["first_seen"]) - float(e["last_seen"])
+    if not 0.0 <= gap <= appearance.max_gap_sec:
+        return False
+    start = track.get("first_foot")
+    return bool(track.get("entry_edge")) or (start is not None and _dist(e["last_foot"], start) <= REID_PLACE_GATE)
+
+
+def _vetoed(appearance: Optional[Appearance], track: Dict[str, Any], e: Dict[str, Any],
+            vetoes: List[Tuple[Dict[str, Any], float]]) -> bool:
+    """Geometry says *track* is *e*; do the clothes clearly say not? Kept in *vetoes* either way; True only when
+    acting (in shadow geometry still decides)."""
+    value = _score(appearance, track, e)
+    if value is None or value >= appearance.veto:
+        return False
+    vetoes.append((e, value))
+    return appearance.acting
+
+
+def _by_appearance(entities: Sequence[Dict[str, Any]], track: Dict[str, Any], appearance: Appearance,
+                   exclude: Sequence[Dict[str, Any]]) -> Optional[Tuple[Dict[str, Any], float]]:
+    """The lost person the clothes clearly point to, ``(entity, score)``, or None: the best plausible candidate at
+    ``link`` or more, ahead of the second by ``margin``."""
+    scored = []
+    for e in entities:
+        if any(e is x for x in exclude) or not _plausible(e, track, appearance):
+            continue
+        value = _score(appearance, track, e)
+        if value is not None:
+            scored.append((value, e))
+    if not scored:
+        return None
+    scored.sort(key=lambda x: -x[0])
+    best, second = scored[0][0], (scored[1][0] if len(scored) > 1 else -1.0)
+    if best >= appearance.link and best - second >= appearance.margin:
+        return scored[0][1], best
+    return None
+
+
 def _attach(entities: List[Dict[str, Any]], track: Dict[str, Any], reattach_sec: float,
-            gate: float) -> Dict[str, Any]:
-    """The entity a track we have not seen before belongs to (an existing one, or a new one appended)."""
+            gate: float, appearance: Optional[Appearance] = None) -> Dict[str, Any]:
+    """The entity a track we have not seen before belongs to (an existing one, or a new one appended). With
+    *appearance* (stage 3.2) the clothes may keep apart what geometry would re-attach and may re-link a lost person
+    geometry cannot; in shadow mode they only say so."""
+    vetoes: List[Tuple[Dict[str, Any], float]] = []
+    chosen: Optional[Dict[str, Any]] = None
+    found: List[Dict[str, Any]] = []
     prev = track.get("prev_id")
     if prev is not None:
         linked = [e for e in entities if e.get("kind") == track["kind"] and int(prev) in e.get("track_ids", [])
                   and float(e["last_seen"]) <= float(track["first_seen"])]
         if linked:
-            return max(linked, key=lambda e: float(e["last_seen"]))
-    found = _candidates(entities, track, reattach_sec, gate)
-    if len(found) == 1:
-        return found[0]
-    e = new_entity(entities, track["kind"], float(track["first_seen"]))
-    e["first_foot"] = list(track.get("first_foot") or ()) or None
-    if len(found) > 1:
-        e["maybe_of"] = sorted((x["id"] for x in found), key=lambda i: (len(i), i))
-    entities.append(e)
-    return e
+            e = max(linked, key=lambda e: float(e["last_seen"]))
+            if not _vetoed(appearance, track, e, vetoes):
+                chosen = e
+    if chosen is None:
+        found = [x for x in _candidates(entities, track, reattach_sec, gate) if not any(x is v for v, _ in vetoes)]
+        if len(found) == 1:
+            if not _vetoed(appearance, track, found[0], vetoes):
+                chosen = found[0]
+            found = []
+    pick = None
+    if chosen is None and appearance is not None and track.get("kind") == "person":
+        pick = _by_appearance(entities, track, appearance, [v for v, _ in vetoes])
+    key = track_key(track)
+    if chosen is None and pick is not None and appearance.acting:
+        chosen, value = pick
+        chosen["linked_by"] = "appearance"
+        chosen["link_score"] = round(value, 3)
+        chosen.setdefault("links", []).append({"track": key, "by": "appearance", "score": round(value, 3),
+                                               "ts": float(track["first_seen"])})
+        appearance.said.append({"what": "link", "track": key, "entity": f"track {int(track['id'])}",
+                                "to": chosen["id"], "score": round(value, 3), "acted": True})
+        _say_vetoes(appearance, key, track, chosen, vetoes)
+        return chosen
+    if chosen is None:
+        chosen = new_entity(entities, track["kind"], float(track["first_seen"]))
+        chosen["first_foot"] = list(track.get("first_foot") or ()) or None
+        if len(found) > 1:
+            chosen["maybe_of"] = sorted((x["id"] for x in found), key=lambda i: (len(i), i))
+        if vetoes:                       # only acting vetoes get here: the clothes kept them apart
+            chosen["not_of"] = [v["id"] for v, _ in vetoes]
+            chosen["veto_score"] = round(min(x for _, x in vetoes), 3)
+        entities.append(chosen)
+        if pick is not None:             # shadow: what the clothes would have done
+            other, value = pick
+            chosen["reid_shadow"] = {"would": "link", "to": other["id"], "score": round(value, 3)}
+            appearance.said.append({"what": "link", "track": key, "entity": chosen["id"], "to": other["id"],
+                                    "score": round(value, 3), "acted": False})
+    _say_vetoes(appearance, key, track, chosen, vetoes)
+    return chosen
+
+
+def _say_vetoes(appearance: Optional[Appearance], key: str, track: Dict[str, Any], chosen: Dict[str, Any],
+                vetoes: List[Tuple[Dict[str, Any], float]]) -> None:
+    """The clothes' "not the same one" for the log, and in shadow on the entity geometry kept."""
+    for other, value in vetoes:
+        acted = appearance.acting
+        appearance.said.append({"what": "veto", "track": key, "entity": chosen["id"] if acted else f"track {int(track['id'])}",
+                                "to": other["id"], "score": round(value, 3), "acted": acted})
+        if not acted:
+            chosen["reid_shadow"] = {"would": "split", "from": other["id"], "score": round(value, 3)}
 
 
 def _refresh_path(e: Dict[str, Any]) -> None:
@@ -118,10 +262,12 @@ def _refresh_path(e: Dict[str, Any]) -> None:
 
 def ingest(entities: List[Dict[str, Any]], tracks: Iterable[Dict[str, Any]], now: float,
            since: Optional[float] = None, reattach_sec: float = REATTACH_SEC,
-           gate: float = REATTACH_DISTANCE, not_before: Optional[float] = None) -> List[str]:
+           gate: float = REATTACH_DISTANCE, not_before: Optional[float] = None,
+           appearance: Optional[Appearance] = None) -> List[str]:
     """Map the tracker's *tracks* (``CameraTracker.snapshot``) onto *entities* (changed in place). Returns the ids of
     the entities seen in ``[since, now]`` (with *since* None: the ones still in view), people first, in id order.
-    Tracks that ended before *not_before* (before the session opened) are left out."""
+    Tracks that ended before *not_before* (before the session opened) are left out. *appearance* (stage 3.2,
+    reid.Reid.appearance) lets the clothes re-link or keep apart a new person; None: geometry only, as before."""
     by_key = {k: e for e in entities for k in e.get("tracks", [])}
     active_keys: Set[str] = set()
     seen: Set[str] = set()
@@ -136,7 +282,7 @@ def ingest(entities: List[Dict[str, Any]], tracks: Iterable[Dict[str, Any]], now
         key = track_key(t)
         e = by_key.get(key)
         if e is None:
-            e = _attach(entities, t, reattach_sec, gate)
+            e = _attach(entities, t, reattach_sec, gate, appearance)
             e["tracks"].append(key)
             e["track_ids"].append(int(t["id"]))
             by_key[key] = e
@@ -146,6 +292,9 @@ def ingest(entities: List[Dict[str, Any]], tracks: Iterable[Dict[str, Any]], now
             e["last_seen"] = last
             if t.get("last_foot") is not None:
                 e["last_foot"] = list(t["last_foot"])
+            e["exit_edge"] = str(t.get("exit_edge") or "")      # where it was last seen leaving (stage 3.3)
+        if first <= float(e["first_seen"]) or "entry_edge" not in e:
+            e["entry_edge"] = str(t.get("entry_edge") or "")
         e["areas"][key] = list(t.get("path") or [])
         e["edges"][key] = [x for x in (t.get("entry_edge"), t.get("exit_edge")) if x]
         _refresh_path(e)
