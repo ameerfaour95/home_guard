@@ -419,6 +419,11 @@ class Window(QMainWindow):
         from .ai_activity_ui import icon
         for button,name in ((overview_button,"shield"),(cameras_button,"camera"),(settings_button,"settings")):
             button.setToolTip(button.text());button.setAccessibleName(button.text());button.setText("");button.setIcon(icon(name));button.setIconSize(QSize(22,22));button.setObjectName("iconButton");self.top_header.addWidget(button)
+        # Access notices: what Home Guard support looked at, with the unread count on the bell (notices_ui.py).
+        from .notices_ui import BadgeButton
+        self.notices_button=BadgeButton();self.notices_button.setObjectName("iconButton");self.notices_button.setIcon(icon("bell"));self.notices_button.setIconSize(QSize(22,22))
+        self.notices_button.setToolTip(tr("notices"));self.notices_button.setAccessibleName(tr("notices"));self.notices_button.clicked.connect(self.open_notices)
+        self.top_header.addWidget(self.notices_button)
         self.top_header.addWidget(self.run_button)
         self.stop_banner = QFrame()
         self.stop_banner.setStyleSheet(f"QFrame {{ background: #493b20; border-radius: 8px; }} QLabel {{ color: {WARNING}; }}")
@@ -570,10 +575,16 @@ class Window(QMainWindow):
         from . import camera_display
         camera_display.subscribe(self.camera_names_changed)
         self.content_stack.addWidget(self.cameras_page.widget)
+        from .notices_ui import NoticesPage, notices_backend_for
+        self.notices_page = NoticesPage(notices_backend_for(self.args), self.notices_counted)
+        self.content_stack.addWidget(self.notices_page.widget)
+        self.notices_page.start()
         if getattr(self.args, "panel", None) == "cameras":
             self.open_cameras()
         if getattr(self.args, "panel", None) == "settings":
             self.open_settings()
+        if getattr(self.args, "panel", None) == "notices":
+            QTimer.singleShot(300, self.open_notices)       # after the first list is in, as when the owner clicks
         if getattr(self.args, "scene", None) and self.args.demo and getattr(self.args, "panel", None) == "cameras":
             from .scene_editor import open_demo_dialog
             open_demo_dialog(self.cameras_page, self.args.scene)
@@ -973,6 +984,16 @@ class Window(QMainWindow):
         if self.box_unreachable: self.settings_page.note.setText(tr("offline_settings"))
         self.content_stack.setCurrentIndex(1)
 
+    def open_notices(self):
+        self.content_stack.setCurrentIndex(3)
+        self.notices_page.poll()
+        self.notices_page.open()
+
+    def notices_counted(self, count):
+        self.notices_button.set_count(count)
+        text = tr("notices_tooltip", count=count) if count else tr("notices")
+        self.notices_button.setToolTip(text);self.notices_button.setAccessibleName(text)
+
     def settings_changed(self):
         self.last_poll = 0
         if self.current_state and self.camera_controls.records:
@@ -1141,6 +1162,8 @@ class Window(QMainWindow):
         if hasattr(self, "discovery_pool"): self.discovery_pool.shutdown(wait=False, cancel_futures=True)
         if hasattr(self, "cameras_page"):
             self.cameras_page.close()
+        if hasattr(self, "notices_page"):
+            self.notices_page.close()
         if hasattr(self,"wizard_cameras"):
             self.wizard_cameras.close()
         if hasattr(self, "pool"):

@@ -527,6 +527,25 @@ TEXT.update(rel_unknown="Unknown", rel_now="now", rel_seconds="{n} s ago", rel_m
 TEXT.update(camera_name_save_failed="The name \"{name}\" could not be saved. Each camera needs its own name; try another.")
 TEXT.update(tile_turn_on="Turn on", remote_read_only="Change settings on the box", detections_need_running="Detections appear when Home Guard is running.")
 
+# Access notices: what Home Guard support looked at (notices_ui.py). The cloud's English sentence is never used for a
+# kind the app knows; these are worded here from the kind, the cameras and the time.
+TEXT.update(
+    notices="Access notices",
+    notices_tooltip="Access notices ({count} new)",
+    notices_hint="Each time Home Guard support looks at your recordings or your chat with the assistant, it shows here.",
+    notices_empty="No one from Home Guard support has viewed your recordings or chats",
+    notices_unavailable="The access notices could not be read from the box. They are checked again in a few minutes.",
+    notice_recording="Home Guard support viewed recordings from {cameras} ({time})",
+    notice_recording_latin="Home Guard support viewed recordings from {cameras} ({time})",
+    notice_recording_any="Home Guard support viewed recordings ({time})",
+    notice_chat="Home Guard support viewed your chat with the assistant ({time})",
+    notice_other="Home Guard support viewed your information ({time})",
+    notice_by="By {name}",
+    notice_new="New",
+    notice_and="{rest} and {last}",
+    notice_and_latin="{rest} and {last}",
+)
+
 TEXT_EN = dict(TEXT)          # every key, in English: the base the other languages are laid over
 
 
