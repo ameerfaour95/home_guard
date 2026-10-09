@@ -271,6 +271,7 @@ class CorrectionTest(Base):
         self.assertEqual(strip_boilerplate("העובדים מסומנים. אני מבין את התסכול שלך ואשתדל לשפר."),
                          "העובדים מסומנים.")
         self.assertTrue(empty_reply("אני מבין. אני אשתדל להיות יותר ברור ולשאול שאלות כשצריך."))
+        self.assertTrue(empty_reply("אני מבין. אני אקח את זה בחשבון להבא."))
 
     def test_the_same_mark_again_is_already_saved(self) -> None:
         self.events.mark_known(PERGOLA, "השכן", "Ameer", dt.datetime(2026, 10, 9, 18, 0).timestamp(), now=NOW)
