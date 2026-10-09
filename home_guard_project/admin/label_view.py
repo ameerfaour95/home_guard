@@ -49,6 +49,8 @@ HELP = [('← / →', 'One frame'), ('Shift + ← / →', 'Five frames'), ('Spac
         ('M', 'Merge the selected track with the nearest one it never overlaps (P1 stays P1)'),
         ('C', 'Copy box to next frame'),
         ('Del / Shift + Del', 'Delete the selected box (its whole track) / only this keyframe'), ('Ctrl + Z / Ctrl + Shift + Z', 'Undo / redo (including text)'),
+        ('Wheel / pinch, + / −, 0', 'Zoom around the cursor, in / out, fit the picture'),
+        ('Middle button or Space + drag', 'Pan the zoomed picture'),
         ('Ctrl + S', 'Save draft'), ('Ctrl + Enter', 'Submit and open next clip'), ('Esc', 'Deselect'), ('?', 'Keyboard help')]
 
 
@@ -65,6 +67,9 @@ class LabelView(QWidget):
         self.loader, self.writer, self.reader, self.media = [TaskRunner(self) for _ in range(4)]
         self.loader.finished.connect(self.loaded); self.writer.finished.connect(self.saved)
         self.reader.finished.connect(self.read_done); self.media.finished.connect(self.media_loaded)
+        # a seek the decoder never answers exactly (another frame's timestamp, or none while paused) settles anyway
+        self.seek_watchdog = QTimer(self); self.seek_watchdog.setSingleShot(True); self.seek_watchdog.setInterval(700)
+        self.seek_watchdog.timeout.connect(self.seek_timed_out); self.seek_nudged = False
         self.autosave = QTimer(self); self.autosave.setSingleShot(True); self.autosave.setInterval(2000)
         self.autosave.timeout.connect(self.save)
         self.clock = QTimer(self); self.clock.setInterval(1000); self.clock.timeout.connect(self.update_save_state); self.clock.start()
@@ -105,6 +110,10 @@ class LabelView(QWidget):
         self.boxes_source = ProvenanceChip(theme); tools.addWidget(self.boxes_source)
         self.boxes_note = label('', 'muted'); self.boxes_note.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         tools.addWidget(self.boxes_note, 1)
+        for text, slot, tip in (('−', lambda: self.canvas.zoom_out(), 'Zoom out  −'),
+                                ('+', lambda: self.canvas.zoom_in(), 'Zoom in  +  (or the mouse wheel / a pinch)'),
+                                ('Fit', lambda: self.canvas.fit(), 'The whole picture  0')):
+            b = button(text, slot, 'compact'); b.setToolTip(tip); tools.addWidget(b)
         self.boxes_toggle = button('Boxes  B', self.toggle_boxes, 'compact'); self.boxes_toggle.setCheckable(True)
         self.boxes_toggle.setChecked(SESSION['boxes']); self.boxes_toggle.setToolTip('Show / hide every box, also while playing (B)')
         tools.addWidget(self.boxes_toggle)
@@ -170,6 +179,8 @@ class LabelView(QWidget):
             '.': lambda: self.jump_keyframe(1), ',': lambda: self.jump_keyframe(-1),
             'K': lambda: self.doc.toggle_keyframe(), 'O': lambda: self.doc.set_enabled(), 'C': self.copy_next,
             'B': self.toggle_boxes, 'H': self.toggle_track_hidden, 'Alt+M': self.split_track, 'M': self.merge_track,
+            '+': lambda: self.canvas.zoom_in(), '=': lambda: self.canvas.zoom_in(), '-': lambda: self.canvas.zoom_out(),
+            '0': lambda: self.canvas.fit(),
             'Del': self.delete_selected, 'Shift+Del': lambda: self.doc.delete_keyframe(),
             'Ctrl+Z': lambda: self.doc.undo(), 'Ctrl+Shift+Z': lambda: self.doc.redo(),
             'Ctrl+S': self.save, 'Ctrl+Return': self.submit, 'Esc': self.deselect, '?': self.help}
@@ -186,8 +197,10 @@ class LabelView(QWidget):
             shortcut.setEnabled(not typing or key.startswith('Ctrl+'))
 
     def run_shortcut(self, key, fn):
-        if key == 'B':
-            fn(); return  # the view toggle works with or without a clip, also while seeking
+        if key in ('B', '+', '=', '-', '0'):
+            fn(); return  # the view toggles work with or without a clip, also while seeking
+        if key == 'Space' and self.canvas.zoom > 1.0 and self.canvas.underMouse():
+            return  # zoomed in with the mouse on the picture: Space held is for panning
         if self.doc and (self.pending_frame is None or key in ('Left', 'Right', 'Shift+Left', 'Shift+Right', '?', 'Esc')):
             fn()
 
@@ -312,15 +325,34 @@ class LabelView(QWidget):
         self.doc.frame_size = [image.width(), image.height()]
         t = frame.startTime()/1_000_000 if frame.startTime() >= 0 else self.player.position()/1000
         native_frame = frame_at(t, self.doc.fps)
-        if self.pending_frame is not None and native_frame != self.pending_frame:
-            return  # A decoder can deliver an earlier seek's frame while scrubbing.
+        if self.pending_frame is not None:
+            if abs(native_frame - self.pending_frame) > 1:
+                return  # A decoder can deliver an earlier seek's frame while scrubbing.
+            self.settle_seek(t, image); return   # the asked frame, give or take the decoder's rounding
         self.canvas.image = image
-        self.pending_frame = None; self.canvas.setEnabled(True)
+        self.canvas.setEnabled(True)
         self.doc.seek(native_frame, t)
+
+    def settle_seek(self, t_sec, image=None):
+        """The pending seek is done: the clicked frame is shown (with the decoder's own time for it)."""
+        frame, self.pending_frame = self.pending_frame, None
+        self.seek_watchdog.stop()
+        if frame is None or not self.doc: return
+        if image is not None: self.canvas.image = image
+        self.canvas.setEnabled(True)
+        self.doc.seek(frame, t_sec)
         if self.pending_copy:
             track_id, box = self.pending_copy; self.pending_copy = None
             track = next((tr for tr in self.doc.tracks if tr.track_id == track_id), None)
             if track: self.doc.put_box(box, track)
+
+    def seek_timed_out(self):
+        """No decoded frame answered the seek: nudge the paused decoder once (play, pause), then settle anyway."""
+        if self.pending_frame is None or not self.doc: return
+        if not self.seek_nudged:
+            self.seek_nudged = True
+            self.player.play(); self.player.pause(); self.seek_watchdog.start(); return
+        self.settle_seek(self.doc.time_for(self.pending_frame))
 
     def position_changed(self):
         if not self.doc: return
@@ -335,6 +367,7 @@ class LabelView(QWidget):
             self.doc.seek(frame); return
         if frame == self.doc.frame and self.pending_frame is None: return
         self.pending_frame = frame; self.canvas.setEnabled(False)
+        self.seek_nudged = False; self.seek_watchdog.start()
         self.position.setText(f'Seeking frame {frame+1}…')
         # Qt's paused decoder includes a frame's end timestamp in its seek interval.
         # Seek inside the requested frame, then use the decoded presentation time.

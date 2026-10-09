@@ -169,7 +169,7 @@ def test_labeler_privacy_and_keyboard(widgets, wait):
     e = v.backend.event(101)
     assert e.customer_id == 0 and not e.raw_meta and all(r.prompt is None and r.raw_text_artifact_id is None for r in e.ai_runs)
     assert v.doc.annotation.ai_prompt_version is None
-    expected = {'Left', 'Right', 'Shift+Left', 'Shift+Right', 'Space', '.', ',', 'K', 'O', 'B', 'H', 'M', 'Alt+M', 'C', 'Del', 'Shift+Del', 'Ctrl+Z', 'Ctrl+Shift+Z', 'Ctrl+S', 'Ctrl+Return', 'Esc', '?', *map(str, range(1, 10))}
+    expected = {'Left', 'Right', 'Shift+Left', 'Shift+Right', 'Space', '.', ',', 'K', 'O', 'B', 'H', 'M', 'Alt+M', 'C', 'Del', '+', '=', '-', '0', 'Shift+Del', 'Ctrl+Z', 'Ctrl+Shift+Z', 'Ctrl+S', 'Ctrl+Return', 'Esc', '?', *map(str, range(1, 10))}
     assert set(v.shortcuts) == expected
     v.player.setSource(__import__('PySide6.QtCore', fromlist=['QUrl']).QUrl())
     v.doc.seek(0); v.canvas.setFocus(); QTest.keyClick(v.canvas, Qt.Key.Key_Right, Qt.KeyboardModifier.ShiftModifier)

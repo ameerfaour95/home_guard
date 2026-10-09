@@ -1,7 +1,11 @@
-"""Interactive frame rectangles and the temporal track editor."""
-from PySide6.QtCore import Qt, QRectF, QPointF, Signal
+"""Interactive frame rectangles and the temporal track editor.
+
+The canvas zooms (wheel or trackpad pinch around the cursor, + / - and Fit) and pans (drag with the middle button, or
+with Space held). Every box is kept in IMAGE coordinates: the zoom only changes where the picture is drawn
+(display_rect), so drawing, moving and resizing give the same box at any zoom."""
+from PySide6.QtCore import Qt, QRectF, QPointF, QEvent, Signal
 from PySide6.QtGui import QColor, QPainter, QPen
-from PySide6.QtWidgets import QWidget, QMenu
+from PySide6.QtWidgets import QWidget, QMenu, QApplication
 from home_guard_project.fleet_contract.tracks import box_at
 from .player import VideoCanvas, SESSION
 from .tag_widgets import machine_name
@@ -26,14 +30,75 @@ class LabelCanvas(VideoCanvas):
     selected = Signal()
     interaction_started = Signal()
 
+    MIN_ZOOM, MAX_ZOOM, STEP = 1.0, 8.0, 1.25
+    zoom_changed = Signal()
+
     def __init__(self, theme='dark'):
         super().__init__(theme)
         self.overlay.hide()
         self.theme, self.doc = theme, None
         self.drag, self.preview = None, None
+        self.zoom, self.pan, self.panning, self.space_held = 1.0, QPointF(0., 0.), None, False
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.setAccessibleName('Video annotation canvas: drag to draw, move or resize a box')
+        self.setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents)
+        self.setAccessibleName('Video annotation canvas: drag to draw, move or resize a box; wheel to zoom')
+        QApplication.instance().installEventFilter(self)   # Space held = pan (Space alone still plays / pauses)
+
+    # ------------------------------------------------------------------ zoom and pan (image coordinates kept)
+    def fit_rect(self):
+        return super().display_rect()
+
+    def display_rect(self):
+        x, y, w, h = self.fit_rect()
+        if self.zoom == 1.0 and self.pan.isNull():
+            return (x, y, w, h)
+        zw, zh = w*self.zoom, h*self.zoom
+        return (x - (zw-w)/2 + self.pan.x(), y - (zh-h)/2 + self.pan.y(), zw, zh)
+
+    def image_point(self, point):
+        """The point under *point* in normalised image coordinates, not clamped (it may lie outside the picture)."""
+        x, y, w, h = self.display_rect()
+        return QPointF((point.x()-x)/w, (point.y()-y)/h) if w and h else QPointF(0., 0.)
+
+    def zoom_to(self, zoom, anchor=None):
+        """Zoom to *zoom* (1 = fit) keeping the image point under *anchor* (default the centre) where it is."""
+        zoom = max(self.MIN_ZOOM, min(self.MAX_ZOOM, zoom))
+        anchor = anchor if anchor is not None else QPointF(self.width()/2, self.height()/2)
+        before = self.image_point(anchor)
+        self.zoom = zoom
+        if zoom == 1.0:
+            self.pan = QPointF(0., 0.)
+        else:
+            x, y, w, h = self.display_rect()
+            # where the anchor's image point lands now, moved back under the anchor
+            self.pan += QPointF(anchor.x() - (x + before.x()*w), anchor.y() - (y + before.y()*h))
+        self.update(); self.zoom_changed.emit()
+
+    def fit(self):
+        self.zoom_to(1.0)
+
+    def zoom_in(self, anchor=None):
+        self.zoom_to(self.zoom*self.STEP, anchor)
+
+    def zoom_out(self, anchor=None):
+        self.zoom_to(self.zoom/self.STEP, anchor)
+
+    def wheelEvent(self, event):
+        steps = event.angleDelta().y()/120 or event.pixelDelta().y()/60
+        if steps:
+            self.zoom_to(self.zoom*(self.STEP**steps), event.position()); event.accept()
+
+    def event(self, event):
+        if event.type() == QEvent.Type.NativeGesture and event.gestureType() == Qt.NativeGestureType.ZoomNativeGesture:
+            self.zoom_to(self.zoom*(1+event.value()), event.position()); return True   # a trackpad pinch
+        return super().event(event)
+
+    def eventFilter(self, obj, event):
+        if event.type() in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease) and event.key() == Qt.Key.Key_Space \
+                and not event.isAutoRepeat():
+            self.space_held = event.type() == QEvent.Type.KeyPress
+        return False
 
     def rect_for(self, xyxy):
         return QRectF(*map_box(xyxy, self.display_rect()))
@@ -76,6 +141,11 @@ class LabelCanvas(VideoCanvas):
         if self.drag and self.drag[0] == 'draw' and self.preview:
             p.setPen(QPen(class_color(self.doc.current_class, self.theme), 2)); p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawRect(self.rect_for(self.preview))
+        if self.zoom > 1.0:
+            text = f'{self.zoom:.1f}×  ·  Fit 0  ·  pan: middle button or Space + drag'
+            bg = QRectF(self.width()-p.fontMetrics().horizontalAdvance(text)-32, 12, p.fontMetrics().horizontalAdvance(text)+20, 28)
+            p.fillRect(bg, QColor(12, 18, 24, 220)); p.setPen(QColor('#edf4f6'))
+            p.drawText(bg, Qt.AlignmentFlag.AlignCenter, text)
         if not SESSION['boxes'] or self.doc.hidden:
             text = 'Boxes hidden  ·  B shows them' if not SESSION['boxes'] else f'{len(self.doc.hidden)} track(s) hidden  ·  H on a track shows it'
             bg = QRectF(12, 12, p.fontMetrics().horizontalAdvance(text)+20, 28)
@@ -83,6 +153,9 @@ class LabelCanvas(VideoCanvas):
             p.drawText(bg, Qt.AlignmentFlag.AlignCenter, text)
 
     def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.MiddleButton or (event.button() == Qt.MouseButton.LeftButton
+                                                              and self.space_held and self.zoom > 1.0):
+            self.panning = event.position(); self.setCursor(Qt.CursorShape.ClosedHandCursor); return
         if not self.doc or event.button() != Qt.MouseButton.LeftButton or not QRectF(*self.display_rect()).contains(event.position()):
             return
         if not SESSION['boxes']:
@@ -106,6 +179,8 @@ class LabelCanvas(VideoCanvas):
         self.selected.emit(); self.update()
 
     def mouseMoveEvent(self, event):
+        if self.panning is not None:
+            self.pan += event.position() - self.panning; self.panning = event.position(); self.update(); return
         if not self.drag:
             return
         mode, origin, box, handle = self.drag
@@ -126,6 +201,8 @@ class LabelCanvas(VideoCanvas):
         self.update()
 
     def mouseReleaseEvent(self, event):
+        if self.panning is not None:
+            self.panning = None; self.unsetCursor(); return
         if self.drag and self.preview:
             self.doc.put_box(self.preview, None if self.drag[0] == 'draw' else self.doc.track)
         self.drag, self.preview = None, None
@@ -138,7 +215,7 @@ class TrackTimeline(QWidget):
 
     def __init__(self, theme='dark'):
         super().__init__()
-        self.doc, self.theme, self.drag = None, theme, None
+        self.doc, self.theme, self.drag, self.scrubbing = None, theme, None, None
         self.left, self.row_height = 172, 38
         self.setMinimumHeight(110); self.setMouseTracking(True)
         self.setAccessibleName('Track timeline: drag keyframes; right-click segments to keep or hide')
@@ -205,12 +282,25 @@ class TrackTimeline(QWidget):
                     menu.exec(event.globalPosition().toPoint())
                 return
             dot = next((k for k in tr.keyframes if abs(self.x(k.frame)-event.position().x()) < 9), None)
-            if dot: self.drag = (tr.track_id, dot.frame)
-        if event.position().x() >= self.left: self.seek_requested.emit(frame)
+            if dot and event.button() == Qt.MouseButton.LeftButton:
+                # a keyframe: jump to ITS frame; it moves only when it is dragged further than a few pixels
+                self.drag = (tr.track_id, dot.frame, event.position().x(), False)
+                self.seek_requested.emit(dot.frame); self.update(); return
+        if event.position().x() >= self.left and event.button() == Qt.MouseButton.LeftButton:
+            self.scrubbing = frame                 # a click seeks; holding the button and moving scrubs
+            self.seek_requested.emit(frame)
         self.update()
 
     def mouseMoveEvent(self, event):
-        if self.drag: self.seek_requested.emit(self.frame(event.position().x()))
+        if self.drag:
+            track_id, old, x0, moved = self.drag
+            if moved or abs(event.position().x() - x0) > 4:
+                self.drag = (track_id, old, x0, True)
+                self.seek_requested.emit(self.frame(event.position().x()))
+        elif getattr(self, 'scrubbing', None) is not None and event.buttons() & Qt.MouseButton.LeftButton:
+            frame = self.frame(event.position().x())
+            if frame != self.scrubbing:
+                self.scrubbing = frame; self.seek_requested.emit(frame)
         elif self.doc:
             row = int((event.position().y()-31)//self.row_height)
             tracks = self.doc.tracks
@@ -218,5 +308,9 @@ class TrackTimeline(QWidget):
                             if 0 <= row < len(tracks) and event.position().x() < self.left else '')
 
     def mouseReleaseEvent(self, event):
+        self.scrubbing = None
         if self.drag:
-            self.doc.move_keyframe(*self.drag, self.frame(event.position().x())); self.drag = None
+            track_id, old, _, moved = self.drag
+            if moved:
+                self.doc.move_keyframe(track_id, old, self.frame(event.position().x()))
+            self.drag = None
