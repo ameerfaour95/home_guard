@@ -331,8 +331,8 @@ class TagView(QWidget):
         self.label_chips = ChipGroup(taxonomy['labels'], False)
         self.label_chips.changed.connect(lambda: self.set_field('label', self.label_chips.value()))
         col.addWidget(self.label_chips)
-        self.serious = QCheckBox('Serious behaviour: a hidden face, trying doors, gates or car doors, looking into '
-                                 'windows or cars')
+        self.serious = QCheckBox('Serious behaviour')
+        self.serious.setToolTip('A hidden or covered face, trying doors, gates or car doors, looking into windows or cars')
         self.serious.toggled.connect(lambda v: self.set_field('serious_behaviour', v)); col.addWidget(self.serious)
         counts = QHBoxLayout(); counts.setSpacing(8)
         self.counts = {}
@@ -975,11 +975,15 @@ class TagView(QWidget):
 
     def render_suggestion(self):
         model = (self.form or {}).get('suggested_by') or ''
+        converted = (self.form or {}).get('converted_by') or ''
         draft = self.key in self.suggested
-        self.suggest_bar.setVisible(bool(model))
+        self.suggest_bar.setVisible(bool(model or converted))
         if model:
             self.suggest_note.setText(f'Suggested by {model}' + (' · a draft: check every field, edit what is wrong, '
                                                                   'then save' if draft else ''))
+        elif converted:
+            self.suggest_note.setText(f'Converted from your words by {converted}' + (
+                ' · a suggestion: check every field, then save' if draft else ''))
         self.discard_button.setVisible(draft)
 
     # ------------------------------------------------------------------ "In my words" -> Convert
@@ -1008,9 +1012,6 @@ class TagView(QWidget):
         self.raw_manual = bool(self.form.get('raw_label'))
         self.suggested[key] = (answer.get('model', ''), {n: deepcopy(self.form.get(n)) for n in SUGGESTED}, before)
         self.render_form(); self.update_save_state()
-        self.suggest_bar.show(); self.discard_button.show()
-        self.suggest_note.setText(f"Converted from your words by {answer.get('model', '')} · a suggestion: check "
-                                  'every field, then save')
         self.save_state.setText('Your words are in the form: check it')
 
     def export(self):
