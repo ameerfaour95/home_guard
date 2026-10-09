@@ -450,7 +450,7 @@ def test_ai_failed_and_rescued_filter_count_and_tooltip(widgets, wait):
     combo.setCurrentIndex(combo.findData('vlm_failed')); wait(lambda: not screen.runner.busy and queries[-1].get('vlm'))
     assert queries[-1]['vlm'] == 'failed' and queries[-1]['with_total'] is True and 'decision' not in queries[-1]
     assert screen.model.rows and all(e.ai_flags == ['AI failed'] for e in screen.model.rows)
-    assert screen.count.text().startswith(f'{len(screen.model.rows)} matching')
+    assert screen.count.text().startswith(f'{len(screen.model.rows)} matching') and screen.total == len(screen.model.rows)
     tip = screen.model.index(0, HEADERS.index('AI decision')).data(Qt.ItemDataRole.ToolTipRole)
     assert tip.split('\n')[-1] == 'AI failed'
     combo.setCurrentIndex(combo.findData('vlm_rescued')); wait(lambda: not screen.runner.busy and queries[-1].get('vlm') == 'rescued')

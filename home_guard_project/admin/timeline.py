@@ -27,6 +27,7 @@ class TimelineScreen(QWidget):
         self.customer_id, self.zone, self.cursor = None, 'UTC', None
         self.start, self.end = self.now()-timedelta(hours=24), self.now()
         self.cell = None
+        self.total = None  # every match of the current filters (the server's count), when it gave one
         self.cameras = None  # the house's cameras (CameraOut) once known; None: every camera the index has seen
         self.density_result = None
         self.saved_filter = None
@@ -224,7 +225,7 @@ class TimelineScreen(QWidget):
         self.older.setEnabled(bool(self.cursor))
         self.older.setText('Load older' if self.cursor else 'End of range')
         self.stack.setCurrentWidget(self.table if self.model.rows else self.empty)
-        total = getattr(page, 'total', None)
+        total = self.total = getattr(page, 'total', None)
         self.count.setText((f'{total}{"+" if page.total_capped else ""} matching  ·  ' if total is not None else '')
                            + f'{len(self.model.rows)} events loaded' + (' · More available' if self.cursor else ' · All in view'))
         self.apply_groups()

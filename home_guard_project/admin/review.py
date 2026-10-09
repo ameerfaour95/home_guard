@@ -168,8 +168,10 @@ class ReviewScreen(QWidget):
         self.update_progress()
 
     def update_progress(self):
-        if self.timeline.saved_filter or any(self.timeline.filters[k].currentData() is not None for k in ('kind','ai','verdict','flagged')) or self.timeline.search.text():
-            self.progress.setText(f'{len(self.timeline.model.rows)} matches loaded · {self.total} unreviewed in last 24 h')
+        if self.timeline.saved_filter or any(self.timeline.filters[k].currentData() is not None for k in ('kind','camera','ai','verdict','flagged','decision')) or self.timeline.search.text():
+            found = (f'{self.timeline.total} matching' if self.timeline.total is not None
+                     else f'{len(self.timeline.model.rows)} matches loaded')
+            self.progress.setText(f'{found} · {self.total} unreviewed in last 24 h')
         else:
             self.progress.setText(f'{self.done} of {self.total} unreviewed in last 24 h · reviewed this session')
 
