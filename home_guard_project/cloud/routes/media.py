@@ -21,13 +21,13 @@ import mimetypes
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import Response
 from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from .. import audit
+from .. import audit, notice_delivery
 from ..access import NO_RECORDINGS_CONSENT, media_refusal, may_see_thumbnail
 from ..deps import SessionDep, current_staff, require_id
 from ..models import Artifact, AuditLog, Customer, Device, Event, Staff
@@ -131,7 +131,7 @@ def _labeler_lookup(session: Session, artifact_id: int):
 
 
 @router.post("/artifacts/{artifact_id}/access", response_model=MediaAccess)
-def artifact_access(artifact_id: int, body: MediaAccessRequest, request: Request,
+def artifact_access(artifact_id: int, body: MediaAccessRequest, request: Request, background_tasks: BackgroundTasks,
                     staff: Staff = Depends(current_staff), session: Session = SessionDep):
     require_id(artifact_id, _NOT_FOUND)
     if staff.role == "labeler":  # visibility first: hidden and missing artifacts get the same 404, the same work
@@ -164,7 +164,8 @@ def artifact_access(artifact_id: int, body: MediaAccessRequest, request: Request
     if body.purpose != "training":
         cameras = [audit.camera_label(session, device.id, camera)] if camera else []
         # All DB writes above are flushed; the S3 put happens last (see audit.owner_notice).
-        audit.owner_notice(session, s3, device, staff, kind="recording", cameras=cameras, now=now)
+        notice = audit.owner_notice(session, s3, device, staff, kind="recording", cameras=cameras, now=now)
+        notice_delivery.schedule(request, background_tasks, [notice])  # pushed to the box after the commit
     return MediaAccess(url=url, expires_utc=now + timedelta(seconds=URL_TTL_SECONDS), mime=mime)
 
 

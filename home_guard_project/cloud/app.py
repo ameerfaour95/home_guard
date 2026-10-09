@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from fastapi import FastAPI
 from sqlalchemy.orm import sessionmaker
 
+from . import notice_delivery
 from .db import make_engine
 from .routes import annotations, audit, auth, chat, customers, events, fleet, media, studio, tagging
 from .settings import Settings
@@ -85,6 +86,9 @@ def create_app(settings: Settings, s3=None, init_db: bool = True) -> FastAPI:
     app.state.sessionmaker = sessionmaker(app.state.engine, expire_on_commit=False)
     app.state.export_executor = _export_executor()
     app.state.export_runner = None  # None: the bounded executor; tests inject a synchronous runner
+    # owner notices are pushed to the box right after the staff request only by the server that runs the loops
+    # (on the tailnet, with the box key); tests inject a fake runner
+    app.state.notice_runner = notice_delivery.ssh_run if settings.run_loops else None
     if init_db:
         from .manage import run_migrations
 
