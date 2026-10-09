@@ -125,7 +125,7 @@ class BothFailTest(unittest.TestCase):
             request=httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions"))))
         assistant, job = run_worker(backend, lang="he")
         (sent,) = assistant.sent
-        self.assertEqual(sent["text"].splitlines()[1], "זוהה אדם. הבדיקה של ה-AI לא הספיקה, הנה התמונה.")
+        self.assertEqual(sent["text"].splitlines()[1], "מה קורה: זוהה אדם. הבדיקה של ה-AI לא הספיקה, הנה התמונה.")
         self.assertTrue(sent["text"].startswith("⚪ "))
         self.assertNotIn("אדם או רכב", sent["text"])
         self.assertEqual(sent["image"], b"jpg")
@@ -138,7 +138,8 @@ class BothFailTest(unittest.TestCase):
         assistant, _ = run_worker(backend, lang="en", labels=("car", "person"))
         (sent,) = assistant.sent
         self.assertEqual(sent["text"].splitlines()[1],
-                         "A person and a vehicle were detected. The AI check did not finish in time; "
+                         "What's happening: A person and a vehicle were detected. The AI check did not finish "
+                         "in time; "
                          "here is the picture.")
 
     def test_no_picture_no_promise_of_one(self) -> None:

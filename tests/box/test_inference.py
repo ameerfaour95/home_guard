@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import datetime as dt
 import unittest
 from unittest import mock
 
@@ -185,7 +186,9 @@ class WorkerWithAssistantTest(unittest.TestCase):
         self.assertEqual(sent["alert"], {"alert_id": "front_door_100_alert", "camera": "front_door", "label": "",
                                          "summary": "a person at the door", "ts": 100.0})
         # The model gave no label: the owner reads "Activity", with a sound, and the camera's name, not its id.
-        self.assertEqual(sent["text"], "\u26aa Activity \u00b7 front door\na person at the door")
+        clock = dt.datetime.fromtimestamp(100.0).strftime("%H:%M")
+        self.assertEqual(sent["text"], f"\u26aa Activity \u00b7 front door \u00b7 {clock}\n"
+                                       "What's happening: a person at the door.")
         self.assertEqual((sent["silent"], sent["lang"]), (False, "en"))
         self.assertEqual(sent["image"], b"jpg")
         self.assertTrue(job.ready.is_set())

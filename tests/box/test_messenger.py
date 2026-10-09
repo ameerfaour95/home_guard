@@ -1,6 +1,7 @@
 """Tests for box/messenger.py: the alert text translated for the owner, never delayed, never lost."""
 from __future__ import annotations
 
+import datetime as dt
 import json
 import time
 import unittest
@@ -12,6 +13,7 @@ from home_guard_project.box import messenger as msg
 from home_guard_project.box.telegram_notify import graded_alert_text
 
 EN = {"summary": "A man in a hood tries the gate at 14:05.", "why": "tries the gate"}
+CLOCK = dt.datetime.fromtimestamp(100.0).strftime("%H:%M")   # the test job's clock (ts=100)
 HE = {"summary": "גבר עם קפוצ'ון מנסה לפתוח את השער ב-14:05.", "why": "מנסה לפתוח את השער"}
 
 
@@ -211,26 +213,26 @@ class WorkerWiringTest(unittest.TestCase):
     def test_the_default_translates_for_a_hebrew_box(self) -> None:
         client = _FakeClient(HE)
         text, _ = self._work({}, client)
-        self.assertEqual(text, graded_alert_text("suspicious", "gate", HE["summary"], HE["why"], "he"))
+        self.assertEqual(text, graded_alert_text("suspicious", "gate", HE["summary"], HE["why"], "he", CLOCK))
         self.assertEqual(len(client.calls), 1)
 
     def test_model_keeps_the_vision_models_own_hebrew_with_no_call(self) -> None:
         client = _FakeClient(HE)
         text, _ = self._work({"owner_translation": "model"}, client)
-        self.assertEqual(text, graded_alert_text("suspicious", "gate", "גבר ליד השער.", "tries the gate", "he"))
+        self.assertEqual(text, graded_alert_text("suspicious", "gate", "גבר ליד השער.", "tries the gate", "he", CLOCK))
         self.assertEqual(client.calls, [])
 
     def test_the_translator_writes_what_the_owner_reads(self) -> None:
         client = _FakeClient(HE)
         text, job = self._work({"owner_translation": "translator"}, client)
-        self.assertEqual(text, graded_alert_text("suspicious", "gate", HE["summary"], HE["why"], "he"))
+        self.assertEqual(text, graded_alert_text("suspicious", "gate", HE["summary"], HE["why"], "he", CLOCK))
         self.assertEqual(len(client.calls), 1)
         # The clip's record keeps what the vision model said.
         self.assertEqual((job.alert["summary"], job.alert["why"]), (_Backend.PARSED["summary"], "tries the gate"))
 
     def test_a_failed_translation_still_sends_the_alert(self) -> None:
         text, _ = self._work({"owner_translation": "translator"}, _FakeClient("garbage"))
-        self.assertEqual(text, graded_alert_text("suspicious", "gate", "גבר ליד השער.", "tries the gate", "he"))
+        self.assertEqual(text, graded_alert_text("suspicious", "gate", "גבר ליד השער.", "tries the gate", "he", CLOCK))
 
 
 class ForeignScriptTest(unittest.TestCase):

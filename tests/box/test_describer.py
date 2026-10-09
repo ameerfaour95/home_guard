@@ -495,7 +495,9 @@ class WorkerTest(unittest.TestCase):
                             {"id": "P2", "appearance": "man, dark shirt", "action": ""}]}
         job = self.work(assistant, json.dumps(two))
         old = assistant.sent[0]["text"]
-        self.assertTrue(old.startswith("🟡 חשוד · כניסה ראשית\n"))             # what was held first
+        # What was held first: the same layout, without the id lines.
+        self.assertEqual(old.split("\n"), ["🟡 חשוד · כניסה ראשית · 09:43", "מה קורה: שני אנשים ליד רכב.",
+                                           "למה הודעתי: אדם מסתכל."])
         new = assistant.held[job.stem]
         self.assertEqual(new.split("\n"), [
             "🟡 חשוד · כניסה ראשית · 09:43",
@@ -522,6 +524,20 @@ class WorkerTest(unittest.TestCase):
             self.assertEqual(assistant.held[job.stem], assistant.sent[0]["text"])
             self.assertFalse(job.input_meta["describer"]["used"])
             self.assertTrue(job.input_meta["describer"]["error"])
+
+    def test_a_describer_timeout_sends_the_same_layout_without_the_id_lines(self):
+        """2026-10-09 21:34 pergola: "describer: TimeoutError: no answer within 12 s"; the owner got "🟡 חשוד ·
+        פרגולה" with no time, no "מה קורה:" and "למה:"."""
+        assistant = HoldingAssistant()
+        with mock.patch.object(ds.Describer, "ask", side_effect=TimeoutError("no answer within 12 s")):
+            job = self.work(assistant, json.dumps(ANSWER))
+        record = job.input_meta["describer"]
+        self.assertEqual((record["used"], record["error"]), (False, "TimeoutError: no answer within 12 s"))
+        text = assistant.held[job.stem]
+        self.assertEqual(text, assistant.sent[0]["text"])
+        self.assertEqual(text.split("\n"), ["🟡 חשוד · כניסה ראשית · 09:43", "מה קורה: שני אנשים ליד רכב.",
+                                            "למה הודעתי: אדם מסתכל."])
+        self.assertFalse(any(line.startswith(("P1", "P2")) for line in text.split("\n")))
 
     def test_off_or_not_held_never_asks(self):
         assistant = HoldingAssistant()

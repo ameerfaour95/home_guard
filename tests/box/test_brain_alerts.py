@@ -16,6 +16,7 @@ from home_guard_project.box.telegram_notify import TelegramConfig, graded_alert_
 from home_guard_project.box.brain.i18n import t
 
 NOW = dt.datetime(2026, 10, 3, 22, 0).timestamp()
+CLOCK100 = dt.datetime.fromtimestamp(100.0).strftime("%H:%M")      # the clock of the test jobs (ts=100)
 
 
 class GradedAlertTest(unittest.TestCase):
@@ -35,12 +36,28 @@ class GradedAlertTest(unittest.TestCase):
 
     def test_graded_text(self) -> None:
         self.assertEqual(graded_alert_text("normal", "gate", "A courier leaves a parcel.", "", "en"),
-                         "🟢 Looks normal · gate\nA courier leaves a parcel.")
-        self.assertEqual(graded_alert_text("escalation", "gate", "A man breaks the window.", "breaks in", "en"),
-                         "🔴 ESCALATION · gate\nA man breaks the window.\nWhy: breaks in")
+                         "🟢 Looks normal · gate\nWhat's happening: A courier leaves a parcel.")
+        self.assertEqual(graded_alert_text("escalation", "gate", "A man breaks the window.", "breaks in", "en", "02:14"),
+                         "🔴 ESCALATION · gate · 02:14\nWhat's happening: A man breaks the window.\n"
+                         "Why I told you: breaks in.")
+        # A normal scene says no why, even when the model gave one.
+        self.assertEqual(graded_alert_text("normal", "gate", "A courier.", "delivers", "en", "02:14"),
+                         "🟢 Looks normal · gate · 02:14\nWhat's happening: A courier.")
         self.assertTrue(graded_alert_text("suspicious", "gate", "גבר מסתובב ליד הגדר.", "מסתובב", "he")
                         .startswith("🟡 חשוד · gate"))
         self.assertTrue(graded_alert_text("", "gate", "x", "", "en").startswith("⚪ Activity · gate"))
+
+    def test_the_fallback_has_the_describers_layout_without_the_id_lines(self) -> None:
+        """2026-10-09 21:34 pergola: the describer timed out and the owner got the old layout (no time, no
+        "מה קורה:", "למה:"). The fallback is the same message as the describer's, without the P lines."""
+        from home_guard_project.box.describer import compose
+
+        summary = "אדם לבוש בגדים כהים נראה הולך על האזור המרוצף. פניו של האדם מוסתרים."
+        why = "פניו מוסתרים בשעת לילה"
+        text = graded_alert_text("suspicious", "פרגולה", summary, why, "he", "21:34")
+        self.assertEqual(text.split("\n"), ["🟡 חשוד · פרגולה · 21:34", f"מה קורה: {summary}",
+                                            f"למה הודעתי: {why}."])
+        self.assertEqual(text, compose("suspicious", "פרגולה", "21:34", summary, [], why, "he"))
 
     def test_send_alert_is_loud_unless_asked_and_speaks_the_box_language(self) -> None:
         posts = []
@@ -163,7 +180,7 @@ class GradedAlertWiringTest(unittest.TestCase):
         # A clear class (a break-in into the house): the reminder needs no second look (2026-10-09).
         backend, job = self._work({"summary": "A man breaks into the house.", "label": "escalation", "people": 1,
                                    "why": "breaks in", "summary_owner": "גבר פורץ לבית."}, assistant, "he")
-        expected = graded_alert_text("escalation", "gate", "גבר פורץ לבית.", "breaks in", "he")
+        expected = graded_alert_text("escalation", "gate", "גבר פורץ לבית.", "breaks in", "he", CLOCK100)
         self.assertEqual(backend.languages, ["he"])
         (sent,) = assistant.sent
         self.assertEqual((sent["text"], sent["silent"], sent["lang"]), (expected, False, "he"))
@@ -177,7 +194,7 @@ class GradedAlertWiringTest(unittest.TestCase):
         _, job = self._work({"summary": "A courier leaves a parcel.", "label": "normal", "people": 1,
                              "why": "", "summary_owner": ""}, assistant)
         (sent,) = assistant.sent
-        self.assertEqual((sent["text"], sent["silent"]), ("🟢 Looks normal · gate\nA courier leaves a parcel.", True))
+        self.assertEqual((sent["text"], sent["silent"]), (f"🟢 Looks normal · gate · {CLOCK100}\nWhat's happening: A courier leaves a parcel.", True))
         self.assertEqual(assistant.reminders, [])
         self.assertTrue(job.alert["silent"])
 
@@ -351,7 +368,7 @@ class ReviewFixTest(unittest.TestCase):
         self.assertEqual(status.offline(started + 200, cameras=["gate", "door"], since=started), ["door", "gate"])
 
     def test_an_english_placeholder_never_reaches_the_owner(self) -> None:
-        expected = graded_alert_text("suspicious", "gate", "A man at the gate.", "lingers", "en")
+        expected = graded_alert_text("suspicious", "gate", "A man at the gate.", "lingers", "en", CLOCK100)
         for lang in ("en", "he"):
             for placeholder in ("an empty string", "<an empty string>", "Empty String", "<empty>"):
                 assistant = _Assistant()

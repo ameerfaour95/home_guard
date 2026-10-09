@@ -108,6 +108,15 @@ class VideoAlertTest(unittest.TestCase):
         self.assertEqual(call["files"]["video"], ("door_1800000000_alert.mp4", b"video-bytes", "video/mp4"))
         self.assertEqual(self.index.lookup(CHAT, res["results"][0]["message_id"])["alert_id"], ALERT["alert_id"])
 
+    def test_a_header_that_has_the_time_does_not_get_it_twice(self) -> None:
+        tg = FakeTelegram()
+        clock = dt.datetime.fromtimestamp(NOW).strftime("%H:%M")
+        text = f"🟡 Suspicious · door · {clock}\nWhat's happening: A person stands at the door."
+        send_alert(self.cfg, self.index, ALERT, text, image=b"jpg", post=tg.post,
+                   post_multipart=tg.post_multipart, video=self.clip, silent=True)
+        (call,) = tg.calls
+        self.assertEqual(call["fields"]["caption"], text)
+
     def test_a_refused_video_falls_back_to_the_picture_with_the_same_buttons(self) -> None:
         tg = FakeTelegram(refuse_video=True)
         res = send_alert(self.cfg, self.index, ALERT, TEXT, image=b"jpg", post=tg.post,

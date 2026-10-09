@@ -3076,7 +3076,8 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                          "why": "" if fact else owner_guard(why, camera_name, lang), "summary_owner": summary_owner},
                         lang, keep=(shown_camera,))
                     told_text, owner_why = told["summary"], why if fact else told["why"]
-                graded = graded_alert_text(shown_label, shown_camera, told_text, owner_why, lang)
+                graded = graded_alert_text(shown_label, shown_camera, told_text, owner_why, lang,
+                                           datetime.fromtimestamp(alert_ts).strftime("%H:%M"))
                 if softened:
                     sentence = told_text.rstrip(". ")
                     graded = f"🟢 {shown_camera}: {sentence}. {why}"

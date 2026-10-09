@@ -129,10 +129,13 @@ def alert_keyboard(alert: Any, lang: str = "en") -> str:
 
 
 def _with_clock(text: str, alert: Dict[str, Any]) -> str:
-    """*text* with the alert's local time at the end of its first line ("🟡 Suspicious · door · 02:14")."""
+    """*text* with the alert's local time at the end of its first line ("🟡 Suspicious · door · 02:14"), unless a
+    line already ends with it (the header the describer and graded_alert_text write)."""
     try:
         clock = dt.datetime.fromtimestamp(float(alert.get("ts"))).strftime("%H:%M")
     except (TypeError, ValueError, OverflowError, OSError):
+        return text
+    if any(line.endswith(f" · {clock}") for line in text.split("\n")):
         return text
     first, sep, rest = text.partition("\n")
     return f"{first} · {clock}{sep}{rest}"

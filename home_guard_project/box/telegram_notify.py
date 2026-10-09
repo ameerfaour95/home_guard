@@ -198,16 +198,14 @@ def alert_text(command: str, summary: str = "", reason: str = "") -> Optional[st
     return None
 
 
-def graded_alert_text(label: str, camera: str, summary: str, why: str = "", lang: str = "en") -> str:
-    """The alert the owner reads: the label and camera first, then what happened, then why (not for normal)."""
-    from .brain.i18n import t  # noqa: PLC0415
+def graded_alert_text(label: str, camera: str, summary: str, why: str = "", lang: str = "en", clock: str = "") -> str:
+    """The alert the owner reads when the describer did not answer: the describer's layout (describer.compose)
+    without the per-id lines - the level, the camera and the time; "What's happening:" and the summary; "Why I told
+    you:" and the why (only suspicious and escalation, and only with a why)."""
+    from .describer import compose  # noqa: PLC0415
 
-    key = {"normal": "alert_normal", "suspicious": "alert_suspicious",
-           "escalation": "alert_escalation"}.get(label, "alert_unclassified")
-    lines = [t(key, lang, camera=camera), (summary or "").strip() or "activity detected"]
-    if label in ("suspicious", "escalation") and (why or "").strip():
-        lines.append(t("alert_why", lang, why=why.strip()))
-    return "\n".join(lines)
+    reason = why if label in ("suspicious", "escalation") else ""
+    return compose(label, camera, clock, (summary or "").strip() or "activity detected", [], reason or "", lang)
 
 
 def notify(cfg: TelegramConfig, command: str, summary: str = "", reason: str = "",

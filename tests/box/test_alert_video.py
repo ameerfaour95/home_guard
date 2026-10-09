@@ -4,6 +4,7 @@ import io
 import json
 import os
 import tempfile
+import datetime as dt
 import unittest
 import urllib.error
 from unittest import mock
@@ -216,7 +217,9 @@ class WorkerReportsTest(unittest.TestCase):
                 self.assertTrue(d.call_args[0][3].startswith(prefix), (label, d.call_args[0][3]))
                 # Telegram gets the graded text; only a normal scene arrives without a sound.
                 self.assertEqual(d.call_args.kwargs["silent"], label == "normal", label)
-                self.assertIn("door\nSomeone is trying the gate.", d.call_args.kwargs["graded"])
+                clock = dt.datetime.fromtimestamp(100.0).strftime("%H:%M")
+                self.assertIn(f"door · {clock}\nWhat's happening: Someone is trying the gate.",
+                              d.call_args.kwargs["graded"])
                 self.assertEqual((status.decisions[0]["label"], job.alert["label"]), (label, label))
 
     def test_a_refused_alert_carries_the_reason(self) -> None:
