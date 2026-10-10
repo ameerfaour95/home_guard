@@ -311,6 +311,35 @@ class SwitchTests(unittest.TestCase):
         self.assertFalse(wants_v3({"assistant": "v2"}))
         self.assertTrue(wants_v3({"assistant": "V3"}))
 
+    def _build(self, env):
+        import shutil
+        import tempfile
+        from unittest.mock import Mock, patch
+
+        from home_guard_project.box.assistant_v3 import build_assistant_v3
+
+        root = tempfile.mkdtemp(prefix="v3build_")
+        self.addCleanup(shutil.rmtree, root, True)
+        with patch("home_guard_project.box.brain.models.make_model", return_value=Mock()),                 patch("home_guard_project.box.brain.vision.make_vision", return_value=Mock()),                 patch("home_guard_project.box.embeddings.make_embedder", return_value=None),                 patch("home_guard_project.box.brain.agent._event_book", return_value=None):
+            agent, _ = build_assistant_v3({"assistant": "v3"}, env, None, Mock(), root, root, root)
+        return agent
+
+    def test_the_builder_makes_v3_on_the_v2_services(self):
+        from home_guard_project.box.assistant_v3 import AssistantV3
+
+        agent = self._build({"OPENAI_API_KEY": "k", "OPENROUTER_API_KEY": "k"})
+        self.assertIsInstance(agent, AssistantV3)
+        self.assertEqual(agent.version, 3)
+        self.assertEqual(agent.writer.model_name, "openai/gpt-6-luna")
+        self.assertEqual(agent.understander.model_name, "qwen/qwen3.7-flash")
+        self.assertIsNotNone(agent.critic)
+
+    def test_no_openrouter_key_keeps_v2(self):
+        from home_guard_project.box.brain.agent import OwnerAgentV2
+
+        agent = self._build({"OPENAI_API_KEY": "k"})
+        self.assertIs(type(agent), OwnerAgentV2)
+
 
 if __name__ == "__main__":
     unittest.main()

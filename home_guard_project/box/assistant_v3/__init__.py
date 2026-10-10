@@ -6,10 +6,13 @@ Switch on the box with ONE line in box.yaml::
 
 Models (box.yaml, all optional; OpenRouter ids, the key is OPENROUTER_API_KEY)::
 
-    v3_write_model: anthropic/claude-haiku-5.5      # the writer and its read tools
-    v3_understand_model: anthropic/claude-haiku-5.5 # the acts JSON
-    v3_critic_model: anthropic/claude-haiku-5.5     # the pre-send check ("off" = code checks only)
+    v3_write_model: openai/gpt-6-luna               # the writer and its read tools
+    v3_understand_model: qwen/qwen3.7-flash         # the acts JSON
+    v3_critic_model: qwen/qwen3.7-flash             # the pre-send check ("off" = code checks only)
     v3_escalate_model: anthropic/claude-sonnet-5.5  # code-triggered, at most 3 a day ("off" = none)
+
+Chosen by the golden-suite bake-off of 2026-10-10 (2 judged runs per arm): luna writer + qwen3.7-flash
+understand/critic 72 and 69 of 81, 1 and 5 stupid messages; luna alone 70/69 (4/4); haiku-5.5 alone 67/67 (8/9).
 """
 from __future__ import annotations
 
@@ -21,9 +24,9 @@ from .agent import AssistantV3
 log = logging.getLogger("box.assistant_v3")
 
 DEFAULTS = {
-    "v3_write_model": "anthropic/claude-haiku-5.5",
-    "v3_understand_model": "anthropic/claude-haiku-5.5",
-    "v3_critic_model": "anthropic/claude-haiku-5.5",
+    "v3_write_model": "openai/gpt-6-luna",
+    "v3_understand_model": "qwen/qwen3.7-flash",
+    "v3_critic_model": "qwen/qwen3.7-flash",
     "v3_escalate_model": "anthropic/claude-sonnet-5.5",
 }
 
