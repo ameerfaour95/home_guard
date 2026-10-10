@@ -185,7 +185,7 @@ def person_mark(t: Turn, act: Act, until_words: str = "") -> None:
     covered = [k for k in same if not k.get("camera") or str(k.get("camera")) == camera]
     if until is None and same:
         # Re-stated or widened: keep the window he already gave (never a new one he did not say).
-        k = max(same, key=lambda x: float(x.get("until") or 0))
+        k = max(same, key=lambda x: float(x.get("at") or 0))      # his latest word on them (a correction wins)
         if covered and not house_wide:
             t.did(f"{who} כבר מסומנים אצלי ב{t.name(camera) if camera else 'כל הבית'} {_when_text(k, t.now)}; "
                   f"לא שיניתי כלום.")
@@ -224,8 +224,8 @@ def person_mark(t: Turn, act: Act, until_words: str = "") -> None:
                       "args": {"who": who, "camera": camera, "house": house_wide, "handle": handle,
                                "quote": act.quote[:200], "crew": crew}}
         t.outcome(entry, f"בעל הבית: אלה {who}")
-        t.plan.notes.append(f"עוד לא נשמר כלום (חסרה שעה): כתוב הד קצר כמו 'אה, אלה {who}?' ואז את השאלה; אל "
-                            f"תגיד שסימנת או שמרת.")
+        t.plan.notes.append(f"{who}: עוד לא נשמרו (חסרה שעה). אם עשית בתור הזה משהו אחר (למשל תיוג) תגיד אותו "
+                            f"בקצרה קודם; ואז הד קצר כמו 'אה, אלה {who}?' והשאלה. אל תגיד שסימנת אותם.")
         return
     daily_from = daily_to = ""
     span = until
@@ -525,6 +525,22 @@ def prefetch(t: Turn) -> None:
             t.plan.evidence.append(f"התמונה החיה מ-{hhmm(entry.get('ts'))} מ{t.name(t.camera_now(str(entry.get('camera') or '')))}"
                                    f" (נשלחה לפני רגע): {entry.get('observation') or 'בלי תיאור'}")
             t.plan.notes.append("ענה מהתמונה הזאת: מה רואים בה ואיפה. אל תגיד שלא בדקת.")
+    if t.und.has("question_history") and not any(a.look_again for a in t.und.acts):
+        rows = t.events(12 * 3600)[:4]
+        for handle, e in rows:
+            t.plan.evidence.append(f"התראה {hhmm(e.get('ts'))} ב{t.name(t.camera_now(str(e.get('camera') or '')))}: "
+                                   f"{(e.get('observation') or e.get('summary') or '')[:200]}")
+        if rows:
+            t.plan.notes.append("ענה מההתראות האלה (שעה, מצלמה, מה נראה); אל תגיד שאין לך ראיות.")
+    if any(a.act == "complaint" and a.issue == "no_explanation" for a in t.und.acts) or \
+            (live is not None and not live.camera):
+        photos = sorted([e for e in (t.state.handles or {}).values() if isinstance(e, dict) and e.get("kind") == "photo"
+                         and 0 <= t.now - float(e.get("ts") or 0) <= 15 * 60], key=lambda e: float(e.get("ts") or 0))
+        if photos and t.und.has("complaint"):
+            for e in photos[-3:]:
+                t.plan.evidence.append(f"תמונה ששלחת ב-{hhmm(e.get('ts'))} מ{t.name(t.camera_now(str(e.get('camera') or '')))}: "
+                                       f"{e.get('observation') or 'בלי תיאור'}")
+            t.plan.notes.append("הסבר עכשיו מה רואים בתמונות האלה, מצלמה מצלמה, במשפט או שניים.")
     for act in t.und.acts:
         if act.look_again:
             handle, entry = t.event_of(act)

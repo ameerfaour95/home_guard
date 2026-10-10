@@ -40,6 +40,7 @@ from .supervisor import (CRITIC_SCHEMA, code_checks, critic_messages, log_interv
 log = logging.getLogger("box.assistant_v3")
 
 ACK = ("👍",)
+STOP_REPEATING = ("צודק, לא אחזור על זה.", "צודק, הפסקתי.", "צודק, אין סיבה. הפסקתי.")
 GREETING = ("היי 👋", "היי, הכול שקט פה.", "היי 👋 הכול בסדר.")
 ESCALATIONS_PER_DAY = 3
 COMPLAINT_HINTS = {
@@ -293,6 +294,9 @@ class AssistantV3(OwnerAgentV2):
         kinds = set(und.kinds())
         if kinds <= {"ack", "greeting"}:
             return random.choice(GREETING if "greeting" in kinds else ACK)
+        if kinds <= {"complaint", "ack"} and not plan.done and all(
+                a.issue == "repetition" for a in und.acts if a.act == "complaint"):
+            return random.choice(STOP_REPEATING)          # owner, 2026-10-09: "צודק, לא אחזור על זה."
         last = cx.last_replies(ctx.state)
         cameras_in_play = [c for c in [turn.camera_of(a) for a in und.acts] if c]
         relevant = mem.relevant(turn.text, cameras_in_play, limit=3) if not und.has("question_memory") else \
@@ -332,6 +336,8 @@ class AssistantV3(OwnerAgentV2):
                                or und.has("question_memory"))
 
         draft = sanitize(draft, cams.ids, ctx.lang)
+        if und.has("question_live", "question_history"):
+            draft = drop_echo(draft, turn.text)
         verdict = check(draft)
         fix = ""
         if not verdict.ok:
@@ -491,6 +497,19 @@ class AssistantV3(OwnerAgentV2):
                 self.memory.save(chat_id, state)
         except Exception as exc:  # noqa: BLE001
             log.warning("v3 summary not folded: %s", exc)
+
+
+def drop_echo(reply: str, owner_text: str) -> str:
+    """"יש מישהו בחוץ? כן, בפרגולה..." -> "כן, בפרגולה...": his own question repeated before the answer goes."""
+    m = re.match(r"\s*([^.!?\n]{2,80}\?)\s*", reply or "")
+    if m and len(reply) > m.end() + 5:
+        from .supervisor import similar  # noqa: PLC0415
+
+        from .acts import norm  # noqa: PLC0415
+
+        if norm(m.group(1)) in norm(owner_text) or similar(m.group(1), owner_text) >= 0.7:
+            return reply[m.end():].strip()
+    return reply
 
 
 def salvage(text: str, check: Callable[[str], Any]) -> str:
