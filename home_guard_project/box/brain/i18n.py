@@ -344,6 +344,7 @@ TEMPLATES: Dict[str, Dict[str, str]] = {
         "en": "What you said is saved now: {camera} {words}.",
         "he": "שמרתי את מה שאמרת: {camera} {words}.",
         "ar": "حفظت ما قلته: {camera} {words}."},
+    "no_repeat_ok": {"en": "Right, I won't repeat it.", "he": "צודק, לא אחזור על זה.", "ar": "معك حق، لن أكرره."},
     "memory_private_keep": {"en": "Right. What I keep stays with me; I'll go into it only if you ask.",
                             "he": "צודק. מה ששמור אצלי נשאר אצלי, ואפרט רק אם תשאל.",
                             "ar": "معك حق. ما أحفظه يبقى عندي، ولن أفصّله إلا إذا سألت."},

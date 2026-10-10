@@ -449,6 +449,22 @@ def memory_lines(services: Services, state: ChatState, snapshot: Any, alert: Opt
     return lines
 
 
+_WHY_REPEAT = re.compile(r"(?<![א-ת])(?:למה|מה)\s+(?:אתה\s+)?(?:חוזר|ממשיך\s+לחזור)|\bwhy\s+(?:do\s+you\s+keep\s+)?"
+                         r"repeat", re.IGNORECASE)
+
+
+def plain_line(text: str, state: ChatState, snapshot: Any, alert: Optional[Dict[str, Any]], lang: str,
+               now: float) -> str:
+    """The line for a reply that has nothing left to say (its memory status or robotic question dropped): "סבבה"
+    gets 👍, "למה אתה חוזר על זה" gets "צודק, לא אחזור על זה.", anything else the plain line about the alert at
+    hand (golden suite g09_22 / g09_23)."""
+    if activity_chat.is_ack(text):
+        return t("ack_short", lang)
+    if activity_chat.stop_repeating(text) or _WHY_REPEAT.search(str(text or "")):
+        return t("no_repeat_ok", lang)
+    return not_understood(state, snapshot, alert, lang, now)
+
+
 def not_understood(state: ChatState, snapshot: Any, alert: Optional[Dict[str, Any]], lang: str, now: float) -> str:
     """For a reply that would otherwise say nothing (2026-10-10: the memory status plus "מה לתקן?" went out instead):
     ONE plain line about the alert being discussed, by its time and camera; never the memory."""
@@ -862,8 +878,11 @@ class OwnerAgentV2:
         if not word:
             return None
         before = in_place(display(snapshot, str(k.get("camera") or ""), ctx.lang), ctx.lang)
-        self._dispatch(ctx, "mark_known", {"who": str(k.get("text") or ""), "owner_words": word, "camera": "all",
-                                           "replaces": [str(m["id"]) for m in crews]}, True, ["mark_known"])
+        args = {"who": str(k.get("text") or ""), "owner_words": word, "camera": "all",
+                "replaces": [str(m["id"]) for m in crews]}
+        if not k.get("daily_to"):
+            args["until"] = hhmm(float(k.get("until") or 0))   # the newest words' end (09:34 "עד 18:00"), not 23:59
+        self._dispatch(ctx, "mark_known", args, True, ["mark_known"])
         if not _kept_known(ctx.receipts):
             return None
         ctx.state.prefs["group_scope"] = km.HOUSE
@@ -1182,7 +1201,7 @@ class OwnerAgentV2:
 
         return reply_guard.final_reply(
             reply_text, ctx.state, now, related, asked, ctx.lang, rewrite,
-            fallback=lambda: not_understood(ctx.state, ctx.snapshot, ctx.alert_event, ctx.lang, now))
+            fallback=lambda: plain_line(text, ctx.state, ctx.snapshot, ctx.alert_event, ctx.lang, now))
 
     def tag_label_for(self, alert: Dict[str, Any], words: str) -> str:
         """The label of the owner's ✏️ words for this clip, from their meaning (km.tag_label): ordinary activity at a
@@ -2017,7 +2036,7 @@ class OwnerAgentV2:
                     # The model's own words never bring up a mark this message is not about (2026-10-10); a code
                     # answer (evidence, a receipt) says what it was built to say.
                     kept = self._keep_private(ctx, text, said, now)
-                    said = kept if kept.strip() else not_understood(state, snapshot, alert, lang, now)
+                    said = kept if kept.strip() else plain_line(text, state, snapshot, alert, lang, now)
                 # A photo sent in this very turn is right there above the answer: no "✓ התמונה נשלחה" line under it
                 # (2026-10-09 12:47). Without an answer the receipt is the reply, as before.
                 lines = [r for r in shown if not _photo_just_sent(r)] if str(said or "").strip() else shown
