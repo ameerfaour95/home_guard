@@ -123,7 +123,9 @@ class OpenAIChat:
     @_safe(ModelMessage)
     def chat(self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]],
              tool_choice: Optional[str] = None) -> ModelMessage:
-        kwargs: Dict[str, Any] = {"model": self.model_name, "messages": [_public(m) for m in messages]}
+        # Capped: without it OpenRouter reserves the model's whole output limit against the balance (402 on low credit).
+        kwargs: Dict[str, Any] = {"model": self.model_name, "messages": [_public(m) for m in messages],
+                                  "max_tokens": 2000}
         if self._temperature is not None:
             kwargs["temperature"] = self._temperature
         if tools:

@@ -293,7 +293,7 @@ def _completer(env: Mapping[str, Any], provider: str,
 
         def create(response_format: Dict[str, Any]) -> Any:
             kwargs: Dict[str, Any] = dict(model=model, temperature=0, messages=[{"role": "user", "content": content}],
-                                          response_format=response_format)
+                                          response_format=response_format, max_tokens=1500)
             if extra:
                 kwargs["extra_body"] = extra
             from .. import usage_ledger  # noqa: PLC0415

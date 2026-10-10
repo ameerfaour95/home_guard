@@ -95,8 +95,9 @@ class AnsweredCallUntouchedTest(unittest.TestCase):
         images = [p["image_url"]["url"] for p in body["messages"][0]["content"] if p["type"] == "image_url"]
         self.assertEqual(images, ["data:image/jpeg;base64," + base64.b64encode(mi.encode_jpeg(f)).decode()
                                   for f in sent])
-        self.assertEqual(sorted(body), ["messages", "model", "reasoning", "response_format", "temperature"]
-                         if "reasoning" in body else ["messages", "model", "response_format", "temperature"])
+        self.assertEqual(sorted(body), ["max_tokens", "messages", "model", "reasoning", "response_format", "temperature"]
+                         if "reasoning" in body else ["max_tokens", "messages", "model", "response_format", "temperature"])
+        self.assertEqual(body["max_tokens"], inf.VLM_MAX_TOKENS)   # 2026-10-10: an uncapped call reserved 65,536
         self.assertNotIn("vlm_rescued", job.alert)
         self.assertNotIn("vlm_failed", job.alert)
         self.assertEqual(job.rescue, {})

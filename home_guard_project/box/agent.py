@@ -683,7 +683,7 @@ class _OpenAIChat:
 
     def chat(self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]],
              tool_choice: Optional[str] = None) -> ModelMessage:
-        kwargs: Dict[str, Any] = {"model": self._model, "messages": messages, "temperature": 0}
+        kwargs: Dict[str, Any] = {"model": self._model, "messages": messages, "temperature": 0, "max_tokens": 2000}
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = tool_choice or "auto"   # "none" forces a plain answer with the tools still declared

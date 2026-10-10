@@ -232,7 +232,7 @@ class OpenAICompatibleJudge:
             self._client = self._make_client()
         # No temperature or token cap: newer small models refuse both; the schema keeps the answer short.
         kwargs: Dict[str, Any] = dict(model=self.model, messages=request["messages"],
-                                      response_format=request["response_format"])
+                                      response_format=request["response_format"], max_tokens=800)
         if self._extra:
             kwargs["extra_body"] = self._extra
         from .. import usage_ledger  # noqa: PLC0415

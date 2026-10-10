@@ -181,6 +181,7 @@ BASELINE_BUILD: Any = None       # baseline.NightlyBuild, ticked by the guard lo
 # reid: off, no model files - changes nothing: entities are judged by geometry alone.
 REID: Any = None
 EVENTS_TICK_SEC = 1.0
+VLM_MAX_TOKENS = 1500           # one Eye / second-look answer is ~100-400 tokens; caps the credit OpenRouter reserves
 VERIFY_TIMEOUT_SEC = 15.0        # the second look before a red waits at most this long, then the red goes out
 # The investigator's wait-and-watch (stage 2b, owner-approved 2026-10-08: a suspicious may wait up to 20 s). A
 # "suspicious" only for lingering is lowered to normal when the tracker saw the person for less than LOITER_MIN_SEC
@@ -1033,8 +1034,10 @@ class GptBackend:
                   timeout: Optional[float] = None, agent: str = "") -> Any:
         """One request, recorded in the usage ledger (as *agent*, else this backend's usage_agent) by the thread
         that makes it, so a call the deadline gave up on is still counted when it ends."""
+        # An answer is a few hundred tokens. Without a cap OpenRouter reserves the model's whole output limit (65,536)
+        # against the balance, and a low balance refuses every call with 402 (2026-10-10 00:25-09:05, no alerts).
         kwargs: Dict[str, Any] = dict(model=self._model, messages=[{"role": "user", "content": content}],
-                                      temperature=0)
+                                      temperature=0, max_tokens=VLM_MAX_TOKENS)
         if response_format:
             kwargs["response_format"] = response_format
         if timeout is not None:
