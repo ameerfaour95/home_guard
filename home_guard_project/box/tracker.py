@@ -240,6 +240,7 @@ class TrackFacts:
     entry_edge: str = ""
     exit_edge: str = ""
     max_conf: float = 0.0                                  # the best detector score of any of its looks
+    seconds_per_ground: Tuple[Tuple[str, int], ...] = ()    # mine / neighbour / public, gaps counted too
 
     @property
     def useful(self) -> bool:
@@ -268,7 +269,8 @@ class TrackFacts:
     def record(self) -> Dict[str, Any]:
         return {"id": self.id, "kind": self.kind, "first_seen": round(self.first_seen, 3),
                 "last_seen": round(self.last_seen, 3), "time_in_view_s": self.time_in_view_s,
-                "stationary_s": self.stationary_s, "seconds_per_area": dict(self.seconds_per_area), "path": list(self.path),
+                "stationary_s": self.stationary_s, "seconds_per_area": dict(self.seconds_per_area),
+                "seconds_per_ground": dict(self.seconds_per_ground), "path": list(self.path),
                 "zones": list(self.zone_path), "crossings": [list(c) for c in self.crossings],
                 "returns": self.returns, "prev_id": self.prev_id, "entry_edge": self.entry_edge,
                 "exit_edge": self.exit_edge, "max_conf": round(self.max_conf, 3)}
@@ -442,8 +444,11 @@ def _track_facts(track: _Track, points: Sequence[Point3], scene: Any) -> TrackFa
     runs = _area_runs(track.kind, points, scene) if scene is not None else []
     crossings = _crossings(track.kind, points, scene) if scene is not None else []
     per_area: Dict[str, float] = {}
+    per_ground: Dict[str, float] = {}
     for area, first, last in runs:
         per_area[area.name] = per_area.get(area.name, 0.0) + (last - first)
+        if area.ground:
+            per_ground[area.ground] = per_ground.get(area.ground, 0.0) + (last - first)
     zone_path = _collapse(str(area.zone).strip().lower() for area, _, _ in runs)
     first_pt, last_pt = points[0], points[-1]
     return TrackFacts(
@@ -455,7 +460,8 @@ def _track_facts(track: _Track, points: Sequence[Point3], scene: Any) -> TrackFa
         stationary_s=int(round(_stationary(points))), crossings=tuple(crossings),
         returns=track.returns, prev_id=track.prev_id,
         entry_edge=zone_path[0] if zone_path else _edge(first_pt[1], first_pt[2]),
-        exit_edge=zone_path[-1] if zone_path else _edge(last_pt[1], last_pt[2]), max_conf=track.max_conf)
+        exit_edge=zone_path[-1] if zone_path else _edge(last_pt[1], last_pt[2]), max_conf=track.max_conf,
+        seconds_per_ground=tuple((g, int(round(s))) for g, s in per_ground.items()))
 
 
 # ----------------------------------------------------------------------------

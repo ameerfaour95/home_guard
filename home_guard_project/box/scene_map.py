@@ -295,10 +295,20 @@ class SceneMap:
         return min(hits, key=lambda a: polygon_area(a.points)) if hits else None
 
     def ground_at(self, p: Point) -> Tuple[str, str, Optional[Area]]:
-        """``(ground, how, area)`` for foot point *p*. *how*: ``area`` (inside one, the innermost), ``near_area``
-        (in a gap, within NEAR_AREA of an area), ``line`` (on a side of the nearest boundary line, and an area
-        within AGREE_DISTANCE agrees; a boundary wall, zone fence, does not count), ``rest`` (the rest of the picture), or ``unknown`` (ground ""). Cautious: a
-        line's side alone never places anyone, and a line that disagrees with the nearest area places nobody."""
+        """``(ground, how, area)`` for foot point *p*, in this order (owner's live bug 2026-10-10, ch2 17:06):
+
+        1. inside an area: its ground (the innermost) - ``area``;
+        2. in a gap, an area within NEAR_AREA (0.03): its ground - ``near_area`` (SAM's gaps are thin slivers);
+        3. the side of the nearest boundary SEGMENT (inward: ours; far: the rest's owner, else the neighbour's),
+           when the nearest area within AGREE_DISTANCE (0.15) has that ground - ``line``;
+        4. a map with the rest set (watch_no_alert, the editor's "what lies beyond the boundary is ..."), the point
+           beyond the nearest line, and no area within AGREE_DISTANCE of another ground: the rest - ``rest``;
+        5. no lines and the rest set: the rest, as before - ``rest``;
+        6. else nobody can tell - ``unknown`` (ground ""), and the alert goes out as before.
+
+        A boundary wall (the regions the owner called "the railing between us", zone fence) stands on the line and
+        is on both sides: it neither agrees nor disagrees in 3 and 4. The risk case stays protected: a gap in our
+        yard beyond the nearest line but next to an area of ours is unknown, rest or no rest."""
         if self.watched and not inside(p, self.watched):
             return "", "unknown", None
         hits = [a for a in self.all_areas() if not (a.implicit and a.name == REST_NAME) and inside(p, a.points)]
@@ -309,18 +319,20 @@ class SceneMap:
                         key=lambda da: da[0])
         if nearby and nearby[0][0] <= NEAR_AREA:
             return nearby[0][1].ground, "near_area", nearby[0][1]
+        rest = self.all_areas()[-1] if self.rest and not self.watched else None
         if self.lines:
             line = min(self.lines, key=lambda ln: segment_distance(p, ln.a, ln.b))
             side = _side(line.a, line.b, p)
-            ground = MINE if side == line.inward else (self.rest_owner or NEIGHBOUR)
-            # A wall the owner called the boundary ("המעקה ביני לבין השכן", zone fence) stands on the line: it is
-            # on both sides and says nothing about this one (ch2, 2026-10-10).
-            beside = [(d, a) for d, a in nearby if a.zone != "fence"]
-            if side and beside and beside[0][0] <= AGREE_DISTANCE and beside[0][1].ground == ground:
+            far = (self.rest_owner or PUBLIC) if self.rest else NEIGHBOUR
+            ground = MINE if side == line.inward else far
+            close = [(d, a) for d, a in nearby if a.zone != "fence" and d <= AGREE_DISTANCE]
+            if side and close and close[0][1].ground == ground:
                 return ground, "line", self._side_area(ground)
+            if (rest is not None and side and side != line.inward
+                    and not any(a.ground != rest.ground for _, a in close)):
+                return rest.ground, "rest", rest
             return "", "unknown", None
-        if self.rest:
-            rest = self.all_areas()[-1]
+        if rest is not None:
             return rest.ground, "rest", rest
         return "", "unknown", None
 

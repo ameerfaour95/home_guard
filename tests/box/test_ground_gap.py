@@ -66,6 +66,44 @@ class GroundAtTest(unittest.TestCase):
         self.assertEqual(zoned.ground_at((0.9, 0.9))[:2], ("", "unknown"))
 
 
+REST_CH2 = sm.SceneMap("ameer_v2_ch2", areas=(OURS, STAIRS, OUR_CORNER), lines=(LINE,), rest=sm.WATCH,
+                       rest_owner="neighbour")
+
+
+class RestStepTest(unittest.TestCase):
+    """Step 4 (home-guard-15's acceptance condition): with the rest set, a point beyond the nearest line counts as the
+    rest's ground when no area within AGREE_DISTANCE says otherwise."""
+
+    def test_beyond_the_line_and_far_from_every_area_is_the_rest(self):
+        self.assertEqual(CH2.ground_at((0.10, 0.90))[:2], ("", "unknown"))           # without the rest: unknown
+        self.assertEqual(REST_CH2.ground_at((0.10, 0.90))[:2], ("neighbour", "rest"))
+
+    def test_the_risk_case_stays_unknown_even_with_the_rest_set(self):
+        # A gap in our yard, beyond the nearest line, next to an area of ours: never the neighbour's.
+        self.assertEqual(REST_CH2.ground_at((0.26, 0.12))[:2], ("", "unknown"))
+
+    def test_on_our_side_of_the_line_the_rest_never_applies(self):
+        p = (0.95, 0.85)                                       # on our side of the line, far from every area
+        self.assertEqual(sm._side(LINE.a, LINE.b, p), LINE.inward)
+        far_from_all = sm.SceneMap("cam", areas=(OUR_CORNER,), lines=(LINE,), rest=sm.WATCH, rest_owner="neighbour")
+        self.assertEqual(far_from_all.ground_at(p)[:2], ("", "unknown"))
+
+    def test_an_agreeing_area_still_names_the_line_step(self):
+        self.assertEqual(REST_CH2.ground_at((0.84, 0.56))[:2], ("neighbour", "line"))
+        self.assertEqual(REST_CH2.ground_at((0.90, 0.70))[:2], ("mine", "line"))
+
+    def test_a_public_rest_makes_the_far_side_public(self):
+        public = sm.SceneMap("cam", areas=(OURS,), lines=(LINE,), rest=sm.WATCH, rest_owner="public")
+        self.assertEqual(public.ground_at((0.10, 0.90))[:2], ("public", "rest"))
+
+    def test_no_lines_and_the_rest_set_is_the_rest_as_before(self):
+        rest = sm.SceneMap("cam", areas=(OURS,), rest=sm.WATCH, rest_owner="neighbour")
+        self.assertEqual(rest.ground_at((0.10, 0.10))[:2], ("neighbour", "rest"))
+
+    def test_unmapped_is_unchanged(self):
+        self.assertEqual(sm.SceneMap("cam").ground_at((0.5, 0.5))[:2], ("", "unknown"))
+
+
 class GapTrackTest(unittest.TestCase):
     def walk_in_the_gap(self):
         return [sm.Track("person", [(i * 0.5, 0.86 + 0.002 * (i % 2), 0.47) for i in range(10)])]
@@ -84,6 +122,8 @@ class GapTrackTest(unittest.TestCase):
         person = facts.people[0]
         self.assertEqual(person.path, (THEIR_SIDE,))
         self.assertTrue(dict(person.seconds_per_area).get(THEIR_SIDE, 0) >= 4)
+        self.assertTrue(dict(person.seconds_per_ground).get("neighbour", 0) >= 4)      # seconds per ground
+        self.assertIn("seconds_per_ground", person.record())
 
     def test_crossing_inward_is_unchanged(self):
         walk = [sm.Track("person", [(i * 0.5, 0.60 + 0.03 * i, 0.60 + 0.035 * i) for i in range(12)])]
