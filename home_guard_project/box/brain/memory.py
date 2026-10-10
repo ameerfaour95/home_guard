@@ -267,7 +267,10 @@ class ChatState:
 def _prefs(value: Any) -> Dict[str, Any]:
     if not isinstance(value, dict):
         return {}
-    return {k: v for k, v in value.items() if isinstance(k, str) and isinstance(v, (str, int, float, bool))}
+    plain = (str, int, float, bool)
+    return {k: v for k, v in value.items() if isinstance(k, str) and (
+        isinstance(v, plain) or isinstance(v, dict) and all(isinstance(x, str) and isinstance(y, plain)
+                                                            for x, y in v.items()))}   # last_place: one flat record
 
 
 def _house_last(value: Any) -> Dict[str, Any]:

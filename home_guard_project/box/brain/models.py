@@ -362,7 +362,7 @@ def make_model(spec: str, env: Dict[str, str]) -> Optional[Any]:
 # A model call refused for money or a key (OpenRouter 402 "requires more credits", OpenAI 429 "insufficient_quota",
 # 401): the owner is told plainly that the AI is out of reach, in his language (2026-10-10 12:34, the owner got an
 # English "I could not work on that right now" for a Hebrew question while the credit was out).
-_NO_ACCESS = re.compile(r"(?:402|401)|payment required|insufficient_quota|no credits|more credits|"
+_NO_ACCESS = re.compile(r"\b(?:402|401)\b|payment required|insufficient_quota|no credits|more credits|"
                         r"credits? (?:remaining|exhausted)|invalid api key|incorrect api key|unauthori[sz]ed",
                         re.IGNORECASE)
 

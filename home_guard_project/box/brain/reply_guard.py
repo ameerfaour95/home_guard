@@ -88,25 +88,61 @@ def status_said_since(state: Any, marks: Sequence[Any], since: float) -> bool:
     return False
 
 
+def keep_private(text: str, unrelated: Sequence[Any]) -> str:
+    """*text* without what it says about marks this message is not about: their status or their people
+    (2026-10-10: "why even mention the workers!!!")."""
+    from . import human  # noqa: PLC0415
+
+    out = str(text or "")
+    hidden = status_sentences(out, unrelated)
+    if hidden:
+        log.warning("reply guard: the memory status of marks this message is not about; dropped")
+        out = " ".join(s.strip() for s in _SENTENCE.split(out) if s.strip() and s not in hidden)
+    gone = human.drop_unrelated(out, unrelated)
+    if gone != out:
+        log.warning("reply guard: a saved mark this message is not about was brought up; dropped")
+    return gone
+
+
 def final_reply(reply: str, state: Any, now: float, marks: Sequence[Any], asked_memory: bool, lang: str,
-                rewrite: Optional[Callable[[str, List[str]], str]] = None) -> str:
-    """*reply* as it may go out. Never raises (on a failure the reply goes out as it was)."""
+                rewrite: Optional[Callable[[str, List[str]], str]] = None, unrelated: Sequence[Any] = (),
+                fallback: Optional[Callable[[], str]] = None) -> str:
+    """*reply* as it may go out. *marks* are the live marks this message is about; *unrelated* the others, which a
+    reply never brings up (2026-10-10: "why even mention the workers!!!"). Robotic sentences ("מה לתקן?", "הבנתי
+    אותך.") never go out; a reply left empty becomes *fallback()* (one plain line about the thing at hand). Never
+    raises (on a failure the reply goes out as it was)."""
     from .i18n import t  # noqa: PLC0415
+    from . import human  # noqa: PLC0415
+
+    def plain() -> str:
+        try:
+            return str(fallback() or "") if fallback is not None else ""
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Fallback line failed: %s", exc)
+            return ""
 
     try:
         out = str(reply or "")
         if not asked_memory:
+            out = keep_private(out, unrelated)
             said = status_sentences(out, marks)
             if said and status_said_since(state, marks, now - STATUS_GAP_SEC):
                 kept = [s for s in _SENTENCE.split(out) if s not in said]
                 log.warning("reply guard: the memory status was said in the last %d min; dropped", STATUS_GAP_SEC // 60)
                 out = " ".join(s.strip() for s in kept if s.strip())
+        if human.generic_sentences(out):
+            log.warning("reply guard: a robotic sentence dropped: %s", human.generic_sentences(out))
+            out = human.drop_generic(out)
+            if not out.strip():
+                out = plain()
         if out.strip() and repeats_recent(state, out):
             log.warning("reply guard: a repeat of a recent reply; one rewrite")
             again = ""
             if rewrite is not None:
                 try:
-                    again = str(rewrite(out, recent_replies(state)) or "").strip()
+                    again = human.drop_generic(str(rewrite(out, recent_replies(state)) or "").strip())
+                    if not asked_memory:
+                        again = human.drop_unrelated(again, unrelated)
                 except Exception as exc:  # noqa: BLE001
                     log.warning("Rewrite failed: %s", exc)
             if again and not repeats_recent(state, again) and not (
@@ -118,7 +154,7 @@ def final_reply(reply: str, state: Any, now: float, marks: Sequence[Any], asked_
                 out = next((x for x in (t("ack_other", lang), t("ack_short", lang)) if _norm(x) not in used),
                            t("ack_short", lang))
         if not out.strip():
-            out = t("ack_short", lang)
+            out = plain() or t("ack_short", lang)
         return out
     except Exception as exc:  # noqa: BLE001
         log.warning("Reply guard failed: %s", exc)
