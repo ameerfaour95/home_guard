@@ -1155,7 +1155,7 @@ class OwnerAgentV2:
         if unbacked_claims(again, ctx.receipts):
             # "עדיין לא שמרתי מי הם" is false while they ARE remembered (2026-10-09 13:02 replay).
             again = honest_answer(again, ctx.receipts, ctx.lang, ctx.text, say_not_done=not marks)
-        plain = not_understood(ctx.state, snapshot, ctx.alert_event, ctx.lang, now)
+        plain = plain_line(ctx.text, ctx.state, snapshot, ctx.alert_event, ctx.lang, now)
         if (hollow(again) or not again.strip()) and not any(r.status == DONE for r in ctx.receipts):
             return plain
         if bool(marks) and offers_mark(again) and not any(r.tool == "mark_known" for r in ctx.receipts):
@@ -1956,7 +1956,7 @@ class OwnerAgentV2:
                             # "עדיין לא שמרתי מי הם" / "לא שמרתי כלום" is false when they ARE remembered (2026-10-09
                             # replay): the claim goes, no "not saved" line, and what is live when nothing is left.
                             answer = (honest_answer(answer, ctx.receipts, lang, ctx.text, say_not_done=False)
-                                      or not_understood(state, snapshot, alert, lang, now))
+                                      or plain_line(text, state, snapshot, alert, lang, now))
                         else:
                             answer = honest_answer(answer, ctx.receipts, lang, ctx.text)
                 if ctx.clarification is None and not _kept_known(ctx.receipts):
@@ -2018,7 +2018,7 @@ class OwnerAgentV2:
                 # "מה תרצה לשנות או להוסיף?" [לתקן את סימון העובדים] ... (2026-10-10 15:14): never asked.
                 log.warning("reply guard: a robotic question dropped: %s", ctx.clarification.get("question"))
                 ctx.clarification = None
-                answer = answer or not_understood(state, snapshot, alert, lang, now)
+                answer = answer or plain_line(text, state, snapshot, alert, lang, now)
             if ctx.clarification is not None:
                 reply_text = ctx.clarification["question"]
                 if shown:
