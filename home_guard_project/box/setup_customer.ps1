@@ -568,11 +568,15 @@ $SetOpt = "cd /d $InstallDir && $Python -m home_guard_project.box set-option"
 if ($UseAI) {
     Info "`n[5] Turning on AI alerts..."
     # Secrets come from this laptop's ~/.homeguard store; they go to the box's
-    # api_key.env as a file, never on a command line.
-    $oaiKey = ''; $tgTok = ''; $tgChats = ''
+    # api_key.env as a file, never on a command line. The box MERGES them into the
+    # api_key.env it has (merge-secrets): a key sent here is set, every other key
+    # stays. Writing a fresh file wiped OPENROUTER_API_KEY twice (2026-10-06, 10-10).
+    $oaiKey = ''; $tgTok = ''; $tgChats = ''; $orKey = ''
     $oaiFile = Join-Path $HgDir 'openai.env'
     $tgFile  = Join-Path $HgDir 'telegram.env'
+    $orFile  = Join-Path $HgDir 'openrouter.env'
     if (Test-Path $oaiFile) { $m = Select-String '^OPENAI_API_KEY=(.+)$'    $oaiFile; if ($m) { $oaiKey  = $m.Matches[0].Groups[1].Value } }
+    if (Test-Path $orFile)  { $m = Select-String '^OPENROUTER_API_KEY=(.+)$' $orFile;  if ($m) { $orKey   = $m.Matches[0].Groups[1].Value } }
     if (Test-Path $tgFile)  { $m = Select-String '^TELEGRAM_BOT_TOKEN=(.+)$' $tgFile;  if ($m) { $tgTok   = $m.Matches[0].Groups[1].Value } }
     if (Test-Path $tgFile)  { $m = Select-String '^TELEGRAM_CHAT_IDS=(.+)$'  $tgFile;  if ($m) { $tgChats = $m.Matches[0].Groups[1].Value } }
     if (-not $oaiKey -or -not $tgTok -or -not $tgChats) {
@@ -581,8 +585,22 @@ if ($UseAI) {
         Step-Warn 'alerts' 'OpenAI/Telegram not configured on this laptop; left in data-collection mode'
     } else {
         $apiLocal = [IO.Path]::GetTempFileName()
-        [IO.File]::WriteAllText($apiLocal, "OPENAI_API_KEY=$oaiKey`nTELEGRAM_BOT_TOKEN=$tgTok`n", (New-Object Text.UTF8Encoding($false)))
-        try { Copy-ToBox $apiLocal (Get-BoxPaths).secrets_env } finally { Remove-Item $apiLocal -ErrorAction SilentlyContinue }
+        $secretsText = "OPENAI_API_KEY=$oaiKey`nTELEGRAM_BOT_TOKEN=$tgTok`n"
+        if ($orKey) { $secretsText += "OPENROUTER_API_KEY=$orKey`n" }
+        [IO.File]::WriteAllText($apiLocal, $secretsText, (New-Object Text.UTF8Encoding($false)))
+        $apiRemote = "$((Get-BoxPaths).secrets_env).incoming"
+        try {
+            Copy-ToBox $apiLocal $apiRemote
+            $merged = Invoke-Box "cd /d $InstallDir && $Python -m home_guard_project.box merge-secrets `"$apiRemote`"" | Out-String
+            if ($LASTEXITCODE -eq 0) {
+                Note "    keys: $($merged.Trim())"
+            } else {
+                # A box too old to merge: never replace its key file (that wiped the vision key).
+                Invoke-Box "cmd /c del `"$apiRemote`"" | Out-Null
+                Bad "The box could not merge its keys ($($merged.Trim())). Its existing api_key.env was left as it is; update the box and run setup again."
+            }
+        } finally { Remove-Item $apiLocal -ErrorAction SilentlyContinue }
+        if (-not $orKey) { Note "    No $orFile on this laptop: the box keeps the OpenRouter key it has (vision model, translator)." }
         Invoke-Box "$SetOpt mode inference"                | ForEach-Object { Note "    $_" }
         Invoke-Box "$SetOpt alert_start_hour $AlertStart"   | Out-Null
         Invoke-Box "$SetOpt alert_end_hour $AlertEnd"       | Out-Null

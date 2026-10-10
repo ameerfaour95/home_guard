@@ -16,6 +16,7 @@ Usage:
     python -m home_guard_project.box start
     python -m home_guard_project.box restart          # restart it once, to pick up changed settings
     python -m home_guard_project.box paths --json     # where this box keeps its config, data and logs (paths.py)
+    python -m home_guard_project.box merge-secrets FILE   # merge FILE's keys into api_key.env, keep the rest; see secrets_file.py
     python -m home_guard_project.box migrate-layout --dry-run   # move them out of the code folder; see layout_migration.py
     python -m home_guard_project.box notices add --b64 <body> --json   # an access notice the cloud pushes; see notices.py
 
@@ -307,6 +308,10 @@ def main() -> None:
         from .paths import main as paths_main  # noqa: PLC0415
 
         sys.exit(paths_main(sys.argv[2:]))
+    if len(sys.argv) > 1 and sys.argv[1] == "merge-secrets":
+        from .secrets_file import main as merge_secrets_main  # noqa: PLC0415
+
+        sys.exit(merge_secrets_main(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "migrate-layout":
         from .layout_migration import main as migrate_main  # noqa: PLC0415
 
