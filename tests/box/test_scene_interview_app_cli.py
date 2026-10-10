@@ -227,6 +227,45 @@ class AppCommandLineTest(unittest.TestCase):
         for argv in (("restore", "--camera", "front", "--check", "--json"), ("restore", "--camera", "front", "--json")):
             self.assertEqual(self.run_main(*argv)[2]["display_name"], "הכניסה")
 
+    def test_after_a_site_rename_propose_brings_the_map_saved_under_the_old_id(self) -> None:
+        # ch3 was mapped as ameer_test_ch3; the site was renamed and the camera is ameer_week_0_1_ch3 now.
+        old = sm.SceneMap.from_dict("ameer_test_ch3", self.app_map(camera="ameer_test_ch3"))
+        sm.confirm_scene_map(old, self.zones, now=1791640000.0)
+        code, _text, data = self.run_main("propose", "--camera", "ameer_week_0_1_ch3", "--json", "--embed", "--grid",
+                                          "--out", self.out)
+        self.assertEqual(code, 0, data)
+        self.assertIs(data["from_old_name"], True)
+        current = data["current_map"]
+        self.assertEqual(current["camera"], "ameer_week_0_1_ch3")
+        self.assertEqual([a["name"] for a in current["areas"]], ["הדשא", "gate", "window"])
+        self.assertEqual([ln["name"] for ln in current["lines"]], ["המעקה"])
+        self.assertEqual(current["confirmed"], 1791640000.0)
+        # Saving it keeps it under the new id and drops the old key.
+        code, _text, data = self.run_main("confirm", "--camera", "ameer_week_0_1_ch3", "--map-b64",
+                                          b64z(dict(current, camera="ameer_week_0_1_ch3")), "--json", "--out", self.out)
+        self.assertEqual(code, 0, data)
+        self.assertEqual(data["stale_removed"], ["ameer_test_ch3"])
+        self.assertEqual(sorted(z.read_scene_maps(z.scene_maps_path_for(self.zones))), ["ameer_week_0_1_ch3"])
+        _code, _text, data = self.run_main("propose", "--camera", "ameer_week_0_1_ch3", "--json", "--embed", "--grid",
+                                           "--out", self.out)
+        self.assertNotIn("from_old_name", data)                          # its own map now
+        self.assertEqual(len(data["current_map"]["areas"]), 3)
+
+    def test_a_camera_with_its_own_map_or_no_old_one_gets_no_old_map(self) -> None:
+        code, _text, data = self.run_main("propose", "--camera", "front", "--json", "--embed", "--grid", "--out",
+                                          self.out)
+        self.assertEqual(code, 0, data)
+        self.assertNotIn("from_old_name", data)                          # no _chN: no channel to look under
+        self.assertEqual(data["current_map"]["areas"], [])
+        sm.confirm_scene_map(sm.SceneMap.from_dict("ameer_test_ch3", self.app_map(camera="ameer_test_ch3")),
+                             self.zones)
+        sm.confirm_scene_map(sm.SceneMap.from_dict("ameer_week_0_1_ch3", {"areas": [
+            {"name": "x", "kind": "mine", "zone": "yard", "points": LAWN}]}), self.zones)
+        _code, _text, data = self.run_main("propose", "--camera", "ameer_week_0_1_ch3", "--json", "--embed", "--grid",
+                                           "--out", self.out)
+        self.assertNotIn("from_old_name", data)
+        self.assertEqual([a["name"] for a in data["current_map"]["areas"]], ["x"])
+
     def test_the_app_map_round_trips_through_from_dict_and_to_dict(self) -> None:
         data = self.app_map(rest="watch_no_alert", rest_owner="public")
         scene = sm.SceneMap.from_dict("front", data)
