@@ -31,6 +31,7 @@ from ..brain.tools import Services, ToolContext, known_rows
 from . import context as cx
 from . import handlers as hd
 from . import prompts
+from ...prompts import fill
 from .acts import SCHEMA, Act, Understanding, quoted, validate
 from .llm import parse_json
 from .memory_view import MemoryView
@@ -348,7 +349,7 @@ class AssistantV3(OwnerAgentV2):
                                  "unclear", "question_memory"}) and not plan.ask
         budget = INVESTIGATE_BUDGET if (und.has("question_history") and _INVESTIGATE.search(turn.text)) else CHAT_BUDGET
         task = self._task(turn, last)
-        system = prompts.WRITER + ("\n\n" + prompts.TOOLS_NOTE.format(budget=budget[0]) if tools_ok else "")
+        system = prompts.WRITER + ("\n\n" + fill(prompts.TOOLS_NOTE, budget=budget[0]) if tools_ok else "")
         model, tier = self.writer, "write"
         if self._escalate(turn, trace):
             model, tier = self.escalation, "escalate"
@@ -546,9 +547,7 @@ class AssistantV3(OwnerAgentV2):
                          f"{cx.clip(t.get('reply'), 120)}" for t in older]
                 prior = str(state.prefs.get("v3_summary") or "")
             msg = self.understander.chat([
-                {"role": "system", "content": "Summarize this Hebrew chat between a homeowner and his security "
-                 "assistant in at most 6 short Hebrew lines: what he decided, corrected, asked to remember or to stop, "
-                 "and any open promise. No ids. Only facts from the chat."},
+                {"role": "system", "content": prompts.SUMMARY},
                 {"role": "user", "content": (f"סיכום קודם:\n{prior}\n\n" if prior else "") + "\n".join(lines)}],
                 None, max_tokens=300)
             if msg.error or not (msg.content or "").strip():
