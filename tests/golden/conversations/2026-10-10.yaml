@@ -1,0 +1,141 @@
+# Golden cases from the owner's chat of 2026-10-10 (site ameer_v2), box logs/telegram_chat.jsonl.
+# The owner's words: "זה הבית של השכן" got "עד מתי?" - "THIS IS STUPID"; "if it was a person it wouldn't talk like
+# that"; "why even mention the workers". Fix page row F.12.
+# Schema: home_guard_project/box/eval_chat.py (load_suite / validate_case). Memory = the box's real state that day.
+defaults:
+  date: "2026-10-10"
+  house:
+    cameras: [ameer_v2_ch1, ameer_v2_ch2, ameer_v2_ch3, ameer_v2_ch5, ameer_v2_ch6, ameer_v2_ch8]
+    aliases: {ameer_v2_ch3: [פרגולה], ameer_v2_ch6: [כניסה ראשית]}
+  memory:
+    marks:
+      - {camera: ameer_v2_ch3, text: העובדים של הפרגולה, until: "2026-10-15 18:00", daily: ["07:00", "18:00"], at: "2026-10-09 09:50"}
+      - {camera: ameer_v2_ch6, text: העובדים של הפרגולה, until: "2026-10-15 18:00", daily: ["07:00", "18:00"], at: "2026-10-09 09:50"}
+    activities:
+      - {cameras: [ameer_v2_ch6], actions: [lying, crawling, bending, holding_tool], cause: החשמלאים שמתקינים לדים במדרגות, place: stairs, until: "2026-10-15 18:00", daily: ["07:00", "18:00"], at: "2026-10-09 13:54"}
+
+cases:
+  - id: g10_01
+    source: "2026-10-10 12:34:58"
+    time: "12:34:58"
+    message: {text: "מה קורה הם יש משהו מחוץ לכניסה הראשית"}
+    live:
+      ameer_v2_ch6: {description: "The front path and steps; a white car parked in the driveway. No people.", people: 0}
+    expect:
+      intent: question_live
+      must_do: ["look:ameer_v2_ch6"]
+      forbid_writes: [tag, person_mark, activity, place_fact]
+      max_questions: 0
+      must_not: ["העובדים", "I could not"]
+      ideal: "בכניסה הראשית שקט — רק הרכב הלבן בחניה, אין אף אחד בחוץ."
+    notes: "The box answered in English ('I could not work on that right now') when OpenRouter ran out of credit. A live question needs a live look at the camera named."
+
+  - id: g10_02
+    source: "2026-10-10 13:48:00"
+    time: "13:48:00"
+    alerts:
+      - id: ameer_v2_ch2_1791628521_alert
+        camera: ameer_v2_ch2
+        time: "13:35:21"
+        label: suspicious
+        summary: "אדם הולך לאורך הקיר ליד חלון. P1 · אדם בבגדים כהים וכובע לבן: הולך לאורך הקיר ומביט לתוך חלון. למה הודעתי: האדם מביט לתוך חלון."
+    message: {text: "זה הבית של השכן", reply_to: ameer_v2_ch2_1791628521_alert}
+    expect:
+      intent: place_fact
+      writes: [{type: place_fact, camera: ameer_v2_ch2, expiry: none}]
+      forbid_writes: [tag, person_mark, activity]
+      max_questions: 0
+      must_not: ["עד מתי", "העובדים", "לכמה זמן"]
+      ideal: "הבנתי, זה הבית של השכן. מה שקורה אצלו לא יגיע אליך — רק אם מישהו עובר לשטח שלך."
+    notes: "A place is permanent: no expiry, no question. Saving it as a person mark or a tag is wrong routing."
+
+  - id: g10_03
+    source: "2026-10-10 13:49:34"
+    time: "13:49:34"
+    alerts:
+      - id: ameer_v2_ch2_1791628521_alert
+        camera: ameer_v2_ch2
+        time: "13:35:21"
+        label: suspicious
+        summary: "אדם הולך לאורך הקיר ליד חלון. P1 · אדם בבגדים כהים וכובע לבן: הולך לאורך הקיר ומביט לתוך חלון. למה הודעתי: האדם מביט לתוך חלון."
+    history:
+      - {time: "13:48:00", owner: "זה הבית של השכן", bot: "עד מתי לזכור את הבית של השכן?", about: ameer_v2_ch2_1791628521_alert}
+    message: {text: "מה קשר ? לא הבנתי"}
+    expect:
+      intent: complaint
+      writes: [{type: place_fact, camera: ameer_v2_ch2, expiry: none}]
+      forbid_writes: [tag, person_mark, activity]
+      max_questions: 0
+      must_not: ["העובדים", "עד מתי"]
+      ideal: "סליחה, שאלה מיותרת — בית של שכן לא נגמר. שמרתי שבמצלמה 2 זה הבית של השכן, ומה שקורה שם לא יגיע אליך."
+    notes: "He is confused by the bot's own question. Own the mistake in one line and do what should have been done (save the place, permanently). Never dump the memory (the real bot listed the workers)."
+
+  - id: g10_04
+    source: "2026-10-10 13:49:55"
+    time: "13:49:55"
+    alerts:
+      - id: ameer_v2_ch2_1791628521_alert
+        camera: ameer_v2_ch2
+        time: "13:35:21"
+        label: suspicious
+        summary: "אדם הולך לאורך הקיר ליד חלון. P1 · אדם בבגדים כהים וכובע לבן: הולך לאורך הקיר ומביט לתוך חלון. למה הודעתי: האדם מביט לתוך חלון."
+    history:
+      - {time: "13:48:00", owner: "זה הבית של השכן", bot: "עד מתי לזכור את הבית של השכן?", about: ameer_v2_ch2_1791628521_alert}
+      - {time: "13:49:34", owner: "מה קשר ? לא הבנתי", bot: "שמור אצלי עכשיו: העובדים של הפרגולה, כל יום 07:00–18:00, עד יום ה׳ 15.10; העובדים של הפרגולה בכניסה ראשית, כל יום 07:00–18:00, עד יום ה׳ 15.10. מה לתקן?"}
+    message: {text: "מה הקשררררררר העבדים של הפרגולה יא חתכית מטומטם"}
+    expect:
+      intent: complaint
+      writes: [{type: place_fact, camera: ameer_v2_ch2, expiry: none}]
+      forbid_writes: [tag, person_mark, activity, mark_removed]
+      max_questions: 0
+      must_not: ["כל יום 07:00", "עד יום ה׳ 15\\.10"]
+      ideal: "צודק, לא קשור בכלל — סליחה. מה שאמרת נשמר: במצלמה 2 זה הבית של השכן, ומה שקורה שם לא יגיע אליך."
+    notes: "A short apology, no defence, no second dump; finish the job he asked for at 13:48. Removing the workers' marks would be wrong: he complains about the mention, not the marks."
+
+  - id: g10_05
+    source: "2026-10-10 15:14:08"
+    time: "15:14:08"
+    history:
+      - {time: "13:48:00", owner: "זה הבית של השכן", bot: "עד מתי לזכור את הבית של השכן?"}
+      - {time: "13:49:34", owner: "מה קשר ? לא הבנתי", bot: "שמור אצלי עכשיו: העובדים של הפרגולה, כל יום 07:00–18:00, עד יום ה׳ 15.10; העובדים של הפרגולה בכניסה ראשית, כל יום 07:00–18:00, עד יום ה׳ 15.10. מה לתקן?"}
+      - {time: "13:49:55", owner: "מה הקשררררררר העבדים של הפרגולה יא חתכית מטומטם", bot: "מה לתקן?"}
+    message: {text: "הזכרון שלך שמור אצלך אתה לא צריך לחשוף לי אותו"}
+    expect:
+      intent: preference
+      forbid_writes: [tag, person_mark, activity, place_fact, mark_removed]
+      max_questions: 0
+      must_not: ["העובדים", "07:00"]
+      ideal: "מובן. הזיכרון נשאר אצלי — לא אפרוס אותו בשיחה."
+    notes: "A standing preference about style. The real bot answered by reciting the workers' mark again."
+
+  - id: g10_06
+    source: "2026-10-10 15:14:23"
+    time: "15:14:23"
+    history:
+      - {time: "13:49:34", owner: "מה קשר ? לא הבנתי", bot: "שמור אצלי עכשיו: העובדים של הפרגולה, כל יום 07:00–18:00, עד יום ה׳ 15.10; העובדים של הפרגולה בכניסה ראשית, כל יום 07:00–18:00, עד יום ה׳ 15.10. מה לתקן?"}
+      - {time: "13:49:55", owner: "מה הקשררררררר העבדים של הפרגולה יא חתכית מטומטם", bot: "מה לתקן?"}
+      - {time: "15:14:08", owner: "הזכרון שלך שמור אצלך אתה לא צריך לחשוף לי אותו", bot: "העובדים של הפרגולה כבר מסומנים בפרגולה ובכניסה ראשית עד 18:00."}
+    message: {text: "אתה יכול לשאול בצורה דרך אגב אבל לא לחשוף"}
+    expect:
+      intent: preference
+      forbid_writes: [tag, person_mark, activity, place_fact, mark_removed]
+      max_questions: 0
+      must_not: ["העובדים"]
+      ideal: "סגור. אם אצטרך לוודא משהו, אשאל בקצרה ובדרך אגב — בלי לפרוס מה ששמור."
+    notes: "The real bot answered 'הבנתי אותך.' and nothing else."
+
+  - id: g10_07
+    source: "2026-10-10 15:14:30"
+    time: "15:14:30"
+    history:
+      - {time: "13:49:55", owner: "מה הקשררררררר העבדים של הפרגולה יא חתכית מטומטם", bot: "מה לתקן?"}
+      - {time: "15:14:08", owner: "הזכרון שלך שמור אצלך אתה לא צריך לחשוף לי אותו", bot: "העובדים של הפרגולה כבר מסומנים בפרגולה ובכניסה ראשית עד 18:00."}
+      - {time: "15:14:23", owner: "אתה יכול לשאול בצורה דרך אגב אבל לא לחשוף", bot: "הבנתי אותך."}
+    message: {text: "מה הקקשרררררר עובדייים יא מטומטם"}
+    expect:
+      intent: complaint
+      forbid_writes: [tag, person_mark, activity, place_fact, mark_removed]
+      max_questions: 0
+      must_not: ["כבר מסומנים", "עד 18:00"]
+      ideal: "צודק, לא היה שום קשר לעובדים. סליחה — לא אזכיר אותם בלי סיבה."
+    notes: "The real bot asked 'מה תרצה לשנות או להוסיף?'."
