@@ -1,2 +1,4 @@
 # Shell scripts must keep LF endings so bash on a box accepts them after a clone.
 *.sh text eol=lf
+*.prompt text eol=lf
+*.system_prompt text eol=lf

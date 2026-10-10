@@ -28,6 +28,7 @@ ROOT_FILES = ("pyproject.toml", "uv.lock", ".python-version", "yolo11s.pt")
 # Whole directories (walked recursively).
 INCLUDE_DIRS = (
     "home_guard_project/box",
+    "home_guard_project/prompts",
     "home_guard_project/s3_upload",
     "home_guard_project/labeling/utils",
 )
