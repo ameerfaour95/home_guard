@@ -339,9 +339,13 @@ CLEAR = _any([
     r"פורץ לבית", r"פריצה לבית", r"פורץ את הדלת", r"שובר את הדלת", r"פורץ דלת", r"פורץ חלון",
 ])
 
-# The second look's question per class (prompts/verify_question_<class>.prompt).
-VERIFY_QUESTIONS = {name: load(f"verify_question_{name}.prompt")
-                    for name in ("weapon", "tool_weapon", "vehicle", "violence", "person_down")}
+VERIFY_QUESTIONS = {
+    "weapon": load("verify_question_weapon.prompt"),
+    "tool_weapon": load("verify_question_tool_weapon.prompt"),
+    "vehicle": load("verify_question_vehicle.prompt"),
+    "violence": load("verify_question_violence.prompt"),
+    "person_down": load("verify_question_person_down.prompt"),
+}
 
 
 def clear_class(text: str) -> bool:
