@@ -34,7 +34,7 @@ import re
 import socket
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 from urllib.parse import quote as urlquote
 
 import yaml
@@ -203,14 +203,106 @@ def alias_old_names(renames: Dict[str, str], cameras: Sequence[str], aliases_pat
             log.warning("Old name %s not kept as an alias of %s: %s", old, new, exc)
 
 
+_CHANNEL_END = re.compile(r"_ch(\d+)$")
+_TAGGED_END = re.compile(r"_(\d+)_ch(\d+)$")
+
+
+def orphan_renames(fresh: Sequence[str], final: Sequence[str], kept: Iterable[str]) -> Dict[str, str]:
+    """``{old: new}``: settings kept under an id that is no longer a camera, for a stream that just got a fresh
+    name on the same channel (2026-10-10: ameer_week_0_1_ch6 -> ameer_v2_ch6 after the site changed).
+
+    One fresh name and one orphan on a channel match. With several fresh names on a channel (two recorders,
+    names tagged with the last number of the address) the tag must match too. Anything else is ambiguous and
+    nothing moves (logged): a wrong match would put one camera's zone on another's picture.
+    """
+    now = set(final)
+    orphans = sorted({str(k) for k in kept} - now)
+
+    def channel(name: str) -> Optional[str]:
+        m = _CHANNEL_END.search(name)
+        return m.group(1) if m else None
+
+    out: Dict[str, str] = {}
+    for ch in sorted({c for c in map(channel, fresh) if c}):
+        news = [n for n in fresh if channel(n) == ch]
+        olds = [o for o in orphans if channel(o) == ch]
+        if not olds:
+            continue
+        if len(news) == 1 and len(olds) == 1:
+            out[olds[0]] = news[0]
+            continue
+        for new in news:
+            m = _TAGGED_END.search(new)
+            same = [o for o in olds if m and o.endswith(f"_{m.group(1)}_ch{ch}")]
+            if len(same) == 1:
+                out[same[0]] = new
+        if not any(o in out for o in olds):
+            log.warning("Settings of %s not carried to %s: cannot tell which camera they belong to", olds, news)
+    return out
+
+
+def _setting_keys(zones_path: str, alerts_path: str, aliases_path: str) -> Set[str]:
+    """Every camera id a per-camera setting is kept under (names, zone, scene map, alert choice)."""
+    keys: Set[str] = set()
+    try:
+        from ..data_collection.zones import _read_raw, read_scene_maps, scene_maps_path_for  # noqa: PLC0415
+
+        keys |= set(_read_raw(zones_path)) | set(read_scene_maps(scene_maps_path_for(zones_path)))
+    except Exception as exc:  # noqa: BLE001 - a damaged file must not block a camera search
+        log.warning("Zones not checked for old camera ids: %s", exc)
+    try:
+        from .camera_alerts import _read_doc  # noqa: PLC0415
+
+        for entries in _read_doc(alerts_path).values():
+            keys |= set(entries)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Alert choices not checked for old camera ids: %s", exc)
+    try:
+        from .brain.aliases import load_aliases  # noqa: PLC0415
+
+        keys |= set(load_aliases(aliases_path))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Camera names not checked for old camera ids: %s", exc)
+    return {str(k) for k in keys}
+
+
+def carry_settings(renames: Dict[str, str], zones_path: str, alerts_path: str, aliases_path: str) -> None:
+    """Move every per-camera setting along the renames ``{old: new}``: zone and scene map, alert choice,
+    the family's names. Each part fails on its own (logged): a settings file never blocks a camera change."""
+    if not renames:
+        return
+    log.info("Carrying camera settings to their new names: %s", renames)
+    try:
+        from ..data_collection.zones import remap_zones  # noqa: PLC0415
+
+        remap_zones(renames, zones_path)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Zones not carried over the rename: %s", exc)
+    try:
+        from .camera_alerts import remap_camera_alerts  # noqa: PLC0415
+
+        remap_camera_alerts(renames, alerts_path)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Alert choices not carried over the rename: %s", exc)
+    try:
+        from .brain.aliases import remap_aliases  # noqa: PLC0415
+
+        remap_aliases(renames, aliases_path)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Camera aliases not carried over the rename: %s", exc)
+
+
 def write_found(found: Found, prefix: str, path: Optional[str] = None,
-                aliases_path: Optional[str] = None) -> Dict[str, Any]:
+                aliases_path: Optional[str] = None, zones_path: Optional[str] = None,
+                alerts_path: Optional[str] = None) -> Dict[str, Any]:
     """Save a search's streams to cameras.yaml, keeping the name and on/off state of every stream it knows.
 
     A stream is known by :func:`stream_key` (its address without the login), so
     a new password or a new site name never renames a camera. New streams get a
-    new name; streams no longer found are dropped, as before. Returns the new
-    {"active", "disabled"} name lists.
+    new name; streams no longer found are dropped, as before. A fresh name whose
+    channel still has settings under an id that is no longer a camera (the old
+    cameras.yaml was lost) takes those settings along (:func:`orphan_renames`).
+    Returns the new {"active", "disabled"} name lists.
     """
     path = path or CAMERAS_PATH
     known, off = _known_streams(path)
@@ -225,15 +317,23 @@ def write_found(found: Found, prefix: str, path: Optional[str] = None,
     active: Dict[str, str] = {}
     disabled: Dict[str, str] = {}
     renames: Dict[str, str] = {}
+    fresh: List[str] = []
     for name, _, stream in _named(found, prefix, known):
         key = stream_key(stream["url"])
         (disabled if key in off else active)[name] = stream["url"]
         renames.update({old: name for old in old_names.get(key, []) if old != name})
+        if key not in known:
+            fresh.append(name)
     _write_cameras(active, disabled, path)
     log.info("Wrote %d cameras (%d off) to %s", len(active) + len(disabled), len(disabled), path)
     final = [*active, *disabled]
-    alias_old_names({old: new for old, new in renames.items() if old not in final}, final,
-                    aliases_path or _aliases_beside(path))
+    aliases_path = aliases_path or _aliases_beside(path)
+    zones_path = zones_path or os.path.join(os.path.dirname(os.path.abspath(path)), "zones.yaml")
+    alerts_path = alerts_path or os.path.join(os.path.dirname(os.path.abspath(path)), "camera_alerts.yaml")
+    if fresh:
+        carry_settings(orphan_renames(fresh, final, _setting_keys(zones_path, alerts_path, aliases_path)),
+                       zones_path, alerts_path, aliases_path)
+    alias_old_names({old: new for old, new in renames.items() if old not in final}, final, aliases_path)
     return {"active": sorted(active), "disabled": sorted(disabled)}
 
 
