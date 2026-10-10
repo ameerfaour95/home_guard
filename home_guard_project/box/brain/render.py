@@ -103,6 +103,8 @@ def _receipt_line(receipt: Receipt, lang: str, retention_days: float, snapshot: 
         from .house import receipt_line as house_line  # noqa: PLC0415
 
         return house_line(receipt, lang)
+    if receipt.tool == "camera_fact" and d.get("place") and not d.get("undo_of"):
+        return ""                              # a place: the agent's one natural line is the reply (place_facts.py)
     if receipt.tool == "camera_fact":          # what the owner taught about a camera (camera_profiles.py)
         where = t("the_house", lang) if d.get("whole_house") else _name(snapshot, str(d.get("camera") or ""), lang)
         if d.get("role") or (d.get("undo_of") and "old_role" in d):
@@ -228,7 +230,9 @@ def render_reply(answer: str, receipts: Sequence[Receipt], lang: str, retention_
         malformed = True
     for receipt in receipts:
         try:
-            lines.append(_receipt_line(receipt, lang, retention_days, snapshot))
+            line = _receipt_line(receipt, lang, retention_days, snapshot)
+            if line:
+                lines.append(line)
         except Exception:
             malformed = True
     if malformed:

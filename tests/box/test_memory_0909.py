@@ -265,6 +265,16 @@ class ContextTest(Base):
         agent.note_alert("-5", dict(ALERT2))
         agent.handle("למה שלחת את זה?", "-5", OWNER)
         block = big.seen[0][0][-1]
+        # 2026-10-10 (owner): the memory is private - a message that is not about the workers never reads them.
+        self.assertNotIn("[LIVE MARKS]", block)
+        self.assertNotIn("העובדים", block)
+        self.assertIn("[MEMORY] what the box keeps is private", block)
+        # The owner names the workers: the marks and the gap are read.
+        big2 = Scripted([reply("סימנתי את העובדים בפרגולה עד 18:00. ההתרעה הזו הייתה בכניסה הראשית.")])
+        agent2 = self.agent(big2)
+        agent2.note_alert("-6", dict(ALERT2))
+        agent2.handle("אלה העובדים?", "-6", OWNER)
+        block = big2.seen[0][0][-1]
         self.assertIn("[LIVE MARKS]", block)
         self.assertIn('"העובדים על הפרגולה" at פרגולה until 18:00', block)
         self.assertIn("[NOT COVERED]", block)
@@ -292,8 +302,14 @@ class ContextTest(Base):
         big = Scripted([reply("אם תרצה, אני יכול לסמן את האנשים ליד הפרגולה כעובדים עד 18:00."),
                         reply("העובדים מסומנים בפרגולה עד 18:00.")])
         out = self.agent(big).handle("למה שלחת התראה?", "-5", OWNER)
-        self.assertEqual(out.text, "העובדים מסומנים בפרגולה עד 18:00.")
         self.assertIn("ALREADY marked", big.seen[1][0][-1])
+        # 2026-10-10: the message is not about the workers, so the reply never brings them up.
+        self.assertNotIn("העובדים", out.text)
+        self.assertNotIn("לסמן", out.text)
+        out = self.agent(Scripted([reply("אם תרצה, אני יכול לסמן את העובדים ליד הפרגולה עד 18:00."),
+                                   reply("העובדים מסומנים בפרגולה עד 18:00.")])).handle(
+            "למה שלחת התראה על העובדים?", "-7", OWNER)
+        self.assertEqual(out.text, "העובדים מסומנים בפרגולה עד 18:00.")
 
     def test_today_lines_and_readable_receipts_in_the_history(self) -> None:
         agent = self.agent()
@@ -319,7 +335,8 @@ class EmptyEmpathyTest(Base):
         self.events.mark_known(PERGOLA, "העובדים", "Ameer", dt.datetime(2026, 10, 9, 18, 0).timestamp(), now=NOW)
         out = self.agent(Scripted([reply("אני מבין אותך."), reply("אני מבין את התסכול שלך.")])).handle(
             "היית צריך להגיע למסקנה הזאת לבד ולתשאל אותי", "-5", OWNER)
-        self.assertEqual(out.text, "שמור אצלי עכשיו: העובדים בפרגולה, היום עד 18:00. מה לתקן?")
+        # 2026-10-10: never the memory status and "מה לתקן?" - one plain line instead.
+        self.assertEqual(out.text, "לא הבנתי למה התכוונת.")
         good = self.agent(Scripted([reply("אני מבין אותך."), reply("סימנתי את העובדים בפרגולה עד 18:00.")]))
         self.assertNotIn("מבין", good.handle("נו?", "-5", OWNER).text)
 

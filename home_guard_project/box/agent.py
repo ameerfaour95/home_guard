@@ -58,7 +58,24 @@ CONVERSATIONS_DIR_NAME = ".conversations"
 LIVE_DIR_NAME = ".live"
 TOOLS_PATH = os.path.join(os.path.dirname(__file__), "agent_tools.json")
 CAMERAS_PATH = paths.cameras_yaml()
-UNAVAILABLE_REPLY = "I could not work on that right now, but your message was saved."
+UNAVAILABLE_REPLY = "I couldn't work on that right now, but your message was saved."   # i18n "unavailable" (en)
+
+def no_ai_access(exc: Any) -> bool:
+    """brain.models.no_ai_access: the AI is out of reach for money or a key."""
+    from .brain.models import no_ai_access as check  # noqa: PLC0415
+
+    return check(exc)
+
+
+def unavailable_reply(lang: str = "en", exc: Any = None, no_ai: bool = False) -> str:
+    """What the owner reads when the assistant could not answer: in the box language, and honest that the AI is out
+    of reach when it is (*no_ai*, or *exc* says so)."""
+    from .brain.i18n import t  # noqa: PLC0415
+
+    try:
+        return t("ai_no_access" if no_ai or (exc is not None and no_ai_access(exc)) else "unavailable", lang)
+    except Exception:  # noqa: BLE001
+        return UNAVAILABLE_REPLY
 
 SYSTEM_PROMPT = """
 You are Home Guard, the assistant of a home security box, talking with the homeowner in a Telegram
@@ -141,6 +158,7 @@ class AgentContext:
     look_now: Optional[Callable[[str], Dict[str, Any]]] = None   # live camera look-up; None self-builds from the env
     set_camera: Optional[Callable[[str, bool], Dict[str, Any]]] = None  # turn a camera on/off; None self-builds
     alert_settings_paths: Optional[Dict[str, str]] = None  # alert_settings file paths (tests); None -> the box's
+    language: Optional[Callable[[], str]] = None   # the box language for what the code writes; None: English
 
 
 @dataclass(frozen=True)
@@ -637,12 +655,18 @@ class OwnerAgent:
         final = self._model.chat(messages, self._tools, tool_choice="none")
         return (final.content or "").strip() or "Noted."
 
+    def _lang(self) -> str:
+        try:
+            return str(self.ctx.language() if self.ctx.language is not None else "en") or "en"
+        except Exception:  # noqa: BLE001
+            return "en"
+
     def handle(self, text: str, chat_id: Any, who: Optional[Dict[str, Any]] = None,
                alert: Optional[Dict[str, Any]] = None) -> AgentReply:
         """Act on one owner message and return what to answer. Never raises; the message is always saved."""
         with self._lock:
             turn = self._turn = _Turn(text=text, chat_id=str(chat_id), who=who or {}, alert=alert)
-            reply = UNAVAILABLE_REPLY
+            reply = unavailable_reply(self._lang())
             try:
                 messages: List[Dict[str, Any]] = [
                     {"role": "system", "content": self._system},
@@ -653,6 +677,7 @@ class OwnerAgent:
                 self._conversations.append(turn.chat_id, text, reply)
             except Exception as exc:  # noqa: BLE001 - no network, a model error: the owner still gets an answer
                 log.warning("Agent could not handle a message: %s", exc)
+                reply = unavailable_reply(self._lang(), exc)
                 # A tool may already have acted (pause applied+saved, verdict saved, clip queued) before
                 # the failure. Report what actually happened rather than a bare "unavailable"; UNAVAILABLE
                 # (with no clips) stands only when nothing was done.

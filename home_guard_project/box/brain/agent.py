@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from ..feedback import Feedback, is_complaint, save_feedback
-from . import activity_chat, house, look_explain, reply_guard, same_people
+from . import activity_chat, house, human, look_explain, reply_guard, same_people
 from . import known_memory as km
 from .claims import empty_reply, honest_answer, unbacked_claims
 from .grounding import evidence_text, ungrounded_details
@@ -39,7 +39,7 @@ from .receipts import ACTING_TOOLS, DONE, FAILED, REQUESTED, UNDONE, Receipt, Re
 from .mode import hhmm
 from .registry import current_camera, display, mentioned_cameras, render_block, resolve_camera
 from .render import receipt_line, render_reply, undo_what
-from .style import strip_boilerplate
+from .style import _glue, strip_boilerplate, strip_internals
 from .tools import DEFAULTS, TOOLS, KEYS, Services, ToolContext, _issue, settings_line
 from .tools import _alert_state, _alert_target, _alert_types, _alert_values
 from .tools import KNOWN_WEEK_SEC, ask_known, asks_retag, in_place, known_line, known_rows, retag_words, session_text
@@ -396,30 +396,72 @@ def _event_camera(state: ChatState, snapshot: Any, alert: Optional[Dict[str, Any
     return camera, " ".join(x for x in (handle or "", when) if x)
 
 
+def _talk_camera(state: ChatState, snapshot: Any, alert: Optional[Dict[str, Any]], now: float) -> str:
+    """The camera this conversation is about: the alert's or the event's being discussed, else the camera the owner
+    last named (the fresh topic). "" when none. Never raises."""
+    try:
+        camera, _ = _event_camera(state, snapshot, alert, now)
+        if camera:
+            return camera
+        topic = state.topic_camera(now)
+        if topic:
+            return current_camera(snapshot, topic[0]) or topic[0]
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Camera of the conversation not read: %s", exc)
+    return ""
+
+
+MEMORY_PRIVATE_LINE = ("[MEMORY] what the box keeps is private and nothing saved relates to this message: never "
+                       "mention, list or hint at saved marks, workers or facts, and never ask about them.")
+
+
 def memory_lines(services: Services, state: ChatState, snapshot: Any, alert: Optional[Dict[str, Any]], lang: str,
-                 now: float) -> List[str]:
-    """What the box remembers, read before every answer (2026-10-09: "אתה לא בודק מה יש בזיכרון?"): the live
-    marks, what the owner said today, and the camera of this event that no mark covers."""
+                 now: float, text: str = "", asked: bool = True) -> List[str]:
+    """What the box remembers, read before an answer it concerns (2026-10-09: "אתה לא בודק מה יש בזיכרון?"; 2026-10-10:
+    "it keeps talking about the workers, why even mention them!!!"): the live marks this message or its event is
+    about, what the owner said today about them, and the camera of this event that no mark covers. When the owner
+    asked about the memory (*asked*) everything; when nothing relates, one line: the memory is private."""
     book = getattr(services, "events", None)
-    lines = km.live_lines(book, snapshot, lang, now) + km.today_lines(state, now)
-    lines += activity_chat.context_lines(getattr(services, "activities", None), snapshot, lang, now)
     try:
         camera, when = _event_camera(state, snapshot, alert, now)
-        gap = km.gap_line(book, snapshot, camera, when, lang, now)
-        if gap:
-            lines.append(gap)
     except Exception as exc:  # noqa: BLE001 - the context is extra
-        log.warning("Gap line not read: %s", exc)
+        log.warning("Event camera not read: %s", exc)
+        camera, when = "", ""
+    marks = km.live_marks(book, now)
+    related = marks if asked else human.memory_related(text, marks, _talk_camera(state, snapshot, alert, now),
+                                                       km.covers)
+    lines: List[str] = []
+    if related:
+        lines += km.live_lines(book, snapshot, lang, now) + km.today_lines(state, now)
+    elif marks:
+        lines.append(MEMORY_PRIVATE_LINE)
+    facts = getattr(services, "activities", None)
+    if asked or (camera and facts is not None and any(camera in f.cameras for f in facts.live(now))):
+        lines += activity_chat.context_lines(facts, snapshot, lang, now)
+    named = asked or any(human.names_mark(text, k) for k in marks)
+    if named:
+        try:
+            gap = km.gap_line(book, snapshot, camera, when, lang, now)
+            if gap:
+                lines.append(gap)
+        except Exception as exc:  # noqa: BLE001 - the context is extra
+            log.warning("Gap line not read: %s", exc)
     return lines
 
 
-def live_status(services: Services, snapshot: Any, lang: str, now: float) -> str:
-    """A concrete status of what is live, for a reply that would otherwise say nothing."""
-    marks = km.live_marks(getattr(services, "events", None), now)
-    if not marks:
-        return f"{t('live_status_none', lang)} {t('live_status_ask', lang)}"
-    return f"{t('live_status', lang, marks=km.marks_text(getattr(services, 'events', None), snapshot, lang, now))} " \
-           f"{t('live_status_ask', lang)}"
+def not_understood(state: ChatState, snapshot: Any, alert: Optional[Dict[str, Any]], lang: str, now: float) -> str:
+    """For a reply that would otherwise say nothing (2026-10-10: the memory status plus "מה לתקן?" went out instead):
+    ONE plain line about the alert being discussed, by its time and camera; never the memory."""
+    try:
+        handle = state.topic_event(now)
+        entry = state.handles.get(handle) if handle else None
+        event = alert if alert and alert.get("camera") else (entry if isinstance(entry, dict) else None)
+        if event:
+            camera = current_camera(snapshot, str(event.get("camera") or "")) or str(event.get("camera") or "")
+            return human.not_understood(lang, event, display(snapshot, camera, lang))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Event for the plain line not read: %s", exc)
+    return human.not_understood(lang)
 
 
 def _tag_undo_rows(ctx: ToolContext, lang: str) -> Tuple[Tuple[Tuple[str, str], ...], ...]:
@@ -532,6 +574,13 @@ def _undo_token(ctx: ToolContext) -> str:
     return ctx.turn_id.rsplit(":", 1)[-1] if any(
         r.tool in UNDOABLE and r.status in (DONE, REQUESTED) and isinstance(r.detail, dict)
         and not r.detail.get("already") and not r.detail.get("undo_of") for r in ctx.receipts) else ""
+
+
+def _no_ai_access(exc: Any) -> bool:
+    """The model call was refused for money or a key (OpenRouter 402, OpenAI insufficient_quota, 401)."""
+    from .models import no_ai_access  # noqa: PLC0415
+
+    return no_ai_access(exc)
 
 
 def _fallback_reply(ctx: Optional[ToolContext], lang: str) -> AgentReply:
@@ -820,6 +869,114 @@ class OwnerAgentV2:
         ctx.state.prefs["group_scope"] = km.HOUSE
         return t("you_are_right_only_at", ctx.lang, camera=before)
 
+    def _place_answer(self, ctx: ToolContext, text: str, alert: Optional[Dict[str, Any]], snapshot: Any,
+                      now: float) -> Optional[str]:
+        """"זה הבית של השכן" about an alert (2026-10-10 13:48, answered "עד מתי לזכור את הבית של השכן?"): a PLACE,
+        kept as a permanent fact of the alert's camera with where its people were (place_facts.py); the guard
+        loop then keeps quiet what stays inside a neighbour's / public place. One natural line. None: not a place
+        statement, or no alert being discussed (the model reads it)."""
+        from .. import place_facts  # noqa: PLC0415
+
+        said = place_facts.place_statement(text)
+        if said is None:
+            return None
+        event: Optional[Dict[str, Any]] = alert if alert and alert.get("alert_id") else None
+        if event is None:
+            handle = ctx.state.topic_event(now)
+            entry = ctx.state.handles.get(handle) if handle else None
+            if isinstance(entry, dict) and entry.get("kind") == "event" and now - float(entry.get("ts") or 0) <= 3 * 3600:
+                event = {"alert_id": str(entry.get("ref") or ""), "camera": str(entry.get("camera") or ""),
+                         "ts": float(entry.get("ts") or 0)}
+        if not event or not event.get("camera"):
+            return None
+        store = profiles_for(self.services)
+        if store is None:
+            return None
+        raw = str(event.get("camera") or "")
+        camera = current_camera(snapshot, raw) or raw
+        try:
+            roots = list(self.services.roots()) if self.services.roots else []
+        except Exception:  # noqa: BLE001
+            roots = []
+        region, zone = place_facts.alert_region(roots, raw, str(event.get("alert_id") or ""))
+        by = str(ctx.speaker.get("name") or "owner")
+        fact = store.add_place(camera, said["words"], said["owner"], region, zone, str(event.get("alert_id") or ""),
+                               by=by, now=now)
+        _issue(ctx, "camera_fact", DONE, camera,
+               {"camera": camera, "fact": fact["text"], "fact_id": fact["id"], "removed": False, "place": True,
+                "owner": said["owner"], "region": fact.get("region"), "zone": fact.get("zone") or "",
+                "already": bool(fact.get("already")), "whole_house": False})
+        ctx.state.prefs["last_place"] = {"words": fact["text"], "camera": camera, "ts": now, "id": fact["id"],
+                                         "owner": said["owner"], "alert_ts": float(event.get("ts") or 0)}
+        log.info("place: %s at %s is %s (region %s, zone %s)", fact["text"], camera, said["owner"],
+                 fact.get("region"), fact.get("zone") or "-")
+        return place_facts.confirmation(said["words"], said["owner"], ctx.lang, said.get("pron", "זה"))
+
+    def _explain_place(self, ctx: ToolContext, text: str, snapshot: Any, now: float) -> Optional[str]:
+        """"מה קשר ? לא הבנתי" right after the place line: what it meant, in plain words, about that alert."""
+        place = ctx.state.prefs.get("last_place") if isinstance(ctx.state.prefs, dict) else None
+        if not isinstance(place, dict) or not human.confused(text) or now - float(place.get("ts") or 0) > 1800:
+            return None
+        last = next((str(turn.get("reply") or "") for turn in reversed(ctx.state.turns or [])
+                     if isinstance(turn, dict) and turn.get("kind") != "alert"), "")
+        if str(place.get("words") or "") not in last:
+            return None
+        name = display(snapshot, str(place.get("camera") or ""), ctx.lang)
+        when = hhmm(float(place.get("alert_ts") or 0)) if place.get("alert_ts") else ""
+        key = "place_explain_neighbour" if place.get("owner") in ("neighbour", "public") else "place_explain_mine"
+        words = str(place.get("words") or "")
+        if str(ctx.lang).startswith("he"):
+            where = words if words.startswith("אצל") else _glue("ב", words)
+        else:
+            where = words if words.lower().startswith(("at ", "in ")) else f"at {words}"
+        return t(key, ctx.lang, time=when, camera=name, where=where)
+
+    def _private_answer(self, ctx: ToolContext, text: str) -> Optional[str]:
+        """"הזכרון שלך שמור אצלך אתה לא צריך לחשוף לי אותו" / "אתה יכול לשאול בצורה דרך אגב אבל לא לחשוף": agreed,
+        in one line, and kept (the memory is shown only when he asks)."""
+        kind = human.private_memory_request(text)
+        if not kind:
+            return None
+        ctx.state.prefs["memory_private"] = True
+        return t("memory_private_ask" if kind == "ask" else "memory_private_keep", ctx.lang)
+
+    def _apology(self, ctx: ToolContext, text: str, alert: Optional[Dict[str, Any]], snapshot: Any,
+                 now: float) -> Optional[str]:
+        """An insult or "מה הקשרררר" (2026-10-10 13:49 and 15:14, answered "מה לתקן?" and the memory): ONE short
+        apology and the concrete fix - the saved thing the bot brought up that has nothing to do with this, and what
+        was really saved. None when there is nothing concrete to say (the model answers, told to apologise once)."""
+        if not human.is_angry(text):
+            return None
+        lang, state = ctx.lang, ctx.state
+        book = getattr(self.services, "events", None)
+        marks = km.live_marks(book, now)
+        try:
+            camera, _ = _event_camera(state, snapshot, alert, now)
+        except Exception:  # noqa: BLE001
+            camera = ""
+        recent = [str(turn.get("reply") or "") for turn in (state.turns or [])[-6:]
+                  if isinstance(turn, dict) and turn.get("kind") != "alert"]
+        he = str(lang).startswith("he")
+        again = any(r.startswith(t("sorry_wrong", lang)) for r in recent)      # said once: other words this time
+        parts: List[str] = []
+        for k in marks:
+            if km.covers(k, camera) if camera else False:
+                continue
+            if any(human.names_mark(r, k) for r in recent) or human.names_mark(text, k):
+                who = km.who_label(str(k.get("text") or ""), lang)
+                line = (t("sorry_not_about_again", lang, who=who) if again else
+                        t("sorry_not_about", lang, who=_glue("ל", who) if he else who))
+                if line not in parts:
+                    parts.append(line)
+        place = state.prefs.get("last_place") if isinstance(state.prefs, dict) else None
+        if isinstance(place, dict) and now - float(place.get("ts") or 0) <= 6 * 3600:
+            name = display(snapshot, str(place.get("camera") or ""), lang)
+            parts.append(t("sorry_saved_place_again" if again else "sorry_saved_place", lang,
+                           words=str(place.get("words") or ""), camera=_glue("ב", name) if he else f"at {name}"))
+        if not parts:
+            return None
+        return " ".join([t("sorry_again" if again else "sorry_wrong", lang)] + parts)
+
     def _evidence_answer(self, ctx: ToolContext, text: str, alert: Optional[Dict[str, Any]], threaded: bool,
                          snapshot: Any, now: float, usage: Dict[str, List[int]]) -> Optional[str]:
         """"Are these the same people?" / "are you sure?" (same_people.py) and "why no explanation?" after photos
@@ -926,14 +1083,25 @@ class OwnerAgentV2:
         if unbacked_claims(again, ctx.receipts):
             # "עדיין לא שמרתי מי הם" is false while they ARE remembered (2026-10-09 13:02 replay).
             again = honest_answer(again, ctx.receipts, ctx.lang, ctx.text, say_not_done=not marks)
+        plain = not_understood(ctx.state, snapshot, ctx.alert_event, ctx.lang, now)
         if (hollow(again) or not again.strip()) and not any(r.status == DONE for r in ctx.receipts):
-            return live_status(self.services, snapshot, ctx.lang, now)
+            return plain
         if bool(marks) and offers_mark(again) and not any(r.tool == "mark_known" for r in ctx.receipts):
-            return live_status(self.services, snapshot, ctx.lang, now)
+            return plain
         if repeats(ctx.state, again):
-            status = live_status(self.services, snapshot, ctx.lang, now)
-            return status if not repeats(ctx.state, status) else again
+            return plain if not repeats(ctx.state, plain) else again
         return again
+
+    def _keep_private(self, ctx: ToolContext, text: str, said: str, now: float) -> str:
+        """The model's answer without the marks this message is not about (reply_guard.keep_private)."""
+        if km.asks_memory(text) or km.asks_history(text) or km.asks_tags(text) or reply_guard.asks_same_people(text):
+            return said
+        marks = km.live_marks(getattr(self.services, "events", None), now)
+        if not marks:
+            return said
+        camera = _talk_camera(ctx.state, ctx.snapshot, ctx.alert_event, now)
+        related = human.memory_related(text, marks, camera, km.covers)
+        return reply_guard.keep_private(said, [k for k in marks if k not in related])
 
     def _final_reply(self, ctx: ToolContext, text: str, reply_text: str, now: float,
                      usage: Dict[str, List[int]]) -> str:
@@ -941,6 +1109,8 @@ class OwnerAgentV2:
         the same reply as one of the last five - one rewrite by the model told what was said, else a short line."""
         marks = km.live_marks(getattr(self.services, "events", None), now)
         asked = km.asks_memory(text) or km.asks_history(text) or km.asks_tags(text)
+        camera = _talk_camera(ctx.state, ctx.snapshot, ctx.alert_event, now)
+        related = marks if asked else human.memory_related(text, marks, camera, km.covers)
 
         def rewrite(draft: str, recent: List[str]) -> str:
             model, tier = (self.fast_model, FAST) if self.fast_model is not None else (self.model, BIG)
@@ -957,7 +1127,9 @@ class OwnerAgentV2:
             _check_message(msg, tier, usage)
             return strip_boilerplate(msg.content or "")
 
-        return reply_guard.final_reply(reply_text, ctx.state, now, marks, asked, ctx.lang, rewrite)
+        return reply_guard.final_reply(
+            reply_text, ctx.state, now, related, asked, ctx.lang, rewrite,
+            fallback=lambda: not_understood(ctx.state, ctx.snapshot, ctx.alert_event, ctx.lang, now))
 
     def tag_label_for(self, alert: Dict[str, Any], words: str) -> str:
         """The label of the owner's ✏️ words for this clip, from their meaning (km.tag_label): ordinary activity at a
@@ -1488,7 +1660,7 @@ class OwnerAgentV2:
             settings = {}
         box_lang = str(settings.get("owner_language") or "en")
         lang = state.language_for(speaker, text, default=box_lang)
-        failed = False
+        failed = no_ai = False
         try:
             snapshot = self.registry.snapshot()
         except Exception as exc:  # noqa: BLE001
@@ -1504,6 +1676,7 @@ class OwnerAgentV2:
             except (TypeError, ValueError, OverflowError, OSError):
                 log.warning("Ignoring malformed alert timestamp")
                 alert["ts"] = 0.0
+            ctx.alert_event = alert
             ctx.alert_handle = state.add_handle("event", str(alert["alert_id"]), str(alert.get("camera") or ""),
                                                 float(alert.get("ts") or 0), str(alert.get("summary") or ""))
         pending, state.pending = state.pending, None
@@ -1546,6 +1719,20 @@ class OwnerAgentV2:
                 return self._undo(chat_id, house_out.undo, who)
             called += [r.tool for r in ctx.receipts]
         code_only = house_out.handled and not house_out.rest
+        if known_done is None and choice is None and snapshot is not None and not code_only:
+            # 2026-10-10: "זה הבית של השכן" is a place (kept for good), "don't reveal your memory" is agreed, and an
+            # insult gets one apology with the fix - in code, never "עד מתי לזכור" or the memory status.
+            try:
+                known_done = (self._place_answer(ctx, text, alert, snapshot, now)
+                              or self._private_answer(ctx, text)
+                              or self._explain_place(ctx, text, snapshot, now)
+                              or (self._fix_gap(ctx, text, snapshot, alert, now) if human.is_angry(text) else None)
+                              or self._apology(ctx, text, alert, snapshot, now))
+            except Exception as exc:  # noqa: BLE001 - the model still gets the message
+                log.warning("Place / apology not answered in code: %s", exc)
+                known_done = None
+            if known_done is not None:
+                called += [r.tool for r in ctx.receipts]
         if known_done is None and choice is None and snapshot is not None and not code_only:
             # "אלה אותם אנשים?" / "אתה בטוח?" from evidence, and "למה אתה לא נותן הסבר?" from the photos just sent
             # (2026-10-09 13:02 and 13:05): answered in code, never a question back or an unbacked "כן, אני בטוח".
@@ -1620,7 +1807,8 @@ class OwnerAgentV2:
                     focus.append(house.context_line(self.services.house, now))
                 except Exception as exc:  # noqa: BLE001
                     log.warning("House state not read for the context: %s", exc)
-            focus += memory_lines(self.services, state, snapshot, alert, lang, now)
+            focus += memory_lines(self.services, state, snapshot, alert, lang, now, text,
+                                  km.asks_memory(text) or km.asks_history(text))
             same = (reply_guard.same_people_lines(getattr(self.services, "events", None), snapshot, lang, now)
                     if reply_guard.asks_same_people(text) else [])
             focus += same
@@ -1696,7 +1884,7 @@ class OwnerAgentV2:
                             # "עדיין לא שמרתי מי הם" / "לא שמרתי כלום" is false when they ARE remembered (2026-10-09
                             # replay): the claim goes, no "not saved" line, and what is live when nothing is left.
                             answer = (honest_answer(answer, ctx.receipts, lang, ctx.text, say_not_done=False)
-                                      or live_status(self.services, snapshot, lang, now))
+                                      or not_understood(state, snapshot, alert, lang, now))
                         else:
                             answer = honest_answer(answer, ctx.receipts, lang, ctx.text)
                 if ctx.clarification is None and not _kept_known(ctx.receipts):
@@ -1745,6 +1933,7 @@ class OwnerAgentV2:
             log.warning("The agent could not handle a message: %s", exc)
             failed = True
             answer = ""
+            no_ai = _no_ai_access(exc)
         # A plain message (a question, a complaint, chit-chat) stays in the chat log only (owner, 2026-10-09): feedback/
         # holds TAGS of clips (record_verdict, retag_clip, the alert's buttons and ✏️), never conversation.
         try:
@@ -1752,6 +1941,12 @@ class OwnerAgentV2:
             # When the Memory Keeper saved who is there, its line is the reply: a verdict filed for the same
             # message is not repeated to the owner.
             shown = [r for r in ctx.receipts if not (_kept_known(ctx.receipts) and r.tool == "record_verdict")]
+            if ctx.clarification is not None and human.generic_sentences(str(ctx.clarification.get("question") or "")) \
+                    and not human.drop_generic(str(ctx.clarification.get("question") or "")):
+                # "מה תרצה לשנות או להוסיף?" [לתקן את סימון העובדים] ... (2026-10-10 15:14): never asked.
+                log.warning("reply guard: a robotic question dropped: %s", ctx.clarification.get("question"))
+                ctx.clarification = None
+                answer = answer or not_understood(state, snapshot, alert, lang, now)
             if ctx.clarification is not None:
                 reply_text = ctx.clarification["question"]
                 if shown:
@@ -1763,7 +1958,13 @@ class OwnerAgentV2:
                                      token=uuid.uuid4().hex[:8])
             else:
                 # No closing offers ("אם יש משהו נוסף… אני כאן"), owner decision 2026-10-08.
-                said = t("unavailable", lang) if failed else strip_boilerplate(answer)
+                said = (t("ai_no_access" if no_ai else "unavailable", lang) if failed
+                        else strip_boilerplate(strip_internals(answer)))
+                if not failed and not code_only and str(said or "").strip():
+                    # The model's own words never bring up a mark this message is not about (2026-10-10); a code
+                    # answer (evidence, a receipt) says what it was built to say.
+                    kept = self._keep_private(ctx, text, said, now)
+                    said = kept if kept.strip() else not_understood(state, snapshot, alert, lang, now)
                 # A photo sent in this very turn is right there above the answer: no "✓ התמונה נשלחה" line under it
                 # (2026-10-09 12:47). Without an answer the receipt is the reply, as before.
                 lines = [r for r in shown if not _photo_just_sent(r)] if str(said or "").strip() else shown
@@ -1773,7 +1974,7 @@ class OwnerAgentV2:
                     lines = [r for r in lines if not (r.status == FAILED and r.reason == "too_many")]
                 reply_text = render_reply(said, lines, lang, self.retention_days, snapshot)
                 if not reply_text:
-                    reply_text = t("unavailable" if failed else "nothing_done", lang)
+                    reply_text = t(("ai_no_access" if no_ai else "unavailable") if failed else "nothing_done", lang)
                 elif not failed and not house_out.handled:     # a status asked for may read alike
                     reply_text = self._final_reply(ctx, text, reply_text, now, usage)
                 elif not answer and is_complaint(text) and any(

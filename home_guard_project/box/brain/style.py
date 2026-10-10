@@ -177,12 +177,51 @@ def name_numbered_cameras(text: str, cameras: Iterable[str] = ()) -> str:
     return _NUMBERED_EN.sub(lambda m: names.get(m.group(1), m.group(0)), out)
 
 
+# The box's own bookkeeping, which the model sometimes copies from the history into its answer (2026-10-09 18:41:
+# "... התמונה ברורה.\n✓ התמונה נשלחה (פרגולה)\n[handles: E30=photo פרגולה Fri 09 Oct 18:41 | receipts: R1
+# check_camera פרגולה done]"). Never shown to the owner.
+_INTERNAL_BRACKET = re.compile(r"\[[^\[\]\n]*\b(?:handles?|receipts?)\s*:[^\[\]\n]*\]?", re.IGNORECASE)
+_INTERNAL_LINE = re.compile(
+    r"^\s*(?:(?:handles?|receipts?|tools?|tool_calls?)\s*:|R\d+\s+[a-z_]{3,}\b|E\d+\s*=\s*(?:photo|event|clip|video)\b|"
+    r"\[(?:ALERT|BOX|LIVE MARKS|OWNER SAID TODAY|NOT COVERED|ALREADY DONE THIS TURN)\b)", re.IGNORECASE)
+_PHOTO_SENT_LINE = re.compile(r"^\s*✓\s*(?:התמונה נשלחה|Photo sent|تم إرسال الصورة)", re.IGNORECASE)
+# Filler about the picture itself: the owner sees the photo ("התמונה ברורה." under every look, 2026-10-09).
+_FILLER = re.compile(r"(?:(?<=^)|(?<=[\s.!?]))(?:התמונה|התמונות|הצילום)\s+(?:ברורה|ברורות|ברור|חדה|חדות)(?:\s+מאוד)?\s*[.!]?"
+                     r"|\b(?:The|This)\s+(?:picture|image|photo)\s+is\s+(?:very\s+)?(?:clear|sharp)\s*[.!]?",
+                     re.IGNORECASE)
+
+
+def strip_internals(text: str) -> str:
+    """*text* without the box's bookkeeping (``[handles: … | receipts: …]``, "R1 check_camera … done", a "✓ התמונה
+    נשלחה" line under an answer) and without "התמונה ברורה." filler. A text that is ONLY a photo receipt stays: it
+    is then the reply. Never raises."""
+    if not isinstance(text, str) or not text.strip():
+        return text if isinstance(text, str) else ""
+    try:
+        lines = []
+        for line in text.split("\n"):
+            line = _INTERNAL_BRACKET.sub("", line)
+            if _INTERNAL_LINE.match(line):
+                continue
+            lines.append(_FILLER.sub("", line).rstrip())
+        real = [ln for ln in lines if ln.strip() and not _PHOTO_SENT_LINE.match(ln)]
+        if real:
+            lines = [ln for ln in lines if not _PHOTO_SENT_LINE.match(ln)]
+        out = "\n".join(lines)
+        out = re.sub(r"\n{3,}", "\n\n", out).strip()
+        out = re.sub(r"[ \t]{2,}", " ", out)
+        return out
+    except Exception as exc:  # noqa: BLE001 - a filter must never stop an answer
+        log.warning("Internals not stripped: %s", exc)
+        return text
+
+
 def clean_outgoing(text: str, cameras: Iterable[str] = (), lang: Optional[str] = None) -> str:
     """The text as it may reach the owner. Never raises; never returns "" for a non-empty text."""
     if not isinstance(text, str) or not text.strip():
         return text if isinstance(text, str) else ""
     try:
-        out = replace_camera_ids(strip_boilerplate(text), cameras, lang)
+        out = replace_camera_ids(strip_boilerplate(strip_internals(text)), cameras, lang)
         return out if out.strip() else "👍"
     except Exception as exc:  # noqa: BLE001 - a filter must never stop an answer
         log.warning("Outgoing text not cleaned: %s", exc)

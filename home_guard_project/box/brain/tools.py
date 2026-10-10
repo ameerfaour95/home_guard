@@ -118,6 +118,7 @@ class ToolContext:
     vision_notes: List[str] = field(default_factory=list)                 # vision answers, kept in the history
     results: List[str] = field(default_factory=list)                      # every tool result of the turn, as JSON
     extra_rows: List[Any] = field(default_factory=list)                   # more button rows for the reply (↩ תיוג)
+    alert_event: Optional[Dict[str, Any]] = None                          # the alert this message answers, if any
 
 
 def _err(message: str, **extra: Any) -> Dict[str, Any]:
@@ -1672,6 +1673,12 @@ def mark_known(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     if not identifies_people(ctx.text):
         return _err("Not saved: this message says what happened, not who the people are. Do not call mark_known; "
                     "answer the message itself.")
+    from ..place_facts import place_statement  # noqa: PLC0415
+
+    if place_statement(ctx.text):
+        # "זה הבית של השכן" (2026-10-10) was saved as people and asked "עד מתי לזכור את הבית של השכן?".
+        return _err("Not saved: the owner named a PLACE (whose house, yard or street it is), not people. A place is "
+                    "permanent and the box keeps it itself; never ask until when. Answer in one short line.")
     if is_routine(ctx.text) and not ctx.alert_handle and not km.work_group(ctx.text):
         return _err("Not saved: a routine ('sometimes', 'every day') is not learned yet. Tell the owner in one line "
                     "that you cannot learn routines yet, and that replying 'זה אני' / 'these are mine' to an alert "
@@ -2199,6 +2206,8 @@ def camera_fact(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
                               {"camera": camera, "role": role, "old_role": old, "already": old == role}),
                        note="The box writes the confirmation; reply with an empty answer.")
     if args.get("remove"):
+        from ..camera_profiles import PLACE_KEYS  # noqa: PLC0415
+
         wanted = " ".join(str(args.get("fact") or words).split()).casefold()
         rows = store.house_facts() if whole_house else store.facts(camera)
         hits = [f for f in rows if f.get("id") == args.get("fact") or wanted in str(f.get("text") or "").casefold()
@@ -2212,7 +2221,7 @@ def camera_fact(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         key, fact = removed
         detail = {"camera": camera, "fact": str(fact.get("text") or ""), "fact_id": str(fact.get("id")),
                   "removed": True, "whole_house": whole_house, "key": key,
-                  "restore": {k: fact[k] for k in ("id", "text", "by", "at") if k in fact}}
+                  "restore": {k: fact[k] for k in ("id", "text", "by", "at") + PLACE_KEYS if k in fact}}
         return _result(_issue(ctx, "camera_fact", DONE, camera, detail),
                        note="The box writes the confirmation; reply with an empty answer.")
     try:

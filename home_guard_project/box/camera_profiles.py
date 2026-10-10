@@ -83,6 +83,18 @@ _RESIDENTS = re.compile(rf"(?:גרים|גרות|גר|אנחנו|we are|there are
                         rf"(\d+|{'|'.join(_HE_COUNT)})", re.IGNORECASE)
 
 
+PLACE_KEYS = ("kind", "owner", "region", "zone", "alert_id")     # a place fact's own fields (add_place)
+
+
+def _box(region: Any) -> Optional[List[float]]:
+    """``[x1, y1, x2, y2]`` inside 0..1 with x1 < x2 and y1 < y2, else None."""
+    try:
+        x1, y1, x2, y2 = (min(1.0, max(0.0, float(v))) for v in list(region)[:4])
+    except (TypeError, ValueError):
+        return None
+    return [round(x1, 4), round(y1, 4), round(x2, 4), round(y2, 4)] if x1 < x2 and y1 < y2 else None
+
+
 def default_path() -> str:
     from . import paths  # noqa: PLC0415
 
@@ -257,6 +269,49 @@ class CameraProfiles:
             log.info("camera fact saved for %s: %s", camera or "the house", text)
             return dict(fact, rule=parse_rule(text))
 
+    def add_place(self, camera: str, text: str, owner: str, region: Optional[Sequence[float]] = None,
+                  zone: str = "", alert_id: str = "", by: str = "owner", now: Optional[float] = None) -> Dict[str, Any]:
+        """Keep a PLACE the owner named in an alert's picture ("זה הבית של השכן", 2026-10-10): whose it is (*owner*:
+        neighbour / public / mine), where in the picture (*region*, ``[x1, y1, x2, y2]`` of 0..1, from the alert's
+        people) and the scene map's area (*zone*) when there is a map. Permanent, like every camera fact; the same
+        words at the same camera again widen the region instead of adding a second fact (``already``)."""
+        text = " ".join(str(text or "").split())[:MAX_FACT_CHARS]
+        if not text or not str(camera or ""):
+            raise ValueError("nothing to remember")
+        box = _box(region)
+        now = float(self.clock()) if now is None else float(now)
+        with self._lock:
+            data = self._read()
+            entry = self._entry(data, str(camera), create=True)
+            facts = [f for f in entry.get("facts") or [] if isinstance(f, dict)]
+            same = next((f for f in facts if f.get("kind") == "place"
+                         and " ".join(str(f.get("text") or "").split()).casefold() == text.casefold()), None)
+            if same is not None:
+                old = _box(same.get("region"))
+                if box and old:
+                    same["region"] = [min(old[0], box[0]), min(old[1], box[1]), max(old[2], box[2]),
+                                      max(old[3], box[3])]
+                elif box:
+                    same["region"] = box
+                if zone and not same.get("zone"):
+                    same["zone"] = str(zone)
+                entry["facts"] = facts
+                self._write(data)
+                return dict(same, already=True, rule=parse_rule(text))
+            if len(facts) >= MAX_FACTS:
+                raise ValueError(f"at most {MAX_FACTS} facts per camera; remove one first")
+            fact = {"id": "CF" + uuid.uuid4().hex[:8], "text": text, "by": str(by or "owner"), "at": now,
+                    "kind": "place", "owner": str(owner or ""), "region": box, "zone": str(zone or ""),
+                    "alert_id": str(alert_id or "")}
+            entry["facts"] = facts + [fact]
+            self._write(data)
+            log.info("place saved for %s: %s (%s, region %s, zone %s)", camera, text, owner, box, zone or "-")
+            return dict(fact, rule=parse_rule(text))
+
+    def places(self, camera: str) -> List[Dict[str, Any]]:
+        """The places the owner named at *camera* (add_place), oldest first."""
+        return [f for f in self.facts(camera) if f.get("kind") == "place"]
+
     def remove_fact(self, fact_id: str) -> Optional[Tuple[str, Dict[str, Any]]]:
         """Remove a fact by its id; ``(camera key, the fact)`` or None when it is not there."""
         with self._lock:
@@ -281,7 +336,7 @@ class CameraProfiles:
             facts = [f for f in entry.get("facts") or [] if isinstance(f, dict)]
             if any(f.get("id") == fact["id"] for f in facts):
                 return False
-            entry["facts"] = facts + [{k: fact[k] for k in ("id", "text", "by", "at") if k in fact}]
+            entry["facts"] = facts + [{k: fact[k] for k in ("id", "text", "by", "at") + PLACE_KEYS if k in fact}]
             self._write(data)
             return True
 

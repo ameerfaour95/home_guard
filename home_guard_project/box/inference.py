@@ -356,11 +356,26 @@ def owner_guard(text: str, camera: str, lang: str) -> str:
         return text
 
 
+def carry_renamed_memory(cameras: Sequence[str]) -> None:
+    """Before the books open: what the owner told the box under a camera's old id (site rename) moves to its new id
+    (memory_rename.py, with a backup; 2026-10-10 the pergola workers' marks stayed on ameer_week_0_1_*). Never
+    raises."""
+    try:
+        from .memory_rename import box_cameras, carry_memory  # noqa: PLC0415
+
+        moved = carry_memory(box_cameras() or list(cameras), paths.state_dir())
+        if moved:
+            log.info("Owner memory carried to the renamed cameras: %s", moved)
+    except Exception as exc:  # noqa: BLE001 - the alerts go on with the memory as it was
+        log.warning("Owner memory not carried over the camera rename: %s", exc)
+
+
 def start_events(box_settings: Mapping[str, Any]) -> Any:
     """Start the box's event book (events.py) once, in the state folder; box.yaml ``notify_normal`` (default off)
     lets the first normal of an event be a message. Never raises: without a book alerts go out as before."""
     global EVENTS, AI_FAILED_NOTIFY
     AI_FAILED_NOTIFY = _on_off(box_settings.get("ai_failed_notify", False), "ai_failed_notify")
+    carry_renamed_memory(KNOWN_CAMERAS)       # before the book reads known.json (the case journal is read per use)
     try:
         from . import events  # noqa: PLC0415
 
@@ -466,10 +481,18 @@ def baseline_look(camera: str, alert_ts: float, label: str, text: str,
 _PLACEHOLDERS = ("an empty string", "empty string")
 
 
+# The summary when the model gave none (the detector's word only). Kept in English in the records; the owner reads it
+# in the box language (2026-10-10 12:34: "מה קורה: a person or vehicle was detected." in a Hebrew alert).
+DETECTED_ONLY = "a person or vehicle was detected"
+_DETECTED_ONLY_TEXT = {"he": "זוהה אדם או רכב", "ar": "تم رصد شخص أو مركبة"}
+
+
 def owner_summary(summary: str, summary_owner: str, lang: str) -> str:
     """The summary the owner reads: the model's *summary_owner* in the box language when it is not English and the
     model really wrote one; otherwise *summary*. An English prompt asks for summary_owner as "<an empty string>",
     and a model sometimes copies that placeholder word for word, so it never reaches the owner."""
+    if (summary or "").strip() == DETECTED_ONLY and lang in _DETECTED_ONLY_TEXT and not (summary_owner or "").strip():
+        return _DETECTED_ONLY_TEXT[lang]
     text = (summary_owner or "").strip()
     if lang == "en" or not text:
         return summary
@@ -2322,6 +2345,35 @@ def _explained_suspicious(event: Any, camera: str, alert_ts: float, text: str, d
         return event
 
 
+def _owner_place_quiet(event: Any, job: Optional[AlertJob], camera: str, decision: Dict[str, Any]) -> Any:
+    """A suspicious whose people all stayed inside a place the owner said is the neighbour's (or the street) at this
+    camera ("זה הבית של השכן", 2026-10-10; place_facts.py): kept, not sent - "neighbour's place (owner said)". Someone
+    who leaves it onto the owner's ground still goes out; an escalation never comes here. Never raises."""
+    tracks = getattr(job, "tracker_tracks", None) if job is not None else None
+    if not tracks:
+        return event
+    try:
+        import dataclasses  # noqa: PLC0415
+
+        from . import place_facts, scene_map  # noqa: PLC0415
+        from .camera_profiles import PROFILES_NAME, CameraProfiles  # noqa: PLC0415
+
+        events_dir = getattr(EVENTS, "directory", "") or os.path.join(paths.state_dir(), "events")
+        profiles = CameraProfiles(os.path.join(events_dir, PROFILES_NAME))
+        if not profiles.places(camera):
+            return event
+        place = place_facts.quiet_place(camera, tracks, profiles, scene_map.load_scene_map(camera))
+        if place is None:
+            return event
+        reason = place_facts.reason_of(place)
+        decision["owner_place"] = {"fact": place.get("id"), "text": place.get("text"), "owner": place.get("owner")}
+        log.info("[%s] kept quiet: %s (\"%s\")", camera, reason, place.get("text"))
+        return dataclasses.replace(event, notify=False, reason=reason)
+    except Exception as exc:  # noqa: BLE001 - the alert goes out as before
+        log.warning("[%s] owner's places not applied: %s", camera, exc)
+        return event
+
+
 def _alert_ground(job: Optional[AlertJob], camera: str, reason: str) -> Dict[str, Any]:
     """Where the alert's people were by the camera's scene map (ground.py), with ``action`` (the Eye's reason names
     something done): ``ground.Ground.record()`` plus ``action``, or {} without a map, without tracks, or on any
@@ -2874,7 +2926,7 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
         # at least a [send_message]; the model's label can raise it (LABEL_COMMANDS).
         cmd = LABEL_COMMANDS.get(label, "[send_message]")
         if not summary:
-            summary = "a person or vehicle was detected"
+            summary = DETECTED_ONLY
         reason = str(parsed.get("alert_reason", "")) if parsed else ""
         why = str(parsed.get("why") or "").strip() if parsed else ""
         summary_owner = str(parsed.get("summary_owner") or "").strip() if parsed else ""
@@ -3005,6 +3057,8 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                                                    detector_people=_detector_people(job) if ai_failed else 0)
         if label == "suspicious" and event is not None and event.notify:
             event = _explained_suspicious(event, camera_name, alert_ts, f"{why} {reason} {summary}", decision)
+        if label == "suspicious" and event is not None and event.notify:
+            event = _owner_place_quiet(event, job, camera_name, decision)
         rarity_line = ""
         if usual.get("raise") and (event is None or event.notify):
             rarity_line = str((usual.get("text_he") if lang == "he" else usual.get("text_en")) or "")
@@ -3084,6 +3138,8 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
 
                     # Already in the owner's language: nothing for the translator to do.
                     told_text, owner_why = ai_unavailable(detected_fact_kinds(labels), lang, bool(image)), why if fact else ""
+                elif summary == DETECTED_ONLY and not summary_owner:
+                    pass                    # the detector's word only: owner_summary already wrote it in his language
                 elif messenger.uses_translator(box_settings, lang):
                     # A house note's reason is already in the box language; only the model's own why is translated.
                     told = messenger.messenger_for(box_settings, env).to_owner(
