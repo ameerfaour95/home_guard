@@ -66,6 +66,8 @@ class ConversationStore:
             tmp = path + ".tmp"
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump({"messages": messages}, f)
+                f.flush()
+                os.fsync(f.fileno())
             os.replace(tmp, path)
         except OSError as exc:
             log.warning("Could not save conversation for %s: %s", chat_id, exc)

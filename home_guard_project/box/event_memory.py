@@ -391,6 +391,8 @@ def save_keyframe(directory: str, event_id: str, jpeg: bytes) -> str:
         tmp = path + ".tmp"
         with open(tmp, "wb") as f:
             f.write(jpeg)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, path)
         return path
     except OSError as exc:
@@ -468,6 +470,8 @@ class EventMemory:
                     for r in keep:
                         row = {key: value for key, value in r.items() if key != "change_to_next"}   # derived on read
                         f.write(json.dumps(row, ensure_ascii=False, default=str) + "\n")
+                    f.flush()
+                    os.fsync(f.fileno())
                 os.replace(tmp, self.path)
                 self._cache = None
             folder = os.path.join(self.directory, KEYFRAMES_DIR)

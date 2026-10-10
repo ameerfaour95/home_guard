@@ -147,6 +147,8 @@ def _write_doc(doc: Dict[str, Dict[str, Any]], path: str) -> None:
         with open(tmp, "w", encoding="utf-8") as f:
             f.write(_HEADER)
             yaml.dump(clean, f, default_flow_style=None, allow_unicode=True, sort_keys=False)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, path)
     finally:
         if os.path.exists(tmp):

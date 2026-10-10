@@ -41,6 +41,8 @@ def _save(data: Dict[str, List[str]], path: str) -> None:
     with open(tmp, "w", encoding="utf-8") as f:
         f.write("# The owner's names for each camera (set in the app or by chat).\n")
         yaml.safe_dump({k: v for k, v in sorted(data.items()) if v}, f, allow_unicode=True)
+        f.flush()
+        os.fsync(f.fileno())
     os.replace(tmp, path)
 
 

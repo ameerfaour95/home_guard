@@ -41,6 +41,8 @@ def box_id(path: Optional[str] = None, create: bool = True) -> Optional[str]:
         tmp = f"{path}.tmp"
         with open(tmp, "w", encoding="ascii") as f:
             f.write(value + "\n")
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, path)
     except OSError:
         return None

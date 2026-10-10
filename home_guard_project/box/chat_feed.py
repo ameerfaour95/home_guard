@@ -73,6 +73,8 @@ class ChatFeed:
         tmp = f"{self.path}.tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             f.writelines(kept)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, self.path)
         wanted = {entry.get("image") for entry in _parse(kept)}
         if os.path.isdir(self.image_dir):

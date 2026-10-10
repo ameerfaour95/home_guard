@@ -92,6 +92,8 @@ def write_desc(desc_dir: str, alert_id: str, key: str, value: Dict[str, Any]) ->
         try:
             with open(tmp, "w", encoding="utf-8") as f:
                 f.write(serialized)
+                f.flush()
+                os.fsync(f.fileno())
             os.replace(tmp, path)
         except BaseException:
             try:

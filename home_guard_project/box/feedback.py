@@ -410,6 +410,8 @@ def _write_json(path: str, data: Any) -> None:
     tmp = f"{path}.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         f.write(payload)
+        f.flush()
+        os.fsync(f.fileno())
     os.replace(tmp, path)
 
 

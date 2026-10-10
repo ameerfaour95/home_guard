@@ -25,7 +25,10 @@ class ViewerPreference:
         descriptor,name=tempfile.mkstemp(prefix='viewer-',suffix='.tmp',dir=self.path.parent)
         temporary=Path(name)
         try:
-            with os.fdopen(descriptor,'w',encoding='utf-8') as stream: json.dump(asdict(settings),stream)
+            with os.fdopen(descriptor,'w',encoding='utf-8') as stream:
+                json.dump(asdict(settings),stream)
+                stream.flush()
+                os.fsync(stream.fileno())
             os.replace(temporary,self.path)
         finally: temporary.unlink(missing_ok=True)
 
@@ -44,7 +47,10 @@ class LanguagePreference:
         descriptor,name=tempfile.mkstemp(prefix='language-',suffix='.tmp',dir=self.path.parent)
         temporary=Path(name)
         try:
-            with os.fdopen(descriptor,'w',encoding='utf-8') as stream: json.dump({'language':language},stream)
+            with os.fdopen(descriptor,'w',encoding='utf-8') as stream:
+                json.dump({'language':language},stream)
+                stream.flush()
+                os.fsync(stream.fileno())
             os.replace(temporary,self.path)
         finally: temporary.unlink(missing_ok=True)
 
@@ -90,6 +96,8 @@ class AddressPreference:
         try:
             with os.fdopen(descriptor,'w',encoding='utf-8') as stream:
                 json.dump(data,stream)
+                stream.flush()
+                os.fsync(stream.fileno())
             os.replace(temporary,self.path)
         finally: temporary.unlink(missing_ok=True)
 
@@ -116,5 +124,7 @@ class InstallerPreference:
         try:
             with os.fdopen(descriptor, 'w', encoding='utf-8') as stream:
                 json.dump({'installer': name}, stream, ensure_ascii=False)
+                stream.flush()
+                os.fsync(stream.fileno())
             os.replace(temporary, self.path)
         finally: temporary.unlink(missing_ok=True)

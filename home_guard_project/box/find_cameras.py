@@ -153,6 +153,8 @@ def _write_cameras(active: Dict[str, str], disabled: Dict[str, str], path: str =
     with open(tmp, "w", encoding="utf-8") as f:
         f.write(_YAML_HEADER)
         yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
+        f.flush()
+        os.fsync(f.fileno())
     os.replace(tmp, path)
 
 

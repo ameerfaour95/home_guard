@@ -88,6 +88,8 @@ class Embedder:
         try:
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(self._cache, f)
+                f.flush()
+                os.fsync(f.fileno())
             os.replace(tmp, self._cache_path)
         except OSError as exc:
             log.warning("Could not save embedding cache: %s", exc)

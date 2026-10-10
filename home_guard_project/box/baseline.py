@@ -388,6 +388,8 @@ class Baseline:
         tmp = self.path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, self.path)
         self._cache = None
 

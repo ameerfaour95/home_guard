@@ -176,6 +176,8 @@ def _write_chat_state(path: str, last_ts: float, at_last: set) -> None:
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump({"last_ts": last_ts, "at_last_ts": sorted(at_last), "updated": time.time()}, f)
+        f.flush()
+        os.fsync(f.fileno())
     os.replace(tmp, path)
 
 
@@ -287,6 +289,8 @@ def copy_usage_ledger(usage_dir: str, site_outbox: str, state_path: str) -> int:
             tmp = dst + ".tmp"
             with open(tmp, "wb") as f:
                 f.write(data)
+                f.flush()
+                os.fsync(f.fileno())
             os.replace(tmp, dst)
             state[name] = len(data)
             copied += 1
@@ -295,6 +299,8 @@ def copy_usage_ledger(usage_dir: str, site_outbox: str, state_path: str) -> int:
             tmp = state_path + ".tmp"
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump({"sizes": state, "updated": time.time()}, f)
+                f.flush()
+                os.fsync(f.fileno())
             os.replace(tmp, state_path)
     except OSError as exc:
         log.warning("AI usage ledger not copied to the outbox (will retry next run): %s", exc)

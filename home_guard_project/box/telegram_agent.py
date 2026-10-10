@@ -909,6 +909,8 @@ class TelegramInbox:
         tmp = f"{self.offset_path}.tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump({"offset": self._offset}, f)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, self.offset_path)
 
     # -- sending ----------------------------------------------------------------

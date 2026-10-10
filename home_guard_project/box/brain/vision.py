@@ -225,6 +225,8 @@ class BudgetedVision:
                     temp = os.fspath(self.path) + ".tmp"
                     with open(temp, "w", encoding="utf-8") as f:
                         json.dump(data, f, allow_nan=False)
+                        f.flush()
+                        os.fsync(f.fileno())
                     os.replace(temp, self.path)
                 except (OSError, ValueError, TypeError):
                     self._warn_once("write", "Vision budget not saved; keeping the in-memory count")

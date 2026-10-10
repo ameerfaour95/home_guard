@@ -304,5 +304,7 @@ def write_alert_clip(
     tmp = f"{meta_path}.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
     os.replace(tmp, meta_path)
     return meta_path

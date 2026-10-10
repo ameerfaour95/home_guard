@@ -278,6 +278,8 @@ class EventBook:
         tmp = self.known_path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump([asdict(k) for k in self._known], f, ensure_ascii=False, indent=1)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, self.known_path)
 
     def _archive(self, s: Session) -> None:

@@ -346,6 +346,8 @@ class ChatMemory:
             tmp = path + ".tmp"
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(state.to_dict(), f, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
             os.replace(tmp, path)
         except Exception as exc:
             log.warning("Could not save the chat %s: %s", chat_id, exc)

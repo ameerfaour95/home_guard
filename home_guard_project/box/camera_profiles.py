@@ -174,6 +174,8 @@ class CameraProfiles:
         tmp = f"{self.path}.{uuid.uuid4().hex[:6]}.tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=1)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, self.path)
 
     def data(self) -> Dict[str, Any]:

@@ -127,5 +127,7 @@ def write(root_dir: str, meta_path: str, tracks: Iterable[Mapping[str, Any]],
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(doc, f, ensure_ascii=False)
+        f.flush()
+        os.fsync(f.fileno())
     os.replace(tmp, path)
     return path

@@ -238,6 +238,8 @@ class ActivityBook:
         tmp = self.path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump([asdict(x) for x in keep], f, ensure_ascii=False, indent=1)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, self.path)
         self._facts = keep
         try:
