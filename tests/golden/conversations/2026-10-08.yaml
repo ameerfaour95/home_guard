@@ -1,0 +1,210 @@
+# Golden cases from the owner's chat of 2026-10-08 (site ameer_week_0_1, shown under its current id ameer_v2).
+# Source: box production_archive/ameer_week_0_1/chat/2026-10-08.jsonl. A day of tagging with "✏️ אחר…" (each tag is a
+# case: the answer after the tag button is the clip's TAG only - no memory, no question), the raw camera id in the
+# alert header ("אתה כבר אמור לדעת איפה זה"), and the scooters clip where "רשמתי את זה כהתרעה צפויה" made him furious.
+# The map interview at 22:49 ("מפה") goes through scene_chat, not the assistant, and is not in this suite.
+defaults:
+  date: "2026-10-08"
+  house:
+    cameras: [ameer_v2_ch1, ameer_v2_ch2, ameer_v2_ch3, ameer_v2_ch5, ameer_v2_ch6, ameer_v2_ch8]
+    aliases: {ameer_v2_ch3: [פרגולה], ameer_v2_ch6: [כניסה ראשית]}
+  alerts:
+    - {id: ameer_v2_ch6_1791430933_alert, camera: ameer_v2_ch6, time: "06:42:13", label: normal, people: 1, summary: "אדם עם תיק גב הולך בשביל הכניסה, עובר ליד מכוניות חונות ועציצים."}
+    - {id: ameer_v2_ch6_1791439078_alert, camera: ameer_v2_ch6, time: "08:57:58", label: escalation, people: 1, summary: "אדם ניפץ את חלון הרכב, יצא מהרכב והלך משם. למה: התקפה על רכב"}
+    - {id: ameer_v2_ch2_1791439138_alert, camera: ameer_v2_ch2, time: "08:58:58", label: suspicious, people: 1, summary: "אדם בבגדים כהים עומד ליד רכב, מרים ידיים, ונראה מחזיק חפץ לפני שהלך משם. למה: התנהגות חשודה: אדם עומד ליד רכב, מרים ידיים, ומסתובב באופן חשוד."}
+    - {id: ameer_v2_ch6_1791446445_alert, camera: ameer_v2_ch6, time: "11:00:45", label: normal, people: 1, summary: "אדם הולך על שטח מרוצף כשהוא נושא תיק וטלפון, ועובר ליד מכונית כסופה חונה."}
+    - {id: ameer_v2_ch2_1791447179_alert, camera: ameer_v2_ch2, time: "11:12:59", label: suspicious, people: 2, summary: "אדם עם פנים מכוסות עובר ליד רכב חונה, לאחר מכן אישה עם שיער גלוי עוברת באותו אזור. למה: הופעת אדם עם פנים מוסתרות"}
+    - {id: ameer_v2_ch5_1791447217_alert, camera: ameer_v2_ch5, time: "11:13:37", label: normal, people: 1, summary: "אדם הולך לרוחב הפריים כשהוא נושא תיק וקופסה, ואז יוצא מהתצוגה."}
+    - {id: ameer_v2_ch5_1791452803_alert, camera: ameer_v2_ch5, time: "12:46:43", label: normal, people: 1, summary: "אדם לבוש חולצה לבנה וכובע נראה כאילו הוא עומד ליד קיר, אולי מתעסק עם עצם."}
+    - {id: ameer_v2_ch3_1791460040_alert, camera: ameer_v2_ch3, time: "14:47:20", label: normal, people: 1, summary: "גבר בבגדים כהים עומד על פלטפורמה ושופך מים מבקבוק."}
+    - {id: ameer_v2_ch6_1791461836_alert, camera: ameer_v2_ch6, time: "15:17:16", label: suspicious, people: 1, summary: "אדם לבוש חולצה עם פסים נושא שני סקוטר ויורד על המרפסת. הפנים שלו מוסתרות על ידי מסכה פיקסלית, מה שמעיד על התנהגות חשודה. למה: פנים מוסתרות"}
+    - {id: ameer_v2_ch6_1791462316_alert, camera: ameer_v2_ch6, time: "15:25:16", label: normal, people: 1, summary: "אשה עם גבול עוברת על מרפסת ויוצאת מהתמונה."}
+    - {id: ameer_v2_ch1_1791466890_alert, camera: ameer_v2_ch1, time: "16:41:30", label: normal, people: 1, summary: "גבר עולה במדרגות ומתקרב לדלת. הוא עומד ליד הדלת ונראה שמסתכל בטלפון."}
+    - {id: ameer_v2_ch6_1791468893_alert, camera: ameer_v2_ch6, time: "17:14:53", label: normal, people: 1, summary: "כלב רץ החוצה משער, אחריו גבר בחולצה שחורה וג'ינס שהולך על שביל הכניסה."}
+    - {id: ameer_v2_ch3_1791469192_alert, camera: ameer_v2_ch3, time: "17:19:52", label: normal, people: 1, summary: "גבר עומד ליד משאית, ואז מתרחק תוך כדי דיבור בטלפון. הוא לובש בגדים כהים."}
+  history:
+    - {time: "06:59:48", owner: "אתה כבר אמור לדעת איפה זה", bot: "נראה שלא הצלחתי להפסיק את ההתרעות. אני לא יכול לכבות את המצלמות, אבל אני יכול להפסיק את ההתרעות. האם תרצה שאעשה זאת?", about: ameer_v2_ch6_1791430933_alert}
+    - {time: "08:59:09", tag_for: ameer_v2_ch6_1791439078_alert, owner: "אדם יוצא שחנה במרכב יוצא מהרכב שלו"}
+    - {time: "09:00:47", tag_for: ameer_v2_ch2_1791439138_alert, owner: "הוא עומד ליד הרכב בחניון, נראה שהוא מדבר עם הידיים"}
+    - {time: "11:31:06", tag_for: ameer_v2_ch6_1791446445_alert, owner: "אישה הולכת בכניסה עם משהו שנראה כמו מגש"}
+    - {time: "11:31:38", tag_for: ameer_v2_ch5_1791447217_alert, owner: "אישה שהולכתכאשר היא מחזיקה קופסה"}
+    - {time: "11:33:38", tag_for: ameer_v2_ch2_1791447179_alert, owner: "אישה עוברת ליד רכב שחונה"}
+    - {time: "13:02:18", tag_for: ameer_v2_ch5_1791452803_alert, owner: "אישה עם חולצה לבנה ופנדנה על הראש הולכת"}
+    - {time: "14:48:43", tag_for: ameer_v2_ch3_1791460040_alert, owner: "גבר בשחור עומד באזור בניה בחצר ושופך מים"}
+    - {time: "15:28:57", tag_for: ameer_v2_ch6_1791462316_alert, owner: "אישה יוצא מהכניסה של הבית כאשר סוחבת תיק על הגב שלה"}
+    - {time: "15:29:15", owner: "🟢 תקין (כפתור, על הסרטון של 15:17)", bot: "✓ נשמר: תקין", about: ameer_v2_ch6_1791461836_alert}
+    - {time: "15:30:13", owner: "אישה יוצאת מהכניסה לבית כאשר היא מחזיקה בשני סקוטרים ויורדת לכיוון האוטו בחניה עם תא המטען פתוח", bot: "רשמתי את זה כהתרעה אמיתית, אבל התיאור היה לא מדויק. אם יש משהו נוסף שתרצה לדעת, אני כאן!"}
+    - {time: "15:31:01", owner: "זה לא התרעה זה תקין", bot: "רשמתי את זה כהתרעה צפויה. אם יש משהו נוסף שתרצה, אני כאן!"}
+    - {time: "15:31:23", owner: "לא חתיכת מטומטם לא !", bot: "רשמתי את זה כהתרעה צפויה. תודה על ההבהרה!"}
+    - {time: "16:55:00", tag_for: ameer_v2_ch1_1791466890_alert, owner: "גבר לבוש לבן עולה במדרגות ליד הבית"}
+    - {time: "17:18:50", tag_for: ameer_v2_ch6_1791468893_alert, owner: "גבר לובש גינס וחולצה שחורה נכנס מהשער הפתוח"}
+
+cases:
+  - id: g08_01
+    source: "2026-10-08 06:59:48"
+    time: "06:59:48"
+    message: {text: "אתה כבר אמור לדעת איפה זה", reply_to: ameer_v2_ch6_1791430933_alert}
+    expect:
+      intent: complaint
+      forbid_writes: [tag, pause, camera_off]
+      max_questions: 0
+      must_not: ["להפסיק את ההתרעות", "לכבות"]
+      must_include_any: ["כניסה ראשית|הכניסה הראשית"]
+      ideal: "צודק — זו הכניסה הראשית. ככה היא תופיע מעכשיו."
+    notes: "The 06:42 alert came with the raw id ameer_week_0_1_ch6 in its header; he had named it 'כניסה ראשית' two nights before. The real bot offered to pause the alerts."
+
+  - id: g08_02
+    source: "2026-10-08 08:59:09"
+    time: "08:59:09"
+    message: {text: "אדם יוצא שחנה במרכב יוצא מהרכב שלו", reply_to: ameer_v2_ch6_1791439078_alert, via: tag}
+    expect:
+      intent: tag_only
+      writes: [{type: tag}]
+      forbid_writes: [person_mark, activity, place_fact]
+      max_questions: 0
+      ideal: "🏷️ נשמר כתיוג לסרטון 08:57 (כניסה ראשית): אדם שחנה יוצא מהרכב שלו."
+    notes: "The red 'smashed the car window' was a man getting out of his parked car."
+
+  - id: g08_03
+    source: "2026-10-08 09:00:47"
+    time: "09:00:47"
+    message: {text: "הוא עומד ליד הרכב בחניון, נראה שהוא מדבר עם הידיים", reply_to: ameer_v2_ch2_1791439138_alert, via: tag}
+    expect:
+      intent: tag_only
+      writes: [{type: tag}]
+      forbid_writes: [person_mark, activity, place_fact]
+      max_questions: 0
+      ideal: "🏷️ נשמר כתיוג לסרטון 08:58 (מצלמה 2): עומד ליד הרכב בחניון ומדבר עם הידיים."
+
+  - id: g08_04
+    source: "2026-10-08 11:31:06"
+    time: "11:31:06"
+    message: {text: "אישה הולכת בכניסה עם משהו שנראה כמו מגש", reply_to: ameer_v2_ch6_1791446445_alert, via: tag}
+    expect:
+      intent: tag_only
+      writes: [{type: tag}]
+      forbid_writes: [person_mark, activity, place_fact]
+      max_questions: 0
+      ideal: "🏷️ נשמר כתיוג לסרטון 11:00 (כניסה ראשית): אישה הולכת בכניסה עם משהו שנראה כמו מגש."
+
+  - id: g08_05
+    source: "2026-10-08 11:31:38"
+    time: "11:31:38"
+    message: {text: "אישה שהולכתכאשר היא מחזיקה קופסה", reply_to: ameer_v2_ch5_1791447217_alert, via: tag}
+    expect:
+      intent: tag_only
+      writes: [{type: tag}]
+      forbid_writes: [person_mark, activity, place_fact]
+      max_questions: 0
+      ideal: "🏷️ נשמר כתיוג לסרטון 11:13 (מצלמה 5): אישה הולכת ומחזיקה קופסה."
+
+  - id: g08_06
+    source: "2026-10-08 11:33:38"
+    time: "11:33:38"
+    message: {text: "אישה עוברת ליד רכב שחונה", reply_to: ameer_v2_ch2_1791447179_alert, via: tag}
+    expect:
+      intent: tag_only
+      writes: [{type: tag}]
+      forbid_writes: [person_mark, activity, place_fact]
+      max_questions: 0
+      ideal: "🏷️ נשמר כתיוג לסרטון 11:12 (מצלמה 2): אישה עוברת ליד רכב שחונה."
+
+  - id: g08_07
+    source: "2026-10-08 13:02:18"
+    time: "13:02:18"
+    message: {text: "אישה עם חולצה לבנה ופנדנה על הראש הולכת", reply_to: ameer_v2_ch5_1791452803_alert, via: tag}
+    expect:
+      intent: tag_only
+      writes: [{type: tag}]
+      forbid_writes: [person_mark, activity, place_fact]
+      max_questions: 0
+      ideal: "🏷️ נשמר כתיוג לסרטון 12:46 (מצלמה 5): אישה עם חולצה לבנה ובנדנה על הראש הולכת."
+
+  - id: g08_08
+    source: "2026-10-08 14:48:43"
+    time: "14:48:43"
+    message: {text: "גבר בשחור עומד באזור בניה בחצר ושופך מים", reply_to: ameer_v2_ch3_1791460040_alert, via: tag}
+    expect:
+      intent: tag_only
+      writes: [{type: tag}]
+      forbid_writes: [person_mark, activity, place_fact]
+      max_questions: 0
+      ideal: "🏷️ נשמר כתיוג לסרטון 14:47 (פרגולה): גבר בשחור עומד באזור הבנייה בחצר ושופך מים."
+
+  - id: g08_09
+    source: "2026-10-08 15:28:57"
+    time: "15:28:57"
+    message: {text: "אישה יוצא מהכניסה של הבית כאשר סוחבת תיק על הגב שלה", reply_to: ameer_v2_ch6_1791462316_alert, via: tag}
+    expect:
+      intent: tag_only
+      writes: [{type: tag}]
+      forbid_writes: [person_mark, activity, place_fact]
+      max_questions: 0
+      ideal: "🏷️ נשמר כתיוג לסרטון 15:25 (כניסה ראשית): אישה יוצאת מהכניסה עם תיק על הגב."
+
+  - id: g08_10
+    source: "2026-10-08 15:30:13"
+    time: "15:30:13"
+    message: {text: "אישה יוצאת מהכניסה לבית כאשר היא מחזיקה בשני סקוטרים ויורדת לכיוון האוטו בחניה עם תא המטען פתוח", reply_to: ameer_v2_ch6_1791461836_alert, via: tag}
+    expect:
+      intent: tag_only
+      writes: [{type: tag}]
+      forbid_writes: [person_mark, activity, place_fact]
+      max_questions: 0
+      must_not: ["התרעה אמיתית"]
+      ideal: "🏷️ נשמר כתיוג לסרטון 15:17 (כניסה ראשית): אישה יוצאת מהבית עם שני סקוטרים ויורדת לאוטו עם תא המטען הפתוח."
+    notes: "His words for the 15:17 'pixel mask' clip, after ✏️ on it. The real bot answered 'רשמתי את זה כהתרעה אמיתית, אבל התיאור היה לא מדויק'."
+
+  - id: g08_11
+    source: "2026-10-08 15:31:01"
+    time: "15:31:01"
+    message: {text: "זה לא התרעה זה תקין", reply_to: ameer_v2_ch6_1791462316_alert}
+    expect:
+      intent: complaint
+      forbid_writes: [person_mark, activity, place_fact]
+      max_questions: 0
+      ideal: "נכון, תקין. הסרטון של 15:17 מסומן אצלי כתקין — אישה עם הסקוטרים בדרך לאוטו."
+    notes: "He is correcting the bot's 'real alert' wording; the clip is already tagged normal by his button. Agree in one line; no memory."
+
+  - id: g08_12
+    source: "2026-10-08 15:31:23"
+    time: "15:31:23"
+    message: {text: "לא חתיכת מטומטם לא !"}
+    expect:
+      intent: complaint
+      forbid_writes: [tag, person_mark, activity, place_fact]
+      max_questions: 0
+      ideal: "סליחה, טעות שלי בניסוח. הסרטון של 15:17 מסומן כתקין, ושום דבר לא נרשם כהתרעה."
+
+  - id: g08_13
+    source: "2026-10-08 16:55:00"
+    time: "16:55:00"
+    message: {text: "גבר לבוש לבן עולה במדרגות ליד הבית", reply_to: ameer_v2_ch1_1791466890_alert, via: tag}
+    expect:
+      intent: tag_only
+      writes: [{type: tag}]
+      forbid_writes: [person_mark, activity, place_fact]
+      max_questions: 0
+      ideal: "🏷️ נשמר כתיוג לסרטון 16:41 (מצלמה 1): גבר בלבן עולה במדרגות ליד הבית."
+
+  - id: g08_14
+    source: "2026-10-08 17:18:50"
+    time: "17:18:50"
+    message: {text: "גבר לובש גינס וחולצה שחורה נכנס מהשער הפתוח", reply_to: ameer_v2_ch6_1791468893_alert, via: tag}
+    expect:
+      intent: tag_only
+      writes: [{type: tag}]
+      forbid_writes: [person_mark, activity, place_fact]
+      max_questions: 0
+      ideal: "🏷️ נשמר כתיוג לסרטון 17:14 (כניסה ראשית): גבר בג'ינס וחולצה שחורה נכנס מהשער הפתוח."
+
+  - id: g08_15
+    source: "2026-10-08 17:32:06"
+    time: "17:32:06"
+    message: {text: "גבר עומד ליד טנדר, ואז מתרחק תוך כדי דיבור בטלפון. הוא לובש בגדים כהים.", reply_to: ameer_v2_ch3_1791469192_alert, via: tag}
+    expect:
+      intent: tag_only
+      writes: [{type: tag}]
+      forbid_writes: [person_mark, activity, place_fact]
+      max_questions: 0
+      ideal: "🏷️ נשמר כתיוג לסרטון 17:19 (פרגולה): גבר עומד ליד טנדר ומתרחק תוך כדי דיבור בטלפון, בבגדים כהים."

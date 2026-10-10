@@ -1,0 +1,224 @@
+# Golden cases from the owner's chat of 2026-10-04 to 2026-10-07 00:06 (sites ameer_tes2 then ameer_week_0_1, shown
+# under the current id ameer_v2). Sources: box production_archive/ameer_week_0_1/chat/2026-10-04.jsonl .. 06.jsonl
+# and logs/telegram_chat.jsonl. Pause commands, the first live questions ("יש מישהו בחוץ?" answered "all empty" with no
+# look; "אני מדבר על עכשיו"), the camera rename that was saved on a dead id, and "מדי פעם אני (עמיר) יוצא החוצה"
+# answered "רשמתי את זה כהתרעה צפויה" (memory keeper spec, plan page section 15). No camera had a name before 23:51
+# on 6.10. Times are full dates because the file spans four days.
+defaults:
+  date: "2026-10-06"
+  house:
+    cameras: [ameer_v2_ch2, ameer_v2_ch3, ameer_v2_ch5, ameer_v2_ch6, ameer_v2_ch8]
+    aliases: {}
+  alerts:
+    - {id: ameer_v2_ch5_1791115480_alert, camera: ameer_v2_ch5, time: "2026-10-04 15:04:40", label: normal, people: 2, summary: "A person walks through the area holding a phone, followed by another person carrying a bag."}
+    - {id: ameer_v2_ch3_1791115602_alert, camera: ameer_v2_ch3, time: "2026-10-04 15:06:42", label: normal, people: 3, summary: "Three people are present; one appears to be working with materials, another is using a phone, and a third is near a vehicle."}
+    - {id: ameer_v2_ch3_1791126021_alert, camera: ameer_v2_ch3, time: "2026-10-04 18:00:21", label: normal, people: 1, summary: "A man exits a parked vehicle and opens the back to access items inside."}
+    - {id: ameer_v2_ch3_1791126210_alert, camera: ameer_v2_ch3, time: "2026-10-04 18:03:30", label: normal, people: 1, summary: "A person walks towards a parked truck, opens the back, and appears to be unloading items."}
+    - {id: ameer_v2_ch6_1791137041_alert, camera: ameer_v2_ch6, time: "2026-10-04 21:04:01", label: normal, people: 1, summary: "A man walks across the driveway, wearing a black shirt and light jeans, with no objects in hand."}
+    - {id: ameer_v2_ch6_1791317682_alert, camera: ameer_v2_ch6, time: "2026-10-06 23:14:42", label: normal, people: 1, summary: "A person stands outside near a parked car, holding a phone. The person remains stationary throughout the clip."}
+    - {id: ameer_v2_ch6_1791319961_alert, camera: ameer_v2_ch6, time: "2026-10-06 23:52:41", label: suspicious, people: 1, summary: "A person with a covered face appears to be looking at a phone while standing near a wall. Why: person with covered face"}
+  history:
+    - {time: "2026-10-04 15:08:16", owner: "תכבה את המצלמות עד 18:00", bot: "ההתרעות לכל המצלמות הושתקו עד השעה 18:00. אם תרצה להחזיר אותן לפני כן, פשוט שלח \"להמשיך\"."}
+    - {time: "2026-10-04 18:02:42", tag_for: ameer_v2_ch3_1791126021_alert, owner: "בנאדם יוצא מהרכב שלו לבוש שחור"}
+    - {time: "2026-10-04 18:03:47", tag_for: ameer_v2_ch5_1791115480_alert, owner: "בנאדם לבוש בשחור הולך כאשר הוא משבר בטלפון"}
+    - {time: "2026-10-04 18:04:14", owner: "תכבה עד 20:00", bot: "ההתרעות לכל המצלמות הושתקו עד השעה 20:00. אם תרצה להחזיר אותן לפני כן, פשוט שלח \"להמשיך\"."}
+    - {time: "2026-10-04 21:05:01", owner: "תכבה את המצלמות עד 00:00", bot: "ההתרעות לכל המצלמות הושתקו עד השעה 00:00 מחר. אם תרצה להחזיר אותן לפני כן, פשוט שלח \"להמשיך\"."}
+    - {time: "2026-10-06 11:18:19", owner: "יש מישהו בחוץ?", bot: "בכל המצלמות אין אנשים, רכבים או בעלי חיים נראים. האזור נראה ריק ונקי.", photos: [ameer_v2_ch2, ameer_v2_ch3, ameer_v2_ch5, ameer_v2_ch6, ameer_v2_ch8]}
+    - {time: "2026-10-06 23:50:02", owner: "היי", bot: "היי! איך אני יכול לעזור לך היום?"}
+    - {time: "2026-10-06 23:50:40", owner: "יש משהו מעניין בחוץ?", bot: "במצלמת ameer_week_0_1_ch6 נראית דמות עומדת מחוץ ליד רכב חונה, מחזיקה טלפון. הדמות נשארת במקום לאורך כל הקטע. אם תרצה לראות את הסרטון, אני יכול לשלוח לך אותו."}
+    - {time: "2026-10-06 23:51:03", owner: "אני מדבר על עכשיו ?", bot: "במצלמת ameer_week_0_1_ch6 התמונה מראה רכב חונה וכמה צמחים. אין אנשים או בעלי חיים נראים, והאזור נראה ריק.", photos: [ameer_v2_ch6]}
+    - {time: "2026-10-06 23:51:28", owner: "אל תקרא לה יותר ככה תקרא לה כניסה ראשית", bot: "שמרתי את המצלמה ameer_tes2_ch6 כ\"כניסה ראשית\". אם יש משהו נוסף שתרצה לשאול או לשנות, אני כאן!"}
+    - {time: "2026-10-06 23:52:05", owner: "מדי פעם אני (עמיר) יוצא החוצה", bot: "רשמתי את זה כהתרעה צפויה. אם יש משהו נוסף שתרצה לדעת או לשאול, אני כאן!"}
+    - {time: "2026-10-06 23:53:06", owner: "תגיד מישהו היה בחוץ?", bot: "בשעה 23:14 במצלמת הכניסה הראשית, נראתה דמות עומדת מחוץ ליד רכב חונה, מחזיקה טלפון. הדמות נשארה במקום לאורך כל הקטע. אם תרצה לראות את הסרטון, אני יכול לשלוח לך אותו."}
+    - {time: "2026-10-07 00:05:39", owner: "מה קורה", bot: "במצלמת הכניסה הראשית, שני רכבים חונים בחניה, ויש צללים על הקרקע. אין אנשים או בעלי חיים נראים כרגע.", photos: [ameer_v2_ch6]}
+
+cases:
+  - id: g04_01
+    source: "2026-10-04 15:08:16"
+    date: "2026-10-04"
+    time: "15:08:16"
+    message: {text: "תכבה את המצלמות עד 18:00", reply_to: ameer_v2_ch3_1791115602_alert}
+    expect:
+      intent: command
+      writes: [{type: [pause, camera_off], expiry: "until:18:00"}]
+      forbid_writes: [tag]
+      max_questions: 0
+      must_include_any: ["18:00"]
+      ideal: "סגור, אין התרעות עד 18:00."
+    notes: "Sent as a reply to a green alert: a command, not a verdict on the clip."
+
+  - id: g04_02
+    source: "2026-10-04 18:02:42"
+    date: "2026-10-04"
+    time: "18:02:42"
+    message: {text: "בנאדם יוצא מהרכב שלו לבוש שחור", reply_to: ameer_v2_ch3_1791126021_alert, via: tag}
+    expect:
+      intent: tag_only
+      writes: [{type: tag}]
+      forbid_writes: [person_mark, activity, place_fact]
+      max_questions: 0
+      ideal: "🏷️ נשמר כתיוג לסרטון 18:00 (מצלמה 3): בנאדם בשחור יוצא מהרכב שלו."
+
+  - id: g04_03
+    source: "2026-10-04 18:03:47"
+    date: "2026-10-04"
+    time: "18:03:47"
+    message: {text: "בנאדם לבוש בשחור הולך כאשר הוא משבר בטלפון", reply_to: ameer_v2_ch5_1791115480_alert, via: tag}
+    expect:
+      intent: tag_only
+      writes: [{type: tag}]
+      forbid_writes: [person_mark, activity, place_fact]
+      max_questions: 0
+      ideal: "🏷️ נשמר כתיוג לסרטון 15:04 (מצלמה 5): בנאדם בשחור הולך ומשחק בטלפון."
+
+  - id: g04_04
+    source: "2026-10-04 18:04:14"
+    date: "2026-10-04"
+    time: "18:04:14"
+    message: {text: "תכבה עד 20:00", reply_to: ameer_v2_ch3_1791126210_alert}
+    expect:
+      intent: command
+      writes: [{type: [pause, camera_off], expiry: "until:20:00"}]
+      forbid_writes: [tag]
+      max_questions: 0
+      must_include_any: ["20:00"]
+      ideal: "סגור, שקט עד 20:00."
+
+  - id: g04_05
+    source: "2026-10-04 21:05:01"
+    date: "2026-10-04"
+    time: "21:05:01"
+    message: {text: "תכבה את המצלמות עד 00:00", reply_to: ameer_v2_ch6_1791137041_alert}
+    expect:
+      intent: command
+      writes: [{type: [pause, camera_off], expiry: "until:00:00"}]
+      forbid_writes: [tag]
+      max_questions: 0
+      ideal: "סגור, שקט עד חצות."
+
+  - id: g06_01
+    source: "2026-10-06 11:18:19"
+    time: "11:18:19"
+    message: {text: "יש מישהו בחוץ?"}
+    expect:
+      intent: question_live
+      must_do: [look]
+      forbid_writes: [tag]
+      max_questions: 0
+      ideal: "בדקתי עכשיו את כל המצלמות — אין אף אחד בחוץ."
+    notes: "The 6.10 replay found the box saying 'all quiet' without a look (fix row 1.11)."
+
+  - id: g06_02
+    source: "2026-10-06 23:50:02"
+    time: "23:50:02"
+    message: {text: "היי"}
+    expect:
+      intent: ack
+      forbid_writes: [tag, person_mark, place_fact]
+      max_questions: 0
+      ideal: "היי 👋"
+    notes: "A greeting gets a greeting; 'איך אני יכול לעזור לך היום?' is a call-centre line."
+
+  - id: g06_03
+    source: "2026-10-06 23:50:40"
+    time: "23:50:40"
+    message: {text: "יש משהו מעניין בחוץ?"}
+    live:
+      ameer_v2_ch6: {description: "Two parked cars and some plants by the entrance; no people.", people: 0}
+    expect:
+      intent: question_live
+      must_do: [look]
+      forbid_writes: [tag]
+      max_questions: 0
+      ideal: "עכשיו שקט: במצלמה 6 רק הרכבים החונים, ובשאר המצלמות אין אף אחד."
+    notes: "He means now. The real bot described the 23:14 clip and offered to send it."
+
+  - id: g06_04
+    source: "2026-10-06 23:51:03"
+    time: "23:51:03"
+    message: {text: "אני מדבר על עכשיו ?"}
+    live:
+      ameer_v2_ch6: {description: "Two parked cars and some plants by the entrance; no people.", people: 0}
+    expect:
+      intent: question_live
+      must_do: [look]
+      forbid_writes: [tag]
+      max_questions: 0
+      ideal: "סליחה. עכשיו: במצלמה 6 רק הרכבים החונים, אין אף אחד בחוץ."
+
+  - id: g06_05
+    source: "2026-10-06 23:51:28"
+    time: "23:51:28"
+    message: {text: "אל תקרא לה יותר ככה תקרא לה כניסה ראשית"}
+    expect:
+      intent: preference
+      writes: [{type: alias, camera: ameer_v2_ch6}]
+      forbid_writes: [tag, person_mark]
+      max_questions: 0
+      must_include_any: ["כניסה ראשית"]
+      ideal: "סגור, מעכשיו זו 'כניסה ראשית'."
+    notes: "'לה' = the camera just shown (6). The real bot saved the name on a camera id that no longer existed."
+
+  - id: g06_06
+    source: "2026-10-06 23:52:05"
+    time: "23:52:05"
+    house:
+      cameras: [ameer_v2_ch2, ameer_v2_ch3, ameer_v2_ch5, ameer_v2_ch6, ameer_v2_ch8]
+      aliases: {ameer_v2_ch6: [כניסה ראשית]}
+    message: {text: "מדי פעם אני (עמיר) יוצא החוצה"}
+    expect:
+      intent: person_mark
+      writes: [{type: [place_fact, person_mark], or_ask: true}]
+      forbid_writes: [tag]
+      max_questions: 1
+      must_not: ["23:59", "עד מתי"]
+      ideal: "הבנתי — אם זה אתה יוצא בכניסה הראשית, לא אקפיץ על זה. מישהו אחר כן."
+    notes: "A standing routine of the owner himself at the camera being discussed (the 23:14 man with the phone was him). No invented end time; at most one short question (e.g. 'בעיקר בלילה?')."
+
+  - id: g06_07
+    source: "2026-10-06 23:53:06"
+    time: "23:53:06"
+    house:
+      cameras: [ameer_v2_ch2, ameer_v2_ch3, ameer_v2_ch5, ameer_v2_ch6, ameer_v2_ch8]
+      aliases: {ameer_v2_ch6: [כניסה ראשית]}
+    message: {text: "תגיד מישהו היה בחוץ?"}
+    expect:
+      intent: question_history
+      forbid_writes: [tag]
+      max_questions: 0
+      must_include_any: ["23:14"]
+      must_not: ["אם תרצה לראות"]
+      ideal: "כן, ב-23:14 בכניסה הראשית מישהו עמד ליד הרכב עם טלפון כמה דקות — כנראה אתה."
+
+  - id: g06_08
+    source: "2026-10-07 00:05:39"
+    date: "2026-10-07"
+    time: "00:05:39"
+    house:
+      cameras: [ameer_v2_ch2, ameer_v2_ch3, ameer_v2_ch5, ameer_v2_ch6, ameer_v2_ch8]
+      aliases: {ameer_v2_ch6: [כניסה ראשית]}
+    message: {text: "מה קורה", reply_to: ameer_v2_ch6_1791319961_alert}
+    live:
+      ameer_v2_ch6: {description: "Two cars parked in the driveway, shadows on the ground. No people.", people: 0}
+    expect:
+      intent: question_live
+      must_do: [look]
+      forbid_writes: [tag]
+      max_questions: 0
+      ideal: "שקט. בכניסה הראשית רק שני הרכבים בחניה, אין אף אחד בחוץ."
+    notes: "Sent as a reply to the 23:52 'covered face' alert (that was him). A live question, not a verdict."
+
+  - id: g06_09
+    source: "2026-10-07 00:06:10"
+    date: "2026-10-07"
+    time: "00:06:10"
+    house:
+      cameras: [ameer_v2_ch2, ameer_v2_ch3, ameer_v2_ch5, ameer_v2_ch6, ameer_v2_ch8]
+      aliases: {ameer_v2_ch6: [כניסה ראשית]}
+    message: {text: "מה עם מסביב לבית"}
+    expect:
+      intent: question_live
+      must_do: [look]
+      forbid_writes: [tag]
+      max_questions: 0
+      ideal: "גם מסביב שקט — עברתי על כל המצלמות, אין אף אחד."

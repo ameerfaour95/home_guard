@@ -1,0 +1,233 @@
+# Golden cases from the owner's chat of 2026-10-07 (site ameer_week_0_1, shown under its current id ameer_v2).
+# Source: box production_archive/ameer_week_0_1/chat/2026-10-07.jsonl. The day of 142 green alerts after "these are
+# my workers", the "possible weapon" red with a reminder, every reply ending "אם יש משהו נוסף... אני כאן" and
+# "רשמתי את זה כהתרעה צפויה" (fix page section 1). Nothing was saved to memory that day (the box ran assistant v1),
+# so every case starts from an empty memory. Bot lines in the history are what the box really sent.
+defaults:
+  date: "2026-10-07"
+  house:
+    cameras: [ameer_v2_ch1, ameer_v2_ch2, ameer_v2_ch3, ameer_v2_ch5, ameer_v2_ch6, ameer_v2_ch8]
+    aliases: {ameer_v2_ch3: [פרגולה], ameer_v2_ch6: [כניסה ראשית]}
+  alerts:
+    - {id: ameer_v2_ch6_1791351095_alert, camera: ameer_v2_ch6, time: "08:31:35", label: escalation, people: 2, summary: "שני גברים מופיעים בפטיו. גבר אחד מתכופף ומרים חפץ כהה מהקרקע. למה: מרים חפץ"}
+    - {id: ameer_v2_ch3_1791355893_alert, camera: ameer_v2_ch3, time: "09:51:33", label: normal, people: 3, summary: "שני גברים נושאים חפץ ארוך לכיוון טנדר חונה. אדם שלישי הולך בקרבת מקום ללא אינטראקציה."}
+    - {id: ameer_v2_ch3_1791357000_alert, camera: ameer_v2_ch3, time: "10:10:00", label: normal, people: 2, summary: "שני אנשים הולכים בשביל הכניסה כשהם נושאים חפצים."}
+    - {id: ameer_v2_ch8_1791364232_alert, camera: ameer_v2_ch8, time: "12:10:32", label: suspicious, people: 1, summary: "אדם עם מסכה ובגדים כהים נראה הולך ליד הבית כשהוא מחזיק חפץ. למה: התנהגות חשודה: מסכה על הפנים"}
+    - {id: ameer_v2_ch3_1791366411_alert, camera: ameer_v2_ch3, time: "12:46:51", label: escalation, people: 1, summary: "אדם נראה מחזיק חפץ ארוך, ייתכן נשק, בעודו עומד ליד סולם. למה: אדם מחזיק נשק", answer: "A worker in a cap stands by the ladder holding a long metal pole - a tool or a piece of the pergola frame. No weapon is visible."}
+    - {id: ameer_v2_ch3_1791366905_alert, camera: ameer_v2_ch3, time: "12:55:05", label: normal, people: 1, summary: "אדם לבוש חולצה לבנה ומכנסיים כהים הופיע, הלך על הפטיו ונעלם מהעין."}
+    - {id: ameer_v2_ch3_1791371757_alert, camera: ameer_v2_ch3, time: "14:15:57", label: normal, people: 1, summary: "אדם מסתובב מאחורי טנדר חונה ואז יוצא מהפריים."}
+    - {id: ameer_v2_ch6_1791378714_alert, camera: ameer_v2_ch6, time: "16:11:54", label: normal, people: 2, summary: "שני פעוטות עומדים בפטיו. אחד מחזיק חפץ קטן, בזמן שכלב נח בקרבת מקום.", answer: "Two small children stand on the patio; one holds a small toy. There is no dog: a dark bag lies on the ground next to them."}
+    - {id: ameer_v2_ch3_1791381758_alert, camera: ameer_v2_ch3, time: "17:02:38", label: normal, people: 1, summary: "גבר נושא קרש עץ ארוך הולך בשביל הכניסה ויוצא מהפריים. מכונית לבנה חונה בקרבת מקום."}
+  history:
+    - {time: "08:33:58", tag_for: ameer_v2_ch6_1791351095_alert, owner: "גבר אחד עומד בכניסה לבית, בוא מתכופף לאסוף משהו"}
+    - {time: "09:52:41", owner: "זה בסדר זה עובדים אצלי שעובדים על הפרגולה", bot: "רשמתי את זה כהתרעה צפויה. אם יש משהו נוסף שתרצה לדעת או לשאול, אני כאן!", about: ameer_v2_ch3_1791355893_alert}
+    - {time: "12:11:45", tag_for: ameer_v2_ch8_1791364232_alert, owner: "זה אחד אנשים שעובדים מחןץ לבית אמרתי לך כבר"}
+    - {time: "12:53:08", owner: "איזה תזכורת , אתה מטומטם ומגזים", bot: "✓ ההסבר שלך לסרטון של 12:46 נשמר.", about: ameer_v2_ch3_1791366411_alert}
+    - {time: "12:53:27", owner: "אני לא יודע על איזה סרטון אתה מדבר בכלל", bot: "רשמתי את זה כהתרעה אמיתית, אבל התיאור היה לא מדויק. אם יש משהו נוסף שתרצה לדעת או לשאול, אני כאן!"}
+    - {time: "12:53:49", owner: "אני שואל אותך על איזה סרטון דיברת?", bot: "דיברתי על סרטון שבו נראתה דמות מחזיקה בטלפון ליד רכב חונה. אם תרצה, אני יכול לחפש את הסרטון הזה או לבדוק את האירועים האחרים."}
+    - {time: "12:54:00", owner: "תראה לי אותו", bot: "שלחתי לך את הסרטון שבו נראית הדמות מחזיקה חפץ ארוך ליד הסולם. אם יש משהו נוסף שתרצה לדעת, אני כאן!", about: ameer_v2_ch3_1791366411_alert}
+    - {time: "12:54:19", owner: "אמרת סולם ונשק", bot: "רשמתי את זה כהתרעה אמיתית, אבל התיאור היה לא מדויק. החפץ היה ארוך ליד הסולם, אבל זה לא היה נשק. אם יש משהו נוסף שתרצה לדעת, אני כאן!"}
+    - {time: "12:54:45", owner: "אין בעיה אבל על איזה פאקינג סרטון דיסרת", bot: "שלחתי לך את הסרטון שבו נראית הדמות מחזיקה חפץ ארוך ליד הסולם. אם יש עוד משהו שתרצה לדעת, אני כאן!"}
+    - {time: "12:55:15", owner: "תפסיק עם ההודעה המטומטת הזאת של אם יש עוד משהו שתרצה לדעת אני כאן זה מעצבן", bot: "רשמתי את זה כהתרעה אמיתית, אבל התיאור היה לא מדויק. תודה על ההבהרה!"}
+    - {time: "12:56:09", owner: "אם זה תקין אז למה אתה ממשיך לשלוח לי הודעות יא מטומטם", bot: "רשמתי את זה כהתרעה צפויה. תודה על ההבהרה!", about: ameer_v2_ch3_1791366905_alert}
+    - {time: "12:56:24", owner: "מה הקשר התרעה צפויה", bot: "רשמתי את זה כהתרעה צפויה כי זה היה אתה שיצאת החוצה. אם יש משהו נוסף שתרצה לדעת, אני כאן!"}
+    - {time: "12:56:55", owner: "יצא החוצה מאיפה לא הבנתי הם עובדים בחוץ וזה מה שאמרתי לך בבוקר מה קשר יצא החוצה", bot: "רשמתי את זה כהתרעה צפויה, כי העובדים הם אלו שראיתי במצלמה. אם יש משהו נוסף שתרצה לדעת, אני כאן!"}
+    - {time: "12:57:15", owner: "די עם ההודעה המטופשת הזאת", bot: "רשמתי את זה כהתרעה צפויה. אם יש משהו נוסף שתרצה, אני כאן!"}
+    - {time: "14:17:05", owner: "אם זה תקין למה אתה ממשיך לשלוח לי הודעות", bot: "רשמתי את זה כהתרעה שגויה. תודה על ההבהרה!", about: ameer_v2_ch3_1791371757_alert}
+    - {time: "17:10:35", owner: "איך הגעת לכלב לא מבין אותך", bot: "✓ ההסבר שלך לסרטון של 16:11 נשמר.", about: ameer_v2_ch6_1791378714_alert}
+
+cases:
+  - id: g07_01
+    source: "2026-10-07 08:33:58"
+    time: "08:33:58"
+    message: {text: "גבר אחד עומד בכניסה לבית, בוא מתכופף לאסוף משהו", reply_to: ameer_v2_ch6_1791351095_alert, via: tag}
+    expect:
+      intent: tag_only
+      writes: [{type: tag}]
+      forbid_writes: [person_mark, activity, place_fact]
+      max_questions: 0
+      ideal: "🏷️ נשמר כתיוג לסרטון 08:31 (כניסה ראשית): גבר עומד בכניסה לבית ומתכופף לאסוף משהו."
+
+  - id: g07_02
+    source: "2026-10-07 09:52:41"
+    time: "09:52:41"
+    message: {text: "זה בסדר זה עובדים אצלי שעובדים על הפרגולה", reply_to: ameer_v2_ch3_1791355893_alert}
+    expect:
+      intent: person_mark
+      writes: [{type: person_mark, camera: [ameer_v2_ch3, ""], or_ask: true}]
+      forbid_writes: [tag, place_fact]
+      max_questions: 1
+      must_not: ["23:59"]
+      ideal: "הבנתי, אלה העובדים של הפרגולה — לא אקפיץ עליהם. עד מתי הם פה היום?"
+    notes: "The one that started the flood: 'רשמתי את זה כהתרעה צפויה' and then 142 more alerts. A mark for today; one question about the hours at most; never an invented end time."
+
+  - id: g07_03
+    source: "2026-10-07 12:11:45"
+    time: "12:11:45"
+    message: {text: "זה אחד אנשים שעובדים מחןץ לבית אמרתי לך כבר", reply_to: ameer_v2_ch8_1791364232_alert, via: tag}
+    expect:
+      intent: tag_only
+      writes: [{type: tag}]
+      forbid_writes: [person_mark, activity, place_fact]
+      max_questions: 0
+      ideal: "🏷️ נשמר כתיוג לסרטון 12:10 (מצלמה 8): אחד העובדים שעובדים מחוץ לבית."
+    notes: "Typed after the tag button: the clip's tag, nothing else (the 'I told you already' belongs to the 09:52 mark, which should have covered this)."
+
+  - id: g07_04
+    source: "2026-10-07 12:53:08"
+    time: "12:53:08"
+    message: {text: "איזה תזכורת , אתה מטומטם ומגזים", reply_to: ameer_v2_ch3_1791366411_alert, via: tag}
+    expect:
+      intent: complaint
+      forbid_writes: [tag, person_mark, activity, place_fact]
+      max_questions: 0
+      must_include_any: ["12:46|סולם|נשק"]
+      ideal: "צודק, סליחה. ה'נשק' ב-12:46 בפרגולה היה כלי עבודה ארוך ליד הסולם, והתזכורת הייתה מיותרת."
+    notes: "Typed after the ✏️ button but it is an insult, not the clip's words: the inbox must not save it as the 12:46 tag (it did, 'ההסבר שלך לסרטון של 12:46 נשמר')."
+
+  - id: g07_05
+    source: "2026-10-07 12:53:27"
+    time: "12:53:27"
+    message: {text: "אני לא יודע על איזה סרטון אתה מדבר בכלל"}
+    expect:
+      intent: question_history
+      forbid_writes: [tag, person_mark, activity]
+      max_questions: 0
+      must_include_any: ["12:46"]
+      ideal: "על ההתרעה האדומה מ-12:46 בפרגולה — אדם ליד הסולם עם חפץ ארוך. שולח לך אותה."
+    notes: "Name the event being discussed (camera + time). The old bot filed the question as a verdict."
+
+  - id: g07_06
+    source: "2026-10-07 12:53:49"
+    time: "12:53:49"
+    message: {text: "אני שואל אותך על איזה סרטון דיברת?"}
+    expect:
+      intent: question_history
+      forbid_writes: [tag, person_mark, activity]
+      max_questions: 0
+      must_include_any: ["12:46"]
+      must_not: ["טלפון ליד רכב"]
+      ideal: "הסרטון של 12:46 בפרגולה: אדם ליד הסולם מחזיק חפץ ארוך, שה-AI חשב בטעות לנשק."
+    notes: "The real bot invented a different clip ('a figure holding a phone by a parked car')."
+
+  - id: g07_07
+    source: "2026-10-07 12:54:00"
+    time: "12:54:00"
+    message: {text: "תראה לי אותו"}
+    expect:
+      intent: command
+      must_do: [send_video]
+      forbid_writes: [tag]
+      max_questions: 0
+      ideal: "הנה הסרטון מ-12:46 בפרגולה."
+
+  - id: g07_08
+    source: "2026-10-07 12:54:19"
+    time: "12:54:19"
+    message: {text: "אמרת סולם ונשק"}
+    expect:
+      intent: complaint
+      must_do: [ask_clip]
+      forbid_writes: [tag, person_mark, activity]
+      max_questions: 0
+      ideal: "נכון, ה-AI כתב 'ייתכן נשק'. בדקתי שוב את הסרטון: זה מוט מתכת ארוך ליד הסולם — כלי עבודה, לא נשק."
+    notes: "Check the clip before agreeing or disagreeing; never file a verdict."
+
+  - id: g07_09
+    source: "2026-10-07 12:54:45"
+    time: "12:54:45"
+    message: {text: "אין בעיה אבל על איזה פאקינג סרטון דיסרת"}
+    expect:
+      intent: question_history
+      forbid_writes: [tag, person_mark, activity]
+      max_questions: 0
+      must_include_any: ["12:46"]
+      ideal: "על הסרטון מ-12:46 בפרגולה — האדם עם המוט ליד הסולם. זה אותו סרטון ששלחתי לך עכשיו."
+
+  - id: g07_10
+    source: "2026-10-07 12:55:15"
+    time: "12:55:15"
+    message: {text: "תפסיק עם ההודעה המטומטת הזאת של אם יש עוד משהו שתרצה לדעת אני כאן זה מעצבן"}
+    expect:
+      intent: preference
+      forbid_writes: [tag, person_mark, activity]
+      max_questions: 0
+      ideal: "סגור, בלי המשפט הזה יותר."
+
+  - id: g07_11
+    source: "2026-10-07 12:56:09"
+    time: "12:56:09"
+    message: {text: "אם זה תקין אז למה אתה ממשיך לשלוח לי הודעות יא מטומטם", reply_to: ameer_v2_ch3_1791366905_alert}
+    expect:
+      intent: complaint
+      forbid_writes: [tag, place_fact]
+      max_questions: 0
+      ideal: "צודק — על מה שתקין לא אמורה להגיע אליך הודעה. מעכשיו רק מה שחריג."
+    notes: "A complaint about green alerts, not a verdict on this clip (the old bot filed 'expected alert')."
+
+  - id: g07_12
+    source: "2026-10-07 12:56:24"
+    time: "12:56:24"
+    message: {text: "מה הקשר התרעה צפויה"}
+    expect:
+      intent: complaint
+      forbid_writes: [tag, place_fact]
+      max_questions: 0
+      must_not: ["יצאת החוצה"]
+      ideal: "לא קשור — ניסוח גרוע שלי. התכוונתי שזה העובדים בפרגולה, לא משהו חשוד."
+    notes: "The real bot made up 'because it was you going out'."
+
+  - id: g07_13
+    source: "2026-10-07 12:56:55"
+    time: "12:56:55"
+    message: {text: "יצא החוצה מאיפה לא הבנתי הם עובדים בחוץ וזה מה שאמרתי לך בבוקר מה קשר יצא החוצה"}
+    expect:
+      intent: complaint
+      writes: [{type: person_mark, camera: [ameer_v2_ch3, ""], or_ask: true}]
+      forbid_writes: [tag, place_fact]
+      max_questions: 1
+      ideal: "צודק, התבלבלתי. אלה העובדים של הפרגולה, כמו שאמרת בבוקר — סימנתי אותם להיום ולא אקפיץ עליהם."
+    notes: "He repeats the 09:52 fact that was never saved: own the mix-up and save it now."
+
+  - id: g07_14
+    source: "2026-10-07 12:57:15"
+    time: "12:57:15"
+    message: {text: "די עם ההודעה המטופשת הזאת"}
+    expect:
+      intent: complaint
+      forbid_writes: [tag, person_mark, activity]
+      max_questions: 0
+      ideal: "סליחה, הפסקתי."
+
+  - id: g07_15
+    source: "2026-10-07 14:17:05"
+    time: "14:17:05"
+    message: {text: "אם זה תקין למה אתה ממשיך לשלוח לי הודעות", reply_to: ameer_v2_ch3_1791371757_alert}
+    expect:
+      intent: complaint
+      forbid_writes: [tag, place_fact]
+      max_questions: 0
+      ideal: "צודק, אין סיבה. על 'תקין' לא אמורה להגיע אליך הודעה — רק על מה שחריג."
+
+  - id: g07_16
+    source: "2026-10-07 17:10:35"
+    time: "17:10:35"
+    message: {text: "איך הגעת לכלב לא מבין אותך", reply_to: ameer_v2_ch6_1791378714_alert, via: tag}
+    expect:
+      intent: question_history
+      must_do: [ask_clip]
+      forbid_writes: [tag, person_mark, activity]
+      max_questions: 0
+      ideal: "בדקתי שוב את הסרטון של 16:11: אין שם כלב — זה תיק כהה על הרצפה ליד הילדים. טעות של ה-AI."
+    notes: "Typed after the ✏️ button but it is a question: answer it from the clip (the inbox saved it as the clip's explanation)."
+
+  - id: g07_17
+    source: "2026-10-07 17:11:11"
+    time: "17:11:11"
+    message: {text: "תכבה את המצלמות עד היום בלילה ותדליק אותם שוב ב 12 בלילה", reply_to: ameer_v2_ch3_1791381758_alert}
+    expect:
+      intent: command
+      writes: [{type: [pause, camera_off], expiry: "until:00:00"}]
+      forbid_writes: [tag]
+      max_questions: 0
+      ideal: "סגור — שקט עד חצות, ואז הכול חוזר לפעול."

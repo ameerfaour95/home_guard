@@ -1,0 +1,408 @@
+# Golden cases from the owner's chat of 2026-10-09 (site ameer_week_0_1, shown here under its current id ameer_v2).
+# Sources: box production_archive/ameer_week_0_1/chat/2026-10-09.jsonl, scratchpad box/chat_0909_full.txt; fix page
+# rows F.2-F.4 (memory vs tag, the 23:59 mark, "you should have worked it out and asked me"), F.7 (photos without
+# words), F.10 (the LED electricians on the entrance stairs, repeated lines, evidence for "same people?").
+# The day file keeps the whole day in `defaults`; each case sees only what came before its own time
+# (eval_chat.visible). Bot lines in the history are what the box really sent.
+defaults:
+  date: "2026-10-09"
+  house:
+    cameras: [ameer_v2_ch1, ameer_v2_ch2, ameer_v2_ch3, ameer_v2_ch5, ameer_v2_ch6, ameer_v2_ch8]
+    aliases: {ameer_v2_ch3: [פרגולה], ameer_v2_ch6: [כניסה ראשית]}
+  memory:
+    marks:
+      - {camera: ameer_v2_ch3, text: "האנשים בפרגולה הם עובדים אצלי על הפרגולה", until: "23:59", at: "09:33:27", gone: "09:50"}
+      - {camera: ameer_v2_ch3, text: "העובדים על הפרגולה", until: "18:00", at: "09:34:40", gone: "09:50"}
+      - {camera: ameer_v2_ch3, text: העובדים של הפרגולה, until: "2026-10-15 18:00", daily: ["07:00", "18:00"], at: "09:50"}
+      - {camera: ameer_v2_ch6, text: העובדים של הפרגולה, until: "2026-10-15 18:00", daily: ["07:00", "18:00"], at: "09:50"}
+    activities:
+      - {cameras: [ameer_v2_ch6], actions: [lying, crawling, bending, holding_tool], cause: החשמלאים שמתקינים לדים במדרגות, place: stairs, until: "2026-10-15 18:00", daily: ["07:00", "18:00"], at: "19:30"}
+  live:
+    ameer_v2_ch1: {description: "A man kneels by the low wall in the yard, working with soil and plants.", people: 1}
+    ameer_v2_ch3: {description: "Three men work at the construction site under the pergola frame, near a trailer and building materials.", people: 3}
+    ameer_v2_ch6: {description: "A white car with its trunk open in the driveway; no people.", people: 0}
+  alerts:
+    - {id: ameer_v2_ch3_1791522099_alert, camera: ameer_v2_ch3, time: "08:01:39", label: suspicious, people: 2, summary: "שני גברים נראים ליד טנדר חונה. גבר אחד לובש חולצה עם דוגמה ורעול פנים, בעוד השני מחזיק חפץ לבן. הם עומדים יחד ליד הרכב. למה: אדם אחד מסתיר את פניו במסכה", answer: "Two workers by the parked van; one in a patterned shirt takes something from the van's back, the other holds a white bucket. Nobody hides his face on purpose."}
+    - {id: ameer_v2_ch6_1791528173_alert, camera: ameer_v2_ch6, time: "09:42:53", label: suspicious, people: 2, summary: "אדם עם כובע עובר ליד גבר שנשען לתוך דלת רכב פתוחה. נראה שהאדם עם הכובע מסתכל על האדם השני. למה: התנהגות חשודה: אדם מסתכל על אדם אחר ליד רכב פתוח"}
+    - {id: ameer_v2_ch3_1791536000_event, camera: ameer_v2_ch3, time: "10:30:00", label: normal, people: 3, in_chat: false, summary: "שלושה גברים עובדים ליד הטריילר ומעבירים קרשים."}
+    - {id: ameer_v2_ch1_1791534417_alert, camera: ameer_v2_ch1, time: "11:26:57", label: normal, people: 1, summary: "זוהה אדם. הבדיקה של ה-AI לא הספיקה, הנה התמונה."}
+    - {id: ameer_v2_ch1_1791534821_alert, camera: ameer_v2_ch1, time: "11:33:41", label: normal, people: 1, summary: "זוהה אדם. הבדיקה של ה-AI לא הספיקה, הנה התמונה."}
+    - {id: ameer_v2_ch1_1791534970_alert, camera: ameer_v2_ch1, time: "11:36:10", label: normal, people: 1, summary: "זוהה אדם. הבדיקה של ה-AI לא הספיקה, הנה התמונה."}
+    - {id: ameer_v2_ch3_1791537000_event, camera: ameer_v2_ch3, time: "11:50:00", label: normal, people: 2, in_chat: false, summary: "שני גברים נושאים קרשים ליד הטנדר."}
+    - {id: ameer_v2_ch3_1791539600_event, camera: ameer_v2_ch3, time: "12:40:00", label: normal, people: 3, in_chat: false, summary: "שלושה אנשים עובדים באתר הבנייה."}
+    - {id: ameer_v2_ch6_1791541475_alert, camera: ameer_v2_ch6, time: "13:24:35", label: escalation, people: 2, summary: "אדם שוכב על הקרקע בזמן שאדם אחר לבוש כהה וחובש כובע זוחל בקרבת מקום, מחזיק מוט מתכת ארוך. למה: התנהגות חריגה: אדם נמצא על הקרקע ואדם אחר מחזיק מוט מתכתי ארוך לידו.", answer: "Two workers on the entrance stairs: one lies on his side fitting an LED strip under a step, the other kneels holding a long metal profile. Tools on the steps; nobody is hurt."}
+    - {id: ameer_v2_ch3_1791542645_alert, camera: ameer_v2_ch3, time: "13:44:05", label: escalation, people: 4, summary: "שני גברים הולכים לכיוון רכב לבן. גבר שלישי פותח את דלת הרכב ומתכופף פנימה. גבר רביעי עומד בקרבת מקום. למה: מנסה לפתוח דלת רכב"}
+    - {id: ameer_v2_ch3_1791570848_alert, camera: ameer_v2_ch3, time: "21:34:08", label: suspicious, people: 1, summary: "אדם לבוש בגדים כהים נראה הולך על האזור המרוצף. פניו של האדם מוסתרים על ידי קפוצ'ון או מסכה. למה: התנהלות חשודה עקב חליפת בגדים כהה ומסכה המסתירה את הפנים", answer: "A cat walks across the paved yard. No people."}
+  history:
+    - {time: "09:22:11", tag_for: ameer_v2_ch3_1791522099_alert, owner: "זה תקין עובדים על הפרגולה בשעות אלה"}
+    - {time: "09:30:38", owner: "לא התכוונתי שזה התיוג וההסבר הנכון התכוונתי שתזכור את זה ותבין את הסיטואציה צריך לריד בין תיוג נכון לבין אנטרקציה איתי בשביל הזכרון שלך", bot: "אני מבין אותך."}
+    - {time: "09:31:06", owner: "מה אתה עושה עם זה?", bot: "מה אתה רוצה שאעשה עם זה?"}
+    - {time: "09:31:42", owner: "מה ההבדל בין שמור את המידע לתיוג", bot: "שמירת המידע מתייחסת לשמירת פרטים או עובדות על האירוע או המצלמה לשימוש עתידי. לא רשמתי שום דבר על ההתראה."}
+    - {time: "09:32:56", owner: "שמור מידע ושנה תיוג\nהתיוג זה אדם עם חולצה לבנה נמצא ליד הטנדר נראה שהוא לוקח משהו מהמטען\n\nהמידע זה עובדים אצלי על הפרגולה", bot: "שמרתי: האנשים בפרגולה הם עובדים אצלי על הפרגולה, עד 23:59. לא אשלח עליהם הודעות, חוץ מדבר חריג."}
+    - {time: "09:34:34", owner: "מי אנר עד 23:59? זה נשמע לך הגיוני? הם עובדים עד 18:00 משהו כזה", bot: "שמרתי: האנשים בפרגולה הם העובדים על הפרגולה, עד 18:00. לא אשלח עליהם הודעות, חוץ מדבר חריג."}
+    - {time: "09:34:43", owner: "היית צריך להגיע למסכנה הזאת לבד ולתשאל אותי", bot: "אני מבין אותך."}
+    - {time: "09:44:40", tag_for: ameer_v2_ch6_1791528173_alert, owner: "אדם עם כובע עובד ליד הכניסה, כאשר אדם אחר ליד האוטו שלו עם הדלת פתוחה"}
+    - {time: "09:45:43", owner: "אמרתי לך יא מטומטם שיש אנשים שעובדים ליד הפרגולה, זה נניח חשבת שהסתכל עליו זה לא אומר שזה חשוד יש אנשים בחוץ ויש אנטרקציה וזה יכול להיות וזה טבעי", bot: "אני מבין אותך. אם תרצה, אני יכול לסמן את האנשים ליד הפרגולה כעובדים עד 18:00."}
+    - {time: "09:46:31", owner: "אבל דיברנו על זה כבר ואמרתי לך שכן , תגיד לי אתה לא קורא את היסטורית השיחה ? אתה לא לוקח אותה בחשבון? אתה לא בודק מה יש בזהרון? אני לא מבין למה אתה ממשיך להיות מטומטם", bot: "אני מבין את התסכול שלך."}
+    - {time: "12:47:47", owner: "מה קורה", bot: "במצלמה 1 יש אדם שעומד בחצר ליד קיר נמוך, נראה שהוא מטפל באדמה או בצמחים. במצלמה 3 יש אדם בחולצה לבנה שעובר בחניה ליד רכב כסוף. במצלמה 6 יש שני אנשים עומדים ליד רכב לבן עם תא מטען פתוח.", photos: [ameer_v2_ch1, ameer_v2_ch3]}
+    - {time: "13:00:53", owner: "תגיד לי יש מישהו בחוץ אצלי?", bot: "", photos: [ameer_v2_ch1, ameer_v2_ch3]}
+    - {time: "13:02:01", owner: "למה אתה לא נותן הסבר ?", bot: "העובדים על הפרגולה כבר מסומנים בפרגולה ובכניסה הראשית עד 18:00."}
+    - {time: "13:02:13", owner: "או מביא סרטון למה תמונה?", bot: "אם תרצה סרטון, אוכל לשלוח אותו. האם תרצה סרטון ממצלמה מסוימת?"}
+    - {time: "13:04:29", owner: "אתה צריך להסביר כאשר אני אומר לך אם יש משהו בחוץ אצלי", bot: "במצלמת הפרגולה יש שלושה אנשים שנראים עובדים או מדברים באתר הבנייה. במצלמת הכניסה הראשית יש רכב לבן עם תא מטען פתוח, אבל אין אנשים או בעלי חיים בסביבה.", photos: [ameer_v2_ch3, ameer_v2_ch6]}
+    - {time: "13:05:16", owner: "אלה אותם אנשים שעבדו מהבוקר או שהתחלפו?", bot: "במצלמת הכניסה הראשית לא היו אירועים בשעה האחרונה. האנשים שראיתם הם אותם עובדים מהבוקר."}
+    - {time: "13:05:29", owner: "אתה בטוח?", bot: "כן, אני בטוח. האנשים שראיתם הם אותם עובדים מהבוקר, והם מסומנים כעובדים על הפרגולה עד 18:00."}
+    - {time: "13:54:07", owner: "אלה מקרים תקינים הם מתקינים זה שני אנשים שמרכיבים את הלדים במדרגות", bot: "העובדים על הפרגולה כבר מסומנים בפרגולה ובכניסה הראשית עד 18:00."}
+    - {time: "13:54:31", owner: "אני מדבר על שני האנשים שאחד מהם התכופף זה רגיל", bot: "בפרגולה, אנשים שעומדים או מדברים זה רגיל וקורה כמה פעמים ביום, בערך 9 פעמים. יש לי רק 3 ימים של היסטוריה, אז זו הערכה זהירה."}
+    - {time: "13:54:38", owner: "חשמלאים שמנסים להתקין לד למדרגות", bot: "החשמלאים שמתקינים את הלדים במדרגות הם חלק מהעובדים על הפרגולה, והם כבר מסומנים כעובדים עד 18:00.", about: ameer_v2_ch3_1791542645_alert}
+    - {time: "13:54:47", owner: "לא בפרגולה אני מתכוון בכניסה הראשית במדרגות", bot: "שמור אצלי עכשיו: העובדים של הפרגולה, כל יום 07:00–18:00, עד יום ה׳ 15.10; העובדים של הפרגולה בכניסה ראשית, כל יום 07:00–18:00, עד יום ה׳ 15.10. מה לתקן?", about: ameer_v2_ch3_1791542645_alert}
+    - {time: "13:55:04", owner: "סבבה", bot: "העובדים של הפרגולה כבר מסומנים בפרגולה ובכניסה הראשית עד 18:00."}
+    - {time: "13:55:14", owner: "למה אתה חוזר על זה", bot: "כן, אני קורא את ההיסטוריה ובודק את הזיכרון. העובדים של הפרגולה כבר מסומנים בפרגולה ובכניסה הראשית עד 18:00."}
+    - {time: "13:55:26", owner: "בסדר הבנתי", bot: "כן, אני קורא את ההיסטוריה ובודק את הזיכרון. העובדים של הפרגולה כבר מסומנים בפרגולה ובכניסה הראשית עד 18:00."}
+    - {time: "13:55:40", owner: "הבנתי אתה לא צריך לחזור על זה", bot: "בסדר, לא אחזור על זה שוב."}
+    - {time: "18:40:57", owner: "יש מישהו עדיין עובד בפרגולה", bot: "", photos: [ameer_v2_ch3]}
+
+cases:
+  - id: g09_01
+    source: "2026-10-09 09:22:11"
+    time: "09:22:11"
+    message: {text: "זה תקין עובדים על הפרגולה בשעות אלה", reply_to: ameer_v2_ch3_1791522099_alert, via: tag}
+    expect:
+      intent: tag_only
+      writes: [{type: tag}]
+      forbid_writes: [person_mark, activity, place_fact]
+      max_questions: 0
+      ideal: "🏷️ נשמר כתיוג לסרטון 08:01 (פרגולה): תקין — עובדים על הפרגולה."
+    notes: "Typed after the tag button: a training label only (owner, 2026-10-09 18:15). At 09:30 he complained that he also wanted it remembered; under the agreed button rule that comes from a plain message (g09_02)."
+
+  - id: g09_02
+    source: "2026-10-09 09:30:38"
+    time: "09:30:38"
+    message: {text: "לא התכוונתי שזה התיוג וההסבר הנכון התכוונתי שתזכור את זה ותבין את הסיטואציה צריך לריד בין תיוג נכון לבין אנטרקציה איתי בשביל הזכרון שלך"}
+    expect:
+      intent: person_mark
+      writes: [{type: person_mark, camera: [ameer_v2_ch3, ""], or_ask: true}]
+      forbid_writes: [tag, place_fact]
+      max_questions: 1
+      must_not: ["23:59"]
+      ideal: "הבנתי, זה שני דברים נפרדים. התיוג נשאר, ובזיכרון: העובדים של הפרגולה עובדים פה ביום, אז לא אקפיץ עליהם. עד איזו שעה הם בדרך כלל?"
+    notes: "Work it out alone: 'it' = the pergola workers in the 08:01 tag. One question (until when) is fine; never invent a time."
+
+  - id: g09_03
+    source: "2026-10-09 09:31:06"
+    time: "09:31:06"
+    message: {text: "מה אתה עושה עם זה?"}
+    expect:
+      intent: person_mark
+      writes: [{type: person_mark, camera: [ameer_v2_ch3, ""], or_ask: true}]
+      forbid_writes: [tag]
+      max_questions: 1
+      must_not: ["23:59"]
+      ideal: "אני זוכר שהעובדים של הפרגולה עובדים פה ביום ולא שולח עליהם התרעות — רק אם מגיע מישהו חדש או קורה משהו חריג. עד איזו שעה הם עובדים?"
+    notes: "The previous reply was an empty 'אני מבין אותך.' and nothing was saved. Answer what it does with the info, and actually do it. 'מה אתה רוצה שאעשה?' is banned."
+
+  - id: g09_04
+    source: "2026-10-09 09:31:42"
+    time: "09:31:42"
+    message: {text: "מה ההבדל בין שמור את המידע לתיוג"}
+    expect:
+      intent: question_meta
+      forbid_writes: [tag]
+      max_questions: 0
+      ideal: "תיוג מלמד את המודל מה קרה בסרטון אחד — הוא לא משנה מה אני עושה. זיכרון כן: למשל שהעובדים בפרגולה הם שלך, אז אני לא מקפיץ עליהם."
+    notes: "A plain explanation in his terms (F.3), no jargon, no 'I did not record anything about the alert'."
+
+  - id: g09_05
+    source: "2026-10-09 09:32:56"
+    time: "09:32:56"
+    message: {text: "שמור מידע ושנה תיוג\nהתיוג זה אדם עם חולצה לבנה נמצא ליד הטנדר נראה שהוא לוקח משהו מהמטען\n\nהמידע זה עובדים אצלי על הפרגולה"}
+    expect:
+      intent: person_mark
+      writes: [{type: tag}, {type: person_mark, camera: [ameer_v2_ch3, ""], or_ask: true}]
+      forbid_writes: [place_fact]
+      max_questions: 1
+      must_not: ["23:59"]
+      ideal: "עשיתי את שניהם: 🏷️ התיוג של 08:01 עודכן — אדם בחולצה לבנה ליד הטנדר לוקח משהו מהמטען. 🧠 והעובדים של הפרגולה בזיכרון. עד איזו שעה הם עובדים?"
+    notes: "An explicit 'change the tag' plus a memory fact in one message: both, with separate receipts. The real bot invented 'until 23:59'."
+
+  - id: g09_06
+    source: "2026-10-09 09:34:34"
+    time: "09:34:34"
+    message: {text: "מי אנר עד 23:59? זה נשמע לך הגיוני? הם עובדים עד 18:00 משהו כזה"}
+    expect:
+      intent: person_mark
+      writes: [{type: person_mark, camera: [ameer_v2_ch3, ""], expiry: "until:18:00"}]
+      forbid_writes: [tag]
+      max_questions: 0
+      no_live_mark_until: "23:59"
+      ideal: "צודק, ניחשתי וזה לא היה הגיוני. תיקנתי: העובדים בפרגולה עד 18:00."
+    notes: "The correction replaces the 23:59 mark (the real bot left it live next to a new 18:00 one)."
+
+  - id: g09_07
+    source: "2026-10-09 09:34:43"
+    time: "09:34:43"
+    message: {text: "היית צריך להגיע למסכנה הזאת לבד ולתשאל אותי"}
+    expect:
+      intent: complaint
+      forbid_writes: [tag, place_fact]
+      max_questions: 0
+      ideal: "נכון. הייתי צריך לשאול אותך עד מתי הם עובדים במקום לנחש. ככה אעשה מעכשיו."
+    notes: "Own it in one line; no empty empathy."
+
+  - id: g09_08
+    source: "2026-10-09 09:44:40"
+    time: "09:44:40"
+    message: {text: "אדם עם כובע עובד ליד הכניסה, כאשר אדם אחר ליד האוטו שלו עם הדלת פתוחה", reply_to: ameer_v2_ch6_1791528173_alert, via: tag}
+    expect:
+      intent: tag_only
+      writes: [{type: tag}]
+      forbid_writes: [person_mark, activity, place_fact]
+      max_questions: 0
+      ideal: "🏷️ נשמר כתיוג לסרטון 09:42 (כניסה ראשית): אדם עם כובע עובד ליד הכניסה, ואדם אחר ליד האוטו שלו עם הדלת פתוחה."
+
+  - id: g09_09
+    source: "2026-10-09 09:45:43"
+    time: "09:45:43"
+    message: {text: "אמרתי לך יא מטומטם שיש אנשים שעובדים ליד הפרגולה, זה נניח חשבת שהסתכל עליו זה לא אומר שזה חשוד יש אנשים בחוץ ויש אנטרקציה וזה יכול להיות וזה טבעי"}
+    expect:
+      intent: complaint
+      writes: [{type: person_mark, camera: [ameer_v2_ch6, ""]}]
+      forbid_writes: [tag]
+      max_questions: 1
+      must_not: ["אם תרצה,? אני יכול לסמן"]
+      ideal: "צודק, סליחה. אלה אותם עובדים — עברו לכניסה הראשית. סימנתי אותם גם שם עד 18:00, ואנשים שמדברים ליד הרכב זה לא חשוד."
+    notes: "The 09:42 entrance alert was the same workers. Extend the mark to the entrance (or the whole house) without offering what was already agreed."
+
+  - id: g09_10
+    source: "2026-10-09 09:46:31"
+    time: "09:46:31"
+    message: {text: "אבל דיברנו על זה כבר ואמרתי לך שכן , תגיד לי אתה לא קורא את היסטורית השיחה ? אתה לא לוקח אותה בחשבון? אתה לא בודק מה יש בזהרון? אני לא מבין למה אתה ממשיך להיות מטומטם"}
+    expect:
+      intent: complaint
+      writes: [{type: person_mark, camera: [ameer_v2_ch6, ""]}]
+      forbid_writes: [tag]
+      max_questions: 0
+      allow: [memory_dump]
+      ideal: "קורא, ופספסתי — סליחה. העובדים מסומנים עכשיו גם בכניסה הראשית עד 18:00, כמו שאמרת."
+    notes: "He asks whether it reads the history and memory: a one-line yes + the fix is right; a full memory dump is not."
+
+  - id: g09_11
+    source: "2026-10-09 12:47:47"
+    time: "12:47:47"
+    message: {text: "מה קורה"}
+    live:
+      ameer_v2_ch1: {description: "A man in the yard by a low wall, bending over soil and plants.", people: 1}
+      ameer_v2_ch3: {description: "A man in a white shirt walks through the parking area next to a silver car.", people: 1}
+      ameer_v2_ch6: {description: "Two people stand by a white car with its trunk open.", people: 2}
+    expect:
+      intent: question_live
+      must_do: [look]
+      forbid_writes: [tag, person_mark]
+      max_questions: 0
+      ideal: "הכול רגיל. בפרגולה מישהו בחולצה לבנה ליד הרכב הכסוף, בכניסה הראשית שניים ליד הרכב הלבן עם תא מטען פתוח, ובמצלמה 1 מישהו מטפל בצמחים ליד הקיר."
+    notes: "Three 'AI check failed' activity alerts from camera 1 came before. A live answer, camera names not numbers where a name exists, no '✓ התמונה נשלחה' lines."
+
+  - id: g09_12
+    source: "2026-10-09 13:00:53"
+    time: "13:00:53"
+    message: {text: "תגיד לי יש מישהו בחוץ אצלי?"}
+    expect:
+      intent: question_live
+      must_do: [look]
+      forbid_writes: [tag]
+      max_questions: 0
+      must_include_any: ["פרגולה|בפרגולה"]
+      ideal: "כן — בפרגולה שלושה עובדים באתר, ובמצלמה 1 מישהו עובד באדמה ליד הקיר. בכניסה הראשית אין אף אחד, רק הרכב הלבן עם תא מטען פתוח."
+    notes: "The real bot sent two photos with no words at all."
+
+  - id: g09_13
+    source: "2026-10-09 13:02:01"
+    time: "13:02:01"
+    message: {text: "למה אתה לא נותן הסבר ?"}
+    expect:
+      intent: complaint
+      forbid_writes: [tag]
+      max_questions: 0
+      must_not: ["כבר מסומנים"]
+      must_include_any: ["פרגולה|בפרגולה"]
+      ideal: "סליחה. בתמונה מהפרגולה שלושה עובדים באתר, ובמצלמה 1 מישהו עובד באדמה ליד הקיר."
+    notes: "Explain the photos just sent (their observations are in the chat). The real bot answered with the workers' mark."
+
+  - id: g09_14
+    source: "2026-10-09 13:02:13"
+    time: "13:02:13"
+    message: {text: "או מביא סרטון למה תמונה?"}
+    expect:
+      intent: command
+      must_do: [send_video]
+      forbid_writes: [tag]
+      max_questions: 0
+      ideal: "צודק, הנה 10 שניות מהפרגולה עכשיו — שלושה עובדים באתר."
+    notes: "Bring the video from the camera where the people are; do not ask which camera."
+
+  - id: g09_15
+    source: "2026-10-09 13:04:29"
+    time: "13:04:29"
+    message: {text: "אתה צריך להסביר כאשר אני אומר לך אם יש משהו בחוץ אצלי"}
+    expect:
+      intent: preference
+      forbid_writes: [tag]
+      max_questions: 0
+      ideal: "צודק. עכשיו: בפרגולה שלושה עובדים באתר, בכניסה הראשית רק הרכב הלבן עם תא מטען פתוח. מעכשיו כל תמונה תגיע עם הסבר."
+    notes: "Agree in a word, give the explanation now, promise once."
+
+  - id: g09_16
+    source: "2026-10-09 13:05:16"
+    time: "13:05:16"
+    message: {text: "אלה אותם אנשים שעבדו מהבוקר או שהתחלפו?"}
+    expect:
+      intent: question_history
+      forbid_writes: [tag]
+      max_questions: 0
+      must_not: ["^כן[,.]", "בטוח שאלה", "אותם עובדים מהבוקר\\.$"]
+      ideal: "אני לא יכול לומר בוודאות — לא עקבתי אחריהם ברצף. מהבוקר עבדו בפרגולה 2–3 אנשים, ועכשיו יש שם שלושה באותו אזור ובאותה עבודה, אז סביר שאלה אותם עובדים."
+    notes: "Evidence only (F.10): sessions and head counts from the event book, never an unbacked 'yes, the same'."
+
+  - id: g09_17
+    source: "2026-10-09 13:05:29"
+    time: "13:05:29"
+    message: {text: "אתה בטוח?"}
+    expect:
+      intent: question_history
+      forbid_writes: [tag]
+      max_questions: 0
+      must_not: ["כן, אני בטוח", "^כן[,.]"]
+      ideal: "לא לגמרי. אין לי זיהוי של אנשים — רק שזה אותו מספר, באותו מקום ובאותה עבודה כמו בבוקר."
+    notes: "The real bot said 'כן, אני בטוח'."
+
+  - id: g09_18
+    source: "2026-10-09 13:54:07"
+    time: "13:54:07"
+    message: {text: "אלה מקרים תקינים הם מתקינים זה שני אנשים שמרכיבים את הלדים במדרגות"}
+    expect:
+      intent: activity_explain
+      writes: [{type: activity, camera: ameer_v2_ch6}]
+      forbid_writes: [tag, place_fact]
+      max_questions: 0
+      must_not: ["כבר מסומנים"]
+      ideal: "הבנתי — השכיבה והזחילה עם הכלים במדרגות בכניסה הראשית זה החשמלאים שמתקינים לדים. עד 18:00 זה ייחשב אצלי רגיל."
+    notes: "The 13:24 red (person lying, another crawling with a metal bar) at the main entrance. Map the actions to the place; the hours come from the workers' mark."
+
+  - id: g09_19
+    source: "2026-10-09 13:54:31"
+    time: "13:54:31"
+    message: {text: "אני מדבר על שני האנשים שאחד מהם התכופף זה רגיל"}
+    expect:
+      intent: activity_explain
+      writes: [{type: activity, camera: ameer_v2_ch6}]
+      forbid_writes: [tag, place_fact]
+      max_questions: 0
+      must_not: ["9 פעמים", "ימים של היסטוריה", "כבר מסומנים"]
+      ideal: "הבנתי, שני החשמלאים במדרגות בכניסה הראשית. הכיפוף והשכיבה שם רגילים עד 18:00 — לא אקפיץ על זה."
+    notes: "The real bot quoted a usage statistic about the pergola."
+
+  - id: g09_20
+    source: "2026-10-09 13:54:38"
+    time: "13:54:38"
+    message: {text: "חשמלאים שמנסים להתקין לד למדרגות", reply_to: ameer_v2_ch3_1791542645_alert}
+    expect:
+      intent: activity_explain
+      writes: [{type: activity, camera: ameer_v2_ch6, or_ask: true}]
+      forbid_writes: [tag]
+      max_questions: 1
+      must_not: ["חלק מהעובדים על הפרגולה", "כבר מסומנים"]
+      ideal: "הבנתי — החשמלאים שמתקינים לדים במדרגות של הכניסה הראשית. עד 18:00 זה רגיל אצלי."
+    notes: "Typed as a reply to the 13:44 pergola car-door red, but the stairs are at the main entrance (the 13:24 red). Either apply it to the entrance or ask once which camera; the car door stays a separate matter."
+
+  - id: g09_21
+    source: "2026-10-09 13:54:47"
+    time: "13:54:47"
+    message: {text: "לא בפרגולה אני מתכוון בכניסה הראשית במדרגות", reply_to: ameer_v2_ch3_1791542645_alert}
+    expect:
+      intent: activity_explain
+      writes: [{type: activity, camera: ameer_v2_ch6}]
+      forbid_writes: [tag]
+      max_questions: 0
+      ideal: "סליחה, הבנתי: הכניסה הראשית, במדרגות. החשמלאים שם — עד 18:00 זה רגיל אצלי."
+    notes: "The real bot dumped the memory and asked 'מה לתקן?'."
+
+  - id: g09_22
+    source: "2026-10-09 13:55:04"
+    time: "13:55:04"
+    message: {text: "סבבה", reply_to: ameer_v2_ch3_1791542645_alert}
+    expect:
+      intent: ack
+      forbid_writes: [tag, person_mark, activity, place_fact]
+      max_questions: 0
+      must_not: ["העובדים"]
+      ideal: "👍"
+
+  - id: g09_23
+    source: "2026-10-09 13:55:14"
+    time: "13:55:14"
+    message: {text: "למה אתה חוזר על זה"}
+    expect:
+      intent: complaint
+      forbid_writes: [tag, person_mark, activity]
+      max_questions: 0
+      must_not: ["העובדים", "אני קורא את ההיסטוריה"]
+      ideal: "צודק, אין סיבה. הפסקתי."
+
+  - id: g09_24
+    source: "2026-10-09 13:55:26"
+    time: "13:55:26"
+    message: {text: "בסדר הבנתי", reply_to: ameer_v2_ch3_1791542645_alert}
+    expect:
+      intent: ack
+      forbid_writes: [tag, person_mark, activity, place_fact]
+      max_questions: 0
+      must_not: ["העובדים", "אני קורא את ההיסטוריה"]
+      ideal: "👍"
+
+  - id: g09_25
+    source: "2026-10-09 13:55:40"
+    time: "13:55:40"
+    message: {text: "הבנתי אתה לא צריך לחזור על זה", reply_to: ameer_v2_ch3_1791542645_alert}
+    expect:
+      intent: ack
+      forbid_writes: [tag, person_mark, activity, place_fact]
+      max_questions: 0
+      must_not: ["העובדים"]
+      ideal: "סגור."
+
+  - id: g09_26
+    source: "2026-10-09 18:40:57"
+    time: "18:40:57"
+    message: {text: "יש מישהו עדיין עובד בפרגולה"}
+    live:
+      ameer_v2_ch3: {description: "Two men work near the trailer and the building materials.", people: 2}
+    expect:
+      intent: question_live
+      must_do: ["look:ameer_v2_ch3"]
+      forbid_writes: [tag]
+      max_questions: 0
+      ideal: "כן, שניים עדיין עובדים בפרגולה, ליד הטריילר."
+
+  - id: g09_27
+    source: "2026-10-09 18:41:09"
+    time: "18:41:09"
+    message: {text: "?"}
+    live:
+      ameer_v2_ch3: {description: "Two men work near the trailer and the building materials.", people: 2}
+    expect:
+      intent: question_live
+      forbid_writes: [tag]
+      max_questions: 0
+      must_include_any: ["שני|שניים|2"]
+      ideal: "כן — שניים עדיין עובדים בפרגולה, ליד הטריילר."
+    notes: "The photo went out with no words; '?' means 'well?'. Answer from the photo just taken (a second look may count one person and contradict). The real reply leaked '[handles: ... receipts: ...]'."
+
+  - id: g09_28
+    source: "2026-10-09 21:36:33"
+    time: "21:36:33"
+    message: {text: "חתול הולך ברחבת הבית, אין תנועה של אנשים", reply_to: ameer_v2_ch3_1791570848_alert, via: tag}
+    expect:
+      intent: tag_only
+      writes: [{type: tag}]
+      forbid_writes: [person_mark, activity, place_fact]
+      max_questions: 0
+      ideal: "🏷️ נשמר כתיוג לסרטון 21:34 (פרגולה): חתול הולך ברחבת הבית, אין תנועה של אנשים."
