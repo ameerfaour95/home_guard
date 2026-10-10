@@ -100,6 +100,7 @@ def cfg(out_dir: str):
     return types.SimpleNamespace(
         MAIN_STREAM_ENABLED=True, STORE_FPS=10.0, YOLO_TRIGGER_CONF=0.35, YOLO_IMGSZ=640,
         TRIGGER_CLASS_IDS=[0, 2, 5, 7], CROP_PADDING=0.3, CROP_MIN_SIZE=384, CROP_EMA_ALPHA=0.3,
+        CROP_POLICY="follow",   # the golden hash pins the per-frame follow crop; test_vlm_crop_window covers clip_window
         OUT_DIR=out_dir,
     )
 

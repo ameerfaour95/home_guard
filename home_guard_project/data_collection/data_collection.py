@@ -515,8 +515,9 @@ def _save_vlm_crop_clip(
     vlm_mp4 = os.path.join(vlm_dir, f"{clip_id}.mp4")
     shutil.move(tmp, vlm_mp4)
 
-    log.info("[%s] VLM crop saved: %s (%dx%d, %d frames, per-frame tracking)",
-             st.name, vlm_mp4, median_w, median_h, len(cropped_frames))
+    log.info("[%s] VLM crop saved: %s (%dx%d, %d frames, %s%s)",
+             st.name, vlm_mp4, median_w, median_h, len(cropped_frames), result.policy,
+             ", whole frame" if result.whole_frame else "")
 
     return vlm_crop.crop_meta(result, settings, os.path.relpath(vlm_mp4, start=cfg.OUT_DIR), m_fps)
 

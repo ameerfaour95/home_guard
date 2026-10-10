@@ -113,6 +113,7 @@ def frame_hash(frame) -> str:
 def cfg(sample_fps):
     return SimpleNamespace(MAIN_STREAM_ENABLED=True, STORE_FPS=10.0, YOLO_TRIGGER_CONF=0.35, YOLO_IMGSZ=640,
                            TRIGGER_CLASS_IDS=[0, 2, 5, 7], CROP_PADDING=0.3, CROP_MIN_SIZE=384, CROP_EMA_ALPHA=0.3,
+                           CROP_POLICY="follow",   # these bytes were recorded under the per-frame follow crop
                            CLIP_SECONDS=10., VLM_SAMPLE_FPS=sample_fps)
 
 
