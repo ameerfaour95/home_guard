@@ -239,7 +239,7 @@ class KeeperTest(unittest.TestCase):
 
     def test_no_closing_offer_and_no_unbacked_verdict_claim(self) -> None:
         out = self.agent(Scripted([reply("היו שני אירועים בבוקר. אם יש משהו נוסף שתרצה לדעת, אני כאן!")])).handle(
-            "מה היה הבוקר", "-5", {"user_id": 1})
+            "מה היה בכניסה הבוקר", "-5", {"user_id": 1})
         self.assertEqual(out.text, "היו שני אירועים בבוקר.")
         big = Scripted([reply("רשמתי את זה כהתרעה צפויה. תודה על ההבהרה!"), reply("רשמתי את זה כהתרעה צפויה.")])
         out = self.agent(big).handle("מדי פעם אני יוצא החוצה בלילה", "-5", {"user_id": 1})

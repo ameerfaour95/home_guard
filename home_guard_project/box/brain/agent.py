@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from ..feedback import Feedback, is_complaint, save_feedback
-from . import activity_chat, house, human, look_explain, reply_guard, same_people
+from . import activity_chat, day_story, house, human, look_explain, reply_guard, same_people
 from . import known_memory as km
 from .claims import empty_reply, honest_answer, unbacked_claims
 from .grounding import evidence_text, ungrounded_details
@@ -803,6 +803,32 @@ class OwnerAgentV2:
             "replaced": [{"camera": camera, "until": float(entry.get("until") or 0),
                           "daily_from": str(entry.get("daily_from") or ""), "daily_to": str(entry.get("daily_to") or "")}]})
         return ""
+
+    def _day_story(self, ctx: ToolContext, text: str, snapshot: Any, now: float,
+                   usage: Dict[str, List[int]]) -> Optional[str]:
+        """"סיכום יום" and its follow-up: the story's text, "" when a line's clip was sent (its receipt is the
+        reply), None when the message is neither."""
+        try:
+            handle = day_story.send_target(text, ctx.state, now)
+            if not handle and getattr(self.services, "events", None) is None:
+                return None                              # no event memory on this box: the models answer
+            if handle:
+                self._dispatch(ctx, "send_media", {"handle": handle}, True, ["send_media"])
+                return ""
+            if not day_story.asks_day_story(text):
+                return None
+            named = list(dict.fromkeys(cam for _, cam in mentioned_cameras(snapshot, text)))
+            story = day_story.tell(self.services.events, getattr(self.services, "activities", None), snapshot, text,
+                                   now, model=getattr(self.services, "story_model", None) or self.model,
+                                   add_handle=ctx.state.add_handle, camera=named[0] if len(named) == 1 else "")
+            spent = usage.setdefault("story", [0, 0])
+            spent[0], spent[1] = spent[0] + int(story.usage[0]), spent[1] + int(story.usage[1])
+            day_story.remember(ctx.state, story, now)
+            ctx.shown.extend(h for h in (x.get("handle") for x in story.lines) if h and h not in ctx.shown)
+            return story.text
+        except Exception as exc:  # noqa: BLE001 - the models still get the message
+            log.warning("Day story failed: %s", exc)
+            return None
 
     def _correct_time(self, ctx: ToolContext, text: str, now: float) -> Optional[str]:
         """"מי אמר עד 23:59? ... הם עובדים עד 18:00" (2026-10-09): a statement with a new end time for the people
@@ -1690,7 +1716,16 @@ class OwnerAgentV2:
         # The answer to "until when?" / "all the cameras or only the pergola?" completes the mark in code.
         known_done = None
         activities = getattr(self.services, "activities", None)
-        if isinstance(pending, dict) and pending.get("kind") == "activity_until":
+        story_done = False
+        if choice is None and pending is None and not (threaded or alert) and snapshot is not None:
+            # "סיכום יום" / "מה היה הבוקר" (owner, 2026-10-10: "tell what happened, not alerts and numbers") and
+            # "שלח את 10:15" after it: the day's story (day_story.py), one model call, never summarize_period.
+            known_done = self._day_story(ctx, text, snapshot, now, usage)
+            story_done = known_done is not None
+            called += [r.tool for r in ctx.receipts]
+        if known_done is not None:
+            pass
+        elif isinstance(pending, dict) and pending.get("kind") == "activity_until":
             known_done = activity_chat.answer_until(activities, pending, text, choice, now, lang)
         elif choice is None and pending is None and activity_chat.is_ack(text) and not _asked_last(state):
             # "סבבה" / "בסדר הבנתי" / "תודה" (2026-10-09 13:55: answered with the memory status, twice): 👍.
@@ -1895,6 +1930,9 @@ class OwnerAgentV2:
                     if _kept_known(ctx.receipts):
                         answer = ""
                 break
+            if not code_only and "day_story" in called and day_story.story_from_results(ctx.results):
+                answer = day_story.story_from_results(ctx.results)      # the story goes out as the box wrote it
+                story_done = True
             if not code_only and ctx.clarification is None and "look_around" in called and not str(answer).strip():
                 # 13:00 "יש מישהו בחוץ?": photos and no word. One summary line from what each camera showed.
                 answer = _look_summary(ctx.results)
@@ -1975,7 +2013,7 @@ class OwnerAgentV2:
                 reply_text = render_reply(said, lines, lang, self.retention_days, snapshot)
                 if not reply_text:
                     reply_text = t(("ai_no_access" if no_ai else "unavailable") if failed else "nothing_done", lang)
-                elif not failed and not house_out.handled:     # a status asked for may read alike
+                elif not failed and not house_out.handled and not story_done:   # a status asked for may read alike
                     reply_text = self._final_reply(ctx, text, reply_text, now, usage)
                 elif not answer and is_complaint(text) and any(
                         r.tool == "mark_known" and r.status == DONE and r.detail.get("replaced") for r in shown):
@@ -2128,6 +2166,10 @@ def build_owner_agent(box_settings: Dict[str, Any], env: Dict[str, str], mute: A
         return None, deliverer
     if fast is not None and hasattr(fast, "usage_agent"):
         fast.usage_agent = "brain_fast"          # the usage ledger counts the two models apart
+    # The day's story (day_story.py): box.yaml day_story_model, else the assistant's main model (2026-10-10:
+    # openai/gpt-4o told today's real day for about $0.003; gpt-4o-mini for $0.0002 but missed the window).
+    story_spec = str(box_settings.get("day_story_model") or "").strip()
+    story_model = (make_model(story_spec, env) if story_spec else None) or big
     # The assistant's own files: data\state on a migrated box, inside live_dir before (paths.state_paths_for).
     state_dir, own_dir = paths.state_paths_for(live_dir)
     work_dir = os.path.join(own_dir, ".live")
@@ -2161,7 +2203,7 @@ def build_owner_agent(box_settings: Dict[str, Any], env: Dict[str, str], mute: A
         embedder=make_embedder(env, os.path.join(own_dir, ".alert_embeddings.json")),
         retention_days=retention, set_option=boxconfig.set_option, read_settings=boxconfig.load_box_settings,
         alert_settings=alert_settings, house=_house_store(mute), events=_event_book(),
-        activities=_activity_book(), **_grounding_services(box_settings),
+        activities=_activity_book(), story_model=story_model, **_grounding_services(box_settings),
     )
     def quiet_log_on() -> bool:
         return bool(boxconfig.load_box_settings().get("quiet_log", False))
