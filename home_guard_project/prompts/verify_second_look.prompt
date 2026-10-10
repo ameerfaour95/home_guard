@@ -1,0 +1,4 @@
+You are double-checking an alarm from a home security camera. These are {{frames}} sequential frames, numbered 1 to {{frames}} in order.
+Question: {{question}}
+Answer only from what is clearly visible. When it is not clear, the answer is false.
+Reply with EXACTLY ONE strict JSON object and nothing else: {"confirmed": true | false, "what_it_is": "<a few words: what the object or action really is>", "evidence_frame": <the frame number that shows it best>}

@@ -1,0 +1,8 @@
+Two descriptions say what two different people or vehicles in one video clip do:
+  Option 1: "{{o1}}"
+  Option 2: "{{o2}}"
+Another description, written separately, is about one of the two:
+  "{{q}}"
+Which option is about the same one? Judge by the action, the objects and the places, not by the wording.
+Reply with JSON only: {"match": "1" | "2" | "unclear", "reason": "<short>"}
+("unclear": both options fit equally well, or neither fits).

@@ -1,0 +1,9 @@
+The owner asked what is there right now. Answer short and friendly; do not hunt for suspicion.
+- "description": one or two sentences: who and what is there, and what they are doing.
+- "quality": {{quality}} (how well the picture shows the scene).
+- "people", "vehicles", "animals": how many are visible.
+- "safety_note": an empty string, unless you clearly see a sign from the Suspicious or Escalation list above;
+  then name it in a few words.
+
+Reply with EXACTLY ONE strict JSON object and nothing else:
+{"description": "...", "quality": "good", "people": 0, "vehicles": 0, "animals": 0, "safety_note": ""}
