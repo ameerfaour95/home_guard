@@ -48,7 +48,7 @@ JPEG = (b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\x
 # $ per million tokens (input, output), OpenRouter list prices.
 PRICES = {"openai/gpt-4o": (2.5, 10.0), "openai/gpt-4o-mini": (0.15, 0.6), "openai/gpt-4.1": (2.0, 8.0),
           "openai/gpt-4.1-mini": (0.4, 1.6), "anthropic/claude-sonnet-4.5": (3.0, 15.0)}
-DEFAULT_BIG, DEFAULT_FAST, DEFAULT_JUDGE = "openrouter:openai/gpt-4o", "openrouter:openai/gpt-4o-mini", "openai/gpt-4o"
+DEFAULT_BIG, DEFAULT_FAST, DEFAULT_JUDGE = "openrouter:openai/gpt-4o", "openrouter:openai/gpt-4o-mini", "openai/gpt-4.1"
 
 INTENTS = ("place_fact", "person_mark", "activity_explain", "tag_only", "question_live", "question_history",
            "question_meta", "complaint", "ack", "preference", "command")
@@ -338,14 +338,55 @@ def ideal_result(case: Dict[str, Any]) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------------------------------------------------
 # The stubbed box
 # ---------------------------------------------------------------------------------------------------------------------
+class RateGate:
+    """At most *rpm* calls per rolling minute per model, shared by every thread (OpenRouter limits a new account to
+    20 requests a minute per model: 2026-10-10 the first baseline lost 50 judge calls and some brain turns to 429)."""
+
+    _gates: Dict[str, "RateGate"] = {}
+    _guard = threading.Lock()
+
+    def __init__(self, rpm: int) -> None:
+        self.rpm, self.calls, self.lock = rpm, [], threading.Lock()
+
+    @classmethod
+    def for_model(cls, name: str, rpm: int) -> "RateGate":
+        with cls._guard:
+            return cls._gates.setdefault(name.split(":", 1)[-1], cls(rpm))
+
+    def wait(self) -> None:
+        while True:
+            with self.lock:
+                now = time.monotonic()
+                self.calls = [t for t in self.calls if now - t < 60.0]
+                if len(self.calls) < self.rpm:
+                    self.calls.append(now)
+                    return
+                pause = 60.0 - (now - self.calls[0]) + 0.05
+            time.sleep(max(0.05, pause))
+
+
+RPM = 18
+
+
 class CountingModel:
-    """Wraps a chat model: counts tokens and calls, and stops the run on a 402 (no credit)."""
+    """Wraps a chat model: counts tokens and calls, keeps under the per-model rate limit (retrying a 429 with a
+    pause), and stops the run on a 402 (no credit)."""
 
     def __init__(self, inner: Any, name: str, ledger: "Spend") -> None:
         self._inner, self._name, self._ledger = inner, name, ledger
+        self._gate = RateGate.for_model(name, RPM)
 
     def chat(self, *args: Any, **kwargs: Any) -> Any:
-        msg = self._inner.chat(*args, **kwargs)
+        msg = None
+        for attempt in range(5):
+            self._gate.wait()
+            msg = self._inner.chat(*args, **kwargs)
+            err = str(getattr(msg, "error", "") or "")
+            if "429" in err or "RateLimit" in err:
+                self._ledger.add_retry(self._name)
+                time.sleep(8.0 * (attempt + 1))
+                continue
+            break
         usage = getattr(msg, "usage", (0, 0)) or (0, 0)
         self._ledger.add(self._name, int(usage[0] or 0), int(usage[1] or 0))
         err = str(getattr(msg, "error", "") or "")
@@ -359,8 +400,12 @@ class CountingModel:
 
 class Spend:
     def __init__(self, cap_usd: float) -> None:
-        self.cap, self.by_model, self.stop = cap_usd, {}, ""
+        self.cap, self.by_model, self.stop, self.retries = cap_usd, {}, "", {}
         self._lock = threading.Lock()
+
+    def add_retry(self, model: str) -> None:
+        with self._lock:
+            self.retries[model] = self.retries.get(model, 0) + 1
 
     def add(self, model: str, tin: int, tout: int) -> None:
         with self._lock:
@@ -1096,7 +1141,7 @@ def write_report(path: str, cases: List[Dict[str, Any]], all_runs: List[List[Dic
     for k, v in meta.items():
         L.append(f"- {k}: {v}")
     L.append(f"- cost: ${spend.usd():.3f} total, ${spend.usd() / max(1, len(all_runs)):.3f} per full run "
-             f"(tokens by model: {json.dumps(spend.by_model)})")
+             f"(tokens in/out/calls by model: {json.dumps(spend.by_model)}; 429 retries: {json.dumps(spend.retries)})")
     if spend.stop:
         L.append(f"- STOPPED EARLY: {spend.stop}")
     L += ["", "## Summary", "", "| run | pass (all) | pass (deterministic) | stupid messages | "
@@ -1210,6 +1255,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     r.add_argument("--fast", default=DEFAULT_FAST)
     r.add_argument("--workers", type=int, default=4)
     r.add_argument("--cap", type=float, default=5.0, help="stop starting new cases above this spend ($)")
+    r.add_argument("--rpm", type=int, default=RPM, help="calls per minute per model (OpenRouter new accounts: 20)")
     r.add_argument("--key-file", default="")
     r.add_argument("--title", default="Golden conversation suite")
     c = sub.add_parser("check", help="schema + ideal replies, no model")
@@ -1236,6 +1282,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         keys = [k.strip() for k in args.only.split(",") if k.strip()]
         cases = [c for c in cases if any(c["id"] == k or c["id"].startswith(k) for k in keys)]
     spend = Spend(args.cap)
+    globals()["RPM"] = max(1, args.rpm)
     env = read_key(args.key_file)
     big, fast, judge = make_models(env, spend, args.big, args.fast, args.judge, need_judge=not args.no_judge)
     import logging  # noqa: PLC0415
