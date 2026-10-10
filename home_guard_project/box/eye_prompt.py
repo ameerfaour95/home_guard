@@ -108,8 +108,9 @@ def _base(situation: Situation) -> str:
 
 # How a category reads when it is NOT expected now, per priors column (default: its name).
 _NOT_EXPECTED_TEXT = {
-    tx.NIGHT: {cid: load(f"eye_v3_unexpected_{cid.lower()}.prompt") for cid in ("N2", "N6", "N7", "N9")},
-    tx.AWAY: {cid: load(f"eye_v3_unexpected_{cid.lower()}.prompt") for cid in ("N7", "N9")},
+    tx.NIGHT: {"N2": load("eye_v3_unexpected_n2.prompt"), "N6": load("eye_v3_unexpected_n6.prompt"),
+               "N7": load("eye_v3_unexpected_n7.prompt"), "N9": load("eye_v3_unexpected_n9.prompt")},
+    tx.AWAY: {"N7": load("eye_v3_unexpected_n7.prompt"), "N9": load("eye_v3_unexpected_n9.prompt")},
 }
 
 
