@@ -39,7 +39,7 @@ from .receipts import ACTING_TOOLS, DONE, FAILED, REQUESTED, UNDONE, Receipt, Re
 from .mode import hhmm
 from .registry import current_camera, display, mentioned_cameras, render_block, resolve_camera
 from .render import receipt_line, render_reply, undo_what
-from .style import strip_boilerplate
+from .style import strip_boilerplate, strip_internals
 from .tools import DEFAULTS, TOOLS, KEYS, Services, ToolContext, _issue, settings_line
 from .tools import _alert_state, _alert_target, _alert_types, _alert_values
 from .tools import KNOWN_WEEK_SEC, ask_known, asks_retag, in_place, known_line, known_rows, retag_words, session_text
@@ -532,6 +532,13 @@ def _undo_token(ctx: ToolContext) -> str:
     return ctx.turn_id.rsplit(":", 1)[-1] if any(
         r.tool in UNDOABLE and r.status in (DONE, REQUESTED) and isinstance(r.detail, dict)
         and not r.detail.get("already") and not r.detail.get("undo_of") for r in ctx.receipts) else ""
+
+
+def _no_ai_access(exc: Any) -> bool:
+    """The model call was refused for money or a key (OpenRouter 402, OpenAI insufficient_quota, 401)."""
+    from .models import no_ai_access  # noqa: PLC0415
+
+    return no_ai_access(exc)
 
 
 def _fallback_reply(ctx: Optional[ToolContext], lang: str) -> AgentReply:
@@ -1488,7 +1495,7 @@ class OwnerAgentV2:
             settings = {}
         box_lang = str(settings.get("owner_language") or "en")
         lang = state.language_for(speaker, text, default=box_lang)
-        failed = False
+        failed = no_ai = False
         try:
             snapshot = self.registry.snapshot()
         except Exception as exc:  # noqa: BLE001
@@ -1745,6 +1752,7 @@ class OwnerAgentV2:
             log.warning("The agent could not handle a message: %s", exc)
             failed = True
             answer = ""
+            no_ai = _no_ai_access(exc)
         # A plain message (a question, a complaint, chit-chat) stays in the chat log only (owner, 2026-10-09): feedback/
         # holds TAGS of clips (record_verdict, retag_clip, the alert's buttons and ✏️), never conversation.
         try:
@@ -1763,7 +1771,8 @@ class OwnerAgentV2:
                                      token=uuid.uuid4().hex[:8])
             else:
                 # No closing offers ("אם יש משהו נוסף… אני כאן"), owner decision 2026-10-08.
-                said = t("unavailable", lang) if failed else strip_boilerplate(answer)
+                said = (t("ai_no_access" if no_ai else "unavailable", lang) if failed
+                        else strip_boilerplate(strip_internals(answer)))
                 # A photo sent in this very turn is right there above the answer: no "✓ התמונה נשלחה" line under it
                 # (2026-10-09 12:47). Without an answer the receipt is the reply, as before.
                 lines = [r for r in shown if not _photo_just_sent(r)] if str(said or "").strip() else shown
@@ -1773,7 +1782,7 @@ class OwnerAgentV2:
                     lines = [r for r in lines if not (r.status == FAILED and r.reason == "too_many")]
                 reply_text = render_reply(said, lines, lang, self.retention_days, snapshot)
                 if not reply_text:
-                    reply_text = t("unavailable" if failed else "nothing_done", lang)
+                    reply_text = t(("ai_no_access" if no_ai else "unavailable") if failed else "nothing_done", lang)
                 elif not failed and not house_out.handled:     # a status asked for may read alike
                     reply_text = self._final_reply(ctx, text, reply_text, now, usage)
                 elif not answer and is_complaint(text) and any(

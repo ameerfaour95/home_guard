@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from typing import Any, Dict, List, Optional
 
-from home_guard_project.box.agent import UNAVAILABLE_REPLY, AgentReply
+from home_guard_project.box.agent import AgentReply, unavailable_reply
 from home_guard_project.box.feedback import FEEDBACK_QUESTION, AlertIndex, MuteState
 from home_guard_project.box.telegram_agent import TelegramInbox, alert_roots, feedback_keyboard, send_alert, start
 from home_guard_project.box.telegram_notify import TelegramConfig
@@ -163,7 +163,7 @@ class TelegramAgentTest(unittest.TestCase):
         self._inbox(tg, agent=None).poll_once()
         (saved,) = self._saved()
         self.assertEqual(saved["raw_text"], "no there was nothing")
-        self.assertEqual(tg.sent("sendMessage")[0]["fields"]["text"], UNAVAILABLE_REPLY)
+        self.assertEqual(tg.sent("sendMessage")[0]["fields"]["text"], unavailable_reply("en", no_ai=True))
 
     def test_handled_updates_are_not_fetched_again_after_a_restart(self) -> None:
         agent = FakeAgent(AgentReply(text="ok"))

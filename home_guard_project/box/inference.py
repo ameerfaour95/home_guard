@@ -466,10 +466,18 @@ def baseline_look(camera: str, alert_ts: float, label: str, text: str,
 _PLACEHOLDERS = ("an empty string", "empty string")
 
 
+# The summary when the model gave none (the detector's word only). Kept in English in the records; the owner reads it
+# in the box language (2026-10-10 12:34: "מה קורה: a person or vehicle was detected." in a Hebrew alert).
+DETECTED_ONLY = "a person or vehicle was detected"
+_DETECTED_ONLY_TEXT = {"he": "זוהה אדם או רכב", "ar": "تم رصد شخص أو مركبة"}
+
+
 def owner_summary(summary: str, summary_owner: str, lang: str) -> str:
     """The summary the owner reads: the model's *summary_owner* in the box language when it is not English and the
     model really wrote one; otherwise *summary*. An English prompt asks for summary_owner as "<an empty string>",
     and a model sometimes copies that placeholder word for word, so it never reaches the owner."""
+    if (summary or "").strip() == DETECTED_ONLY and lang in _DETECTED_ONLY_TEXT and not (summary_owner or "").strip():
+        return _DETECTED_ONLY_TEXT[lang]
     text = (summary_owner or "").strip()
     if lang == "en" or not text:
         return summary
@@ -2874,7 +2882,7 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
         # at least a [send_message]; the model's label can raise it (LABEL_COMMANDS).
         cmd = LABEL_COMMANDS.get(label, "[send_message]")
         if not summary:
-            summary = "a person or vehicle was detected"
+            summary = DETECTED_ONLY
         reason = str(parsed.get("alert_reason", "")) if parsed else ""
         why = str(parsed.get("why") or "").strip() if parsed else ""
         summary_owner = str(parsed.get("summary_owner") or "").strip() if parsed else ""
@@ -3084,6 +3092,8 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
 
                     # Already in the owner's language: nothing for the translator to do.
                     told_text, owner_why = ai_unavailable(detected_fact_kinds(labels), lang, bool(image)), why if fact else ""
+                elif summary == DETECTED_ONLY and not summary_owner:
+                    pass                    # the detector's word only: owner_summary already wrote it in his language
                 elif messenger.uses_translator(box_settings, lang):
                     # A house note's reason is already in the box language; only the model's own why is translated.
                     told = messenger.messenger_for(box_settings, env).to_owner(

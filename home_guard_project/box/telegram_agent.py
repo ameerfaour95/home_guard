@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from . import telegram_notify, voice
-from .agent import UNAVAILABLE_REPLY, AgentContext, OwnerAgent, make_chat_model
+from .agent import UNAVAILABLE_REPLY, AgentContext, OwnerAgent, make_chat_model, unavailable_reply  # noqa: F401
 from .chat_feed import ChatFeed
 from .brain.i18n import LANGS, detect_language
 from .brain.i18n import t as tr
@@ -763,6 +763,7 @@ def start(
                     camera_names=list(camera_names), mute_state=mute, feedback_dir=live_dir,
                     roots=lambda: alert_roots(live_dir, archive_dir),
                     retention_days=PRODUCTION_RETENTION_DAYS,
+                    language=lambda: str(box_settings.get("owner_language") or "en"),
                 ))
                 if version == 2:
                     log.warning("Owner assistant runs as v1 (the v2 brain could not be built).")
@@ -1446,7 +1447,7 @@ class TelegramInbox:
         self._mark_answered(alert)
         if self.agent is None:
             save_feedback(self.feedback_dir, alert, Feedback(), text, _who(sender), chat_id, self._now())
-            self._say(chat_id, UNAVAILABLE_REPLY, reply_to=message.get("message_id"))
+            self._say(chat_id, unavailable_reply(self._language(), no_ai=True), reply_to=message.get("message_id"))
             return
         if v2:
             if self.deliverer is not None:
