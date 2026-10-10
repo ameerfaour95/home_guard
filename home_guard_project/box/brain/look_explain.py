@@ -19,6 +19,7 @@ import logging
 import re
 from typing import Any, Dict, List, Optional, Sequence
 
+from ...prompts import render
 from .i18n import LANGUAGE_NAMES, t
 from .registry import display
 
@@ -89,15 +90,6 @@ def code_lines(looks: Sequence[Dict[str, Any]], snapshot: Any, lang: str) -> str
     return "\n".join(rows)
 
 
-_SYSTEM = """You explain to a home owner what the live photos you just sent him show. He asked for an explanation.
-Write in {language}. One short line per camera, in the order given, starting with PLACE exactly as given (the camera's name
-and the photo's time, e.g. "בפרגולה ב-13:00:"). Say who is there (how
-many, what they wear only if it helps tell them apart), what they do, and any vehicle; a camera with nobody: say so
-in a few words. Only what the description says: never add people, objects or actions. When a camera has KNOWN
-(people the owner told you about) and people are seen there, end that line with "probably" + those people (in
-{language}: "כנראה העובדים שסימנת"), never as a certainty. No question, no offer, no greeting, no apology. Plain text."""
-
-
 def explain(model: Any, looks: Sequence[Dict[str, Any]], snapshot: Any, marks: Sequence[Dict[str, Any]], lang: str,
             usage: Dict[str, List[int]]) -> str:
     """The lines for *looks*. Never raises; never a question (the code lines replace one)."""
@@ -114,7 +106,7 @@ def explain(model: Any, looks: Sequence[Dict[str, Any]], snapshot: Any, marks: S
                     f'description: {look["description"]}' + (f'; KNOWN: {"; ".join(known)}' if known else ""))
     language = LANGUAGE_NAMES.get(lang, "English")
     try:
-        msg = model.chat([{"role": "system", "content": _SYSTEM.format(language=language)},
+        msg = model.chat([{"role": "system", "content": render("brain_look_explain.system_prompt", language=language)},
                           {"role": "user", "content": "PHOTOS:\n" + "\n".join(rows)}], [])
         spent = usage.setdefault("big", [0, 0])
         spent[0] += int(msg.usage[0] or 0)

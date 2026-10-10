@@ -1,0 +1,1 @@
+Only moments when the detector saw a person or a moving vehicle are saved. Outside the alert hours nothing is saved while the quiet log is off, nor before quiet_log_since; cameras that were off saw nothing. 'unknown' means the start of the quiet log is not known.

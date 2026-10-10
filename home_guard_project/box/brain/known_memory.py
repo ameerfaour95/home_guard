@@ -24,6 +24,8 @@ import logging
 import re
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
+from ...prompts import render
+
 log = logging.getLogger("box.brain.known_memory")
 
 _HE_PREFIX = r"(?<![א-ת])[ושהבלמכ]{0,2}"
@@ -247,9 +249,7 @@ def live_lines(book: Any, snapshot: Any, lang: str, now: float) -> List[str]:
         return ["[LIVE MARKS] none - the owner marked nobody as known right now"]
     rows = [f'"{k.get("text")}" at {where_text(snapshot, str(k.get("camera") or ""), lang)} until '
             f'{_hhmm(k.get("until"))} (said {_hhmm(k.get("at"))}, id {k.get("id")})' for k in marks]
-    return ["[LIVE MARKS] the box silences suspicious alerts about these people (never an escalation): "
-            + "; ".join(rows) + ". They are already saved: never offer to mark them again; a correction of one is "
-                                "mark_known with the new time / camera / words, and it replaces the old mark."]
+    return [render("brain_context_live_marks.prompt", marks="; ".join(rows))]
 
 
 def today_lines(state: Any, now: float, limit: int = 8) -> List[str]:
@@ -298,10 +298,7 @@ def gap_line(book: Any, snapshot: Any, camera: str, when: str, lang: str, now: f
     except Exception as exc:  # noqa: BLE001
         log.warning("Gap line not built: %s", exc)
         return ""
-    return (f"[NOT COVERED] the event being discussed ({when}) is at {here}; the live marks cover only: {there}. "
-            f"If the owner says these are the same people, this is the gap: name it in one line and call "
-            f"mark_known for them with camera \"all\" (the whole house) or {here}, the same until - it replaces the "
-            f"old mark. Never offer what is already marked.")
+    return render("brain_context_not_covered.prompt", when=when, here=here, there=there)
 
 
 def receipt_note(receipt: Any, snapshot: Any = None) -> str:

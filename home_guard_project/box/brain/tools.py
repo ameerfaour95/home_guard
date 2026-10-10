@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
+from ...prompts import load, render
 from ..alert_clips import PRE_SECONDS
 from ..archive import AlertRecord
 from ..feedback import (MAX_MUTE_HOURS, VERDICTS, Feedback, MuteState, feedback_from_fields, is_insult,
@@ -405,7 +406,7 @@ def assess_event(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         if out.get("refused") or out.get("error") in ("vision_failed", "no_answer"):
             return {"ok": True, "handle": handle, "assessment": "unavailable",
                     "reason": "refused" if out.get("refused") else "failed",
-                    "note": "Say: activity detected; assessment unavailable. This never means normal."}
+                    "note": load("brain_tool_assess_unavailable.prompt")}
         return out
     _keep_description(ctx, handle, "", out["text"])
     return {"ok": True, "handle": handle, "camera": record.camera, "time": local(record.ts),
@@ -423,7 +424,7 @@ def ask_clarification(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     if not question or len(choices) < 2:
         return _err("give one short question and 2 to 5 choices")
     ctx.clarification = {"question": question, "choices": choices, "ts": _finite(ctx.services.now())}
-    return {"ok": True, "message": "The question will be sent with buttons; end the turn now."}
+    return {"ok": True, "message": load("brain_tool_question_sent.prompt")}
 
 
 # -- acting ----------------------------------------------------------------------
@@ -533,8 +534,7 @@ def _camera_or_topic(ctx: ToolContext, words: Any) -> Tuple[Optional[str], Optio
         return choices[0], None
     ctx.clarification = {"question": t("which_camera", ctx.lang), "choices": list(choices),
                          "ts": _finite(ctx.services.now())}
-    return None, _err("no camera was named and none is being talked about: the owner is asked which one with "
-                      "buttons; end the turn now")
+    return None, _err(load("brain_tool_which_camera_asked.prompt"))
 
 
 def _aka(ctx: ToolContext, camera: str) -> str:
@@ -654,8 +654,7 @@ def _note_facts(ctx: ToolContext, handle: str, out: Dict[str, Any], look: Dict[s
     if look.get("unsure_people"):
         out["unsure_people"] = look["unsure_people"]
     if look.get("corrected"):
-        out["note"] = ("The detector found no person here: never say there is one. A person the picture model "
-                       "thought it saw may be told only as 'ייתכן שיש אדם, לא בטוח'.")
+        out["note"] = load("brain_tool_detector_no_person.prompt")
     entry = ctx.state.handles.get(handle)
     if isinstance(entry, dict) and facts.known:
         entry["objects"] = rec["objects"][:12]
@@ -736,12 +735,11 @@ def look_around(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     seen = [row for row in rows if "error" not in row]
     if not seen:
         # 2026-10-08 replay: with no picture at all the model still answered "all quiet". Nothing seen is not quiet.
-        return _err("No camera gave a picture now, so nothing is known about outside. Say exactly that in one line; "
-                    "never say it is quiet.", cameras=rows)
+        return _err(load("brain_tool_look_around_no_picture.prompt"), cameras=rows)
     blind = [row["camera"] for row in rows if "error" in row]
     return {"ok": True, "cameras": rows,
-            "note": ("Answer in one or two sentences: where people are and what they do; call quiet only the cameras "
-                     "that gave a picture." + (f" No picture from: {', '.join(blind)} - say so." if blind else ""))}
+            "note": load("brain_tool_look_around.prompt") + (
+                " " + render("brain_tool_look_around_blind.prompt", cameras=", ".join(blind)) if blind else "")}
 
 
 WHERE_FRESH_SEC = 120.0      # a live look this recent answers "where is it?" without a new picture
@@ -776,8 +774,7 @@ def map_info(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     if summary.get("map") == "none":
         out["say"] = gl.no_map_text(ctx.lang)
     else:
-        out["note"] = ("Area names are labels from the owner's drawing: say 'your ground' / 'the neighbour's ground', "
-                       "not 'area 7'.")
+        out["note"] = load("brain_tool_map_area_names.prompt")
     return out
 
 
@@ -829,12 +826,12 @@ def where_is(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     else:
         shot = ctx.services.grab_photo(camera) if ctx.services.grab_photo else {"error": "no live view"}
         if not isinstance(shot, dict) or shot.get("error") or not isinstance(shot.get("image"), str):
-            return _err("No picture from this camera now, so where things stand is not known. Say exactly that.",
+            return _err(load("brain_tool_where_no_picture.prompt"),
                         camera=name)
         found = gl.grounded_facts(camera, shot["image"], now, detector=ctx.services.detect,
                                   status_path=ctx.services.status_path, zones_path=ctx.services.zones_path)
         if not found.known:
-            return _err("The detector could not look now, so where things stand is not known. Say exactly that.",
+            return _err(load("brain_tool_where_no_detector.prompt"),
                         camera=name)
         seen, ts = list(found.objects), now
     placed = [gl.place(scene, s) for s in seen]
@@ -842,7 +839,7 @@ def where_is(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     out.update(res)
     out["seen_at"] = hhmm(ts)
     out.setdefault("note", "")
-    out["note"] = (out["note"] + " Answer with 'say' in one line; never guess whose car it is beyond it.").strip()
+    out["note"] = (out["note"] + " " + load("brain_tool_where_answer.prompt")).strip()
     return out
 
 
@@ -860,8 +857,7 @@ def asks_for_media(text: str) -> bool:
 @_safe_tool
 def record_clip(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     if str(ctx.text or "").strip() and not asks_for_media(ctx.text):     # no text: an internal call (tests, tools)
-        return _err("Not recorded: this message does not ask for a video. If you are not sure what the owner means, "
-                    "ask one short question instead of acting.")
+        return _err(load("brain_tool_record_clip_not_asked.prompt"))
     camera, bad = _camera_or_topic(ctx, args.get("camera"))
     if bad:
         return bad
@@ -903,8 +899,7 @@ def send_media(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     if entry.get("kind") in ("photo", "clip"):
         path, camera = str(entry["ref"]), str(entry.get("camera") or "")
         if path in ctx.sent_paths:
-            return {"ok": True, "already_sent": True, "note": "This exact file was already sent in this turn; "
-                    "do not send it again and do not mention it twice."}
+            return {"ok": True, "already_sent": True, "note": load("brain_tool_already_sent.prompt")}
         if not os.path.isfile(path):
             return _result(_issue(ctx, "send_media", FAILED, handle, {"kind": entry["kind"]}, "not_on_box"))
         if entry["kind"] == "photo":
@@ -978,8 +973,7 @@ def _resume_not_on_disk(ctx: ToolContext, now: float, camera: Optional[str]) -> 
 @_safe_tool
 def pause_alerts(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     if not quoted_from(str(args.get("owner_words") or ""), ctx.text):
-        return _err("Not paused: pause only when this message asks for it, and owner_words must be copied "
-                    "from it (two words or more).")
+        return _err(load("brain_tool_pause_not_asked.prompt"))
     cameras, bad = _cameras_arg(ctx, args.get("cameras") or args.get("camera"))
     if bad:
         return bad
@@ -1069,14 +1063,11 @@ def record_verdict(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     if verdict not in VERDICTS or verdict == "none":
         return _err("verdict must be one of true_alert, false_alarm, real_but_wrong, expected, missed_event")
     if not quoted_from(str(args.get("owner_words") or ""), ctx.text):
-        return _err("Not saved: owner_words must quote the owner's judgement from this message (two words or "
-                    "more). If the message only points at an event, ask what they want to say about it.")
+        return _err(load("brain_tool_verdict_not_quoted.prompt"))
     if (not_a_judgement(str(args.get("owner_words") or "")) or is_insult(ctx.text)
             or (is_question(ctx.text) and not ctx.threaded)):
         # 2026-10-07: "על איזה סרטון דיברת", "יא מטומטם" and "די עם ההודעה" were each filed as a verdict.
-        return _err("Not saved: a question, a complaint or a command is not a judgement of the alert. Answer what "
-                    "the owner asked or said; if they ask which alert you meant, name it (time, camera, what was "
-                    "seen).")
+        return _err(load("brain_tool_verdict_not_a_judgement.prompt"))
     feedback = Feedback(verdict=verdict, note=str(args.get("note") or "")[:300])
     save_feedback(ctx.services.feedback_dir, _alert_of(entry), feedback, ctx.text, ctx.speaker, ctx.chat_id,
                   ctx.services.now())
@@ -1232,8 +1223,7 @@ DEFAULTS = {"alert_start_hour": 0, "alert_end_hour": 0, "alert_cooldown_sec": 12
 @_safe_tool
 def change_setting(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     if not quoted_from(str(args.get("owner_words") or ""), ctx.text):
-        return _err("Not changed: change a setting only when this message asks for it; owner_words must be "
-                    "copied from it (two words or more).")
+        return _err(load("brain_tool_setting_not_asked.prompt"))
     name = str(args.get("setting") or "")
     if name not in SETTING_NAMES:
         return _err("setting must be one of alert_hours, cooldown_minutes, sensitivity, language, quiet_log")
@@ -1444,8 +1434,7 @@ def get_alert_settings(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]
 
 def _change_alerts(ctx: ToolContext, args: Dict[str, Any], tool: str, key: str, value: Any) -> Dict[str, Any]:
     if not quoted_from(str(args.get("owner_words") or ""), ctx.text):
-        return _err("Not changed: change alert settings only when this message asks for it; owner_words must be "
-                    "copied from it (two words or more).")
+        return _err(load("brain_tool_alerts_not_asked.prompt"))
     if ctx.services.alert_settings is None:
         return _err("alert settings are not available on this box")
     raw = args.get("camera")
@@ -1520,8 +1509,7 @@ def _house_ready(ctx: ToolContext, args: Dict[str, Any]) -> Optional[Dict[str, A
     if ctx.services.house is None:
         return _err("the house state is not available on this box")
     if not quoted_from(str(args.get("owner_words") or ""), ctx.text):
-        return _err("Not changed: change the house state only when this message says so; owner_words must be "
-                    "copied from it (two words or more).")
+        return _err(load("brain_tool_house_not_asked.prompt"))
     return None
 
 
@@ -1595,8 +1583,7 @@ def house_status(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     if ctx.services.house is None:
         return _err("the house state is not available on this box")
     text, _rows = house.status(ctx)
-    return {"ok": True, "status": text, "note": "Pending requests are answered with buttons; tell the owner to "
-                                                  "type status to see them."}
+    return {"ok": True, "status": text, "note": load("brain_tool_house_status.prompt")}
 
 
 # -- the Memory Keeper: "these are my workers" (events.EventBook.mark_known) ------------------------------------
@@ -1822,7 +1809,7 @@ def ask_known(ctx: ToolContext, args: Dict[str, Any], need: List[str], now: floa
     ctx.clarification = {"question": question, "choices": choices, "ts": now, "kind": "known", "need": list(need),
                          "args": dict(args, asked=asked)}
     return {"ok": False, "asked": question,
-            "note": "Nothing is saved yet: the owner is asked this one question. End the turn now."}
+            "note": load("brain_tool_known_question_asked.prompt")}
 
 
 @_safe_tool
@@ -1834,20 +1821,16 @@ def mark_known(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     if not who:
         return _err("who: who the people are, in the owner's words (\"the workers\", \"Ameer\")")
     if not _said(args.get("owner_words"), ctx.text):
-        return _err("Not saved: owner_words must be copied exactly from this message.")
+        return _err(load("brain_tool_owner_words_not_exact.prompt"))
     if not identifies_people(ctx.text):
-        return _err("Not saved: this message says what happened, not who the people are. Do not call mark_known; "
-                    "answer the message itself.")
+        return _err(load("brain_tool_known_not_people.prompt"))
     from ..place_facts import place_statement  # noqa: PLC0415
 
     if place_statement(ctx.text):
         # "זה הבית של השכן" (2026-10-10) was saved as people and asked "עד מתי לזכור את הבית של השכן?".
-        return _err("Not saved: the owner named a PLACE (whose house, yard or street it is), not people. A place is "
-                    "permanent and the box keeps it itself; never ask until when. Answer in one short line.")
+        return _err(load("brain_tool_known_a_place.prompt"))
     if is_routine(ctx.text) and not ctx.alert_handle and not km.work_group(ctx.text):
-        return _err("Not saved: a routine ('sometimes', 'every day') is not learned yet. Tell the owner in one line "
-                    "that you cannot learn routines yet, and that replying 'זה אני' / 'these are mine' to an alert "
-                    "about them stops the alerts about them for that day.")
+        return _err(load("brain_tool_known_routine.prompt"))
     now = _finite(ctx.services.now())
     scope_arg = str(args.get("scope") or "").strip().lower()
     house_wide = _house_arg(args.get("camera")) or scope_arg in ("house", "all")
@@ -1919,7 +1902,7 @@ def mark_known(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     if same and len(old) == 1:
         detail.update(known_id=str(same[0].get("id") or ""), already=True, people=int(same[0].get("people") or 0))
         return _result(_issue(ctx, "mark_known", DONE, camera or "house", detail),
-                       note="It was already saved like this; nothing changed. Reply with an empty answer.")
+                       note=load("brain_tool_already_saved.prompt"))
     try:
         by = str(ctx.speaker.get("name") or "owner")
         if old:
@@ -1951,7 +1934,7 @@ def mark_known(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
             log.warning("Tag not saved with the memory: %s", exc)
     receipt = _issue(ctx, "mark_known", DONE, camera or "house", detail)
     return _result(receipt, until=dt.datetime.fromtimestamp(span).isoformat(timespec="minutes"),
-                   note="The box writes the confirmation; reply with an empty answer.")
+                   note=load("brain_tool_box_confirms.prompt"))
 
 
 # -- the clip's tag, changed from the chat (2026-10-09: "שמור מידע ושנה תיוג / התיוג זה אדם עם חולצה לבנה..." saved
@@ -2002,12 +1985,11 @@ def retag_clip(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         return _err(f"unknown handle {handle!r}")
     tag = " ".join(str(args.get("tag") or "").split())[:300]
     if not quoted_from(tag, ctx.text):
-        return _err("Not saved: tag must be the owner's new description of the clip, copied exactly from this "
-                    "message (two words or more).")
+        return _err(load("brain_tool_retag_not_quoted.prompt"))
     covered = km.covered_at(ctx.services.events, current_camera(ctx.snapshot, str(entry.get("camera") or ""))
                             or str(entry.get("camera") or ""), _finite(entry.get("ts") or now), now)
     return _result(file_tag(ctx, entry, km.tag_label(tag, covered), tag, now),
-                   note="The box writes the confirmation of the new tag.")
+                   note=load("brain_tool_box_confirms_tag.prompt"))
 
 
 def session_text(session: Dict[str, Any], snapshot: Any, lang: str, now: float) -> Dict[str, Any]:
@@ -2054,8 +2036,7 @@ def recent_activity(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     return {"ok": True, "since": hhmm(since), "events": [session_text(r, ctx.snapshot, ctx.lang, now)
                                                         for r in rows[-10:]],
             "owner_said": known,
-            "note": "Events are per camera: who was there, from when to when, what the vision model saw. "
-                    "For what is happening at this moment, also look live with check_camera."}
+            "note": load("brain_tool_recent_activity.prompt")}
 
 
 # -- the event memory (event_memory.py): "what happened at the pergola at noon?", "were the workers here yesterday?" --
@@ -2170,11 +2151,9 @@ def search_events(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         rows.append(dict(memory_event_text(hit, ctx.snapshot, ctx.lang, now), handle=handle))
     if not rows:
         return {"ok": True, "found": 0, "events": [],
-                "note": "Nothing in the box's memory matches. Say that nothing matching was recorded (not that "
-                        "nothing happened). The memory keeps 30 days of events."}
+                "note": load("brain_tool_search_none.prompt")}
     return {"ok": True, "found": len(rows), "events": rows,
-            "note": "Past events from the box's memory, best match first. Answer from 'what'; get_event gives the "
-                    "details, its picture and its video."}
+            "note": load("brain_tool_search_found.prompt")}
 
 
 @_safe_tool
@@ -2211,8 +2190,7 @@ def get_event(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         first = next((saved[a] for a in alert_ids if a in saved), None)
         if first is not None:
             out["video"] = _show(ctx, first)
-    out["note"] = ("To show it: send_media with 'picture' (its first picture) or 'video' (its first alert's video). "
-                   "Without them the picture or video is no longer on the box.")
+    out["note"] = load("brain_tool_get_event.prompt")
     return out
 
 
@@ -2341,9 +2319,7 @@ def how_usual(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     if asked_time and phase:
         d["at_that_time"] = {"says": ""}
     out = {"ok": True, **d, "answer": usual_answer(d, ctx.lang, phase, tag),
-           "note": "Answer from 'answer' (written by the box from its own counts); say how many days of history "
-                   "it has when it is short. Never invent a number. Only the owner's own words go into "
-                   "camera_fact."}
+           "note": load("brain_tool_how_usual.prompt")}
     return out
 
 
@@ -2356,7 +2332,7 @@ def camera_fact(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         return _err("the box's camera memory is not available; tell the owner it was not saved")
     words = " ".join(str(args.get("owner_words") or "").split())[:200]
     if not _said(words, ctx.text):
-        return _err("Not saved: owner_words must be copied exactly from this message.")
+        return _err(load("brain_tool_owner_words_not_exact.prompt"))
     whole_house = bool(args.get("whole_house"))
     camera = ""
     if not whole_house:
@@ -2374,7 +2350,7 @@ def camera_fact(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         old = store.set_role(camera, role, by=by, now=now)
         return _result(_issue(ctx, "camera_fact", DONE, camera,
                               {"camera": camera, "role": role, "old_role": old, "already": old == role}),
-                       note="The box writes the confirmation; reply with an empty answer.")
+                       note=load("brain_tool_box_confirms.prompt"))
     if args.get("remove"):
         from ..camera_profiles import PLACE_KEYS  # noqa: PLC0415
 
@@ -2393,7 +2369,7 @@ def camera_fact(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
                   "removed": True, "whole_house": whole_house, "key": key,
                   "restore": {k: fact[k] for k in ("id", "text", "by", "at") + PLACE_KEYS if k in fact}}
         return _result(_issue(ctx, "camera_fact", DONE, camera, detail),
-                       note="The box writes the confirmation; reply with an empty answer.")
+                       note=load("brain_tool_box_confirms.prompt"))
     try:
         fact = store.add_fact(camera, words, by=by, now=now)
     except ValueError as exc:
@@ -2402,7 +2378,7 @@ def camera_fact(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
               "whole_house": whole_house, "rule": (fact.get("rule") or {}).get("kind", ""),
               "already": bool(fact.get("already"))}
     return _result(_issue(ctx, "camera_fact", DONE, camera, detail),
-                   note="The box writes the confirmation; reply with an empty answer.")
+                   note=load("brain_tool_box_confirms.prompt"))
 
 
 TOOLS: Dict[str, Callable[[ToolContext, Dict[str, Any]], Dict[str, Any]]] = {

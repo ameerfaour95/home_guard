@@ -38,6 +38,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
+from ...prompts import load, render
 from ..camera_names import channel_of
 from .mode import hhmm
 from .registry import display
@@ -583,25 +584,9 @@ def rows_of(episodes: List[Episode], snapshot: Any) -> List[Row]:
 
 
 # ------------------------------------------------------------------------------------------------- the writer
-SYSTEM = """You are the guard of a family home. The owner asked what happened at the house {period}. You get one line per episode the cameras saw, oldest first (what people did, as the camera's AI described it in English). Tell the owner the story in Hebrew, the way a human guard reports at the end of a shift.
-
-Write only lines, each in this form:
-[n] HH:MM · <place>: <what happened>
-- [n] is the episode's number from the input, HH:MM its start time, <place> the place name exactly as given.
-- At most {max_lines} lines; usually fewer. Join episodes that are one story into one line (use the first number). Leave out episodes that add nothing new.
-- Past tense, short: one sentence per line, about 20 words at most.
-- Tell what people did, plainly: came in, walked to the door, knocked, waited, left, got into a car and drove out, carried something, worked. Mention one detail that helps recognise them (a red hat, a white shirt, a helmet). When the description only suggests who it was, say "כנראה" (כנראה שליח, כנראה עובד).
-- A KNOWN line is the household's routine that the owner already explained: write it as ONE short line, ending with "כרגיל" ("[n] HH:MM–HH:MM · <places>: <who> עבדו כאן, כרגיל.").
-- A line marked CHECK: when what was seen really deserves a look (someone at a window or a door that is not theirs, trying a handle, a face hidden on purpose, taking things away), write "[n] HH:MM · <place>: משהו שכדאי לראות: ..." and say exactly what made it worth a look - at most two such lines. Workers with helmets, hats or tools, people carrying bags in daylight, are ordinary: tell those like the others.
-- A line marked NEIGHBOUR'S GROUND or STREET happened outside the owner's place (its <place> already says where): tell it in a few plain words, never "משהו שכדאי לראות" - the neighbour's life is not the owner's concern.
-{busy}- Never write: how many alerts or events there were, the words התרעה/התרעות/התראה, labels such as חשוד/רגיל/נורמלי, anything about what the cameras could or could not cover, camera ids, English words, or any detail that is not in the input.
-- No greeting, no title, no closing line."""
-
-
 def _prompt(rows: Sequence[Row], period: str) -> List[Dict[str, str]]:
-    busy = ("- It was a busy day: put the one line that matters most first (a CHECK, else the most unusual), then "
-            "the others oldest first.\n" if len(rows) > MAX_LINES else "")
-    system = SYSTEM.format(period=period, max_lines=MAX_LINES, busy=busy)
+    busy = load("brain_day_story_busy.prompt") if len(rows) > MAX_LINES else ""
+    system = render("brain_day_story.system_prompt", period=period, max_lines=MAX_LINES, busy=busy)
     return [{"role": "system", "content": system},
             {"role": "user", "content": f"Period: {period}\n" + "\n".join(r.text for r in rows)}]
 
@@ -977,7 +962,7 @@ def day_story_tool(ctx: Any, args: Dict[str, Any]) -> Dict[str, Any]:
                      camera=camera, where=where_for(ctx.services))
         remember(ctx.state, story, now)
         return {"ok": True, "day_story": True, "story": story.text,
-                "note": "This story is the whole answer: reply with it exactly as written, add nothing."}
+                "note": load("brain_day_story_tool.prompt")}
     except Exception as exc:  # noqa: BLE001
         log.warning("day_story failed: %s", exc)
         return {"ok": False, "error": "the day's story could not be written"}

@@ -22,6 +22,7 @@ import logging
 import re
 from typing import Any, Callable, List, Optional, Sequence
 
+from ...prompts import load
 from .activity_chat import is_ack  # noqa: F401 - re-exported
 from .style import strip_boilerplate
 
@@ -191,9 +192,7 @@ def same_people_lines(events: Any, snapshot: Any, lang: str, now: float) -> List
             rows.append(line)
     except Exception as exc:  # noqa: BLE001
         log.warning("Same-people evidence not read: %s", exc)
-    head = ("[SAME PEOPLE EVIDENCE] the owner asks whether these are the same people. Answer ONLY from this: a link "
-            "with a score is evidence; the same clothes in two descriptions is a hint ('נראה שכן לפי הבגדים'); "
-            "nothing else is. Without either, say honestly that you are not sure. Never 'אני בטוח' without a link.")
+    head = load("brain_context_same_people.prompt")
     return [head + (" Today's events: " + "; ".join(rows) if rows else " No events today.")]
 
 

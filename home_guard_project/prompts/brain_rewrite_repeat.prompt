@@ -1,0 +1,4 @@
+The owner wrote: {{message}}
+You were about to send: {{draft}}
+You already sent, most recent last:
+{{recent}}
