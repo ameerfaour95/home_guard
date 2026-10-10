@@ -275,6 +275,24 @@ class NeighbourPlaceGuardTests(unittest.TestCase):
         other_camera = Track("person", [(1.0, 0.10, 0.73)])
         self.assertIsNone(quiet_place(CH3, [other_camera], self.profiles))
 
+    def test_a_scene_map_area_counts_as_the_place(self) -> None:
+        self.profiles.add_place(CH3, "החצר של השכן", "neighbour", None, zone="neighbour yard", now=T(13, 48))
+
+        class Area:
+            def __init__(self, name):
+                self.name = name
+
+        class Scene:
+            informative = True
+
+            def area_at(self, p):
+                return Area("neighbour yard") if p[0] > 0.6 else Area("our yard")
+
+        inside = Track("person", [(1.0, 0.7, 0.5), (2.0, 0.8, 0.6)])
+        self.assertEqual(quiet_place(CH3, [inside], self.profiles, Scene())["text"], "החצר של השכן")
+        onto_ours = Track("person", [(1.0, 0.7, 0.5), (2.0, 0.3, 0.6)])
+        self.assertIsNone(quiet_place(CH3, [onto_ours], self.profiles, Scene()))
+
     def test_the_guard_loop_keeps_it_quiet_and_says_why(self) -> None:
         from home_guard_project.box import inference as inf  # noqa: PLC0415
 
