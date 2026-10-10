@@ -34,6 +34,7 @@ import time
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
+from ...prompts import load
 from .. import scene_map as sm
 
 log = logging.getLogger("box.brain.grounded_look")
@@ -321,12 +322,7 @@ def facts_text(facts: Facts) -> str:
         lines.append("THE OWNER'S SCENE MAP: ours = " + (", ".join(names.get(sm.MINE, [])) or "-")
                      + "; neighbour's = " + (", ".join(names.get(sm.NEIGHBOUR, [])) or "-")
                      + "; public = " + (", ".join(names.get(sm.PUBLIC, [])) or "-") + ".")
-    lines += [
-        "Rules: describe only what is visible. \"people\" is the detector's people count.",
-        "A person the detector did not find: mention only if clearly visible and large, and only as \"there may be "
-        "a person, not certain\" - never as a fact - and count it in \"unsure_people\", not in \"people\".",
-        "Whose ground something is comes only from these facts; never guess it from the picture.",
-    ]
+    lines.append(load("brain_vision_facts_rules.prompt"))
     return "\n".join(lines)
 
 
@@ -527,4 +523,4 @@ def where_is(objects: Sequence[Seen], what: str, scene: Optional[sm.SceneMap], l
         lines = ["המקום שבו הוא עומד לא מסומן במפה שציירת, אז אני לא יודע של מי השטח שם." if he
                  else "The spot where it stands is not on the map you drew, so I cannot tell whose ground it is."]
     return {"map": "yes", "found": found, "say": " ".join(dict.fromkeys(x for x in lines if x)),
-            "note": "The map says whose GROUND it stands on, not whose car it is."}
+            "note": load("brain_tool_map_ground.prompt")}

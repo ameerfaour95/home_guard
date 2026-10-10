@@ -23,6 +23,7 @@ import time
 from collections.abc import Mapping
 from typing import Any, Callable, Dict, List, Optional
 
+from ...prompts import load, render
 from ..inference import LABEL_RULES, LABELS, label_of, parse_vlm_json
 
 log = logging.getLogger("box.brain.vision")
@@ -50,32 +51,15 @@ def look_schema(guard: bool, grounded: bool = False) -> Dict[str, Any]:
 
 
 def look_prompt(camera: str, guard: bool, question: str = "", what: str = "a live photo", facts: str = "") -> str:
-    lines = [
-        f'You are the eyes of a home security system, looking at {what} from the homeowner\'s own camera "{camera}".',
-        "",
-    ]
+    lines = [render("brain_vision_look.prompt", what=what, camera=camera), ""]
     if facts:               # what the detector found and whose ground it is on (grounded_look.facts_text)
-        lines += [facts, "", '"unsure_people": people you think you see that the detector did not find (0 if none).',
-                  ""]
-    lines += [
-        '"description": what is visible and what any people, vehicles or animals are doing, in one to three short',
-        "sentences. Describe only what is there; where unsure, say \"appears to\". Never guess names, age or ethnicity.",
-        '"quality": how usable the picture is - "clear", "blurry", "dark", or "no_signal" (black, grey, frozen or',
-        "garbled). This is about the picture, NOT about whether anything is happening: a sharp, empty yard is \"clear\".",
-        '"people": how many people are visible (0 if none).',
-    ]
+        lines += [facts, "", load("brain_vision_look_unsure.prompt"), ""]
+    lines.append(load("brain_vision_look_fields.prompt"))
     if guard:
-        lines += [
-            "",
-            'Give the scene ONE "label":',
-            LABEL_RULES,
-            "Dark clothing alone never makes a scene suspicious; judge what people do.",
-            '"why": one short clause naming the behaviour behind a suspicious or escalation label; "" for normal.',
-        ]
+        lines += ["", render("brain_vision_look_label.prompt", label_rules=LABEL_RULES)]
     if question:
-        lines += ["", f'Also answer the homeowner\'s question inside "description": "{question}". '
-                      "If the pictures cannot show it, say so."]
-    lines += ["", "Reply with exactly one JSON object with these fields and nothing else."]
+        lines += ["", render("brain_vision_look_question.prompt", question=question)]
+    lines += ["", load("brain_vision_reply_json.prompt")]
     return "\n".join(lines)
 
 
@@ -85,19 +69,7 @@ def ask_schema() -> Dict[str, Any]:
 
 
 def ask_prompt(camera: str, question: str, frames: int, language: str = "English") -> str:
-    return "\n".join([
-        f"You are the eyes of a home security system, looking at {frames} numbered frames (1 to {frames}, in time "
-        f'order) from a saved video of the homeowner\'s own camera "{camera}".',
-        f'The homeowner asks: "{question}"',
-        "",
-        f'"answer": the answer in {language}, in one or two short sentences, only from what the frames show. If the',
-        "frames cannot show it (too dark, too far, hidden, out of the picture), say so - never guess. Never guess",
-        "names, age or ethnicity.",
-        '"frame": the number of the frame that shows the answer best; 0 if none does.',
-        '"seen": true only when the frames clearly show the answer.',
-        "",
-        "Reply with exactly one JSON object with these fields and nothing else.",
-    ])
+    return render("brain_vision_ask.prompt", frames=frames, camera=camera, question=question, language=language)
 
 
 class Vision:

@@ -1,0 +1,5 @@
+"description": what is visible and what any people, vehicles or animals are doing, in one to three short
+sentences. Describe only what is there; where unsure, say "appears to". Never guess names, age or ethnicity.
+"quality": how usable the picture is - "clear", "blurry", "dark", or "no_signal" (black, grey, frozen or
+garbled). This is about the picture, NOT about whether anything is happening: a sharp, empty yard is "clear".
+"people": how many people are visible (0 if none).

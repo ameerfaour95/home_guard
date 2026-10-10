@@ -1,10 +1,11 @@
 # home_guard_project/box/brain/profiles.py
 """What the model is told and may use, per mode (Guard / Assistant) and tier (fast / big).
 
-Guard and Assistant share the honesty, language and asking rules (common.txt)
-and differ in focus and in one tool each: Guard judges a saved clip
-(assess_event), Assistant answers questions about one (describe_event). The
-fast first responder also gets hand_off, to pass a message to the big model.
+Guard and Assistant share the honesty, language and asking rules
+(prompts/brain_common.system_prompt) and differ in focus and in one tool
+each: Guard judges a saved clip (assess_event), Assistant answers questions
+about one (describe_event). The fast first responder also gets hand_off, to
+pass a message to the big model.
 """
 
 from __future__ import annotations
@@ -15,11 +16,13 @@ import os
 import re
 from typing import Dict, List, Optional, Sequence
 
+from ... import prompts
+
 log = logging.getLogger("box.brain.profiles")
 
 _DIR = os.path.dirname(os.path.abspath(__file__))
 TOOLS_PATH = os.path.join(_DIR, "agent_tools_v2.json")
-PROMPTS_DIR = os.path.join(_DIR, "prompts")
+PROMPTS_DIR = prompts.PROMPTS_DIR
 
 COMMON_TOOLS = ("find_events", "summarize_period", "day_story", "ask_vision", "recent_activity", "search_events", "get_event", "how_usual", "camera_fact", "check_camera", "look_around", "map_info", "where_is", "record_clip",
                 "send_media", "pause_alerts", "resume_alerts", "set_camera_active", "set_alias", "change_setting",
@@ -186,14 +189,14 @@ def system_prompt(mode: str, retention_days: float, tier: str = "big") -> str:
         log.warning("Invalid retention days; using the existing 14-day default")
         days = 14
     try:
-        parts = [_read("common.txt").replace("{retention_days}", str(days)),
-                 _read("guard.txt" if mode == "guard" else "assistant.txt")]
+        parts = [prompts.fill(_read("brain_common.system_prompt"), retention_days=days),
+                 _read("brain_guard.system_prompt" if mode == "guard" else "brain_assistant.system_prompt")]
         if tier == "fast":
-            parts.append(_read("fast.txt"))
+            parts.append(_read("brain_fast.system_prompt"))
         if any("\ufffd" in part for part in parts):
             log.warning("Replaced invalid UTF-8 in system prompt")
         return "\n\n".join(parts)
-    except (OSError, ValueError, TypeError) as exc:
+    except (OSError, ValueError, TypeError, KeyError) as exc:
         raise RuntimeError(f"Cannot read system prompt from {PROMPTS_DIR}: {exc}") from exc
 
 

@@ -23,6 +23,7 @@ import re
 from uuid import uuid4
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set
 
+from ...prompts import load
 from ..archive import AlertRecord, _finite, _words, load_records
 from ..embeddings import cosine
 from ..inference import PERSON_CLASSES, VEHICLE_CLASSES
@@ -251,7 +252,5 @@ def coverage(snapshot: Any, all_records: Sequence[AlertRecord], start_ts: float,
         "quiet_log_since": since,
         "oldest_quiet_event_kept": local(min(quiet)) if quiet else None,
         "oldest_kept": local(snapshot.now - snapshot.retention_days * 86400),
-        "note": ("Only moments when the detector saw a person or a moving vehicle are saved. Outside the alert "
-                 "hours nothing is saved while the quiet log is off, nor before quiet_log_since; cameras that "
-                 "were off saw nothing. 'unknown' means the start of the quiet log is not known."),
+        "note": load("brain_tool_coverage.prompt"),
     }

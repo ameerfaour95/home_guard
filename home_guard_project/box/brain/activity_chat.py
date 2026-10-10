@@ -27,6 +27,7 @@ import logging
 import re
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from ...prompts import load, render
 from .. import activity_memory as am
 from . import known_memory as km
 from .i18n import t
@@ -164,40 +165,7 @@ def context_lines(activities: Any, snapshot: Any, lang: str, now: float) -> List
                     f'{dt.datetime.fromtimestamp(f.until).strftime("%a %d.%m %H:%M")}, id {f.id})')
     if not rows:
         return []
-    return ["[OWNER EXPLAINED ACTIONS] saved; alerts with these actions at these cameras in their hours are kept "
-            "quiet (a red gets a second look first): " + "; ".join(rows) + ". Never offer to save them again."]
-
-
-_SYSTEM = """You read one message the owner of a home-security box wrote in the family's chat, and decide whether it
-explains an ACTION seen in one of the recent alerts as normal (work, a known person, a routine), so the box can
-remember what that action means at that camera.
-
-Answer with ONE JSON object and nothing else:
-{"kind": "explain" | "correct" | "none",
- "event": "<the handle of the alert it is about, e.g. E4, or empty>",
- "camera": "<a camera the owner NAMES in this message, as he wrote it, or empty>",
- "fact": "<the id of a fact said in the last minutes that this message repeats, adds to or corrects, or empty>",
- "actions": ["<from ACTIONS: what the owner says is normal, or what the alert shows that he explains>"],
- "place": "<from PLACES, or empty>",
- "place_words": "<the owner's own words for the place, or empty>",
- "cause": "<a short noun phrase in the owner's language, from his words: who and what work, e.g. החשמלאים
-           שמתקינים לדים - never a copy of his whole message>",
- "cause_en": "<the same in English>",
- "who_mark": "<the id of a live mark when he says these are those people, else empty>",
- "until": "<HH:MM only if he said until when, else empty>"}
-
-Rules
-- "explain": he says something seen in an alert is normal or explains why it happened ("אלה מקרים תקינים הם
-  מתקינים...", "אחד מהם התכופף זה רגיל", "חשמלאים שמנסים להתקין לד"). "correct": he corrects the camera, the
-  place or the actions of a fact said in the last minutes ("לא בפרגולה, אני מתכוון בכניסה הראשית").
-  "none": anything else - a question, a complaint about the box's messages, an acknowledgement, a request, a
-  remark that explains no action.
-- event: a reply is usually about the alert it replies to, but when his words fit another recent alert better
-  (the camera or place he names, the number of people, the action he names), choose that one.
-- When the message repeats, adds to or corrects a fact said in the last minutes (same people, same work), give
-  that fact's id; never a new fact for the same work.
-- actions only from ACTIONS. Never "car_door" unless he speaks about a car door.
-- cause in his words; never invent who they are."""
+    return [render("brain_context_owner_explained.prompt", facts="; ".join(rows))]
 
 
 def _parse(content: str) -> Dict[str, Any]:
@@ -241,7 +209,8 @@ def ask_model(model: Any, text: str, state: Any, snapshot: Any, alert_handle: Op
         f"[PLACES] {', '.join(am.PLACES)}",
         f'[OWNER NOW] "{text}"'])
     try:
-        msg = model.chat([{"role": "system", "content": _SYSTEM}, {"role": "user", "content": user}], [])
+        msg = model.chat([{"role": "system", "content": load("brain_activity_chat.system_prompt")},
+                          {"role": "user", "content": user}], [])
         spent = usage.setdefault("big", [0, 0])
         spent[0] += int(msg.usage[0] or 0)
         spent[1] += int(msg.usage[1] or 0)

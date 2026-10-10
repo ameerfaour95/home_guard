@@ -26,6 +26,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
+from ...prompts import load, render
 from ..feedback import Feedback, is_complaint, save_feedback
 from . import activity_chat, case_chat, day_story, house, human, look_explain, reply_guard, same_people
 from . import known_memory as km
@@ -177,13 +178,13 @@ def context_block(snapshot: Any, settings_text: str, now: float, lang: str, aler
         lines.append(f"[ALERT THIS MESSAGE ANSWERS] {alert_handle} {_alert_camera(snapshot, alert)} {alert_time}: "
                      f"{alert.get('summary') or 'no description'}")
     else:
-        lines.append("[ALERT THIS MESSAGE ANSWERS] none - if the owner judges an alert, ask which one")
+        lines.append(load("brain_context_alert_none.prompt"))
     lines.append(f"[ANSWER IN] {LANGUAGE_NAMES.get(lang, 'English')}")
     lines.append(f"[BOX LANGUAGE] {LANGUAGE_NAMES.get(box_lang, 'English')} (alerts and announcements)")
     if pending_answer:
         question, answer = pending_answer
-        lines.append(f'[YOUR QUESTION] You asked: "{question.get("question")}" with the choices '
-                     f'{", ".join(question.get("choices") or [])}. The owner answered: "{answer}".')
+        lines.append(render("brain_context_your_question.prompt", question=question.get("question"),
+                            choices=", ".join(question.get("choices") or []), answer=answer))
     lines += list(focus)
     lines += ["[MESSAGE]", text]
     return "\n".join(lines)
@@ -237,23 +238,17 @@ def focus_lines(state: ChatState, snapshot: Any, text: str, now: float, alert_ha
         lines.append("[CAMERAS IN THIS MESSAGE] " + ", ".join(said))
     topic = state.topic_camera(now)
     if topic:
-        lines.append(f"[CAMERA BEING DISCUSSED] {topic[0]}" + (f" ({topic[1]})" if topic[1] else "")
-                     + " - a request that names no camera means this one: leave camera out of check_camera / "
-                       "record_clip and the box uses it")
+        lines.append(render("brain_context_camera_topic.prompt",
+                            camera=f"{topic[0]} ({topic[1]})" if topic[1] else topic[0]))
     else:
-        lines.append("[CAMERA BEING DISCUSSED] none - if the owner names no camera, leave camera out and the box "
-                     "asks them; never guess one")
+        lines.append(load("brain_context_camera_none.prompt"))
     event = state.topic_event(now)
     if event:
         lines.append(f"[EVENT BEING DISCUSSED] {state.event_text(event)}")
     if asks_about_now(text):
-        lines.append("[RIGHT NOW] the message asks what is happening now: look live with check_camera, "
-                     "not find_events")
+        lines.append(load("brain_context_right_now.prompt"))
     if says_known(text):
-        lines.append("[OWNER SAYS WHO IS THERE] the message says who the people are: call mark_known (camera: the "
-                     "alert this message answers, or the camera being discussed; leave it out and the box uses "
-                     "them). Do not call record_verdict for it, and reply with an empty answer: the box writes "
-                     "the confirmation")
+        lines.append(load("brain_context_says_known.prompt"))
     return lines
 
 
@@ -411,8 +406,7 @@ def _talk_camera(state: ChatState, snapshot: Any, alert: Optional[Dict[str, Any]
     return ""
 
 
-MEMORY_PRIVATE_LINE = ("[MEMORY] what the box keeps is private and nothing saved relates to this message: never "
-                       "mention, list or hint at saved marks, workers or facts, and never ask about them.")
+MEMORY_PRIVATE_LINE = load("brain_context_memory_private.prompt")
 
 
 def memory_lines(services: Services, state: ChatState, snapshot: Any, alert: Optional[Dict[str, Any]], lang: str,
@@ -641,15 +635,13 @@ class OwnerAgentV2:
         if name == "record_verdict" and not activity_chat.asks_to_tag(ctx.text):
             # Owner, 2026-10-09 18:15: a plain message about an alert is for the MEMORY; a tag for the detection
             # model comes only from the alert's buttons ("🏷️ תיוג אחר") or an explicit "change the tag".
-            return {"ok": False, "error": "Not saved: a plain message is not a tag. The owner tags a clip with the "
-                                          "alert's buttons; answer what he said, and if it explains why something "
-                                          "seen was normal, the box remembers it by itself."}
+            return {"ok": False, "error": load("brain_tool_not_a_tag.prompt")}
         key = ""
         try:
             key = f"{ctx.turn_id}:{name}:{_effective(ctx, name, args)}"
             if name in ACTING_TOOLS:
                 if key in ctx.done_calls:
-                    return dict(ctx.done_calls[key], note="already done in this turn; do not repeat it")
+                    return dict(ctx.done_calls[key], note=load("brain_tool_already_done.prompt"))
                 ctx.call_key = key
             result = self._run_tool(ctx, name, args)
             if not isinstance(result, dict):
@@ -1163,17 +1155,9 @@ class OwnerAgentV2:
         log.warning("memory guard: %s; one rewrite",
                     "empty empathy" if empty else "offers a live mark" if offer else "repeats an earlier reply")
         messages.append({"role": "assistant", "content": answer})
-        why = ("Your answer has no fact, no action and no question; it is never sent. " if empty else
-               "Your answer offers to mark people who are ALREADY marked ([LIVE MARKS]). " if offer else
-               "You already sent this same answer a moment ago; a repeated sentence reads robotic. Answer what the "
-               "owner asks in THIS message, in other words - if they ask whether you read the history or check "
-               "the memory, say yes and prove it with what is in memory and what they said today. ")
-        messages.append({"role": "user", "content": (
-            "[BOX] " + why
-            + "Read [LIVE MARKS], [OWNER SAID TODAY] and [NOT COVERED]. Say what is live and what the real gap is, "
-              "and fix it now with its tool when the owner asked for it (a correction of a mark is mark_known: it "
-              "replaces the old one) - or ask ONE concrete question. When the owner complains, name the concrete "
-              "mistake in one line. Then call reply.")})
+        why = load("brain_second_look_empty.prompt" if empty else "brain_second_look_offer.prompt" if offer else
+                   "brain_second_look_repeat.prompt")
+        messages.append({"role": "user", "content": "[BOX] " + why + " " + load("brain_second_look_fix.prompt")})
         try:
             again = self._loop(ctx, model, messages, tier, usage, called)
         except Exception as exc:  # noqa: BLE001
@@ -1216,15 +1200,10 @@ class OwnerAgentV2:
         def rewrite(draft: str, recent: List[str]) -> str:
             model, tier = (self.fast_model, FAST) if self.fast_model is not None else (self.model, BIG)
             msg = model.chat([
-                {"role": "system", "content": (
-                    "You are the home-security box chatting with the owner in a family chat. Your next reply repeats "
-                    "what you already said. Write it again: ONE or two short sentences in "
-                    f"{LANGUAGE_NAMES.get(ctx.lang, 'English')} that answer what the owner wrote NOW, in other words, "
-                    "and never repeat a sentence you already sent. If there is nothing new to say, write a short "
-                    "acknowledgement of a few words. Never restate what is saved in memory. Text only.")},
-                {"role": "user", "content": f"The owner wrote: {text}\nYou were about to send: {draft}\n"
-                                            "You already sent, most recent last:\n"
-                                            + "\n".join(f"- {r}" for r in recent)}], [])
+                {"role": "system", "content": render("brain_rewrite_repeat.system_prompt",
+                                                     language=LANGUAGE_NAMES.get(ctx.lang, "English"))},
+                {"role": "user", "content": render("brain_rewrite_repeat.prompt", message=text, draft=draft,
+                                                   recent="\n".join(f"- {r}" for r in recent))}], [])
             _check_message(msg, tier, usage)
             return strip_boilerplate(msg.content or "")
 
@@ -1324,7 +1303,7 @@ class OwnerAgentV2:
             for c in msg.tool_calls:
                 if ctx.clarification is not None and c.name != "retag_clip":   # a question: nothing after it runs
                     messages.append({"role": "tool", "tool_call_id": c.id, "content": json.dumps(
-                        {"ok": False, "error": "not run: you asked the owner a question; wait for the answer"})})
+                        {"ok": False, "error": load("brain_tool_not_run_question.prompt")})})
                     continue
                 valid = c.valid and _valid_args(c.arguments)
                 if c.name == "hand_off" and tier == FAST and valid:
@@ -1989,13 +1968,13 @@ class OwnerAgentV2:
                     can = tool_names(ctx.mode, tier)
                     save = bool({"save", "alias"} & set(bad)) and "set_alias" in can
                     keep = "known" in bad and "mark_known" in can
-                    messages.append({"role": "user", "content": (
-                        f"[BOX] Your answer describes actions that did not happen ({', '.join(bad)}). "
-                        + ("If the owner asked you to remember a name for a camera, call set_alias now. " if save
-                           else "")
-                        + ("If the owner said who the people at a camera are, call mark_known now. " if keep
-                           else "")
-                        + "Write the answer again with facts only and call reply. Do not call any other tool.")})
+                    nudge = [render("brain_claim_guard.prompt", claims=", ".join(bad))]
+                    if save:
+                        nudge.append(load("brain_claim_guard_set_alias.prompt"))
+                    if keep:
+                        nudge.append(load("brain_claim_guard_mark_known.prompt"))
+                    nudge.append(load("brain_claim_guard_rewrite.prompt"))
+                    messages.append({"role": "user", "content": "[BOX] " + " ".join(nudge)})
                     answer = self._loop(ctx, model, messages, tier, usage, called,
                                         only=["reply"] + (["set_alias"] if save else [])
                                         + (["mark_known"] if keep else []))

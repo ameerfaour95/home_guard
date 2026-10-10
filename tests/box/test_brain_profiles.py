@@ -172,8 +172,8 @@ class ProfilesTest(unittest.TestCase):
     def test_prompt_files_with_invalid_utf8_or_braces_do_not_raise(self) -> None:
         with tempfile.TemporaryDirectory() as directory, patch.object(profiles, "PROMPTS_DIR", directory):
             root = Path(directory)
-            (root / "common.txt").write_bytes(b"kept {retention_days} days \xff {unknown}")
-            (root / "guard.txt").write_text("MODE: GUARD", encoding="utf-8")
+            (root / "brain_common.system_prompt").write_bytes(b"kept {{retention_days}} days \xff {unknown}")
+            (root / "brain_guard.system_prompt").write_text("MODE: GUARD", encoding="utf-8")
             with self.assertLogs("box.brain.profiles", level="WARNING") as logs:
                 prompt = system_prompt("guard", 14)
             self.assertEqual(len(logs.output), 1)
