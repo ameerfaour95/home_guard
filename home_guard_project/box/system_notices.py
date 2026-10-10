@@ -18,7 +18,7 @@ messages (and no others; his rule: never a message type he did not agree to):
 
    and ONE line when the first Eye call answers again::
 
-       ✅ ה-AI חזר לעבוד. לא היה זמין 00:25–09:05, ובזמן הזה נשמרו 41 אירועים בלי בדיקה.
+       ✅ ה-AI חזר לעבוד. לא היה זמין 00:25–09:05.
 
 Both are fixed texts (no model is asked to write or translate them), Hebrew on a Hebrew box and English otherwise,
 sent as a normal (not silent) message with no buttons. box.yaml ``system_notices: on | off`` (default on). A send
@@ -377,8 +377,10 @@ class SystemNotices:
         kept = int(eye.get("fails") or 0)
         span = f"{_when(since, 'en', _with_date(since, now))}-{_when(now, 'en', _with_date(since, now))}"
         if eye.get("announced"):
-            self._hand_on(AI_BACK, ai_back_text(since, now, kept, self._lang()))
-            log.info("AI-back notice: not available %s, %d event(s) kept without an AI check -> sent", span, kept)
+            # No count for the owner: failed calls are not events (one event can fail several calls), and a wrong
+            # number is worse than none. The log keeps it.
+            self._hand_on(AI_BACK, ai_back_text(since, now, 0, self._lang()))
+            log.info("AI-back notice: not available %s, %d failed Eye call(s) -> sent", span, kept)
         else:
             log.info("AI outage over: %d failed Eye call(s) %s, never announced -> nothing to send", kept, span)
         self._eye = {}

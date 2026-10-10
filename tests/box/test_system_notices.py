@@ -246,10 +246,8 @@ class AiDownTest(NoticeCase):
         self.assertEqual(len(self.sent), 1)
         with self.assertLogs("box.system_notices", "INFO") as logs:
             again.eye(True, now=at(10, 9, 5))
-        self.assertEqual(self.sent[1], (sn.AI_BACK, "✅ ה-AI חזר לעבוד. לא היה זמין 00:25–09:05, ובזמן הזה נשמרו 5 "
-                                                     "אירועים בלי בדיקה."))
-        self.assertIn("INFO:box.system_notices:AI-back notice: not available 00:25-09:05, 5 event(s) kept without an "
-                      "AI check -> sent", logs.output)
+        self.assertEqual(self.sent[1], (sn.AI_BACK, "✅ ה-AI חזר לעבוד. לא היה זמין 00:25–09:05."))
+        self.assertIn("INFO:box.system_notices:AI-back notice: not available 00:25-09:05, 5 failed Eye call(s) -> sent", logs.output)
         again.eye(True, now=at(10, 9, 6))
         self.notices().eye(True, now=at(10, 9, 7))           # and after a restart
         self.assertEqual(len(self.sent), 2)
@@ -397,8 +395,7 @@ class TenTenNightReplayTest(NoticeCase):
         self.assertEqual(clock, [("00:39", sn.AI_DOWN), ("09:05", sn.AI_BACK), ("12:33", sn.BOX_DOWN)])
         self.assertEqual(log[0][2], "⚠️ ה-AI לא זמין מ-00:25 (נגמר הקרדיט ב-OpenRouter). הקופסה ממשיכה להקליט ולשמור, "
                                     "אבל בלי בדיקת AI לא נשלחות התרעות עד שזה יחזור.")
-        self.assertEqual(log[1][2], f"✅ ה-AI חזר לעבוד. לא היה זמין 00:25–09:05, ובזמן הזה נשמרו {failed} אירועים "
-                                    "בלי בדיקה.")
+        self.assertEqual(log[1][2], "✅ ה-AI חזר לעבוד. לא היה זמין 00:25–09:05.")
         self.assertEqual(log[2][2], "⚠️ המערכת לא פעלה בין 09:23 ל-12:33 (הקופסה כבתה, כנראה הפסקת חשמל).")
 
 
