@@ -83,40 +83,78 @@ class CreationTest(CaseChatBase):
 
 
 class QuestionTest(CaseChatBase):
-    def test_the_last_day_question_goes_out_once_and_a_tap_answers_it(self) -> None:
+    def drop_marks(self) -> None:
+        for k in self.events.list_known(self.clock):
+            self.events.cancel_known(k["id"])
+
+    def test_the_crew_gets_one_question_for_its_marks_and_the_explanation_tied_to_them(self) -> None:
         agent, _ = self.explained()
         (fact,) = self.activities.live(self.clock)
+        marks = self.events.list_known(self.clock)
+        self.assertTrue(fact.known_id in {k["id"] for k in marks})      # the 13:54 fact took the entrance mark's window
         sent = Sent()
         self.assertEqual(case_chat.tick(self.services, sent, [CHAT], {"owner_language": "he"},
                                         agent.registry.snapshot(), DAY(14, 18))["asked"], 0)
+        self.assertEqual(case_chat.tick(self.services, sent, [CHAT], {"owner_language": "he"},
+                                        agent.registry.snapshot(), DAY(15, 17, 55))["asked"], 0)
         done = case_chat.tick(self.services, sent, [CHAT], {"owner_language": "he"}, agent.registry.snapshot(),
                               DAY(15, 18))
-        self.assertEqual(done["asked"], 1)
+        self.assertEqual(done["asked"], 1, "one question: the marks and the explanation tied to them")
         (chat, text, rows), = sent.messages
-        self.assertEqual(text, "החשמלאים שמתקינים לדים במדרגות של הכניסה הראשית: עוד פעילים אחרי 15.10?")
+        self.assertEqual(text, "העובדים של הפרגולה (בפרגולה ובכניסה הראשית): עוד פעילים אחרי 15.10?")
         self.assertEqual([[label for label, _ in row] for row in rows], [["עוד שבוע", "זה נגמר"], ["קבוע: כל יום חול"]])
-        self.assertEqual(rows[0][0][1], f"kn:x:ce.w.{fact.id}")
+        ident = "mk_" + min(k["id"] for k in marks)
+        self.assertEqual(rows[0][0][1], f"kn:x:ce.w.{ident}")
         self.assertTrue(all(len(code.encode()) <= 64 for row in rows for _, code in row))
         case_chat.tick(self.services, sent, [CHAT], {"owner_language": "he"}, agent.registry.snapshot(), DAY(15, 18, 5))
         self.assertEqual(len(sent.messages), 1, "asked once")
         self.clock = DAY(15, 18, 6)
+        reply = agent.known_button(CHAT, "x", f"ce.w.{ident}", OWNER)
+        self.assertEqual(reply.text, "🧠 סגור, העובדים של הפרגולה (בפרגולה ובכניסה הראשית) עד יום ה׳ 22.10.")
+        self.assertIsNone(agent.known_button(CHAT, "x", f"ce.w.{ident}", OWNER), "a second tap says nothing")
+        self.assertEqual(self.activities.get(fact.id).until, DAY(22, 18))
+        renewed = self.events.list_known(self.clock)
+        self.assertEqual(sorted((k["camera"], k["until"], k["daily_from"], k["daily_to"]) for k in renewed),
+                         [(PERGOLA, DAY(22, 18), "07:00", "18:00"), (ENTRANCE, DAY(22, 18), "07:00", "18:00")])
+        self.assertTrue(all(c.scope.until == DAY(22, 18) for c in self.cases.cases()))
+        self.assertTrue(all(c.confirmations == 1 for c in self.cases.cases()))
+
+    def test_it_is_over_for_the_crew(self) -> None:
+        agent, _ = self.explained()
+        case_chat.tick(self.services, Sent(), [CHAT], {"owner_language": "he"}, agent.registry.snapshot(), DAY(15, 18))
+        ident = "mk_" + min(k["id"] for k in self.events.list_known(self.clock))
+        self.clock = DAY(15, 18, 2)
+        reply = agent.known_button(CHAT, "x", f"ce.e.{ident}", OWNER)
+        self.assertEqual(reply.text, "🧠 סגרתי: העובדים של הפרגולה (בפרגולה ובכניסה הראשית) כבר לא מסומנים אצלי.")
+        self.assertEqual(self.events.list_known(DAY(15, 12)), [])
+        self.assertEqual(self.cases.cases(), [])
+
+    def test_an_explanation_of_its_own_gets_its_own_question(self) -> None:
+        agent, _ = self.explained()
+        (fact,) = self.activities.live(self.clock)
+        self.drop_marks()
+        sent = Sent()
+        case_chat.tick(self.services, sent, [CHAT], {"owner_language": "he"}, agent.registry.snapshot(), DAY(15, 18))
+        (chat, text, rows), = sent.messages
+        self.assertEqual(text, "החשמלאים שמתקינים לדים במדרגות של הכניסה הראשית: עוד פעילים אחרי 15.10?")
+        self.assertEqual(rows[0][0][1], f"kn:x:ce.w.{fact.id}")
+        self.clock = DAY(15, 18, 6)
         reply = agent.known_button(CHAT, "x", f"ce.w.{fact.id}", OWNER)
         self.assertEqual(reply.text, "🧠 סגור, החשמלאים שמתקינים לדים במדרגות של הכניסה הראשית עד יום ה׳ 22.10.")
-        self.assertIsNone(agent.known_button(CHAT, "x", f"ce.w.{fact.id}", OWNER), "a second tap says nothing")
-        self.assertEqual(self.activities.get(fact.id).until, DAY(22, 18))
 
     def test_back_after_it_ended_asks_with_the_real_time(self) -> None:
         agent, _ = self.explained()
         (fact,) = self.activities.live(self.clock)
         (case,) = [c for c in self.cases.cases() if c.source.get("origin") == "activity"]
-        q = {"key": f"extend:{fact.id}", "kind": "again", "case_id": case.id, "fact_id": fact.id, "chat_id": CHAT,
-             "last_day": fact.until, "seen_at": DAY(16, 9, 12)}
+        q = {"key": f"extend:{fact.id}", "ident": fact.id, "kind": "again", "case_id": case.id, "fact_id": fact.id,
+             "who": fact.cause, "chat_id": CHAT, "last_day": fact.until, "seen_at": DAY(16, 9, 12)}
         text, _ = case_chat.question(q, self.services, agent.registry.snapshot(), "he")
         self.assertEqual(text, "החשמלאים שמתקינים לדים במדרגות של הכניסה הראשית: שוב כאן היום (09:12). עוד פעילים?")
 
     def test_standing_and_its_promise(self) -> None:
         agent, _ = self.explained()
         (fact,) = self.activities.live(self.clock)
+        self.drop_marks()
         case_chat.tick(self.services, Sent(), [CHAT], {"owner_language": "he"}, agent.registry.snapshot(), DAY(15, 18))
         self.clock = DAY(15, 18, 1)
         reply = agent.known_button(CHAT, "x", f"ce.s.{fact.id}", OWNER)

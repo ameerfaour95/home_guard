@@ -239,30 +239,82 @@ def _fact_case(store: CaseStore, fact_id: str) -> Optional[Case]:
     return cases[0] if cases else None
 
 
-def questions_due(store: CaseStore, activities: Any, now: Optional[float] = None) -> List[Dict[str, Any]]:
-    """The one question per explained action that is due now: ``{key, kind, case_id, fact_id, chat_id, last_day,
-    seen_at}``. *kind* ``ending``: its last day (a fact of more than one day), at 18:00 or its end when earlier.
-    *kind* ``again``: it ended and the same kind of event came back on a later day. Never one asked before."""
+def _last_day_due(first_at: float, until: float, now: float) -> bool:
+    """A memory of more than one day, on its last day, at 18:00 or at its end when that is earlier."""
+    last = _date(until)
+    return last > _date(first_at) and _date(now) == last and now >= min(_at(last, ASK_AT), until)
+
+
+def _mark_info(mark: Mapping[str, Any]) -> Dict[str, Any]:
+    keep = ("id", "camera", "text", "until", "at", "people", "daily_from", "daily_to")
+    return {k: mark.get(k) for k in keep}
+
+
+def mark_groups(events: Any, now: float) -> List[List[Dict[str, Any]]]:
+    """The live crew marks (a daily window) grouped by the same people and the same end: the pergola workers
+    marked at the pergola and at the main entrance are one crew, and get one question."""
+    groups: Dict[tuple, List[Dict[str, Any]]] = {}
+    try:
+        marks = events.list_known(now) if events is not None else []
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Marks not read for the question: %s", exc)
+        marks = []
+    for m in marks:
+        if isinstance(m, dict) and m.get("daily_from") and m.get("daily_to") and m.get("until"):
+            groups.setdefault((" ".join(str(m.get("text") or "").split()), round(float(m["until"]))), []).append(m)
+    return list(groups.values())
+
+
+def questions_due(store: CaseStore, activities: Any, now: Optional[float] = None,
+                  events: Any = None) -> List[Dict[str, Any]]:
+    """The one question per week-long memory that is due now: ``{key, ident, kind, case_id, fact_id, facts,
+    marks, who, chat_id, last_day, seen_at}``. *kind* ``ending``: its last day (a memory of more than one day), at
+    18:00 or its end when earlier - a crew's marks (*events*) as one question, which also covers the explained
+    actions tied to them (``known_id``); an explained action of its own. *kind* ``again``: an explained action that
+    ended and whose kind of event came back on a later day. Never one asked before."""
     now = time.time() if now is None else now
     out: List[Dict[str, Any]] = []
-    if activities is None:
-        return out
+    folded: set = set()
+    facts_now = []
+    if activities is not None:
+        try:
+            facts_now = [f for f in activities.live(now - 2 * 86400) if not f.cancelled_at]
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Explained actions not read for the question: %s", exc)
+    for group in mark_groups(events, now - 6 * 3600):    # a mark that ended at 18:00 is still asked at 18:05
+        until = float(group[0]["until"])
+        if not _last_day_due(min(float(m.get("at") or until) for m in group), until, now):
+            continue
+        ids = sorted(str(m["id"]) for m in group)
+        tied = [f for f in facts_now if f.known_id in ids and _date(f.until) == _date(until)]
+        folded |= {f.id for f in tied}
+        ident = f"mk_{ids[0]}"
+        if store.asked(f"extend:{ident}") is not None:
+            continue
+        cases = [c for c in store.cases() if c.source.get("known_id") in ids or c.source.get("fact_id") in
+                 {f.id for f in tied}]
+        out.append({"key": f"extend:{ident}", "ident": ident, "kind": "ending",
+                    "case_id": cases[0].id if cases else "", "fact_id": "", "facts": [f.id for f in tied],
+                    "marks": [_mark_info(m) for m in group], "who": str(group[0].get("text") or ""),
+                    "chat_id": next((str(c.source.get("chat_id")) for c in cases if c.source.get("chat_id")), ""),
+                    "last_day": until, "seen_at": 0.0})
     for case in store.cases():
         fact_id = str(case.source.get("fact_id") or "")
-        if case.source.get("origin") != ORIGIN_ACTIVITY or not fact_id or case.scope.until is None:
+        if case.source.get("origin") != ORIGIN_ACTIVITY or not fact_id or case.scope.until is None \
+                or fact_id in folded:
             continue
         key = f"extend:{fact_id}"
         if store.asked(key) is not None:
             continue
-        fact = activities.get(fact_id)
+        fact = activities.get(fact_id) if activities is not None else None
         if fact is None or fact.cancelled_at:
             continue
-        common = {"key": key, "case_id": case.id, "fact_id": fact_id, "chat_id": str(case.source.get("chat_id") or ""),
+        common = {"key": key, "ident": fact_id, "case_id": case.id, "fact_id": fact_id, "facts": [fact_id],
+                  "marks": [], "who": str(fact.cause), "chat_id": str(case.source.get("chat_id") or ""),
                   "last_day": float(fact.until)}
         last = _date(fact.until)
         if _date(now) == last and last > _date(fact.at or fact.until):
-            # Its last day (an explanation of more than one day): at 18:00, or at its end when that is earlier.
-            if now >= min(_at(last, ASK_AT), float(fact.until)):
+            if _last_day_due(float(fact.at or fact.until), float(fact.until), now):
                 out.append({**common, "kind": "ending", "seen_at": 0.0})
             continue
         if fact.live(now):
@@ -274,59 +326,84 @@ def questions_due(store: CaseStore, activities: Any, now: Optional[float] = None
     return out
 
 
-def _crew_until(fact: Any, now: float, days: int = CREW_DAYS) -> float:
+def _crew_until(until: float, daily_to: str, now: float, days: int = CREW_DAYS) -> float:
     """The end of one more crew week: the daily window's end (or the old end's clock), *days* days on."""
-    clock = str(fact.daily_to or _clock(float(fact.until)))
-    base = max(_date(float(fact.until)), _date(now))
-    if _date(float(fact.until)) < _date(now):          # it had ended: a new week from today
+    clock = str(daily_to or _clock(until))
+    if _date(until) < _date(now):                       # it had ended: a new week from today
         return _at(_date(now) + dt.timedelta(days=days - 1), clock)
-    return _at(base + dt.timedelta(days=days), clock)
+    return _at(_date(until) + dt.timedelta(days=days), clock)
 
 
 def answer(store: CaseStore, activities: Any, key: str, choice: str, by: str,
-           now: Optional[float] = None) -> Dict[str, Any]:
-    """The owner's tap on the question *key*. Returns ``{ok, kind, case, fact, until}``; ``ok`` False when it
-    was answered before or its memory is gone (the brain then says nothing new)."""
+           now: Optional[float] = None, events: Any = None) -> Dict[str, Any]:
+    """The owner's tap on the question *key*: for its explained actions and its crew marks (*events*) alike.
+    Returns ``{ok, kind, case, fact, until, who}``; ``ok`` False when it was answered before or its memory is gone
+    (the brain then says nothing new)."""
     now = time.time() if now is None else now
     asked = store.asked(key)
     if asked is None or asked.get("answer") or choice not in ANSWERS:
         return {"ok": False, "kind": "answered" if asked and asked.get("answer") else "gone"}
-    fact = activities.get(str(asked.get("fact_id") or "")) if activities is not None else None
-    case = store.get(str(asked.get("case_id") or ""))
-    if fact is None or case is None:
+    fact_ids = [str(f) for f in (asked.get("facts") or [asked.get("fact_id")]) if f]
+    facts = [f for f in (activities.get(i) for i in fact_ids) if f is not None] if activities is not None else []
+    marks = [m for m in asked.get("marks") or [] if isinstance(m, dict)]
+    if not facts and not (marks and events is not None):
         return {"ok": False, "kind": "gone"}
     store.answer_asked(key, choice, by)
+    mark_ids = {str(m.get("id")) for m in marks}
+    mine = [c for c in store.cases() if c.source.get("fact_id") in fact_ids or c.source.get("known_id") in mark_ids]
+    first = facts[0] if facts else None
+    out: Dict[str, Any] = {"ok": True, "kind": choice, "fact": first, "who": str(asked.get("who") or ""),
+                           "until": None}
     if choice == ENDED:
-        if fact.live(now):
-            activities.cancel(fact.id, now)
-        for c in store.cases():
-            if c.source.get("fact_id") == fact.id and c.invalid_at is None:
-                store.invalidate(c.id, "ended (the owner)", by)
-        return {"ok": True, "kind": ENDED, "fact": fact, "case": store.get(case.id), "until": now}
-    store.confirm(case.id, by, f"answer:{key}")
+        for fact in facts:
+            if not fact.cancelled_at:
+                activities.cancel(fact.id, now)
+        for m in marks:
+            events.cancel_known(str(m.get("id")))
+        for c in mine:
+            store.invalidate(c.id, "ended (the owner)", by)
+        out.update(until=now, case=store.get(mine[0].id) if mine else None)
+        return out
+    for c in mine:
+        store.confirm(c.id, by, f"answer:{key}")
     if choice == WEEK:
-        until = _crew_until(fact, now)
-        extended = activities.update(fact.id, now, allow_ended=True, until=until)
-        if extended is not None:
-            fact = extended
-        else:                                   # pruned from the book: the same explanation, written again
-            fact = activities.add(fact.cameras, fact.actions, fact.cause, until, now, cause_en=fact.cause_en,
-                                  place=fact.place, place_words=fact.place_words, owner_words=fact.owner_words,
-                                  who=fact.who, known_id=fact.known_id, daily_from=fact.daily_from,
-                                  daily_to=fact.daily_to, by=by, alert_id=fact.alert_id)
-        for c in store.cases():
-            if c.source.get("fact_id") == asked.get("fact_id") and c.invalid_at is None:
-                store.revise(c.id, replace(c.scope, until=until), by, "one more week (the owner)",
-                             source={"fact_id": fact.id, "facts": list(dict.fromkeys(
-                                 [*(c.source.get("facts") or ()), str(asked.get("fact_id")), fact.id]))})
-        return {"ok": True, "kind": WEEK, "fact": fact, "case": store.get(case.id), "until": until}
-    # STANDING: every weekday, the same hours, no end. The week-long explanation keeps its own end.
-    hours = case.scope.hours if case.scope.hours != ("00:00", "00:00") else fact_hours(fact)
-    for c in store.cases():
-        if c.source.get("fact_id") == fact.id and c.invalid_at is None:
-            store.revise(c.id, replace(c.scope, until=None, weekdays=WORKWEEK, hours=hours), by,
-                         "standing: every weekday (the owner)")
-    return {"ok": True, "kind": STANDING, "fact": fact, "case": store.get(case.id), "until": None}
+        until = None
+        for fact in facts:
+            until = _crew_until(float(fact.until), fact.daily_to, now)
+            extended = activities.update(fact.id, now, allow_ended=True, until=until)
+            if extended is None:                # pruned from the book: the same explanation, written again
+                extended = activities.add(fact.cameras, fact.actions, fact.cause, until, now, cause_en=fact.cause_en,
+                                          place=fact.place, place_words=fact.place_words,
+                                          owner_words=fact.owner_words, who=fact.who, known_id=fact.known_id,
+                                          daily_from=fact.daily_from, daily_to=fact.daily_to, by=by,
+                                          alert_id=fact.alert_id)
+            for c in mine:
+                if c.source.get("fact_id") == fact.id:
+                    store.revise(c.id, replace(c.scope, until=until), by, "one more week (the owner)",
+                                 source={"fact_id": extended.id, "facts": list(dict.fromkeys(
+                                     [*(c.source.get("facts") or ()), fact.id, extended.id]))})
+            out["fact"] = out["fact"] if out["fact"] is not first else extended
+        for m in marks:
+            until = _crew_until(float(m.get("until") or now), str(m.get("daily_to") or ""), now)
+            saved = events.replace_known(str(m.get("id")), str(m.get("camera") or ""), str(m.get("text") or ""),
+                                         by=by, until=until, now=now, people=m.get("people"),
+                                         daily_from=str(m.get("daily_from") or ""),
+                                         daily_to=str(m.get("daily_to") or ""))
+            for c in mine:
+                if c.source.get("known_id") == str(m.get("id")):
+                    store.revise(c.id, replace(c.scope, until=until), by, "one more week (the owner)",
+                                 source={"known_id": str(saved.get("id") or m.get("id"))})
+        out.update(until=until, case=store.get(mine[0].id) if mine else None)
+        return out
+    # STANDING: every weekday, the same hours, no end. The week-long memories keep their own end.
+    for c in mine:
+        hours = c.scope.hours
+        if hours == ("00:00", "00:00") and first is not None:
+            hours = fact_hours(first)
+        store.revise(c.id, replace(c.scope, until=None, weekdays=WORKWEEK, hours=hours), by,
+                     "standing: every weekday (the owner)")
+    out.update(case=store.get(mine[0].id) if mine else None)
+    return out
 
 
 # -- the nightly routine proposals ------------------------------------------------------------------------------------

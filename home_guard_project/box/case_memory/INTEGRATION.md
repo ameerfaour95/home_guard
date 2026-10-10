@@ -148,9 +148,11 @@ the owner makes in the chat also writes a precedent through the Keeper:
   judge, the delivery never changes. After its end, the same kind of event (any hour) is logged `seen_after_end`.
 - **One question** (`link.questions_due`, sent by the keeper thread `case_chat.start`, every 5 min, started by
   `inference.start_case_keeper`): an explained action of more than one day, on its last day at 18:00 (or its end
-  when earlier); or one that ended and came back on a later day. Once per explanation (`store.note_asked`).
-  Buttons ride `kn:x:ce.<w|e|s>.<fact id>`: another week (fact + precedent, a confirmation), it's over (fact
-  cancelled, precedent invalid), standing (no end, weekdays, the same hours, a confirmation). A second tap sends
+  when earlier); or one that ended and came back on a later day. A crew's marks (a daily window) of the same
+  people and end get ONE question on their last day, which also covers the explained actions tied to them
+  (`known_id`); `ce.*.mk_<mark id>`. Once per memory (`store.note_asked`).
+  Buttons ride `kn:x:ce.<w|e|s>.<fact id | mk_ id>`: another week (facts, marks via `replace_known` and
+  precedents, a confirmation), it's over (facts and marks cancelled, precedents invalid), standing (no end, weekdays, the same hours, a confirmation). A second tap sends
   nothing.
 - **Routines** (`link.nightly_routines`): box.yaml `routine_proposals: off|shadow|on`, **off** by default. Shadow logs
   each new proposal once (`routine_seen`); on sends it once with `kn:x:ce.<ry|rn>.<R id>`. Not on until the owner

@@ -550,6 +550,9 @@ TEMPLATES: Dict[str, Dict[str, str]] = {
     "cm_ended_saved": {"en": "🧠 Done: {actions} {where} count as unusual again.",
                        "he": "🧠 סגרתי: {actions} {where} שוב ייחשבו חריגים.",
                        "ar": "🧠 تم: {actions} {where} غير عادية مجددًا."},
+    "cm_ended_marks": {"en": "🧠 Done: {who} {where} are no longer marked as known.",
+                       "he": "🧠 סגרתי: {who} {where} כבר לא מסומנים אצלי.",
+                       "ar": "🧠 تم: {who} {where} لم يعودوا معروفين عندي."},
     "cm_standing_saved": {"en": "🧠 Saved as standing: {who} {where}, weekdays {hours}. Until you confirm it 3 times "
                                 "I only learn; after that it comes as a quiet message instead of an alert. A serious "
                                 "event always comes as it does today.",

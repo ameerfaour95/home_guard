@@ -151,21 +151,44 @@ def memory_section(services: Any, snapshot: Any, lang: str, now: float) -> str:
     return t("cm_long_term", lang, rows="\n".join(rows)) if rows else ""
 
 
-def question(q: Dict[str, Any], services: Any, snapshot: Any, lang: str) -> Tuple[str, Tuple[Tuple[Tuple[str, str], ...], ...]]:
-    """The one question and its three buttons."""
+def _cameras_where(cameras: Sequence[str], snapshot: Any, lang: str) -> str:
+    """"(בפרגולה ובכניסה הראשית)" / "(at the pergola and at the main entrance)": a crew's marked cameras."""
+    from .activity_chat import definite_he  # noqa: PLC0415
+
+    names = list(dict.fromkeys(display(snapshot, c, lang) for c in cameras if c))
+    if not names:
+        return ""
+    if str(lang).startswith("he"):
+        parts = []
+        for n in names:
+            d = definite_he(n)
+            parts.append(f"ב{d[1:]}" if d.startswith("ה") else f"ב{d}")
+        return "(" + " ו".join(parts) + ")"
+    return "(" + " and ".join(f"at {n}" for n in names) + ")"
+
+
+def _question_where(q: Dict[str, Any], services: Any, snapshot: Any, lang: str) -> str:
     store, activities = store_of(services), getattr(services, "activities", None)
+    if q.get("marks"):
+        return _cameras_where([str(m.get("camera") or "") for m in q["marks"]], snapshot, lang)
     case = store.get(q["case_id"])
-    fact = activities.get(q["fact_id"]) if activities is not None else None
-    who = str(fact.cause if fact is not None else case.title)
-    where = _where(case, fact, snapshot, lang)
+    fact = activities.get(q["fact_id"]) if activities is not None and q.get("fact_id") else None
+    return _where(case, fact, snapshot, lang)
+
+
+def question(q: Dict[str, Any], services: Any, snapshot: Any, lang: str) -> Tuple[str, Tuple[Tuple[Tuple[str, str], ...], ...]]:
+    """The one question and its three buttons (an explained action, or a crew's marks with what is tied to them)."""
+    who = str(q.get("who") or "")
+    where = _question_where(q, services, snapshot, lang)
     if q["kind"] == "again":
         text = t("cm_ask_again", lang, who=who, where=where,
                  time=dt.datetime.fromtimestamp(q["seen_at"]).strftime("%H:%M"))
     else:
         text = t("cm_ask_ending", lang, who=who, where=where, date=_date(q["last_day"]))
-    fid = q["fact_id"]
-    rows = (((t("cm_btn_week", lang), f"kn:x:ce.w.{fid}"), (t("cm_btn_ended", lang), f"kn:x:ce.e.{fid}")),
-            ((t("cm_btn_standing", lang), f"kn:x:ce.s.{fid}"),))
+    text = " ".join(text.split())
+    ident = q.get("ident") or q["fact_id"]
+    rows = (((t("cm_btn_week", lang), f"kn:x:ce.w.{ident}"), (t("cm_btn_ended", lang), f"kn:x:ce.e.{ident}")),
+            ((t("cm_btn_standing", lang), f"kn:x:ce.s.{ident}"),))
     return text, rows
 
 
@@ -199,17 +222,24 @@ def button(services: Any, snapshot: Any, code: str, who: Any, lang: str, now: Op
         choice = _CHOICES.get(kind)
         if choice is None:
             return None
-        before = activities.get(ident) if activities is not None else None
-        out = link.answer(store, activities, f"extend:{ident}", choice, _by(who), now)
+        asked = store.asked(f"extend:{ident}") or {}
+        out = link.answer(store, activities, f"extend:{ident}", choice, _by(who), now,
+                          events=getattr(services, "events", None))
         if not out.get("ok"):
             return None
-        case, fact = out["case"], out.get("fact") or before
-        where = _where(case, fact, snapshot, lang)
+        case, fact = out.get("case"), out.get("fact")
+        q = dict(asked, case_id=case.id if case is not None else "", fact_id=fact.id if fact is not None else "")
+        where = _question_where(q, services, snapshot, lang) if (asked.get("marks") or case is not None) else ""
+        name = str(asked.get("who") or (fact.cause if fact is not None else ""))
         if choice == link.ENDED:
+            if asked.get("marks") or case is None or not case.scope.actions:
+                return " ".join(t("cm_ended_marks", lang, who=name, where=where).split())
             return t("cm_ended_saved", lang, actions=_actions(case, lang), where=where)
         if choice == link.WEEK:
-            return t("cm_week_saved", lang, who=fact.cause, where=where, day=_day(out["until"], lang))
-        return t("cm_standing_saved", lang, who=fact.cause, where=where, hours=cm_texts.hours_text(case.scope.hours))
+            return " ".join(t("cm_week_saved", lang, who=name, where=where, day=_day(out["until"], lang)).split())
+        hours = case.scope.hours if case is not None else (str((asked.get("marks") or [{}])[0].get("daily_from")),
+                                                           str((asked.get("marks") or [{}])[0].get("daily_to")))
+        return " ".join(t("cm_standing_saved", lang, who=name, where=where, hours=cm_texts.hours_text(hours)).split())
     except Exception as exc:  # noqa: BLE001
         log.warning("Case memory answer failed: %s", exc)
         return None
@@ -237,7 +267,7 @@ def tick(services: Any, send: Callable[..., Dict[str, Any]], chat_ids: Sequence[
     except Exception as exc:  # noqa: BLE001
         log.warning("Owner memories not synced: %s", exc)
     try:
-        for q in link.questions_due(store, activities, now):
+        for q in link.questions_due(store, activities, now, getattr(services, "events", None)):
             chat = q["chat_id"] or default_chat
             if not chat:
                 continue
@@ -245,6 +275,8 @@ def tick(services: Any, send: Callable[..., Dict[str, Any]], chat_ids: Sequence[
             result = send(chat, text, rows=rows)
             if isinstance(result, dict) and result.get("ok"):
                 store.note_asked(q["key"], case_id=q["case_id"], fact_id=q["fact_id"], kind=q["kind"], chat_id=chat,
+                                 facts=q.get("facts") or [], marks=q.get("marks") or [], who=q.get("who") or "",
+                                 ident=q.get("ident") or "",
                                  message_id=result.get("message_id"))
                 done["asked"] += 1
                 log.info("case memory asked once (%s, %s): %s", q["kind"], q["fact_id"], text)
