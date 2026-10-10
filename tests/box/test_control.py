@@ -14,7 +14,8 @@ class ControlTest(unittest.TestCase):
         self.logs = os.path.join(tmp.name, "logs")   # not created yet: the flags must create it
 
     def _flags(self) -> list[str]:
-        return sorted(os.listdir(self.logs)) if os.path.isdir(self.logs) else []
+        names = os.listdir(self.logs) if os.path.isdir(self.logs) else []
+        return sorted(n for n in names if n.startswith("collector."))   # owner_stop.json stays (system_notices)
 
     def test_stop_then_start(self) -> None:
         self.assertFalse(control.is_stopped(self.logs))

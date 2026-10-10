@@ -10,6 +10,11 @@ processes. It asks instead, with two flag files that the runner
 
 A stop lasts until ``start``: it survives a reboot, and the heartbeat's
 self-heal leaves a stopped box alone.
+
+A stop also records its time in ``logs/owner_stop.json`` (system_notices), which
+the start does not clear: the next inference start can then tell a box the owner
+stopped from one that died, and says nothing about the owner's own stop
+(owner decision 2026-10-10).
 """
 
 from __future__ import annotations
@@ -33,7 +38,10 @@ def _touch(path: str) -> None:
 
 
 def stop(log_dir: str = LOG_DIR) -> None:
-    """Ask the runner to stop the program and keep it stopped."""
+    """Ask the runner to stop the program and keep it stopped, and record when (system_notices)."""
+    from .system_notices import record_owner_stop  # noqa: PLC0415
+
+    record_owner_stop(log_dir)
     _touch(_flag(STOP_FLAG, log_dir))
 
 

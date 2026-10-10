@@ -171,6 +171,9 @@ EVENTS: Any = None
 # sent the detector's alert? The owner, 2026-10-09 12:55: "got a weird message ... we didn't agree on this" - off:
 # the clip is kept and logged, nothing is sent. On: once per event, as before.
 AI_FAILED_NOTIFY = False
+# The box-down and AI-down notices (system_notices.SystemNotices, owner-approved 2026-10-10), started by run()
+# (start_system_notices). None - tests, tools - sends nothing.
+NOTICES: Any = None
 # Every camera id this box knows (run() fills it): the last guard swaps any of them in an owner text for its name.
 KNOWN_CAMERAS: Tuple[str, ...] = ()
 # What is usual at each camera (baseline.Historian, task 2.9), started by run() (start_baseline). None - tests, tools -
@@ -368,6 +371,41 @@ def carry_renamed_memory(cameras: Sequence[str]) -> None:
             log.info("Owner memory carried to the renamed cameras: %s", moved)
     except Exception as exc:  # noqa: BLE001 - the alerts go on with the memory as it was
         log.warning("Owner memory not carried over the camera rename: %s", exc)
+
+
+def start_system_notices(box_settings: Mapping[str, Any], env: Mapping[str, str], provider: str = "") -> Any:
+    """Start the two system notices (system_notices.py): the box-down check now, the alive time and the AI outage
+    while running. Never raises: without them the box runs as before."""
+    global NOTICES
+    try:
+        from . import system_notices  # noqa: PLC0415
+
+        NOTICES = system_notices.start(box_settings, env, owner_language, provider=provider)
+    except Exception as exc:  # noqa: BLE001
+        NOTICES = None
+        log.warning("System notices not started (%s)", exc)
+    return NOTICES
+
+
+def notices_tick(now: float) -> None:
+    """The guard loop's beat for the system notices: the alive time (every minute) and an outage that is due."""
+    if NOTICES is not None:
+        try:
+            NOTICES.tick(now)
+        except Exception as exc:  # noqa: BLE001 - a notice must never stop the alerts
+            log.debug("System notices tick failed: %s", exc)
+
+
+def note_eye(backend: Any, answered: bool, failure: str = "", rescue: Optional[Mapping[str, Any]] = None) -> None:
+    """Tell the system notices how an Eye call ended: answered, or failed after the fallback and the 768 rescue
+    (*failure* and the rescue's error say why). NullBackend (no model at all) is not an Eye call."""
+    if NOTICES is None or isinstance(backend, NullBackend):
+        return
+    try:
+        error = " ".join(part for part in (failure, str((rescue or {}).get("error") or "")) if part)
+        NOTICES.eye(answered, error)
+    except Exception as exc:  # noqa: BLE001
+        log.debug("System notices not told about the Eye call: %s", exc)
 
 
 def start_events(box_settings: Mapping[str, Any]) -> Any:
@@ -2896,12 +2934,14 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
             raw, parsed = "", None
             failure = str(exc)
         rescued = False
+        rescue_record: Dict[str, Any] = {}
         if not isinstance(parsed, dict):
             # Both models failed: one more try of the main model on smaller pictures (VLM_RESCUE_MAX_SIDE).
             rescue = vlm_rescue(backend, frames, camera_name, asked_at, settings.alert_start_hour,
                                 settings.alert_end_hour, failure or "the answer was not a JSON object",
                                 owner_language=lang, **context)
             if rescue is not None:
+                rescue_record = rescue[2]
                 if job is not None:
                     job.rescue = rescue[2]
                 if rescue[2]["answered"]:
@@ -2910,6 +2950,7 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
         answer, eye_record = parsed, {}
         # No model answered: the detector's alert still goes out, and says plainly that the AI check did not finish.
         ai_failed = not isinstance(answer, dict)
+        note_eye(backend, not ai_failed, failure, rescue_record)     # the system notices' AI outage
         if situation is not None:
             parsed, eye_record = _eye_answer(parsed, situation)
             if job is not None:
@@ -3378,6 +3419,7 @@ def serve_without_cameras(box_settings: Dict[str, Any], env: Dict[str, str], tur
     except Exception as exc:  # noqa: BLE001 - without the assistant there is still nothing to watch
         log.warning("Owner assistant not started (%s).", exc)
     while keep_running():
+        notices_tick(time.time())       # the box is running: no box-down notice for this time
         sleep(5.0)
     return 0
 
@@ -3414,6 +3456,7 @@ def run() -> int:
              f"{settings.vlm_provider}:{settings.vlm_model}"
              + (f" -> {settings.vlm_fallback_model}" if settings.vlm_fallback_model else ""), settings.dry_run)
 
+    start_system_notices(box_settings, env, settings.vlm_provider)   # first: the gap ends now
     backend = make_backend(settings, env)
     try:
         from .model_expiry import start_check  # noqa: PLC0415
@@ -3559,6 +3602,7 @@ def run() -> int:
     try:
         while True:
             now_ts = time.time()
+            notices_tick(now_ts)
             settings_changed = bool(live.check(now_ts))
             if settings.quiet_log or quiet is not None:
                 quiet_on = settings.quiet_log and not in_alert_window(
