@@ -51,7 +51,7 @@ PRICES = {"openai/gpt-4o": (2.5, 10.0), "openai/gpt-4o-mini": (0.15, 0.6), "open
 DEFAULT_BIG, DEFAULT_FAST, DEFAULT_JUDGE = "openrouter:openai/gpt-4o", "openrouter:openai/gpt-4o-mini", "openai/gpt-4o"
 
 INTENTS = ("place_fact", "person_mark", "activity_explain", "tag_only", "question_live", "question_history",
-           "complaint", "ack", "preference", "command")
+           "question_meta", "complaint", "ack", "preference", "command")
 WRITE_TYPES = ("place_fact", "person_mark", "activity", "tag", "pause", "camera_off", "alias", "preference",
                "house_state", "expect", "mark_removed", "activity_removed", "fact_removed")
 DIMENSIONS = ("understood", "routing", "questions", "human_tone", "evidence", "concise", "no_recitation",
@@ -121,7 +121,8 @@ def validate_case(case: Dict[str, Any]) -> List[str]:
     if expect.get("max_questions") not in (0, 1):
         errs.append(f"{cid}: max_questions must be 0 or 1")
     for w in list(expect.get("writes") or []) + [{"type": t} for t in expect.get("forbid_writes") or []]:
-        if not isinstance(w, dict) or w.get("type") not in WRITE_TYPES:
+        types = (w.get("type") if isinstance(w.get("type"), list) else [w.get("type")]) if isinstance(w, dict) else [None]
+        if any(t not in WRITE_TYPES for t in types):
             errs.append(f"{cid}: unknown write {w!r}")
     for m in expect.get("must_do") or []:
         if str(m).split(":", 1)[0] not in MUST_DO:
@@ -135,6 +136,12 @@ def validate_case(case: Dict[str, Any]) -> List[str]:
     alerts = {a.get("id") for a in case.get("alerts") or []}
     if msg.get("reply_to") and msg["reply_to"] not in alerts:
         errs.append(f"{cid}: reply_to {msg['reply_to']} is not one of the case's alerts")
+    elif msg.get("reply_to") and case.get("time") and case.get("date"):
+        try:
+            if msg["reply_to"] not in {a.get("id") for a in visible(case)["alerts"]}:
+                errs.append(f"{cid}: reply_to {msg['reply_to']} is not before the message")
+        except (ValueError, KeyError, TypeError) as exc:
+            errs.append(f"{cid}: bad time ({exc})")
     if msg.get("via", "message") not in ("message", "tag"):
         errs.append(f"{cid}: via must be message or tag")
     if msg.get("via") == "tag" and not msg.get("reply_to"):
@@ -156,13 +163,33 @@ def ts_of(case: Dict[str, Any], clock: Any, date: Optional[str] = None) -> float
     return dt.datetime(y, mo, d, *parts).timestamp()
 
 
+def visible(case: Dict[str, Any], keep_turns: int = 14) -> Dict[str, Any]:
+    """What the box knew just before the owner's message: the alerts and turns before the case's time (a day file
+    keeps the whole day in ``defaults``), the last *keep_turns* turns, and the memory live at that moment (an entry
+    with ``at`` later than the message, or ``gone`` at or before it, is left out)."""
+    now = ts_of(case, case["time"])
+    alerts = [a for a in case.get("alerts") or [] if ts_of(case, a["time"]) < now]
+    history = [h for h in case.get("history") or [] if ts_of(case, h["time"]) < now][-keep_turns:]
+    memory: Dict[str, Any] = {}
+    for key, rows in (case.get("memory") or {}).items():
+        memory[key] = [r for r in rows or [] if (not r.get("at") or ts_of(case, r["at"]) <= now)
+                       and (not r.get("gone") or ts_of(case, r["gone"]) > now)]
+    return {"alerts": alerts, "history": history, "memory": memory}
+
+
 # ---------------------------------------------------------------------------------------------------------------------
 # Deterministic checks (also used on the ideal replies by the pytest subset)
 # ---------------------------------------------------------------------------------------------------------------------
 def count_questions(text: str, buttons: Sequence[str] = ()) -> int:
-    """Questions back to the owner: each run of "?" ends one; choice buttons are a question too."""
-    n = len(re.findall(r"\?+", text or ""))
-    return max(n, 1) if buttons else n
+    """Questions back to the owner: sentences ending in "?" with 5+ words (a short echo like "אה, הם של הפרגולה?"
+    before the real question is not a second question - the owner's own example, F.4); a lone short question
+    still counts once, and two or more choice buttons are a question too (one button, "📹 שלח את הסרטון", is an
+    offer)."""
+    parts = re.findall(r"[^?.!\n]*\?+", text or "")
+    n = sum(1 for p in parts if len(p.replace("?", " ").split()) >= 5)
+    if n == 0 and parts:
+        n = 1
+    return max(n, 1) if len(buttons or ()) >= 2 else n
 
 
 def english_words(text: str) -> List[str]:
@@ -177,10 +204,14 @@ def _clock(ts: Optional[float]) -> str:
 
 
 def write_matches(want: Dict[str, Any], got: Dict[str, Any], now: float) -> bool:
-    if want.get("type") != got.get("type"):
+    types = want.get("type") if isinstance(want.get("type"), list) else [want.get("type")]
+    if got.get("type") not in types:
         return False
-    if want.get("camera") is not None and want["camera"] not in (got.get("cameras") or [got.get("camera")]):
-        return False
+    if want.get("camera") is not None:
+        allowed = want["camera"] if isinstance(want["camera"], list) else [want["camera"]]
+        have = list(got.get("cameras") or []) + [got.get("camera") or ""]
+        if not any(c in have for c in allowed):
+            return False
     scope = want.get("scope")
     if scope == "house" and got.get("camera") not in ("", None) and not got.get("whole_house"):
         return False
@@ -231,17 +262,18 @@ def deterministic(case: Dict[str, Any], out: Dict[str, Any]) -> List[Dict[str, A
         add("must_include_any", ok, "" if ok else " | ".join(expect["must_include_any"]))
     if "english" not in allow:
         eng = english_words(text)
-        add("hebrew", len(eng) <= 1 and bool(re.search(r"[֐-׿]", text)) or not text.strip(),
-            " ".join(eng[:6]))
+        hebrew = bool(re.search(r"[\u0590-\u05FF]", text))
+        add("hebrew", len(eng) <= 1 and (hebrew or not eng), " ".join(eng[:6]))
     q = count_questions(text, out.get("buttons") or ())
     limit = int(expect.get("max_questions", 0))
     add("max_questions", q <= limit, f"{q} > {limit}" if q > limit else "")
     # writes
     asked = q >= 1
     wanted = expect.get("writes") or []
-    missing = [w for w in wanted if not any(write_matches(w, g, now) for g in writes)]
+    missing = [w for w in wanted if not any(write_matches(w, g, now) for g in writes)
+               and not ((w.get("or_ask") or expect.get("write_or_ask")) and asked)]
     if wanted:
-        ok = not missing or (expect.get("write_or_ask") and asked)
+        ok = not missing
         add("writes", ok, "" if ok else "missing " + json.dumps(missing, ensure_ascii=False))
     forbidden = set(expect.get("forbid_writes") or [])
     bad = [g for g in writes if g.get("type") in forbidden]
@@ -274,12 +306,15 @@ def ideal_result(case: Dict[str, Any]) -> Dict[str, Any]:
     writes = []
     for w in expect.get("writes") or []:
         g = dict(w)
+        if isinstance(g.get("type"), list):
+            g["type"] = g["type"][0]
         exp = w.get("expiry")
         if exp == "today":
             g["until"] = now + 60
         elif isinstance(exp, str) and exp.startswith("until:"):
             g["until"] = ts_of(case, exp.split(":", 1)[1])
         cam = w.get("camera")
+        cam = cam[0] if isinstance(cam, list) else cam
         g["camera"] = cam if cam is not None else ("" if w.get("scope") == "house" else "cam")
         writes.append(g)
     tools: List[str] = []
@@ -539,9 +574,10 @@ class World:
         from .brain.memory import ChatMemory  # noqa: PLC0415,F401
 
         case = self.case
-        memory = case.get("memory") or {}
-        start = min([self.clock["now"]] + [ts_of(case, a["time"]) for a in case.get("alerts") or []]
-                    + [ts_of(case, h["time"]) for h in case.get("history") or []]) - 60
+        view = visible(case)
+        memory = view["memory"]
+        start = min([self.clock["now"]] + [ts_of(case, a["time"]) for a in view["alerts"]]
+                    + [ts_of(case, h["time"]) for h in view["history"]]) - 60
         for m in memory.get("marks") or []:
             at = ts_of(case, m.get("at") or start)
             daily = m.get("daily") or []
@@ -566,9 +602,9 @@ class World:
                                      camera=pause.get("camera")), start)
         # alerts and the turns before the owner's message, in time order
         timeline: List[Tuple[float, int, str, Dict[str, Any]]] = []
-        for a in case.get("alerts") or []:
+        for a in view["alerts"]:
             timeline.append((ts_of(case, a["time"]), 0, "alert", a))
-        for i, h in enumerate(case.get("history") or []):
+        for i, h in enumerate(view["history"]):
             timeline.append((ts_of(case, h["time"]), 1 + i, "turn", h))
         for ts, _, kind, item in sorted(timeline, key=lambda x: (x[0], x[1])):
             self.clock["now"] = ts
@@ -616,6 +652,10 @@ class World:
             alert = self.alerts[h["about"]]
             handles.append(state.add_handle("event", alert["alert_id"], alert["camera"], alert["ts"],
                                             alert.get("summary", "")))
+        for cam in h.get("photos") or []:
+            handle = state.add_handle("photo", f"{cam}_{int(ts)}.jpg", cam, ts)
+            state.note_observation(handle, self.live(cam)["description"])
+            handles.append(handle)
         state.add_turn(str(OWNER["user_id"]), str(h.get("owner") or ""), str(h.get("bot") or ""), handles, [], ts)
         self.agent.memory.save(CHAT, state)
 
@@ -843,19 +883,21 @@ Return JSON only: {"scores": {"understood": n, "routing": n, "questions": n, "hu
 
 def _context_text(case: Dict[str, Any]) -> str:
     lines = []
-    for a in case.get("alerts") or []:
+    view = visible(case)
+    names = (case.get("house") or {}).get("aliases") or {}
+    for a in view["alerts"][-6:]:
         lines.append(f"[{a['time']}] BOX ALERT ({a.get('label', 'suspicious')}) camera "
-                     f"{(case.get('house') or {}).get('aliases', {}).get(a['camera'], [a['camera']])[0]}: "
-                     f"{a.get('summary', '')}")
-    for h in case.get("history") or []:
+                     f"{names.get(a['camera'], [a['camera']])[0]}: {a.get('summary', '')}")
+    for h in view["history"][-8:]:
         if h.get("tag_for"):
             lines.append(f"[{h['time']}] OWNER (after the 🏷️ tag button, a tag): {h.get('owner', '')}")
             continue
         if h.get("owner"):
             lines.append(f"[{h['time']}] OWNER: {h['owner']}")
-        if h.get("bot"):
-            lines.append(f"[{h['time']}] BOT: {h['bot']}")
-    mem = case.get("memory") or {}
+        if h.get("bot") or h.get("photos"):
+            shot = f" [+ photos: {', '.join(h['photos'])}]" if h.get("photos") else ""
+            lines.append(f"[{h['time']}] BOT: {h.get('bot') or ''}{shot}")
+    mem = view["memory"]
     if any(mem.get(k) for k in ("marks", "activities", "facts", "pauses")):
         lines.append("MEMORY BEFORE: " + json.dumps(mem, ensure_ascii=False))
     live = case.get("live") or {}
