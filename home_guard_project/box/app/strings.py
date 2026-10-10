@@ -40,6 +40,7 @@ TEXT = {
     "ai_urgent_sent": "Urgent alert sent",
     "ai_training": "No alert - nothing happening (saved for training)",
     "ai_muted": "Not sent - alerts are paused",
+    "ai_held": "Kept, not sent (nothing to alert on)",
     "ai_not_sent": "NOT SENT",
     "ai_empty": "No activity yet. When a camera sees a person or a vehicle, the AI's answer appears here.",
     "ai_stopped": "Home Guard is stopped",

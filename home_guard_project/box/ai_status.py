@@ -94,10 +94,12 @@ class AiStatus:
 
     def decision(self, camera: str, labels: List[str], summary: str, command: str, sent: bool,
                  false_positive: bool = False, muted: bool = False, error: str = "",
-                 now: Optional[float] = None, label: str = "") -> None:
+                 now: Optional[float] = None, label: str = "", held: str = "") -> None:
         """Record what the AI said about one trigger, and what happened to the alert.
 
-        *label* is the AI's own label for the scene: normal, suspicious or escalation.
+        *label* is the AI's own label for the scene: normal, suspicious or escalation. *held* is the box's own reason
+        for not sending on purpose (the event book, a known mark, the owner's explanation): that is not a delivery
+        failure, and the app must not say "alerts are not reaching Telegram" for it (2026-10-10).
         """
         now = time.time() if now is None else now
         with self._lock:
@@ -105,7 +107,7 @@ class AiStatus:
             self._decisions.append({
                 "ts": now, "camera": camera, "labels": list(labels), "summary": summary, "command": command,
                 "label": label, "sent": bool(sent), "false_positive": bool(false_positive), "muted": bool(muted),
-                "error": error,
+                "error": error, "held": held,
             })
             self._decisions = self._decisions[-KEEP_DECISIONS:]
             self._write(now, force=True)

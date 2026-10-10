@@ -3026,7 +3026,7 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
             if getattr(event, "arrival", None):
                 send_arrival_line(event.arrival, box_settings, env, lang)
             if status is not None:
-                status.decision(camera_name, labels, summary, cmd, sent=False, error=event.reason, label=label)
+                status.decision(camera_name, labels, summary, cmd, sent=False, held=event.reason, label=label)
             if job is not None:
                 job.alert = {**decision, "summary": summary, "alert_command": cmd, "alert_reason": reason,
                              "labels": job.labels, "muted": False, "why": why, "summary_owner": summary_owner,
