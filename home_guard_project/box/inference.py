@@ -2345,6 +2345,35 @@ def _explained_suspicious(event: Any, camera: str, alert_ts: float, text: str, d
         return event
 
 
+def _owner_place_quiet(event: Any, job: Optional[AlertJob], camera: str, decision: Dict[str, Any]) -> Any:
+    """A suspicious whose people all stayed inside a place the owner said is the neighbour's (or the street) at this
+    camera ("זה הבית של השכן", 2026-10-10; place_facts.py): kept, not sent - "neighbour's place (owner said)". Someone
+    who leaves it onto the owner's ground still goes out; an escalation never comes here. Never raises."""
+    tracks = getattr(job, "tracker_tracks", None) if job is not None else None
+    if not tracks:
+        return event
+    try:
+        import dataclasses  # noqa: PLC0415
+
+        from . import place_facts, scene_map  # noqa: PLC0415
+        from .camera_profiles import PROFILES_NAME, CameraProfiles  # noqa: PLC0415
+
+        events_dir = getattr(EVENTS, "directory", "") or os.path.join(paths.state_dir(), "events")
+        profiles = CameraProfiles(os.path.join(events_dir, PROFILES_NAME))
+        if not profiles.places(camera):
+            return event
+        place = place_facts.quiet_place(camera, tracks, profiles, scene_map.load_scene_map(camera))
+        if place is None:
+            return event
+        reason = place_facts.reason_of(place)
+        decision["owner_place"] = {"fact": place.get("id"), "text": place.get("text"), "owner": place.get("owner")}
+        log.info("[%s] kept quiet: %s (\"%s\")", camera, reason, place.get("text"))
+        return dataclasses.replace(event, notify=False, reason=reason)
+    except Exception as exc:  # noqa: BLE001 - the alert goes out as before
+        log.warning("[%s] owner's places not applied: %s", camera, exc)
+        return event
+
+
 def _alert_ground(job: Optional[AlertJob], camera: str, reason: str) -> Dict[str, Any]:
     """Where the alert's people were by the camera's scene map (ground.py), with ``action`` (the Eye's reason names
     something done): ``ground.Ground.record()`` plus ``action``, or {} without a map, without tracks, or on any
@@ -3028,6 +3057,8 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                                                    detector_people=_detector_people(job) if ai_failed else 0)
         if label == "suspicious" and event is not None and event.notify:
             event = _explained_suspicious(event, camera_name, alert_ts, f"{why} {reason} {summary}", decision)
+        if label == "suspicious" and event is not None and event.notify:
+            event = _owner_place_quiet(event, job, camera_name, decision)
         rarity_line = ""
         if usual.get("raise") and (event is None or event.notify):
             rarity_line = str((usual.get("text_he") if lang == "he" else usual.get("text_en")) or "")
