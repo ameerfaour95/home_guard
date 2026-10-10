@@ -35,22 +35,29 @@ class VisionRefused(Exception):
     """The model declined to look."""
 
 
-def look_schema(guard: bool) -> Dict[str, Any]:
+def look_schema(guard: bool, grounded: bool = False) -> Dict[str, Any]:
     props: Dict[str, Any] = {
         "description": {"type": "string"},
         "quality": {"type": "string", "enum": list(QUALITIES)},
         "people": {"type": "integer"},
     }
+    if grounded:            # a person the detector did not find, that the model may think it sees (grounded_look)
+        props["unsure_people"] = {"type": "integer"}
     if guard:
         props["label"] = {"type": "string", "enum": list(LABELS)}
         props["why"] = {"type": "string"}
     return {"type": "object", "properties": props, "required": list(props), "additionalProperties": False}
 
 
-def look_prompt(camera: str, guard: bool, question: str = "", what: str = "a live photo") -> str:
+def look_prompt(camera: str, guard: bool, question: str = "", what: str = "a live photo", facts: str = "") -> str:
     lines = [
         f'You are the eyes of a home security system, looking at {what} from the homeowner\'s own camera "{camera}".',
         "",
+    ]
+    if facts:               # what the detector found and whose ground it is on (grounded_look.facts_text)
+        lines += [facts, "", '"unsure_people": people you think you see that the detector did not find (0 if none).',
+                  ""]
+    lines += [
         '"description": what is visible and what any people, vehicles or animals are doing, in one to three short',
         "sentences. Describe only what is there; where unsure, say \"appears to\". Never guess names, age or ethnicity.",
         '"quality": how usable the picture is - "clear", "blurry", "dark", or "no_signal" (black, grey, frozen or',
@@ -101,11 +108,13 @@ class Vision:
         self.model_name = model_name
 
     def look(self, camera: str, images: List[bytes], guard: bool, question: str = "",
-             what: str = "a live photo") -> Dict[str, Any]:
+             what: str = "a live photo", facts: str = "") -> Dict[str, Any]:
+        """*facts*: what code already knows about the picture (grounded_look.facts_text), given to the model."""
         if not images:
             return {"ok": False, "refused": False, "error": "no_pictures"}
         try:
-            raw = self._complete(look_prompt(camera, guard, question, what), list(images), look_schema(guard))
+            raw = self._complete(look_prompt(camera, guard, question, what, facts), list(images),
+                                 look_schema(guard, grounded=bool(facts)))
         except VisionRefused:
             return {"ok": False, "refused": True, "error": "refused"}
         except Exception as exc:  # noqa: BLE001 - offline, TLS, a model error
@@ -128,6 +137,11 @@ class Vision:
             "quality": quality if quality in QUALITIES else "clear",
             "people": people,
         }
+        if facts:
+            try:
+                out["unsure_people"] = max(0, int(parsed.get("unsure_people") or 0))
+            except (TypeError, ValueError, OverflowError):
+                out["unsure_people"] = 0
         if guard:
             if str(parsed.get("label") or "").strip().lower() not in LABELS:
                 log.warning("Guard look returned no valid label")
@@ -203,7 +217,9 @@ class BudgetedVision:
         return {"day": today, "count": count}
 
     def look(self, camera: str, images: List[bytes], guard: bool, question: str = "",
-             what: str = "a live photo") -> Dict[str, Any]:
+             what: str = "a live photo", facts: str = "") -> Dict[str, Any]:
+        if facts:
+            return self._spend(lambda: self._vision.look(camera, images, guard, question, what, facts=facts))
         return self._spend(lambda: self._vision.look(camera, images, guard, question, what))
 
     def ask(self, camera: str, images: List[bytes], question: str, language: str = "English") -> Dict[str, Any]:

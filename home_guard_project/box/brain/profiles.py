@@ -21,7 +21,7 @@ _DIR = os.path.dirname(os.path.abspath(__file__))
 TOOLS_PATH = os.path.join(_DIR, "agent_tools_v2.json")
 PROMPTS_DIR = os.path.join(_DIR, "prompts")
 
-COMMON_TOOLS = ("find_events", "summarize_period", "ask_vision", "recent_activity", "search_events", "get_event", "how_usual", "camera_fact", "check_camera", "look_around", "record_clip",
+COMMON_TOOLS = ("find_events", "summarize_period", "ask_vision", "recent_activity", "search_events", "get_event", "how_usual", "camera_fact", "check_camera", "look_around", "map_info", "where_is", "record_clip",
                 "send_media", "pause_alerts", "resume_alerts", "set_camera_active", "set_alias", "change_setting",
                 "record_verdict", "mark_known", "retag_clip", "ask_clarification", "get_alert_settings", "set_alert_types", "set_sensitivity", "house_status",
                 "house_state", "house_expect", "house_cancel", "reply")

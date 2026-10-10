@@ -761,6 +761,42 @@
   {
     "type": "function",
     "function": {
+      "name": "map_info",
+      "description": "The owner's scene map of one camera: which areas are the owner's own ground, the neighbour's or public, the boundary lines, what the camera watches. For \"מה המצלמה הזו רואה?\", \"איפה הגבול עם השכן?\", \"what does the map say?\". Without a map it says so and offers to draw it in the app.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "camera": {
+            "type": "string",
+            "description": "A camera name or the owner's word for it. Leave it out for the camera being discussed."
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "where_is",
+      "description": "Whose ground something in a camera's picture stands on, by the owner's scene map: a car, a person, or an area (\"של מי הרכב?\", \"זה אצלי או אצל השכן?\", \"השער שלי?\", \"is that car on my side?\"). Uses the latest live look (two minutes) or a new detector look. Answer ownership and location questions with it, never from the picture alone. The map says whose GROUND it is, not whose car.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "camera": {
+            "type": "string",
+            "description": "A camera name or the owner's word for it. Leave it out for the camera being discussed."
+          },
+          "what": {
+            "type": "string",
+            "description": "What the owner asks about, in their words (\"הרכב\", \"the person\", \"P1\", \"השער\")."
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
       "name": "search_events",
       "description": "The box's memory of past events (30 days; one event per camera activity, with what was seen, how many people, whether the owner was told, what the owner said about them, and what changed from the event before). Finds the best 3 by the owner's words, a time or a camera, also in Hebrew (\"what happened at the pergola at noon?\", \"did the white car leave?\", \"were the workers here yesterday?\"). Use it only when the conversation and the context block do not already answer; for right now use check_camera, for the last hour recent_activity.",
       "parameters": {
