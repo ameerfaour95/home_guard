@@ -571,8 +571,6 @@ class World:
 
     # -- seeding -------------------------------------------------------------------------------------------------
     def seed(self) -> None:
-        from .brain.memory import ChatMemory  # noqa: PLC0415,F401
-
         case = self.case
         view = visible(case)
         memory = view["memory"]
@@ -785,6 +783,18 @@ def run_case(case: Dict[str, Any], big: Any, fast: Any) -> Dict[str, Any]:
 
     _patch_aliases()
     started = time.time()
+    import logging  # noqa: PLC0415
+
+    warnings: List[str] = []
+    me = threading.get_ident()
+
+    class _Catch(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            if record.thread == me and record.levelno >= logging.WARNING:
+                warnings.append(f"{record.name}: {record.getMessage()}"[:300])
+
+    catch = _Catch()
+    logging.getLogger().addHandler(catch)
     out: Dict[str, Any] = {"id": case["id"], "text": "", "buttons": [], "tools": [], "writes": [], "photos": [],
                            "videos": [], "photo_cameras": [], "error": "", "path": ""}
     world: Optional[World] = None
@@ -841,8 +851,10 @@ def run_case(case: Dict[str, Any], big: Any, fast: Any) -> Dict[str, Any]:
         out["trace"] = traceback.format_exc()[-1500:]
     finally:
         _local.world = None
+        logging.getLogger().removeHandler(catch)
         if world is not None:
             shutil.rmtree(world.root, ignore_errors=True)
+    out["warnings"] = warnings[:20]
     out["seconds"] = round(time.time() - started, 1)
     return out
 
@@ -1003,6 +1015,14 @@ def make_models(env: Dict[str, str], spend: Spend, big_spec: str = DEFAULT_BIG, 
             CountingModel(judge, judge_name, spend) if judge else None)
 
 
+UNAVAILABLE_HE = "לא הצלחתי לטפל בזה כרגע"
+
+
+def _provider_hiccup(res: Dict[str, Any]) -> bool:
+    """The brain's "could not work on that" reply after a failed model call (429, timeout, 5xx)."""
+    return UNAVAILABLE_HE in str(res.get("text") or "") or "could not work on that" in str(res.get("text") or "")
+
+
 def run_suite(cases: List[Dict[str, Any]], runs: int, big: Any, fast: Any, judge: Any, spend: Spend,
               workers: int = 4, log: Callable[[str], None] = print) -> List[List[Dict[str, Any]]]:
     """``results[run][i]`` for every case: the run result with ``judge`` and ``verdict``."""
@@ -1017,6 +1037,10 @@ def run_suite(cases: List[Dict[str, Any]], runs: int, big: Any, fast: Any, judge
                               "text": "", "writes": [], "tools": []}
             else:
                 results[i] = run_case(case, big, fast)
+                if _provider_hiccup(results[i]) and not spend.over():
+                    first = results[i]
+                    results[i] = run_case(case, big, fast)      # one retry: a provider error is not the assistant
+                    results[i]["retried"] = first.get("warnings") or first.get("text")
             res = results[i]
             judged = None
             if judge is not None and not spend.over() and not str(res.get("error", "")).startswith("skipped"):
@@ -1086,6 +1110,15 @@ def write_report(path: str, cases: List[Dict[str, Any]], all_runs: List[List[Dic
                  + ", ".join(f"{d} {abs((s['per_run'][0]['dims'][d] or 0) - (s['per_run'][1]['dims'][d] or 0)):.2f}"
                              for d in DIMENSIONS))
     L.append(f"\nPass thresholds per dimension: {json.dumps(PASS_AT)}; any stupid-message flag is a hard fail.")
+    for r_i, run in enumerate(all_runs):
+        flagged = []
+        for res in run:
+            flags = [f for f, v in (((res.get("judge") or {}).get("flags")) or {}).items() if v]
+            if flags:
+                flagged.append(f"{res['id']} ({', '.join(flags)})")
+        retried = [res["id"] for res in run if res.get("retried")]
+        L.append(f"\n**Stupid messages, run {r_i + 1}: {len(flagged)}** - " + ("; ".join(flagged) or "none")
+                 + (f". Retried once after a provider error: {', '.join(retried)}" if retried else ""))
     # per intent
     L += ["", "## By intent (run 1)", "", "| intent | cases | pass | det pass | mean judge |", "|---|---|---|---|---|"]
     first = all_runs[0] if all_runs else []
