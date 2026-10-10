@@ -27,7 +27,7 @@ SUFFIXES = (".prompt", ".system_prompt")
 _PLACEHOLDER = re.compile(r"\{\{(\w+)\}\}")
 
 
-def path(name: str) -> str:
+def path(name: str, /) -> str:
     """The file of prompt *name* (``"eye_legacy.prompt"``)."""
     if not name.endswith(SUFFIXES) or os.path.basename(name) != name:
         raise ValueError(f"not a prompt file name: {name!r}")
@@ -35,7 +35,7 @@ def path(name: str) -> str:
 
 
 @functools.lru_cache(maxsize=None)
-def load(name: str) -> str:
+def load(name: str, /) -> str:
     """The text of prompt *name*, without the newline that ends the file."""
     with open(path(name), encoding="utf-8") as f:
         text = f.read()
@@ -46,7 +46,7 @@ def placeholders(text: str) -> set[str]:
     return set(_PLACEHOLDER.findall(text))
 
 
-def fill(text: str, **values: Any) -> str:
+def fill(text: str, /, **values: Any) -> str:
     """*text* with every ``{{name}}`` replaced by ``str(values[name])``; every value must be used."""
     wanted = placeholders(text)
     missing = wanted - values.keys()
@@ -56,7 +56,7 @@ def fill(text: str, **values: Any) -> str:
     return _PLACEHOLDER.sub(lambda m: str(values[m.group(1)]), text)
 
 
-def render(name: str, **values: Any) -> str:
+def render(name: str, /, **values: Any) -> str:
     """Prompt *name* with its ``{{placeholders}}`` filled in."""
     return fill(load(name), **values)
 
