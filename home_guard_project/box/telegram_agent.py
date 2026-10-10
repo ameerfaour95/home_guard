@@ -744,11 +744,15 @@ def start(
         try:
             from .brain.agent import build_owner_agent, follow_up_camera_receipts  # noqa: PLC0415
 
-            agent, deliverer = build_owner_agent(box_settings, env, mute, cfg, live_dir, archive_dir, log_dir, feed)
+            from .assistant_v3 import build_assistant_v3, wants_v3  # noqa: PLC0415
+
+            # box.yaml "assistant: v3" (default v2): the v3 assistant on the same services (assistant_v3/).
+            build = build_assistant_v3 if wants_v3(box_settings) else build_owner_agent
+            agent, deliverer = build(box_settings, env, mute, cfg, live_dir, archive_dir, log_dir, feed)
             if agent is not None:
                 threading.Thread(target=follow_up_camera_receipts, args=(agent.book, agent.registry, deliverer),
                                  name="camera-follow-up", daemon=True).start()
-                log.info("Owner assistant v2 (brain) is on.")
+                log.info("Owner assistant v%s is on.", getattr(agent, "version", 2))
         except Exception as exc:  # noqa: BLE001 - the inbox must start whatever the brain does
             log.warning("Owner assistant v2 not available (%s); using v1.", exc)
             agent, deliverer = None, None

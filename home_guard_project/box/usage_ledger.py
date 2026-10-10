@@ -54,6 +54,9 @@ AGENTS: Tuple[str, ...] = (
     "translator_fast",    # the translator's hedge model, raced after a slow or broken answer
     "brain",              # the owner's assistant, its main model (brain/models.py; agent.py v1)
     "brain_fast",         # the assistant's fast model (box.yaml agent_fast_model)
+    "brain_v3",           # assistant v3's writer (and its code-triggered escalation model) (assistant_v3/)
+    "brain_v3_understand",  # assistant v3's understanding step: the message as dialogue acts (assistant_v3/)
+    "brain_v3_critic",    # assistant v3's pre-send critic (assistant_v3/supervisor.py)
     "brain_tool_vision",  # the assistant's camera look (brain/vision.py: look_around / ask_vision)
     "day_story",          # the assistant's "summary of the day" told like a guard (brain/day_story.py), one call each
     "embeddings",         # alert search and case memory vectors (embeddings.py)
