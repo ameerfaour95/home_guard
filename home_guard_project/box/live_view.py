@@ -23,15 +23,12 @@ from collections.abc import Mapping
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from . import providers
+from ..prompts import load
 
 log = logging.getLogger("box.live_view")
 
 VISION_MODEL = "gpt-4o"      # vision-capable; the text agent stays on gpt-4o-mini
-VISION_PROMPT = (
-    "You are a home security assistant looking at one still frame from a camera. In one or two short, "
-    "factual sentences, say what is visible right now - any people, vehicles or animals and what they "
-    "appear to be doing. If nothing notable is there, say the view looks clear."
-)
+VISION_PROMPT = load("live_view.prompt")
 
 
 def _camera_url(camera: str, cameras_path: str) -> Optional[str]:

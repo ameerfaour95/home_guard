@@ -1,0 +1,12 @@
+CONTEXT (oldest first; times are local):
+{{context}}
+
+OWNER'S MESSAGE at {{time}}{{reply_to}}{{via_tag}}: {{message}}
+
+EXPECTED: intent={{intent}}; memory writes={{writes}}{{write_or_ask}}; forbidden writes={{forbid_writes}}; at most {{max_questions}} question(s); must do={{must_do}}. Notes: {{notes}}
+IDEAL REPLY (reference): {{ideal}}
+
+ACTUAL REPLY: {{reply}}
+ACTUAL BUTTONS: {{buttons}}
+ACTUAL TOOLS CALLED: {{tools}}; photos sent: {{photos}}; videos sent: {{videos}}
+ACTUAL MEMORY WRITES: {{memory_writes}}

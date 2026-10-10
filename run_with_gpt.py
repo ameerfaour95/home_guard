@@ -6,6 +6,7 @@ import cv2
 import math
 import time
 import json
+import re
 import logging
 import threading
 import ctypes
@@ -181,33 +182,21 @@ def detect_moving_car(result, last_center_by_id: Dict[int, Tuple[float, float]],
 # -----------------------------
 # LLM LOGIC
 # -----------------------------
+# The prompt's words live in home_guard_project/prompts (read by path: this script runs as a file).
+PROMPTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "home_guard_project", "prompts")
+
+
+def read_prompt(name: str) -> str:
+    """The text of prompt file *name*, without the newline that ends the file (as home_guard_project.prompts.load)."""
+    with open(os.path.join(PROMPTS_DIR, name), encoding="utf-8") as f:
+        text = f.read()
+    return text[:-1] if text.endswith("\n") else text
+
+
 def build_gpt_prompt(*, camera_name: str, t_sec: int, local_time_str: str, alert_start_hour: int, alert_end_hour: int) -> str:
     window_str = format_window(alert_start_hour, alert_end_hour)
-    return f"""
-You are a security camera assistant. You receive MULTIPLE sequential frames (~5 seconds) from camera "{camera_name}".
-Treat them as a SHORT VIDEO CLIP.
-
-Return EXACTLY ONE STRICT JSON OBJECT (NOT an array) and NOTHING else:
-{{
-  "time_sec": {t_sec},
-  "camera": "{camera_name}",
-  "summary": "<one sentence describing the ENTIRE clip>",
-  "alert_command": "[none]" or "[call_owner]" or "[send_message]",
-  "alert_reason": "<short reason, or empty string if alert_command is [none]>"
-}}
-
-HARD RULES:
-- Single JSON Object only.
-- Summary describes the 5-sec clip activity.
-- If person detected: describe appearance and action.
-
-Alert policy:
-- Alert window: {window_str}. Current time: {local_time_str}.
-- If OUTSIDE window: alert_command MUST be "[none]".
-- If INSIDE window:
-  * Person/Car visible? alert_command MUST be "[send_message]" (minimum).
-  * Suspicious (forced entry, hiding, loitering)? alert_command MUST be "[call_owner]".
-""".strip()
+    values = {"camera_name": camera_name, "t_sec": t_sec, "window": window_str, "local_time": local_time_str}
+    return re.sub(r"\{\{(\w+)\}\}", lambda m: str(values[m.group(1)]), read_prompt("legacy_gpt4v.prompt"))
 
 def _frame_to_jpeg_b64(frame_bgr) -> str:
     ok, buf = cv2.imencode(".jpg", frame_bgr, [int(cv2.IMWRITE_JPEG_QUALITY), 85])

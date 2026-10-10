@@ -39,6 +39,8 @@ import threading
 import time
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
+from ..prompts import load, render
+
 os.environ.setdefault("HOMEGUARD_USAGE_LEDGER", "off")
 
 CHAT = "-5326761586"
@@ -909,35 +911,7 @@ def run_case(case: Dict[str, Any], big: Any, fast: Any) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------------------------------------------------
 # The judge
 # ---------------------------------------------------------------------------------------------------------------------
-JUDGE_SYSTEM = """You grade replies of a home-security assistant that talks with a homeowner in Hebrew on Telegram.
-The bar: a top-company human agent (think the best remote-monitoring operator at a premium security firm) - sharp,
-warm, short, specific, answers first, no filler, never recites its internal state, never asks what it can work out
-itself, never pretends. The owner hates: questions he already answered, "מה לתקן?", empty "הבנתי אותך.", the bot
-dumping its memory ("שמור אצלי עכשיו: ..."), mentioning unrelated things (e.g. the workers when he talks about the
-neighbour's house), English, invented times (e.g. "until 23:59"), internal ids/handles, closing offers ("אם יש עוד
-משהו אני כאן"), and asking "until when?" about something permanent (a place is permanent).
-Routing rules the owner agreed on: what he writes after pressing the 🏷️ tag button is a TAG (training label for the
-detection model only, no memory, no question). A plain message explaining people/places/activities is MEMORY (and
-changes what the box does). Complaints, questions and acks are neither: no tag, no memory write.
-
-You get the context, the owner's message, the expected behaviour, an IDEAL reply written by a human expert (a
-reference for quality, NOT an exact target: a different wording that is as good scores as high), and the actual
-reply with the tools it called and the memory writes it made. Score the ACTUAL reply, 1-5 each (5 = as good as the
-ideal or better, 3 = acceptable but clearly weaker, 1 = wrong/harmful):
-- understood: got what the owner meant without needing more explanation.
-- routing: the right memory / tag / nothing routing, with the right scope and expiry (judge the writes made).
-- questions: asks nothing it could work out; at most one short question, only if truly needed.
-- human_tone: sounds like a human security operator, not a bot; warm but not sugary; no canned phrases.
-- evidence: claims are backed by what it looked at (cameras, the clip, the event book); no unbacked certainty. If
-  the turn needs no evidence, score 5 unless the reply invents facts.
-- concise: short, answers first, no filler or repetition.
-- no_recitation: does not recite memory/internal state that the owner did not ask for; no ids or handles.
-- top_company: would a top-company human agent send exactly this message?
-Flags (true/false), each a "stupid message": nonsensical (doesn't make sense), irrelevant (talks about something
-else), repetitive (repeats a line already sent in the context or within itself), robotic (template/system voice).
-Return JSON only: {"scores": {"understood": n, "routing": n, "questions": n, "human_tone": n, "evidence": n,
-"concise": n, "no_recitation": n, "top_company": n}, "flags": {"nonsensical": b, "irrelevant": b, "repetitive": b,
-"robotic": b}, "reason": "<one or two sentences>"}"""
+JUDGE_SYSTEM = load("eval_chat_judge.system_prompt")
 
 
 def _context_text(case: Dict[str, Any]) -> str:
@@ -968,20 +942,18 @@ def _context_text(case: Dict[str, Any]) -> str:
 def judge_case(case: Dict[str, Any], result: Dict[str, Any], judge: Any) -> Dict[str, Any]:
     expect = case.get("expect") or {}
     msg = case["message"]
-    user = (f"CONTEXT (oldest first; times are local):\n{_context_text(case)}\n\n"
-            f"OWNER'S MESSAGE at {case['time']}"
-            f"{' (a Telegram reply to the alert ' + msg['reply_to'] + ')' if msg.get('reply_to') else ''}"
-            f"{' (typed after pressing the 🏷️ tag button)' if msg.get('via') == 'tag' else ''}: {msg['text']}\n\n"
-            f"EXPECTED: intent={expect.get('intent')}; memory writes={json.dumps(expect.get('writes') or [], ensure_ascii=False)}"
-            f"{' (or one short question first)' if expect.get('write_or_ask') else ''}; forbidden writes="
-            f"{expect.get('forbid_writes') or []}; at most {expect.get('max_questions', 0)} question(s); must do="
-            f"{expect.get('must_do') or []}. Notes: {case.get('notes') or expect.get('notes') or '-'}\n"
-            f"IDEAL REPLY (reference): {expect.get('ideal')}\n\n"
-            f"ACTUAL REPLY: {result.get('text') or '(nothing sent)'}\n"
-            f"ACTUAL BUTTONS: {result.get('buttons') or []}\n"
-            f"ACTUAL TOOLS CALLED: {result.get('tools') or []}; photos sent: {len(result.get('photos') or [])}; "
-            f"videos sent: {len(result.get('videos') or [])}\n"
-            f"ACTUAL MEMORY WRITES: {json.dumps(_writes_for_judge(result.get('writes') or []), ensure_ascii=False)}")
+    user = render(
+        "eval_chat_judge.prompt", context=_context_text(case), time=case["time"],
+        reply_to=" " + render("eval_chat_judge_reply_to.prompt", alert=msg["reply_to"]) if msg.get("reply_to") else "",
+        via_tag=" " + load("eval_chat_judge_via_tag.prompt") if msg.get("via") == "tag" else "", message=msg["text"],
+        intent=expect.get("intent"), writes=json.dumps(expect.get("writes") or [], ensure_ascii=False),
+        write_or_ask=" " + load("eval_chat_judge_write_or_ask.prompt") if expect.get("write_or_ask") else "",
+        forbid_writes=expect.get("forbid_writes") or [], max_questions=expect.get("max_questions", 0),
+        must_do=expect.get("must_do") or [], notes=case.get("notes") or expect.get("notes") or "-",
+        ideal=expect.get("ideal"), reply=result.get("text") or "(nothing sent)", buttons=result.get("buttons") or [],
+        tools=result.get("tools") or [], photos=len(result.get("photos") or []),
+        videos=len(result.get("videos") or []),
+        memory_writes=json.dumps(_writes_for_judge(result.get("writes") or []), ensure_ascii=False))
     messages = [{"role": "system", "content": JUDGE_SYSTEM}, {"role": "user", "content": user}]
     for attempt in range(2):
         msg_out = judge.chat(messages, None)

@@ -41,24 +41,19 @@ from transformers import AutoProcessor, AutoModelForImageTextToText
 # ==========================================================
 # 0) PROMPT
 # ==========================================================
-PROMPT = """
-You are a security camera assistant watching a {camera_name} camera.
+# The words live in home_guard_project/prompts (read by path: this script runs as a file). Sent as written: the
+# {camera_name} and the doubled braces in it are not filled in.
+PROMPTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompts")
 
-Task:
-Describe what happens in the video
 
-Alert policy:
-- If no person is visible: alert_command = "[none]"
-- If any person is visible: alert_command = "[send_message]"
-- If suspicious behavior is visible alert_command = "[call_owner]"
+def read_prompt(name: str) -> str:
+    """The text of prompt file *name*, without the newline that ends the file (as home_guard_project.prompts.load)."""
+    with open(os.path.join(PROMPTS_DIR, name), encoding="utf-8") as f:
+        text = f.read()
+    return text[:-1] if text.endswith("\n") else text
 
-Output format:
-{{
-  "summary": "<one sentence describing the whole clip>",
-  "alert_reason": "<short reason>",
-  "alert_command": "[none] or [send_message] or [call_owner]"
-}}
-"""
+
+PROMPT = read_prompt("legacy_smolvlm.prompt")
 
 
 # ==========================================================
