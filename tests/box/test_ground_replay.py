@@ -51,6 +51,32 @@ class ReplayTest(unittest.TestCase):
             z.write_scene_maps({CAM: SCENE.stored()}, path)
             self.assertEqual(rp.maps_from_file(path)(CAM).areas, SCENE.areas)
 
+    def test_the_live_trackers_own_boxes_and_a_meta_without_trigger_ts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "x.tracks.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"camera": CAM, "clip_start_ts": 100.0, "clip_end_ts": 110.0,
+                           "looks": [{"ts": 101.0}, {"ts": 102.0}],
+                           "tracks": [{"id": 2, "kind": "person", "cls": 0, "max_conf": 0.8,
+                                       "boxes": [{"ts": 101.0, "box": [0.1, 0.6, 0.2, 0.8]},
+                                                 {"ts": 102.0, "box": [0.12, 0.6, 0.22, 0.8]}]}]}, f)
+            looks = rp.looks_from_tracks(path)
+            self.assertEqual((looks["t0"], looks["t1"]), (100.0, 110.0))
+            self.assertEqual(looks["looks"][0], [101.0, [[0, 0.8, 0.1, 0.6, 0.2, 0.8]]])
+            self.assertIsNone(rp.looks_from_tracks(os.path.join(tmp, "missing.json")))
+        m = meta(1791641194.0, "suspicious")
+        del m["trigger_ts"]
+        self.assertEqual(rp.trigger_ts(m), 1791641194.0)          # from the stem
+        m["clip_path"] = r"clips\ameer_v2_ch2\2026-10-10\ameer_v2_ch2_1791641194_alert.mp4"   # a Windows box
+        self.assertEqual(rp.stem_of(m), "ameer_v2_ch2_1791641194_alert")
+
+    def test_maps_by_channel_after_a_site_rename(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "scene_maps.yaml")
+            z.write_scene_maps({"ameer_v2_ch1": SCENE.stored()}, path)
+            self.assertIsNone(rp.maps_from_file(path)(CAM))
+            self.assertEqual(rp.maps_from_file(path, by_channel=True)(CAM).areas, SCENE.areas)
+
     def test_load_metas_keeps_the_dates_asked_for(self):
         with tempfile.TemporaryDirectory() as tmp:
             os.makedirs(os.path.join(tmp, "meta", CAM))

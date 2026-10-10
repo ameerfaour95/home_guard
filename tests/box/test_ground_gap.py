@@ -39,6 +39,17 @@ class GroundAtTest(unittest.TestCase):
         # Beyond the line's far side geometrically, but our own corner is the area close by: they disagree.
         self.assertEqual(CH2.ground_at((0.26, 0.12))[:2], ("", "unknown"))
 
+    def test_a_boundary_wall_near_the_point_neither_agrees_nor_disagrees(self):
+        # The real 17:06 case: the last foot points came close to the wall the owner called the railing between
+        # them (ours, zone fence) while their stairs were a little further away, on the same side of the line.
+        wall = sm.Area("fence", sm.MINE, "fence", ((0.63, 0.93), (0.66, 0.90), (0.68, 0.92), (0.65, 0.95)))
+        scene = sm.SceneMap("ameer_v2_ch2", areas=(OURS, STAIRS, wall), lines=(LINE,))
+        p = (0.58, 0.95)
+        self.assertLess(sm.NEAR_AREA, sm.polygon_distance(p, wall.points))
+        self.assertLess(sm.polygon_distance(p, wall.points), sm.polygon_distance(p, STAIRS.points))
+        self.assertEqual(CH2.ground_at(p)[:2], ("neighbour", "line"))       # without the wall: the same
+        self.assertEqual(scene.ground_at(p)[:2], ("neighbour", "line"))
+
     def test_far_from_every_area_stays_unknown(self):
         self.assertEqual(CH2.ground_at((0.10, 0.90))[:2], ("", "unknown"))
 

@@ -297,7 +297,7 @@ class SceneMap:
     def ground_at(self, p: Point) -> Tuple[str, str, Optional[Area]]:
         """``(ground, how, area)`` for foot point *p*. *how*: ``area`` (inside one, the innermost), ``near_area``
         (in a gap, within NEAR_AREA of an area), ``line`` (on a side of the nearest boundary line, and an area
-        within AGREE_DISTANCE agrees), ``rest`` (the rest of the picture), or ``unknown`` (ground ""). Cautious: a
+        within AGREE_DISTANCE agrees; a boundary wall, zone fence, does not count), ``rest`` (the rest of the picture), or ``unknown`` (ground ""). Cautious: a
         line's side alone never places anyone, and a line that disagrees with the nearest area places nobody."""
         if self.watched and not inside(p, self.watched):
             return "", "unknown", None
@@ -313,7 +313,10 @@ class SceneMap:
             line = min(self.lines, key=lambda ln: segment_distance(p, ln.a, ln.b))
             side = _side(line.a, line.b, p)
             ground = MINE if side == line.inward else (self.rest_owner or NEIGHBOUR)
-            if side and nearby and nearby[0][0] <= AGREE_DISTANCE and nearby[0][1].ground == ground:
+            # A wall the owner called the boundary ("המעקה ביני לבין השכן", zone fence) stands on the line: it is
+            # on both sides and says nothing about this one (ch2, 2026-10-10).
+            beside = [(d, a) for d, a in nearby if a.zone != "fence"]
+            if side and beside and beside[0][0] <= AGREE_DISTANCE and beside[0][1].ground == ground:
                 return ground, "line", self._side_area(ground)
             return "", "unknown", None
         if self.rest:

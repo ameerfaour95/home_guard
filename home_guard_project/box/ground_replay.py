@@ -22,6 +22,7 @@ import glob
 import json
 import logging
 import os
+import re
 import sys
 import tempfile
 from typing import Any, Callable, Dict, List, Optional, Sequence
@@ -51,7 +52,40 @@ def load_metas(raw: str, dates: Sequence[str] = ()) -> List[Dict[str, Any]]:
 
 
 def stem_of(meta: Dict[str, Any]) -> str:
-    return os.path.splitext(os.path.basename(str(meta.get("clip_path") or "")))[0]
+    return os.path.splitext(os.path.basename(str(meta.get("clip_path") or "").replace("\\", "/")))[0]
+
+
+def trigger_ts(meta: Dict[str, Any]) -> float:
+    """When the alert fired: ``trigger_ts``, else the second in its stem (``<camera>_<ts>_alert``), else the clip's
+    start plus the pre-roll."""
+    if meta.get("trigger_ts"):
+        return float(meta["trigger_ts"])
+    m = re.search(r"_(\d{9,})_alert$", stem_of(meta))
+    if m:
+        return float(m.group(1))
+    from .alert_clips import PRE_SECONDS  # noqa: PLC0415
+
+    return float(meta.get("clip_start_ts") or 0) + PRE_SECONDS
+
+
+def looks_from_tracks(path: str) -> Optional[Dict[str, Any]]:
+    """The live tracker's own looks for a clip (``<stem>.tracks.json``, saved with every alert since 99bf99d):
+    every box it kept, by look, as detections. None when the file is not there or not readable."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        by_ts: Dict[float, List[List[float]]] = {}
+        for look in data.get("looks") or []:
+            by_ts.setdefault(round(float(look["ts"]), 3), [])
+        for track in data.get("tracks") or []:
+            conf = float(track.get("max_conf") or 0.9)
+            for box in track.get("boxes") or []:
+                by_ts.setdefault(round(float(box["ts"]), 3), []).append(
+                    [int(track.get("cls") or 0), conf] + [float(v) for v in box["box"]])
+        return {"camera": data.get("camera"), "t0": float(data["clip_start_ts"]), "t1": float(data["clip_end_ts"]),
+                "looks": [[ts, dets] for ts, dets in sorted(by_ts.items())], "source": "tracks.json"}
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
 
 
 def detect_looks(raw: str, metas: Sequence[Dict[str, Any]], looks: Dict[str, Any], detector: Any) -> Dict[str, Any]:
@@ -104,7 +138,7 @@ def replay(metas: Sequence[Dict[str, Any]], looks: Dict[str, Any], scene_for: Ca
     for k, meta in enumerate(metas):
         cam, stem = str(meta["camera_name"]), stem_of(meta)
         alert = meta.get("alert") or {}
-        ts = float(meta["trigger_ts"])
+        ts = trigger_ts(meta)
         label = str(alert.get("label") or "")
         why, reason = str(alert.get("why") or ""), str(alert.get("alert_reason") or "")
         summary, people = str(alert.get("summary") or ""), alert.get("people")
@@ -157,19 +191,30 @@ def summarize(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     return {"cameras": {k: dict(v) for k, v in sorted(per.items())}, "total": dict(total)}
 
 
-def maps_from_file(path: str) -> Callable[[str], Any]:
-    """Scene maps from a scene_maps.yaml-format file (``{scene_maps: {camera: entry}}``)."""
+def maps_from_file(path: str, by_channel: bool = False) -> Callable[[str], Any]:
+    """Scene maps from a scene_maps.yaml-format file (``{scene_maps: {camera: entry}}``). *by_channel*: a camera
+    the file does not name takes the map of the one camera with its channel (``ameer_week_0_1_ch2`` ->
+    ``ameer_v2_ch2`` after a site rename)."""
     from ..data_collection.zones import read_scene_maps  # noqa: PLC0415
+    from .camera_names import channel_of  # noqa: PLC0415
 
     entries = read_scene_maps(path, strict=True)
     scenes = {cam: sm.SceneMap.from_dict(cam, entry) for cam, entry in entries.items()}
-    return lambda cam: scenes.get(cam)
+
+    def scene_for(cam: str) -> Any:
+        if cam in scenes or not by_channel:
+            return scenes.get(cam)
+        same = [c for c in scenes if channel_of(c) is not None and channel_of(c) == channel_of(cam)]
+        return scenes[same[0]] if len(same) == 1 else None
+
+    return scene_for
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(prog="ground_replay", description=__doc__.split("\n", 1)[0])
     parser.add_argument("--raw", required=True, help="a folder with meta/ and clips/ (production layout)")
     parser.add_argument("--maps", default="", help="scene maps in scene_maps.yaml format (default: the box's own)")
+    parser.add_argument("--by-channel", action="store_true", help="match maps by channel (after a site rename)")
     parser.add_argument("--looks", default="", help="the detector looks cache (default: <raw>/ground_replay_looks.json)")
     parser.add_argument("--dates", default="", help="local dates to keep, comma separated")
     parser.add_argument("--out", default="", help="write every row here (JSON)")
@@ -180,6 +225,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if os.path.isfile(looks_path):
         with open(looks_path, encoding="utf-8") as f:
             looks = json.load(f)
+    for meta in metas:                       # the live tracker's own boxes, where the box saved them
+        stem = stem_of(meta)
+        if stem not in looks:
+            found = glob.glob(os.path.join(args.raw, "responses", "**", f"{stem}.tracks.json"), recursive=True)
+            own = looks_from_tracks(found[0]) if found else None
+            if own is not None:
+                looks[stem] = own
     if any(stem_of(m) not in looks for m in metas):
         from ultralytics import YOLO  # noqa: PLC0415
 
@@ -191,7 +243,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                                                          verbose=False))
         with open(looks_path, "w", encoding="utf-8") as f:
             json.dump(looks, f)
-    scene_for = maps_from_file(args.maps) if args.maps else sm.load_scene_map
+    scene_for = maps_from_file(args.maps, args.by_channel) if args.maps else sm.load_scene_map
     rows = replay(metas, looks, scene_for)
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:
