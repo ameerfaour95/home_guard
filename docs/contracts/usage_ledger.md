@@ -52,6 +52,9 @@ including failed and timed-out ones. Ignore lines that do not parse (a write cut
 | `translator_fast` | The translator's hedge model, raced after a slow or broken answer | `messenger.Messenger._hedged` |
 | `brain` | The owner's assistant, main model (also the v1 assistant) | `brain/models.py`, `agent.py` |
 | `brain_fast` | The assistant's fast model | `brain/models.py` (box.yaml `agent_fast_model`) |
+| `brain_v3` | Assistant v3's writer, and its code-triggered escalation model (box.yaml `assistant: v3`) | `assistant_v3/agent.py` |
+| `brain_v3_understand` | Assistant v3's understanding step (the message as dialogue acts) | `assistant_v3/agent.py` |
+| `brain_v3_critic` | Assistant v3's pre-send critic | `assistant_v3/supervisor.py` |
 | `brain_tool_vision` | The assistant's camera look (`look_around` / `ask_vision`) | `brain/vision.py` |
 | `day_story` | The assistant's summary of the day, told like a guard (one call per summary) | `brain/day_story.py` (box.yaml `day_story_model`) |
 | `embeddings` | Vectors for alert search and case memory | `embeddings.py` |

@@ -47,7 +47,12 @@ JPEG = (b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\x
         + b"\xff\xd9")
 # $ per million tokens (input, output), OpenRouter list prices.
 PRICES = {"openai/gpt-4o": (2.5, 10.0), "openai/gpt-4o-mini": (0.15, 0.6), "openai/gpt-4.1": (2.0, 8.0),
-          "openai/gpt-4.1-mini": (0.4, 1.6), "anthropic/claude-sonnet-4.5": (3.0, 15.0)}
+          "openai/gpt-4.1-mini": (0.4, 1.6), "anthropic/claude-sonnet-4.5": (3.0, 15.0),
+          "anthropic/claude-haiku-5.5": (0.10, 0.50), "openai/gpt-6-luna": (0.10, 0.50),
+          "qwen/qwen3.7-flash": (0.03, 0.13), "anthropic/claude-sonnet-5.5": (2.0, 10.0),
+          "openai/gpt-6-sol": (2.0, 10.0)}
+# assistant v3 (assistant_v3/): its models, set by ``--assistant v3`` (make_models_v3)
+V3: Dict[str, Any] = {}
 DEFAULT_BIG, DEFAULT_FAST, DEFAULT_JUDGE = "openrouter:openai/gpt-4o", "openrouter:openai/gpt-4o-mini", "openai/gpt-4.1"
 
 INTENTS = ("place_fact", "person_mark", "activity_explain", "tag_only", "question_live", "question_history",
@@ -550,9 +555,17 @@ class World:
             request_restart=lambda: None, embedder=None, now=lambda: self.clock["now"],
             set_option=self._set_option, read_settings=lambda: {"owner_language": "he"}, alert_settings=None,
             house=self.house, events=self.events, activities=self.activities)
-        self.agent = OwnerAgentV2(big, self.registry, ChatMemory(os.path.join(self.root, ".conversations")),
-                                  ReceiptBook(os.path.join(self.root, ".receipts"), now=lambda: self.clock["now"]),
-                                  self.services, fast_model=fast, now=lambda: self.clock["now"])
+        if V3:
+            from .assistant_v3 import AssistantV3  # noqa: PLC0415
+
+            self.agent = AssistantV3(V3["write"], self.registry, ChatMemory(os.path.join(self.root, ".conversations")),
+                                     ReceiptBook(os.path.join(self.root, ".receipts"), now=lambda: self.clock["now"]),
+                                     self.services, understand_model=V3["understand"], critic_model=V3.get("critic"),
+                                     escalation_model=V3.get("escalate"), now=lambda: self.clock["now"])
+        else:
+            self.agent = OwnerAgentV2(big, self.registry, ChatMemory(os.path.join(self.root, ".conversations")),
+                                      ReceiptBook(os.path.join(self.root, ".receipts"), now=lambda: self.clock["now"]),
+                                      self.services, fast_model=fast, now=lambda: self.clock["now"])
 
     # -- services ------------------------------------------------------------------------------------------------
     def live(self, camera: str) -> Dict[str, Any]:
@@ -1062,6 +1075,25 @@ def make_models(env: Dict[str, str], spend: Spend, big_spec: str = DEFAULT_BIG, 
             CountingModel(judge, judge_name, spend) if judge else None)
 
 
+def make_models_v3(env: Dict[str, str], spend: Spend, write: str, understand: str, critic: str,
+                   escalate: str) -> None:
+    """The v3 assistant's models (OpenRouter ids; "off" for no critic / no escalation), counted and rate-gated
+    like the others, into :data:`V3` (World builds AssistantV3 from them)."""
+    from .assistant_v3.llm import make_v3_model  # noqa: PLC0415
+
+    def one(spec: str, agent: str, temperature: float) -> Any:
+        if not spec or spec == "off":
+            return None
+        model = make_v3_model(spec, env, usage_agent=agent, temperature=temperature)
+        if model is None:
+            raise SystemExit("no OpenRouter key: set OPENROUTER_API_KEY or pass --key-file")
+        return CountingModel(model, spec, spend)
+
+    V3.clear()
+    V3.update(write=one(write, "brain_v3", 0.2), understand=one(understand, "brain_v3_understand", 0.0),
+              critic=one(critic, "brain_v3_critic", 0.0), escalate=one(escalate, "brain_v3", 0.2))
+
+
 UNAVAILABLE_HE = "לא הצלחתי לטפל בזה כרגע"
 
 
@@ -1259,6 +1291,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     r.add_argument("--cap", type=float, default=5.0, help="stop starting new cases above this spend ($)")
     r.add_argument("--rpm", type=int, default=RPM, help="calls per minute per model (OpenRouter new accounts: 20)")
     r.add_argument("--key-file", default="")
+    r.add_argument("--assistant", default="v2", choices=("v2", "v3"), help="which assistant answers")
+    r.add_argument("--v3-write", default="anthropic/claude-haiku-5.5")
+    r.add_argument("--v3-understand", default="anthropic/claude-haiku-5.5")
+    r.add_argument("--v3-critic", default="anthropic/claude-haiku-5.5", help='"off": code checks only')
+    r.add_argument("--v3-escalate", default="off")
     r.add_argument("--title", default="Golden conversation suite")
     c = sub.add_parser("check", help="schema + ideal replies, no model")
     c.add_argument("--suite", default="tests/golden")
@@ -1287,13 +1324,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     globals()["RPM"] = max(1, args.rpm)
     env = read_key(args.key_file)
     big, fast, judge = make_models(env, spend, args.big, args.fast, args.judge, need_judge=not args.no_judge)
+    if args.assistant == "v3":
+        make_models_v3(env, spend, args.v3_write, args.v3_understand, args.v3_critic, args.v3_escalate)
     import logging  # noqa: PLC0415
 
     logging.basicConfig(level=logging.ERROR)
     t0 = time.time()
     all_runs = run_suite(cases, args.runs, big, fast, judge, spend, workers=args.workers)
     meta = {"date": dt.datetime.now().strftime("%Y-%m-%d %H:%M"), "cases": len(cases), "runs": len(all_runs),
-            "assistant models": f"{args.big} + {args.fast}", "judge": "none" if args.no_judge else args.judge,
+            "assistant models": (f"v3: write {args.v3_write}, understand {args.v3_understand}, critic "
+                                 f"{args.v3_critic}, escalate {args.v3_escalate}" if args.assistant == "v3"
+                                 else f"{args.big} + {args.fast}"), "judge": "none" if args.no_judge else args.judge,
             "wall time": f"{time.time() - t0:.0f}s"}
     try:
         import subprocess  # noqa: PLC0415
