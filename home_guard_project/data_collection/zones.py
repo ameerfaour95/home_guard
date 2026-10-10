@@ -122,8 +122,17 @@ def load_zones(path: str = ZONES_PATH) -> Dict[str, List[Point]]:
     return zones
 
 
+def _sync(f: Any) -> None:
+    """Push *f*'s data to the disk before it is renamed into place. Without it a power cut right after the
+    replace can leave the new name pointing at a file of the right size full of zero bytes (the box's zones.yaml
+    and scene_maps.yaml, 2026-10-10 09:23)."""
+    f.flush()
+    os.fsync(f.fileno())
+
+
 def save_zones(zones: Dict[str, Sequence[Sequence[float]]], path: str = ZONES_PATH) -> None:
-    """Write the whole file (temp file + replace, so a reader never sees half a file)."""
+    """Write the whole file (temp file synced to disk, then replace: a reader never sees half a file, and a
+    power cut leaves the old file or the new one)."""
     clean: Dict[str, List[List[float]]] = {}
     for camera, pts in zones.items():
         try:
@@ -137,6 +146,7 @@ def save_zones(zones: Dict[str, Sequence[Sequence[float]]], path: str = ZONES_PA
         with open(tmp, "w", encoding="utf-8") as f:
             f.write(_HEADER)
             yaml.dump(data, f, default_flow_style=None, allow_unicode=True)
+            _sync(f)
         os.replace(tmp, path)
     finally:
         if os.path.exists(tmp):
@@ -272,7 +282,7 @@ def read_scene_maps(path: str = SCENE_MAPS_PATH, strict: bool = False) -> Dict[s
 
 
 def write_scene_maps(entries: Dict[str, Any], path: str = SCENE_MAPS_PATH) -> None:
-    """Write the whole scene-map file (temp file + replace)."""
+    """Write the whole scene-map file (temp file synced to disk, then replace)."""
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     tmp = path + ".tmp"
     try:
@@ -280,6 +290,7 @@ def write_scene_maps(entries: Dict[str, Any], path: str = SCENE_MAPS_PATH) -> No
             f.write(_SCENE_HEADER)
             yaml.safe_dump({"scene_maps": dict(entries)}, f, default_flow_style=None, allow_unicode=True,
                            sort_keys=False)
+            _sync(f)
         os.replace(tmp, path)
     finally:
         if os.path.exists(tmp):

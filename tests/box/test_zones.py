@@ -367,3 +367,34 @@ class BlackAreasTest(unittest.TestCase):
         with self.assertRaises(OSError):
             z.remap_zones({"front": "gate"}, self.zones, between=between)
         self.assertEqual(set(z.read_scene_maps(self.scenes)), {"front"})
+
+
+class DurableWriteTest(unittest.TestCase):
+    """2026-10-10 the box's zones.yaml and scene_maps.yaml were found full of zero bytes after a stop: the temp
+    file was renamed into place before its data reached the disk. Each writer flushes and fsyncs the temp file
+    before the replace, so after a power cut the file is the old one or the new one, never zeros."""
+
+    def setUp(self) -> None:
+        self.dir = tempfile.mkdtemp()
+        self.zones = os.path.join(self.dir, "zones.yaml")
+        self.scenes = os.path.join(self.dir, z.SCENE_MAPS_FILE)
+
+    def _order(self, write) -> list:
+        from unittest import mock
+
+        calls = []
+        real_fsync, real_replace = os.fsync, os.replace
+        with mock.patch.object(z.os, "fsync", side_effect=lambda fd: (calls.append("fsync"), real_fsync(fd))[1]), \
+                mock.patch.object(z.os, "replace", side_effect=lambda a, b: (calls.append("replace"), real_replace(a, b))[1]):
+            write()
+        return calls
+
+    def test_zones_are_synced_to_disk_before_the_replace(self) -> None:
+        calls = self._order(lambda: z.save_zones({"front": LEFT_HALF}, self.zones))
+        self.assertEqual(calls[:2], ["fsync", "replace"])
+        self.assertEqual(z.load_zones(self.zones), {"front": LEFT_HALF})
+
+    def test_scene_maps_are_synced_to_disk_before_the_replace(self) -> None:
+        calls = self._order(lambda: z.write_scene_maps({"front": {"areas": []}}, self.scenes))
+        self.assertEqual(calls[:2], ["fsync", "replace"])
+        self.assertEqual(z.read_scene_maps(self.scenes), {"front": {"areas": []}})
