@@ -55,6 +55,7 @@ AGENTS: Tuple[str, ...] = (
     "brain",              # the owner's assistant, its main model (brain/models.py; agent.py v1)
     "brain_fast",         # the assistant's fast model (box.yaml agent_fast_model)
     "brain_tool_vision",  # the assistant's camera look (brain/vision.py: look_around / ask_vision)
+    "day_story",          # the assistant's "summary of the day" told like a guard (brain/day_story.py), one call each
     "embeddings",         # alert search and case memory vectors (embeddings.py)
     "investigator",       # reserved: the lingering investigator is tracker-only today (no model call)
     "transcription",      # the owner's voice messages (voice.py)
