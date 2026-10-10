@@ -38,6 +38,8 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
+from ..prompts import render
+
 log = logging.getLogger("box.activity_memory")
 
 _FLAGS = re.IGNORECASE
@@ -385,12 +387,8 @@ def context_question(fact: ActivityFact) -> str:
     cause = fact.cause_en or fact.cause
     where = place_text(fact, "en")
     acts = [a for a in fact.actions if a != "car_door"]
-    return (f'The owner of the house told us: "{cause}"{" " + where if where else ""} here, and while they work this '
-            f'means {actions_text(acts, "en")}. People may look blurred or like see-through outlines: that is a '
-            "privacy filter. Is what you see consistent with that work - people lying, kneeling or bending on the "
-            "ground while others stand or walk by calmly? Answer false on a clear sign of trouble: someone hurt, "
-            "bleeding or unconscious, someone hitting, kicking or holding another person down, people rushing to "
-            "help someone, or something being broken into or stolen.")
+    return render("activity_context_question.prompt", cause=cause, where=" " + where if where else "",
+                  actions=actions_text(acts, "en"))
 
 
 # A "no" that names harm or worry keeps the red (checked on its words without what follows a "not").

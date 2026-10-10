@@ -1,0 +1,23 @@
+You write the facts for a home-security alert the homeowner is about to get. The pictures are frames of one short
+clip, in time order (#1, #2 ... bottom-left). The box's tracker drew a coloured box with an id chip on each one it
+follows: {{roster}}.
+
+The alert check already looked at this clip and said: "{{summary}}"
+Why the owner is told: "{{why}}"{{places}}
+
+Answer with ONLY this JSON:
+{"scene": "...", "entities": [{"id": "P1", "appearance": "...", "action": "..."}], "reason": "..."}
+
+- scene: ONE sentence, at most {{scene_words}} words: who is there, what is happening and where (the yard, the
+  driveway, the street, by the gate, at the door...).
+- entities: one item per id above that you can see, people first. A vehicle only when it matters (someone uses it,
+  it moves, a door or trunk is open).
+  - appearance: only what is visible, at most {{appearance_words}} words: man or woman only if clear, clothes and
+    colours, hat, hood, mask, what they carry; say "person" when not sure which. A vehicle: its type and colour.
+    If a person id's box is on something that is not a person (a lamp, a shadow, a plant), write "not a person".
+  - action: what THIS id does in the frames, at most {{action_words}} words, present tense. If you are not sure
+    which one did it, write "" (empty). Never guess and never move an action from one id to another.
+- reason: why the owner is told, at most {{reason_words}} words, from the alert check's words above; no new facts.
+- Say only what is visible. Name no object the alert check did not name unless you clearly see it carried; never
+  say weapon, knife or gun unless the alert check did.
+- Plain English, no ids other than those above.

@@ -41,6 +41,7 @@ import time
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from . import marks, usage_ledger
+from ..prompts import load, render
 
 log = logging.getLogger("box.describer")
 
@@ -230,33 +231,12 @@ def build_prompt(ids: Mapping[str, str], summary: str, why: str, places: Sequenc
     """The describer's instructions. *ids*: id -> kind of everything drawn."""
     roster = ", ".join(f"{i} ({'person' if k == 'person' else 'vehicle'})" for i, k in sorted(ids.items(),
                                                                                              key=lambda x: _order(x[0])))
-    place = (f'\nPlaces the tracker saw them in (the owner\'s own names, write them exactly so): '
-             f'{", ".join(chr(34) + p + chr(34) for p in places)}.' if places else "")
-    return f"""
-You write the facts for a home-security alert the homeowner is about to get. The pictures are frames of one short
-clip, in time order (#1, #2 ... bottom-left). The box's tracker drew a coloured box with an id chip on each one it
-follows: {roster or "(nobody was tracked)"}.
-
-The alert check already looked at this clip and said: "{summary.strip()}"
-Why the owner is told: "{why.strip()}"{place}
-
-Answer with ONLY this JSON:
-{{"scene": "...", "entities": [{{"id": "P1", "appearance": "...", "action": "..."}}], "reason": "..."}}
-
-- scene: ONE sentence, at most {WORDS_SCENE - 4} words: who is there, what is happening and where (the yard, the
-  driveway, the street, by the gate, at the door...).
-- entities: one item per id above that you can see, people first. A vehicle only when it matters (someone uses it,
-  it moves, a door or trunk is open).
-  - appearance: only what is visible, at most {WORDS_APPEARANCE - 2} words: man or woman only if clear, clothes and
-    colours, hat, hood, mask, what they carry; say "person" when not sure which. A vehicle: its type and colour.
-    If a person id's box is on something that is not a person (a lamp, a shadow, a plant), write "not a person".
-  - action: what THIS id does in the frames, at most {WORDS_ACTION - 2} words, present tense. If you are not sure
-    which one did it, write "" (empty). Never guess and never move an action from one id to another.
-- reason: why the owner is told, at most {WORDS_REASON - 4} words, from the alert check's words above; no new facts.
-- Say only what is visible. Name no object the alert check did not name unless you clearly see it carried; never
-  say weapon, knife or gun unless the alert check did.
-- Plain English, no ids other than those above.
-""".strip()
+    place = ("\n" + render("describer_places.prompt", places=", ".join(chr(34) + p + chr(34) for p in places))
+             if places else "")
+    return render("describer_alert.prompt", roster=roster or load("describer_nobody.prompt"),
+                  summary=summary.strip(), why=why.strip(), places=place,
+                  scene_words=WORDS_SCENE - 4, appearance_words=WORDS_APPEARANCE - 2,
+                  action_words=WORDS_ACTION - 2, reason_words=WORDS_REASON - 4)
 
 
 def parse(raw: str, ids: Mapping[str, str]) -> Dict[str, Any]:

@@ -17,6 +17,7 @@ try:
 except ImportError:  # run as a script (run_collector.sh): the repo root is not on sys.path yet
     sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")))
     from home_guard_project.box import paths as _paths
+from home_guard_project.prompts import load as _load_prompt
 
 log = logging.getLogger(__name__)
 
@@ -24,6 +25,9 @@ _DIR = os.path.dirname(os.path.abspath(__file__))
 _CONFIG_PATH = os.path.join(_DIR, "config.yaml")     # code defaults, in the repo
 _CAMERAS_PATH = _paths.cameras_yaml()                 # per-box config: where the layout keeps it (paths.py)
 _ZONES_PATH = _paths.zones_yaml()
+
+# The VLM's instruction when config.yaml has no vlm.prompt; a {camera_name} in it is filled per clip (.format).
+_DEFAULT_VLM_PROMPT = _load_prompt("collector_vlm.prompt")
 
 # Optional YAML merged over config.yaml (e.g. box/config.box.yaml for unattended runs).
 _OVERLAY_ENV = "HOME_GUARD_CONFIG_OVERLAY"
@@ -132,7 +136,7 @@ class Config:
     # ── VLM ───────────────────────────────────────────────────────────────
     RUN_VLM_ON_SAVED_CLIPS: bool = False
     VLM_SAMPLE_FPS: int = 1
-    VLM_PROMPT: str = "Describe what happens in the video"
+    VLM_PROMPT: str = _DEFAULT_VLM_PROMPT
 
     # ── YOLO export ───────────────────────────────────────────────────────
     EXPORT_YOLO_TRAINING_DATA: bool = True
@@ -295,7 +299,7 @@ def load_config(
 
         RUN_VLM_ON_SAVED_CLIPS=bool(_deep_get(cfg_data, "vlm", "enabled", default=False)),
         VLM_SAMPLE_FPS=int(_deep_get(cfg_data, "vlm", "sample_fps", default=1)),
-        VLM_PROMPT=str(_deep_get(cfg_data, "vlm", "prompt", default="Describe what happens in the video")),
+        VLM_PROMPT=str(_deep_get(cfg_data, "vlm", "prompt", default=_DEFAULT_VLM_PROMPT)),
 
         EXPORT_YOLO_TRAINING_DATA=bool(_deep_get(cfg_data, "yolo_export", "enabled", default=True)),
         YOLO_EXPORT_FPS=float(_deep_get(cfg_data, "yolo_export", "fps", default=2.0)),
