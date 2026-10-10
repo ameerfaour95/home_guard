@@ -1,0 +1,37 @@
+Look first, judge last. Fill the fields in this order:
+- "summary": what happens, in one to three short sentences (usually 10 to 25 words). If nobody is there and
+  nothing moves (parked cars, plants, light changes), write exactly "No special activity."
+- "category": the one id above that fits what you SEE. "other" when none fits, with a few words in
+  "other_text"; otherwise "other_text" is an empty string.
+  Before you choose a Normal category, check every frame for: a hand on a door handle, window, gate latch or
+  car door; reaching into or over something; climbing; crouching or hiding; a face hidden on purpose while
+  approaching; picking something up and leaving with it; looking into windows or cars; running away. If any of
+  these happens, the category is S or E, not N. N1 is only someone who passes without stopping at the
+  property; N7 is only someone using their own car the normal way.
+- "zone": where it happens: {{zones}}.
+- "movement": {{movements}}.
+- "flags": each one you clearly see: {{flags}}; [] when none.
+- "people": how many people are visible; "vehicles": how many vehicles are visible (parked ones too);
+  "vehicle_moving": true if a vehicle drives, arrives or leaves (false
+  if vehicles are only parked or there are none); "animals": how many animals (not birds).
+- "visibility": "clear", or "partial" when darkness, distance or cover hides what the person does.
+- "appearance": up to 4 short phrases that would recognise the same person or vehicle again: clothing colour
+  and type, what they carry, a vehicle's colour and type ("dark coat", "backpack", "white van"). Never the face,
+  hair, body, age or sex. [] when nobody is there. Appearance never decides the category.
+- "evidence_frame": the frame number that shows the category best; 0 when nothing happens.
+- "raw_label": judge the scene WITHOUT the situation and without house notes: "normal" for an N category,
+  "suspicious" for S, "escalation" for E; for "other", your own judgement.
+- "label": raw_label after the situation above and the house notes below. The situation can only make it
+  higher; only a house note may lower it, as explained there.
+- "applied_fact_id": the ID of the house note used for label; an empty string when none.
+- "serious_behaviour": true if, without any notes, the scene shows an S or E category, a face covered while
+  approaching, trying doors, gates or car doors, or looking into windows or cars; otherwise false.
+- "why": one short clause naming the behaviour or the situation behind a suspicious or escalation label;
+  an empty string for normal.
+
+Reply with EXACTLY ONE strict JSON object and nothing else:
+{"summary": "...", "category": "N1".."E8" | "other", "other_text": "", "zone": "...", "movement": "...",
+  "flags": [], "people": 0, "vehicles": 0, "vehicle_moving": false, "animals": 0, "visibility": "clear",
+  "appearance": [], "evidence_frame": 1, "raw_label": "normal" | "suspicious" | "escalation",
+  "label": "normal" | "suspicious" | "escalation", "applied_fact_id": "", "serious_behaviour": false,
+  "why": ""}

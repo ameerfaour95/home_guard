@@ -32,6 +32,8 @@ import math
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
+from ..prompts import load
+
 REATTACH_SEC = 120.0             # a lost entity is still "the same one" when a lone candidate starts within this
 REATTACH_DISTANCE = 0.15         # picture widths from its last foot point (as tracker.RETURN_DISTANCE)
 PARKED_DISTANCE = 0.03           # as scene_map.PARKED_DISTANCE: a vehicle that moved less is parked, never an entity
@@ -43,8 +45,7 @@ ACTIVE, LOST, GONE = "active", "lost", "gone"
 PREFIX = {"person": "P", "vehicle": "CAR"}
 ENTITIES_VERSION = "ent1"        # the Eye's prompt version gets "+ent1" when the roster line is shown
 ROSTER_HEAD = "PEOPLE/VEHICLES IN VIEW (from the tracker): "
-ROSTER_RULE = ("These ids are the box's own names for who it follows; use them only in per_entity to say what each "
-               "one does. Count people from the frames, not from this list.")
+ROSTER_RULE = load("eye_entities_roster_rule.prompt")
 ROSTER_LIMIT = 300
 # Stage 3.2, appearance (reid.py); box.yaml reid_link / reid_margin / reid_veto override the first three.
 REID_LINK = 0.70                 # cosine to re-link a lost person by clothes ...

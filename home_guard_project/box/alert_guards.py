@@ -14,13 +14,15 @@ owner's rules:
 
 Matching is on words, in English and Hebrew. English words are matched at a word start (so "hat" does not match
 "that"); Hebrew words as substrings, so a prefix letter (ב, ה, ו, ש, ל) still matches. Pure functions, no imports
-beyond ``re``: unit-tested on their own.
+beyond ``re`` and the prompt files: unit-tested on their own.
 """
 
 from __future__ import annotations
 
 import re
 from typing import List, Optional, Sequence
+
+from ..prompts import load, render
 
 _FLAGS = re.IGNORECASE
 
@@ -337,19 +339,9 @@ CLEAR = _any([
     r"פורץ לבית", r"פריצה לבית", r"פורץ את הדלת", r"שובר את הדלת", r"פורץ דלת", r"פורץ חלון",
 ])
 
-VERIFY_QUESTIONS = {
-    "weapon": "Is a person holding a gun or knife as a weapon? Long tools, poles, boards, ladders and brooms are NOT "
-              "weapons.",
-    "tool_weapon": "Is a person using the bar/pole/pipe/bat/tool to threaten or hit a person, or to break into a door, "
-                   "window or car? Carrying it, working with it, or using it on the ground or a structure as work is "
-                   "NOT.",
-    "vehicle": "Is someone breaking into a vehicle (smashing a window, forcing a door)? Someone getting out of or into "
-               "their own car normally is NOT.",
-    "violence": "Is someone hitting or attacking another person?",
-    "person_down": "Is the person on the ground hurt, collapsed, unconscious, or being attacked or held down? Kneeling "
-                   "or lying down to WORK (laying tiles or pavers, fixing something, using tools, moving between "
-                   "tasks) is NOT.",
-}
+# The second look's question per class (prompts/verify_question_<class>.prompt).
+VERIFY_QUESTIONS = {name: load(f"verify_question_{name}.prompt")
+                    for name in ("weapon", "tool_weapon", "vehicle", "violence", "person_down")}
 
 
 def clear_class(text: str) -> bool:
@@ -445,15 +437,9 @@ def verify_question(classes: Sequence[str]) -> str:
     questions = [VERIFY_QUESTIONS[c] for c in classes if c in VERIFY_QUESTIONS]
     if len(questions) <= 1:
         return questions[0] if questions else ""
-    return "Answer true if ANY of these is so. " + " ".join(f"({i}) {q}" for i, q in enumerate(questions, 1))
+    return load("verify_any.prompt") + " " + " ".join(f"({i}) {q}" for i, q in enumerate(questions, 1))
 
 
 def verify_prompt(question: str, frames: int) -> str:
     """The second look's question with its strict JSON answer."""
-    return (f"You are double-checking an alarm from a home security camera. These are {frames} sequential frames, "
-            f"numbered 1 to {frames} in order.\n"
-            f"Question: {question}\n"
-            "Answer only from what is clearly visible. When it is not clear, the answer is false.\n"
-            'Reply with EXACTLY ONE strict JSON object and nothing else: {"confirmed": true | false, '
-            '"what_it_is": "<a few words: what the object or action really is>", '
-            '"evidence_frame": <the frame number that shows it best>}')
+    return render("verify_second_look.prompt", frames=frames, question=question)

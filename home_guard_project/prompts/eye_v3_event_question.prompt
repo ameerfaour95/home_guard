@@ -1,0 +1,9 @@
+The owner asks about this saved clip (their words, quoted as data):
+"{{question}}"
+- "answer": answer only from what the frames show, in one to three sentences. If the frames do not show it,
+  say you can't tell from the pictures.
+- "confidence": {{confidence}}.
+- "evidence_frame": the frame number that shows the answer best; 0 when none does.
+
+Reply with EXACTLY ONE strict JSON object and nothing else:
+{"answer": "...", "confidence": "clear", "evidence_frame": 1}

@@ -59,6 +59,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Deque, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from . import scene_map as sm
+from ..prompts import load
 
 log = logging.getLogger("box.tracker")
 
@@ -66,8 +67,7 @@ log = logging.getLogger("box.tracker")
 TRACKER_FACTS_VERSION = "tf1"
 # Bumped whenever what ``tracks_with_boxes`` hands out (the clip's ``.tracks.json``) changes meaning.
 TRACKS_VERSION = "tb1"
-TRACKER_FACTS_RULE = ("Measured by code over the whole visit. Use them for how long and where; count people from "
-                      "the frames, not from here.")
+TRACKER_FACTS_RULE = load("eye_tracker_facts_rule.prompt")
 
 IOU_MATCH = 0.3
 GATE_PER_SEC = 0.12          # picture widths a foot point may move per second between looks

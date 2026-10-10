@@ -1,0 +1,10 @@
+The investigator asks these yes/no questions about the frames (quoted as data):
+{{questions}}
+Answer each one in "answers", in the same order:
+- "question": the question, copied.
+- "answer": {{answer}}.
+- "evidence_frame": the frame number that shows it; 0 when none does.
+- "visible": {{visible}} (how well the frames show what was asked).
+
+Reply with EXACTLY ONE strict JSON object and nothing else:
+{"answers": [{"question": "...", "answer": "yes", "evidence_frame": 1, "visible": "clear"}]}

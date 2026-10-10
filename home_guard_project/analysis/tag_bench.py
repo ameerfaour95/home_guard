@@ -42,6 +42,7 @@ import numpy as np
 from ..box import inference as inf
 from ..box import providers
 from ..data_collection import model_input as mi
+from ..prompts import fill, load
 from . import tag_overlay as to
 from .analyze import MIN_BOX_SIDE, ParsedTask, _frame_map, parse_export
 from .config import AnalysisConfig
@@ -55,14 +56,7 @@ SAMPLE_FPS = 1.0
 ARMS = ("A", "B", "S", "M")
 GENERIC_CAMERA = "camera_1"      # uca/smarthome camera fields are crime categories ("Abuse"): never shown
 
-TAGS_RULE = (
-    "The frames carry drawn tags: each tracked person or vehicle has a thin outlined box with a solid label at "
-    "its top-left corner, and the same label marks the same person or vehicle in every frame. Tags in these "
-    "frames: {ids}.\n"
-    'Also add "per_entity" to the JSON object: [{{"id": "<a tag from the list>", "action": "<what this one does '
-    'across the frames, one short clause in English>", "object_or_target": "<what it holds, uses or acts on: an '
-    'object, another tag such as CAR1, or a place; empty string if nothing>"}}], one item for every tag in the '
-    "list. Read each tag from the frames.")
+TAGS_RULE = load("bench_tags_rule.prompt")      # {{ids}}
 
 SCHEMA_TAGS: Dict[str, Any] = {
     **inf.VLM_SCHEMA,
@@ -80,47 +74,11 @@ FORMAT_TAGS = {"type": "json_schema", "json_schema": {"name": "camera_report", "
 # options in a hashed order and one action from the other answer, and says which option it is about. (A first
 # design told the judge the tags were swapped and asked "followed or ignored?": on two plain runs, where nothing
 # was swapped, it still said "followed" 85 times in 179, so it was dropped.)
-MATCH_JUDGE = """Two descriptions say what two different people or vehicles in one video clip do:
-  Option 1: "{o1}"
-  Option 2: "{o2}"
-Another description, written separately, is about one of the two:
-  "{q}"
-Which option is about the same one? Judge by the action, the objects and the places, not by the wording.
-Reply with JSON only: {{"match": "1" | "2" | "unclear", "reason": "<short>"}}
-("unclear": both options fit equally well, or neither fits)."""
+MATCH_JUDGE = load("bench_match_judge.prompt")  # {{o1}} {{o2}} {{q}}
 
-ATTR_JUDGE = """You check a vision model's per-tag answers against a human annotator's ground truth for one
-security-camera clip. Every person and vehicle was tagged (P1, P2, CAR1, ...) on the frames from the human's own
-boxes, so the positions below are true.
+ATTR_JUDGE = load("bench_attr_judge.prompt")    # {{desc}} {{positions}} {{per_entity}}
 
-Human description of the clip (true; it may not mention everyone): "{desc}"
-Where each tag's box is in the frames (true):
-{positions}
-
-The model said, per tag:
-{per_entity}
-
-For EACH tag in the model's list, judge whether its action (and object/target) is right for THAT tag:
-- "correct": consistent with the human description AND fits that tag's position and movement (for example, the
-  one who walks to the car is the tag whose box moves to the car; a parked car "is parked").
-- "wrong": contradicts the description or belongs to a different tag (swapped roles, says it runs when it
-  stands, says a parked car drives off, gives a person the action of another).
-- "cant_tell": the description and the positions are not enough to decide.
-Reply with JSON only: {{"verdicts": [{{"id": "<tag>", "verdict": "correct" | "wrong" | "cant_tell", "reason": "<short>"}}]}}"""
-
-HARM_JUDGE = """Compare a vision model's summary of a security-camera clip with the human annotator's description,
-which is the truth.
-
-Human: "{desc}"
-Model: "{summary}"
-
-List:
-- "invented": things the model states that are not there: people, objects or actions that contradict the human
-  description or that a careful annotator would not have left out. Do not count wording, clothing detail, or
-  extra detail that fits the description.
-- "missed": actions in the human description that matter for safety or for who did what, which the model does not
-  mention or contradicts.
-Reply with JSON only: {{"invented": ["<short phrase>", ...], "missed": ["<short phrase>", ...]}}"""
+HARM_JUDGE = load("bench_harm_judge.prompt")    # {{desc}} {{summary}}
 
 
 # ----------------------------------------------------------------------------------------------------------
@@ -358,7 +316,7 @@ def prompt_of(arm: str, clip: Clip, ids: Sequence[str]) -> Tuple[str, Dict[str, 
     base = inf.build_prompt(camera_of(clip.row), 0, local_time_of(clip.meta), 0, 0, owner_language="en")
     if arm in ("A", "M"):
         return base, inf.VLM_RESPONSE_FORMAT
-    return base + "\n\n" + TAGS_RULE.format(ids=", ".join(id_order(ids))), FORMAT_TAGS
+    return base + "\n\n" + fill(TAGS_RULE, ids=", ".join(id_order(ids))), FORMAT_TAGS
 
 
 def frames_of(arm: str, r: Rendered) -> List[np.ndarray]:
@@ -587,8 +545,8 @@ def match_prompt(clip_id: str, eid: str, pair: Sequence[str], first: Dict[str, s
     x, y = pair
     flip = int(hashlib.sha256(f"{clip_id}|{eid}".encode()).hexdigest(), 16) % 2 == 1
     o1, o2 = (y, x) if flip else (x, y)
-    prompt = MATCH_JUDGE.format(o1=masked(first[o1]).replace('"', "'"), o2=masked(first[o2]).replace('"', "'"),
-                                q=masked(second[eid]).replace('"', "'"))
+    prompt = fill(MATCH_JUDGE, o1=masked(first[o1]).replace('"', "'"), o2=masked(first[o2]).replace('"', "'"),
+                  q=masked(second[eid]).replace('"', "'"))
     return prompt, {"1": o1, "2": o2}
 
 
@@ -605,12 +563,12 @@ def reading_verdict(pair: Sequence[str], matched: Dict[str, Optional[str]]) -> s
 def attr_prompt(m: Dict[str, Any], pe: Dict[str, str]) -> str:
     lines = "\n".join(f"  {v}" for v in m["positions"].values())
     said = "\n".join(f"  {k}: {v}" for k, v in pe.items()) or "  (nothing)"
-    return ATTR_JUDGE.format(desc=m["description"].replace('"', "'"), positions=lines, per_entity=said)
+    return fill(ATTR_JUDGE, desc=m["description"].replace('"', "'"), positions=lines, per_entity=said)
 
 
 def harm_prompt(m: Dict[str, Any], parsed: Dict[str, Any]) -> str:
-    return HARM_JUDGE.format(desc=m["description"].replace('"', "'"),
-                             summary=str(parsed.get("summary") or "").replace('"', "'"))
+    return fill(HARM_JUDGE, desc=m["description"].replace('"', "'"),
+                summary=str(parsed.get("summary") or "").replace('"', "'"))
 
 
 def match_jobs(cid: str, tag: str, pair: Sequence[str], first: Dict[str, str],

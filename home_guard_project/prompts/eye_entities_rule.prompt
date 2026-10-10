@@ -1,0 +1,1 @@
+Also add "per_entity" to the JSON object: [{"id": "<an id from the list above>", "action": "<what this one does in the frames, one short clause in {{language}}>"}] for each listed id you can tell apart in the frames; [] when you cannot.

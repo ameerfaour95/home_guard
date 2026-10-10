@@ -1,0 +1,13 @@
+Compare a vision model's summary of a security-camera clip with the human annotator's description,
+which is the truth.
+
+Human: "{{desc}}"
+Model: "{{summary}}"
+
+List:
+- "invented": things the model states that are not there: people, objects or actions that contradict the human
+  description or that a careful annotator would not have left out. Do not count wording, clothing detail, or
+  extra detail that fits the description.
+- "missed": actions in the human description that matter for safety or for who did what, which the model does not
+  mention or contradicts.
+Reply with JSON only: {"invented": ["<short phrase>", ...], "missed": ["<short phrase>", ...]}

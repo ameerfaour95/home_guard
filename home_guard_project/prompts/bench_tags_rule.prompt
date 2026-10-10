@@ -1,0 +1,2 @@
+The frames carry drawn tags: each tracked person or vehicle has a thin outlined box with a solid label at its top-left corner, and the same label marks the same person or vehicle in every frame. Tags in these frames: {{ids}}.
+Also add "per_entity" to the JSON object: [{"id": "<a tag from the list>", "action": "<what this one does across the frames, one short clause in English>", "object_or_target": "<what it holds, uses or acts on: an object, another tag such as CAR1, or a place; empty string if nothing>"}], one item for every tag in the list. Read each tag from the frames.

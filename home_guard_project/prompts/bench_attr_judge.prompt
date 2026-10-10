@@ -1,0 +1,18 @@
+You check a vision model's per-tag answers against a human annotator's ground truth for one
+security-camera clip. Every person and vehicle was tagged (P1, P2, CAR1, ...) on the frames from the human's own
+boxes, so the positions below are true.
+
+Human description of the clip (true; it may not mention everyone): "{{desc}}"
+Where each tag's box is in the frames (true):
+{{positions}}
+
+The model said, per tag:
+{{per_entity}}
+
+For EACH tag in the model's list, judge whether its action (and object/target) is right for THAT tag:
+- "correct": consistent with the human description AND fits that tag's position and movement (for example, the
+  one who walks to the car is the tag whose box moves to the car; a parked car "is parked").
+- "wrong": contradicts the description or belongs to a different tag (swapped roles, says it runs when it
+  stands, says a parked car drives off, gives a person the action of another).
+- "cant_tell": the description and the positions are not enough to decide.
+Reply with JSON only: {"verdicts": [{"id": "<tag>", "verdict": "correct" | "wrong" | "cant_tell", "reason": "<short>"}]}
