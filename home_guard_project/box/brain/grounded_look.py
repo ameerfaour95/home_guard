@@ -393,7 +393,8 @@ def enforce(look: Dict[str, Any], facts: Facts, name: str = "") -> Dict[str, Any
     out = dict(look)
     text = str(out.get("description") or "")
     he = _hebrew(text)
-    where = f" ב{name}" if (he and name) else (f" at {name}" if name else "")
+    # The camera's name only in its own script: "במצלמה 2", never "at מצלמה 2" inside an English answer.
+    where = f" ב{name}" if (he and name) else (f" at {name}" if name and not _hebrew(name) else "")
     corrected: List[str] = []
     unsure_people = _int(out.get("unsure_people"))
     if facts.count(PERSON) == 0:

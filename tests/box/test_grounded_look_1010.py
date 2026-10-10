@@ -69,8 +69,8 @@ class EnforceTest(Base):
 
     def test_english_answer_too(self) -> None:
         look = {"ok": True, "description": SAID_EN, "quality": "clear", "people": 1}
-        out = gl.enforce(look, self.facts([TRUCK]))
-        self.assertTrue(out["description"].startswith("No people seen now"))
+        out = gl.enforce(look, self.facts([TRUCK]), "מצלמה 2")
+        self.assertTrue(out["description"].startswith("No people seen now"))     # no Hebrew name in English
         self.assertNotIn("person in dark clothing", out["description"])
         self.assertIn("pickup is parked", out["description"])
         self.assertIn("There may be a person, not certain.", out["description"])
