@@ -808,9 +808,11 @@ def _patch_aliases() -> None:
         world = getattr(_local, "world", None)
         return world.aliases if world is not None else original(None)
 
-    def load_file(path: str = "") -> Dict[str, List[str]]:
-        world = getattr(_local, "world", None)
-        return {k: list(v) for k, v in world.aliases.items()} if world is not None else {}
+    original_file = brain_aliases.load_aliases
+
+    def load_file(*args: Any, **kwargs: Any) -> Dict[str, List[str]]:
+        world = getattr(_local, "world", None)       # outside a golden case (other tests): the real reader
+        return {k: list(v) for k, v in world.aliases.items()} if world is not None else original_file(*args, **kwargs)
 
     camera_names._load = load
     brain_aliases.load_aliases = load_file
