@@ -96,9 +96,15 @@ class Turn:
         return self.last_photo_camera() or ""
 
     def last_photo(self, within: float = PHOTO_FRESH_SEC) -> Tuple[str, Dict[str, Any]]:
+        """The newest live photo (of the newest ones, the one with the most people in it)."""
         rows = [(h, e) for h, e in (self.state.handles or {}).items() if isinstance(e, dict)
                 and e.get("kind") == "photo" and 0 <= self.now - float(e.get("ts") or 0) <= within]
-        return max(rows, key=lambda kv: float(kv[1].get("ts") or 0)) if rows else ("", {})
+        if not rows:
+            return ("", {})
+        newest = max(float(e.get("ts") or 0) for _, e in rows)
+        latest = [(h, e) for h, e in rows if newest - float(e.get("ts") or 0) <= 120]
+        return max(latest, key=lambda kv: (int(kv[1].get("people") or 0) or _people_in(kv[1].get("observation")),
+                                           float(kv[1].get("ts") or 0)))
 
     def last_photo_camera(self, within: float = PHOTO_FRESH_SEC) -> str:
         _, e = self.last_photo(within)
@@ -116,10 +122,29 @@ class Turn:
 
 
 # ---------------------------------------------------------------------------------------------------------------------
+_COUNT = {"a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "אחד": 1, "שני": 2, "שניים": 2,
+          "שלושה": 3, "ארבעה": 4, "חמישה": 5}
+
+
+def _people_in(text: Any) -> int:
+    """How many people a description names ("Three men work..." -> 3, "A man kneels..." -> 1, "no people" -> 0)."""
+    text = str(text or "")
+    if re.search(r"\bno (?:people|one)\b|אין אנשים|אין אף אחד", text, re.IGNORECASE):
+        return 0
+    m = re.search(r"\b(a|an|one|two|three|four|five|\d)\s+(?:\w+\s+)?(?:man|men|woman|women|person|people|workers?)\b",
+                  text, re.IGNORECASE)
+    if m:
+        word = m.group(1).lower()
+        return int(word) if word.isdigit() else _COUNT.get(word, 1)
+    return 1 if re.search(r"\b(?:man|men|woman|person|people|workers?)\b|אדם|אנשים|גבר|עובד|אישה", text,
+                          re.IGNORECASE) else 0
+
+
 def place_fact(t: Turn, act: Act) -> None:
     from .. import place_facts  # noqa: PLC0415
 
-    if _crew(act.subject or act.quote) and not re.search(r"בית|חצר|חניה|שטח|מגרש|גינה|רחוב|בניין", act.subject or act.quote):
+    said = f"{act.subject} {act.quote}"
+    if _crew(said) and not re.search(r"בית|חצר|חניה|שטח|מגרש|גינה|רחוב|בניין|שכנ", said):
         return person_mark(t, act)             # "המידע זה עובדים אצלי על הפרגולה" is people, not a place
     handle, entry = t.event_of(act)
     camera = t.camera_of(act)
@@ -137,10 +162,10 @@ def place_fact(t: Turn, act: Act) -> None:
         return
     where = t.name(camera)
     if fact.get("already"):
-        t.did(f"זה כבר שמור אצלי לתמיד: ב{where} {fact['text']}.")
+        t.did(f"ב{where} — {fact['text']}: זה כבר היה ידוע לי, ומה שקורה שם לא מקפיץ התראה.")
     else:
-        t.did(f"שמרתי לתמיד (מקום, בלי תאריך): ב{where} — {fact['text']}. מה שקורה שם לא יקפיץ התראה, רק מי "
-              f"שעובר לשטח של הבית.")
+        t.did(f"ב{where} — {fact['text']} (לתמיד, בלי תאריך): מה שקורה שם לא יקפיץ התראה, רק מי שעובר לשטח "
+              f"של הבית.")
     if event:
         t.outcome(entry, f"בעל הבית: {fact['text']} → נסגרה כרגילה")
         t.did(f"ההתראה של {hhmm(entry.get('ts'))} שם נסגרה כרגילה.")
@@ -162,6 +187,8 @@ def person_mark(t: Turn, act: Act, until_words: str = "") -> None:
         return
     if act.routine:
         return camera_fact(t, act)
+    if km._ONE_OFF.search(f"{who} {act.quote}"):
+        return alert_feedback(t, act)          # the postman, a delivery: a one-off closes the alert, never a mark
     house_wide = act.scope == "house" or act.camera == "house"
     camera = "" if house_wide else t.camera_of(act)
     handle, entry = t.event_of(act)
@@ -208,7 +235,7 @@ def person_mark(t: Turn, act: Act, until_words: str = "") -> None:
         until = km.until_said_today(t.state, who, t.now)
     if until is None:
         where = f"ב{t.name(camera)}" if camera else "בכל הבית"
-        quiet = act.repaired or t.und.emotion == "angry"
+        quiet = act.repaired or t.und.emotion == "angry" or t.und.has("activity_explain")
         if quiet:
             # He is complaining or this repairs an earlier miss: no question now; kept for today, said as "today".
             end = dt.datetime.fromtimestamp(t.now).replace(hour=23, minute=59, second=0).timestamp()
@@ -253,9 +280,10 @@ def person_mark(t: Turn, act: Act, until_words: str = "") -> None:
         return
     where = f"ב{t.name(camera)}" if camera else "בכל הבית"
     when = _when_text(saved, t.now)
-    line = f"נשמר: {who} {where} {when}."
+    line = f"{who} {where} {when}: לא תגיע עליהם התראה בשעות האלה."
     if daily_from and not daily_old:
-        line += f" הנחתי שהעבודה נמשכת כמה ימים (כל יום {daily_from}–{daily_to}, שבוע); יש כפתור 'רק היום'."
+        line += f" (הנחה: עבודה של כמה ימים, כל יום {daily_from}–{daily_to}.)"
+        t.plan.notes.append("יש כפתורים לתיקון (רק היום / שבוע); אל תשאל על זה ואל תציע במילים.")
     if replaces:
         olds = ", ".join(sorted({clock(float(k.get('until') or 0)) for k in replaces}))
         line += f" זה מחליף את הסימון הקודם (עד {olds})."
@@ -335,7 +363,7 @@ def activity_explain(t: Turn, act: Act) -> None:
         when = f"כל יום {fact.daily_from}–{fact.daily_to} עד {km.day_text(fact.until, 'he')}"
     else:
         when = f"עד {clock(fact.until)}"
-    t.did(f"נשמר: {am.actions_text(fact.actions, 'he')} {where} = {fact.cause}. זה ייחשב רגיל {when}"
+    t.did(f"{am.actions_text(fact.actions, 'he')} {where} = {fact.cause}: זה ייחשב רגיל {when}"
           f"{' (אותו חלון כמו הסימון של ' + win['who'] + ')' if win.get('who') else ''}; פריצה, פגיעה או דלת רכב "
           f"עדיין יתריעו.")
     t.plan.rows.append((("↩ ביטול", f"kn:x:{fact.id}"),))
@@ -351,7 +379,7 @@ def camera_fact(t: Turn, act: Act) -> None:
     if fact is None:
         return
     where = f"ב{t.name(camera)}" if camera else "בבית"
-    t.did(f"{'זה כבר ידוע לי' if fact.get('already') else 'רשמתי לתמיד'} {where}: {fact['text']}.")
+    t.did(f"{where}: {fact['text']} ({'כבר היה ידוע' if fact.get('already') else 'לתמיד'}).")
 
 
 def tag_only(t: Turn, act: Act) -> None:
@@ -420,6 +448,10 @@ def command(t: Turn, act: Act) -> None:
         camera = act.camera if act.camera and act.camera != "house" else None
         if resume(t, camera):
             t.did("ההתראות חזרו לפעול.")
+    elif kind == "camera_off" and (act.until_quote or not act.camera or act.camera == "house"):
+        # "תכבה את המצלמות עד ..." means quiet until then (the cameras keep recording): a pause
+        act.command = "pause"
+        return command(t, act)
     elif kind in ("camera_off", "camera_on"):
         camera = t.camera_of(act)
         if not camera:

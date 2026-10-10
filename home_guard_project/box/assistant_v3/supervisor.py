@@ -28,6 +28,9 @@ CLOSING = re.compile(r"אם (?:יש|תרצה|צריך|תצטרך) (?:עוד )?(?
                      r"תודה על ההבהרה|תודה שעדכנת|איך (?:אני )?(?:יכול|אוכל) לעזור|במה עוד")
 GENERIC_Q = re.compile(r"מה לתקן|מה תרצה|מה (?:אתה )?רוצה שאעשה|מה תרצה לשנות|תרצה ש|האם תרצה|אם תרצה,? אוכל|"
                        r"רוצה שאשלח|לשלוח לך\?")
+INTERNAL = re.compile(r"לא (?:שיניתי|שמרתי|תיקנתי|סימנתי|רשמתי)(?: \S+)? (?:כלום|דבר|שום)|עוד לא (?:שמרתי|נשמר)|"
+                      r"לא שמרתי (?:את זה|את העובדה)|כרגע לא שיניתי|לא שיניתי (?:כלום|דבר)")
+META = re.compile(r"הודעה לבעל הבית|^בעל הבית:|טיוטה|בוא נבדוק|DONE|EVIDENCE|ASK:", re.MULTILINE)
 JARGON = re.compile(r"התרעה צפויה|כהתרעה (?:אמיתית|שגויה)|כהתרעת שווא|מתייג את זה|תיוג כשגרה")
 EMPATHY = re.compile(r"אני מבין את התסכול|אני מבין אותך|מבין את הכעס|אני מצטער לשמוע|מתנצל על אי הנוחות")
 ONLY_ACK = re.compile(r"^\s*(?:הבנתי|אני מבין|מבין)(?: אותך)?[.!]?\s*$")
@@ -88,6 +91,10 @@ def code_checks(reply: str, *, lang: str, last_replies: Sequence[str], allowed_t
         failed.append(Check("internal_id", m.group(0)))
     if CLOSING.search(text):
         failed.append(Check("closing_offer", CLOSING.search(text).group(0)))
+    if INTERNAL.search(text):
+        failed.append(Check("internal_state", INTERNAL.search(text).group(0)))
+    if META.search(text):
+        failed.append(Check("meta", META.search(text).group(0)))
     if JARGON.search(text):
         failed.append(Check("jargon", JARGON.search(text).group(0)))
     g = GENERIC_Q.search(text)

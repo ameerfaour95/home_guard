@@ -40,7 +40,7 @@ from .supervisor import (CRITIC_SCHEMA, code_checks, critic_messages, log_interv
 log = logging.getLogger("box.assistant_v3")
 
 ACK = ("👍",)
-STOP_REPEATING = ("צודק, לא אחזור על זה.", "צודק, הפסקתי.", "צודק, אין סיבה. הפסקתי.")
+STOP_REPEATING = ("צודק, לא אחזור על זה.", "סגור, לא אחזור על זה.", "צודק, הפסקתי.")
 GREETING = ("היי 👋", "היי, הכול שקט פה.", "היי 👋 הכול בסדר.")
 ESCALATIONS_PER_DAY = 3
 COMPLAINT_HINTS = {
@@ -66,6 +66,8 @@ FIX_TEXT = {
     "unbacked_claim": "כתבת שעשית/שמרת/שלחת משהו שלא נעשה בתור הזה; אל תטען את זה.",
     "question": "אל תשאל שאלה.",
     "too_long": "ארוך מדי; משפט או שניים.",
+    "internal_state": "אל תדווח מה לא עשית או מה לא נשמר; תגיד רק מה רלוונטי לו.",
+    "meta": "כתבת הערות לעצמך; כתוב רק את ההודעה עצמה.",
     "jargon": "בלי ז'רגון ('התרעה צפויה', 'תיוג'); מילים פשוטות.",
 }
 REPAIR_ISSUES = ("unwanted_question", "ignored_memory", "irrelevant", "wrong_fact")
@@ -138,6 +140,7 @@ class AssistantV3(OwnerAgentV2):
             self._repair_earlier(und, ctx, cams, mem, now, usage, trace)
         turn = hd.Turn(ctx=ctx, mem=mem, cams=cams, text=text, now=now, alert=alert, und=und, called=called, box=box)
 
+        merge_pause_resume(und)
         # ---- ACT ----
         for act in und.acts:
             fn = hd.HANDLERS.get(act.act)
@@ -229,6 +232,7 @@ class AssistantV3(OwnerAgentV2):
         if any(a.act == "complaint" and a.issue == "irrelevant" for a in und.acts):
             # "מה הקשר העובדים?": the people he names are what he complains about, never a new memory of them
             und.acts = [a for a in und.acts if a.act not in ("person_mark", "activity_explain")]
+        self._widen_on_complaint(und, ctx, now, trace)
         if not und.has("complaint", "unclear") or und.has(*REPAIRABLE):
             return
         if not any(a.act == "complaint" and a.quote and a.issue in REPAIR_ISSUES for a in und.acts) \
@@ -253,6 +257,28 @@ class AssistantV3(OwnerAgentV2):
                 und.acts.extend(keep)
                 trace.append(f"repaired earlier {cx.hhmm(old.get('ts'))}: {[a.act for a in keep]}")
                 return
+
+    def _widen_on_complaint(self, und: Understanding, ctx: ToolContext, now: float, trace: List[str]) -> None:
+        """"I told you there are workers here!" right after an alert at a camera their mark does not cover
+        (2026-10-09 09:45): the crew is widened to the house, with no question - the owner said it already."""
+        if und.has(*REPAIRABLE) or not any(a.act == "complaint" and a.issue not in ("repetition", "bad_wording")
+                                           for a in und.acts):
+            return
+        book = getattr(self.services, "events", None)
+        crews = [k for k in (km.live_marks(book, now) if book is not None else []) if hd._crew(str(k.get("text") or ""))]
+        if not crews or not hd._crew(ctx.text):
+            return
+        events = sorted([e for e in (ctx.state.handles or {}).values() if isinstance(e, dict)
+                         and e.get("kind") == "event" and 0 <= now - float(e.get("ts") or 0) <= 3600],
+                        key=lambda e: float(e.get("ts") or 0))
+        if not events:
+            return
+        cam = current_camera(ctx.snapshot, str(events[-1].get("camera") or "")) or ""
+        if cam and not any(not k.get("camera") or str(k.get("camera")) == cam for k in crews):
+            k = max(crews, key=lambda x: float(x.get("at") or 0))
+            und.acts.append(Act(act="person_mark", quote=ctx.text[:120], subject=str(k.get("text") or ""),
+                                camera="house", scope="house", earlier=True))
+            trace.append(f"widened the crew on a complaint ({cam})")
 
     def _understand(self, text: str, ctx: ToolContext, cams: cx.Cameras, mem: MemoryView, now: float,
                     usage: Dict[str, List[int]], trace: List[str], reply_to: Optional[str] = None,
@@ -294,6 +320,9 @@ class AssistantV3(OwnerAgentV2):
         kinds = set(und.kinds())
         if kinds <= {"ack", "greeting"}:
             return random.choice(GREETING if "greeting" in kinds else ACK)
+        simple = self._simple(turn)
+        if simple:
+            return simple
         if kinds <= {"complaint", "ack"} and not plan.done and all(
                 a.issue == "repetition" for a in und.acts if a.act == "complaint"):
             return random.choice(STOP_REPEATING)          # owner, 2026-10-09: "צודק, לא אחזור על זה."
@@ -321,7 +350,9 @@ class AssistantV3(OwnerAgentV2):
         allowed = times_in(turn.text, body, evidence, *cx.earlier_owner_words(ctx.state, turn.now))
         claim_receipts = list(ctx.receipts) + [Receipt(id="v3", turn="v3", tool=t, status=DONE) for t in
                                                _backing(ctx.receipts, plan)]
-        subjects = [r.text for r in mem.records() if r.type in ("person_mark", "activity_rule") and r not in relevant]
+        irrelevant = any(a.issue == "irrelevant" for a in und.acts)
+        subjects = [r.text for r in mem.records() if r.type in ("person_mark", "activity_rule")
+                    and (irrelevant or r not in relevant)]
 
         def check(text: str):
             return code_checks(text, lang=ctx.lang, last_replies=last, allowed_times=allowed, receipts=claim_receipts,
@@ -367,6 +398,26 @@ class AssistantV3(OwnerAgentV2):
             draft = (draft.rstrip() + " " + plan.ask["question"]).strip()
         return draft or self._template(turn)
 
+    def _simple(self, turn: hd.Turn) -> str:
+        """Templates first (Rasa, Alexa): a lone command or verdict whose receipt says it all gets the owner's own
+        short line, never a generated paragraph ("סגור, שקט עד 22:00.")."""
+        acts, ctx = turn.und.acts, turn.ctx
+        done = [r for r in ctx.receipts if r.status == DONE]
+        if len(acts) != 1 or turn.plan.ask:
+            return ""
+        a = acts[0]
+        if a.act == "command" and a.command == "pause" and done:
+            d = done[0].detail or {}
+            cam = str(d.get("camera") or "")
+            return f"סגור, {turn.name(cam) + ' בשקט' if cam else 'שקט'} עד {d.get('until')}."
+        if a.act == "command" and a.command == "resume" and done:
+            return "סגור, ההתראות חזרו."
+        if a.act == "preference" and a.command == "alias" and any(r.tool == "set_alias" for r in done):
+            return f"סגור, מעכשיו זו '{a.value}'."
+        if a.act == "alert_feedback" and turn.plan.done:
+            return random.choice(("👍 סגרתי.", "👍"))
+        return ""
+
     def _task(self, turn: hd.Turn, last: Sequence[str]) -> str:
         und, plan = turn.und, turn.plan
         lines = ["מה הבנתי מההודעה (לשימוש פנימי): " + json.dumps(public_acts(und, turn.cams), ensure_ascii=False)
@@ -381,11 +432,12 @@ class AssistantV3(OwnerAgentV2):
         if plan.done:
             lines.append("מה עשיתי בתור הזה (עובדות שאפשר לומר):\n" + "\n".join(f"- {d}" for d in plan.done))
         if und.has("question_memory"):
-            plan.notes.append("הוא שאל מה אתה זוכר: פרט כל פריט בזיכרון הרלוונטי בביטוי קצר, בלי מזהים.")
+            plan.notes.append("הוא שאל מה אתה זוכר: תן את כל הפריטים מ'זיכרון רלוונטי', כל אחד בביטוי קצר, בלי "
+                              "מזהים ובלי לדלג על אף אחד.")
         if plan.notes:
             lines.append("הנחיה לתור הזה:\n" + "\n".join(f"- {d}" for d in plan.notes))
         else:
-            lines.append("בתור הזה לא שמרתי ולא שיניתי כלום.")
+            lines.append("(פנימי: בתור הזה לא בוצעה שום פעולה - אל תטען שעשית משהו, ואל תכתוב שלא עשית.)")
         ev = plan.evidence or []
         if ev:
             lines.append("ראיות שבדקתי עכשיו:\n" + "\n".join(f"- {e}" for e in ev))
@@ -452,6 +504,8 @@ class AssistantV3(OwnerAgentV2):
         plan = turn.plan
         if plan.ask:
             return plan.ask["question"]
+        if turn.und.kinds() == ["preference"]:
+            return "סגור, ככה מעכשיו."
         if plan.done:
             return " ".join(re.sub(r"\s*\([^)]*\)", "", d) for d in plan.done[:2])
         if plan.evidence:
@@ -499,6 +553,17 @@ class AssistantV3(OwnerAgentV2):
             log.warning("v3 summary not folded: %s", exc)
 
 
+def merge_pause_resume(und: Understanding) -> None:
+    """"תכבה עד היום בלילה ותדליק שוב ב-12": one pause until midnight, not a pause and a resume now."""
+    pause = next((a for a in und.acts if a.act == "command" and a.command in ("pause", "camera_off")), None)
+    resume = next((a for a in und.acts if a.act == "command" and a.command in ("resume", "camera_on")
+                   and a.until_quote), None)
+    if pause is not None and resume is not None:
+        if not pause.until_quote or "בלילה" in resume.until_quote:
+            pause.until_quote = resume.until_quote
+        und.acts.remove(resume)
+
+
 def drop_echo(reply: str, owner_text: str) -> str:
     """"יש מישהו בחוץ? כן, בפרגולה..." -> "כן, בפרגולה...": his own question repeated before the answer goes."""
     m = re.match(r"\s*([^.!?\n]{2,80}\?)\s*", reply or "")
@@ -539,5 +604,7 @@ def _backing(receipts: Sequence[Any], plan: hd.Plan) -> List[str]:
     """Receipts that back a claim word in v3's own terms: any memory write this turn (a mark, a place or camera
     fact, an activity rule, a preference) backs "רשמתי / שמרתי / הבנתי ש... השכן / זוכר"."""
     tools = {r.tool for r in receipts if getattr(r, "status", "") in (DONE, REQUESTED)}
-    memory = bool(tools & {"mark_known", "camera_fact", "activity"}) or         any(d.startswith("העדפה קבועה נשמרה") for d in plan.done)
+    if "retag_clip" in tools and not tools & {"mark_known", "camera_fact", "activity"}:
+        return ["record_verdict"]                     # "עדכנתי את התיוג" is backed by the tag's receipt
+    memory = bool(tools & {"mark_known", "camera_fact", "activity"}) or any(d.startswith("מעכשיו:") for d in plan.done)
     return ["mark_known", "camera_fact", "house_expect"] if memory else []

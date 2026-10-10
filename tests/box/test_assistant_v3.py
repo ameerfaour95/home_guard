@@ -271,6 +271,40 @@ class TurnTests(unittest.TestCase):
         self.assertTrue(out["text"].strip())
 
 
+class SmallRulesTests(unittest.TestCase):
+    def test_pause_then_resume_at_midnight_is_one_pause(self):
+        from home_guard_project.box.assistant_v3.acts import Act, Understanding
+        from home_guard_project.box.assistant_v3.agent import merge_pause_resume
+
+        und = Understanding(acts=[Act("command", command="pause", until_quote="עד היום בלילה"),
+                                  Act("command", command="resume", until_quote="ב 12 בלילה")])
+        merge_pause_resume(und)
+        self.assertEqual([a.command for a in und.acts], ["pause"])
+        self.assertEqual(und.acts[0].until_quote, "ב 12 בלילה")
+
+    def test_people_in_a_description(self):
+        from home_guard_project.box.assistant_v3.handlers import _people_in
+
+        self.assertEqual(_people_in("Three men work under the pergola"), 3)
+        self.assertEqual(_people_in("A man kneels by the low wall"), 1)
+        self.assertEqual(_people_in("A quiet yard, no people"), 0)
+
+    def test_reporting_what_was_not_done_is_internal_state(self):
+        verdict = sv.code_checks("הבנתי, זה היה הדוור. לא שיניתי כלום.", lang="he", last_replies=[], allowed_times="",
+                                 receipts=[], memory_subjects=[], owner_text="", may_ask=False, act_kinds=["ack"])
+        self.assertIn("internal_state", verdict.reason())
+
+    def test_the_postman_closes_the_alert_and_is_not_remembered(self):
+        alert = dict(ALERT, id="ameer_v2_ch6_9_alert", camera="ameer_v2_ch6", time="12:10:00")
+        understand = acts_for({"זה היה הדוור": {"emotion": "neutral", "acts": [
+            act("person_mark", quote="זה היה הדוור", subject="הדוור", camera="cam6")]}})
+        writer = FakeModel(lambda user, kw: "👍 סגרתי, זה היה הדוור.")
+        out = run({"time": "12:15:00", "alerts": [alert], "message": {"text": "זה היה הדוור", "reply_to": alert["id"]}},
+                  understand, writer)
+        self.assertEqual(out["writes"], [])
+        self.assertEqual(out["buttons"], [])
+
+
 class SwitchTests(unittest.TestCase):
     def test_v3_only_when_asked(self):
         self.assertFalse(wants_v3({}))
