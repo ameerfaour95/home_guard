@@ -336,6 +336,14 @@ TEMPLATES: Dict[str, Dict[str, str]] = {
         "en": "I meant: the {time} alert ({camera}) was {where}. I'll keep telling you what happens there.",
         "he": "התכוונתי שההתראה של {time} ({camera}) הייתה {where}. על מה שקורה שם אמשיך לעדכן אותך.",
         "ar": "قصدت أن تنبيه {time} ({camera}) كان {where}. سأستمر في إخبارك بما يحدث هناك."},
+    "sorry_place_now_theirs": {
+        "en": "What you said is saved now: {camera} {words}, and what happens there won't reach you.",
+        "he": "שמרתי את מה שאמרת: {camera} {words}, ומה שקורה שם לא יגיע אליך.",
+        "ar": "حفظت ما قلته: {camera} {words}، وما يحدث هناك لن يصلك."},
+    "sorry_place_now_ours": {
+        "en": "What you said is saved now: {camera} {words}.",
+        "he": "שמרתי את מה שאמרת: {camera} {words}.",
+        "ar": "حفظت ما قلته: {camera} {words}."},
     "memory_private_keep": {"en": "Right. What I keep stays with me; I'll go into it only if you ask.",
                             "he": "צודק. מה ששמור אצלי נשאר אצלי, ואפרט רק אם תשאל.",
                             "ar": "معك حق. ما أحفظه يبقى عندي، ولن أفصّله إلا إذا سألت."},

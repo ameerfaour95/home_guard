@@ -855,15 +855,15 @@ class OwnerAgentV2:
         if not alert and not (isinstance(entry, dict) and now - float(entry.get("ts") or 0) <= 1800):
             return None                                   # only about a recent alert
         crews = [k for k in marks if km.work_group(str(k.get("text") or "")) and km.same_people(text, str(k["text"]))]
-        if len(crews) != 1:
-            return None
-        k = crews[0]
+        if not crews or len({str(k.get("camera") or "") for k in crews}) != 1:
+            return None                     # one crew at one camera (two marks of it: the newest words, both replaced)
+        k = max(crews, key=lambda m: float(m.get("at") or 0))
         word = next((w for w in text.split() if km.work_group(w)), "")
         if not word:
             return None
         before = in_place(display(snapshot, str(k.get("camera") or ""), ctx.lang), ctx.lang)
         self._dispatch(ctx, "mark_known", {"who": str(k.get("text") or ""), "owner_words": word, "camera": "all",
-                                           "replaces": str(k["id"])}, True, ["mark_known"])
+                                           "replaces": [str(m["id"]) for m in crews]}, True, ["mark_known"])
         if not _kept_known(ctx.receipts):
             return None
         ctx.state.prefs["group_scope"] = km.HOUSE
@@ -889,6 +889,15 @@ class OwnerAgentV2:
                          "ts": float(entry.get("ts") or 0)}
         if not event or not event.get("camera"):
             return None
+        if self._save_place(ctx, said, event, snapshot, now) is None:
+            return None
+        return place_facts.confirmation(said["words"], said["owner"], ctx.lang, said.get("pron", "זה"))
+
+    def _save_place(self, ctx: ToolContext, said: Dict[str, str], event: Dict[str, Any], snapshot: Any,
+                    now: float) -> Optional[Dict[str, Any]]:
+        """Keep the place *said* about *event* (place_facts.py) with its receipt; the saved fact, or None."""
+        from .. import place_facts  # noqa: PLC0415
+
         store = profiles_for(self.services)
         if store is None:
             return None
@@ -910,7 +919,36 @@ class OwnerAgentV2:
                                          "owner": said["owner"], "alert_ts": float(event.get("ts") or 0)}
         log.info("place: %s at %s is %s (region %s, zone %s)", fact["text"], camera, said["owner"],
                  fact.get("region"), fact.get("zone") or "-")
-        return place_facts.confirmation(said["words"], said["owner"], ctx.lang, said.get("pron", "זה"))
+        return dict(fact, camera=camera, owner=said["owner"], pron=said.get("pron", "זה"))
+
+    def _unsaved_place(self, ctx: ToolContext, snapshot: Any, now: float) -> Optional[Dict[str, Any]]:
+        """A place the owner said about an alert in the last two hours that was never kept (2026-10-10 13:48: "זה
+        הבית של השכן" got "עד מתי לזכור?" and nothing was saved): kept now. The saved fact, or None."""
+        from .. import place_facts  # noqa: PLC0415
+
+        state = ctx.state
+        place = state.prefs.get("last_place") if isinstance(state.prefs, dict) else None
+        for turn in reversed([x for x in (state.turns or [])[-10:] if isinstance(x, dict) and x.get("kind") != "alert"]):
+            ts = float(turn.get("ts") or 0)
+            if now - ts > 7200:
+                break
+            said = place_facts.place_statement(str(turn.get("text") or ""))
+            if said is None:
+                continue
+            if isinstance(place, dict) and float(place.get("ts") or 0) >= ts - 1:
+                return None                                   # it was kept when he said it
+            entries = [state.handles.get(h) for h in turn.get("handles") or ()]
+            entry = next((e for e in entries if isinstance(e, dict) and e.get("kind") == "event"), None)
+            if entry is None:                                 # the newest alert before his words
+                events = [e for e in state.handles.values() if isinstance(e, dict) and e.get("kind") == "event"
+                          and 0 <= ts - float(e.get("ts") or 0) <= 3 * 3600]
+                entry = max(events, key=lambda e: float(e.get("ts") or 0)) if events else None
+            if entry is None or not entry.get("camera"):
+                return None
+            event = {"alert_id": str(entry.get("ref") or ""), "camera": str(entry.get("camera") or ""),
+                     "ts": float(entry.get("ts") or 0)}
+            return self._save_place(ctx, said, event, snapshot, now)
+        return None
 
     def _explain_place(self, ctx: ToolContext, text: str, snapshot: Any, now: float) -> Optional[str]:
         """"מה קשר ? לא הבנתי" right after the place line: what it meant, in plain words, about that alert."""
@@ -943,36 +981,51 @@ class OwnerAgentV2:
     def _apology(self, ctx: ToolContext, text: str, alert: Optional[Dict[str, Any]], snapshot: Any,
                  now: float) -> Optional[str]:
         """An insult or "מה הקשרררר" (2026-10-10 13:49 and 15:14, answered "מה לתקן?" and the memory): ONE short
-        apology and the concrete fix - the saved thing the bot brought up that has nothing to do with this, and what
-        was really saved. None when there is nothing concrete to say (the model answers, told to apologise once)."""
+        apology naming what the bot really got wrong in this conversation, and the fix done now. From the context,
+        never a canned line (golden suite g09_09: at 09:45 the complaint WAS about the workers - the gap fix answers
+        that one, before this):
+        - he asks what something has to do with it ("מה הקשר העובדים"), and the bot's last replies brought up a saved
+          mark the alert at hand is not about: "זה לא קשור לעובדים";
+        - he told where something is and it was never kept ("זה הבית של השכן" -> "עד מתי לזכור?"): kept now, and
+          said; or it was kept, and he is still asking: what was kept.
+        None when nothing concrete went wrong that code can name (the model answers, told to apologise once)."""
         if not human.is_angry(text):
             return None
         lang, state = ctx.lang, ctx.state
-        book = getattr(self.services, "events", None)
-        marks = km.live_marks(book, now)
+        he = str(lang).startswith("he")
+        marks = km.live_marks(getattr(self.services, "events", None), now)
         try:
             camera, _ = _event_camera(state, snapshot, alert, now)
         except Exception:  # noqa: BLE001
             camera = ""
-        recent = [str(turn.get("reply") or "") for turn in (state.turns or [])[-6:]
-                  if isinstance(turn, dict) and turn.get("kind") != "alert"]
-        he = str(lang).startswith("he")
-        again = any(r.startswith(t("sorry_wrong", lang)) for r in recent)      # said once: other words this time
+        replies = [str(turn.get("reply") or "") for turn in (state.turns or [])[-6:]
+                   if isinstance(turn, dict) and turn.get("kind") != "alert"]
+        again = any(r.startswith((t("sorry_wrong", lang), t("sorry_again", lang))) for r in replies[-4:])
         parts: List[str] = []
-        for k in marks:
-            if km.covers(k, camera) if camera else False:
-                continue
-            if any(human.names_mark(r, k) for r in recent) or human.names_mark(text, k):
-                who = km.who_label(str(k.get("text") or ""), lang)
-                line = (t("sorry_not_about_again", lang, who=who) if again else
-                        t("sorry_not_about", lang, who=_glue("ל", who) if he else who))
-                if line not in parts:
-                    parts.append(line)
-        place = state.prefs.get("last_place") if isinstance(state.prefs, dict) else None
-        if isinstance(place, dict) and now - float(place.get("ts") or 0) <= 6 * 3600:
-            name = display(snapshot, str(place.get("camera") or ""), lang)
-            parts.append(t("sorry_saved_place_again" if again else "sorry_saved_place", lang,
-                           words=str(place.get("words") or ""), camera=_glue("ב", name) if he else f"at {name}"))
+        if human.asks_relation(text):
+            for k in marks:
+                if camera and km.covers(k, camera):
+                    continue                                   # the alert at hand IS theirs: not unrelated
+                # the bot's own last replies brought them up, or he names them in his "what have X to do with it"
+                if any(human.names_mark(r, k) for r in replies[-3:]) or human.names_mark(text, k):
+                    who = km.who_label(str(k.get("text") or ""), lang)
+                    line = (t("sorry_not_about_again", lang, who=who) if again else
+                            t("sorry_not_about", lang, who=_glue("ל", who) if he else who))
+                    if line not in parts:
+                        parts.append(line)
+        saved = self._unsaved_place(ctx, snapshot, now)
+        if saved is not None:
+            name = display(snapshot, str(saved.get("camera") or ""), lang)
+            key = "sorry_place_now_theirs" if saved.get("owner") in ("neighbour", "public") else "sorry_place_now_ours"
+            words = str(saved.get("text") or "")
+            parts.append(t(key, lang, camera=_glue("ב", name) if he else f"at {name}",
+                           words=f'{saved.get("pron") or "זה"} {words}' if he else words))
+        elif parts or human.asks_relation(text):
+            place = state.prefs.get("last_place") if isinstance(state.prefs, dict) else None
+            if isinstance(place, dict) and now - float(place.get("ts") or 0) <= 6 * 3600:
+                name = display(snapshot, str(place.get("camera") or ""), lang)
+                parts.append(t("sorry_saved_place_again" if again else "sorry_saved_place", lang,
+                               words=str(place.get("words") or ""), camera=_glue("ב", name) if he else f"at {name}"))
         if not parts:
             return None
         return " ".join([t("sorry_again" if again else "sorry_wrong", lang)] + parts)

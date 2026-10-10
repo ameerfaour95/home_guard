@@ -59,6 +59,16 @@ _ANGRY = re.compile(rf"(?<![{_HE}])[ושה]{{0,2}}(?:מטומט\w*|טיפש\w*|�
 _WHAT_RELATION = re.compile(rf"(?<![{_HE}])מה\s+ה?קשר", re.IGNORECASE)
 
 
+_RELATION = re.compile(rf"(?<![{_HE}])(?:מה\s+ה?ק+ש+ר+|מה\s+זה\s+קשור|למה\s+אתה\s+(?:מזכיר|מדבר\s+על))(?![{_HE}])|"
+                       r"\bwhat\s+(?:does\s+(?:that|this|it)\s+have\s+to\s+do|has\s+(?:that|this)\s+got\s+to\s+do)\b",
+                       re.IGNORECASE)
+
+
+def asks_relation(text: str) -> bool:
+    """"מה הקשר / מה זה קשור / למה אתה מזכיר" - he asks what something the bot said has to do with it."""
+    return bool(_RELATION.search(str(text or "")))
+
+
 def is_angry(text: str) -> bool:
     """An insult ("יא מטומטם", "חתיכת"), or a stretched "מה הקשררררר" (not a plain "מה הקשר?")."""
     text = str(text or "")
