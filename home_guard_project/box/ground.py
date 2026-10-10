@@ -38,6 +38,7 @@ class Ground:
     entered_from: str = ""           # the neighbour's / public area someone walked from into an area of ours
     from_ground: str = ""            # whose ground that area is (neighbour | public)
     people: int = 0                  # people tracks judged
+    placed: tuple = ()               # how their foot points were placed: (("area", n), ("near_area", n), ...)
 
     @property
     def entered(self) -> bool:
@@ -52,7 +53,7 @@ class Ground:
     def record(self) -> Dict[str, Any]:
         return {"on": self.on, "crossed_inward": self.crossed_inward, "line": self.line,
                 "entered_from": self.entered_from, "from_ground": self.from_ground, "people": self.people,
-                "entered": self.entered, "off_our_ground": self.off_our_ground}
+                "entered": self.entered, "off_our_ground": self.off_our_ground, "placed": dict(self.placed)}
 
 
 UNKNOWN = Ground()
@@ -82,15 +83,20 @@ def ground_of(tracks: Sequence[Any], scene: Any) -> Ground:
         if sm.MINE in grounds:
             ons.append(sm.MINE)
             continue
-        placed = [scene.area_at((x, y)) for _, x, y in points]
+        placed = [scene.place_at((x, y)) for _, x, y in points]
         off = [a for a in placed if a is not None and a.ground in (sm.NEIGHBOUR, sm.PUBLIC)]
         if runs and len(off) >= WHOLE_SHARE * len(points):
             ons.append(sm.NEIGHBOUR if any(a.ground == sm.NEIGHBOUR for a in off) else sm.PUBLIC)
         else:
             ons.append("")
     on = next(g for g in (sm.MINE, "", sm.NEIGHBOUR, sm.PUBLIC) if g in ons)
+    how: Dict[str, int] = {}
+    for track in people:
+        for _, x, y in track.points:
+            way = scene.ground_at((x, y))[1]
+            how[way] = how.get(way, 0) + 1
     return Ground(on=on, crossed_inward=crossed, line=line, entered_from=entered_from, from_ground=from_ground,
-                  people=len(people))
+                  people=len(people), placed=tuple(sorted(how.items())))
 
 
 def from_record(record: Optional[Dict[str, Any]]) -> Ground:

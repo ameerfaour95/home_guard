@@ -359,7 +359,7 @@ def _area_runs(kind: str, points: Sequence[Point3], scene: Any) -> List[List[Any
     current = None
     cand, cand_count, cand_first = None, 0, 0.0
     for ts, x, y in points:
-        area = scene.area_at((x, y))
+        area = scene.place_at((x, y))           # a gap between areas counts by its ground (scene_map.ground_at)
         if current is not None and area == current:
             runs[-1][2] = ts
             cand, cand_count = None, 0
@@ -596,7 +596,7 @@ class CameraTracker:
     @staticmethod
     def _same_place(p: Tuple[float, float], q: Tuple[float, float], scene: Any) -> bool:
         if scene is not None:
-            a, b = scene.area_at(p), scene.area_at(q)
+            a, b = scene.place_at(p), scene.place_at(q)
             if a is not None and b is not None:
                 return a == b
         return math.hypot(p[0] - q[0], p[1] - q[1]) <= RETURN_DISTANCE

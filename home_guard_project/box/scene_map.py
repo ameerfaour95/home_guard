@@ -62,6 +62,10 @@ IN, OUT = "in", "out"
 NAME_LIMIT = 40
 WATCHED_NAME = "watched area"              # the implicit mine area that today's drawn zone becomes
 REST_NAME = "rest of the picture"          # the implicit area outside every area of a confirmed map
+# A foot point in a gap between the owner's areas (SAM's polygons leave thin slivers; live bug 2026-10-10, ch2):
+NEAR_AREA = 0.03                           # an area this close (picture widths) is where the point is
+AGREE_DISTANCE = 0.15                      # a line's side counts only when an area this close agrees with it
+SIDE_NAMES = {MINE: "our side", NEIGHBOUR: "the neighbour's side", PUBLIC: "the street side"}
 WHOLE_PICTURE = ((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0))
 MAX_TRACKS_PER_KIND = 3
 FACTS_LIMIT = 400
@@ -127,6 +131,22 @@ def _side(a: Point, b: Point, p: Point) -> str:
     """``left`` or ``right`` of travel from a to b as seen on the picture (y grows downwards), "" on the line."""
     c = _cross(a, b, p)
     return "" if c == 0 else ("left" if c < 0 else "right")
+
+
+def segment_distance(p: Point, a: Point, b: Point) -> float:
+    """The distance from *p* to the segment a-b."""
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    length = dx * dx + dy * dy
+    t = 0.0 if length == 0 else max(0.0, min(1.0, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / length))
+    return math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy))
+
+
+def polygon_distance(p: Point, polygon: Sequence[Point]) -> float:
+    """0 inside *polygon*, else the distance from *p* to its nearest edge."""
+    if inside(p, polygon):
+        return 0.0
+    n = len(polygon)
+    return min(segment_distance(p, polygon[i], polygon[(i + 1) % n]) for i in range(n))
 
 
 def foot_point(box: Sequence[float]) -> Point:
@@ -273,6 +293,44 @@ class SceneMap:
             return None
         hits = [a for a in self.all_areas() if inside(p, a.points)]
         return min(hits, key=lambda a: polygon_area(a.points)) if hits else None
+
+    def ground_at(self, p: Point) -> Tuple[str, str, Optional[Area]]:
+        """``(ground, how, area)`` for foot point *p*. *how*: ``area`` (inside one, the innermost), ``near_area``
+        (in a gap, within NEAR_AREA of an area), ``line`` (on a side of the nearest boundary line, and an area
+        within AGREE_DISTANCE agrees), ``rest`` (the rest of the picture), or ``unknown`` (ground ""). Cautious: a
+        line's side alone never places anyone, and a line that disagrees with the nearest area places nobody."""
+        if self.watched and not inside(p, self.watched):
+            return "", "unknown", None
+        hits = [a for a in self.all_areas() if not (a.implicit and a.name == REST_NAME) and inside(p, a.points)]
+        if hits:
+            area = min(hits, key=lambda a: polygon_area(a.points))
+            return area.ground, "area", area
+        nearby = sorted(((polygon_distance(p, a.points), a) for a in self.areas if a.kind != BLACK),
+                        key=lambda da: da[0])
+        if nearby and nearby[0][0] <= NEAR_AREA:
+            return nearby[0][1].ground, "near_area", nearby[0][1]
+        if self.lines:
+            line = min(self.lines, key=lambda ln: segment_distance(p, ln.a, ln.b))
+            side = _side(line.a, line.b, p)
+            ground = MINE if side == line.inward else (self.rest_owner or NEIGHBOUR)
+            if side and nearby and nearby[0][0] <= AGREE_DISTANCE and nearby[0][1].ground == ground:
+                return ground, "line", self._side_area(ground)
+            return "", "unknown", None
+        if self.rest:
+            rest = self.all_areas()[-1]
+            return rest.ground, "rest", rest
+        return "", "unknown", None
+
+    def place_at(self, p: Point) -> Optional[Area]:
+        """The area the point counts in (``ground_at``): its own, a near one, a side of a line (an implicit area
+        named after its ground: "the neighbour's side"), or the rest; None where the map cannot place it."""
+        return self.ground_at(p)[2]
+
+    @staticmethod
+    def _side_area(ground: str) -> Area:
+        kind = MINE if ground == MINE else WATCH
+        return Area(SIDE_NAMES.get(ground, ground), kind, "other", WHOLE_PICTURE,
+                    owner=ground if kind == WATCH else "", implicit=True)
 
     def camera_role(self) -> str:
         """The role the owner's own areas suggest (the largest one), or "" when the map says nothing."""
@@ -528,7 +586,7 @@ def _track_text(scene: SceneMap, track: Track, label: str) -> Tuple[str, str, Op
     visits: List[Tuple[Area, float, float]] = []                # (area, first ts, last ts), consecutive runs
     grounds = set()
     for ts, x, y in track.points:
-        area = scene.area_at((x, y))
+        area = scene.place_at((x, y))
         if area is None:
             continue
         grounds.add(area.ground)

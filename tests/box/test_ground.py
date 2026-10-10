@@ -82,7 +82,8 @@ class GroundOfTest(unittest.TestCase):
     def test_the_record(self) -> None:
         g = gr.ground_of([walk([0.8] * 6)], yard_and_neighbour())
         self.assertEqual(g.record(), {"on": "neighbour", "crossed_inward": False, "line": "", "entered_from": "",
-                                      "from_ground": "", "people": 1, "entered": False, "off_our_ground": True})
+                                      "from_ground": "", "people": 1, "entered": False, "off_our_ground": True,
+                                      "placed": {"area": 6}})
 
     def test_a_line_crossed_from_a_place_the_map_does_not_name(self) -> None:
         scene = sm.SceneMap("cam", areas=(sm.Area("yard", sm.MINE, "yard", LEFT),), lines=(RAILING,))
