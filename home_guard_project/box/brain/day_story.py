@@ -20,6 +20,10 @@ How:
    coverage, no English. Without a model, or when its lines fail the check, code writes the lines from the Hebrew
    notes.
 5. Each line keeps its clip's handle in the chat state, so "שלח את 10:15" / "תראה לי את זה" sends that clip.
+6. Where it happened (lead, 2026-10-10: the 13:35 and 17:06 ch2 events were in the NEIGHBOUR's house): the owner's
+   place facts (place_facts.py), else the scene map's ground (ground.ground_of, SceneMap.ground_at per foot point),
+   else the alert meta's ground record. A story on the neighbour's ground or the street says so ("מצלמה 2, בבית של
+   השכן") and is never "worth a look" unless someone came onto the owner's ground or it was an escalation.
 
 The usage ledger counts the call as agent ``day_story``.
 """
@@ -178,10 +182,19 @@ class Episode:
     who: List[str] = field(default_factory=list)       # the owner's labels of people seen (family)
     known: str = ""                                     # the owner's words that explain it ("העובדים של הפרגולה")
     top_note: str = ""                                  # the Hebrew note of its most serious session
+    where: str = ""                                     # neighbour | public: everyone stayed on that ground
+    entered: bool = False                               # someone came onto the owner's ground from there
+
+    @property
+    def off_ground(self) -> bool:
+        return self.where in (NEIGHBOUR, PUBLIC) and not self.entered
 
     @property
     def concern(self) -> bool:
-        return _LEVELS.get(self.level, 0) >= _LEVELS["suspicious"] and not self.known
+        if self.known or _LEVELS.get(self.level, 0) < _LEVELS["suspicious"]:
+            return False
+        # The neighbour's life is not the owner's concern: only an escalation, or someone crossing onto our ground.
+        return not self.off_ground or self.level == "escalation"
 
 
 def _same_camera(a: str, b: str) -> bool:
@@ -191,6 +204,143 @@ def _same_camera(a: str, b: str) -> bool:
         return True
     ca, cb = channel_of(a), channel_of(b)
     return ca is not None and ca == cb
+
+
+NEIGHBOUR, PUBLIC, MINE = "neighbour", "public", "mine"
+WHERE_HE = {NEIGHBOUR: "בבית של השכן", PUBLIC: "ברחוב"}
+OFF_SHARE = 0.8            # this much of a person's foot points on someone else's ground is "stayed there"
+
+
+def _tracks(path: str) -> List[Any]:
+    """The people of a clip's ``.tracks.json`` as scene-map tracks: ``kind`` and ``points`` of (ts, x, y) feet."""
+    from types import SimpleNamespace  # noqa: PLC0415
+
+    with open(path, encoding="utf-8") as f:
+        doc = json.load(f)
+    out = []
+    for t in doc.get("tracks") or ():
+        if not isinstance(t, dict) or t.get("kind") != "person":
+            continue
+        points = [(float(b["ts"]), (float(b["box"][0]) + float(b["box"][2])) / 2.0, float(b["box"][3]))
+                  for b in t.get("boxes") or () if isinstance(b, dict) and len(b.get("box") or ()) >= 4]
+        if points:
+            out.append(SimpleNamespace(kind="person", points=sorted(points)))
+    return out
+
+
+def _by_points(tracks: Sequence[Any], scene: Any) -> str:
+    """Whose ground, from SceneMap.ground_at on every foot point (two looks are too few for the tracker's
+    inertia): ours when anyone was mostly on ours, unknown when anyone cannot be placed, else theirs."""
+    ons = []
+    for t in tracks:
+        grounds = [scene.ground_at((x, y))[0] for _, x, y in t.points]
+        off = [g for g in grounds if g in (NEIGHBOUR, PUBLIC)]
+        if grounds.count(MINE) * 2 > len(grounds):
+            ons.append(MINE)
+        elif off and len(off) >= OFF_SHARE * len(grounds):
+            ons.append(NEIGHBOUR if NEIGHBOUR in off else PUBLIC)
+        else:
+            ons.append("")
+    return next((g for g in (MINE, "", NEIGHBOUR, PUBLIC) if g in ons), "")
+
+
+def make_where(roots: Sequence[str], scene_for: Optional[Callable[[str], Any]] = None, profiles: Any = None
+               ) -> Callable[[str, str], Dict[str, Any]]:
+    """``where(camera, alert_id) -> {"on", "entered", "how"}``: the owner's place facts at the camera, else the scene
+    map (ground.ground_of, then ground_at per foot point), else the alert meta's ground record. Never raises."""
+    import glob  # noqa: PLC0415
+
+    from .. import ground as gr  # noqa: PLC0415
+    from .. import place_facts as pf  # noqa: PLC0415
+
+    roots = [str(r) for r in dict.fromkeys(roots or ()) if r]
+
+    def meta_ground(camera: str, alert_id: str) -> Dict[str, Any]:
+        for root in roots:
+            for path in glob.glob(os.path.join(glob.escape(root), "meta", glob.escape(camera), "**",
+                                               glob.escape(alert_id) + ".meta.json"), recursive=True):
+                try:
+                    with open(path, encoding="utf-8") as f:
+                        rec = json.load(f).get("ground")
+                    if isinstance(rec, dict):
+                        return rec
+                except (OSError, ValueError, AttributeError):
+                    continue
+        return {}
+
+    def where(camera: str, alert_id: str) -> Dict[str, Any]:
+        try:
+            meta = meta_ground(camera, alert_id)
+            entered = bool(meta.get("entered") or meta.get("crossed_inward") or meta.get("entered_from"))
+            path = pf.tracks_file(roots, camera, alert_id)
+            tracks = _tracks(path) if path else []
+            scene = scene_for(camera) if scene_for is not None else None
+            if tracks and profiles is not None:
+                place = pf.quiet_place(camera, tracks, profiles, scene)
+                if place is not None:
+                    return {"on": str(place.get("owner") or ""), "entered": entered, "how": "place"}
+            if tracks and scene is not None and getattr(scene, "informative", False):
+                g = gr.ground_of(tracks, scene)
+                entered = entered or g.entered
+                on = g.on or _by_points(tracks, scene)
+                if on:
+                    return {"on": on, "entered": entered, "how": "map"}
+            return {"on": str(meta.get("on") or ""), "entered": entered, "how": "meta" if meta.get("on") else ""}
+        except Exception as exc:  # noqa: BLE001 - unknown ground: told as before
+            log.debug("ground of %s not read: %s", alert_id, exc)
+            return {"on": "", "entered": False, "how": ""}
+
+    return where
+
+
+def where_for(services: Any) -> Optional[Callable[[str, str], Dict[str, Any]]]:
+    """make_where from the assistant's services: its alert roots, the scene maps beside its zones file (a renamed
+    camera finds its map by channel) and the camera profiles' place facts."""
+    try:
+        from .. import scene_map as sm  # noqa: PLC0415
+        from ..ground_replay import maps_from_file  # noqa: PLC0415
+        from .tools import profiles_for  # noqa: PLC0415
+
+        roots = list(services.roots()) if getattr(services, "roots", None) else []
+        zones_path = getattr(services, "zones_path", None)
+        cache: Dict[str, Any] = {}
+        by_channel: List[Any] = []
+
+        def scene_for(camera: str) -> Any:
+            if camera not in cache:
+                scene = sm.load_scene_map(camera, zones_path)
+                if not getattr(scene, "informative", False):
+                    try:
+                        if not by_channel:
+                            by_channel.append(maps_from_file(sm._paths(zones_path)[1], by_channel=True))
+                        scene = by_channel[0](camera) or scene
+                    except Exception:  # noqa: BLE001 - no stored maps
+                        pass
+                cache[camera] = scene
+            return cache[camera]
+
+        return make_where(roots, scene_for, profiles_for(services))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("day story: whose ground cannot be read: %s", exc)
+        return None
+
+
+def ground_episodes(episodes: Sequence["Episode"], where: Optional[Callable[[str, str], Dict[str, Any]]]) -> None:
+    """Sets each episode's ``where`` (neighbour / public when every placed session stayed there and none was on
+    ours) and ``entered`` (someone came onto our ground)."""
+    if where is None:
+        return
+    for ep in episodes:
+        ons: List[str] = []
+        for r in ep.records:
+            camera = str(r.get("camera") or "")
+            for alert_id in [a for a in r.get("alert_ids") or [] if a][:4]:
+                w = where(camera, alert_id)
+                ep.entered = ep.entered or bool(w.get("entered"))
+                if w.get("on"):
+                    ons.append(str(w["on"]))
+        if ons and all(o in (NEIGHBOUR, PUBLIC) for o in ons):
+            ep.where = NEIGHBOUR if NEIGHBOUR in ons else PUBLIC
 
 
 def _summaries(record: Dict[str, Any]) -> List[str]:
@@ -394,7 +544,10 @@ def rows_of(episodes: List[Episode], snapshot: Any) -> List[Row]:
         rows.append(Row(0, min(e.start for e in eps), max(e.end for e in eps), "", known=who, places=places,
                         episode=max(eps, key=_weight)))
     for ep in rest:
-        rows.append(Row(0, ep.start, ep.end, "", episode=ep, places=[_place(snapshot, ep.cameras)]))
+        place = _place(snapshot, ep.cameras)
+        if ep.off_ground:
+            place = f"{place}, {WHERE_HE[ep.where]}"
+        rows.append(Row(0, ep.start, ep.end, "", episode=ep, places=[place]))
     rows.sort(key=lambda r: r.start)
     for i, row in enumerate(rows, 1):
         row.n = i
@@ -409,6 +562,10 @@ def rows_of(episodes: List[Episode], snapshot: Any) -> List[Row]:
                 bits.append(f"{ep.people} {'person' if ep.people == 1 else 'people'}")
             if ep.who:
                 bits.append("who: " + ", ".join(ep.who))
+            if ep.off_ground:
+                bits.append("NEIGHBOUR'S GROUND" if ep.where == NEIGHBOUR else "STREET")
+            elif ep.entered:
+                bits.append("CAME ONTO THE OWNER'S GROUND")
             if ep.concern:
                 bits.append("CHECK")
             what = " | ".join(ep.summaries)
@@ -436,6 +593,7 @@ Write only lines, each in this form:
 - Tell what people did, plainly: came in, walked to the door, knocked, waited, left, got into a car and drove out, carried something, worked. Mention one detail that helps recognise them (a red hat, a white shirt, a helmet). When the description only suggests who it was, say "כנראה" (כנראה שליח, כנראה עובד).
 - A KNOWN line is the household's routine that the owner already explained: write it as ONE short line, ending with "כרגיל" ("[n] HH:MM–HH:MM · <places>: <who> עבדו כאן, כרגיל.").
 - A line marked CHECK: when what was seen really deserves a look (someone at a window or a door that is not theirs, trying a handle, a face hidden on purpose, taking things away), write "[n] HH:MM · <place>: משהו שכדאי לראות: ..." and say exactly what made it worth a look - at most two such lines. Workers with helmets, hats or tools, people carrying bags in daylight, are ordinary: tell those like the others.
+- A line marked NEIGHBOUR'S GROUND or STREET happened outside the owner's place (its <place> already says where): tell it in a few plain words, never "משהו שכדאי לראות" - the neighbour's life is not the owner's concern.
 {busy}- Never write: how many alerts or events there were, the words התרעה/התרעות/התראה, labels such as חשוד/רגיל/נורמלי, anything about what the cameras could or could not cover, camera ids, English words, or any detail that is not in the input.
 - No greeting, no title, no closing line."""
 
@@ -448,6 +606,7 @@ def _prompt(rows: Sequence[Row], period: str) -> List[Dict[str, str]]:
             {"role": "user", "content": f"Period: {period}\n" + "\n".join(r.text for r in rows)}]
 
 
+_WORTH = re.compile(r"(?<=: )\s*משהו\s+שכדאי\s+לראות\s*[:,-]?\s*")
 _LINE = re.compile(r"^\s*[-*•]?\s*\[(\d+)\]\s*(.+?)\s*$")
 _TIME = re.compile(r"(?<!\d)([01]?\d|2[0-3]):([0-5]\d)(?!\d)")
 
@@ -506,6 +665,8 @@ def check_lines(raw: str, rows: Sequence[Row]) -> List[Tuple[str, Optional[Row]]
         text = with_head(text, row)
         if not text:
             continue
+        if row is not None and not (row.episode is not None and row.episode.concern) and _WORTH.search(text):
+            text = _WORTH.sub("", text, count=1)          # the neighbour's life, the known routine: never flagged
         if _BANNED.search(text):
             log.warning("day story: a line says what it may not (%s); dropped", _BANNED.search(text).group(0))
             continue
@@ -668,7 +829,7 @@ def _handle_for(add_handle: Optional[Callable[..., str]], row: Optional[Row]) ->
 
 def tell(book: Any, activities: Any, snapshot: Any, text: str, now: float, model: Any = None,
          add_handle: Optional[Callable[..., str]] = None, args: Optional[Dict[str, Any]] = None,
-         camera: str = "") -> Story:
+         camera: str = "", where: Optional[Callable[[str, str], Dict[str, Any]]] = None) -> Story:
     """The story of the period the owner asked about. One model call at most; never raises."""
     since, until, period = period_of(text, now, args)
     try:
@@ -678,6 +839,7 @@ def tell(book: Any, activities: Any, snapshot: Any, text: str, now: float, model
         records, sessions = [], {}
     kept = [r for r in records if not is_noise(r)]
     episodes = episodes_of(kept, sessions)
+    ground_episodes(episodes, where)
     explain(episodes, marks_of(book), facts_of(activities, since) if activities is not None else [])
     rows = rows_of(episodes, snapshot)
     log.info("day story %s: %d records, %d after noise, %d episodes, %d rows", period, len(records), len(kept),
@@ -812,7 +974,7 @@ def day_story_tool(ctx: Any, args: Dict[str, Any]) -> Dict[str, Any]:
         story = tell(ctx.services.events, getattr(ctx.services, "activities", None), ctx.snapshot, words, now,
                      model=getattr(ctx.services, "story_model", None), add_handle=ctx.state.add_handle,
                      args={k: args.get(k) for k in ("day", "time_from", "time_to", "last_hours") if args.get(k)},
-                     camera=camera)
+                     camera=camera, where=where_for(ctx.services))
         remember(ctx.state, story, now)
         return {"ok": True, "day_story": True, "story": story.text,
                 "note": "This story is the whole answer: reply with it exactly as written, add nothing."}

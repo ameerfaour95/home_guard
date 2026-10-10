@@ -820,7 +820,8 @@ class OwnerAgentV2:
             named = list(dict.fromkeys(cam for _, cam in mentioned_cameras(snapshot, text)))
             story = day_story.tell(self.services.events, getattr(self.services, "activities", None), snapshot, text,
                                    now, model=getattr(self.services, "story_model", None) or self.model,
-                                   add_handle=ctx.state.add_handle, camera=named[0] if len(named) == 1 else "")
+                                   add_handle=ctx.state.add_handle, camera=named[0] if len(named) == 1 else "",
+                                   where=day_story.where_for(self.services))
             spent = usage.setdefault("story", [0, 0])
             spent[0], spent[1] = spent[0] + int(story.usage[0]), spent[1] + int(story.usage[1])
             day_story.remember(ctx.state, story, now)

@@ -187,6 +187,42 @@ class DayStoryTest(unittest.TestCase):
                                      "במצלמה 1 בין 02:45 ל-02:46.")
         self.assertEqual(model.calls, [])
 
+    # -- where it happened (lead, 2026-10-10: the 13:35 and 17:06 ch2 events were in the neighbour's house) --------
+    def add_neighbour_visit(self) -> None:
+        with open(os.path.join(self.dir, "events_archive.jsonl"), "a", encoding="utf-8") as f:
+            f.write(json.dumps(record("e6", 5, "15:20", "Two men look over the wall into a window.", people=2,
+                                      level="suspicious"), ensure_ascii=False) + "\n")
+
+    def test_the_neighbours_life_is_told_where_it_happened_and_never_flagged(self) -> None:
+        self.add_neighbour_visit()
+        on = {"on": "neighbour", "entered": False}
+        where = lambda cam, aid: on if "_ch5_" in aid else {"on": "", "entered": False}      # noqa: E731
+        model = Scripted("[5] 15:20 · מצלמה 5: משהו שכדאי לראות: שני גברים הציצו מעל הקיר לחלון.\n"
+                         "[6] 16:40 · חניה: משהו שכדאי לראות: אדם בקפוצ'ון כהה ניסה את ידית הדלת האחורית.")
+        story = ds.tell(self.book, None, snapshot(), "סיכום יום", NOW, model=model, where=where,
+                        add_handle=self.state.add_handle)
+        self.assertIn("NEIGHBOUR'S GROUND", model.calls[0][-1]["content"])
+        self.assertEqual(story.text.splitlines(), [
+            "15:20 · מצלמה 5, בבית של השכן: שני גברים הציצו מעל הקיר לחלון.",
+            "16:40 · חניה: משהו שכדאי לראות: אדם בקפוצ'ון כהה ניסה את ידית הדלת האחורית.",
+            "רוצה שאשלח את הסרטון של 16:40?"])
+        code = ds.tell(self.book, None, snapshot(), "סיכום יום", NOW, where=where).text
+        self.assertIn("15:20 · מצלמה 5, בבית של השכן: ", code)
+        self.assertNotIn("15:20 · מצלמה 5, בבית של השכן: משהו", code)
+        # Someone who came onto the owner's ground from there, or an escalation, is still worth a look.
+        on["entered"] = True
+        self.assertIn("15:20 · מצלמה 5: משהו שכדאי לראות", ds.tell(self.book, None, snapshot(), "סיכום יום", NOW,
+                                                                   where=where).text)
+
+    def test_whose_ground_by_the_foot_points(self) -> None:
+        from types import SimpleNamespace  # noqa: PLC0415
+
+        scene = SimpleNamespace(ground_at=lambda p: ("neighbour" if p[0] < 0.5 else "mine", "line", None))
+        left = SimpleNamespace(kind="person", points=[(1.0, 0.2, 0.9), (2.0, 0.3, 0.9)])
+        right = SimpleNamespace(kind="person", points=[(1.0, 0.8, 0.9), (2.0, 0.9, 0.9)])
+        self.assertEqual(ds._by_points([left], scene), "neighbour")
+        self.assertEqual(ds._by_points([left, right], scene), "mine")      # anyone on ours: ours
+
     # -- "שלח את 10:15" ------------------------------------------------------------------------------------------
     def test_each_line_keeps_its_clip_for_a_follow_up(self) -> None:
         story = self.tell(Scripted(GOOD))
