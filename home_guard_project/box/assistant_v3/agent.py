@@ -31,7 +31,7 @@ from ..brain.tools import Services, ToolContext, known_rows
 from . import context as cx
 from . import handlers as hd
 from . import prompts
-from .acts import SCHEMA, Act, Understanding, validate
+from .acts import SCHEMA, Act, Understanding, quoted, validate
 from .llm import parse_json
 from .memory_view import MemoryView
 from .skills import CHAT_BUDGET, INVESTIGATE_BUDGET, Toolbox, loop
@@ -65,6 +65,7 @@ FIX_TEXT = {
     "unbacked_claim": "כתבת שעשית/שמרת/שלחת משהו שלא נעשה בתור הזה; אל תטען את זה.",
     "question": "אל תשאל שאלה.",
     "too_long": "ארוך מדי; משפט או שניים.",
+    "jargon": "בלי ז'רגון ('התרעה צפויה', 'תיוג'); מילים פשוטות.",
 }
 NO_REPAIR = ("repetition", "too_many_alerts", "bad_wording", "no_explanation")
 REPAIRABLE = ("place_fact", "person_mark", "activity_explain", "camera_fact")
@@ -218,10 +219,14 @@ class AssistantV3(OwnerAgentV2):
         wrong question or saved nothing, 2026-10-10 "זה הבית של השכן" -> "עד מתי?" -> "מה קשר?"): the owner's
         last statements of the live window that left no receipt are read again, and what they should have saved
         is done now. Only memory acts are taken from them."""
+        if not und.has("complaint", "question_meta", "unclear"):
+            # an "earlier" act re-does a mishandled statement; only a complaint or "what do you do with it" asks that
+            und.acts = [a for a in und.acts if not (a.earlier and a.act in REPAIRABLE
+                                                    and not quoted(a.quote, ctx.text))] or und.acts
         if any(a.act == "complaint" and a.issue == "irrelevant" for a in und.acts):
             # "מה הקשר העובדים?": the people he names are what he complains about, never a new memory of them
             und.acts = [a for a in und.acts if a.act not in ("person_mark", "activity_explain")]
-        if not und.has("complaint", "question_meta", "unclear") or und.has(*REPAIRABLE):
+        if not und.has("complaint", "unclear") or und.has(*REPAIRABLE):
             return
         if any(a.act == "complaint" and a.issue in NO_REPAIR for a in und.acts):
             return                                     # "why do you repeat", "too many messages": nothing to redo
@@ -240,8 +245,7 @@ class AssistantV3(OwnerAgentV2):
             if keep:
                 for a in keep:
                     a.earlier = True
-                    # done only if complete (a repair never asks), unless he asks what happens with it
-                    a.repaired = not und.has("question_meta")
+                    a.repaired = True               # a repair never asks a question
                 und.acts.extend(keep)
                 trace.append(f"repaired earlier {cx.hhmm(old.get('ts'))}: {[a.act for a in keep]}")
                 return
@@ -291,8 +295,8 @@ class AssistantV3(OwnerAgentV2):
         relevant = mem.relevant(turn.text, cameras_in_play, limit=3) if not und.has("question_memory") else \
             mem.relevant(turn.text, [], limit=6, include_types=("person_mark", "activity_rule", "place_fact",
                                                                   "camera_fact"))
-        if und.has("question_memory") and not relevant:
-            relevant = mem.records()[:6]
+        if und.has("question_memory"):
+            relevant = [r for r in mem.records() if r.type != "preference"][:8]
         memory_lines = [r.line(ctx.snapshot, ctx.lang, turn.now) for r in relevant]
         body = cx.block(ctx.snapshot, cams, ctx.state, getattr(self.services, "events", None), turn.now,
                         memory_lines=memory_lines, prefs=mem.prefs(), message=turn.text,
@@ -316,7 +320,8 @@ class AssistantV3(OwnerAgentV2):
             return code_checks(text, lang=ctx.lang, last_replies=last, allowed_times=allowed, receipts=claim_receipts,
                                memory_subjects=subjects, owner_text=turn.text + " " + " ".join(
                                    cx.earlier_owner_words(ctx.state, turn.now)[-3:]),
-                               may_ask=bool(plan.ask), act_kinds=list(kinds), evidence_text=evidence + " ".join(memory_lines),
+                               may_ask=bool(plan.ask), act_kinds=list(kinds), strict_memory=not (kinds & {
+                                   "question_live", "question_history", "question_memory"}), evidence_text=evidence + " ".join(memory_lines),
                                long_ok=plan.long_ok or (und.has("question_live") and len(turn.box.evidence) > 2)
                                or und.has("question_memory"))
 
@@ -370,7 +375,7 @@ class AssistantV3(OwnerAgentV2):
             if act.act == "complaint":
                 lines.append("הוא מתלונן. " + COMPLAINT_HINTS.get(act.issue or "other", COMPLAINT_HINTS["other"])
                              + (" מה שתיקנת בתור הזה מופיע למעלה תחת 'מה עשיתי'; אל תמציא פעולה אחרת."
-                                if plan.done else " לא שינית כלום בתור הזה: אל תטען שתיקנת, מחקת או שינית."))
+                                if plan.done else " אל תטען שתיקנת, מחקת או שינית משהו."))
                 break
         lines.append("כתוב עכשיו רק את ההודעה לבעל הבית, בעברית, משפט או שניים.")
         return "\n\n".join(lines)

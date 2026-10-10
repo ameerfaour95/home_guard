@@ -28,6 +28,7 @@ CLOSING = re.compile(r"אם (?:יש|תרצה|צריך|תצטרך) (?:עוד )?(?
                      r"תודה על ההבהרה|תודה שעדכנת|איך (?:אני )?(?:יכול|אוכל) לעזור|במה עוד")
 GENERIC_Q = re.compile(r"מה לתקן|מה תרצה|מה (?:אתה )?רוצה שאעשה|מה תרצה לשנות|תרצה ש|האם תרצה|אם תרצה,? אוכל|"
                        r"רוצה שאשלח|לשלוח לך\?")
+JARGON = re.compile(r"התרעה צפויה|כהתרעה (?:אמיתית|שגויה)|כהתרעת שווא|מתייג את זה|תיוג כשגרה")
 EMPATHY = re.compile(r"אני מבין את התסכול|אני מבין אותך|מבין את הכעס|אני מצטער לשמוע|מתנצל על אי הנוחות")
 ONLY_ACK = re.compile(r"^\s*(?:הבנתי|אני מבין|מבין)(?: אותך)?[.!]?\s*$")
 _TIME = re.compile(r"(?<!\d)([01]?\d|2[0-3]):([0-5]\d)(?!\d)")
@@ -71,7 +72,7 @@ def similar(a: str, b: str) -> float:
 
 def code_checks(reply: str, *, lang: str, last_replies: Sequence[str], allowed_times: str, receipts: Sequence[Any],
                 memory_subjects: Sequence[str], owner_text: str, may_ask: bool, act_kinds: Sequence[str],
-                evidence_text: str = "", long_ok: bool = False) -> Verdict:
+                evidence_text: str = "", long_ok: bool = False, strict_memory: bool = False) -> Verdict:
     failed: List[Check] = []
     text = reply.strip()
     if not text:
@@ -87,6 +88,8 @@ def code_checks(reply: str, *, lang: str, last_replies: Sequence[str], allowed_t
         failed.append(Check("internal_id", m.group(0)))
     if CLOSING.search(text):
         failed.append(Check("closing_offer", CLOSING.search(text).group(0)))
+    if JARGON.search(text):
+        failed.append(Check("jargon", JARGON.search(text).group(0)))
     g = GENERIC_Q.search(text)
     if g:
         failed.append(Check("generic_question", g.group(0)))
@@ -98,7 +101,7 @@ def code_checks(reply: str, *, lang: str, last_replies: Sequence[str], allowed_t
             break
     if "question_memory" not in act_kinds:
         for subject in memory_subjects:
-            if recites(text, subject, owner_text):
+            if recites(text, subject, owner_text, strict_memory):
                 failed.append(Check("memory_recital", subject[:40]))
                 break
     for m in _TIME.finditer(text):
@@ -138,11 +141,20 @@ def _content(text: str) -> List[str]:
     return out
 
 
-def recites(reply: str, subject: str, owner_text: str) -> bool:
+def recites(reply: str, subject: str, owner_text: str, strict: bool = False) -> bool:
     """The reply brings up a memory record the owner did not raise: two of the record's words in a row (its name,
     "העובדים של הפרגולה") together with memory talk ("מסומנים", "עד יום ה׳", "שמור אצלי"). Seeing workers at work
     and saying so is not a recital; "the workers are marked until 18:00" in a talk about the neighbour is."""
     words = _content(subject)
+    if not words or (not strict and not _MARKED.search(reply)):
+        return False
+    if strict and len(words) >= 1:
+        # A turn that is not a question about what is seen (a preference, a complaint, an ack): naming a memory's
+        # people the owner did not name is bringing them up.
+        said = set(_content(owner_text))
+        key = words[0]
+        if key in _content(reply) and key not in said and key not in ("פרגו", "כניס", "מצלמ"):
+            return True
     if len(words) < 2 or not _MARKED.search(reply):
         return False
     have = _content(reply)

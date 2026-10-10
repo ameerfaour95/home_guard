@@ -21,6 +21,7 @@ SUITE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # the brain passes it.
 KNOWN_OFFLINE_FAILURES = {
     "g09_10",   # 09:46 "you don't read the history?": answered in code with the memory list, no entrance mark
+    "g11_03",   # v2 lists the memory in code and ends with a question back (שאל "מה תייגתי היום?")
 }
 
 

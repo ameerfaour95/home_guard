@@ -1,0 +1,84 @@
+# Golden cases added while building assistant v3 (2026-10-10). They are not verbatim owner turns: each one pins a
+# failure found in the v3 build or a rule the owner stated (memory/feedback files) that the real chats did not test
+# yet. Same house and memory as the 2026-10-10 day file. Schema: home_guard_project/box/eval_chat.py.
+defaults:
+  date: "2026-10-10"
+  house:
+    cameras: [ameer_v2_ch1, ameer_v2_ch2, ameer_v2_ch3, ameer_v2_ch5, ameer_v2_ch6, ameer_v2_ch8]
+    aliases: {ameer_v2_ch3: [פרגולה], ameer_v2_ch6: [כניסה ראשית]}
+  memory:
+    marks:
+      - {camera: ameer_v2_ch6, text: העובדים של הפרגולה, until: "2026-10-15 18:00", daily: ["07:00", "18:00"], at: "2026-10-09 09:50"}
+    facts:
+      - {camera: ameer_v2_ch2, text: הבית של השכן}
+
+cases:
+  - id: g11_01
+    source: "2026-10-10 10:05"
+    time: "10:05:00"
+    alerts:
+      - {id: ameer_v2_ch1_1791612000_alert, camera: ameer_v2_ch1, time: "10:00:00", label: suspicious, people: 2, summary: "שני גברים עם כלי גינון עובדים ליד הקיר הנמוך בחצר."}
+    history:
+      - {time: "10:03:00", owner: "אלה הגננים שלי", bot: "הבנתי, אלה הגננים שלך במצלמה 1. עד איזו שעה הם עובדים פה?", about: ameer_v2_ch1_1791612000_alert}
+    message: {text: "עד 17 בערך"}
+    expect:
+      intent: person_mark
+      writes: [{type: person_mark, camera: [ameer_v2_ch1, ""], expiry: "until:17:00"}]
+      forbid_writes: [tag, place_fact]
+      max_questions: 0
+      must_not: ["23:59", "עד מתי"]
+      ideal: "סגור — הגננים במצלמה 1 עד 17:00, ואם הם חוזרים מחר זה אותו דבר."
+    notes: "v3: the answer to the assistant's own one question (typed, not a button) completes the mark from the open question in the chat; never a second question."
+
+  - id: g11_02
+    source: "2026-10-10 11:20"
+    time: "11:20:00"
+    message: {text: "החניה מאחורי השער במצלמה 5 שייכת לבניין, לא שלנו"}
+    expect:
+      intent: place_fact
+      writes: [{type: place_fact, camera: ameer_v2_ch5, expiry: none}]
+      forbid_writes: [tag, person_mark, activity]
+      max_questions: 0
+      must_not: ["עד מתי", "לכמה זמן", "העובדים"]
+      ideal: "הבנתי, החניה מאחורי השער במצלמה 5 של הבניין. מה שקורה שם לא יקפיץ לך התראה."
+    notes: "A place stated with no alert to reply to: permanent, at the camera he names, no question."
+
+  - id: g11_03
+    source: "2026-10-10 16:00"
+    time: "16:00:00"
+    message: {text: "מה אתה זוכר על הבית?"}
+    expect:
+      intent: question_meta
+      forbid_writes: [tag, person_mark, activity, place_fact]
+      max_questions: 0
+      allow: [memory_dump]
+      must_include_any: ["שכן"]
+      ideal: "שני דברים: במצלמה 2 זה הבית של השכן, והעובדים של הפרגולה מסומנים בכניסה הראשית כל יום 07:00–18:00 עד יום ה׳ 15.10."
+    notes: "The one time memory is listed: he asked for it (owner rule 2026-10-10: shown ONLY on 'מה אתה זוכר?')."
+
+  - id: g11_04
+    source: "2026-10-10 16:05"
+    time: "16:05:00"
+    message: {text: "תשתיק רק את הפרגולה לשעתיים"}
+    expect:
+      intent: command
+      writes: [{type: pause, camera: ameer_v2_ch3}]
+      forbid_writes: [tag, camera_off]
+      max_questions: 0
+      must_include_any: ["18:05|פרגולה"]
+      ideal: "סגור, הפרגולה בשקט עד 18:05. שאר המצלמות ממשיכות כרגיל."
+    notes: "One camera only, a relative time; a pause files nothing in feedback/ (a command is not a tag)."
+
+  - id: g11_05
+    source: "2026-10-10 12:15"
+    time: "12:15:00"
+    alerts:
+      - {id: ameer_v2_ch6_1791619800_alert, camera: ameer_v2_ch6, time: "12:10:00", label: suspicious, people: 1, summary: "אדם עם חבילה ניגש לדלת הכניסה, משאיר אותה ועוזב."}
+    message: {text: "זה היה הדוור", reply_to: ameer_v2_ch6_1791619800_alert}
+    expect:
+      intent: ack
+      forbid_writes: [tag, person_mark, place_fact, activity]
+      max_questions: 0
+      must_not: ["עד מתי", "לזכור"]
+      ideal: "👍 סגרתי, זה היה הדוור."
+    notes: "A one-off visitor closes the alert; it is not a person to remember (known_memory._ONE_OFF) and never a tag."

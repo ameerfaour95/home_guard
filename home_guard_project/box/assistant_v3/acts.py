@@ -39,6 +39,7 @@ COMMANDS = ("pause", "resume", "camera_off", "camera_on", "alias", "send_video",
             "setting")
 ISSUES = ("repetition", "ignored_memory", "wrong_fact", "irrelevant", "unwanted_question", "bad_wording",
           "too_many_alerts", "no_explanation", "other")
+MEMORY_ACTS = ("place_fact", "person_mark", "activity_explain", "camera_fact")
 EMOTIONS = ("neutral", "annoyed", "angry", "confused", "happy")
 
 
@@ -179,6 +180,8 @@ def validate(raw: Dict[str, Any], message: str, earlier_owner: Sequence[str], ca
         act.routine = item.get("routine") is True
         act.look_again = item.get("look_again") is True
         act.earlier = item.get("earlier") is True
+        if act.act in MEMORY_ACTS and not act.quote:
+            continue                           # memory only from words he really wrote (no quote: no write)
         out.acts.append(act)
     if not out.acts:
         out.acts.append(Act(act="unclear"))

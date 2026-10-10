@@ -118,6 +118,8 @@ class Turn:
 def place_fact(t: Turn, act: Act) -> None:
     from .. import place_facts  # noqa: PLC0415
 
+    if _crew(act.subject or act.quote) and not re.search(r"בית|חצר|חניה|שטח|מגרש|גינה|רחוב|בניין", act.subject or act.quote):
+        return person_mark(t, act)             # "המידע זה עובדים אצלי על הפרגולה" is people, not a place
     handle, entry = t.event_of(act)
     camera = t.camera_of(act)
     words = act.quote or act.subject
@@ -147,6 +149,12 @@ def _crew(text: str) -> bool:
     return km.work_group(text) or bool(re.search(r"פועל|עובד|קבלן|חשמלא|אינסטלט|גנן|צבע|שיפוצ|צוות|טכנאי", text))
 
 
+def _shared(a: str, b: str) -> bool:
+    from .memory_view import words  # noqa: PLC0415
+
+    return bool(words(a) & words(b))
+
+
 def person_mark(t: Turn, act: Act, until_words: str = "") -> None:
     who = act.subject or act.quote
     if not who:
@@ -160,7 +168,7 @@ def person_mark(t: Turn, act: Act, until_words: str = "") -> None:
     live = km.live_marks(book, t.now) if book is not None else []
     crew = _crew(f"{who} {act.quote}")
     same = [k for k in live if km.same_people(who, str(k.get("text") or "")) or
-            (crew and _crew(str(k.get("text") or "")))]
+            (crew and _crew(str(k.get("text") or "")) and _shared(who, str(k.get("text") or "")))]
     if crew and same and not house_wide:
         # A crew moves around (2026-10-09 09:46): he explains people at a camera their mark does not cover yet.
         recent = [e for _, e in t.events(3600)]
@@ -168,42 +176,52 @@ def person_mark(t: Turn, act: Act, until_words: str = "") -> None:
             cam_now = t.camera_now(str(recent[0].get("camera") or ""))
             if cam_now and not any(not k.get("camera") or str(k.get("camera")) == cam_now for k in same):
                 house_wide, camera = True, ""
-    words = until_words or act.until_quote
+    words = until_words or ("" if (act.earlier and same) else act.until_quote)
     until = parse_until(words, t.now) if words else None
-    if until is None and not words:
-        until = km.until_said_today(t.state, who, t.now)
     covered = [k for k in same if not k.get("camera") or str(k.get("camera")) == camera]
+    if until is None and same:
+        # Re-stated or widened: keep the window he already gave (never a new one he did not say).
+        k = max(same, key=lambda x: float(x.get("until") or 0))
+        if covered and not house_wide:
+            t.did(f"{who} כבר מסומנים אצלי ב{t.name(camera) if camera else 'כל הבית'} {_when_text(k, t.now)}; "
+                  f"לא שיניתי כלום.")
+            t.outcome(entry, f"בעל הבית: אלה {who} (כבר מסומנים)")
+            return
+        wide = house_wide or len(same) > 1 or not camera
+        saved = t.mem.mark_people(t.ctx, str(k.get("text") or who), "" if wide else camera,
+                                  float(k.get("until") or 0), str(k.get("daily_from") or ""),
+                                  str(k.get("daily_to") or ""), replaces=same)
+        if saved:
+            before = ", ".join(sorted({t.name(str(x.get("camera") or "")) for x in same}))
+            t.did(f"הרחבתי: {saved.get('text') or who} מסומנים עכשיו {'בכל הבית' if wide else 'ב' + t.name(camera)}, "
+                  f"באותן שעות כמו קודם (קודם רק ב{before}).")
+            t.outcome(entry, f"בעל הבית: אלה {who} → נסגרה כרגילה")
+            if entry:
+                t.did(f"ההתראה של {hhmm(entry.get('ts'))} ב{t.name(t.camera_now(str(entry.get('camera') or '')))} "
+                      f"נסגרה, אלה הם.")
+        return
     if until is None:
-        if same:
-            # Re-stated or widened: keep the window he already gave.
-            k = max(same, key=lambda x: float(x.get("until") or 0))
-            if covered and not house_wide:
-                t.did(f"{who} כבר מסומנים אצלי ב{t.name(camera) if camera else 'כל הבית'} "
-                      f"{_when_text(k, t.now)} — לא שיניתי כלום.")
-                t.outcome(entry, f"בעל הבית: אלה {who} (כבר מסומנים)")
-                return
-            saved = t.mem.mark_people(t.ctx, str(k.get("text") or who), "" if (house_wide or len(same) > 1 or not camera)
-                                      else camera, float(k.get("until") or 0), str(k.get("daily_from") or ""),
-                                      str(k.get("daily_to") or ""), replaces=same)
-            if saved:
-                where = "בכל הבית" if (house_wide or len(same) > 1 or not camera) else f"ב{t.name(camera)}"
-                t.did(f"הרחבתי את הסימון: {saved.get('text') or who} מסומנים עכשיו {where} {_when_text(saved, t.now)}"
-                      f" (קודם רק ב{', '.join(t.name(str(x.get('camera') or '')) for x in same)}).")
+        until = km.until_said_today(t.state, who, t.now)
+    if until is None:
+        where = f"ב{t.name(camera)}" if camera else "בכל הבית"
+        quiet = act.repaired or t.und.has("complaint") or t.und.emotion == "angry"
+        if quiet:
+            # He is complaining or this repairs an earlier miss: no question now; kept for today, said as "today".
+            end = dt.datetime.fromtimestamp(t.now).replace(hour=23, minute=59, second=0).timestamp()
+            if t.mem.mark_people(t.ctx, who, camera, end, replaces=[]) is not None:
                 t.outcome(entry, f"בעל הבית: אלה {who} → נסגרה כרגילה")
-                if entry:
-                    t.did(f"ההתראה של {hhmm(entry.get('ts'))} ב{t.name(t.camera_now(str(entry.get('camera') or '')))} "
-                          f"נסגרה — אלה הם.")
+                t.did(f"סימנתי את {who} {where} להיום, כדי שלא תגיע עליהם התראה.")
             return
-        if act.repaired:
-            t.plan.trace.append("repair: mark needs an hour; not asked")
-            return
+        # The owner's own way (2026-10-09): "אה, הם של הפרגולה? עד איזו שעה הם עובדים?" - nothing saved with a
+        # time he did not say; the tapped or typed hour completes it in code.
         choices = km.likely_hours(t.now) + ["אחר…"]
-        question = "עד איזו שעה הם עובדים פה?" if crew else "עד מתי הם פה היום?"
+        question = "עד איזו שעה הם עובדים?" if crew else "עד מתי הם פה היום?"
         t.plan.ask = {"question": question, "choices": choices, "kind": "v3_mark",
                       "args": {"who": who, "camera": camera, "house": house_wide, "handle": handle,
                                "quote": act.quote[:200], "crew": crew}}
-        t.did(f"הבנתי ש{who} הם אנשים שלו{' ב' + t.name(camera) if camera else ''}; עוד לא שמרתי כי לא אמר עד מתי.")
         t.outcome(entry, f"בעל הבית: אלה {who}")
+        t.did(f"שמעתי: {who} {where} הם אנשים שלו. עוד לא נשמר כלום (חסרה שעה). כתוב רק הד קצר כמו "
+              f"'אה, אלה {who}?' ואז את השאלה; אל תגיד שסימנת או שמרת.")
         return
     daily_from = daily_to = ""
     span = until
@@ -225,8 +243,6 @@ def person_mark(t: Turn, act: Act, until_words: str = "") -> None:
             if win:
                 daily_from, daily_to, span = win["daily_from"], win["daily_to"], float(win["until"])
     replaces = [k for k in same if not camera or not k.get("camera") or str(k.get("camera")) == camera] if same else []
-    if camera and same and not replaces:
-        replaces = []
     saved = t.mem.mark_people(t.ctx, who, camera, span, daily_from, daily_to, replaces=replaces)
     if not saved:
         t.plan.trace.append("person_mark: not saved")
@@ -256,6 +272,8 @@ def _when_text(mark: Dict[str, Any], now: float) -> str:
 def activity_explain(t: Turn, act: Act) -> None:
     words = " ".join(x for x in (act.subject, act.quote) if x)
     named_places = am.places_in(words)
+    if not am.actions_in(words) and not named_places and _crew(words):
+        return person_mark(t, act)             # "הם עובדים בחוץ": who they are, not what an action means
     candidates = []
     for handle, entry in t.events():
         text = f"{entry.get('observation') or ''} {entry.get('summary') or ''}"
@@ -329,7 +347,7 @@ def camera_fact(t: Turn, act: Act) -> None:
     if fact is None:
         return
     where = f"ב{t.name(camera)}" if camera else "בבית"
-    t.did(f"{'זה כבר שמור' if fact.get('already') else 'נשמר לתמיד'} {where}: {fact['text']}.")
+    t.did(f"{'זה כבר ידוע לי' if fact.get('already') else 'רשמתי לתמיד'} {where}: {fact['text']}.")
 
 
 def tag_only(t: Turn, act: Act) -> None:
@@ -366,14 +384,16 @@ def preference(t: Turn, act: Act) -> None:
             t.plan.trace.append("alias: no camera")
             return
         t.called.append("set_alias")
+        before = t.cams.name(camera)
         out = TOOLS["set_alias"](t.ctx, {"camera": camera, "alias": act.value})
         if out.get("ok"):
-            t.did(f"מעכשיו המצלמה שהייתה '{t.cams.name(camera)}' נקראת '{act.value}'.")
+            t.did(f"השם החדש של המצלמה ({before}) הוא '{act.value}'." if before != act.value
+                  else f"המצלמה נקראת '{act.value}'.")
         return
     value = act.value or act.quote
     if value:
         t.mem.add_preference(value)
-        t.did(f"העדפה קבועה נשמרה: {value}")
+        t.did(f"מעכשיו: {value} (אל תכתוב שזה 'נשמר'; תגיד רק מה ישתנה)")
 
 
 def command(t: Turn, act: Act) -> None:
@@ -389,7 +409,7 @@ def command(t: Turn, act: Act) -> None:
         t.called.append("pause_alerts")
         if pause(t, camera, until):
             where = f"ב{t.name(camera)}" if camera else "בכל המצלמות"
-            t.did(f"ההתראות מושתקות {where} עד {clock(until)} (המצלמות ממשיכות להקליט), ואז חוזרות לבד. יש כפתור ביטול.")
+            t.did(f"ההתראות מושתקות {where} עד {clock(until)}.")
     elif kind == "resume":
         t.called.append("resume_alerts")
         camera = act.camera if act.camera and act.camera != "house" else None

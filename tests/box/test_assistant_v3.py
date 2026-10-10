@@ -89,8 +89,8 @@ class ActsTests(unittest.TestCase):
         raw = {"emotion": "confused", "acts": [act("place_fact", quote="זה הבית של השכן", earlier=True),
                                                 act("place_fact", quote="זה הבית של השכן")]}
         und = validate(raw, "מה קשר? לא הבנתי", ["זה הבית של השכן"], {}, [])
+        self.assertEqual(len(und.acts), 1)               # a memory act with no real quote is dropped whole
         self.assertEqual(und.acts[0].quote, "זה הבית של השכן")
-        self.assertEqual(und.acts[1].quote, "")
 
     def test_unknown_camera_and_handle_are_dropped(self):
         und = validate({"acts": [act("question_live", camera="cam9", event="E44")]}, "מה קורה", [], {}, ["E1"])
@@ -181,7 +181,7 @@ class TurnTests(unittest.TestCase):
         pause = next(w for w in out["writes"] if w["type"] == "pause")
         self.assertEqual(dt.datetime.fromtimestamp(pause["until"]).strftime("%H:%M"), "18:00")
 
-    def test_a_crew_with_no_hour_gets_one_question_with_buttons(self):
+    def test_a_crew_with_no_hour_gets_one_question_and_no_invented_time(self):
         understand = acts_for({"זה בסדר אלה העובדים של הפרגולה": {"emotion": "neutral", "acts": [
             act("person_mark", quote="אלה העובדים של הפרגולה", subject="העובדים של הפרגולה", camera="cam3")]}})
         writer = FakeModel(lambda user, kw: "הבנתי, אלה העובדים של הפרגולה. עד איזו שעה הם עובדים פה?")
@@ -191,7 +191,7 @@ class TurnTests(unittest.TestCase):
                   understand, writer)
         self.assertGreaterEqual(len(out["buttons"]), 2)
         self.assertEqual(ec.count_questions(out["text"], out["buttons"]), 1)
-        self.assertFalse([w for w in out["writes"] if w["type"] == "person_mark"])
+        self.assertFalse([w for w in out["writes"] if w["type"] == "person_mark"])    # no time he did not say
         self.assertNotIn("23:59", out["text"])
 
     def test_the_tapped_hour_completes_the_mark_in_code(self):
@@ -227,6 +227,17 @@ class TurnTests(unittest.TestCase):
         finally:
             ec._local.world = None
             ec.V3.clear()
+
+    def test_in_a_complaint_a_crew_with_no_hour_is_kept_for_today_without_a_question(self):
+        understand = acts_for({"אמרתי לך שהם עובדים פה": {"emotion": "angry", "acts": [
+            act("complaint", quote="אמרתי לך", issue="ignored_memory"),
+            act("person_mark", quote="שהם עובדים פה", subject="העובדים", camera="cam3")]}})
+        writer = FakeModel(lambda user, kw: "צודק, סימנתי אותם להיום.")
+        out = run({"time": "12:56:55", "message": {"text": "אמרתי לך שהם עובדים פה"}}, understand, writer)
+        marks = [w for w in out["writes"] if w["type"] == "person_mark"]
+        self.assertEqual(len(marks), 1)
+        self.assertEqual(dt.datetime.fromtimestamp(marks[0]["until"]).date().isoformat(), DAY)
+        self.assertEqual(out["buttons"], [])
 
     def test_a_complaint_redoes_the_mishandled_place(self):
         understand = acts_for({
