@@ -94,6 +94,7 @@ class Services:
     detect: Optional[Callable[[str], Any]] = None
     status_path: str = ""
     zones_path: Optional[str] = None
+    story_model: Any = None    # the model that writes the day's story (box.yaml day_story_model; day_story.py)
 
 
 @dataclass
@@ -2432,3 +2433,13 @@ TOOLS: Dict[str, Callable[[ToolContext, Dict[str, Any]], Dict[str, Any]]] = {
     "how_usual": how_usual,
     "camera_fact": camera_fact,
 }
+
+
+@_safe_tool
+def day_story(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+    from .day_story import day_story_tool  # noqa: PLC0415 - day_story reads the registry, not the tools
+
+    return day_story_tool(ctx, args)
+
+
+TOOLS["day_story"] = day_story          # "סיכום יום" / "מה היה היום" told like a guard (2026-10-10)

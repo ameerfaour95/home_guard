@@ -63,7 +63,7 @@
     "type": "function",
     "function": {
       "name": "summarize_period",
-      "description": "Everything saved over a period, for a summary: totals by camera, label and kind, the notable events with handles, and coverage. Write a short natural summary from it.",
+      "description": "Counts of what was saved over a period (totals by camera, label and kind, coverage), ONLY when the owner asks how many. Never for \"what happened today\" or \"a summary of the day\": that is day_story.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -81,6 +81,42 @@
               "type": "string"
             },
             "description": "Limit to these cameras."
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "day_story",
+      "description": "The owner asks what happened over a day or a part of it (\"סיכום יום\", \"מה היה היום\", \"מה קרה הבוקר\", \"מאתמול בערב\", \"tell me what happened\"). The box tells it like a guard: what people did, in order, the known routine in one line, a real concern plainly. Its 'story' is the whole answer: reply with it exactly as written, add nothing (no counts, no alerts).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "words": {
+            "type": "string",
+            "description": "The owner's words for the period, as written (\"הבוקר\", \"מאתמול בערב\")."
+          },
+          "day": {
+            "type": "string",
+            "description": "\"today\", \"yesterday\" or \"YYYY-MM-DD\"."
+          },
+          "time_from": {
+            "type": "string",
+            "description": "HH:MM, the period's start on that day."
+          },
+          "time_to": {
+            "type": "string",
+            "description": "HH:MM, the period's end on that day."
+          },
+          "last_hours": {
+            "type": "number",
+            "description": "The last this-many hours."
+          },
+          "camera": {
+            "type": "string",
+            "description": "Only this camera, when the owner names one."
           }
         }
       }
