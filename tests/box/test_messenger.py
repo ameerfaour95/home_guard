@@ -179,8 +179,8 @@ class SettingsTest(unittest.TestCase):
         with mock.patch.dict(msg._MESSENGERS, clear=True):
             m = msg.messenger_for({}, {"OPENROUTER_API_KEY": "or-1"})
         self.assertEqual(m.hedge_model, "google/gemini-3.5-flash-lite")
-        self.assertEqual(m._extra_body, {"reasoning": {"enabled": False}})
-        self.assertEqual(m._hedge_extra_body, {"reasoning": {"effort": "minimal"}})
+        self.assertEqual(m._extra_body["reasoning"], {"enabled": False})
+        self.assertEqual(m._hedge_extra_body["reasoning"], {"effort": "minimal"})
         client = _FakeClient(HE)
         m = msg.Messenger(client, "main/model", 4.0, {"main": 1}, hedge_model="racer/model",
                           hedge_extra_body={"racer": 1})

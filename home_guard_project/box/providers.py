@@ -5,6 +5,7 @@ Every provider here speaks the OpenAI ``chat.completions`` API, so one client
 """
 from __future__ import annotations
 
+import copy
 import os
 from dataclasses import dataclass
 from typing import Any, Dict, Mapping, Optional, Tuple
@@ -42,7 +43,7 @@ PROVIDERS: Dict[str, Provider] = {
     "gateway": Provider("gateway", None, "HOMEGUARD_BOX_TOKEN", base_url_env="HOMEGUARD_GATEWAY_URL"),
 }
 
-# Per-model request extras that replace the provider's: OpenRouter refuses "reasoning off" for some models
+# Per-model request extras that replace those keys of the provider's: OpenRouter refuses "reasoning off" for some models
 # ("Reasoning is mandatory for this endpoint", gemini-3.8-flash, 2026-10-09); the least thinking they allow instead.
 MODEL_EXTRA_BODY: Dict[Tuple[str, str], Dict[str, Any]] = {
     ("openrouter", "google/gemini-3.8-flash"): {"reasoning": {"effort": "minimal"}},
@@ -97,7 +98,7 @@ def resolve(name: str, env: Mapping[str, str],
             model: str = "") -> Tuple[str, Optional[str], Optional[Dict[str, Any]]]:
     """``(api_key, base_url, extra_body)`` for *name*; raises naming the missing variable.
     A ``*thinking*`` model gets no extras: its provider refuses "thinking off". A model in MODEL_EXTRA_BODY gets
-    its own extras instead of the provider's."""
+    its own keys (e.g. ``reasoning``) in place of the provider's, the rest kept."""
     p = get(name)
     url = (str(env.get(p.base_url_env) or "").strip() if p.base_url_env else "") or p.base_url
     if url is None and p.base_url_env:
@@ -108,8 +109,8 @@ def resolve(name: str, env: Mapping[str, str],
             raise ProviderError(f"{p.key_env} is not set (put it in api_key.env: python -m home_guard_project.box paths --get secrets_env)")
         key = "ollama" if p.name == "ollama" else "none"   # the SDK wants some key; these servers ignore it
     own = MODEL_EXTRA_BODY.get((p.name, model.strip()))
-    if own is not None:
-        return key, url, dict(own)
+    if own is not None:      # the provider's extras with the model's own keys in place (deep copies)
+        return key, url, copy.deepcopy({**(p.extra_body or {}), **own})
     extra = dict(p.extra_body) if p.extra_body and "thinking" not in model.lower() else None
     return key, url, extra
 
