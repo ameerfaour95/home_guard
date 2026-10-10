@@ -85,6 +85,7 @@ reply to E3: "זה לא התרעה, זה בסדר"
 → {"emotion":"neutral","acts":[{"act":"alert_feedback","quote":"זה לא התרעה, זה בסדר","event":"E3","verdict":"normal"}]}
 
 "מה המצב בחוץ" → {"emotion":"neutral","acts":[{"act":"question_live","quote":"מה המצב בחוץ","camera":"house"}]}
+"תגיד, מישהו היה ליד השער?" (past tense: what happened) → {"emotion":"neutral","acts":[{"act":"question_history","quote":"מישהו היה ליד השער?","camera":"cam4"}]}
 "יש מישהו ליד השער עכשיו?" → {"emotion":"neutral","acts":[{"act":"question_live","quote":"יש מישהו ליד השער עכשיו?","camera":"cam4"}]}
 [E9 is a live photo of cam3 you just sent with no words] "?" → {"emotion":"confused","acts":[{"act":"question_live","quote":"?","camera":"cam3","event":"E9"}]}
 
@@ -176,4 +177,5 @@ Say "rewrite" ONLY for a real problem a demanding owner would hate:
 - it asks a question it did not need, or a generic one ("מה לתקן?"), or offers options in words;
 - empty empathy or apology without the concrete mistake/fix; a closing offer; robotic or call-centre tone;
 - it claims something with no support in the evidence (a time, a person, an action done).
-Otherwise "pass". Short and plain is good; do not ask for more detail than needed."""
+Otherwise "pass". Short and plain is good; do not ask for more detail than needed. A question the plan requires
+(said in the evidence) is correct - never ask to remove it."""

@@ -261,12 +261,19 @@ class AssistantV3(OwnerAgentV2):
     def _widen_on_complaint(self, und: Understanding, ctx: ToolContext, now: float, trace: List[str]) -> None:
         """"I told you there are workers here!" right after an alert at a camera their mark does not cover
         (2026-10-09 09:45): the crew is widened to the house, with no question - the owner said it already."""
-        if und.has(*REPAIRABLE) or not any(a.act == "complaint" and a.issue not in ("repetition", "bad_wording")
-                                           for a in und.acts):
+        if und.has("person_mark", "place_fact") or not any(
+                a.act == "complaint" and a.issue not in ("repetition", "bad_wording") for a in und.acts):
             return
         book = getattr(self.services, "events", None)
         crews = [k for k in (km.live_marks(book, now) if book is not None else []) if hd._crew(str(k.get("text") or ""))]
-        if not crews or not hd._crew(ctx.text):
+        if not hd._crew(ctx.text):
+            return
+        if not crews:
+            # "הם עובדים בחוץ, זה מה שאמרתי לך בבוקר" and nothing was ever saved (2026-10-07 12:56): kept for today
+            m = re.search(r"\S*(?:עובד|פועל|קבלן|גנן|חשמלא)\S*(?:\s+\S+){0,3}", ctx.text)
+            if m:
+                und.acts.append(Act(act="person_mark", quote=m.group(0), subject=m.group(0), repaired=True))
+                trace.append("restated people with no mark: kept for today")
             return
         events = sorted([e for e in (ctx.state.handles or {}).values() if isinstance(e, dict)
                          and e.get("kind") == "event" and 0 <= now - float(e.get("ts") or 0) <= 3600],
@@ -470,6 +477,8 @@ class AssistantV3(OwnerAgentV2):
 
     def _critique(self, turn: hd.Turn, draft: str, evidence: str, last: Sequence[str], usage: Dict[str, List[int]],
                   trace: List[str]) -> str:
+        if turn.plan.ask:
+            evidence += f"\nTHE PLAN REQUIRES THIS ONE QUESTION (it is correct to ask it): {turn.plan.ask['question']}"
         msg = self.critic.chat(critic_messages(prompts.CRITIC, turn.text, public_acts(turn.und, turn.cams), last,
                                                evidence, draft), None, json_schema=CRITIC_SCHEMA, max_tokens=200)
         spent = usage.setdefault("critic", [0, 0])
