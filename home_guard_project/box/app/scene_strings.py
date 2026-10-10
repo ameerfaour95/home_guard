@@ -33,6 +33,11 @@ TEXT = {
         start_over_question="Delete the map of {camera} and start over? The saved map stays until you save.",
         start_over_yes="Yes, start over",
         start_over_no="Keep the map",
+        beyond_question="Beyond the boundary, what you did not mark is:",
+        camera_off_title="This camera is off",
+        camera_off_hint="It is not watching or alerting now. You can map it anyway, ready for when it is switched "
+                        "back on.",
+        map_anyway="Map anyway",
 
         regions_hint="Tap a number on the picture or in the list, then choose whose it is.",
         grid_note="Automatic outlining was not available, so the picture was split into squares. "
@@ -94,7 +99,7 @@ TEXT = {
         line_cancel="Cancel",
         line_title="Boundary {number}",
         line_name_placeholder="Name (optional), e.g. the railing",
-        line_flip="The other side is ours",
+        line_flip="Flip side",
         line_empty="No boundaries yet.",
 
         count_mine="{count} ours",
@@ -187,6 +192,10 @@ TEXT = {
         start_over_question="למחוק את המפה של {camera} ולהתחיל מחדש? המפה השמורה תישאר עד שתשמרו.",
         start_over_yes="כן, להתחיל מחדש",
         start_over_no="להשאיר את המפה",
+        beyond_question="מה שמעבר לגבול ולא סימנתם הוא:",
+        camera_off_title="המצלמה כבויה",
+        camera_off_hint="היא לא צופה ולא מתריעה עכשיו. אפשר למפות אותה בכל זאת, כדי שתהיה מוכנה כשתדליקו אותה שוב.",
+        map_anyway="למפות בכל זאת",
 
         regions_hint="לחצו על מספר בתמונה או ברשימה, ובחרו של מי המקום.",
         grid_note="הסימון האוטומטי לא היה זמין, ולכן התמונה חולקה לריבועים. ענו על הריבועים שאתם מכירים.",
@@ -247,7 +256,7 @@ TEXT = {
         line_cancel="ביטול",
         line_title="קו גבול {number}",
         line_name_placeholder="שם (לא חובה), למשל המעקה",
-        line_flip="הצד השני שלנו",
+        line_flip="להפוך צד",
         line_empty="עוד אין קווי גבול.",
 
         count_mine="{count} שלנו",

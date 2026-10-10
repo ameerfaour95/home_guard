@@ -266,6 +266,26 @@ class AppCommandLineTest(unittest.TestCase):
         self.assertNotIn("from_old_name", data)
         self.assertEqual([a["name"] for a in data["current_map"]["areas"]], ["x"])
 
+    def test_the_apps_save_keeps_the_map_it_replaces_and_the_rest_beyond_the_boundary(self) -> None:
+        # The editor saves only through confirm --map-b64: confirm keeps the map it replaces (scene_maps_backup.json)
+        # before writing, so a cleaned-up map (duplicates merged) can always come back with "restore".
+        piled = self.app_map()
+        piled["areas"] = piled["areas"] + piled["areas"][:2]           # as the reopen bug left it
+        self.run_main("confirm", "--camera", "front", "--map-b64", b64z(piled), "--json", "--out", self.out)
+        self.assertEqual(len(sm.load_scene_map("front", self.zones).areas), 5)
+        cleaned = self.app_map(rest="watch_no_alert", rest_owner="neighbour")
+        code, _text, data = self.run_main("confirm", "--camera", "front", "--map-b64", b64z(cleaned), "--json",
+                                          "--out", self.out)
+        self.assertEqual(code, 0, data)
+        backup = si.previous_map("front", self.zones)
+        self.assertEqual(len(backup["scene"]["areas"]), 5)              # the piled-up map, kept
+        saved = sm.load_scene_map("front", self.zones)
+        self.assertEqual(len(saved.areas), 3)
+        self.assertEqual((saved.rest, saved.rest_owner), ("watch_no_alert", "neighbour"))
+        self.assertEqual((data["map"]["rest"], data["map"]["rest_owner"]), ("watch_no_alert", "neighbour"))
+        code, _text, data = self.run_main("restore", "--camera", "front", "--json", "--no-restart")
+        self.assertEqual((code, len(data["map"]["areas"])), (0, 5))
+
     def test_the_app_map_round_trips_through_from_dict_and_to_dict(self) -> None:
         data = self.app_map(rest="watch_no_alert", rest_owner="public")
         scene = sm.SceneMap.from_dict("front", data)

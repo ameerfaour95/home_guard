@@ -11,6 +11,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QAbstractButton, QApplication, QLabel, QLineEdit, QStackedWidget, QWidget
 
+from home_guard_project.box import scene_interview as si   # imported here: the box's side, never first in a worker
 from home_guard_project.box import scene_map as sm
 from home_guard_project.box.app import scene_editor as se
 from home_guard_project.box.app.scene_backend import DemoSceneBackend, SceneError
@@ -562,17 +563,17 @@ class SetupStepTest(HebrewApp):
         from home_guard_project.box.app.setup_pages import Page
         window = self.window([('front_ch1', True), ('back_ch2', True), ('off_ch3', False)])
         step = open_scene_step(window)
-        self.assertEqual(step.cameras, ['front_ch1', 'back_ch2'])          # switched-off cameras are not asked
+        self.assertEqual(step.cameras, ['front_ch1', 'back_ch2', 'off_ch3'])   # switched off: last, greyed
         self.assertTrue(window.next.isHidden())
-        self.assertEqual(step.progress.text(), st('setup_eyebrow', 'he', number=1, total=2))
+        self.assertEqual(step.progress.text(), st('setup_eyebrow', 'he', number=1, total=3))
         self.assertTrue(step.editor.back_button.isHidden())               # nothing before the first camera
         step.editor.skip_button.click()                                    # skip camera 1, even while it loads
         self.assertEqual(step.index, 1)
-        self.assertEqual(step.editor.title.text(), 'מצלמה 2 מתוך 2')          # the box named neither
+        self.assertEqual(step.editor.title.text(), 'מצלמה 2 מתוך 3')          # the box named neither
         self.assertFalse([t for t in texts(step) if 'front_ch1' in t or 'back_ch2' in t])
         step.skip_all.click()                                              # finish without maps
         self.assertEqual(window.pages_set, [Page.SUMMARY])
-        self.assertEqual(window.scene_states, {'front_ch1': SKIPPED, 'back_ch2': SKIPPED})
+        self.assertEqual(window.scene_states, {'front_ch1': SKIPPED, 'back_ch2': SKIPPED, 'off_ch3': SKIPPED})
 
     def test_save_and_next_then_back(self) -> None:
         from home_guard_project.box.app.scene_setup_step import SAVED, SceneSetupStep
@@ -707,6 +708,173 @@ class CameraCardTest(HebrewApp):
         dialog.editor.primary.click()
         self.assertTrue(wait_until(lambda: page.zone_dialog is None))
         self.assertEqual(saved, [(CAMERA, [])])                           # confirm removed today's zone
+
+
+class BoxConfirm:
+    """The real box command line for confirm (``SceneBackend.confirm``: ``confirm --map-b64 ...``), its map
+    read back from the line exactly as the box reads it, and the box's answer shaped by the demo backend."""
+    def __init__(self, backend):
+        from home_guard_project.box.app.scene_backend import SceneBackend
+        self.lines, self.maps = [], []
+        self.demo = backend
+
+        def runner(line, **kw):
+            import json
+            self.lines.append(line)
+            scene = si.decode_map_b64(line[line.index('--map-b64') + 1])
+            self.maps.append(scene)
+            saved = DemoSceneBackend.confirm(self.demo, CAMERA, scene)
+            return SimpleNamespace(stdout=json.dumps({'camera': CAMERA, 'map': saved.map, 'restart_needed': False}) + '\n',
+                                   returncode=0)
+        box = SceneBackend(runner=runner, python='py')
+        backend.confirm = lambda camera, scene, restart=True: box.confirm(camera, scene, restart)
+
+
+def ch2_like():
+    import json
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fixtures', 'scene_map_ch2_duplicates.json')
+    with open(path, encoding='utf-8') as f:
+        return dict(json.load(f), camera=CAMERA)
+
+
+class ReopenedMapDetailsTest(Base):
+    """The ch2 bugs: duplicates cleaned on the next save, each line's side, what lies beyond the boundary."""
+    def test_a_map_with_near_duplicates_saves_only_its_places(self) -> None:
+        from home_guard_project.box.app import scene_model as model
+        backend = DemoSceneBackend(current=ch2_like())
+        box = BoxConfirm(backend)
+        editor = self.loaded(backend=backend)
+        self.assertEqual(len(editor.kept), 9)
+        self.assertEqual(editor.merged_note.text(), st('merged_note', 'he', count=8))
+        editor.primary.click(); editor.primary.click()
+        self.assertTrue(wait_until(lambda: editor.page == se.SAVED), (editor.page, editor.error_detail.text()))
+        sent = box.maps[-1]
+        self.assertEqual(len(sent['areas']), 9)                          # 17 on the box: 9 places go back
+        masks = [model.area_mask(a['points']) for a in sent['areas']]
+        self.assertLess(max(model.overlap(a, b) for i, a in enumerate(masks) for b in masks[i + 1:]), model.SAME_PLACE)
+        self.assertEqual([a['name'] for a in sent['areas']], [a['name'] for a in ch2_like()['areas'][8:]])
+        self.assertEqual(len(sent['lines']), 3)
+        self.assertEqual((sent['rest'], sent['rest_owner']), ('watch_no_alert', 'neighbour'))   # kept as it was
+        self.assertIn('--map-b64', box.lines[-1])                        # the one path that keeps a backup on the box
+        self.assertEqual(len(backend.maps[CAMERA]['areas']), 9)
+
+    def test_flip_side_on_a_reopened_map_saves_the_other_side(self) -> None:
+        backend = DemoSceneBackend(current=ch2_like())
+        box = BoxConfirm(backend)
+        editor = self.loaded(backend=backend)
+        self.assertEqual(len(editor.kept_flips), 3)                      # each line, on the saved map's tab
+        self.assertFalse(editor.kept_lines.isHidden())
+        self.assertEqual(editor.kept_flips[0].text(), 'להפוך צד')
+        self.assertEqual(editor.stage.mode, 'kept')
+        before = [ln.inward for ln in editor.lines]
+        editor.kept_flips[0].click()
+        editor.line_rows[2].flip.click()                                # the same button in the Lines tab
+        editor.tabs.select(se.REGIONS); editor.tab_changed(se.REGIONS)
+        editor.primary.click(); editor.primary.click()
+        self.assertTrue(wait_until(lambda: editor.page == se.SAVED))
+        other = {'left': 'right', 'right': 'left'}
+        self.assertEqual([ln['inward'] for ln in box.maps[-1]['lines']], [other[before[0]], before[1], other[before[2]]])
+        self.assertEqual(box.maps[-1]['lines'][0]['a'], [0.557, 1.0])
+
+    def test_beyond_the_boundary_is_the_neighbours_saves_rest_and_owner(self) -> None:
+        backend = DemoSceneBackend(names=NAMED)
+        box = BoxConfirm(backend)
+        editor = self.loaded(backend=backend)
+        editor.region_rows[1].choices.buttons['mine'].click()
+        editor.add_line(se.boundary_toward((.16, .47), (.86, .47), (.5, .75), 'המעקה'))
+        editor.primary.click()
+        self.assertFalse(editor.beyond_card.isHidden())
+        self.assertEqual([b.text() for b in editor.beyond_buttons.values()], ['של השכן', 'רחוב', 'לא יודע'])
+        self.assertFalse(any(b.isChecked() for b in editor.beyond_buttons.values()))    # nothing said yet
+        self.assertNotIn('rest', editor.pending_map)
+        editor.beyond_buttons['neighbour'].click()
+        self.assertTrue(editor.beyond_buttons['neighbour'].isChecked())
+        self.assertEqual(editor.rest_label.text(), st('rest_neighbour', 'he'))
+        editor.primary.click()
+        self.assertTrue(wait_until(lambda: editor.page == se.SAVED))
+        sent = box.maps[-1]
+        self.assertEqual({k: sent[k] for k in ('rest', 'rest_owner')}, {'rest': 'watch_no_alert', 'rest_owner': 'neighbour'})
+        again = sm.SceneMap.from_dict(CAMERA, sent).to_dict()           # the fields the box already has
+        self.assertEqual((again['rest'], again['rest_owner']), ('watch_no_alert', 'neighbour'))
+        self.assertEqual((backend.maps[CAMERA]['rest'], backend.maps[CAMERA]['rest_owner']), ('watch_no_alert', 'neighbour'))
+        # Reopened: the question shows the camera's answer, and keeps it unless the owner says otherwise.
+        reopened = self.loaded(backend=backend)
+        reopened.primary.click()
+        self.assertTrue(reopened.beyond_buttons['neighbour'].isChecked())
+        self.assertEqual((reopened.pending_map['rest'], reopened.pending_map['rest_owner']), ('watch_no_alert', 'neighbour'))
+        reopened.beyond_buttons['public'].click()
+        self.assertEqual((reopened.pending_map['rest'], reopened.pending_map['rest_owner']), ('watch_no_alert', 'public'))
+        reopened.beyond_buttons['unknown'].click()
+        self.assertNotIn('rest', reopened.pending_map)                  # not known: watched as today
+        self.assertEqual(reopened.rest_label.text(), st('rest_unmapped', 'he'))
+
+    def test_no_boundary_no_question_and_the_rest_stays(self) -> None:
+        current = {'camera': CAMERA, 'areas': [{'name': 'x', 'kind': 'mine', 'zone': 'yard',
+                                                'points': [[0, 0], [.5, 0], [.5, .5]]}],
+                   'lines': [], 'rest': 'watch_no_alert', 'rest_owner': 'public'}
+        editor = self.loaded(backend=DemoSceneBackend(current=current))
+        editor.primary.click()
+        self.assertTrue(editor.beyond_card.isHidden())
+        self.assertEqual((editor.pending_map['rest'], editor.pending_map['rest_owner']), ('watch_no_alert', 'public'))
+        self.assertTrue(editor.kept_lines.isHidden())
+
+
+class CameraOffTest(HebrewApp):
+    """A camera switched off is greyed, says so, and is mapped only on "map anyway"; it never blocks setup."""
+    def test_setup_lists_it_last_greyed_and_never_waits_for_it(self) -> None:
+        from home_guard_project.box.app.scene_setup_step import SKIPPED, SceneSetupStep
+        backend = DemoSceneBackend(names=NAMED)
+        step = SceneSetupStep(backend, ['front_ch1', CAMERA], off={CAMERA})
+        step.resize(1300, 720); step.show()
+        self.addCleanup(lambda: (step.editor.close_jobs(), step.deleteLater()))
+        self.assertTrue(wait_until(lambda: step.editor.page == se.EDIT))
+        self.assertEqual(step.dots.off, [False, True])
+        step.editor.skip_button.click()
+        editor = step.editor
+        self.assertEqual(editor.page, se.OFF)
+        self.assertEqual(editor.stage.off_text, 'המצלמה כבויה')
+        self.assertEqual(editor.primary.text(), 'למפות בכל זאת')
+        self.assertFalse(editor.skip_button.isHidden())
+        self.assertEqual(backend.calls.count('propose'), 1)              # the box is not asked about it
+        self.assertFalse([t for t in texts(step) if CAMERA in t or 'front_ch1' in t])
+        editor.primary.click()                                           # map anyway
+        self.assertTrue(wait_until(lambda: editor.page == se.EDIT))
+        self.assertEqual(editor.stage.off_text, '')
+        self.assertEqual(backend.calls.count('propose'), 2)
+        states = []
+        step.finished.connect(states.append)
+        step.skip_all.click()
+        self.assertEqual(states, [{'front_ch1': SKIPPED, CAMERA: SKIPPED}])
+
+    def test_the_map_step_takes_switched_off_cameras_too(self) -> None:
+        from home_guard_project.box.app.scene_setup_step import SKIPPED, open_scene_step
+        from home_guard_project.box.app.setup_pages import Page
+        window = SetupStepTest.window(self, [('front_ch1', True), ('off_ch3', False), ('back_ch2', True)])
+        step = open_scene_step(window)
+        self.assertEqual(step.cameras, ['front_ch1', 'back_ch2', 'off_ch3'])   # the switched-off camera last
+        self.assertEqual(step.off, {'off_ch3'})
+        step.editor.skip_button.click(); step.editor.skip_button.click()
+        self.assertEqual(step.editor.page, se.OFF)
+        step.editor.skip_button.click()                                   # skipping it finishes the step
+        self.assertEqual(window.pages_set, [Page.SUMMARY])
+        self.assertEqual(window.scene_states, {'front_ch1': SKIPPED, 'back_ch2': SKIPPED, 'off_ch3': SKIPPED})
+
+    def test_from_the_camera_card(self) -> None:
+        from dataclasses import replace
+        from home_guard_project.box.app.box_controls import BoxControls
+        from home_guard_project.box.app.camera_controls import CameraControls
+        from home_guard_project.box.app.camera_ui import CameraPage
+        page = CameraPage(CameraControls(BoxControls(demo=True), [CAMERA]), lambda: None)
+        page.widget.resize(1200, 650); page.widget.show()
+        self.addCleanup(lambda: (page.close(), page.widget.deleteLater()))
+        page.render(page.load_photos())
+        page.controls.records = [replace(c, enabled=False) for c in page.controls.records]
+        page.zone_widgets[CAMERA][0].click()
+        dialog = page.zone_dialog
+        self.assertEqual(dialog.editor.page, se.OFF)
+        self.assertEqual(dialog.editor.primary.text(), 'למפות בכל זאת')
+        dialog.editor.primary.click()
+        self.assertTrue(wait_until(lambda: dialog.editor.page == se.EDIT))
 
 
 if __name__ == '__main__':

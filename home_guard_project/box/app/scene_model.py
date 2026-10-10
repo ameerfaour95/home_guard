@@ -293,23 +293,57 @@ def rest_after(current, scene):
     return "unmapped"
 
 
-def polygon_key(points):
-    """An outline as the box compares it: its corners rounded to DECIMALS."""
-    return tuple((round(float(x), DECIMALS), round(float(y), DECIMALS)) for x, y in points or ())
+MASK = 200                     # cells per side of the picture when two outlines are compared
+SAME_PLACE = .85               # outlines overlapping at least this much (IoU) are one place
 
 
-def unique_areas(areas):
-    """*areas* with the ones on the very same outline (``polygon_key``) collapsed into one, the last one's kind and
-    name kept (saving a reopened map used to add the answers on top of the saved areas); and how many were merged."""
-    last = {}
-    for i, area in enumerate(areas):
-        last[polygon_key(area.get("points"))] = i
-    kept = [a for i, a in enumerate(areas) if last[polygon_key(a.get("points"))] == i]
-    return kept, len(areas) - len(kept)
+def area_mask(points, size=MASK):
+    """The outline filled on a *size* x *size* grid of the picture: ``{row: bits}``, a cell set when its centre is
+    inside (even-odd, as the box draws polygons). Plain Python, so the app needs nothing new."""
+    points = [(float(x), float(y)) for x, y in points or ()]
+    if len(points) < 3:
+        return {}
+    rows = {}
+    n = len(points)
+    ys = [y for _x, y in points]
+    for row in range(max(0, int(min(ys) * size) - 1), min(size, int(max(ys) * size) + 2)):
+        y = (row + .5) / size
+        xs = sorted(x1 + (y - y1) * (x2 - x1) / (y2 - y1)
+                    for (x1, y1), (x2, y2) in ((points[i], points[(i + 1) % n]) for i in range(n))
+                    if (y1 <= y) != (y2 <= y))
+        bits = 0
+        for a, b in zip(xs[0::2], xs[1::2]):
+            first, last = max(0, math.ceil(a * size - .5)), min(size - 1, math.floor(b * size - .5))
+            if last >= first:
+                bits |= (1 << (last + 1)) - (1 << first)
+        if bits:
+            rows[row] = bits
+    return rows
+
+
+def overlap(a, b):
+    """How much two filled outlines (``area_mask``) are one place: intersection over union, 0 to 1."""
+    inter = sum((bits & b.get(row, 0)).bit_count() for row, bits in a.items())
+    union = sum(v.bit_count() for v in a.values()) + sum(v.bit_count() for v in b.values()) - inter
+    return inter / union if union else 0.
+
+
+def unique_areas(areas, same=SAME_PLACE):
+    """*areas* with repeats of one place collapsed: outlines overlapping by *same* (IoU) or more are one place, and
+    the LAST of them (the latest save) is kept, at its own position, with its kind and name. Saving a reopened map
+    used to add the answers on top of the saved areas, from a new picture, so the repeats are near, not exact
+    (ch2, 2026-10-10: 17 areas, 9 places). Returns (kept areas, how many were merged)."""
+    masks = [area_mask(a.get("points")) for a in areas]
+    kept = []
+    for i in range(len(areas) - 1, -1, -1):
+        if not any(overlap(masks[i], masks[j]) >= same for j in kept):
+            kept.append(i)
+    kept.reverse()
+    return [areas[i] for i in kept], len(areas) - len(kept)
 
 
 def merged_duplicates(current):
-    """How many of the camera's stored areas repeat another one's outline (``from_current`` merges them)."""
+    """How many of the camera's stored areas repeat another one's place (``from_current`` merges them)."""
     return unique_areas([a for a in (current or {}).get("areas") or () if choice_of(a)])[1]
 
 
@@ -333,7 +367,7 @@ def owner_name(hand):
 
 
 def from_current(current):
-    """The camera's map now as editable areas and lines: its stored areas (repeats of one outline merged, see
+    """The camera's map now as editable areas and lines: its stored areas (repeats of one place merged, see
     ``unique_areas``), and today's watch zone as an area of ours (``confirm`` keeps it as one)."""
     current = current or {}
     stored, _merged = unique_areas([a for a in current.get("areas") or () if choice_of(a)])

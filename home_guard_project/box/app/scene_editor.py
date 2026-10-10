@@ -38,9 +38,10 @@ from .zone_editor import ZonePill, alpha, colors, polygon_path
 
 PANEL_WIDTH = 420
 COMPACT_BELOW = 700             # px of editor height: below it the answer cards go compact
-LOADING, EDIT, SUMMARY, SAVED, ERROR = range(5)
+LOADING, EDIT, SUMMARY, SAVED, ERROR, OFF = range(6)
 REGIONS, DRAW, LINES = range(3)
 KEPT_PAGE = 3                    # the first tab's page while the camera's saved map is shown
+BEYOND = ("neighbour", "public", "unknown")      # what lies beyond the boundary, unmarked: the summary's question
 HANDLE = 12                      # px: how close a click must be to a corner or a line
 
 
@@ -147,6 +148,7 @@ class MapStage(QWidget):
         self.walls = []                    # (Boundary, sure) along the places answered "it is the boundary"
         self.rest = None
         self.muted = False                 # the card's old photo behind an error: not the box's own picture
+        self.off_text = ""                 # "this camera is off", over the greyed picture
         self.mode = "view"
         self.selected_region = 0
         self.selected_hand = -1
@@ -434,6 +436,8 @@ class MapStage(QWidget):
             p.restore()
             self.paint_numbers(p, t)
             self.paint_kept_names(p, t)
+        if self.off_text:
+            self.paint_off(p, core, t)
         if self.veil > 0:
             self.paint_veil(p, core, t)
         p.setClipping(False); p.setBrush(Qt.BrushStyle.NoBrush); p.setPen(QPen(alpha(t['text'], .1), 1))
@@ -589,7 +593,7 @@ class MapStage(QWidget):
         for i, line in enumerate(self.lines):
             selected = i == self.selected_line and self.mode == "line"
             colour = QColor(t['action'] if selected else '#ffffff')
-            p.setOpacity(1. if self.mode in ("line", "view") else .7)
+            p.setOpacity(1. if self.mode in ("line", "view", "kept") else .7)
             a, b = self.to_stage(line.a), self.to_stage(line.b)
             for pen_colour, width in ((alpha('#000000', .55), 8), (colour, 3.5)):
                 p.setPen(QPen(pen_colour, width, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)); p.drawLine(a, b)
@@ -683,6 +687,16 @@ class MapStage(QWidget):
             p.drawText(QRectF(centre.x() - radius, centre.y() - radius, radius * 2, radius * 2),
                        Qt.AlignmentFlag.AlignCenter, str(region.number))
         p.setOpacity(1.)
+
+    def paint_off(self, p, core, t):
+        """The camera is switched off: its picture greyed, and a quiet pill saying so."""
+        p.fillRect(core, alpha(t['bg'], .45))
+        p.setLayoutDirection(self.text_direction)
+        font = QFont(self.font()); font.setPixelSize(16); font.setWeight(QFont.Weight.DemiBold); p.setFont(font)
+        width = p.fontMetrics().horizontalAdvance(self.off_text) + 40
+        box = QRectF(core.center().x() - width / 2, core.center().y() - 20, width, 40)
+        p.setPen(QPen(alpha(t['text'], .2), 1)); p.setBrush(alpha(t['bg'], .9)); p.drawRoundedRect(box, 20, 20)
+        p.setPen(QColor(t['secondary'])); p.drawText(box, Qt.AlignmentFlag.AlignCenter, self.off_text)
 
     def paint_veil(self, p, core, t):
         p.setLayoutDirection(self.text_direction)
@@ -1286,9 +1300,10 @@ class SceneMapEditor(QWidget):
     name_changed = Signal(str)
 
     def __init__(self, backend, camera, lang=None, setup=None, placeholder=None, parent=None, name="",
-                 position=None):
+                 position=None, off=False):
         super().__init__(parent)
         self.backend, self.camera = backend, camera
+        self.off = off                    # switched off on the box: greyed, mapped only on "map anyway"
         self.lang = lang or language()
         self.setup = setup
         self.position = position or setup
@@ -1303,6 +1318,7 @@ class SceneMapEditor(QWidget):
         self.kept, self.kept_rows = [], []  # the saved map's areas, while it is shown
         self.kept_view = False
         self.started_over = False         # "Start over" dropped the saved map here (not on the box)
+        self.beyond = None                # the owner's answer to "beyond the boundary is...": None keeps the rest
         self.labels = {}                  # where each numbered place's number sits
         self.merged = 0                   # stored areas that repeated another one's outline
         self.from_old_name = False        # the saved map was found under the camera's old id
@@ -1374,6 +1390,7 @@ class SceneMapEditor(QWidget):
         self.pages.addWidget(scrolling(self.build_summary(t)))
         self.pages.addWidget(scrolling(self.build_saved(t)))
         self.pages.addWidget(scrolling(self.build_error(t)))
+        self.pages.addWidget(scrolling(self.build_off(t)))
         self.count_line = words('', 'count'); side.addWidget(self.count_line)
         footer = QHBoxLayout(); footer.setSpacing(10)
         self.back_button = ZonePill(st('setup_back' if setup else 'cancel', self.lang))
@@ -1491,6 +1508,9 @@ class SceneMapEditor(QWidget):
         self.moved_note = words(st('moved_note', self.lang), 'note'); self.moved_note.hide(); col.addWidget(self.moved_note)
         self.kept_hint = words(st('kept_hint', self.lang), 'body'); col.addWidget(self.kept_hint)
         self.kept_scroll, self.kept_column = scroll_list(); col.addWidget(self.kept_scroll, 1)
+        self.kept_lines = clear(QWidget()); self.kept_lines_layout = QVBoxLayout(self.kept_lines)
+        self.kept_lines_layout.setContentsMargins(0, 0, 0, 0); self.kept_lines_layout.setSpacing(4)
+        col.addWidget(self.kept_lines)
         over = QHBoxLayout(); over.setSpacing(8)
         self.start_over_button = TextAction(st('start_over', self.lang), 'warning')
         self.start_over_button.clicked.connect(self.ask_start_over)
@@ -1534,6 +1554,30 @@ class SceneMapEditor(QWidget):
             tile = CountTile(key if key != 'lines' else None, st('tile_' + key, self.lang))
             grid.addWidget(tile, i // 2, i % 2); self.tiles[key] = tile
         lay.addLayout(grid)
+        self.beyond_card = QFrame(); self.beyond_card.setObjectName('sceneBeyond')
+        self.beyond_card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.beyond_card.setStyleSheet(
+            f'QFrame#sceneBeyond {{ background: {t["surface"]}; border: 1px solid {t["border"]}; border-radius: 12px; }}'
+            f'QFrame#sceneBeyond QLabel {{ background: transparent; }}')
+        card = QVBoxLayout(self.beyond_card); card.setContentsMargins(12, 10, 12, 12); card.setSpacing(8)
+        question = words(st('beyond_question', self.lang), 'body')
+        question.setStyleSheet(f'color: {t["text"]}; font-size: 10.5pt; font-weight: 600;')
+        card.addWidget(question)
+        row = QHBoxLayout(); row.setSpacing(8)
+        self.beyond_buttons = {}
+        for key in BEYOND:
+            button = QPushButton(st('choice_' + key, self.lang)); button.setCheckable(True)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            edge = COLOURS.get(key, t['border'])
+            button.setStyleSheet(f'QPushButton {{ background: {t["raised"]}; color: {t["text"]}; border: 1px solid {t["border"]}; '
+                                 f'border-radius: 12px; padding: 8px 10px; font-size: 10.5pt; font-weight: 600; }}'
+                                 f'QPushButton:checked {{ border: 2px solid {edge if key != "unknown" else t["action"]}; '
+                                 f'background: {rgba(edge if key != "unknown" else t["action"], .16)}; }}')
+            button.setFixedHeight(38)
+            button.clicked.connect(lambda checked=False, key=key: self.answer_beyond(key))
+            row.addWidget(button, 1); self.beyond_buttons[key] = button
+        card.addLayout(row)
+        lay.addWidget(self.beyond_card)
         self.rest_label = words('', 'body'); lay.addWidget(self.rest_label)
         self.left_out_label = words('', 'note'); lay.addWidget(self.left_out_label)
         self.walls_label = words('', 'note'); lay.addWidget(self.walls_label)
@@ -1554,6 +1598,13 @@ class SceneMapEditor(QWidget):
         lay.addStretch(1)
         return page
 
+    def build_off(self, t):
+        page = QWidget(); lay = QVBoxLayout(page); lay.setContentsMargins(0, 8, 0, 0); lay.setSpacing(12)
+        lay.addWidget(words(st('camera_off_title', self.lang), 'heading'))
+        lay.addWidget(words(st('camera_off_hint', self.lang), 'body'))
+        lay.addStretch(1)
+        return page
+
     def build_error(self, t):
         page = QWidget(); lay = QVBoxLayout(page); lay.setContentsMargins(0, 8, 0, 0); lay.setSpacing(12)
         lay.addWidget(words(st('error_title', self.lang), 'heading'))
@@ -1569,7 +1620,13 @@ class SceneMapEditor(QWidget):
 
     # --- flow --------------------------------------------------------------
     def start(self):
-        """Ask the box for the numbered picture (FastSAM can take seconds)."""
+        """Ask the box for the numbered picture (FastSAM can take seconds); a camera that is off waits for "map
+        anyway" (it may be switched back on)."""
+        if self.off:
+            self.stage.off_text = st('camera_off_title', self.lang); self.stage.update()
+            self.show_page(OFF)
+            return
+        self.stage.off_text = ''; self.stage.update()
         self.show_page(LOADING)
         self.stage.set_loading(st('loading_title', self.lang), st('loading_hint', self.lang))
         self.retry = self.start
@@ -1607,6 +1664,7 @@ class SceneMapEditor(QWidget):
         # A camera that has a map opens on it; the numbered places are for a camera without one (or Start over).
         self.kept_view = has_saved_map(self.current)
         self.started_over = False
+        self.beyond = None
         self.kept, self.hands = (areas, []) if self.kept_view else ([], areas)
         self.merged = merged_duplicates(self.current) if self.kept_view else 0
         self.from_old_name = self.kept_view and bool(getattr(proposal, 'from_old_name', False))
@@ -1619,6 +1677,7 @@ class SceneMapEditor(QWidget):
         self.build_kept_rows()
         self.build_hand_rows()
         self.build_line_rows()
+        self.build_kept_lines()
         self.refresh_walls()
         self.show_kept_notes()
         self.show_page(EDIT)
@@ -1660,17 +1719,23 @@ class SceneMapEditor(QWidget):
             last = setup and self.setup[0] >= self.setup[1]
             self.primary.setText(st('finish' if last else 'next_camera', self.lang) if setup else st('done', self.lang))
             self.primary.setEnabled(True)
-        elif page == ERROR:
-            self.primary.setText(st('try_again', self.lang)); self.primary.setEnabled(True)
+        elif page in (ERROR, OFF):
+            self.primary.setText(st('try_again' if page == ERROR else 'map_anyway', self.lang)); self.primary.setEnabled(True)
             self.back_button.setText(st('setup_back' if setup else 'cancel', self.lang))
         self.back_button.setVisible(page != SAVED and (setup and self.setup[0] > 1 or not setup or page == SUMMARY))
-        self.skip_button.setVisible(setup and page in (LOADING, EDIT, ERROR))
+        self.skip_button.setVisible(setup and page in (LOADING, EDIT, ERROR, OFF))
         self.show_previous()
         self.stage.set_mode(self.stage_mode(self.tabs.index) if page == EDIT else 'view')
         self.refresh_counts()
 
+    def map_anyway(self):
+        self.off = False
+        self.start()
+
     def primary_clicked(self):
-        if self.page == EDIT:
+        if self.page == OFF:
+            self.map_anyway()
+        elif self.page == EDIT:
             self.open_summary()
         elif self.page == SUMMARY:
             self.save()
@@ -1776,9 +1841,28 @@ class SceneMapEditor(QWidget):
         if self.started_over:
             rest, owner = '', ''
         walls = [line for _n, line, sure, _w in self.walls() if sure]
+        if (self.lines or walls) and self.beyond:
+            # Only the owner's own answer changes it: beyond the boundary is the neighbour's or the street
+            # (seen, no routine alerts), or not known (watched as today).
+            from ..scene_map import WATCH
+            rest, owner = ('', '') if self.beyond == 'unknown' else (WATCH, self.beyond)
         regions = () if self.kept_view else self.regions
         return build_map(self.camera, regions, self.answers, self.names, self.kept + self.hands, self.lines + walls,
                          rest=rest, rest_owner=owner)
+
+    def beyond_now(self):
+        """The answer the question shows: the owner's, else what the camera's rest is now (None: not said)."""
+        if self.beyond:
+            return self.beyond
+        from ..scene_map import PUBLIC, WATCH
+        if self.started_over or self.current.get('rest') != WATCH:
+            return None
+        owner = self.current.get('rest_owner') or PUBLIC
+        return owner if owner in BEYOND else None
+
+    def answer_beyond(self, key):
+        self.beyond = key
+        self.open_summary()
 
     def refresh_walls(self):
         """The boundary places' lines on the picture, and "which side is ours?" in each row that needs it."""
@@ -1817,6 +1901,10 @@ class SceneMapEditor(QWidget):
         c = counts(scene)
         for key, tile in self.tiles.items():
             tile.set_count(c[key])
+        self.beyond_card.setVisible(bool(scene['lines']))
+        shown = self.beyond_now()
+        for key, button in self.beyond_buttons.items():
+            button.setChecked(key == shown)
         rest = rest_after(self.current, scene)
         self.rest_label.setText(st('rest_' + rest, self.lang))
         self.stage.rest = rest if rest in COLOURS else None
@@ -1942,6 +2030,30 @@ class SceneMapEditor(QWidget):
         self.stage.set_kept(self.kept, self.kept_titles())
         self.refresh_counts()
 
+    def build_kept_lines(self):
+        """Under the saved areas: each boundary line, the arrow on the picture pointing to our side, and "flip
+        side" when the arrow is wrong."""
+        while self.kept_lines_layout.count():
+            item = self.kept_lines_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+            elif item.layout():
+                while item.layout().count():
+                    child = item.layout().takeAt(0)
+                    if child.widget():
+                        child.widget().deleteLater()
+        self.kept_flips = []
+        for i, line in enumerate(self.lines if self.kept_view else ()):
+            row = QHBoxLayout(); row.setSpacing(8)
+            row.addWidget(Badge(line=True))
+            row.addWidget(words(line.name if line.name and line.name != 'line' else st('line_title', self.lang, number=i + 1),
+                                'body', wrap=False), 1)
+            flip = TextAction(st('line_flip', self.lang)); flip.clicked.connect(lambda checked=False, i=i: self.flip_line(i))
+            row.addWidget(flip); self.kept_flips.append(flip)
+            self.kept_lines_layout.addLayout(row)
+        self.kept_lines.setVisible(bool(self.kept_flips))
+        align_labels(self.kept_lines)
+
     def select_kept(self, index):
         if self.page != EDIT or not self.kept_view:
             return
@@ -1985,6 +2097,7 @@ class SceneMapEditor(QWidget):
         self.lines = []
         self.hands = from_current({'watched': self.current.get('watched')})[0]
         self.started_over = True          # the saved map's "rest of the picture" goes with it
+        self.beyond = None
         self.answers.clear(); self.names.clear(); self.sides.clear()
         self.stage.set_regions(self.regions, self.labels)
         self.stage.hands = self.hands; self.stage.lines = self.lines
@@ -1993,6 +2106,7 @@ class SceneMapEditor(QWidget):
         self.build_kept_rows()
         self.build_hand_rows()
         self.build_line_rows()
+        self.build_kept_lines()
         self.refresh_walls()
         self.show_kept_notes()
         first = REGIONS if self.regions else DRAW
@@ -2170,12 +2284,12 @@ class SceneMapEditor(QWidget):
 
     def flip_line(self, index):
         self.lines[index] = self.lines[index].flipped()
-        self.stage.update()
+        self.stage.update(); self.refresh_counts()
 
     def delete_line(self, index):
         del self.lines[index]
         self.stage.selected_line = -1
-        self.build_line_rows(); self.stage.update()
+        self.build_line_rows(); self.build_kept_lines(); self.stage.update()
 
     def line_draft_changed(self, message=''):
         placing = self.stage.line_draft is not None
@@ -2195,7 +2309,7 @@ class SceneMapEditor(QWidget):
     def add_line(self, line):
         self.lines.append(line)
         self.stage.line_draft = None
-        self.build_line_rows()
+        self.build_line_rows(); self.build_kept_lines()
         self.line_draft_changed()
         self.select_line(len(self.lines) - 1)
 
@@ -2247,7 +2361,8 @@ class SceneMapDialog(QDialog):
         height = min(room.height(), max(620, round(parent_size.height() * .93)))
         return QSize(width, height)
 
-    def __init__(self, backend, camera, lang=None, parent=None, start=True, placeholder=None, name="", position=None):
+    def __init__(self, backend, camera, lang=None, parent=None, start=True, placeholder=None, name="", position=None,
+                 off=False):
         super().__init__(parent)
         lang = lang or language()
         self.setModal(True)
@@ -2260,7 +2375,7 @@ class SceneMapDialog(QDialog):
         self.resize(self.opening_size(host, screen))
         layout = QVBoxLayout(self); layout.setContentsMargins(28, 26, 28, 26)
         self.editor = SceneMapEditor(backend, camera, lang, placeholder=placeholder, parent=self, name=name,
-                                     position=position)
+                                     position=position, off=off)
         layout.addWidget(self.editor)
         self.setWindowTitle(st('window_title', lang, camera=self.editor.name))
         self.editor.name_changed.connect(lambda n: self.setWindowTitle(st('window_title', lang, camera=n)))
@@ -2297,11 +2412,13 @@ def open_map_dialog(page, name, demo_state=None, display=''):
     box's name for it, when the page has it."""
     from .scene_backend import scene_backend_for
     photo = page.zone_widgets.get(name, (None, None, None))[2]
-    ids = [c.name for c in getattr(page.controls, 'records', [])]
+    records = list(getattr(page.controls, 'records', []))
+    ids = [c.name for c in records]
     position = (ids.index(name) + 1, len(ids)) if name in ids else None
+    off = any(c.name == name and not c.enabled for c in records)          # switched off: greyed, "map anyway"
     # The card knows only ids; the box names the camera in its first answer (propose), "מצלמה 2 מתוך 5" till then.
     dialog = SceneMapDialog(scene_backend_for(page.controls), name, parent=page.widget, start=demo_state is None,
-                            placeholder=getattr(photo, 'pix', None), position=position, name=display)
+                            placeholder=getattr(photo, 'pix', None), position=position, name=display, off=off)
     page.zone_dialog = dialog            # the camera page pauses its polling while a dialog is open
     dialog.saved.connect(lambda saved: page.zone_saved(name, []))     # confirm removes today's zone: whole picture
     if demo_state:
@@ -2320,8 +2437,8 @@ def open_map_dialog(page, name, demo_state=None, display=''):
 # Demo states, for screenshots and tests (``--scene STATE``)
 # ----------------------------------------------------------------------------
 DEMO_STATES = ('loading', 'regions', 'grid', 'wall', 'drawing', 'line', 'summary', 'saved', 'restored', 'error',
-               'saved-map', 'start-over-confirm', 'merged-duplicates', 'from-old-name')
-SAVED_MAP_STATES = DEMO_STATES[-4:]          # reopening a camera that has a map
+               'saved-map', 'start-over-confirm', 'merged-duplicates', 'from-old-name', 'beyond', 'camera-off')
+SAVED_MAP_STATES = DEMO_STATES[-6:-1]        # reopening a camera that has a map
 DEMO_ANSWERS = {1: ('mine', {'he': 'הדשא', 'en': 'the lawn'}), 2: ('neighbour', {'he': 'הבית של השכן', 'en': 'the house across'}),
                 3: ('mine', {'he': 'השביל', 'en': 'the driveway'}), 4: ('mine', {'he': '', 'en': ''}),
                 5: ('hide', {'he': '', 'en': ''})}
@@ -2354,6 +2471,11 @@ def demo_saved_map(backend, camera, lang, duplicates=0):
 def drive(editor, state):
     """Put a demo editor straight into *state*, synchronously (the demo backend needs no box)."""
     backend = editor.backend
+    if state == 'camera-off':
+        editor.off = True
+        editor.stage.set_picture(picture_pixmap(backend.picture(editor.camera)))
+        editor.start()
+        return
     if state in SAVED_MAP_STATES:
         from .scene_backend import Previous
         backend.maps.pop(editor.camera, None)
@@ -2362,6 +2484,8 @@ def drive(editor, state):
         editor.loaded(backend.propose(editor.camera), previous=Previous(True, 1791480000.))
         if state == 'start-over-confirm':
             editor.ask_start_over()
+        elif state == 'beyond':
+            editor.open_summary(); editor.answer_beyond('neighbour')
         return
     if state == 'loading':
         editor.show_page(LOADING)

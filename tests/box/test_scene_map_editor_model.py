@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import unittest
 from types import SimpleNamespace
 from unittest import mock
@@ -15,6 +16,13 @@ LAWN = ((0., .5), (.5, .5), (.5, 1.), (0., 1.))
 HOUSE = ((.5, .1), (1., .1), (1., .5), (.5, .5))
 STREET = ((0., 0.), (.5, 0.), (.5, .5), (0., .5))
 REGIONS = (model.Region(1, LAWN, .25), model.Region(2, HOUSE, .2), model.Region(3, STREET, .25))
+FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
+
+
+def ch2_like():
+    """A map shaped like the real ch2 after the reopen bug: 17 areas, 9 places, 3 lines."""
+    with open(os.path.join(FIXTURES, "scene_map_ch2_duplicates.json"), encoding="utf-8") as f:
+        return json.load(f)
 
 
 class BuildMapTest(unittest.TestCase):
@@ -82,23 +90,42 @@ class BuildMapTest(unittest.TestCase):
         self.assertEqual(scene["areas"][0]["zone"], "gate")                # a stored zone is kept
         self.assertEqual(scene["areas"][1]["name"], sm.WATCHED_NAME)
 
-    def test_repeats_of_one_outline_are_merged_keeping_the_last_answer(self) -> None:
-        # A reopened map saved with the answers on top of the saved areas: 8 places, 9 of them again.
-        def area(i, kind="mine", name=None):
-            x = i / 10
-            return {"name": name or f"area {i}", "kind": kind, "zone": "other",
-                    "points": [[x, .1], [x + .05, .1], [x + .05, .2 + 1e-6]]}
-        areas = ([area(i) for i in range(8)] + [area(i, "black", f"again {i}") for i in range(8)]
-                 + [area(2, "mine", "the gate")])
-        current = {"areas": areas, "lines": []}
-        self.assertEqual(model.merged_duplicates(current), 9)
-        hands, _lines = model.from_current(current)
-        self.assertEqual(len(hands), 8)
-        self.assertEqual([(h.choice, h.name) for h in hands],
-                         [("hide", f"again {i}") for i in (0, 1, 3, 4, 5, 6, 7)] + [("mine", "the gate")])
-        self.assertEqual(model.polygon_key([[.12341, .5]]), model.polygon_key([[.12344, .5]]))
-        self.assertNotEqual(model.polygon_key([[.1234, .5]]), model.polygon_key([[.1235, .5]]))
-        self.assertEqual(model.merged_duplicates({"areas": areas[:8]}), 0)
+    def test_repeats_of_one_place_are_merged_by_overlap_keeping_the_last(self) -> None:
+        # ch2 after the reopen bug (2026-10-10): 8 places saved, then 9 answered again from a new picture and saved
+        # on top: near repeats with other corner counts ("area 1" 17 corners vs 18, "fence" 10 vs 7).
+        current = ch2_like()
+        self.assertEqual(len(current["areas"]), 17)
+        self.assertEqual(model.merged_duplicates(current), 8)
+        hands, lines = model.from_current(current)
+        self.assertEqual(len(hands), 9)
+        second = current["areas"][8:]
+        self.assertEqual([(h.name, h.choice, h.zone) for h in hands],
+                         [(a["name"], model.choice_of(a), a["zone"]) for a in second])     # the last of each place
+        self.assertEqual([h.points for h in hands], [a["points"] for a in second])
+        self.assertEqual(len(lines), 3)
+        masks = [model.area_mask(h.points) for h in hands]
+        self.assertLess(max(model.overlap(a, b) for i, a in enumerate(masks) for b in masks[i + 1:]), model.SAME_PLACE)
+        # The near repeats really are near, not equal.
+        first = current["areas"][:8]
+        self.assertTrue(all(a["points"] != b["points"] for a, b in zip(first, second)))
+        self.assertEqual((len(first[0]["points"]), len(second[0]["points"])), (17, 18))
+        self.assertEqual(model.merged_duplicates({"areas": second}), 0)
+
+    def test_overlap_is_intersection_over_union_on_the_grid(self) -> None:
+        whole = model.area_mask([[0, 0], [1, 0], [1, 1], [0, 1]])
+        self.assertEqual(sum(v.bit_count() for v in whole.values()), model.MASK * model.MASK)
+        half = model.area_mask([[0, 0], [.5, 0], [.5, 1], [0, 1]])
+        self.assertAlmostEqual(model.overlap(whole, half), .5, places=2)
+        self.assertEqual(model.overlap(half, model.area_mask([[.5, 0], [1, 0], [1, 1], [.5, 1]])), 0.)
+        self.assertEqual(model.overlap(half, half), 1.)
+        # A small place inside a big one (the car on the driveway) is its own place.
+        car = [{"name": "car", "kind": "mine", "points": [[.4, .4], [.6, .4], [.6, .6], [.4, .6]]}]
+        drive = [{"name": "drive", "kind": "mine", "points": [[0, 0], [1, 0], [1, 1], [0, 1]]}]
+        self.assertEqual(model.unique_areas(drive + car), (drive + car, 0))
+        # Exactly the same outline twice: one place, the later one.
+        again = [dict(drive[0], name="again")]
+        self.assertEqual(model.unique_areas(drive + car + again), (car + again, 1))
+        self.assertEqual(model.area_mask([[0, 0], [1, 1]]), {})
 
     def test_a_saved_map_is_one_with_areas_or_lines_not_only_todays_zone(self) -> None:
         self.assertFalse(model.has_saved_map({}))

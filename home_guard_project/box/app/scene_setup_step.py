@@ -1,7 +1,8 @@
 """Setup's "the map of each camera" step: the scene map editor, camera by camera, after the camera check.
 
 It never blocks finishing setup: every camera can be skipped ("Skip for now"), and "Finish without maps" leaves
-at once. The window keeps one small hook (``Window.open_scene_step``); everything else lives here.
+at once. Cameras switched off come last, greyed ("this camera is off"), mapped only on "map anyway": one may be
+switched back on. The window keeps one small hook (``Window.open_scene_step``); everything else lives here.
 """
 from PySide6.QtCore import Qt, QRectF, Signal
 from PySide6.QtGui import QColor, QPainter
@@ -15,10 +16,12 @@ SAVED, SKIPPED = "saved", "skipped"
 
 
 class CameraDots(QWidget):
-    """One dot per camera: saved (filled), skipped (hollow), current (ringed)."""
-    def __init__(self, count, parent=None):
+    """One dot per camera: saved (filled), skipped (hollow), current (ringed); a camera that is off is a faint
+    dash."""
+    def __init__(self, count, parent=None, off=()):
         super().__init__(parent)
         self.states = [None] * count
+        self.off = list(off) or [False] * count
         self.current = 0
         self.setFixedSize(max(1, count) * 18, 18)
 
@@ -29,7 +32,10 @@ class CameraDots(QWidget):
         for i, state in enumerate(self.states):
             x = (len(self.states) - 1 - i) * 18 if rtl else i * 18
             box = QRectF(x + 3, 3, 12, 12)
-            if i == self.current:
+            if self.off[i] and i != self.current and state != SAVED:
+                p.setPen(Qt.PenStyle.NoPen); p.setBrush(alpha(t['muted'], .5))
+                p.drawRoundedRect(QRectF(x + 4, 8, 10, 2.5), 1.25, 1.25)
+            elif i == self.current:
                 p.setPen(QColor(t['action'])); p.setBrush(alpha(t['action'], .3)); p.drawEllipse(box)
             elif state == SAVED:
                 p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor(t['ok'])); p.drawEllipse(box)
@@ -42,10 +48,11 @@ class SceneSetupStep(QFrame):
     """``finished`` carries {camera: saved | skipped} (cameras never reached are missing)."""
     finished = Signal(dict)
 
-    def __init__(self, backend, cameras, lang=None, pictures=None, parent=None):
+    def __init__(self, backend, cameras, lang=None, pictures=None, parent=None, off=()):
         super().__init__(parent)
         self.backend = backend
         self.cameras = list(cameras)
+        self.off = {c for c in off if c in self.cameras}      # switched off: greyed, never in the way
         self.pictures = dict(pictures or {})
         self.names = {}                      # camera id -> the box's name for it (names --json)
         self.jobs = Jobs(self)
@@ -70,7 +77,7 @@ class SceneSetupStep(QFrame):
         head.addLayout(titles, 1)
         self.restore_slot = QHBoxLayout(); self.restore_slot.setContentsMargins(0, 0, 0, 0)
         head.addLayout(self.restore_slot)
-        self.dots = CameraDots(len(self.cameras)); head.addWidget(self.dots, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.dots = CameraDots(len(self.cameras), off=[c in self.off for c in self.cameras]); head.addWidget(self.dots, 0, Qt.AlignmentFlag.AlignVCenter)
         self.skip_all = TextAction(st('setup_skip_all', self.lang)); head.addWidget(self.skip_all, 0, Qt.AlignmentFlag.AlignVCenter)
         self.skip_all.clicked.connect(self.skip_everything)
         root.addLayout(head)
@@ -103,7 +110,8 @@ class SceneSetupStep(QFrame):
         self.index = index
         camera = self.cameras[index]
         self.editor = SceneMapEditor(self.backend, camera, self.lang, setup=(index + 1, len(self.cameras)),
-                                     placeholder=self.pictures.get(camera), name=self.names.get(camera, ''))
+                                     placeholder=self.pictures.get(camera), name=self.names.get(camera, ''),
+                                     off=camera in self.off)
         self.editor.finished.connect(self.camera_finished)
         self.editor.name_changed.connect(lambda name: self.show_progress())
         self.body.addWidget(self.editor)
@@ -143,11 +151,13 @@ class SceneSetupStep(QFrame):
 
 
 def setup_cameras(window):
-    """The cameras the check left switched on (their ids; the editor shows their names), with the check's photos
-    (shown while the box numbers each picture)."""
+    """The cameras (their ids; the editor shows their names): the ones the check left switched on, then the ones
+    switched off (``cameras.yaml`` ``disabled:``); the check's photos (shown while the box numbers each picture);
+    and the ids that are off."""
     from PySide6.QtGui import QPixmap
     controls = window.wizard_cameras.controls
-    records = [c for c in getattr(controls, 'records', []) if c.enabled]
+    records = list(getattr(controls, 'records', []))
+    records = [c for c in records if c.enabled] + [c for c in records if not c.enabled]
     pictures = {}
     for i, camera in enumerate(records):
         if window.args.demo:
@@ -155,14 +165,16 @@ def setup_cameras(window):
             pictures[camera.name] = demo_picture(i)
         elif camera.ok and camera.file:
             pictures[camera.name] = QPixmap(camera.file)
-    return [c.name for c in records], pictures
+    return [c.name for c in records], pictures, {c.name for c in records if not c.enabled}
 
 
 def open_scene_step(window, demo_state=None):
     """Show the step after the camera check; with no cameras, go straight on to the summary."""
     from .setup_pages import Page
-    cameras, pictures = setup_cameras(window)
-    if not cameras:
+    cameras, pictures, off = setup_cameras(window)
+    if demo_state == 'camera-off' and cameras:
+        off = off | {cameras[-1]}                 # the demo's cameras are all on: show the last one off
+    if len(off) >= len(cameras):                 # nothing switched on: nothing to map now, never a stop
         window.set_page(Page.SUMMARY)
         return None
     if window.args.demo:
@@ -174,8 +186,14 @@ def open_scene_step(window, demo_state=None):
     old = getattr(window, 'scene_step', None)
     if old is not None:
         window.pages.removeWidget(old); old.deleteLater()
-    step = SceneSetupStep(backend, cameras, pictures=pictures)
-    if demo_state:
+    step = SceneSetupStep(backend, cameras, pictures=pictures, off=off)
+    if demo_state == 'camera-off':
+        step.show_camera(len(cameras) - 1, start=False)
+        for camera in cameras[:-1]:
+            step.states[camera] = SAVED
+        step.dots.states = [step.states.get(c) for c in cameras]; step.dots.update()
+        drive(step.editor, demo_state)
+    elif demo_state:
         step.show_camera(min(1, len(cameras) - 1), start=False)
         step.states[cameras[0]] = SAVED; step.dots.states[0] = SAVED; step.dots.update()
         drive(step.editor, demo_state)
