@@ -13,11 +13,13 @@ upstream_timeout_sec: 20
 deadline_sec: 27
 max_concurrent: 256
 aliases:
-  # The camera reports. Same order as the box today: Qwen3.5-9B, then Qwen3-VL-8B, then gpt-4o as a last resort.
+  # The camera reports. Same order as the box: Qwen3.7-Plus, then Qwen3.8-Omni-Flash (2026-10-09 migration: OpenRouter
+  # retires qwen3.5-9b on 2026-10-21), then Qwen3-VL-8B, then gpt-4o as a last resort.
   eye:
     kind: chat
     upstreams:
-      - {provider: openrouter, model: qwen/qwen3.5-9b}
+      - {provider: openrouter, model: qwen/qwen3.7-plus}
+      - {provider: openrouter, model: qwen/qwen3.8-omni-flash}
       - {provider: openrouter, model: qwen/qwen3-vl-8b-instruct}
       - {provider: openai, model: gpt-4o}
   gpt-4o:

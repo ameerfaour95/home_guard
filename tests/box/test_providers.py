@@ -20,6 +20,17 @@ class ProvidersTest(unittest.TestCase):
         self.assertIsNone(pv.resolve("openrouter", env, "qwen/qwen3-vl-8b-thinking")[2])
         self.assertEqual(pv.resolve("openrouter", env, "qwen/qwen3-vl-8b-instruct")[2], {"reasoning": {"enabled": False}, "usage": {"include": True}})
 
+    def test_a_model_that_must_reason_gets_its_own_extras(self) -> None:
+        env = {"OPENROUTER_API_KEY": "or-1"}
+        for model in ("google/gemini-3.8-flash", "google/gemini-3.5-flash-lite"):
+            extra = pv.resolve("openrouter", env, model)[2]
+            self.assertEqual(extra, {"reasoning": {"effort": "minimal"}, "usage": {"include": True}})
+            extra["reasoning"]["effort"] = "changed"                             # a copy, not the table's
+        self.assertEqual(pv.resolve("openrouter", env, "google/gemini-3.8-flash")[2],
+                         {"reasoning": {"effort": "minimal"}, "usage": {"include": True}})
+        self.assertEqual(pv.resolve("openrouter", env, "google/gemini-3.1-flash-lite")[2],
+                         {"reasoning": {"enabled": False}, "usage": {"include": True}})
+
     def test_ollama_needs_no_key_and_url_can_be_overridden(self) -> None:
         self.assertEqual(pv.resolve("ollama", {})[:2], ("ollama", "http://localhost:11434/v1"))
         self.assertEqual(pv.resolve("ollama", {"OLLAMA_BASE_URL": "http://gpu:11434/v1"})[1], "http://gpu:11434/v1")

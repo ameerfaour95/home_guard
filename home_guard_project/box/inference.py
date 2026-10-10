@@ -3415,6 +3415,12 @@ def run() -> int:
              + (f" -> {settings.vlm_fallback_model}" if settings.vlm_fallback_model else ""), settings.dry_run)
 
     backend = make_backend(settings, env)
+    try:
+        from .model_expiry import start_check  # noqa: PLC0415
+
+        start_check(box_settings)       # a WARNING when OpenRouter retires a model we use within 14 days
+    except Exception as exc:  # noqa: BLE001 - a guard never stops the box
+        log.info("Model expiry check not started: %s", exc)
     start_case_memory(box_settings, env)
     # A bare model name ("yolo11s.pt") is a file in the box's models folder; its OpenVINO copy is made next to it.
     model, device = load_detector(paths.resolve_model(settings.model), settings.device)

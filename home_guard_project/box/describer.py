@@ -18,7 +18,7 @@ touched. A SEPARATE call, the describer, runs only for clips that are SENT (a fe
   benchmark drew them (marks.py: outline + id chip, in each frame's own crop pixels; P1/CAR1 as the event's entities
   number them, entities.py);
 - a short strict-JSON prompt: one scene sentence, per id {appearance, action}, the reason;
-- qwen/qwen3.5-9b via OpenRouter within DEFAULT_TIMEOUT_SEC; its English goes through the translator (messenger.py,
+- qwen/qwen3.7-plus via OpenRouter within DEFAULT_TIMEOUT_SEC (qwen3.5-9b until OpenRouter retired it, 2026-10-21); its English goes through the translator (messenger.py,
   with the glossary).
 
 The benchmark measured per-person attribution for people at about 50%, so the describer must not invent: the prompt
@@ -46,7 +46,8 @@ log = logging.getLogger("box.describer")
 
 DESCRIBER_VERSION = "describer-1"
 DEFAULT_PROVIDER = "openrouter"
-DEFAULT_MODEL = "qwen/qwen3.5-9b"
+# 2026-10-09 replay of the 4 house alerts x 2: 8/8 ok, p50 4.4 s, max 7.1 s (qwen3.5-9b: 4.9 / 11.6 s), same ids kept.
+DEFAULT_MODEL = "qwen/qwen3.7-plus"
 DEFAULT_TIMEOUT_SEC = 15.0  # 2026-10-09: 9 of 10 answered in 2.9-10.3 s, one timed out at 12 s (21:34)
 TRANSLATE_TIMEOUT_SEC = 10.0   # 2026-10-09 replay: Gemini Flash Lite took over 6 s on 3 of 8 field sets
 MAX_FRAMES = 8           # of the Eye's frames, spread over those with marks: enough to see who does what, inside the budget
