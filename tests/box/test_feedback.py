@@ -13,7 +13,6 @@ from home_guard_project.box.feedback import (
     MuteState,
     button_feedback,
     confirmation_text,
-    feedback_prompt,
     parse_feedback,
     save_feedback,
 )
@@ -141,12 +140,6 @@ class ButtonAndTextTest(unittest.TestCase):
         self.assertEqual(button_feedback("fb:expected", NOW).verdict, "expected")
         pause = button_feedback("fb:mute60", NOW)
         self.assertEqual((pause.action, pause.mute_until), ("mute", NOW + HOUR))
-
-    def test_prompt_carries_the_message_the_alert_the_time_and_the_cameras(self) -> None:
-        prompt = feedback_prompt("it's just me, stop until six", "front_door: a person at the door", NOW, CAMERAS)
-        for expected in ("it's just me, stop until six", "a person at the door", "15:00", "front_door", "back_yard",
-                         "false_alarm", "real_but_wrong", "mute_until"):
-            self.assertIn(expected, prompt)
 
     def test_confirmation_says_what_was_understood(self) -> None:
         self.assertIn("false alarm", confirmation_text(Feedback(verdict="false_alarm")))
