@@ -37,6 +37,7 @@ class Plan:
     rows: List[Any] = field(default_factory=list)
     trace: List[str] = field(default_factory=list)
     cited: List[str] = field(default_factory=list)      # memory lines the writer may use for this turn
+    notes: List[str] = field(default_factory=list)      # how to phrase THIS turn (for the writer, never sent)
     long_ok: bool = False
     final: Optional[str] = None                         # a reply written by code that goes out as is (day story)
 
@@ -176,7 +177,10 @@ def person_mark(t: Turn, act: Act, until_words: str = "") -> None:
             cam_now = t.camera_now(str(recent[0].get("camera") or ""))
             if cam_now and not any(not k.get("camera") or str(k.get("camera")) == cam_now for k in same):
                 house_wide, camera = True, ""
-    words = until_words or ("" if (act.earlier and same) else act.until_quote)
+    from .acts import quoted  # noqa: PLC0415
+
+    # an hour from an EARLIER message with the same people already marked: widen, never a new window
+    words = until_words or ("" if (act.earlier and same and not quoted(act.until_quote, t.text)) else act.until_quote)
     until = parse_until(words, t.now) if words else None
     covered = [k for k in same if not k.get("camera") or str(k.get("camera")) == camera]
     if until is None and same:
@@ -204,7 +208,7 @@ def person_mark(t: Turn, act: Act, until_words: str = "") -> None:
         until = km.until_said_today(t.state, who, t.now)
     if until is None:
         where = f"ב{t.name(camera)}" if camera else "בכל הבית"
-        quiet = act.repaired or t.und.has("complaint") or t.und.emotion == "angry"
+        quiet = act.repaired or t.und.emotion == "angry"
         if quiet:
             # He is complaining or this repairs an earlier miss: no question now; kept for today, said as "today".
             end = dt.datetime.fromtimestamp(t.now).replace(hour=23, minute=59, second=0).timestamp()
@@ -220,8 +224,8 @@ def person_mark(t: Turn, act: Act, until_words: str = "") -> None:
                       "args": {"who": who, "camera": camera, "house": house_wide, "handle": handle,
                                "quote": act.quote[:200], "crew": crew}}
         t.outcome(entry, f"בעל הבית: אלה {who}")
-        t.did(f"שמעתי: {who} {where} הם אנשים שלו. עוד לא נשמר כלום (חסרה שעה). כתוב רק הד קצר כמו "
-              f"'אה, אלה {who}?' ואז את השאלה; אל תגיד שסימנת או שמרת.")
+        t.plan.notes.append(f"עוד לא נשמר כלום (חסרה שעה): כתוב הד קצר כמו 'אה, אלה {who}?' ואז את השאלה; אל "
+                            f"תגיד שסימנת או שמרת.")
         return
     daily_from = daily_to = ""
     span = until
@@ -393,7 +397,8 @@ def preference(t: Turn, act: Act) -> None:
     value = act.value or act.quote
     if value:
         t.mem.add_preference(value)
-        t.did(f"מעכשיו: {value} (אל תכתוב שזה 'נשמר'; תגיד רק מה ישתנה)")
+        t.did(f"מעכשיו: {value}")
+        t.plan.notes.append("תאשר במשפט קצר וטבעי מה ישתנה מעכשיו; בלי 'נשמר' ובלי להזכיר את הזיכרון.")
 
 
 def command(t: Turn, act: Act) -> None:
@@ -515,6 +520,11 @@ def prefetch(t: Turn) -> None:
         if not fresh_photo:
             cam = live.camera if live.camera and live.camera != "house" else ""
             t.box.run("look_now", {"camera": cam or "house"})
+        else:
+            # "?" right after a photo: the answer is what that photo showed (one look, kept on its handle)
+            t.plan.evidence.append(f"התמונה החיה מ-{hhmm(entry.get('ts'))} מ{t.name(t.camera_now(str(entry.get('camera') or '')))}"
+                                   f" (נשלחה לפני רגע): {entry.get('observation') or 'בלי תיאור'}")
+            t.plan.notes.append("ענה מהתמונה הזאת: מה רואים בה ואיפה. אל תגיד שלא בדקת.")
     for act in t.und.acts:
         if act.look_again:
             handle, entry = t.event_of(act)

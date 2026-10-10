@@ -136,11 +136,21 @@ class SupervisorTests(unittest.TestCase):
         dump = "אגב, העובדים של הפרגולה מסומנים עד יום ה׳."
         self.assertIn("memory_recital", self.check(dump, memory_subjects=[subject], owner_text="זה הבית של השכן",
                                                    act_kinds=["place_fact"]).reason())
+        self.assertIn("memory_recital", self.check("סגור, אשאל על העובדים בדרך אגב.", memory_subjects=[subject],
+                                                   owner_text="תשאל בדרך אגב", act_kinds=["preference"],
+                                                   strict_memory="single").reason())
         seen = "בפרגולה שלושה עובדים ליד הטריילר."
         self.assertTrue(self.check(seen, memory_subjects=[subject], owner_text="יש מישהו בחוץ?").ok)
 
     def test_an_unbacked_save_claim(self):
         self.assertIn("unbacked_claim", self.check("שמרתי את זה.", act_kinds=["preference"]).reason())
+        self.assertTrue(self.check("אני זוכר שבמצלמה 2 זה הבית של השכן.", act_kinds=["question_memory"]).ok)
+
+    def test_salvage_keeps_the_passing_sentences(self):
+        from home_guard_project.box.assistant_v3.agent import salvage
+
+        check = lambda text: self.check(text)  # noqa: E731
+        self.assertEqual(salvage("בפרגולה שלושה עובדים. הם עובדים עד 23:59.", check), "בפרגולה שלושה עובדים.")
 
     def test_sanitize(self):
         self.assertNotIn("E7", sv.sanitize("ההתראה (E7) נסגרה", [], "he"))
@@ -229,7 +239,7 @@ class TurnTests(unittest.TestCase):
             ec.V3.clear()
 
     def test_in_a_complaint_a_crew_with_no_hour_is_kept_for_today_without_a_question(self):
-        understand = acts_for({"אמרתי לך שהם עובדים פה": {"emotion": "angry", "acts": [
+        understand = acts_for({"אמרתי לך שהם עובדים פה": {"emotion": "angry", "acts": [  # angry: no question
             act("complaint", quote="אמרתי לך", issue="ignored_memory"),
             act("person_mark", quote="שהם עובדים פה", subject="העובדים", camera="cam3")]}})
         writer = FakeModel(lambda user, kw: "צודק, סימנתי אותם להיום.")

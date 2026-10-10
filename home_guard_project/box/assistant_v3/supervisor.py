@@ -72,7 +72,7 @@ def similar(a: str, b: str) -> float:
 
 def code_checks(reply: str, *, lang: str, last_replies: Sequence[str], allowed_times: str, receipts: Sequence[Any],
                 memory_subjects: Sequence[str], owner_text: str, may_ask: bool, act_kinds: Sequence[str],
-                evidence_text: str = "", long_ok: bool = False, strict_memory: bool = False) -> Verdict:
+                evidence_text: str = "", long_ok: bool = False, strict_memory: str = "") -> Verdict:
     failed: List[Check] = []
     text = reply.strip()
     if not text:
@@ -113,6 +113,8 @@ def code_checks(reply: str, *, lang: str, last_replies: Sequence[str], allowed_t
         bad = unbacked_claims(text, list(receipts))
     except Exception:  # noqa: BLE001
         bad = []
+    if set(act_kinds) & {"question_memory", "question_meta"}:
+        bad = [b for b in bad if b not in ("save", "known")]     # talking ABOUT memory is not claiming a save
     if bad:
         failed.append(Check("unbacked_claim", ",".join(bad)))
     q = questions(text)
@@ -141,14 +143,27 @@ def _content(text: str) -> List[str]:
     return out
 
 
-def recites(reply: str, subject: str, owner_text: str, strict: bool = False) -> bool:
+CAMERA_WORDS = {"פרגול", "כניסה", "כניס", "ראשית", "מצלמ"}
+
+
+def recites(reply: str, subject: str, owner_text: str, strict: str = "") -> bool:
     """The reply brings up a memory record the owner did not raise: two of the record's words in a row (its name,
     "העובדים של הפרגולה") together with memory talk ("מסומנים", "עד יום ה׳", "שמור אצלי"). Seeing workers at work
     and saying so is not a recital; "the workers are marked until 18:00" in a talk about the neighbour is."""
     words = _content(subject)
-    if not words or (not strict and not _MARKED.search(reply)):
+    if not words:
         return False
-    if strict and len(words) >= 1:
+    said = set(_content(owner_text))
+    have = _content(reply)
+    pairs = {(a, b) for a, b in zip(words, words[1:])}
+    if strict == "pair" and any((a, b) in pairs for a, b in zip(have, have[1:])) and not (set(words) & said):
+        return True                    # its name ("העובדים של הפרגולה") in a turn he did not raise it
+    if strict == "irrelevant" and (any((a, b) in pairs for a, b in zip(have, have[1:])) or
+                                   (words[0] in have and _MARKED.search(reply))):
+        return True                    # he just said it is unrelated: not one more word about it
+    if not strict and not _MARKED.search(reply):
+        return False
+    if strict == "single":
         # A turn that is not a question about what is seen (a preference, a complaint, an ack): naming a memory's
         # people the owner did not name is bringing them up.
         said = set(_content(owner_text))
@@ -163,7 +178,7 @@ def recites(reply: str, subject: str, owner_text: str, strict: bool = False) -> 
     if not hit:
         return False
     said = _content(owner_text)
-    return not any((a, b) in pairs for a, b in zip(said, said[1:])) and not (set(words) & set(said)) - {"פרגו"}
+    return not any((a, b) in pairs for a, b in zip(said, said[1:])) and not (set(words) & set(said)) - CAMERA_WORDS
 
 
 def sanitize(text: str, cameras: Sequence[str], lang: str) -> str:
@@ -194,7 +209,7 @@ CRITIC_SCHEMA = {"type": "object", "properties": {"verdict": {"type": "string", 
 
 def log_intervention(trace: List[str], what: str) -> None:
     trace.append(what)
-    log.info("v3 supervisor: %s", what)
+    log.warning("v3 supervisor: %s", what)        # every intervention is in the box log (and the eval's report)
 
 
 def times_in(*texts: str) -> str:

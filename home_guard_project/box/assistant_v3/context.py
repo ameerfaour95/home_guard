@@ -163,7 +163,8 @@ def window(state: Any, now: float) -> Tuple[List[str], List[str], List[Dict[str,
     return lines, old, live
 
 
-_REMEMBER = re.compile(r"תזכור|לזכור|זיכרון|זכרון|זהרון|שמור|תשמור|remember", re.IGNORECASE)
+_REMEMBER = re.compile(r"(?<![א-ת])(?:ש|ו)?(?:תזכור|לזכור|זיכרון|זכרון|זהרון|שמור|תשמור)(?![א-ת])|remember",
+                       re.IGNORECASE)
 
 
 def earlier_owner_words(state: Any, now: float, message: str = "") -> List[str]:

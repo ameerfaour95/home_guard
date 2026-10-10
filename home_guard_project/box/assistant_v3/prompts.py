@@ -78,6 +78,9 @@ EXAMPLES (fields not shown are null, "" or false):
 "תעשה שני דברים: התיוג זה גבר מעמיס קרשים לטנדר. ותזכור שזה הקבלן שלי"
 → {"emotion":"neutral","acts":[{"act":"tag_only","quote":"התיוג זה גבר מעמיס קרשים לטנדר","event":"E3","value":"גבר מעמיס קרשים לטנדר"},{"act":"person_mark","quote":"ותזכור שזה הקבלן שלי","subject":"הקבלן","camera":"cam5"}]}
 
+reply to E3: "אם זה בסדר למה אתה שולח לי את זה?"
+→ {"emotion":"annoyed","acts":[{"act":"complaint","quote":"למה אתה שולח לי את זה?","issue":"too_many_alerts"},{"act":"alert_feedback","quote":"אם זה בסדר","event":"E3","verdict":"normal"}]}
+
 reply to E3: "זה לא התרעה, זה בסדר"
 → {"emotion":"neutral","acts":[{"act":"alert_feedback","quote":"זה לא התרעה, זה בסדר","event":"E3","verdict":"normal"}]}
 

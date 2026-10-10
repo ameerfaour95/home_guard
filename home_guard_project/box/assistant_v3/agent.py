@@ -67,6 +67,8 @@ FIX_TEXT = {
     "too_long": "ארוך מדי; משפט או שניים.",
     "jargon": "בלי ז'רגון ('התרעה צפויה', 'תיוג'); מילים פשוטות.",
 }
+REPAIR_ISSUES = ("unwanted_question", "ignored_memory", "irrelevant", "wrong_fact")
+REPAIR_SEC = 20 * 60.0
 NO_REPAIR = ("repetition", "too_many_alerts", "bad_wording", "no_explanation")
 REPAIRABLE = ("place_fact", "person_mark", "activity_explain", "camera_fact")
 _INVESTIGATE = re.compile(r"מה קרה|תבדוק|בדוק|מה היה|במשך|הלילה|אתמול|מהבוקר|כל היום|היום")
@@ -228,10 +230,11 @@ class AssistantV3(OwnerAgentV2):
             und.acts = [a for a in und.acts if a.act not in ("person_mark", "activity_explain")]
         if not und.has("complaint", "unclear") or und.has(*REPAIRABLE):
             return
-        if any(a.act == "complaint" and a.issue in NO_REPAIR for a in und.acts):
+        if not any(a.act == "complaint" and a.quote and a.issue in REPAIR_ISSUES for a in und.acts) \
+                and not und.has("unclear"):
             return                                     # "why do you repeat", "too many messages": nothing to redo
         turns = [t for t in ctx.state.turns if isinstance(t, dict) and t.get("kind") not in ("alert", "tag")
-                 and now - float(t.get("ts") or 0) <= cx.WINDOW_SEC and str(t.get("text") or "").strip()]
+                 and now - float(t.get("ts") or 0) <= REPAIR_SEC and str(t.get("text") or "").strip()]
         for old in reversed(turns[-3:]):
             if old.get("receipts"):
                 return                                 # the newest statement was handled: nothing to repair
@@ -320,8 +323,11 @@ class AssistantV3(OwnerAgentV2):
             return code_checks(text, lang=ctx.lang, last_replies=last, allowed_times=allowed, receipts=claim_receipts,
                                memory_subjects=subjects, owner_text=turn.text + " " + " ".join(
                                    cx.earlier_owner_words(ctx.state, turn.now)[-3:]),
-                               may_ask=bool(plan.ask), act_kinds=list(kinds), strict_memory=not (kinds & {
-                                   "question_live", "question_history", "question_memory"}), evidence_text=evidence + " ".join(memory_lines),
+                               may_ask=bool(plan.ask), act_kinds=list(kinds),
+                               strict_memory=("irrelevant" if any(a.issue == "irrelevant" for a in und.acts) else
+                                              "single" if kinds <= {"preference", "ack", "greeting"} else
+                                              "pair" if not kinds & {"question_live", "question_history",
+                                                                     "question_memory"} else ""), evidence_text=evidence + " ".join(memory_lines),
                                long_ok=plan.long_ok or (und.has("question_live") and len(turn.box.evidence) > 2)
                                or und.has("question_memory"))
 
@@ -342,11 +348,15 @@ class AssistantV3(OwnerAgentV2):
                 draft = second
             else:
                 log_intervention(trace, f"rewrite failed: {v2.reason()}")
-                if verdict.ok:
-                    pass                                  # the critic's wish failed; the first draft passed code
-                else:
-                    draft = self._template(turn)
-                    log_intervention(trace, "template sent")
+                if not verdict.ok:
+                    # Keep what is good: the sentences of either draft that pass on their own; else the template.
+                    kept = salvage(second, check) or salvage(draft, check)
+                    if kept:
+                        draft = kept
+                        log_intervention(trace, "salvaged the passing sentences")
+                    else:
+                        draft = self._template(turn)
+                        log_intervention(trace, "template sent")
         if plan.ask and "?" not in draft:
             draft = (draft.rstrip() + " " + plan.ask["question"]).strip()
         return draft or self._template(turn)
@@ -355,12 +365,19 @@ class AssistantV3(OwnerAgentV2):
         und, plan = turn.und, turn.plan
         lines = ["מה הבנתי מההודעה (לשימוש פנימי): " + json.dumps(public_acts(und, turn.cams), ensure_ascii=False)
                  + f" · רגש: {und.emotion}"]
-        handle, entry = turn.event_of(None) if (turn.ctx.alert_handle or turn.state.topic_event(turn.now)) else ("", {})
+        about_event = turn.ctx.alert_handle or any(a.event for a in und.acts if a.act in (
+            "question_history", "complaint", "alert_feedback", "activity_explain", "place_fact", "person_mark"))
+        handle, entry = turn.event_of(next((a for a in und.acts if a.event), None)) if about_event and not \
+            und.has("command") else ("", {})
         if entry:
             lines.append(f"ההתראה שמדברים עליה: {cx.hhmm(entry.get('ts'))} ב{turn.cams.name(turn.camera_now(str(entry.get('camera') or '')))}"
                          f" — {cx.clip(entry.get('observation') or entry.get('summary'), 200)}")
         if plan.done:
             lines.append("מה עשיתי בתור הזה (עובדות שאפשר לומר):\n" + "\n".join(f"- {d}" for d in plan.done))
+        if und.has("question_memory"):
+            plan.notes.append("הוא שאל מה אתה זוכר: פרט כל פריט בזיכרון הרלוונטי בביטוי קצר, בלי מזהים.")
+        if plan.notes:
+            lines.append("הנחיה לתור הזה:\n" + "\n".join(f"- {d}" for d in plan.notes))
         else:
             lines.append("בתור הזה לא שמרתי ולא שיניתי כלום.")
         ev = plan.evidence or []
@@ -427,6 +444,8 @@ class AssistantV3(OwnerAgentV2):
     def _template(self, turn: hd.Turn) -> str:
         """The safe Hebrew reply built from what the turn did and saw (never English, never empty)."""
         plan = turn.plan
+        if plan.ask:
+            return plan.ask["question"]
         if plan.done:
             return " ".join(re.sub(r"\s*\([^)]*\)", "", d) for d in plan.done[:2])
         if plan.evidence:
@@ -435,8 +454,10 @@ class AssistantV3(OwnerAgentV2):
                 return "בדקתי עכשיו, התמונה למעלה."
             return "בדקתי: " + first
         if turn.und.has("complaint"):
-            return "צודק, סליחה. מה שכתבתי קודם לא היה במקום."
-        return "קיבלתי."
+            return "צודק, סליחה."
+        if turn.und.has("question_live", "question_history", "question_memory", "question_meta"):
+            return "לא הצלחתי לבדוק את זה עכשיו, אנסה שוב בעוד רגע."
+        return "👍"
 
     # ------------------------------------------------------------------------------------------------------------
     def _fold_summary(self, chat_id: str) -> None:
@@ -470,6 +491,15 @@ class AssistantV3(OwnerAgentV2):
                 self.memory.save(chat_id, state)
         except Exception as exc:  # noqa: BLE001
             log.warning("v3 summary not folded: %s", exc)
+
+
+def salvage(text: str, check: Callable[[str], Any]) -> str:
+    """The sentences of *text* that pass the checks on their own (a stray invented time or a recited memory
+    sentence goes, the answer stays). "" when none is left."""
+    parts = [p.strip() for p in re.findall(r"[^.!?\n]+[.!?]?", text or "") if p.strip()]
+    kept = [p for p in parts if len(p.split()) >= 2 and check(p).ok]
+    out = " ".join(kept).strip()
+    return out if out and check(out).ok else ""
 
 
 def public_acts(und: Understanding, cams: cx.Cameras) -> List[Dict[str, Any]]:

@@ -986,7 +986,7 @@ def judge_case(case: Dict[str, Any], result: Dict[str, Any], judge: Any) -> Dict
             f"{' (a Telegram reply to the alert ' + msg['reply_to'] + ')' if msg.get('reply_to') else ''}"
             f"{' (typed after pressing the 🏷️ tag button)' if msg.get('via') == 'tag' else ''}: {msg['text']}\n\n"
             f"EXPECTED: intent={expect.get('intent')}; memory writes={json.dumps(expect.get('writes') or [], ensure_ascii=False)}"
-            f"{' (or one short question first)' if expect.get('write_or_ask') else ''}; forbidden writes="
+            f"{' (or one short question first)' if _or_ask(expect) else ''}; forbidden writes="
             f"{expect.get('forbid_writes') or []}; at most {expect.get('max_questions', 0)} question(s); must do="
             f"{expect.get('must_do') or []}. Notes: {case.get('notes') or expect.get('notes') or '-'}\n"
             f"IDEAL REPLY (reference): {expect.get('ideal')}\n\n"
@@ -1007,6 +1007,14 @@ def judge_case(case: Dict[str, Any], result: Dict[str, Any], judge: Any) -> Dict
         if getattr(msg_out, "error", ""):
             return {"error": str(msg_out.error)[:200]}
     return {"error": "judge returned no JSON"}
+
+
+def _or_ask(expect: Dict[str, Any]) -> bool:
+    """The case accepts one short question instead of the write (``write_or_ask``, or ``or_ask`` on a write): the
+    judge is told the same contract the deterministic check applies (before 2026-10-10 it was told only for the
+    expect-level flag, so a correct "until when?" scored as a routing miss)."""
+    return bool(expect.get("write_or_ask") or any(isinstance(w, dict) and w.get("or_ask")
+                                                  for w in expect.get("writes") or []))
 
 
 def _writes_for_judge(writes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
