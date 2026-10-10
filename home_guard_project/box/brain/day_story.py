@@ -628,6 +628,23 @@ def facts_of(activities: Any, since: float) -> List[Any]:
 
 
 # ------------------------------------------------------------------------------------------------- the story
+def quiet_text(records: Sequence[Dict[str, Any]], snapshot: Any, period: str) -> str:
+    """Nothing to tell. Never "quiet" over people the AI could not describe (2026-10-10 morning: camera 1 tracked
+    people from 06:20 to 08:50 with no description): one plain line says when and where."""
+    spans: Dict[str, List[float]] = {}
+    for r in records:
+        if _summaries(r) or not any(isinstance(e, dict) and e.get("kind") == "person" for e in r.get("entities") or []):
+            continue
+        name = display(snapshot, str(r.get("camera") or ""), "he")
+        lo, hi = float(r.get("start") or 0), float(r.get("end") or r.get("start") or 0)
+        span = spans.setdefault(name, [lo, hi])
+        span[0], span[1] = min(span[0], lo), max(span[1], hi)
+    if not spans:
+        return f"{period} היה שקט, לא היה משהו לספר."
+    where = "; ".join(f"ב{name} בין {_clock(lo)} ל-{_clock(hi)}" for name, (lo, hi) in spans.items())
+    return f"{period} לא היה משהו מיוחד לספר. היו אנשים שלא הצלחתי לראות מה עשו: {where}."
+
+
 @dataclass
 class Story:
     text: str
@@ -666,7 +683,7 @@ def tell(book: Any, activities: Any, snapshot: Any, text: str, now: float, model
     log.info("day story %s: %d records, %d after noise, %d episodes, %d rows", period, len(records), len(kept),
              len(episodes), len(rows))
     if not rows:
-        return Story(text=f"{period} היה שקט, לא היה משהו לספר.", lines=[])
+        return Story(text=quiet_text(records, snapshot, period), lines=[])
     lines: List[Tuple[str, Optional[Row]]] = []
     usage = (0, 0)
     used = False

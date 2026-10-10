@@ -79,8 +79,10 @@ class DayStoryTest(unittest.TestCase):
     def setUp(self) -> None:
         self.dir = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.dir)
+        undescribed = dict(record("n1", 1, "02:45", "a person or vehicle was detected", people=0),
+                           entities=[{"id": "P1", "kind": "person"}])
         rows = [
-            record("n1", 1, "02:45", "a person or vehicle was detected", people=0),        # no AI description
+            undescribed,                                                                   # no AI description
             record("n2", 5, "06:30", "A bird lands on the lamp next to the door.", people=0),   # a bird, the lamp
             record("n3", 5, "12:00", "No special activity.", people=0),
             record("e1", 6, "07:02", "A person in a red hat walks to the front door, knocks and leaves."),
@@ -176,9 +178,14 @@ class DayStoryTest(unittest.TestCase):
 
     def test_a_quiet_period(self) -> None:
         model = Scripted(GOOD)
-        story = ds.tell(self.book, None, snapshot(), "מה היה הלילה", at("05:00"), model=model)
-        self.assertEqual(story.text, "הלילה היה שקט, לא היה משהו לספר.")
+        story = ds.tell(self.book, None, snapshot(), "מה היה אתמול", NOW, model=model)
+        self.assertEqual(story.text, "אתמול היה שקט, לא היה משהו לספר.")
         self.assertEqual(model.calls, [])                       # nothing to tell: no call
+        # Never "quiet" over people the AI did not describe: when and where, in one plain line.
+        story = ds.tell(self.book, None, snapshot(), "מה היה הלילה", at("05:00"), model=model)
+        self.assertEqual(story.text, "הלילה לא היה משהו מיוחד לספר. היו אנשים שלא הצלחתי לראות מה עשו: "
+                                     "במצלמה 1 בין 02:45 ל-02:46.")
+        self.assertEqual(model.calls, [])
 
     # -- "שלח את 10:15" ------------------------------------------------------------------------------------------
     def test_each_line_keeps_its_clip_for_a_follow_up(self) -> None:
