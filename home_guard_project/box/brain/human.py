@@ -65,6 +65,16 @@ def is_angry(text: str) -> bool:
     return bool(_ANGRY.search(text) or (_WHAT_RELATION.search(text) and _STRETCHED.search(text)))
 
 
+_CONFUSED = re.compile(rf"(?<![{_HE}])(?:לא\s+הבנתי|מה\s+ה?קשר|מה\s+זאת\s+אומרת|מה\s+זה\s+אומר|על\s+מה\s+אתה\s+מדבר|"
+                       rf"מה\s+אתה\s+רוצה)(?![{_HE}])|\b(?:what\s+do\s+you\s+mean|i\s+don'?t\s+(?:get|understand))\b",
+                       re.IGNORECASE)
+
+
+def confused(text: str) -> bool:
+    """The owner did not understand the last reply ("מה קשר ? לא הבנתי"), without anger."""
+    return bool(_CONFUSED.search(squeeze(text))) and not is_angry(text)
+
+
 # -- "keep your memory to yourself" ----------------------------------------------------------------------------
 _PRIVATE = re.compile(rf"(?<![{_HE}])(?:לא|אל|בלי|תפסיק)\s+(?:\S+\s+){{0,4}}?(?:לחשוף|תחשוף|לפרט|תפרט|לגלות|תגלה)"
                       rf"(?![{_HE}])|\b(?:don'?t|stop)\s+(?:tell|show|list|reveal)\w*\s+(?:me\s+)?(?:your\s+|what'?s?\s+in\s+"

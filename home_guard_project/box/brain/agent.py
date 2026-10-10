@@ -907,10 +907,29 @@ class OwnerAgentV2:
                 "owner": said["owner"], "region": fact.get("region"), "zone": fact.get("zone") or "",
                 "already": bool(fact.get("already")), "whole_house": False})
         ctx.state.prefs["last_place"] = {"words": fact["text"], "camera": camera, "ts": now, "id": fact["id"],
-                                         "owner": said["owner"]}
+                                         "owner": said["owner"], "alert_ts": float(event.get("ts") or 0)}
         log.info("place: %s at %s is %s (region %s, zone %s)", fact["text"], camera, said["owner"],
                  fact.get("region"), fact.get("zone") or "-")
         return place_facts.confirmation(said["words"], said["owner"], ctx.lang, said.get("pron", "זה"))
+
+    def _explain_place(self, ctx: ToolContext, text: str, snapshot: Any, now: float) -> Optional[str]:
+        """"מה קשר ? לא הבנתי" right after the place line: what it meant, in plain words, about that alert."""
+        place = ctx.state.prefs.get("last_place") if isinstance(ctx.state.prefs, dict) else None
+        if not isinstance(place, dict) or not human.confused(text) or now - float(place.get("ts") or 0) > 1800:
+            return None
+        last = next((str(turn.get("reply") or "") for turn in reversed(ctx.state.turns or [])
+                     if isinstance(turn, dict) and turn.get("kind") != "alert"), "")
+        if str(place.get("words") or "") not in last:
+            return None
+        name = display(snapshot, str(place.get("camera") or ""), ctx.lang)
+        when = hhmm(float(place.get("alert_ts") or 0)) if place.get("alert_ts") else ""
+        key = "place_explain_neighbour" if place.get("owner") in ("neighbour", "public") else "place_explain_mine"
+        words = str(place.get("words") or "")
+        if str(ctx.lang).startswith("he"):
+            where = words if words.startswith("אצל") else _glue("ב", words)
+        else:
+            where = words if words.lower().startswith(("at ", "in ")) else f"at {words}"
+        return t(key, ctx.lang, time=when, camera=name, where=where)
 
     def _private_answer(self, ctx: ToolContext, text: str) -> Optional[str]:
         """"הזכרון שלך שמור אצלך אתה לא צריך לחשוף לי אותו" / "אתה יכול לשאול בצורה דרך אגב אבל לא לחשוף": agreed,
@@ -1706,6 +1725,7 @@ class OwnerAgentV2:
             try:
                 known_done = (self._place_answer(ctx, text, alert, snapshot, now)
                               or self._private_answer(ctx, text)
+                              or self._explain_place(ctx, text, snapshot, now)
                               or (self._fix_gap(ctx, text, snapshot, alert, now) if human.is_angry(text) else None)
                               or self._apology(ctx, text, alert, snapshot, now))
             except Exception as exc:  # noqa: BLE001 - the model still gets the message

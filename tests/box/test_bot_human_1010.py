@@ -190,7 +190,10 @@ class TodayChatTests(unittest.TestCase):
         self.assertEqual(len(self.events.list_known(T(13, 48))), 2)
 
         lines = [out.text]
-        lines.append(self.say(agent, "מה קשר ? לא הבנתי", T(13, 49, 34)).text)
+        what = self.say(agent, "מה קשר ? לא הבנתי", T(13, 49, 34)).text
+        self.assertEqual(what, "התכוונתי שהאדם בהתראה של 13:35 (מצלמה 2) היה בבית של השכן. מעכשיו מה שקורה שם לא "
+                               "יישלח אליך, רק מי שעובר משם לשטח שלך.")
+        lines.append(what)
         sorry = self.say(agent, "מה הקשררררררר העבדים של הפרגולה יא חתכית מטומטם", T(13, 49, 55)).text
         self.assertEqual(sorry, "סליחה, טעיתי. זה לא קשור לעובדים. רשמתי: הבית של השכן במצלמה 2.")
         keep = self.say(agent, "הזכרון שלך שמור אצלך אתה לא צריך לחשוף לי אותו", T(15, 14, 8)).text
@@ -204,9 +207,18 @@ class TodayChatTests(unittest.TestCase):
         for line in lines:
             for bad in ROBOTIC + ("שמור אצלי עכשיו", "מסומנים"):
                 self.assertNotIn(bad, line)
+        self.assertEqual(big.seen, [])                     # every turn of the afternoon was answered in code
         for line in (lines[1], keep, ask):
             self.assertNotIn("עובדים", line)
             self.assertNotIn("העובדים", line)
+
+    def test_a_model_answer_never_brings_up_the_workers(self) -> None:
+        big = Scripted([call("reply", answer="העובדים של הפרגולה כבר מסומנים בפרגולה ובכניסה ראשית עד 18:00. מה לתקן?")])
+        out = self.say(self.agent(big), "מה זה היה?", T(13, 50), ALERT)
+        self.assertEqual(out.text, "לא הבנתי למה התכוונת לגבי ההתראה של 13:35 (מצלמה 2).")
+        context = str(big.seen[0][-1])                    # the context block of this turn
+        self.assertIn("[MEMORY] what the box keeps is private", context)
+        self.assertNotIn("[LIVE MARKS]", context)
 
     def test_the_memory_is_shown_when_he_asks(self) -> None:
         out = self.say(self.agent(Scripted([])), "מה אתה זוכר?", T(13, 50))
