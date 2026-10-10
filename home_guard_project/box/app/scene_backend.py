@@ -57,6 +57,7 @@ class Proposal:
     regions: tuple = ()
     current: dict = field(default_factory=dict)  # the camera's map now (SceneMap.to_dict): the whole truth
     names: dict = field(default_factory=dict)    # the box's names for it: {"he", "en"}
+    from_old_name: bool = False                  # *current* was saved under the camera's old id (a site rename)
 
     @property
     def grid(self):
@@ -160,7 +161,7 @@ def proposal_from(camera, data):
         raise SceneError("bad_picture")
     current = data.get("current_map") if isinstance(data.get("current_map"), dict) else {}
     return Proposal(camera, "grid" if data.get("method") == "grid" else "sam", picture, regions, current,
-                    names_from(data))
+                    names_from(data), bool(current) and data.get("from_old_name") is True)
 
 
 def saved_from(camera, data, restored=False):
@@ -285,12 +286,14 @@ DEMO_NAMES = {"front_door": {"he": "דלת הכניסה", "en": "Front door"}, "
 class DemoSceneBackend:
     """No box: the demo picture and regions; ``confirm`` validates and shapes the map as the box would.
     ``fail`` makes that step fail once (``propose`` | ``confirm``). *names*: the box's names per camera
-    (``{"he", "en"}``); a camera without one gets none, as from a box that cannot say."""
-    def __init__(self, fail=None, method="sam", current=None, names=None):
+    (``{"he", "en"}``); a camera without one gets none, as from a box that cannot say. *from_old_name*: *current*
+    was saved under the camera's old id, as after a site rename."""
+    def __init__(self, fail=None, method="sam", current=None, names=None, from_old_name=False):
         self.names_by_camera = {k: dict(v) for k, v in (DEMO_NAMES if names is None else names).items()}
         self.fail = fail
         self.method = method
         self.current = dict(current or {})          # the first camera's map now; each camera keeps its own after
+        self.from_old_name = from_old_name
         self.maps = {}
         self.backups = {}                            # camera -> (the map a save replaced, when)
         self.calls = []
@@ -321,7 +324,8 @@ class DemoSceneBackend:
         if grid:
             self.method = "grid"
         return Proposal(camera, self.method, self.picture(camera), self.regions(),
-                        dict(self.maps.get(camera, self.current)), self.name_of(camera))
+                        dict(self.maps.get(camera, self.current)), self.name_of(camera),
+                        self.from_old_name and camera not in self.maps)
 
     def name_of(self, camera):
         return dict(self.names_by_camera.get(camera) or {"he": "", "en": ""})
@@ -346,7 +350,7 @@ class DemoSceneBackend:
         from .scene_model import restart_expected
         current = self.maps.get(camera, self.current)
         draft = sm.SceneMap.from_dict(camera, scene, current.get("watched") or None)
-        saved = confirmed_preview(draft).to_dict()
+        saved = dict(confirmed_preview(draft).to_dict(), confirmed=__import__("time").time())
         self.backups[camera] = (current, __import__("time").time())
         self.maps[camera] = saved
         return Saved(camera, saved, restart_expected(current, scene), names=self.name_of(camera))

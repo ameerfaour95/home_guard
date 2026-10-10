@@ -8,6 +8,7 @@ leave the region out of the map.
 import base64
 import json
 import math
+import re
 import zlib
 from dataclasses import dataclass, field
 
@@ -292,12 +293,86 @@ def rest_after(current, scene):
     return "unmapped"
 
 
-def from_current(current):
-    """The camera's map now as editable hand areas and lines: its stored areas, and today's watch zone as an
-    area of ours (``confirm`` keeps it as one)."""
+MASK = 200                     # cells per side of the picture when two outlines are compared
+SAME_PLACE = .85               # outlines overlapping at least this much (IoU) are one place
+
+
+def area_mask(points, size=MASK):
+    """The outline filled on a *size* x *size* grid of the picture: ``{row: bits}``, a cell set when its centre is
+    inside (even-odd, as the box draws polygons). Plain Python, so the app needs nothing new."""
+    points = [(float(x), float(y)) for x, y in points or ()]
+    if len(points) < 3:
+        return {}
+    rows = {}
+    n = len(points)
+    ys = [y for _x, y in points]
+    for row in range(max(0, int(min(ys) * size) - 1), min(size, int(max(ys) * size) + 2)):
+        y = (row + .5) / size
+        xs = sorted(x1 + (y - y1) * (x2 - x1) / (y2 - y1)
+                    for (x1, y1), (x2, y2) in ((points[i], points[(i + 1) % n]) for i in range(n))
+                    if (y1 <= y) != (y2 <= y))
+        bits = 0
+        for a, b in zip(xs[0::2], xs[1::2]):
+            first, last = max(0, math.ceil(a * size - .5)), min(size - 1, math.floor(b * size - .5))
+            if last >= first:
+                bits |= (1 << (last + 1)) - (1 << first)
+        if bits:
+            rows[row] = bits
+    return rows
+
+
+def overlap(a, b):
+    """How much two filled outlines (``area_mask``) are one place: intersection over union, 0 to 1."""
+    inter = sum((bits & b.get(row, 0)).bit_count() for row, bits in a.items())
+    union = sum(v.bit_count() for v in a.values()) + sum(v.bit_count() for v in b.values()) - inter
+    return inter / union if union else 0.
+
+
+def unique_areas(areas, same=SAME_PLACE):
+    """*areas* with repeats of one place collapsed: outlines overlapping by *same* (IoU) or more are one place, and
+    the LAST of them (the latest save) is kept, at its own position, with its kind and name. Saving a reopened map
+    used to add the answers on top of the saved areas, from a new picture, so the repeats are near, not exact
+    (ch2, 2026-10-10: 17 areas, 9 places). Returns (kept areas, how many were merged)."""
+    masks = [area_mask(a.get("points")) for a in areas]
+    kept = []
+    for i in range(len(areas) - 1, -1, -1):
+        if not any(overlap(masks[i], masks[j]) >= same for j in kept):
+            kept.append(i)
+    kept.reverse()
+    return [areas[i] for i in kept], len(areas) - len(kept)
+
+
+def merged_duplicates(current):
+    """How many of the camera's stored areas repeat another one's place (``from_current`` merges them)."""
+    return unique_areas([a for a in (current or {}).get("areas") or () if choice_of(a)])[1]
+
+
+def has_saved_map(current):
+    """The camera has a map of its own (stored areas or lines), not only today's drawn zone."""
     current = current or {}
+    return bool(current.get("areas") or current.get("lines"))
+
+
+_STAND_IN = re.compile(r"(drawn )?area \d+")
+
+
+def owner_name(hand):
+    """The name the owner gave the area, or "" for the box's own stand-ins (``area 3``, ``drawn area 1``, the zone
+    word of an unnamed one, the watched area): those are not words to show in a name field."""
+    name = str(hand.name or "").strip()
+    if not name or name == sm.WATCHED_NAME or _STAND_IN.fullmatch(name) or (hand.zone and hand.zone != "other"
+                                                                            and name == hand.zone):
+        return ""
+    return name
+
+
+def from_current(current):
+    """The camera's map now as editable areas and lines: its stored areas (repeats of one place merged, see
+    ``unique_areas``), and today's watch zone as an area of ours (``confirm`` keeps it as one)."""
+    current = current or {}
+    stored, _merged = unique_areas([a for a in current.get("areas") or () if choice_of(a)])
     hands = [HandArea([list(p) for p in a.get("points") or ()], choice_of(a), str(a.get("name") or ""),
-                      str(a.get("zone") or "other")) for a in current.get("areas") or () if choice_of(a)]
+                      str(a.get("zone") or "other")) for a in stored]
     watched = current.get("watched")
     if watched and not any(h.points == [list(p) for p in watched] for h in hands):
         hands.append(HandArea([list(p) for p in watched], "mine", sm.WATCHED_NAME, "other"))

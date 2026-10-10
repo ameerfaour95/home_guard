@@ -979,6 +979,23 @@ def confirm_app_map(camera: str, data: Mapping[str, Any], out_dir: str = INTERVI
     return scene
 
 
+def old_name_map(camera: str, current: sm.SceneMap, known_cameras: Sequence[str],
+                 zones_path: Optional[str] = None) -> Dict[str, Any]:
+    """For ``propose --embed``: when *camera* has no map of its own but an old id of its channel does (a site
+    rename, ``ameer_week_0_1_ch2`` -> ``ameer_v2_ch2``), that map as ``current_map`` (under the new id, with the
+    camera's own drawn zone) and ``from_old_name``; otherwise nothing. ``confirm`` then keeps it under the new id
+    and drops the old key (``stale_keys``)."""
+    if current.areas or current.lines or not known_cameras:
+        return {}
+    old = [sm.load_scene_map(key, zones_path) for key in stale_keys(camera, known_cameras, zones_path)]
+    old = [m for m in old if m.areas or m.lines]
+    if not old:
+        return {}
+    newest = max(old, key=lambda m: m.confirmed)
+    return {"current_map": dict(newest.to_dict(), camera=camera, watched=current.to_dict()["watched"]),
+            "from_old_name": True}
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     from .find_cameras import CAMERAS_PATH, _known_camera, _restart_running_mode  # noqa: PLC0415
 
@@ -1026,6 +1043,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                              watched=current.watched)
             if args.embed:
                 result = with_names(embed_proposal(result, picture_path, current), camera)
+                result.update(old_name_map(camera, current, _known_cameras(CAMERAS_PATH)))
         elif args.command == "answer":
             regions_path = os.path.join(args.out, f"{_stem(camera)}_regions.json")
             with open(regions_path, encoding="utf-8") as f:
