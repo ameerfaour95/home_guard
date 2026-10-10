@@ -1887,6 +1887,21 @@ def _budgeted(vision: Any, limit: int, path: str, wrapper: Any) -> Any:
     return wrapper(vision, limit, path) if vision is not None else None
 
 
+def _grounding_services(box_settings: Dict[str, Any]) -> Dict[str, Any]:
+    """The grounded live look's detector (the box's YOLO model, loaded on first use) and the live detector's status
+    file (grounded_look.py). Empty on any failure: the look then goes on without detector facts."""
+    try:
+        from .. import paths  # noqa: PLC0415
+        from ..boxconfig import LOG_DIR  # noqa: PLC0415
+        from .grounded_look import Detector  # noqa: PLC0415
+
+        model = paths.resolve_model(str(box_settings.get("inference_yolo_model") or "yolo11s.pt"))
+        return {"detect": Detector(model), "status_path": os.path.join(LOG_DIR, "ai_status.json")}
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Grounded look not set up (%s)", exc)
+        return {}
+
+
 def build_owner_agent(box_settings: Dict[str, Any], env: Dict[str, str], mute: Any, cfg: Any, live_dir: str,
                       archive_dir: str, log_dir: str, feed: Any = None) -> Tuple[Optional[OwnerAgentV2], Any]:
     """The production agent and its Telegram deliverer (the agent is None when no model key is set)."""
@@ -1945,7 +1960,7 @@ def build_owner_agent(box_settings: Dict[str, Any], env: Dict[str, str], mute: A
         embedder=make_embedder(env, os.path.join(own_dir, ".alert_embeddings.json")),
         retention_days=retention, set_option=boxconfig.set_option, read_settings=boxconfig.load_box_settings,
         alert_settings=alert_settings, house=_house_store(mute), events=_event_book(),
-        activities=_activity_book(),
+        activities=_activity_book(), **_grounding_services(box_settings),
     )
     def quiet_log_on() -> bool:
         return bool(boxconfig.load_box_settings().get("quiet_log", False))

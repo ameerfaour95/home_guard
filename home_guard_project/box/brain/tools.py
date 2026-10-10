@@ -89,6 +89,11 @@ class Services:
     house: Any = None          # house_state.HouseStateStore: the one writer of the house state (brain/house.py)
     events: Any = None         # events.EventBook: sessions per camera and the owner's "these are my workers"
     activities: Any = None     # activity_memory.ActivityBook: what an action means at a camera (the owner's words)
+    # The grounded look (grounded_look.py): the detector on a live photo, the live detector's status file, and the
+    # zones file beside the scene maps (None: the box's own).
+    detect: Optional[Callable[[str], Any]] = None
+    status_path: str = ""
+    zones_path: Optional[str] = None
 
 
 @dataclass
@@ -565,10 +570,10 @@ def check_camera(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     if implied:
         out["used_camera_being_discussed"] = True
     look: Dict[str, Any] = {}
+    facts = None
     if ctx.services.vision is not None:
         try:
-            with open(shot["image"], "rb") as f:
-                look = ctx.services.vision.look(camera, [f.read()], guard=ctx.mode == GUARD)
+            look, facts = _grounded_look(ctx, camera, shot["image"])
         except Exception as exc:
             log.warning("Live-photo vision failed: %s", exc)
             look = {"ok": False}
@@ -585,6 +590,7 @@ def check_camera(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         out.update(description=look["description"], quality=look["quality"], people=look["people"])
         ctx.state.note_observation(handle, look["description"])
         _note_people(ctx, handle, look["people"])
+        _note_facts(ctx, handle, out, look, facts)
         if ctx.mode == GUARD:
             out.update(label=look.get("label", ""), why=look.get("why", ""))
     else:
@@ -602,6 +608,54 @@ def _note_people(ctx: ToolContext, handle: str, people: Any) -> None:
     entry = ctx.state.handles.get(handle)
     if isinstance(entry, dict) and isinstance(people, int) and not isinstance(people, bool):
         entry["people"] = max(0, people)
+
+
+def _grounded_look(ctx: ToolContext, camera: str, image: str) -> Tuple[Dict[str, Any], Any]:
+    """The vision look at a live photo, grounded (grounded_look.py, 2026-10-10 17:03: a person the detector did not
+    find was told as a fact): the detector's objects on that photo and their ground on the owner's map go to the
+    model as facts, and its answer is checked against them. ``(look, facts)``."""
+    from . import grounded_look as gl  # noqa: PLC0415
+
+    svc = ctx.services
+    facts = gl.grounded_facts(camera, image, _finite(svc.now()), detector=svc.detect, status_path=svc.status_path,
+                              zones_path=svc.zones_path)
+    text = gl.facts_text(facts)
+    with open(image, "rb") as f:
+        data = f.read()
+    look: Any = None
+    if text:
+        try:
+            look = svc.vision.look(camera, [data], guard=ctx.mode == GUARD, facts=text)
+        except TypeError:          # a vision without facts (an older stand-in): the plain look, still checked below
+            look = None
+    if look is None:
+        look = svc.vision.look(camera, [data], guard=ctx.mode == GUARD)
+    look = gl.enforce(look or {}, facts, display(ctx.snapshot, camera, ctx.lang)) if isinstance(look, dict) else look
+    return look, facts
+
+
+def _note_facts(ctx: ToolContext, handle: str, out: Dict[str, Any], look: Dict[str, Any], facts: Any) -> None:
+    """The detector's facts and their ground, on the tool result (short) and on the photo's handle (where_is)."""
+    if facts is None or not (facts.known or facts.mapped):
+        return
+    from . import grounded_look as gl  # noqa: PLC0415
+
+    rec = facts.record()
+    if facts.known:
+        out["detector"] = {k: rec[k] for k in ("people", "vehicles", "animals")}
+        out["detector"]["objects"] = [{k: o[k] for k in ("label", "ground", "area") if o.get(k)}
+                                      for o in rec["objects"]][:6]
+    whose = gl.ground_line(facts, ctx.lang)
+    if whose:
+        out["whose_ground"] = whose
+    if look.get("unsure_people"):
+        out["unsure_people"] = look["unsure_people"]
+    if look.get("corrected"):
+        out["note"] = ("The detector found no person here: never say there is one. A person the picture model "
+                       "thought it saw may be told only as 'ייתכן שיש אדם, לא בטוח'.")
+    entry = ctx.state.handles.get(handle)
+    if isinstance(entry, dict) and facts.known:
+        entry["objects"] = rec["objects"][:12]
 
 
 def photo_caption(ctx: ToolContext, camera: str, ts: Any = None) -> str:
@@ -641,10 +695,11 @@ def look_around(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
             rows.append({"camera": name, "error": "no picture from this camera now"})
             continue
         look: Dict[str, Any] = {}
+        facts = None
         if ctx.services.vision is not None:
             try:
-                with open(shot["image"], "rb") as f:
-                    look = ctx.services.vision.look(cam, [f.read()], guard=ctx.mode == GUARD) or {}
+                look, facts = _grounded_look(ctx, cam, shot["image"])
+                look = look or {}
             except Exception as exc:  # noqa: BLE001 - one camera's failure must not end the look
                 log.warning("look_around: vision failed on %s: %s", cam, exc)
                 look = {}
@@ -659,10 +714,16 @@ def look_around(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         handle = ctx.state.add_handle("photo", shot["image"], cam, ctx.services.now())
         ctx.state.note_observation(handle, str(look.get("description") or ""))
         _note_people(ctx, handle, people)
+        _note_facts(ctx, handle, row, look, facts)
         row["handle"] = handle
-        if people and _media_sent(ctx) < LOOK_AROUND_PHOTOS and ctx.services.deliver is not None:
+        # A person the detector missed but the picture model may have seen is shown too, never hidden.
+        if ((people or look.get("unsure_people")) and _media_sent(ctx) < LOOK_AROUND_PHOTOS
+                and ctx.services.deliver is not None):
             # 2026-10-09 13:00 "יש מישהו בחוץ?": two photos and no word. Each one says what it shows.
-            caption = " · ".join(x for x in (photo_caption(ctx, cam), first_sentence(look.get("description"))) if x)
+            said = first_sentence(look.get("description"))
+            if not people and "people" in (look.get("corrected") or ()):
+                said = "ייתכן שיש אדם, לא בטוח" if str(ctx.lang).startswith("he") else "maybe a person, not certain"
+            caption = " · ".join(x for x in (photo_caption(ctx, cam), said) if x)
             sent = _service_result(ctx.services.deliver.photo(ctx.chat_id, shot["image"], caption=caption))
             _issue(ctx, "check_camera", DONE if sent.get("ok") else FAILED, cam,
                    {"camera": cam, "message_id": sent.get("message_id")}, "" if sent.get("ok") else "telegram")
@@ -678,6 +739,108 @@ def look_around(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     return {"ok": True, "cameras": rows,
             "note": ("Answer in one or two sentences: where people are and what they do; call quiet only the cameras "
                      "that gave a picture." + (f" No picture from: {', '.join(blind)} - say so." if blind else ""))}
+
+
+WHERE_FRESH_SEC = 120.0      # a live look this recent answers "where is it?" without a new picture
+
+
+def _owner_facts(ctx: ToolContext, camera: str) -> List[str]:
+    """What the owner taught about the camera (camera_profiles facts: "זה הבית של השכן"), at most three."""
+    try:
+        store = profiles_for(ctx.services)
+        rows = store.facts(camera) if store is not None else []
+        return [str(f.get("text")) for f in rows if isinstance(f, dict) and f.get("text")][:3]
+    except Exception as exc:  # noqa: BLE001 - the map answers without them
+        log.debug("camera facts not read: %s", exc)
+        return []
+
+
+@_safe_tool
+def map_info(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+    """The owner's scene map of one camera in a few words: whose ground each area is, the boundary lines, the role.
+    For "מה המצלמה הזו רואה?", "איפה הגבול עם השכן?". No map: says so and offers to draw it in the app."""
+    from . import grounded_look as gl  # noqa: PLC0415
+
+    camera, bad = _camera_or_topic(ctx, args.get("camera"))
+    if bad:
+        return bad
+    name = display(ctx.snapshot, camera, ctx.lang)
+    summary = gl.map_summary(camera, ctx.services.zones_path)
+    out: Dict[str, Any] = {"ok": True, "camera": name, **summary}
+    facts = _owner_facts(ctx, camera)
+    if facts:
+        out["owner_said"] = facts
+    if summary.get("map") == "none":
+        out["say"] = gl.no_map_text(ctx.lang)
+    else:
+        out["note"] = ("Area names are labels from the owner's drawing: say 'your ground' / 'the neighbour's ground', "
+                       "not 'area 7'.")
+    return out
+
+
+def _recent_objects(ctx: ToolContext, camera: str, now: float) -> Tuple[Optional[List[Dict[str, Any]]], float]:
+    """The detector's objects of the newest live look at *camera* these WHERE_FRESH_SEC seconds, and its time."""
+    best: Tuple[Optional[List[Dict[str, Any]]], float] = (None, 0.0)
+    for entry in (ctx.state.handles or {}).values():
+        if not isinstance(entry, dict) or entry.get("kind") != "photo" or entry.get("camera") != camera:
+            continue
+        if not isinstance(entry.get("objects"), list):
+            continue
+        try:
+            ts = float(entry.get("ts") or 0)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= now - ts <= WHERE_FRESH_SEC and ts >= best[1]:
+            best = (entry["objects"], ts)
+    return best
+
+
+@_safe_tool
+def where_is(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+    """Whose ground something stands on, by the owner's scene map: "של מי הרכב?", "זה אצלי או אצל השכן?", "השער שלי?".
+    From the newest live look at the camera (two minutes), else from a new picture the detector looks at (not sent).
+    The map tells whose GROUND, never whose car; no map: says so and offers to draw it."""
+    from . import grounded_look as gl  # noqa: PLC0415
+
+    camera, bad = _camera_or_topic(ctx, args.get("camera"))
+    if bad:
+        return bad
+    name = display(ctx.snapshot, camera, ctx.lang)
+    what = str(args.get("what") or ctx.text or "")
+    scene = gl.load_map(camera, ctx.services.zones_path)
+    out: Dict[str, Any] = {"ok": True, "camera": name}
+    facts = _owner_facts(ctx, camera)
+    if facts:
+        out["owner_said"] = facts
+    if scene is None:
+        return dict(out, map="none", say=gl.no_map_text(ctx.lang))
+    now = _finite(ctx.services.now())
+    rows, ts = _recent_objects(ctx, camera, now)
+    seen: List[Any] = []
+    if rows is not None:
+        for r in rows:
+            try:
+                seen.append(gl.Seen(str(r["label"]), float(r["conf"]), tuple(float(v) for v in r["box"][:4])))
+            except (KeyError, TypeError, ValueError):
+                continue
+    else:
+        shot = ctx.services.grab_photo(camera) if ctx.services.grab_photo else {"error": "no live view"}
+        if not isinstance(shot, dict) or shot.get("error") or not isinstance(shot.get("image"), str):
+            return _err("No picture from this camera now, so where things stand is not known. Say exactly that.",
+                        camera=name)
+        found = gl.grounded_facts(camera, shot["image"], now, detector=ctx.services.detect,
+                                  status_path=ctx.services.status_path, zones_path=ctx.services.zones_path)
+        if not found.known:
+            return _err("The detector could not look now, so where things stand is not known. Say exactly that.",
+                        camera=name)
+        seen, ts = list(found.objects), now
+    placed = [gl.place(scene, s) for s in seen]
+    res = gl.where_is(placed, what, scene, ctx.lang)
+    out.update(res)
+    out["seen_at"] = hhmm(ts)
+    out.setdefault("note", "")
+    out["note"] = (out["note"] + " Answer with 'say' in one line; never guess whose car it is beyond it.").strip()
+    return out
 
 
 # 2026-10-08 live: "שכחת את 7" (a correction meant for the install interview) made the model record a new clip of
@@ -2235,6 +2398,8 @@ TOOLS: Dict[str, Callable[[ToolContext, Dict[str, Any]], Dict[str, Any]]] = {
     "ask_clarification": ask_clarification,
     "check_camera": check_camera,
     "look_around": look_around,
+    "map_info": map_info,
+    "where_is": where_is,
     "record_clip": record_clip,
     "send_media": send_media,
     "pause_alerts": pause_alerts,
