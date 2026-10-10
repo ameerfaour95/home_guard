@@ -31,10 +31,11 @@ main_stream:
   # the person moves inside a still view (2026-10-09; a camera that pans and zooms with the person hides the
   # real movement). follow: the old per-frame crop (crop_padding / crop_ema_alpha), kept for the A/B.
   crop_policy: clip_window
-  crop_window_padding: 0.1  # clip_window: per side, fraction of the window's width / height ...
-  crop_person_margin: 0.5   # ... or at least this many median box heights, whichever is bigger
+  # Tuned 2026-10-10 on eval_set_v2 (tighter than 0.1 / 0.5 / 0.5, which zoomed too little and lost alerts).
+  crop_window_padding: 0.05 # clip_window: per side, fraction of the window's width / height ...
+  crop_person_margin: 0.25  # ... or at least this many median box heights, whichever is bigger
   crop_max_aspect: 2.0      # clip_window: grown with more scene (never stretched) to at most 2:1
-  crop_whole_frame_above: 0.5  # clip_window: a window over this fraction of the frame sends the whole frame
+  crop_whole_frame_above: 0.8  # clip_window: a window over this fraction of the frame sends the whole frame
   crop_padding: 0.3         # follow: padding around trigger-class union bbox (fraction of bbox dims)
   crop_min_size: 384        # minimum crop dimension in pixels (both policies)
   crop_ema_alpha: 0.3       # follow: temporal smoothing factor for stable crops across frames

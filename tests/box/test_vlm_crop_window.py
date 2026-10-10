@@ -2,8 +2,8 @@
 
 The old per-frame crop panned and zoomed with the person (2026-10-09, seen while tagging); a video model reads
 that as camera motion and loses the person's real movement. These tests pin the window's rules: every backed-up
-box of the clip inside it, one-off boxes left out, padding of at least half a person, at most 2:1 grown with
-more scene (never stretched), the whole frame when it covers over half of it, and the same box for every frame.
+box of the clip inside it, one-off boxes left out, padding of at least a quarter of a person, at most 2:1 grown
+with more scene (never stretched), the whole frame when it covers over 80% of it, and the same box for every frame.
 """
 from __future__ import annotations
 
@@ -119,28 +119,28 @@ class ClipWindowTest(unittest.TestCase):
         r = vlm_crop.crop_clip(detector_from(lambda i: []), settings(), subs(), 1000., 1010., mains(), 1000.)
         self.assertIsNone(r)
 
-    def test_a_person_standing_still_keeps_half_their_height_around_them(self):
+    def test_a_person_standing_still_keeps_a_quarter_of_their_height_around_them(self):
         person = (1000., 600., 1150., 1000.)                 # 400 px tall
         window, _ = vlm_crop.clip_window([[person]] * 5, MAIN_H, MAIN_W, settings())
         x1, y1, x2, y2 = window
-        self.assertLessEqual(x1, 1000 - 200)
-        self.assertGreaterEqual(x2, 1150 + 200)
-        self.assertLessEqual(y1, 600 - 200)
-        self.assertGreaterEqual(y2, 1000 + 200 - 1)
+        self.assertLessEqual(x1, 1000 - 100)
+        self.assertGreaterEqual(x2, 1150 + 100)
+        self.assertLessEqual(y1, 600 - 100)
+        self.assertGreaterEqual(y2, 1000 + 100 - 1)
 
     def test_a_long_walk_is_padded_by_its_own_size(self):
         looks = [[(400. + 60 * k, 700., 460. + 60 * k, 820.)] for k in range(20)]   # 1200 px wide, 120 tall
         window, whole = vlm_crop.clip_window(looks, MAIN_H, MAIN_W, settings())
         self.assertFalse(whole)
-        self.assertLessEqual(window[0], 400 - 0.1 * 1200 + 1)
-        self.assertGreaterEqual(window[2], 1600 + 0.1 * 1200 - 1)
+        self.assertLessEqual(window[0], 400 - 0.05 * 1200 + 1)
+        self.assertGreaterEqual(window[2], 1600 + 0.05 * 1200 - 1)
 
     def test_shape_is_at_most_two_to_one_grown_with_more_scene(self):
         looks = [[(400. + 60 * k, 700., 460. + 60 * k, 820.)] for k in range(20)]
         window, _ = vlm_crop.clip_window(looks, MAIN_H, MAIN_W, settings())
         w, h = window[2] - window[0], window[3] - window[1]
         self.assertLessEqual(w, 2 * h + 2)
-        self.assertGreater(h, 120 + 2 * 60)                  # taller than the padded walk itself: more scene
+        self.assertGreater(h, 120 + 2 * 30)                  # taller than the padded walk itself: more scene
 
     def test_small_person_gets_at_least_min_size(self):
         window, _ = vlm_crop.clip_window([[(1000., 700., 1010., 730.)]] * 3, MAIN_H, MAIN_W, settings())
@@ -155,7 +155,15 @@ class ClipWindowTest(unittest.TestCase):
             self.assertTrue(0 <= x1 < x2 <= MAIN_W and 0 <= y1 < y2 <= MAIN_H, window)
             self.assertTrue(x1 <= box[0] and box[2] <= x2 + 1 and y1 <= box[1] and box[3] <= y2 + 1, window)
 
-    def test_a_window_over_half_the_frame_is_the_whole_frame(self):
+    def test_a_window_over_half_but_under_80_percent_stays_a_crop(self):
+        # Sending the whole frame from half the frame on zoomed too little and lost alerts in the eval (2026-10-10).
+        looks = [[(300. + 80 * k, 300., 420. + 80 * k, 1000.)] for k in range(20)]   # ~1900 x 700 + padding
+        window, whole = vlm_crop.clip_window(looks, MAIN_H, MAIN_W, settings())
+        area = (window[2] - window[0]) * (window[3] - window[1]) / float(MAIN_W * MAIN_H)
+        self.assertFalse(whole)
+        self.assertTrue(0.5 < area <= 0.8, area)
+
+    def test_a_window_over_80_percent_of_the_frame_is_the_whole_frame(self):
         looks = [[(100. + 120 * k, 300., 300. + 120 * k, 1300.)] for k in range(20)]   # across the yard
         window, whole = vlm_crop.clip_window(looks, MAIN_H, MAIN_W, settings())
         self.assertEqual((window, whole), ((0, 0, MAIN_W, MAIN_H), True))
@@ -199,7 +207,7 @@ class SettingsTest(unittest.TestCase):
         cfg = dc_config.load_config()
         s = vlm_crop.settings_from_config(cfg)
         self.assertEqual((s.policy, s.window_padding, s.person_margin, s.max_aspect, s.whole_frame_above),
-                         (vlm_crop.POLICY_CLIP_WINDOW, 0.1, 0.5, 2.0, 0.5))
+                         (vlm_crop.POLICY_CLIP_WINDOW, 0.05, 0.25, 2.0, 0.8))
 
 
 if __name__ == "__main__":

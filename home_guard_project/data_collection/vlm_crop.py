@@ -7,9 +7,11 @@ main stream, then one of two policies (config main_stream.crop_policy):
 
 * ``clip_window`` (default since 2026-10-09): ONE still window for the whole clip
   (:func:`clip_window`) - the box around every trigger box the clip had, one-off
-  boxes left out, padded by the window's size or half a person, grown to at most
-  2:1 with more scene, the whole frame when it covers over half of it. The person
+  boxes left out, padded by the window's size or a quarter of a person, grown to at most
+  2:1 with more scene, the whole frame when it covers over 80% of it. The person
   moves inside a still view, so the model sees the real movement against the yard.
+  Padding and the whole-frame cut were tuned on eval_set_v2 (2026-10-10): a quarter
+  of a person and 5% per side, whole frame above 80%.
   A camera that pans and zooms with the person turns into "camera motion", which
   video models read worst (research: knowledge base "Crop framing for Video LLM").
 * ``follow``: the old crop - a padded square around each look's union, gaps
@@ -61,10 +63,10 @@ class CropSettings:
     min_size: int
     ema_alpha: float            # follow
     policy: str = POLICY_CLIP_WINDOW
-    window_padding: float = 0.1     # clip_window: per side, fraction of the window's width / height ...
-    person_margin: float = 0.5      # ... or this many median box heights, whichever is bigger
+    window_padding: float = 0.05    # clip_window: per side, fraction of the window's width / height ...
+    person_margin: float = 0.25     # ... or this many median box heights, whichever is bigger
     max_aspect: float = 2.0         # clip_window: long side at most this times the short one (grown, not cut)
-    whole_frame_above: float = 0.5  # clip_window: a window over this fraction of the frame -> the whole frame
+    whole_frame_above: float = 0.8  # clip_window: a window over this fraction of the frame -> the whole frame
 
 
 def settings_from_config(cfg: Any) -> CropSettings:
@@ -78,10 +80,10 @@ def settings_from_config(cfg: Any) -> CropSettings:
         min_size=int(cfg.CROP_MIN_SIZE),
         ema_alpha=float(cfg.CROP_EMA_ALPHA),
         policy=_policy(getattr(cfg, "CROP_POLICY", POLICY_CLIP_WINDOW)),
-        window_padding=float(getattr(cfg, "CROP_WINDOW_PADDING", 0.1)),
-        person_margin=float(getattr(cfg, "CROP_PERSON_MARGIN", 0.5)),
+        window_padding=float(getattr(cfg, "CROP_WINDOW_PADDING", 0.05)),
+        person_margin=float(getattr(cfg, "CROP_PERSON_MARGIN", 0.25)),
         max_aspect=max(1.0, float(getattr(cfg, "CROP_MAX_ASPECT", 2.0))),
-        whole_frame_above=float(getattr(cfg, "CROP_WHOLE_FRAME_ABOVE", 0.5)),
+        whole_frame_above=float(getattr(cfg, "CROP_WHOLE_FRAME_ABOVE", 0.8)),
     )
 
 
