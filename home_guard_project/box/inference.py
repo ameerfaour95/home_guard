@@ -356,11 +356,26 @@ def owner_guard(text: str, camera: str, lang: str) -> str:
         return text
 
 
+def carry_renamed_memory(cameras: Sequence[str]) -> None:
+    """Before the books open: what the owner told the box under a camera's old id (site rename) moves to its new id
+    (memory_rename.py, with a backup; 2026-10-10 the pergola workers' marks stayed on ameer_week_0_1_*). Never
+    raises."""
+    try:
+        from .memory_rename import box_cameras, carry_memory  # noqa: PLC0415
+
+        moved = carry_memory(box_cameras() or list(cameras), paths.state_dir())
+        if moved:
+            log.info("Owner memory carried to the renamed cameras: %s", moved)
+    except Exception as exc:  # noqa: BLE001 - the alerts go on with the memory as it was
+        log.warning("Owner memory not carried over the camera rename: %s", exc)
+
+
 def start_events(box_settings: Mapping[str, Any]) -> Any:
     """Start the box's event book (events.py) once, in the state folder; box.yaml ``notify_normal`` (default off)
     lets the first normal of an event be a message. Never raises: without a book alerts go out as before."""
     global EVENTS, AI_FAILED_NOTIFY
     AI_FAILED_NOTIFY = _on_off(box_settings.get("ai_failed_notify", False), "ai_failed_notify")
+    carry_renamed_memory(KNOWN_CAMERAS)       # before the book reads known.json (the case journal is read per use)
     try:
         from . import events  # noqa: PLC0415
 
