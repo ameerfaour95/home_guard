@@ -19,6 +19,20 @@ TEXT = {
         tab_regions="Numbered places",
         tab_draw="Draw by hand",
         tab_lines="Boundaries",
+        tab_saved="Saved map",
+
+        saved_on="Saved {when}",
+        kept_hint="This is the map the box keeps for this camera. Tap a place to rename it, change whose it is or "
+                  "delete it. Draw more by hand, or start over.",
+        kept_title="Area {number}",
+        kept_empty="No saved places left. Draw by hand, or start over.",
+        merged_note="{count} duplicate places were merged into one each. Saving cleans them on the box too.",
+        merged_note_one="1 duplicate place was merged. Saving cleans it on the box too.",
+        moved_note="This map was carried over from the camera’s previous name. Save to keep it under the new one.",
+        start_over="Start over",
+        start_over_question="Delete the map of {camera} and start over? The saved map stays until you save.",
+        start_over_yes="Yes, start over",
+        start_over_no="Keep the map",
 
         regions_hint="Tap a number on the picture or in the list, then choose whose it is.",
         grid_note="Automatic outlining was not available, so the picture was split into squares. "
@@ -159,6 +173,20 @@ TEXT = {
         tab_regions="מקומות ממוספרים",
         tab_draw="ציור ידני",
         tab_lines="קווי גבול",
+        tab_saved="המפה השמורה",
+
+        saved_on="נשמרה ב-{when}",
+        kept_hint="זו המפה שהקופסה שומרת למצלמה הזאת. לחצו על מקום כדי לשנות את השם שלו, של מי הוא, או למחוק "
+                  "אותו. אפשר לצייר עוד ביד, או להתחיל מחדש.",
+        kept_title="אזור {number}",
+        kept_empty="לא נשארו מקומות שמורים. אפשר לצייר ביד, או להתחיל מחדש.",
+        merged_note="אוחדו {count} מקומות כפולים. השמירה תנקה אותם גם בקופסה.",
+        merged_note_one="אוחד מקום כפול אחד. השמירה תנקה אותו גם בקופסה.",
+        moved_note="המפה הועברה מהשם הקודם של המצלמה. שמרו כדי לקבע אותה בשם החדש.",
+        start_over="להתחיל מחדש",
+        start_over_question="למחוק את המפה של {camera} ולהתחיל מחדש? המפה השמורה תישאר עד שתשמרו.",
+        start_over_yes="כן, להתחיל מחדש",
+        start_over_no="להשאיר את המפה",
 
         regions_hint="לחצו על מספר בתמונה או ברשימה, ובחרו של מי המקום.",
         grid_note="הסימון האוטומטי לא היה זמין, ולכן התמונה חולקה לריבועים. ענו על הריבועים שאתם מכירים.",

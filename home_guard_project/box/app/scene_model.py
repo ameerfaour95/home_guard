@@ -8,6 +8,7 @@ leave the region out of the map.
 import base64
 import json
 import math
+import re
 import zlib
 from dataclasses import dataclass, field
 
@@ -292,12 +293,52 @@ def rest_after(current, scene):
     return "unmapped"
 
 
-def from_current(current):
-    """The camera's map now as editable hand areas and lines: its stored areas, and today's watch zone as an
-    area of ours (``confirm`` keeps it as one)."""
+def polygon_key(points):
+    """An outline as the box compares it: its corners rounded to DECIMALS."""
+    return tuple((round(float(x), DECIMALS), round(float(y), DECIMALS)) for x, y in points or ())
+
+
+def unique_areas(areas):
+    """*areas* with the ones on the very same outline (``polygon_key``) collapsed into one, the last one's kind and
+    name kept (saving a reopened map used to add the answers on top of the saved areas); and how many were merged."""
+    last = {}
+    for i, area in enumerate(areas):
+        last[polygon_key(area.get("points"))] = i
+    kept = [a for i, a in enumerate(areas) if last[polygon_key(a.get("points"))] == i]
+    return kept, len(areas) - len(kept)
+
+
+def merged_duplicates(current):
+    """How many of the camera's stored areas repeat another one's outline (``from_current`` merges them)."""
+    return unique_areas([a for a in (current or {}).get("areas") or () if choice_of(a)])[1]
+
+
+def has_saved_map(current):
+    """The camera has a map of its own (stored areas or lines), not only today's drawn zone."""
     current = current or {}
+    return bool(current.get("areas") or current.get("lines"))
+
+
+_STAND_IN = re.compile(r"(drawn )?area \d+")
+
+
+def owner_name(hand):
+    """The name the owner gave the area, or "" for the box's own stand-ins (``area 3``, ``drawn area 1``, the zone
+    word of an unnamed one, the watched area): those are not words to show in a name field."""
+    name = str(hand.name or "").strip()
+    if not name or name == sm.WATCHED_NAME or _STAND_IN.fullmatch(name) or (hand.zone and hand.zone != "other"
+                                                                            and name == hand.zone):
+        return ""
+    return name
+
+
+def from_current(current):
+    """The camera's map now as editable areas and lines: its stored areas (repeats of one outline merged, see
+    ``unique_areas``), and today's watch zone as an area of ours (``confirm`` keeps it as one)."""
+    current = current or {}
+    stored, _merged = unique_areas([a for a in current.get("areas") or () if choice_of(a)])
     hands = [HandArea([list(p) for p in a.get("points") or ()], choice_of(a), str(a.get("name") or ""),
-                      str(a.get("zone") or "other")) for a in current.get("areas") or () if choice_of(a)]
+                      str(a.get("zone") or "other")) for a in stored]
     watched = current.get("watched")
     if watched and not any(h.points == [list(p) for p in watched] for h in hands):
         hands.append(HandArea([list(p) for p in watched], "mine", sm.WATCHED_NAME, "other"))

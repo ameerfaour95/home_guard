@@ -82,6 +82,37 @@ class BuildMapTest(unittest.TestCase):
         self.assertEqual(scene["areas"][0]["zone"], "gate")                # a stored zone is kept
         self.assertEqual(scene["areas"][1]["name"], sm.WATCHED_NAME)
 
+    def test_repeats_of_one_outline_are_merged_keeping_the_last_answer(self) -> None:
+        # A reopened map saved with the answers on top of the saved areas: 8 places, 9 of them again.
+        def area(i, kind="mine", name=None):
+            x = i / 10
+            return {"name": name or f"area {i}", "kind": kind, "zone": "other",
+                    "points": [[x, .1], [x + .05, .1], [x + .05, .2 + 1e-6]]}
+        areas = ([area(i) for i in range(8)] + [area(i, "black", f"again {i}") for i in range(8)]
+                 + [area(2, "mine", "the gate")])
+        current = {"areas": areas, "lines": []}
+        self.assertEqual(model.merged_duplicates(current), 9)
+        hands, _lines = model.from_current(current)
+        self.assertEqual(len(hands), 8)
+        self.assertEqual([(h.choice, h.name) for h in hands],
+                         [("hide", f"again {i}") for i in (0, 1, 3, 4, 5, 6, 7)] + [("mine", "the gate")])
+        self.assertEqual(model.polygon_key([[.12341, .5]]), model.polygon_key([[.12344, .5]]))
+        self.assertNotEqual(model.polygon_key([[.1234, .5]]), model.polygon_key([[.1235, .5]]))
+        self.assertEqual(model.merged_duplicates({"areas": areas[:8]}), 0)
+
+    def test_a_saved_map_is_one_with_areas_or_lines_not_only_todays_zone(self) -> None:
+        self.assertFalse(model.has_saved_map({}))
+        self.assertFalse(model.has_saved_map({"watched": [[0, 0], [1, 0], [1, 1]], "areas": [], "lines": []}))
+        self.assertTrue(model.has_saved_map({"areas": [{"kind": "mine"}]}))
+        self.assertTrue(model.has_saved_map({"areas": [], "lines": [{"a": [0, 0], "b": [1, 1]}]}))
+
+    def test_the_boxs_own_stand_in_names_are_not_shown_as_names(self) -> None:
+        for name, zone in (("area 3", "other"), ("drawn area 1", "other"), (sm.WATCHED_NAME, "other"),
+                           ("gate", "gate"), ("", "other")):
+            self.assertEqual(model.owner_name(model.HandArea([], "mine", name, zone)), "", name)
+        for name, zone in (("הדשא", "yard"), ("the gate", "gate"), ("area 3b", "other")):
+            self.assertEqual(model.owner_name(model.HandArea([], "mine", name, zone)), name)
+
     def test_our_side_of_a_line(self) -> None:
         line = model.boundary_from_areas((.5, 0.), (.5, 1.), [LAWN], "railing")
         self.assertEqual(line.inward, model.boundary_toward((.5, 0.), (.5, 1.), (.2, .8)).inward)
