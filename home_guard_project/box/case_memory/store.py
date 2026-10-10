@@ -20,7 +20,7 @@ import os
 import threading
 import time
 from datetime import datetime, timedelta
-from typing import Any, Callable, Dict, Iterable, List, Optional, Protocol, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Protocol, Sequence, Tuple
 
 from .ladder import SHADOW_STAGE, TrustLadder
 from .models import (ACTIVE, ALERT, EFFECTS, INVALID, MAX_EXAMPLES, PAUSED, SHADOW, Case, Example, Expecting, Scope,
@@ -174,14 +174,59 @@ def _keep_examples(examples: List[Example]) -> List[Example]:
     return [examples[0]] + examples[-(MAX_EXAMPLES - 1):]
 
 
+_CAMERAS_TTL = 60.0
+_cameras_cache: Dict[str, Any] = {"at": -1e18, "names": []}
+
+
+def box_cameras() -> List[str]:
+    """The box's cameras (cameras.yaml, memory_rename.box_cameras), re-read at most once a minute."""
+    now = time.monotonic()
+    if now - _cameras_cache["at"] > _CAMERAS_TTL:
+        try:
+            from ..memory_rename import box_cameras as read  # noqa: PLC0415
+
+            _cameras_cache["names"] = list(read())
+        except Exception as exc:  # noqa: BLE001 - without the list only exact ids match
+            log.warning("Cameras not read for the case memory: %s", exc)
+            _cameras_cache["names"] = []
+        _cameras_cache["at"] = now
+    return list(_cameras_cache["names"])
+
+
+def same_camera(case_camera: str, camera: str, current: Sequence[str] = ()) -> bool:
+    """The case's camera is *camera*: the same id, or (2026-10-10, the site rename ameer_week_0_1_* -> ameer_v2_*)
+    an old id that is no longer a camera, on the channel of which *camera* is the one current camera
+    (find_cameras.orphan_renames' rule; memory_rename moves the journal itself at start, this covers the time
+    before it and a journal written by an older process)."""
+    if case_camera == camera:
+        return True
+    from ..camera_names import channel_of  # noqa: PLC0415
+
+    ch = channel_of(case_camera)
+    if ch is None or ch != channel_of(camera) or not current or case_camera in current:
+        return False
+    return [c for c in current if channel_of(c) == ch] == [camera]
+
+
 class CaseStore:
     """Cases, widening proposals, expecting notes and answered routine proposals, folded from the journal."""
 
     def __init__(self, backend: CaseBackend, now: Callable[[], float] = time.time,
-                 ladder: TrustLadder = TrustLadder()) -> None:
+                 ladder: TrustLadder = TrustLadder(),
+                 cameras: Optional[Callable[[], Sequence[str]]] = None) -> None:
         self.backend = backend
         self._now = now
         self.ladder = ladder
+        self._cameras = cameras if cameras is not None else box_cameras
+
+    def same_camera(self, case_camera: str, camera: str) -> bool:
+        if case_camera == camera:
+            return True
+        try:
+            return same_camera(case_camera, camera, self._cameras())
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Camera fallback by channel failed: %s", exc)
+            return False
 
     @classmethod
     def at(cls, path: str, **kwargs: Any) -> "CaseStore":
@@ -336,7 +381,7 @@ class CaseStore:
     def cases(self, camera: Optional[str] = None, include_invalid: bool = False) -> List[Case]:
         with _LOCK:
             state = self._fold()
-        out = [c for c in state["cases"].values() if camera is None or c.camera == camera]
+        out = [c for c in state["cases"].values() if camera is None or self.same_camera(c.camera, camera)]
         return [c for c in out if include_invalid or c.status != INVALID]
 
     def live_cases(self, camera: str) -> List[Case]:

@@ -173,6 +173,23 @@ class ShadowMatchTest(Base):
         self.assertEqual([m["event_ts"] for m in self.store.seen_after_end()], [T(10, 9, 30)])
 
 
+class RenamedSiteTest(Base):
+    """2026-10-10 12:31 the site became ameer_v2: a precedent still under ameer_week_0_1_ch6 follows by channel."""
+
+    def test_an_old_id_follows_the_one_camera_on_its_channel(self) -> None:
+        self.explain()
+        new = "ameer_v2_ch6"
+        self.store._cameras = lambda: [new, "ameer_v2_ch3"]
+        self.assertEqual([c.camera for c in self.store.live_cases(new)], [ENTRANCE])
+        ev = CaseEvent.build("ev", new, T(10, 10), {"people": 2, "label": "suspicious"}, label="suspicious",
+                             text="A man lies on the stairs.")
+        self.assertEqual(self.memory.apply(ev, SUSPICIOUS)[1].kind, "shadow")
+        # Not while the old id is still a camera, nor on another channel, nor with two cameras on the channel.
+        for cams in ([new, ENTRANCE], ["ameer_v2_ch3"], [new, "other_site_ch6"]):
+            self.store._cameras = lambda cams=cams: cams
+            self.assertEqual(self.store.live_cases(new), [], cams)
+
+
 class LadderTest(Base):
     def test_three_owner_confirmations_make_it_a_quiet_message_never_more(self) -> None:
         _, (result,) = self.explain()

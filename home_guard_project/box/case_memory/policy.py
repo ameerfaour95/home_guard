@@ -190,7 +190,8 @@ class CaseMemory:
         """The same kind of event after the case's end, at any hour: what it did fits, only the end (and the
         hour) do not."""
         whole = replace(case, scope=replace(case.scope, until=None, hours=("00:00", "00:00")))
-        return not gate_failures(whole, sig, self.config.hour_margin_min, self.config.max_path_distance)
+        return not gate_failures(whole, sig, self.config.hour_margin_min, self.config.max_path_distance,
+                                 self.store.same_camera)
 
     # -- the decision ---------------------------------------------------------------------------------------------
     def assess(self, event: Union[CaseEvent, Mapping[str, Any]], decision: Mapping[str, Any],
@@ -219,8 +220,8 @@ class CaseMemory:
         else:
             cases = [c for c in cases if not c.scope.actions
                      or not veto(sig, label, command, explained=c.scope.actions)]
-        failures = {c.id: gate_failures(c, sig, self.config.hour_margin_min, self.config.max_path_distance)
-                    for c in cases}
+        failures = {c.id: gate_failures(c, sig, self.config.hour_margin_min, self.config.max_path_distance,
+                                        self.store.same_camera) for c in cases}
         gated = [c for c in cases if not failures[c.id]]
         gated_out = {k: v for k, v in failures.items() if v}
         if self.log_matches:

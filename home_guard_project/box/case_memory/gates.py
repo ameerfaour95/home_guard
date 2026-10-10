@@ -6,7 +6,7 @@ Each failure is a short English reason the owner can read ("23:10 is outside 07:
 """
 from __future__ import annotations
 
-from typing import List, Sequence
+from typing import Callable, List, Optional, Sequence
 
 from .. import taxonomy as tx
 from .models import Case, Scope, Signature, hhmm, minutes_of, window_minutes
@@ -100,13 +100,15 @@ def family(category: str) -> str:
     return FAMILIES.get(category, "")
 
 
-def gate_failures(case: Case, sig: Signature, hour_margin_min: int = 15, max_path_distance: float = 0.34) -> List[str]:
-    """Every gate *sig* fails for *case* (empty list: it passes all of them)."""
+def gate_failures(case: Case, sig: Signature, hour_margin_min: int = 15, max_path_distance: float = 0.34,
+                  same_camera: Optional[Callable[[str, str], bool]] = None) -> List[str]:
+    """Every gate *sig* fails for *case* (empty list: it passes all of them). *same_camera(case camera, event
+    camera)*: the store's, which follows a renamed site by channel; exact ids without it."""
     s: Scope = case.scope
     out = []
     if not case.live:
         out.append(f"case is {case.status}")
-    if sig.camera != s.camera:
+    if not (sig.camera == s.camera or (same_camera is not None and same_camera(s.camera, sig.camera))):
         out.append(f"camera {sig.camera} is not {s.camera}")
     if not in_window(sig.minute, s.hours, hour_margin_min):
         out.append(f"{hhmm(sig.minute)} is outside {s.hours[0]}-{s.hours[1]}")
