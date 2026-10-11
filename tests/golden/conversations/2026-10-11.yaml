@@ -63,7 +63,7 @@ cases:
     notes: "Real turn: v3 answered from the 21:46 clip ('לא ניתן לראות את מספר הרכב בתמונות של האירוע'); he meant: do you remember it."
 
   - id: g12_04
-    source: "2026-10-11 pinned"
+    source: "2026-10-11 09:00"
     time: "09:00:00"
     message: {text: "תזכור, מספר הרכב שלי 12-345-67"}
     expect:
@@ -76,7 +76,7 @@ cases:
     notes: "The other half of the car-number question: told once, kept."
 
   - id: g12_05
-    source: "2026-10-11 pinned"
+    source: "2026-10-11 09:05"
     time: "09:05:00"
     memory:
       facts:
