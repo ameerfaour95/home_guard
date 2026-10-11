@@ -387,6 +387,7 @@ def camera_fact(t: Turn, act: Act) -> None:
         return
     where = f"ב{t.name(camera)}" if camera else "בבית"
     t.did(f"{where}: {fact['text']} ({'כבר היה ידוע' if fact.get('already') else 'לתמיד'}).")
+    t.plan.notes.append(load("assistant_v3_note_fact_saved.prompt"))
 
 
 def tag_only(t: Turn, act: Act) -> None:
