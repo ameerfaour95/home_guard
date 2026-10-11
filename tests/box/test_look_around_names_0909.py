@@ -78,9 +78,9 @@ class CaptionTest(unittest.TestCase):
         self.deliver = Deliver()
         look_around(self.ctx("מה קורה", vision=Vision({PERGOLA: 1, ENTRANCE: 2})), {})
         clock = dt.datetime.fromtimestamp(NOW).strftime("%H:%M")
-        # ...and what it shows (13:00: "יש מישהו בחוץ?" got two photos and no word).
-        self.assertEqual([c for _, c in self.deliver.photos],
-                         [f"פרגולה · {clock} · 1 people", f"כניסה ראשית · {clock} · 2 people"])
+        # ...and what it shows only in the owner's language (2026-10-10 23:54: the pergola photo came with an English
+        # sentence; this fake vision writes English, so the caption is the name and the time).
+        self.assertEqual([c for _, c in self.deliver.photos], [f"פרגולה · {clock}", f"כניסה ראשית · {clock}"])
 
     def test_no_answer_after_a_look_around_gets_one_summary_line(self) -> None:
         from home_guard_project.box.brain.agent import _look_summary  # noqa: PLC0415

@@ -28,7 +28,9 @@ _busy_lock = threading.Lock()
 
 def grab_photo(camera: str, out_dir: str, cameras_path: str, zones_path: Optional[str] = None,
                now: Callable[[], float] = time.time, grab: Any = None) -> dict:
-    return grab_masked(camera, cameras_path, out_dir, now=now, grab=grab, zones_path=zones_path)
+    """A live photo for the owner and the vision model, and the full-resolution copy for the detector's second
+    look (``"full"``, 2026-10-11: a "person" the detector half-saw on the small picture was stacked chairs)."""
+    return grab_masked(camera, cameras_path, out_dir, now=now, grab=grab, zones_path=zones_path, keep_full=True)
 
 
 def bounds_text(start: float, end: float) -> str:

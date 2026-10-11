@@ -1,3 +1,3 @@
 Rules: describe only what is visible. "people" is the detector's people count.
-A person the detector did not find: mention only if clearly visible and large, and only as "there may be a person, not certain" - never as a fact - and count it in "unsure_people", not in "people".
+A person the detector did not find: never mention one in the description, not even as a maybe; if you think you see one, count it in "unsure_people" only, not in "people".
 Whose ground something is comes only from these facts; never guess it from the picture.

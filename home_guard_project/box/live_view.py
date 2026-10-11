@@ -108,14 +108,68 @@ def _remove_quietly(path: str) -> None:
         pass
 
 
+LOOK_WIDTH = 960                 # the picture the vision model and the owner get
+FULL_KEEP_SEC = 3600.0           # a full-resolution copy is only for the detector's second look: kept an hour
+
+
+def _full_path(image_path: str) -> str:
+    return os.path.splitext(image_path)[0] + "_full.jpg"
+
+
+def _shrink_in_place(src: str, dst: str, width: int = LOOK_WIDTH) -> bool:
+    """*src* (masked) written to *dst* at most *width* wide. False on any failure."""
+    try:
+        import cv2  # noqa: PLC0415
+
+        img = cv2.imread(src)
+        if img is None:
+            return False
+        h, w = img.shape[:2]
+        if w > width:
+            img = cv2.resize(img, (width, max(1, int(h * width / w))), interpolation=cv2.INTER_AREA)
+        return bool(cv2.imwrite(dst, img, [int(cv2.IMWRITE_JPEG_QUALITY), 85]))
+    except Exception as exc:  # noqa: BLE001 - fail closed: the caller drops the picture
+        log.warning("Live-view resize failed: %s", exc)
+        return False
+
+
+def _width_of(path: str) -> int:
+    try:
+        import cv2  # noqa: PLC0415
+
+        img = cv2.imread(path)
+        return 0 if img is None else int(img.shape[1])
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def prune_full_copies(out_dir: str, now: float, keep_sec: float = FULL_KEEP_SEC) -> None:
+    """Remove the full-resolution copies older than *keep_sec* (they are only for the look that made them)."""
+    try:
+        for name in os.listdir(out_dir):
+            if name.endswith("_full.jpg"):
+                path = os.path.join(out_dir, name)
+                try:
+                    if now - os.path.getmtime(path) > keep_sec:
+                        os.remove(path)
+                except OSError:
+                    pass
+    except OSError:
+        pass
+
+
 def grab_masked(camera: str, cameras_path: str, out_dir: str, now: Callable[[], float] = time.time,
                 grab: Optional[Callable[[str, str], bool]] = None,
-                zones_path: Optional[str] = None, keep_zone: bool = True) -> Dict[str, Any]:
+                zones_path: Optional[str] = None, keep_zone: bool = True, keep_full: bool = False) -> Dict[str, Any]:
     """A current picture from *camera*, masked to its watch zone: ``{"camera", "image"}`` or ``{"error"}``.
 
     The unmasked grab only ever exists under a temporary name; if the zone cannot
     be applied the picture is dropped (fail closed). ``keep_zone=False`` (the owner's own install interview, which
     asks about what today's zone blacks out) masks only the scene map's black areas, never less.
+
+    ``keep_full=True`` (the assistant's live looks, 2026-10-11): the camera's full resolution is grabbed and kept,
+    masked the same way, as ``"full"``, for the detector's second look at a possible person (grounded_look); the
+    ``"image"`` is the same LOOK_WIDTH picture as before. A grab no wider than that has no ``"full"``.
     """
     temp_path = None
     try:
@@ -123,7 +177,9 @@ def grab_masked(camera: str, cameras_path: str, out_dir: str, now: Callable[[], 
         if not url:
             return {"error": f"no camera named {camera!r} is configured"}
         if grab is None:
-            from .find_cameras import _grab_snapshot as grab  # noqa: PLC0415
+            from .find_cameras import _grab_snapshot  # noqa: PLC0415
+
+            grab = (lambda u, p: _grab_snapshot(u, p, width=100_000)) if keep_full else _grab_snapshot
         try:
             os.makedirs(out_dir, exist_ok=True)
         except OSError as exc:
@@ -141,6 +197,13 @@ def grab_masked(camera: str, cameras_path: str, out_dir: str, now: Callable[[], 
             return {"error": f"could not get a picture from {camera} right now (is it online?)"}
         if (polygon or black) and not _mask_in_place(temp_path, polygon, black=black):
             return {"error": f"could not prepare the picture from {camera} right now"}
+        if keep_full and _width_of(temp_path) > LOOK_WIDTH:
+            full_path = _full_path(image_path)
+            if not _shrink_in_place(temp_path, image_path):
+                return {"error": f"could not prepare the picture from {camera} right now"}
+            os.replace(temp_path, full_path)
+            prune_full_copies(out_dir, now())
+            return {"camera": camera, "image": image_path, "full": full_path}
         os.replace(temp_path, image_path)
         return {"camera": camera, "image": image_path}
     except Exception as exc:  # noqa: BLE001 - never expose an unmasked picture after a failure

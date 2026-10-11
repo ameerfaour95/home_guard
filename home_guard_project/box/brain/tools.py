@@ -576,7 +576,7 @@ def check_camera(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     facts = None
     if ctx.services.vision is not None:
         try:
-            look, facts = _grounded_look(ctx, camera, shot["image"])
+            look, facts = _grounded_look(ctx, camera, shot["image"], _full_of(shot.get("full")))
         except Exception as exc:
             log.warning("Live-photo vision failed: %s", exc)
             look = {"ok": False}
@@ -613,15 +613,16 @@ def _note_people(ctx: ToolContext, handle: str, people: Any) -> None:
         entry["people"] = max(0, people)
 
 
-def _grounded_look(ctx: ToolContext, camera: str, image: str) -> Tuple[Dict[str, Any], Any]:
+def _grounded_look(ctx: ToolContext, camera: str, image: str, full: str = "") -> Tuple[Dict[str, Any], Any]:
     """The vision look at a live photo, grounded (grounded_look.py, 2026-10-10 17:03: a person the detector did not
     find was told as a fact): the detector's objects on that photo and their ground on the owner's map go to the
-    model as facts, and its answer is checked against them. ``(look, facts)``."""
+    model as facts, and its answer is checked against them. The detector reads the full-resolution copy *full* when
+    the grab kept one (2026-10-11). ``(look, facts)``."""
     from . import grounded_look as gl  # noqa: PLC0415
 
     svc = ctx.services
     facts = gl.grounded_facts(camera, image, _finite(svc.now()), detector=svc.detect, status_path=svc.status_path,
-                              zones_path=svc.zones_path)
+                              zones_path=svc.zones_path, full_path=_full_of(full))
     text = gl.facts_text(facts)
     with open(image, "rb") as f:
         data = f.read()
@@ -651,8 +652,6 @@ def _note_facts(ctx: ToolContext, handle: str, out: Dict[str, Any], look: Dict[s
     whose = gl.ground_line(facts, ctx.lang)
     if whose:
         out["whose_ground"] = whose
-    if look.get("unsure_people"):
-        out["unsure_people"] = look["unsure_people"]
     if look.get("corrected"):
         out["note"] = load("brain_tool_detector_no_person.prompt")
     entry = ctx.state.handles.get(handle)
@@ -669,6 +668,18 @@ def photo_caption(ctx: ToolContext, camera: str, ts: Any = None) -> str:
     except Exception as exc:  # noqa: BLE001 - a caption must never stop the picture
         log.debug("photo caption not made: %s", exc)
         return ""
+
+
+def _full_of(shot_full: Any) -> str:
+    return shot_full if isinstance(shot_full, str) else ""
+
+
+def caption_words(ctx: ToolContext, description: Any) -> str:
+    """The first sentence of a vision description for a photo's caption, only when it is in the owner's language
+    (2026-10-10 23:54: the pergola photo came with an English sentence - the vision model writes English)."""
+    said = first_sentence(description)
+    hebrew = bool(re.search(r"[א-ת]", said))
+    return said if said and hebrew == str(ctx.lang).startswith("he") else ""
 
 
 def first_sentence(text: Any, limit: int = 120) -> str:
@@ -700,7 +711,7 @@ def look_around(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         facts = None
         if ctx.services.vision is not None:
             try:
-                look, facts = _grounded_look(ctx, cam, shot["image"])
+                look, facts = _grounded_look(ctx, cam, shot["image"], _full_of(shot.get("full")))
                 look = look or {}
             except Exception as exc:  # noqa: BLE001 - one camera's failure must not end the look
                 log.warning("look_around: vision failed on %s: %s", cam, exc)
@@ -718,14 +729,13 @@ def look_around(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         _note_people(ctx, handle, people)
         _note_facts(ctx, handle, row, look, facts)
         row["handle"] = handle
-        # A person the detector missed but the picture model may have seen is shown too, never hidden.
-        if ((people or look.get("unsure_people")) and _media_sent(ctx) < LOOK_AROUND_PHOTOS
-                and ctx.services.deliver is not None):
-            # 2026-10-09 13:00 "יש מישהו בחוץ?": two photos and no word. Each one says what it shows.
-            said = first_sentence(look.get("description"))
-            if not people and "people" in (look.get("corrected") or ()):
-                said = "ייתכן שיש אדם, לא בטוח" if str(ctx.lang).startswith("he") else "maybe a person, not certain"
-            caption = " · ".join(x for x in (photo_caption(ctx, cam), said) if x)
+        # A photo only of a person the detector confirmed (2026-10-11, the owner: no "maybe a person" - the pergola's
+        # stacked chairs went out as a person with a photo).
+        if people and _media_sent(ctx) < LOOK_AROUND_PHOTOS and ctx.services.deliver is not None:
+            # 2026-10-09 13:00 "יש מישהו בחוץ?": two photos and no word. Each one says where and when; what it
+            # shows only in the owner's language.
+            caption = " · ".join(x for x in (photo_caption(ctx, cam), caption_words(ctx, look.get("description")))
+                                 if x)
             sent = _service_result(ctx.services.deliver.photo(ctx.chat_id, shot["image"], caption=caption))
             _issue(ctx, "check_camera", DONE if sent.get("ok") else FAILED, cam,
                    {"camera": cam, "message_id": sent.get("message_id")}, "" if sent.get("ok") else "telegram")
@@ -829,7 +839,8 @@ def where_is(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
             return _err(load("brain_tool_where_no_picture.prompt"),
                         camera=name)
         found = gl.grounded_facts(camera, shot["image"], now, detector=ctx.services.detect,
-                                  status_path=ctx.services.status_path, zones_path=ctx.services.zones_path)
+                                  status_path=ctx.services.status_path, zones_path=ctx.services.zones_path,
+                                  full_path=_full_of(shot.get("full")))
         if not found.known:
             return _err(load("brain_tool_where_no_detector.prompt"),
                         camera=name)
