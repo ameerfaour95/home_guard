@@ -2696,12 +2696,15 @@ def _held(res: Any) -> bool:
 
 
 def _places(job: AlertJob) -> List[str]:
-    """The owner's area names the tracker saw this alert's people and vehicles in (scene map), first visit first."""
+    """The owner's area names the tracker saw this alert's people and vehicles in (scene map), first visit first;
+    never the map's stand-ins ("area 2"), which the describer would copy into his message."""
+    from .scene_map import owner_given  # noqa: PLC0415
+
     out: List[str] = []
     record = getattr(job, "tracker", None) or {}
     for one in list(record.get("people") or []) + list(record.get("vehicles") or []):
         for name in list(one.get("path") or []) + list((one.get("seconds_per_area") or {}).keys()):
-            if isinstance(name, str) and name.strip() and name.strip() not in out:
+            if isinstance(name, str) and owner_given(name) and name.strip() not in out:
                 out.append(name.strip())
     return out[:4]
 

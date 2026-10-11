@@ -66,6 +66,14 @@ REST_NAME = "rest of the picture"          # the implicit area outside every are
 NEAR_AREA = 0.03                           # an area this close (picture widths) is where the point is
 AGREE_DISTANCE = 0.15                      # a line's side counts only when an area this close agrees with it
 SIDE_NAMES = {MINE: "our side", NEIGHBOUR: "the neighbour's side", PUBLIC: "the street side"}
+_STAND_IN = re.compile(r"(?:drawn )?area \d+", re.IGNORECASE)
+
+
+def owner_given(name: str) -> bool:
+    """A name the owner gave an area, not one of the box's stand-ins ("area 7", "drawn area 1", the watched area,
+    the rest of the picture): only those may reach his messages (owner 2026-10-11: "ב-area 2" in an alert)."""
+    name = str(name or "").strip()
+    return bool(name) and not _STAND_IN.fullmatch(name) and name not in (WATCHED_NAME, REST_NAME)
 WHOLE_PICTURE = ((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0))
 MAX_TRACKS_PER_KIND = 3
 FACTS_LIMIT = 400

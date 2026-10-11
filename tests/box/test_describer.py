@@ -560,3 +560,19 @@ class WorkerTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StandInPlacesTest(unittest.TestCase):
+    """Owner 2026-10-11: "כורע על הקרקע ב-area 2" - the map's stand-in names never reach the describer's places."""
+
+    def test_only_names_the_owner_gave(self) -> None:
+        job = SimpleNamespace(tracker={
+            "people": [{"path": ["area 2", "the pergola", "drawn area 1"],
+                        "seconds_per_area": {"Area 7": 3, "rest of the picture": 2, "watched area": 1}}],
+            "vehicles": [{"path": ["the neighbour's side"], "seconds_per_area": {}}]})
+        self.assertEqual(inf._places(job), ["the pergola", "the neighbour's side"])
+
+    def test_nothing_named_is_no_places_line(self) -> None:
+        job = SimpleNamespace(tracker={"people": [{"path": ["area 1"], "seconds_per_area": {"area 1": 4}}]})
+        self.assertEqual(inf._places(job), [])
+        self.assertNotIn("area 1", ds.build_prompt({"P1": "person"}, "A person.", "", inf._places(job)))
