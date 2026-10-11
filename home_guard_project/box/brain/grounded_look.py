@@ -16,8 +16,11 @@ vision model only describes. Code checks its answer against them.
    the map drawn as ameer_week_0_1_ch2).
 3. ``facts_text(...)``: the facts block for the vision prompt.
 4. ``enforce(...)``: the post-check. With no person detected, an answer that states a person is rewritten from the
-   facts ("לא רואה אנשים במצלמה 2 עכשיו"); a person the model still thinks it saw is kept only as "ייתכן שיש אדם, לא
-   בטוח". The same for vehicles. Logged.
+   facts ("לא רואה אנשים במצלמה 2 עכשיו"); a person the model still thinks it saw is not told at all (2026-10-11, the
+   owner: no assumption the detector did not make). A vehicle it alone saw is kept only as "ייתכן שיש רכב, לא בטוח".
+   Logged.
+6. The second look (2026-10-11): a person the detector is not sure of (below PERSON_SURE) on the full-resolution
+   picture is looked at again on a crop around it (``Detector.zoom``); unconfirmed it is no fact.
 5. ``map_info`` / ``where_is``: the map tools' answers ("של מי הרכב?" -> "הטנדר חונה בשטח של השכן (לפי המפה
    שציירת)"); without a map an honest "no map yet" and the offer to draw it.
 """
@@ -41,6 +44,22 @@ log = logging.getLogger("box.brain.grounded_look")
 
 FRESH_SEC = 2.0                     # the live detector's look counts for a photo taken this close to it
 LOOK_CONF = {"person": 0.35, "vehicle": 0.4, "animal": 0.4}   # what this look counts as seen
+# 2026-10-11 23:54, the pergola at night: "בפרגולה יש אדם ליד נגרר" - the detector gave stacked chairs "person" 0.52
+# on the 960-wide picture and the vision model was told it as a fact. The owner: a person is said only when the
+# detector is sure on the full-resolution picture. Below PERSON_SURE a person needs the second look (zoom) to find
+# one at ZOOM_CONF or more; else it is not a fact, and nothing tells it (calibrated on the box, see the commit).
+# On the box (yolo11s OpenVINO, 2026-10-11): the back yard's garden lamps and a wall fitting come out "person" up to
+# 0.80 on the whole picture and real people from 0.31; on a full-resolution crop the lamps read 0.00-0.59 and the
+# chairs of 23:54 0.00, while every person seen at 0.85+ read 0.88+. ZOOM_CONF 0.60 keeps every lamp out at the cost
+# of a few dim or far people (0.37-0.50), which the owner prefers to a made-up one. On a small picture (no
+# full-resolution copy: 704-960 wide) the second look still passes lamps at up to 0.77, so it needs ZOOM_CONF_SMALL.
+PERSON_SURE = 0.85
+ZOOM_CONF = 0.60
+ZOOM_CONF_SMALL = 0.80
+ZOOM_MIN_CONF = 0.25                # what the second look reads at all
+ZOOM_PAD = 3.0                      # the crop: this many times the box's long side ...
+ZOOM_MIN_SIDE = 320                 # ... and at least this many pixels
+MAX_ZOOMS = 4                       # second looks per photo (~0.4 s each on the N150), the surest first
 PERSON, VEHICLE, ANIMAL = "person", "vehicle", "animal"
 _KIND_OF = {"person": PERSON, "car": VEHICLE, "truck": VEHICLE, "bus": VEHICLE, "motorcycle": VEHICLE,
             "bicycle": VEHICLE, "dog": ANIMAL, "cat": ANIMAL, "bird": ANIMAL}
@@ -72,6 +91,7 @@ class Facts:
     objects: List[Seen] = field(default_factory=list)
     mapped: bool = False            # the camera has an informative scene map
     areas: Dict[str, List[str]] = field(default_factory=dict)    # ground -> area names
+    doubtful: List[Seen] = field(default_factory=list)            # "people" the second look did not confirm: no fact
 
     @property
     def known(self) -> bool:
@@ -84,6 +104,8 @@ class Facts:
         out: Dict[str, Any] = {"source": self.source or "none", "people": self.count(PERSON),
                                "vehicles": self.count(VEHICLE), "animals": self.count(ANIMAL),
                                "objects": [o.record() for o in self.objects], "map": "yes" if self.mapped else "none"}
+        if self.doubtful:
+            out["doubtful_people"] = [o.record() for o in self.doubtful]
         return out
 
 
@@ -141,6 +163,49 @@ class Detector:
 
         return objects_from_result(result)
 
+    def zoom(self, image_path: str, box: Sequence[float]) -> Optional[float]:
+        """The second look (2026-10-11): the detector on a crop of *image_path* around *box* (0..1), so a small
+        far-off "person" is seen at the detector's full input size. The confidence of the most sure person whose box
+        holds the candidate's centre (0.0 when none), or None when the detector cannot run."""
+        with self._lock:
+            model = self._load()
+            if model is None:
+                return None
+            try:
+                import cv2  # noqa: PLC0415
+
+                img = cv2.imread(image_path)
+                if img is None:
+                    return None
+                crop, (cx, cy) = zoom_crop(img, box)
+                result = model.predict(crop, conf=ZOOM_MIN_CONF, device=self._device, verbose=False)[0]
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Look detector's second look failed on %s: %s", image_path, exc)
+                return None
+        best = 0.0
+        names = getattr(result, "names", {}) or {}
+        for b in getattr(result, "boxes", None) or []:
+            if names.get(int(b.cls[0])) != "person":
+                continue
+            x1, y1, x2, y2 = (float(v) for v in b.xyxy[0])
+            if x1 <= cx <= x2 and y1 <= cy <= y2:
+                best = max(best, float(b.conf[0]))
+        return best
+
+
+def zoom_crop(img: Any, box: Sequence[float]) -> Tuple[Any, Tuple[float, float]]:
+    """A square-ish crop of *img* (pixels) around *box* (0..1): ZOOM_PAD times the box's long side, at least
+    ZOOM_MIN_SIDE pixels, kept inside the picture. ``(crop, the box's centre in the crop)``."""
+    h, w = img.shape[:2]
+    x1, y1, x2, y2 = (float(v) for v in box[:4])
+    x1, x2, y1, y2 = x1 * w, x2 * w, y1 * h, y2 * h
+    cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+    side = max(ZOOM_PAD * max(x2 - x1, y2 - y1), ZOOM_MIN_SIDE)
+    sw, sh = int(min(side, w)), int(min(side, h))
+    left = int(max(0, min(w - sw, cx - sw / 2)))
+    top = int(max(0, min(h - sh, cy - sh / 2)))
+    return img[top:top + sh, left:left + sw], (cx - left, cy - top)
+
 
 def _from_live(camera: str, taken: float, status_path: str) -> Optional[List[Dict[str, Any]]]:
     """The live detector's look at *camera* (ai_status.json) when it was made within FRESH_SEC of *taken*."""
@@ -158,13 +223,20 @@ def _from_live(camera: str, taken: float, status_path: str) -> Optional[List[Dic
 
 
 def detect(camera: str, image_path: str, taken: float, detector: Optional[Callable[[str], Any]] = None,
-           status_path: str = "") -> Tuple[str, List[Seen]]:
-    """``(source, objects)``: the detector on this photo, else the live detector's fresh look, else ``("", [])``."""
+           status_path: str = "", full_path: str = "",
+           doubtful: Optional[List[Seen]] = None) -> Tuple[str, List[Seen]]:
+    """``(source, objects)``: the detector on this photo (its full-resolution copy *full_path* when there is one),
+    else the live detector's fresh look, else ``("", [])``. A person below PERSON_SURE stays only when the
+    detector's second look (``detector.zoom``) confirms it - ZOOM_CONF on the full-resolution copy, ZOOM_CONF_SMALL
+    without one; the others go to *doubtful* (not facts)."""
     raw: Optional[List[Dict[str, Any]]] = None
     source = ""
+    full = bool(full_path) and os.path.isfile(full_path)
+    path = full_path if full else image_path
+    bar = ZOOM_CONF if full else ZOOM_CONF_SMALL
     if detector is not None:
         try:
-            raw = detector(image_path)
+            raw = detector(path)
         except Exception as exc:  # noqa: BLE001
             log.warning("Look detector failed: %s", exc)
             raw = None
@@ -172,8 +244,10 @@ def detect(camera: str, image_path: str, taken: float, detector: Optional[Callab
     if raw is None and status_path:
         raw = _from_live(camera, taken, status_path)
         source = "live" if raw is not None else ""
+    zoom = getattr(detector, "zoom", None) if source == "detector" else None
+    zooms = 0
     seen: List[Seen] = []
-    for obj in raw or []:
+    for obj in sorted(raw or [], key=_conf_of, reverse=True):
         try:
             label = str(obj["label"])
             conf = float(obj["conf"])
@@ -181,9 +255,38 @@ def detect(camera: str, image_path: str, taken: float, detector: Optional[Callab
         except (KeyError, TypeError, ValueError, IndexError):
             continue
         kind = _KIND_OF.get(label, "")
-        if kind and len(box) == 4 and conf >= LOOK_CONF[kind]:
-            seen.append(Seen(label, conf, box))   # type: ignore[arg-type]
+        if not (kind and len(box) == 4 and conf >= LOOK_CONF[kind]):
+            continue
+        item = Seen(label, conf, box)   # type: ignore[arg-type]
+        if kind == PERSON and conf < PERSON_SURE:
+            second = _second_look(zoom if zooms < MAX_ZOOMS else None, path, box)
+            zooms += 1
+            log.info("Look %s: person %.2f -> second look %s", camera, conf,
+                     "none" if second is None else f"{second:.2f}")
+            if second is None or second < bar:
+                if doubtful is not None:
+                    doubtful.append(item)
+                continue
+        seen.append(item)
     return source, seen
+
+
+def _conf_of(obj: Any) -> float:
+    try:
+        return float(obj["conf"])
+    except (KeyError, TypeError, ValueError):
+        return 0.0
+
+
+def _second_look(zoom: Any, path: str, box: Sequence[float]) -> Optional[float]:
+    if not callable(zoom):
+        return None
+    try:
+        got = zoom(path, box)
+        return None if got is None else float(got)
+    except Exception as exc:  # noqa: BLE001 - no second look: not confirmed
+        log.warning("Look detector's second look failed: %s", exc)
+        return None
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -278,12 +381,14 @@ def area_names(scene: Optional[sm.SceneMap]) -> Dict[str, List[str]]:
 
 
 def grounded_facts(camera: str, image_path: str, taken: float, detector: Optional[Callable[[str], Any]] = None,
-                   status_path: str = "", zones_path: Optional[str] = None) -> Facts:
+                   status_path: str = "", zones_path: Optional[str] = None, full_path: str = "") -> Facts:
     """Everything code knows about this photo before the vision model looks. Never raises."""
     try:
-        source, seen = detect(camera, image_path, taken, detector, status_path)
+        doubtful: List[Seen] = []
+        source, seen = detect(camera, image_path, taken, detector, status_path, full_path, doubtful)
         scene = load_map(camera, zones_path)
-        return Facts(camera, source, [place(scene, s) for s in seen], scene is not None, area_names(scene))
+        return Facts(camera, source, [place(scene, s) for s in seen], scene is not None, area_names(scene),
+                     doubtful)
     except Exception as exc:  # noqa: BLE001 - without facts the look goes on as before
         log.warning("Grounded facts for %s failed: %s", camera, exc)
         return Facts(camera)
@@ -347,7 +452,7 @@ _HEDGE = re.compile(r"\b(?:may|might|possibly|perhaps|not certain|unclear)\b|י�
                     re.IGNORECASE)
 _SENTENCE = re.compile(r"(?<=[.!?])\s+")
 _CLAUSE = re.compile(r",\s*|;\s*|\s+(?:while|and|whereas)\s+|\s+(?=בזמן ש|כאשר|ובזמן ש|וכן )", re.IGNORECASE)
-_LEAD = re.compile(r"^(?:בזמן ש|ובזמן ש|כאשר |וכן )")
+_LEAD = re.compile(r"^(?:בזמן ש|ובזמן ש|כאשר |וכן |(?:while|and|whereas)\s+)", re.IGNORECASE)
 
 
 def _asserts(clause: str, words: "re.Pattern[str]") -> bool:
@@ -365,7 +470,8 @@ def _strip(text: str, words: "re.Pattern[str]") -> Tuple[str, bool]:
         keep = [_LEAD.sub("", c.strip()) for c in clauses if not _asserts(c, words)]
         dropped = True
         if keep:
-            kept_sentences.append(", ".join(keep).strip() + ".")
+            kept = ", ".join(keep).strip()
+            kept_sentences.append(kept[:1].upper() + kept[1:] + ".")     # "while a pickup ..." -> "A pickup ..."
     return " ".join(s for s in kept_sentences if s.strip(" .")), dropped
 
 
@@ -382,8 +488,9 @@ def _int(value: Any) -> int:
 
 def enforce(look: Dict[str, Any], facts: Facts, name: str = "") -> Dict[str, Any]:
     """*look* (``Vision.look``'s answer) checked against the detector. With no person detected, a stated person is
-    taken out of the description and replaced by the fact; one the model still thinks it saw stays only as
-    "ייתכן שיש אדם, לא בטוח". The same for vehicles. Adds ``unsure_people`` / ``grounded`` / ``corrected``."""
+    taken out of the description and replaced by the fact, with no "maybe" (the model's count goes to
+    ``model_people``, for the log). A vehicle only the model saw stays as "ייתכן שיש רכב, לא בטוח". Adds
+    ``unsure_people`` / ``grounded`` / ``corrected``."""
     if not isinstance(look, dict) or not look.get("ok") or not facts.known:
         return look
     out = dict(look)
@@ -397,11 +504,11 @@ def enforce(look: Dict[str, Any], facts: Facts, name: str = "") -> Dict[str, Any
         stated = _int(out.get("people"))
         text, dropped = _strip(text, _PERSON_WORDS)
         if stated or dropped:
+            # 2026-10-11 (the owner): no "maybe a person" either - a person the detector did not confirm is not
+            # told at all. The model's count stays in the log only.
             unsure_people = max(unsure_people, stated, 1 if dropped else 0)
-            fact = (f"לא רואה אנשים{where} עכשיו (הגלאי לא מצא אף אדם)." if he
-                    else f"No people seen{where} now (the detector found none).")
-            hedge = (" ייתכן שיש אדם, לא בטוח." if he else " There may be a person, not certain.")
-            text = (fact + (" " + text if text else "") + hedge).strip()
+            fact = (f"לא רואה אנשים{where} עכשיו." if he else f"No people seen{where} now.")
+            text = (fact + (" " + text if text else "")).strip()
             corrected.append("people")
         out["people"] = 0
     elif _int(out.get("people")) == 0:
@@ -415,7 +522,9 @@ def enforce(look: Dict[str, Any], facts: Facts, name: str = "") -> Dict[str, Any
             text = (text2 + (" ייתכן שיש רכב, לא בטוח." if he else " There may be a vehicle, not certain.")).strip()
             corrected.append("vehicles")
     out["description"] = text or ("לא רואה אנשים עכשיו." if he else "No people seen now.")
-    out["unsure_people"] = unsure_people
+    out["unsure_people"] = 0 if facts.count(PERSON) == 0 else unsure_people
+    if unsure_people and facts.count(PERSON) == 0:
+        out["model_people"] = unsure_people          # for the log and the replay, never for the owner
     out["grounded"] = facts.record()
     if corrected:
         out["corrected"] = corrected

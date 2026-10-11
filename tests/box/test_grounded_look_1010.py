@@ -22,7 +22,7 @@ from home_guard_project.box.brain.vision import Vision, look_prompt, look_schema
 NOW = 1_791_641_027.0
 CH2 = "ameer_v2_ch2"
 TRUCK = {"label": "truck", "conf": 0.84, "box": [0.40, 0.50, 0.68, 0.77]}
-PERSON = {"label": "person", "conf": 0.81, "box": [0.80, 0.60, 0.85, 0.90]}
+PERSON = {"label": "person", "conf": 0.88, "box": [0.80, 0.60, 0.85, 0.90]}     # sure: no second look needed
 # The 17:03 answer, as the vision model / the chat said it.
 SAID_HE = "במצלמה 2 יש אדם בלבוש כהה הולך ליד צד הבית, בזמן שטנדר חונה בחניה ליד חומרי בנייה. התמונה ברורה."
 SAID_EN = "A person in dark clothing walks by the side of the house, while a pickup is parked near building materials."
@@ -61,19 +61,20 @@ class EnforceTest(Base):
         out = gl.enforce(look, self.facts([TRUCK]), "מצלמה 2")
         self.assertEqual(out["people"], 0)
         self.assertIn("לא רואה אנשים במצלמה 2 עכשיו", out["description"])
-        self.assertIn("ייתכן שיש אדם, לא בטוח", out["description"])
+        self.assertNotIn("ייתכן שיש אדם", out["description"])               # 2026-10-11: not even a maybe
         self.assertNotIn("יש אדם בלבוש כהה", out["description"])           # never as a fact
         self.assertIn("טנדר חונה בחניה", out["description"])                # the rest of the answer stays
         self.assertEqual(out["corrected"], ["people"])
-        self.assertGreaterEqual(out["unsure_people"], 1)
+        self.assertEqual(out["unsure_people"], 0)
+        self.assertGreaterEqual(out["model_people"], 1)                     # kept for the log only
 
     def test_english_answer_too(self) -> None:
         look = {"ok": True, "description": SAID_EN, "quality": "clear", "people": 1}
         out = gl.enforce(look, self.facts([TRUCK]), "מצלמה 2")
         self.assertTrue(out["description"].startswith("No people seen now"))     # no Hebrew name in English
         self.assertNotIn("person in dark clothing", out["description"])
-        self.assertIn("pickup is parked", out["description"])
-        self.assertIn("There may be a person, not certain.", out["description"])
+        self.assertIn("A pickup is parked", out["description"])             # not "while a pickup ..."
+        self.assertNotIn("may be a person", out["description"])
 
     def test_an_answer_with_no_person_is_left_alone(self) -> None:
         look = {"ok": True, "description": "A pickup is parked. No people are visible.", "quality": "clear",
@@ -136,7 +137,7 @@ class PlaceTest(Base):
         text = gl.facts_text(facts)
         self.assertIn("- people: 0", text)
         self.assertIn("truck/pickup (0.84) on the neighbour's ground", text)
-        self.assertIn("never as a fact", text)
+        self.assertIn("not even as a maybe", text)
         self.assertIn(text, look_prompt(CH2, False, facts=text))
         self.assertIn("unsure_people", look_schema(False, grounded=True)["properties"])
         self.assertNotIn("unsure_people", look_schema(False)["properties"])
@@ -182,8 +183,9 @@ class ToolsTest(Base):
         out = check_camera(ctx, {"camera": CH2})
         self.assertIn("- people: 0", vision.facts[0])
         self.assertEqual(out["people"], 0)
-        self.assertIn("ייתכן שיש אדם, לא בטוח", out["description"])
+        self.assertNotIn("ייתכן שיש אדם", out["description"])
         self.assertNotIn("יש אדם בלבוש כהה", out["description"])
+        self.assertNotIn("unsure_people", out)
         self.assertEqual(out["detector"]["people"], 0)
         self.assertIn("בשטח של השכן", out["whose_ground"])
         self.assertIn("never say there is one", out["note"])
@@ -193,15 +195,16 @@ class ToolsTest(Base):
         self.assertTrue(ans["ok"])
         self.assertIn("הטנדר בשטח של השכן (לפי המפה שציירת)", ans["say"])
 
-    def test_look_around_caption_never_states_the_person(self) -> None:
+    def test_look_around_sends_no_photo_of_a_person_the_detector_did_not_find(self) -> None:
+        # 2026-10-11: before, a possible person went out as a photo with "ייתכן שיש אדם"; the owner: no assumption.
         self.save(neighbour_map())
         out = look_around(self.ctx("יש מישהו בחוץ?", FakeVision(), detect=lambda _p: [TRUCK]), {})
         row = out["cameras"][0]
         self.assertEqual(row["people"], 0)
-        self.assertEqual(row["unsure_people"], 1)
-        self.assertEqual(len(self.deliver.photos), 1)                  # a possible person is shown, not hidden
-        self.assertIn("ייתכן שיש אדם, לא בטוח", self.deliver.photos[0][1])
-        self.assertNotIn("יש אדם בלבוש כהה", self.deliver.photos[0][1])
+        self.assertNotIn("unsure_people", row)
+        self.assertEqual(self.deliver.photos, [])
+        self.assertNotIn("ייתכן שיש אדם", row["description"])
+        self.assertNotIn("יש אדם בלבוש כהה", row["description"])
 
     def test_where_is_without_a_map_is_honest(self) -> None:
         ans = where_is(self.ctx("של מי הרכב", detect=lambda _p: [TRUCK]), {"camera": CH2, "what": "הרכב"})
