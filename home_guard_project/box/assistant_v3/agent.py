@@ -142,6 +142,7 @@ class AssistantV3(OwnerAgentV2):
         turn = hd.Turn(ctx=ctx, mem=mem, cams=cams, text=text, now=now, alert=alert, und=und, called=called, box=box)
 
         merge_pause_resume(und)
+        hd.photo_request(turn)
         # ---- ACT ----
         for act in und.acts:
             fn = hd.HANDLERS.get(act.act)
@@ -359,6 +360,12 @@ class AssistantV3(OwnerAgentV2):
         if self._escalate(turn, trace):
             model, tier = self.escalation, "escalate"
         draft = self._write(model, system, body, task, tools_ok, budget, turn, usage, tier)
+        if not draft.strip() and tier == "escalate":
+            # 2026-10-11 10:13 and 10:14: the big model answered nothing twice and "צודק, סליחה." went out instead of
+            # an answer. An empty escalation falls back to the writer, never to the template.
+            log_intervention(trace, "escalation empty: the writer answers")
+            model, tier = self.writer, "write"
+            draft = self._write(model, system, body, task, tools_ok, budget, turn, usage, tier)
         evidence = "\n".join(plan.done + plan.evidence + turn.box.evidence)
         allowed = times_in(turn.text, body, evidence, *cx.earlier_owner_words(ctx.state, turn.now))
         claim_receipts = list(ctx.receipts) + [Receipt(id="v3", turn="v3", tool=t, status=DONE) for t in

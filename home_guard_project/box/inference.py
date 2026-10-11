@@ -2610,14 +2610,20 @@ def arrival_text(arrival: Dict[str, Any], lang: str) -> str:
     return t("arrived_line", lang, who=str(arrival.get("who") or ""), camera=camera, time=when)
 
 
-def send_arrival_line(arrival: Dict[str, Any], box_settings: Dict[str, Any], env: Dict[str, str], lang: str) -> None:
-    """Send the arrival line without a sound. Never raises: it is only news."""
+def send_arrival_line(arrival: Dict[str, Any], box_settings: Dict[str, Any], env: Dict[str, str], lang: str,
+                      assistant: Any = None) -> None:
+    """Send the arrival line without a sound, and note it in the assistant's chat (OwnerAssistant.note_line) so
+    "תן לי תמונה" right after it is about that camera. Never raises: it is only news."""
     try:
         from . import telegram_notify  # noqa: PLC0415
 
         text = arrival_text(arrival, lang)
-        telegram_notify.send_message(telegram_notify.load_telegram_config(box_settings, env), text, silent=True)
+        res = telegram_notify.send_message(telegram_notify.load_telegram_config(box_settings, env), text, silent=True)
         log.info("arrival line sent: %s", text)
+        if assistant is not None and isinstance(res, dict) and res.get("sent"):
+            at = float(arrival.get("at") or time.time())
+            camera = str(arrival.get("camera") or "")
+            assistant.note_line(camera, at, text, f"arrival_{camera}_{int(at)}")
     except Exception as exc:  # noqa: BLE001
         log.warning("arrival line not sent: %s", exc)
 
@@ -3107,7 +3113,7 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                                                  eye_record.get("prompt_version", legacy_version),
                                                  f"{why} {reason} {summary}", shadow_only=True)
             if getattr(event, "arrival", None):
-                send_arrival_line(event.arrival, box_settings, env, lang)
+                send_arrival_line(event.arrival, box_settings, env, lang, assistant)
             if status is not None:
                 status.decision(camera_name, labels, summary, cmd, sent=False, held=event.reason, label=label)
             if job is not None:

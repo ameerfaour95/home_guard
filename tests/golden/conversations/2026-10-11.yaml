@@ -113,3 +113,41 @@ cases:
       must_not: ["אין תיעוד", "07:01", "כיסוי"]
       ideal: "יש. ב-08:15 בכניסה הראשית אישה יצאה עם ילד על הידיים וילד נוסף אחריה, והלכו לרכב הלבן. זה נשמר אצלי ולא נשלח לך כי זה נראה רגיל. ב-08:24 הרכב הלבן עוד עמד שם עם דלת פתוחה."
     notes: "Real turn: the box's journal had the 08:15 event (normal: kept, not sent) and v3 answered 'אין תיעוד יציאה' from the chat's alerts only."
+
+  - id: g12_07
+    source: "2026-10-11 10:11:34"
+    time: "10:11:34"
+    alerts:
+      - {id: arrival_ameer_v2_ch3_1791702420, camera: ameer_v2_ch3, time: "10:08:18", label: normal, people: 2, summary: "העובדים של הפרגולה הגיעו לפרגולה (10:07)"}
+    live:
+      ameer_v2_ch3: {description: "Two workers near a ladder under the pergola frame; a pickup parked behind.", people: 2, vehicles: 1}
+    message: {text: "תן לי תמונה"}
+    expect:
+      intent: command
+      must_do: ["look:ameer_v2_ch3"]
+      forbid_writes: [tag, person_mark, place_fact, alias, watch]
+      max_questions: 0
+      must_not: ["אין לי תמונה", "כבויה", "מצלמה 1"]
+      ideal: "הנה הפרגולה עכשיו: שני עובדים ליד הסולם."
+    notes: "Real turn: three minutes after the box's line 'the pergola workers arrived (10:07)'. v3 answered 'no live picture from the main camera' and then tried camera 1, which is off."
+
+  - id: g12_08
+    source: "2026-10-11 10:13:14"
+    time: "10:13:14"
+    alerts:
+      - {id: arrival_ameer_v2_ch3_1791702420, camera: ameer_v2_ch3, time: "10:08:18", label: normal, people: 2, summary: "העובדים של הפרגולה הגיעו לפרגולה (10:07)"}
+    live:
+      ameer_v2_ch3: {description: "Two workers near a ladder under the pergola frame; a pickup parked behind.", people: 2, vehicles: 1}
+    history:
+      - {time: "10:11:34", owner: "תן לי תמונה", bot: "אין לי תמונה חיה מהמצלמה הראשית כרגע."}
+      - {time: "10:11:55", owner: "תצלם מה זה אין לי", bot: "ניסיתי לצלם עכשיו, אבל מצלמה 1 כבויה."}
+      - {time: "10:12:39", owner: "לא מצלמה 1 מצלמה שמשקיפה על הפרגולה", bot: "צודק, טעיתי בזיהוי המצלמה: מצלמה 1 כבויה, והמצלמה שמשקיפה על הפרגולה היא פרגולה."}
+    message: {text: "נוווווו תן לי פאקינג תמונהה"}
+    expect:
+      intent: command
+      must_do: ["look:ameer_v2_ch3"]
+      forbid_writes: [tag, person_mark, place_fact, alias, watch]
+      max_questions: 0
+      must_not: ["צודק, סליחה", "כבויה"]
+      ideal: "הנה הפרגולה עכשיו: שני עובדים ליד הסולם."
+    notes: "Real turn: read as a complaint only and answered 'צודק, סליחה.' with no picture (the big model returned nothing)."

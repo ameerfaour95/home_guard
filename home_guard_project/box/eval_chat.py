@@ -564,7 +564,7 @@ class World:
 
             # Watches ("tell me when the car leaves"): the case's live "vehicles" count stands for the detector.
             self.services.detect = self._detect
-            watches._current = watches.Watches(os.path.join(self.root, ".watches.json"), self._grab_photo,
+            self.services.watches = watches.Watches(os.path.join(self.root, ".watches.json"), self._grab_photo,
                                                self._detect, lambda chat, image, caption: True,
                                                now=lambda: self.clock["now"])
 
@@ -590,13 +590,17 @@ class World:
     def _watches(self) -> List[Dict[str, Any]]:
         from . import watches  # noqa: PLC0415
 
-        store = watches.current()
+        store = self.services.watches
         return list(watches._read(store.path)) if store is not None else []
 
     def _detect(self, path: str) -> List[Dict[str, Any]]:
         camera = next((c for c in self.cameras if os.path.basename(path).startswith(c + "_")), "")
-        n = int(self.live(camera).get("vehicles") or 0) if camera else 0
-        return [{"label": "car", "conf": 0.8, "box": [0.1 + 0.2 * i, 0.5, 0.25 + 0.2 * i, 0.8]} for i in range(n)]
+        live = self.live(camera) if camera else {}
+        cars = [{"label": "car", "conf": 0.8, "box": [0.1 + 0.2 * i, 0.5, 0.25 + 0.2 * i, 0.8]}
+                for i in range(int(live.get("vehicles") or 0))]
+        people = [{"label": "person", "conf": 0.9, "box": [0.1 + 0.15 * i, 0.2, 0.18 + 0.15 * i, 0.6]}
+                  for i in range(int(live.get("people") or 0))]
+        return cars + people
 
     def _grab_photo(self, camera: str) -> Dict[str, Any]:
         if camera not in self.cameras:

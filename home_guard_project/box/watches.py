@@ -227,6 +227,7 @@ def start(services: Any, deliverer: Any, path: Optional[str] = None) -> Optional
         return bool(got.get("ok")) if isinstance(got, dict) else bool(got)
 
     _current = Watches(path or default_path(), services.grab_photo, services.detect, send, now=services.now)
+    services.watches = _current
     _current.start()
     log.info("Watches on (%d active)", len(_current.active()))
     return _current

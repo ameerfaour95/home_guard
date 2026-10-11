@@ -15,7 +15,7 @@ from typing import Any, Dict, List
 from home_guard_project.box import eval_chat as ec
 from home_guard_project.box import watches as wt
 
-from test_assistant_v3 import ALERT, FakeModel, act, acts_for, run
+from test_assistant_v3 import ALERT, HOUSE as HOUSE_ALL, FakeModel, act, acts_for, run
 
 CAR = {"label": "car", "conf": 0.8, "box": [0.40, 0.50, 0.60, 0.80]}
 OTHER_CAR = {"label": "car", "conf": 0.8, "box": [0.05, 0.50, 0.20, 0.70]}
@@ -187,3 +187,75 @@ class MemoryQuestionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PhotoAskTests(unittest.TestCase):
+    """2026-10-11 10:08-10:14: "העובדים של הפרגולה הגיעו (10:07)", then four asks for a picture; the first went to a
+    camera that is off, the next two were read as complaints and got "צודק, סליחה."."""
+
+    ARRIVAL = {"id": "arrival_ameer_v2_ch3_1791702420", "camera": "ameer_v2_ch3", "time": "10:08:18", "label": "normal",
+               "people": 2, "summary": "העובדים של הפרגולה הגיעו לפרגולה (10:07)"}
+
+    def tearDown(self) -> None:
+        ec.V3.clear()
+
+    def test_a_picture_right_after_the_workers_line_is_of_the_pergola(self):
+        understand = acts_for({"תן לי תמונה": {"emotion": "neutral", "acts": [
+            act("command", quote="תן לי תמונה", command="send_photo")]}})
+        writer = FakeModel(lambda user, kw: "הנה הפרגולה עכשיו: שני עובדים ליד הסולם.")
+        out = run({"time": "10:11:34", "alerts": [self.ARRIVAL], "message": {"text": "תן לי תמונה"}},
+                  understand, writer)
+        self.assertEqual(out["photo_cameras"], ["ameer_v2_ch3"])
+
+    def test_an_angry_ask_read_as_a_complaint_still_gets_a_picture(self):
+        msg = "נוווווו תן לי פאקינג תמונהה"
+        understand = acts_for({msg: {"emotion": "angry", "acts": [act("complaint", quote=msg, issue="other")]}})
+        writer = FakeModel(lambda user, kw: "הנה, הפרגולה עכשיו.")
+        out = run({"time": "10:13:14", "alerts": [self.ARRIVAL], "message": {"text": msg}}, understand, writer)
+        self.assertEqual(out["photo_cameras"], ["ameer_v2_ch3"])
+        self.assertNotEqual(out["text"].strip(), "צודק, סליחה.")
+
+    def test_a_past_picture_question_is_not_a_new_picture(self):
+        msg = "מה רואים בתמונה?"
+        understand = acts_for({msg: {"emotion": "neutral", "acts": [act("question_history", quote=msg)]}})
+        writer = FakeModel(lambda user, kw: "שני עובדים ליד הסולם.")
+        out = run({"time": "10:15:00", "alerts": [self.ARRIVAL], "message": {"text": msg}}, understand, writer)
+        self.assertEqual(out["photo_cameras"], [])
+
+    def test_an_empty_big_model_falls_back_to_the_writer(self):
+        from home_guard_project.box.assistant_v3.agent import AssistantV3
+
+        msg = "מה סליחה תן לי תמונהה יא טיפש"
+        understand = acts_for({msg: {"emotion": "angry", "acts": [act("complaint", quote=msg, issue="other")]}})
+        writer = FakeModel(lambda user, kw: "הנה הפרגולה עכשיו: שני עובדים ליד הסולם.")
+        empty = FakeModel(lambda user, kw: "")
+        old = AssistantV3._escalate
+        AssistantV3._escalate = lambda self, turn, trace: True
+        try:
+            ec.V3.clear()
+            ec.V3.update(write=writer, understand=understand, critic=None, escalate=empty)
+            case = {"id": "t", "source": "test", "date": "2026-10-10", "house": HOUSE_ALL, "time": "10:14:39",
+                    "alerts": [self.ARRIVAL], "message": {"text": msg},
+                    "expect": {"intent": "command", "ideal": "x", "max_questions": 0}}
+            out = ec.run_case(case, None, None)
+        finally:
+            AssistantV3._escalate = old
+        self.assertTrue(empty.calls)
+        self.assertIn("שני עובדים", out["text"])
+
+
+class ArrivalLineNotedTests(unittest.TestCase):
+    def test_the_arrival_line_goes_into_the_chat_history_and_feed(self):
+        from types import SimpleNamespace
+
+        from home_guard_project.box.telegram_agent import OwnerAssistant
+
+        noted, fed = [], []
+        agent = SimpleNamespace(version=2, note_alert=lambda chat, item: noted.append((chat, item)))
+        feed = SimpleNamespace(add=lambda *a, **k: fed.append((a, k)))
+        assistant = OwnerAssistant(cfg=SimpleNamespace(chat_ids=["-5"]), index=None, mute=None,
+                                   inbox=SimpleNamespace(agent=agent), feed=feed)
+        assistant.note_line("ameer_v2_ch3", 1791702420.0, "העובדים של הפרגולה הגיעו (10:07)", "arrival_ameer_v2_ch3_1")
+        self.assertEqual(noted[0][0], "-5")
+        self.assertEqual((noted[0][1]["camera"], noted[0][1]["alert_id"]), ("ameer_v2_ch3", "arrival_ameer_v2_ch3_1"))
+        self.assertEqual(fed[0][0][:2], ("box", "message"))

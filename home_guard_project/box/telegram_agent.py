@@ -567,6 +567,22 @@ class OwnerAssistant:
             return True
         return any(owner_reacted(root, alert_id) for root in alert_roots(self.feedback_dir, self.archive_dir))
 
+    def note_line(self, camera: str, ts: float, text: str, ref: str) -> None:
+        """A line the box sent outside an alert ("העובדים של הפרגולה הגיעו (10:07)") goes into the feed and into each
+        chat's history as an event at *camera*, so what the owner says next is about it (2026-10-11 10:08: the
+        arrival line, then "תן לי תמונה" three minutes later went to a camera that was off). Never raises."""
+        try:
+            if self.feed is not None:
+                self.feed.add("box", "message", text, camera=camera, alert_id=ref)
+            agent = getattr(self.inbox, "agent", None)
+            if getattr(agent, "version", 1) != 2:
+                return
+            item = {"alert_id": ref, "camera": camera, "ts": ts, "label": "normal", "summary": text}
+            for chat_id in self.cfg.chat_ids:
+                agent.note_alert(chat_id, item)
+        except Exception as exc:  # noqa: BLE001 - the line itself is already out
+            log.warning("Box line not noted in the chat history: %s", exc)
+
     def announce(self, text: str) -> None:
         """One message to every configured chat (mode switches), sent on its own thread so a slow network never
         holds up the detector loop. Never raises."""

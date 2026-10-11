@@ -97,6 +97,7 @@ class Services:
     zones_path: Optional[str] = None
     story_model: Any = None    # the model that writes the day's story (box.yaml day_story_model; day_story.py)
     cases: Any = None          # case_memory.CaseStore: the long-term precedents those memories also write (case_chat)
+    watches: Any = None        # watches.Watches: "tell me when the car leaves" (v3), checked by its own thread
 
 
 @dataclass

@@ -416,7 +416,7 @@ def alert_feedback(t: Turn, act: Act) -> None:
           f"כ{verdict}.")
 
 
-_NAMING = re.compile(r"תקרא|קרא ל|נקרא|תקראו|שם ל?ה?מצלמה|השם של|שם חדש|תשנה את השם|תן לה שם|call|name|rename",
+_NAMING = re.compile(r"תקרא|קרא ל|נקרא|תקראו|שם ל?ה?מצלמה|השם של|שם חדש|תשנה את השם|תן לה שם|\bcall\b|\bname\b|rename",
                      re.IGNORECASE)
 
 
@@ -479,11 +479,7 @@ def command(t: Turn, act: Act) -> None:
     elif kind == "send_video":
         send_video(t, act)
     elif kind == "send_photo":
-        camera = t.camera_of(act)
-        if camera:
-            out = t.box.run("look_now", {"camera": camera})
-            if out.get("ok", True):
-                t.did(f"נשלחה תמונה חיה מ{t.name(camera)}.")
+        send_photo(t, act)
     elif kind in ("house_mode", "setting"):
         from ..brain import house  # noqa: PLC0415
 
@@ -494,6 +490,57 @@ def command(t: Turn, act: Act) -> None:
             if out.handled and out.text:
                 t.plan.final = out.text
                 t.plan.rows.extend(out.rows or ())
+
+
+_PHOTO_ASK = re.compile(r"(?<![א-ת])(?:תמונה+|תמונות|תצלם|צלם|צילום|סנאפ)(?![א-ת])|\b(?:photo|picture|snapshot)\b",
+                        re.IGNORECASE)
+
+
+def photo_request(t: Turn) -> None:
+    """"תן לי תמונה" / "נוווו תן לי פאקינג תמונהה" always gets a picture (2026-10-11 10:11-10:14: four asks, the first
+    three read as a complaint or answered "no live picture from the main camera"). A message that asks for a picture
+    and has no send_photo / send_video act gets one, at the camera he names now or named in his last messages."""
+    if not _PHOTO_ASK.search(t.text) or any(a.act == "command" and a.command in ("send_photo", "send_video")
+                                            for a in t.und.acts):
+        return
+    if t.und.has("question_live") and not t.und.has("complaint"):
+        return                                   # "יש תמונה מהכניסה?" as a live question: prefetch looks already
+    t.und.acts.append(Act(act="command", command="send_photo", quote=t.text[:120]))
+    t.plan.trace.append("photo asked: send_photo added")
+
+
+def _named_camera(t: Turn, *texts: str) -> str:
+    from ..brain.registry import mentioned_cameras  # noqa: PLC0415
+
+    for text in texts:
+        named = [cam for _, cam in mentioned_cameras(t.snapshot, text or "")]
+        if named:
+            return t.camera_now(named[-1])
+    return ""
+
+
+def send_photo(t: Turn, act: Act) -> None:
+    """A live picture: of the camera he names (in this message or his last two), else the one being discussed, else
+    of every camera that is on. A camera that is off is said, and the others are shown instead."""
+    enabled = {c.name for c in t.snapshot.cameras if c.enabled}
+    owner = t.mem_owner_words()[:2]
+    camera = act.camera if act.camera and act.camera != "house" else ""
+    # what he names now, else what was just talked about (an alert or the box's line: the topic), else his last words
+    camera = _named_camera(t, t.text) or camera or t.camera_of(act) or _named_camera(t, *owner)
+    if camera and camera not in enabled:
+        t.did(f"{t.name(camera)} כבויה, אז שלחתי מהמצלמות שפועלות.")
+        camera = ""
+    cams = [camera] if camera else [c.name for c in t.snapshot.cameras if c.enabled]
+    sent = []
+    for cam in cams:
+        t.box.run("look_now", {"camera": cam})
+        if any(r.tool == "check_camera" and r.status == DONE and r.target == cam for r in t.ctx.receipts):
+            sent.append(t.name(cam))
+    if sent:
+        t.did(f"נשלחה תמונה חיה מ{', '.join(sent)}.")
+        t.plan.notes.append(load("assistant_v3_note_photo_sent.prompt"))
+    else:
+        t.did("לא הצלחתי לקבל תמונה מהמצלמות כרגע.")
 
 
 def pause(t: Turn, camera: Optional[str], until: float) -> bool:
@@ -558,7 +605,7 @@ def watch_request(t: Turn, act: Act) -> None:
     from .. import watches  # noqa: PLC0415
 
     camera = t.camera_of(act)
-    store = watches.current()
+    store = getattr(t.ctx.services, "watches", None) or watches.current()
     if not camera:
         t.plan.notes.append(load("assistant_v3_note_watch_no_camera.prompt"))
         return
