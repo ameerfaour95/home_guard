@@ -1328,33 +1328,37 @@ class TelegramInbox:
         return self.pending.match(chat_id, user_id, now, reply_to=replied, reply_alert=reply_alert)
 
     def _take_voice(self, chat_id: str, sender: Dict[str, Any], message: Dict[str, Any]) -> Any:
-        """True when *message* is a voice answer to an "Other…" wait: it is transcribed and saved as the
-        words; when it cannot be, the owner is asked to write them (the wait stays). The transcript (a str) when
-        it was heard but is not the clip's words (a question, a complaint): the assistant reads it. False when no
-        wait is open. Never raises."""
+        """A voice message, transcribed. True when it was the words of an "Other…" tag wait (saved), or when it
+        could not be heard (the owner is asked to write it); else the transcript (a str): the assistant reads it like
+        a typed message. False when *message* has no voice. Never raises.
+
+        2026-10-11 11:29: a voice message with no tag wait open was dropped without a word (it was only ever
+        transcribed for a tag), so "I sent a voice and got no answer"."""
         spoken = message.get("voice") or message.get("audio")
         if not isinstance(spoken, dict) or not spoken.get("file_id"):
             return False
         lang = self._language()
         try:
-            if not self._wait_for(chat_id, sender.get("id"), message, self._now()):
-                return False
+            waiting = bool(self._wait_for(chat_id, sender.get("id"), message, self._now()))
         except Exception as exc:  # noqa: BLE001
             log.warning("Voice message not matched to a tag: %s", exc)
-            return False
+            waiting = False
         heard = ""
         try:
             if self.transcriber is not None:
                 audio, name = self._fetch_voice(str(spoken["file_id"]))
                 heard = " ".join(str(self.transcriber(audio, name, lang) or "").split())
+            else:
+                log.warning("Voice message not transcribed: no transcriber (no OpenAI key)")
         except Exception as exc:  # noqa: BLE001 - the owner is asked to write instead
             log.warning("Voice message not transcribed: %s", exc)
         if heard:
-            return self._take_tag_text(chat_id, sender, heard, message, spoken=True) or heard
+            log.info("Voice message heard (%d chars)%s", len(heard), " for the tag wait" if waiting else "")
+            return (self._take_tag_text(chat_id, sender, heard, message, spoken=True) or heard) if waiting else heard
         try:
             self._say(chat_id, tr("tag_voice_failed", lang), reply_to=message.get("message_id"))
         except Exception as exc:  # noqa: BLE001
-            log.warning("Could not ask for the tag in writing: %s", exc)
+            log.warning("Could not ask for the voice message in writing: %s", exc)
         return True
 
     def _take_tag_text(self, chat_id: str, sender: Dict[str, Any], text: str, message: Dict[str, Any],

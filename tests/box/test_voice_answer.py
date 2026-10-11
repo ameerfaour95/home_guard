@@ -133,10 +133,19 @@ class VoiceAnswerTest(unittest.TestCase):
         inbox.handle_update(spoken(2))
         self.assertEqual(self._saved(self.production)[0]["owner_text"], "it was the gardener")
 
-    def test_a_voice_message_nobody_asked_for_is_left_alone(self) -> None:
+    def test_a_voice_message_nobody_asked_for_goes_to_the_assistant(self) -> None:
+        # 2026-10-11 11:29: it used to be left alone (only a tag wait transcribed voice), and the owner got no answer.
         agent = FakeAgent()
         self._inbox(agent=agent).handle_update(spoken(1))
-        self.assertEqual((self.fetched, self.heard, agent.seen, self.tg.calls), ([], [], [], []))
+        self.assertEqual(self.fetched, ["VOICE1"])
+        self.assertEqual(agent.seen, ["it was the gardener"])
+        self.assertEqual(self.tg.texts()[-1], "agent answer")
+
+    def test_a_voice_message_that_cannot_be_heard_is_answered_not_dropped(self) -> None:
+        agent = FakeAgent()
+        self._inbox(agent=agent, transcriber=None).handle_update(spoken(1))
+        self.assertEqual(agent.seen, [])
+        self.assertEqual(self.tg.texts()[-1], t("tag_voice_failed", "he"))
 
     def test_without_a_transcriber_the_owner_is_asked_to_write_and_the_wait_stays(self) -> None:
         inbox = self._inbox(transcriber=None)
@@ -191,3 +200,25 @@ class DownloadTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TranscriberChainTest(unittest.TestCase):
+    """2026-10-11: the OpenAI account had no credit; OpenRouter's audio model takes over."""
+
+    def test_openrouter_answers_when_openai_fails(self) -> None:
+        from unittest import mock
+
+        from home_guard_project.box import voice
+
+        def broken(audio, name, language):
+            raise RuntimeError("insufficient_quota")
+
+        with mock.patch.object(voice, "_openai_transcriber", lambda env, model: broken), \
+                mock.patch.object(voice, "_openrouter_transcriber", lambda env, model: lambda a, n, l: "תן לי תמונה"):
+            t = voice.make_transcriber({"OPENAI_API_KEY": "x", "OPENROUTER_API_KEY": "y"})
+            self.assertEqual(t(b"ogg", "voice.oga", "he"), "תן לי תמונה")
+
+    def test_no_keys_no_transcriber(self) -> None:
+        from home_guard_project.box import voice
+
+        self.assertIsNone(voice.make_transcriber({}))

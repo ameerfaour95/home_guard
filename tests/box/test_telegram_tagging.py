@@ -801,9 +801,8 @@ class InboxTaggingTest(unittest.TestCase):
             msg = text(uid, "", sender=sender, reply_to=reply_to)
             del msg["message"]["text"]
             msg["message"]["voice"] = {"file_id": "fake"}
-            before = len(self.tg.calls)
             inbox.handle_update(msg)
-            self.assertEqual(len(self.tg.calls), before)
+            self.assertEqual(self._saved(), [])          # a voice not meant for the wait never fills it
         inbox.handle_update(text(5, "gardener"))
         self.assertEqual(self._saved()[0]["owner_text"], "gardener")
 
