@@ -603,6 +603,45 @@ def vehicle_words(*texts: str) -> str:
     return ""
 
 
+DAY_EVENTS = 8
+
+
+def day_events(t: Turn, camera: str = "", hours: float = 12.0) -> List[str]:
+    """The box's events of the last *hours* (at *camera*, else every camera), oldest first, each one line with whether
+    the owner was told: the event memory's archive and the sessions still open. [] when there is no memory."""
+    from ..brain.tools import _memory, memory_event_text  # noqa: PLC0415
+
+    memory = _memory(t.ctx)
+    if memory is None:
+        return []
+    since = t.now - hours * 3600.0
+    rows: List[Dict[str, Any]] = []
+    try:
+        rows = [r for r in memory.records() if float(r.get("end") or r.get("start") or 0) >= since]
+        book = getattr(t.ctx.services, "events", None)
+        if book is not None:
+            rows += [memory.live_record(s) for s in book.recent(since, camera) if not s.get("closed")]
+    except Exception as exc:  # noqa: BLE001 - the chat's own alerts still answer
+        log.warning("v3: event memory not read: %s", exc)
+        return []
+    if camera:
+        rows = [r for r in rows if t.camera_now(str(r.get("camera") or "")) == camera]
+    rows = sorted({str(r.get("event_id") or id(r)): r for r in rows}.values(), key=lambda r: float(r.get("start") or 0))
+    out = []
+    for r in rows[-DAY_EVENTS:]:
+        e = memory_event_text(r, t.snapshot, t.ctx.lang, t.now)
+        told = "נשלח לך" if e["told_the_owner"] else "לא נשלח לך (נשמר ביומן)"
+        out.append(f"מהיומן של הקופסה: {e['from']}–{e['to']} ב{e['camera']} ({told}): {cx_clip(e['what'], 260)}")
+    if out:
+        t.plan.notes.append(load("assistant_v3_note_day_events.prompt"))
+    return out
+
+
+def cx_clip(text: Any, limit: int) -> str:
+    text = " ".join(str(text or "").split())
+    return text if len(text) <= limit else text[:limit - 1].rsplit(" ", 1)[0] + "…"
+
+
 HANDLERS = {"place_fact": place_fact, "person_mark": person_mark, "activity_explain": activity_explain,
             "camera_fact": camera_fact, "tag_only": tag_only, "alert_feedback": alert_feedback,
             "preference": preference, "command": command, "watch_request": watch_request}
@@ -625,6 +664,15 @@ def prefetch(t: Turn) -> None:
             t.plan.evidence.append(f"התמונה החיה מ-{hhmm(entry.get('ts'))} מ{t.name(t.camera_now(str(entry.get('camera') or '')))}"
                                    f" (נשלחה לפני רגע): {entry.get('observation') or 'בלי תיאור'}")
             t.plan.notes.append("ענה מהתמונה הזאת: מה רואים בה ואיפה. אל תגיד שלא בדקת.")
+    if t.und.has("question_history") or any(a.act == "complaint" and a.issue in ("ignored_memory", "wrong_fact", "other")
+                                            for a in t.und.acts):
+        # 2026-10-11 09:20 "האם היא עזבה? זה מתועד אצלך?" / "בכניסה הראשית אין תיעוד כזה?": the answer came only from
+        # the alerts sent in the chat, while the box's event memory held 08:15 "a woman walks out holding a child
+        # ... towards a parked white car" (normal: kept, not sent). What happened is read from the event memory.
+        history = t.und.first("question_history", "complaint")
+        cam = history.camera if history and history.camera and history.camera != "house" else ""
+        for line in day_events(t, cam):
+            t.plan.evidence.append(line)
     if t.und.has("question_history") and not any(a.look_again for a in t.und.acts):
         rows = t.events(12 * 3600)[:4]
         for handle, e in rows:

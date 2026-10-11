@@ -672,6 +672,25 @@ class World:
         store = profiles_for(self.services)
         for fct in memory.get("facts") or []:
             store.add_fact(fct.get("camera") or "", fct["text"], by="Hello_24", now=start)
+        # The box's event journal (event_memory archive): what the cameras saw, sent or kept ("reported": false).
+        journal = case.get("journal") or []
+        if journal:
+            from .event_memory import memory_for  # noqa: PLC0415
+
+            path = memory_for(self.events.directory).path
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "a", encoding="utf-8") as f:
+                for i, j in enumerate(journal):
+                    begin = ts_of(case, j["time"])
+                    f.write(json.dumps({"event_id": f"j{i}", "camera": j["camera"], "start": begin,
+                                        "end": ts_of(case, j.get("end") or j["time"]), "labels": [j.get("label", "normal")],
+                                        "level": j.get("label", "normal"), "people_max": int(j.get("people") or 1),
+                                        "reported": bool(j.get("reported")), "owner_known": [], "alert_ids": [],
+                                        "outcome": "left", "observations": [{"ts": begin, "label": j.get("label", "normal"),
+                                                                             "summary": j["summary"]}],
+                                        "caption": j["summary"] + ("" if j.get("reported") else
+                                                                   " Not sent to the owner.")},
+                                       ensure_ascii=False) + "\n")
         for pause in memory.get("pauses") or []:
             from .feedback import Feedback  # noqa: PLC0415
 

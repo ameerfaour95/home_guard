@@ -91,3 +91,25 @@ cases:
       must_not: ["השכן"]
       ideal: "12-345-67."
     notes: "Saved: the answer is the number, and nothing else from memory (no dump)."
+
+  - id: g12_06
+    source: "2026-10-11 09:20:55"
+    time: "09:20:55"
+    alerts:
+      - {id: ameer_v2_ch8_1791691268_alert, camera: ameer_v2_ch8, time: "07:01:08", label: suspicious, people: 1, summary: "אדם בחצר ניגש ומרים כיסוי ירוק מחפץ."}
+    journal:
+      - {camera: ameer_v2_ch6, time: "08:14:54", end: "08:17:32", people: 3, summary: "A woman walks out holding a child, followed by another small child. They walk across the patio towards a parked white car."}
+      - {camera: ameer_v2_ch6, time: "08:23:59", end: "08:24:58", people: 1, summary: "A man wearing a cap walks across the driveway and exits the frame. A white car is parked on the right with its door open."}
+      - {camera: ameer_v2_ch8, time: "07:01:08", end: "07:02:00", people: 1, label: suspicious, reported: true, summary: "A person in the yard lifts a green cover off an object."}
+    history:
+      - {time: "09:04:51", owner: "אשתי יצאה מהבית ולא עידכנת אותי כמו שביקשתי", bot: "צודק, פספסתי את הבקשה שלך לדווח כשאשתך יוצאת מהבית; אין לי תיעוד שמאפשר לקבוע מתי היא יצאה."}
+      - {time: "09:20:20", owner: "אבל האם היא עזבה האם זה מתועד אצלך?", bot: "כן, מתועד אירוע במצלמה 8 ב־07:01: אדם הרים את הכיסוי הירוק ובדק מה שמתחתיו. האירוע מתועד, אבל אין בו תיעוד שאשתך עזבה את הבית."}
+    message: {text: "בכניסה הראשית אין תיעוד כזה?"}
+    expect:
+      intent: question_history
+      forbid_writes: [tag, person_mark, activity, place_fact, alias]
+      max_questions: 0
+      must_include_any: ["08:1[45]"]
+      must_not: ["אין תיעוד", "07:01", "כיסוי"]
+      ideal: "יש. ב-08:15 בכניסה הראשית אישה יצאה עם ילד על הידיים וילד נוסף אחריה, והלכו לרכב הלבן. זה נשמר אצלי ולא נשלח לך כי זה נראה רגיל. ב-08:24 הרכב הלבן עוד עמד שם עם דלת פתוחה."
+    notes: "Real turn: the box's journal had the 08:15 event (normal: kept, not sent) and v3 answered 'אין תיעוד יציאה' from the chat's alerts only."
