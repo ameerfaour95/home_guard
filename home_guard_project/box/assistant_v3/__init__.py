@@ -59,6 +59,12 @@ def build_assistant_v3(box_settings: Dict[str, Any], env: Dict[str, str], *args:
                         critic_model=critic, escalation_model=escalate, retention_days=v2.retention_days)
     log.info("assistant v3 on: write=%s understand=%s critic=%s escalate=%s", spec["v3_write_model"],
              spec["v3_understand_model"], spec["v3_critic_model"], spec["v3_escalate_model"])
+    try:
+        from .. import watches  # noqa: PLC0415
+
+        watches.start(v2.services, deliverer)
+    except Exception as exc:  # noqa: BLE001 - the assistant runs without watches
+        log.warning("Watches not started: %s", exc)
     return agent, deliverer
 
 

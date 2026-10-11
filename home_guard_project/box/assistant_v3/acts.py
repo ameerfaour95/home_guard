@@ -28,11 +28,12 @@ ACTS = (
     "greeting",          # "היי", "בוקר טוב"
     "preference",        # how the assistant should behave from now on, or a name for a camera
     "command",           # do something now: pause, resume, camera off/on, send a video or photo, house mode
+    "watch_request",     # tell me WHEN something happens ("ברגע שהיא יוצאת תן לי דיווח": the car leaves the entrance)
     "chit_chat",         # anything else conversational
     "unclear",           # cannot tell
 )
 HANDLER_ACTS = ("place_fact", "person_mark", "activity_explain", "camera_fact", "tag_only", "alert_feedback",
-                "ack", "greeting", "preference", "command")
+                "ack", "greeting", "preference", "command", "watch_request")
 SKILL_ACTS = ("question_live", "question_history", "question_memory", "question_meta", "complaint", "chit_chat",
               "unclear")
 COMMANDS = ("pause", "resume", "camera_off", "camera_on", "alias", "send_video", "send_photo", "house_mode",
@@ -41,6 +42,7 @@ ISSUES = ("repetition", "ignored_memory", "wrong_fact", "irrelevant", "unwanted_
           "too_many_alerts", "no_explanation", "other")
 MEMORY_ACTS = ("place_fact", "person_mark", "activity_explain", "camera_fact")
 EMOTIONS = ("neutral", "annoyed", "angry", "confused", "happy")
+CHANGES = ("leaves", "arrives")         # watch_request: what to tell him about
 
 
 def _nullable(kind: str, enum: Optional[Sequence[str]] = None) -> Dict[str, Any]:
@@ -65,12 +67,13 @@ ACT_SCHEMA: Dict[str, Any] = {
         "value": _nullable("string"),
         "verdict": _nullable("string", ("normal", "false_alarm", "real")),
         "issue": _nullable("string", ISSUES),
+        "change": _nullable("string", CHANGES),
         "routine": {"type": "boolean"},
         "look_again": {"type": "boolean"},
         "earlier": {"type": "boolean"},
     },
     "required": ["act", "quote", "camera", "event", "subject", "until_quote", "scope", "command", "value",
-                 "verdict", "issue", "routine", "look_again", "earlier"],
+                 "verdict", "issue", "change", "routine", "look_again", "earlier"],
     "additionalProperties": False,
 }
 SCHEMA: Dict[str, Any] = {
@@ -97,6 +100,7 @@ class Act:
     value: str = ""
     verdict: str = ""
     issue: str = ""
+    change: str = ""          # watch_request: leaves | arrives
     routine: bool = False
     look_again: bool = False
     earlier: bool = False
@@ -174,7 +178,8 @@ def validate(raw: Dict[str, Any], message: str, earlier_owner: Sequence[str], ca
         elif ev:
             act.dropped.append("event")
         for name, allowed in (("scope", ("camera", "house")), ("command", COMMANDS),
-                              ("verdict", ("normal", "false_alarm", "real")), ("issue", ISSUES)):
+                              ("verdict", ("normal", "false_alarm", "real")), ("issue", ISSUES),
+                              ("change", CHANGES)):
             value = str(item.get(name) or "")
             setattr(act, name, value if value in allowed else "")
         act.routine = item.get("routine") is True

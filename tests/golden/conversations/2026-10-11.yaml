@@ -1,0 +1,93 @@
+# The owner's chat of 2026-10-10 23:55 and 2026-10-11 07:56-07:58 with assistant v3 (the real turns, and two that pin
+# what the fix must also do). Same house as the 2026-10-10 day file. Schema: home_guard_project/box/eval_chat.py.
+defaults:
+  date: "2026-10-11"
+  house:
+    cameras: [ameer_v2_ch2, ameer_v2_ch3, ameer_v2_ch5, ameer_v2_ch6, ameer_v2_ch8]
+    aliases: {ameer_v2_ch3: [פרגולה], ameer_v2_ch6: [כניסה ראשית]}
+  memory:
+    facts:
+      - {camera: ameer_v2_ch2, text: הבית של השכן}
+      - {camera: ameer_v2_ch8, text: "מצלמה 8 מכסה את אזור התרנגולות; בעל הבית מאכיל אותן בבוקר ובערב"}
+
+cases:
+  - id: g12_01
+    source: "2026-10-11 07:57:50"
+    time: "07:57:50"
+    live:
+      ameer_v2_ch6: {description: "A white car parked at the main entrance. No people.", people: 0, vehicles: 1}
+    history:
+      - {time: "07:56:45", owner: "האם אשתי יצאה מהבית?", bot: "אין לי תיעוד שאשתך יצאה מהבית הבוקר; לא מצאתי אירוע כזה במצלמות."}
+      - {time: "07:57:26", owner: "תבדוק במצלמה הראשית אם יש רכב לבן שם שעדיין חונה אם כן אז היא לא יצאה", bot: "כן, במצלמה הראשית הרכב הלבן עדיין חונה בכניסה."}
+    message: {text: "מעולה ברגע שהיא יוצאת תן לי דיווח"}
+    expect:
+      intent: watch_request
+      writes: [{type: watch, camera: ameer_v2_ch6}]
+      forbid_writes: [alias, tag, preference, place_fact, person_mark]
+      max_questions: 0
+      must_not: ["אשת בעל הבית", "מעכשיו זו"]
+      ideal: "סגור. ברגע שהרכב הלבן יוצא מהכניסה הראשית אשלח לך תמונה."
+    notes: "Real turn: v3 saved 'אשת בעל הבית' as a NAME of the main-entrance camera (preference/alias) and answered 'סגור, מעכשיו זו אשת בעל הבית'. He asked to be told when his wife's car leaves (she has no phone)."
+
+  - id: g12_02
+    source: "2026-10-11 07:58:25"
+    time: "07:58:25"
+    live:
+      ameer_v2_ch6: {description: "A white car parked at the main entrance. No people.", people: 0, vehicles: 1}
+    history:
+      - {time: "07:57:26", owner: "תבדוק במצלמה הראשית אם יש רכב לבן שם שעדיין חונה אם כן אז היא לא יצאה", bot: "כן, במצלמה הראשית הרכב הלבן עדיין חונה בכניסה."}
+      - {time: "07:57:50", owner: "מעולה ברגע שהיא יוצאת תן לי דיווח", bot: "סגור, מעכשיו זו 'אשת בעל הבית'."}
+    message: {text: "הכוונה אם היא יוצאת מהבית תן לי דיווח"}
+    expect:
+      intent: watch_request
+      writes: [{type: watch, camera: ameer_v2_ch6}]
+      forbid_writes: [alias, tag, preference, place_fact, person_mark]
+      max_questions: 0
+      must_not: ["אשת בעל הבית", "מעכשיו זו"]
+      ideal: "הבנתי, סליחה. ברגע שהרכב הלבן יוצא מהכניסה הראשית אשלח לך תמונה."
+    notes: "Real turn: he corrected and got the same wrong answer again."
+
+  - id: g12_03
+    source: "2026-10-10 23:55:24"
+    time: "23:55:24"
+    alerts:
+      - {id: ameer_v2_ch5_1791657984_alert, camera: ameer_v2_ch5, time: "21:46:24", label: suspicious, people: 1, summary: "אדם עם כיסוי ראש ניגש לאזור ונראה שבדק או נגע במשהו ליד הקרקע."}
+    message: {text: "מה המספר של הרכב של הבעלים"}
+    expect:
+      intent: question_memory
+      forbid_writes: [tag, person_mark, activity, place_fact, alias, watch]
+      max_questions: 0
+      must_not: ["21:46", "בתמונות של האירוע"]
+      must_include_any: ["לא שמור|אין לי|לא שמרתי|לא אמרת|לא יודע"]
+      ideal: "אין לי את מספר הרכב שלך שמור. אם תכתוב לי אותו, אזכור."
+    notes: "Real turn: v3 answered from the 21:46 clip ('לא ניתן לראות את מספר הרכב בתמונות של האירוע'); he meant: do you remember it."
+
+  - id: g12_04
+    source: "2026-10-11 pinned"
+    time: "09:00:00"
+    message: {text: "תזכור, מספר הרכב שלי 12-345-67"}
+    expect:
+      intent: camera_fact
+      writes: [{type: place_fact}]
+      forbid_writes: [tag, person_mark, alias, watch]
+      max_questions: 0
+      must_include_any: ["12-345-67"]
+      ideal: "סגור, מספר הרכב שלך 12-345-67."
+    notes: "The other half of the car-number question: told once, kept."
+
+  - id: g12_05
+    source: "2026-10-11 pinned"
+    time: "09:05:00"
+    memory:
+      facts:
+        - {camera: "", text: "מספר הרכב של בעל הבית: 12-345-67"}
+        - {camera: ameer_v2_ch2, text: הבית של השכן}
+    message: {text: "מה המספר של הרכב שלי?"}
+    expect:
+      intent: question_memory
+      forbid_writes: [tag, person_mark, activity, place_fact, alias, watch]
+      max_questions: 0
+      must_include_any: ["12-345-67"]
+      must_not: ["השכן"]
+      ideal: "12-345-67."
+    notes: "Saved: the answer is the number, and nothing else from memory (no dump)."

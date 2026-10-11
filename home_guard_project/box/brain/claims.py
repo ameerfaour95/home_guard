@@ -100,6 +100,14 @@ CLAIMS: Dict[str, Dict[str, object]] = {
                r"(?<!\w)לא\s+(?:אשלח|אתריע|אתריעה)\s+(?:לך\s+)?(?:עליהם|עליך|עליכם|על\s+זה)"],
         "ar": [],
     },
+    # A promise to tell him later (2026-10-11 07:58): "אעדכן אותך כשהיא יוצאת" went out while nothing was watching.
+    "watch": {
+        "tools": {"watch"},
+        "en": [r"\bI(?:['’]ll| will)\s+(?:let you know|tell you|notify you|alert you|update you)\b[^.?!\n]{0,50}"
+               r"\b(?:when|once|as soon as|if)\b"],
+        "he": [r"(?:אעדכן|אודיע|אדווח|אגיד|אשלח|אתריע)\s+(?:לך|אותך)?[^.?!\n]{0,50}(?:כש|ברגע ש|אם\s|מתי ש)"],
+        "ar": [],
+    },
     "save": {
         # "רשמתי שאתם בחופשה" after a real house change is backed too
         "tools": {"record_verdict", "set_alias", "house_state", "house_expect", "house_cancel", "mark_known",

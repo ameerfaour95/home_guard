@@ -58,9 +58,10 @@ V3: Dict[str, Any] = {}
 DEFAULT_BIG, DEFAULT_FAST, DEFAULT_JUDGE = "openrouter:openai/gpt-4o", "openrouter:openai/gpt-4o-mini", "openai/gpt-4.1"
 
 INTENTS = ("place_fact", "person_mark", "activity_explain", "tag_only", "question_live", "question_history",
-           "question_meta", "complaint", "ack", "preference", "command")
+           "question_meta", "question_memory", "camera_fact", "complaint", "ack", "preference", "command",
+           "watch_request")
 WRITE_TYPES = ("place_fact", "person_mark", "activity", "tag", "pause", "camera_off", "alias", "preference",
-               "house_state", "expect", "mark_removed", "activity_removed", "fact_removed")
+               "house_state", "expect", "mark_removed", "activity_removed", "fact_removed", "watch")
 DIMENSIONS = ("understood", "routing", "questions", "human_tone", "evidence", "concise", "no_recitation",
               "top_company")
 PASS_AT = {"understood": 4, "routing": 4, "questions": 4, "human_tone": 4, "evidence": 3, "concise": 4,
@@ -558,7 +559,14 @@ class World:
             set_option=self._set_option, read_settings=lambda: {"owner_language": "he"}, alert_settings=None,
             house=self.house, events=self.events, activities=self.activities)
         if V3:
+            from . import watches  # noqa: PLC0415
             from .assistant_v3 import AssistantV3  # noqa: PLC0415
+
+            # Watches ("tell me when the car leaves"): the case's live "vehicles" count stands for the detector.
+            self.services.detect = self._detect
+            watches._current = watches.Watches(os.path.join(self.root, ".watches.json"), self._grab_photo,
+                                               self._detect, lambda chat, image, caption: True,
+                                               now=lambda: self.clock["now"])
 
             self.agent = AssistantV3(V3["write"], self.registry, ChatMemory(os.path.join(self.root, ".conversations")),
                                      ReceiptBook(os.path.join(self.root, ".receipts"), now=lambda: self.clock["now"]),
@@ -578,6 +586,17 @@ class World:
         entry.setdefault("description", DEFAULT_LIVE)
         entry.setdefault("people", 0)
         return entry
+
+    def _watches(self) -> List[Dict[str, Any]]:
+        from . import watches  # noqa: PLC0415
+
+        store = watches.current()
+        return list(watches._read(store.path)) if store is not None else []
+
+    def _detect(self, path: str) -> List[Dict[str, Any]]:
+        camera = next((c for c in self.cameras if os.path.basename(path).startswith(c + "_")), "")
+        n = int(self.live(camera).get("vehicles") or 0) if camera else 0
+        return [{"label": "car", "conf": 0.8, "box": [0.1 + 0.2 * i, 0.5, 0.25 + 0.2 * i, 0.8]} for i in range(n)]
 
     def _grab_photo(self, camera: str) -> Dict[str, Any]:
         if camera not in self.cameras:
@@ -741,7 +760,7 @@ class World:
         return {"marks": self.events.list_known(now), "activities": [vars(a).copy() for a in self.activities.live(now)],
                 "facts": facts, "tags": tags, "house": house_lines, "mute": self.mute.snapshot(),
                 "aliases": json.loads(json.dumps(self.aliases)), "options": list(self.option_writes),
-                "cameras_off": sorted(self.disabled)}
+                "cameras_off": sorted(self.disabled), "watches": self._watches()}
 
 
 def diff_writes(before: Dict[str, Any], after: Dict[str, Any], world: World) -> List[Dict[str, Any]]:
@@ -797,6 +816,9 @@ def diff_writes(before: Dict[str, Any], after: Dict[str, Any], world: World) -> 
                     ",".join(sorted(after["mute"].get("cameras") or {}))})
     for w in world.alias_writes:
         out.append({"type": "alias", "camera": w["camera"], "text": w["alias"]})
+    for w in after.get("watches", [])[len(before.get("watches", [])):]:
+        out.append({"type": "watch", "camera": w.get("camera"), "text": w.get("subject"), "until": w.get("until"),
+                    "change": w.get("change")})
     for w in world.option_writes[len(before["options"]):]:
         out.append({"type": "preference", "text": f"{w['key']}={w['value']}"})
     for w in world.camera_writes:

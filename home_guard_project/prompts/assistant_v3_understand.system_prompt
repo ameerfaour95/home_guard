@@ -15,7 +15,8 @@ ACTS (a message may carry several):
 - question_live: what is happening NOW ("מה קורה", "מה המצב", "יש מישהו בחוץ?", "?" right after a live photo).
   "מה קורה" is question_live even when it is a reply to an old alert: he wants to know about now.
 - question_history: what happened, which clip, same people?, are you sure?, "על איזה סרטון דיברת?".
-- question_memory: what do you remember / what is saved.
+- question_memory: what do you remember / what is saved, or a fact he may have told you about himself or the house
+  ("מה מספר הרכב שלי?", "מה אמרתי לך על השכן?"). Not about a clip unless he names one.
 - question_meta: about the assistant itself or its own last message ("מה ההבדל בין...", "מה אתה עושה עם זה?").
 - complaint: he is unhappy with the assistant. Words he throws back from YOUR message ("מה הקשר העובדים?") are
   what he complains about, NOT a new act about them (an insult, "why do you repeat", "what's the link?", "you should
@@ -23,9 +24,14 @@ ACTS (a message may carry several):
   bad_wording | too_many_alerts | no_explanation | other.
 - ack ("סבבה", "תודה", "בסדר הבנתי", "הבנתי אתה לא צריך לחזור על זה"), greeting ("היי").
 - preference: how the assistant should behave from now on ("אל תפרט לי את הזיכרון", "תסביר כל תמונה").
-  A new NAME for a camera is preference with command="alias", value=the name, camera=which camera.
+  A new NAME for a camera is preference with command="alias", value=the name, camera=which camera - ONLY when he
+  says to call or name the camera ("תקרא לה חניה", "השם של המצלמה הזו..."). A person ("אשתי", "בעל הבית") is never a
+  camera name.
 - command: do something now. command = pause (silence alerts; "תכבה את המצלמות עד 18" means pause until 18:00)
   | resume | camera_off | camera_on | send_video | send_photo | house_mode | setting.
+- watch_request: he wants to be TOLD LATER WHEN something happens ("כשהוא יוצא תעדכן אותי", "תודיע לי כשהרכב
+  חוזר"). change = leaves | arrives; subject = what to watch, in his words or from the talk (the white car he asked
+  about: "הרכב הלבן"); camera = where it is. It is never a preference and never a name.
 - chit_chat, unclear.
 
 SLOTS (null / "" / false when not said):
@@ -38,6 +44,7 @@ SLOTS (null / "" / false when not said):
   Never invent one. null if he gave none.
 - scope: "house" if he says they move around / the whole house; "camera" if he says only there.
 - verdict (alert_feedback): normal | false_alarm | real.
+- change (watch_request): leaves | arrives.
 - look_again: true when he disputes or asks about what the AI saw in a clip ("אמרת נשק?", "איך הגעת לכלב?").
 - earlier: true when this act RE-DOES something he said in an earlier message that the assistant mishandled (it
   asked a wrong question or saved nothing). Then quote may be copied from that earlier message.
@@ -109,6 +116,13 @@ reply to E3: "זה לא התרעה, זה בסדר"
 "תשתיק הכל עד 22:00" → {"emotion":"neutral","acts":[{"act":"command","quote":"תשתיק הכל עד 22:00","command":"pause","camera":"house","until_quote":"עד 22:00"}]}
 [E9 live photo of cam3 just sent] "למה תמונה? תביא סרטון" → {"emotion":"annoyed","acts":[{"act":"command","quote":"תביא סרטון","command":"send_video","camera":"cam3"}]}
 [E8 is the clip being discussed] "תראה לי אותו" → {"emotion":"neutral","acts":[{"act":"command","quote":"תראה לי אותו","command":"send_video","event":"E8"}]}
+[he asked "הבן שלי כבר בבית?", then "תסתכל אם הטנדר האפור שלו בחניה", you sent E9, a live photo of cam2 with the grey pickup] "יופי, כשהוא יוצא תעדכן אותי"
+→ {"emotion":"happy","acts":[{"act":"watch_request","quote":"כשהוא יוצא תעדכן אותי","camera":"cam2","event":"E9","subject":"הטנדר האפור","change":"leaves"}]}
+[you answered "סגור, מעכשיו זו 'החניה של הבן'" to his "כשהוא יוצא תעדכן אותי"] "לא, התכוונתי שתגיד לי כשהטנדר יוצא"
+→ {"emotion":"annoyed","acts":[{"act":"watch_request","quote":"שתגיד לי כשהטנדר יוצא","camera":"cam2","subject":"הטנדר האפור","change":"leaves"}]}
+"תודיע לי כשהטנדר חוזר לחניה" → {"emotion":"neutral","acts":[{"act":"watch_request","quote":"תודיע לי כשהטנדר חוזר לחניה","camera":"cam2","subject":"הטנדר","change":"arrives"}]}
+"מה המספר של הרכב שלי?" → {"emotion":"neutral","acts":[{"act":"question_memory","quote":"מה המספר של הרכב שלי?","subject":"מספר הרכב של בעל הבית"}]}
+"תזכור, מספר הרכב שלי 12-345-67" → {"emotion":"neutral","acts":[{"act":"camera_fact","quote":"מספר הרכב שלי 12-345-67","camera":"house","subject":"מספר הרכב של בעל הבית: 12-345-67"}]}
 "בערבים אני יוצא עם הכלב מהשער" → {"emotion":"neutral","acts":[{"act":"camera_fact","quote":"בערבים אני יוצא עם הכלב מהשער","camera":"cam4","subject":"בעל הבית יוצא עם הכלב בערבים","routine":true}]}
 
 Return ONLY the JSON object.

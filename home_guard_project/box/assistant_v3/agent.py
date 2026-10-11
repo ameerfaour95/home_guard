@@ -31,7 +31,7 @@ from ..brain.tools import Services, ToolContext, known_rows
 from . import context as cx
 from . import handlers as hd
 from . import prompts
-from ...prompts import fill
+from ...prompts import fill, load
 from .acts import SCHEMA, Act, Understanding, quoted, validate
 from .llm import parse_json
 from .memory_view import MemoryView
@@ -340,7 +340,12 @@ class AssistantV3(OwnerAgentV2):
             mem.relevant(turn.text, [], limit=6, include_types=("person_mark", "activity_rule", "place_fact",
                                                                   "camera_fact"))
         if und.has("question_memory"):
-            relevant = [r for r in mem.records() if r.type != "preference"][:8]
+            # 2026-10-11 "מה המספר של הרכב של הבעלים": the records that share his words first, then the rest; what
+            # is not there is said plainly ("not saved"), never answered from a clip.
+            rest = [r for r in mem.records() if r.type != "preference" and r not in relevant]
+            relevant = (relevant + rest)[:8]
+            if _asks_one_thing(und):
+                turn.plan.notes.append(load("assistant_v3_note_memory_missing.prompt"))
         memory_lines = [r.line(ctx.snapshot, ctx.lang, turn.now) for r in relevant]
         body = cx.block(ctx.snapshot, cams, ctx.state, getattr(self.services, "events", None), turn.now,
                         memory_lines=memory_lines, prefs=mem.prefs(), message=turn.text,
@@ -439,7 +444,7 @@ class AssistantV3(OwnerAgentV2):
                          f" — {cx.clip(entry.get('observation') or entry.get('summary'), 200)}")
         if plan.done:
             lines.append("מה עשיתי בתור הזה (עובדות שאפשר לומר):\n" + "\n".join(f"- {d}" for d in plan.done))
-        if und.has("question_memory"):
+        if und.has("question_memory") and not _asks_one_thing(und):
             plan.notes.append("הוא שאל מה אתה זוכר: תן את כל הפריטים מ'זיכרון רלוונטי', כל אחד בביטוי קצר, בלי "
                               "מזהים ובלי לדלג על אף אחד.")
         if plan.notes:
@@ -592,6 +597,15 @@ def salvage(text: str, check: Callable[[str], Any]) -> str:
     kept = [p for p in parts if len(p.split()) >= 2 and check(p).ok]
     out = " ".join(kept).strip()
     return out if out and check(out).ok else ""
+
+
+_REMEMBER_ALL = re.compile(r"מה (?:אתה )?זוכר|מה שמור|מה (?:יש )?בזיכרון|what do you remember", re.IGNORECASE)
+
+
+def _asks_one_thing(und: Understanding) -> bool:
+    """A memory question about ONE thing ("מה מספר הרכב שלי?"), not "what do you remember?" (that one lists all)."""
+    act = und.first("question_memory")
+    return bool(act and act.subject and not _REMEMBER_ALL.search(act.quote or ""))
 
 
 def public_acts(und: Understanding, cams: cx.Cameras) -> List[Dict[str, Any]]:

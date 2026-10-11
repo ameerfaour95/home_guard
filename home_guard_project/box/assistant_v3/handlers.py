@@ -19,6 +19,7 @@ from ..brain.tools import TOOLS, ToolContext, _issue, quoted_from, retag_words
 from .acts import Act, Understanding
 from .context import Cameras, hhmm
 from .memory_view import MemoryView
+from ...prompts import load, render
 from .skills import Toolbox, internal
 from .timeparse import clock, parse_until
 
@@ -116,6 +117,12 @@ class Turn:
     def outcome(self, entry: Dict[str, Any], what: str) -> None:
         if isinstance(entry, dict) and entry:
             entry["v3_outcome"] = what[:160]
+
+    def mem_owner_words(self) -> List[str]:
+        """His own messages of the live window, newest first (what "she" and "it" point at)."""
+        from .context import earlier_owner_words  # noqa: PLC0415
+
+        return list(reversed(earlier_owner_words(self.state, self.now, self.text)))
 
     def did(self, line: str) -> None:
         self.plan.done.append(line)
@@ -409,7 +416,16 @@ def alert_feedback(t: Turn, act: Act) -> None:
           f"כ{verdict}.")
 
 
+_NAMING = re.compile(r"תקרא|קרא ל|נקרא|תקראו|שם ל?ה?מצלמה|השם של|שם חדש|תשנה את השם|תן לה שם|call|name|rename",
+                     re.IGNORECASE)
+
+
 def preference(t: Turn, act: Act) -> None:
+    if act.command == "alias" and act.value and not _NAMING.search(f"{act.quote} {t.text}"):
+        # 2026-10-11 07:57 "מעולה ברגע שהיא יוצאת תן לי דיווח" became the camera name "אשת בעל הבית" (twice): a name
+        # is saved only when he says to call / name the camera.
+        t.plan.trace.append(f"alias without naming words dropped: {act.value!r}")
+        return
     if act.command == "alias" and act.value:
         camera = act.camera if act.camera and act.camera != "house" else (t.last_photo_camera(3600) or t.camera_of(act))
         if not camera:
@@ -535,9 +551,61 @@ def send_video(t: Turn, act: Act) -> None:
             t.did(f"נשלח הסרטון של ההתראה מ-{hhmm(entry.get('ts'))} ב{t.name(t.camera_now(str(entry.get('camera') or '')))}.")
 
 
+def watch_request(t: Turn, act: Act) -> None:
+    """"ברגע שהיא יוצאת תן לי דיווח" (2026-10-11): a one-shot watch on the vehicles at the camera (watches.py), checked
+    every minute by the box's own detector; one photo when it happens. The baseline is the vehicles on a picture
+    taken now."""
+    from .. import watches  # noqa: PLC0415
+
+    camera = t.camera_of(act)
+    store = watches.current()
+    if not camera:
+        t.plan.notes.append(load("assistant_v3_note_watch_no_camera.prompt"))
+        return
+    name = t.name(camera)
+    if store is None:
+        t.plan.trace.append("watch: watches are off")
+        t.plan.notes.append(render("assistant_v3_note_watch_off.prompt", camera=name))
+        return
+    seen = store.look(camera)
+    if seen is None:
+        t.plan.trace.append("watch: no picture")
+        t.plan.notes.append(render("assistant_v3_note_watch_no_picture.prompt", camera=name))
+        return
+    change = act.change or "leaves"
+    if change == "leaves" and not seen["vehicles"]:
+        t.plan.notes.append(render("assistant_v3_note_watch_no_vehicle.prompt", camera=name))
+        return
+    until = parse_until(act.until_quote, t.now) if act.until_quote else None
+    subject = vehicle_words(act.subject, t.text, *t.mem_owner_words()) if len(seen["vehicles"]) <= 1 else ""
+    row = store.add(t.ctx.chat_id, camera, name, change, subject, seen["vehicles"], until)
+    _issue(t.ctx, "watch", DONE, camera, {"camera": camera, "change": change, "subject": subject,
+                                          "until": clock(row["until"]), "watch_id": row["id"]})
+    what = subject or ("הרכב" if len(seen["vehicles"]) == 1 else f"אחד מ-{len(seen['vehicles'])} הרכבים שעומדים שם")
+    verb = "יוצא מ" if change == "leaves" else "מגיע ל"
+    if change == "arrives":
+        what = vehicle_words(act.subject, t.text) or "רכב"
+    t.did(f"אשלח לך תמונה ברגע ש{what} {verb}{name}.")
+    t.plan.notes.append(load("assistant_v3_note_watch_set.prompt"))
+
+
+_VEHICLE = re.compile(r"(?<![א-ת])[ה]?(רכב|אוטו|מכונית|טנדר|משאית|ג'יפ|ג׳יפ|אופנוע)(?![א-ת])(?:\s+[ה]?(לבן|לבנה|שחור|שחורה|"
+                      r"כסוף|כסופה|אפור|אפורה|אדום|אדומה|כחול|כחולה|ירוק|ירוקה|צהוב|צהובה))?")
+
+
+def vehicle_words(*texts: str) -> str:
+    """"הרכב הלבן" from the first of *texts* that names a vehicle (his words: "יש רכב לבן שם"); "" when none does.
+    The understanding's subject can be a person ("אשת בעל הבית", 2026-10-11) while what is watched is her car."""
+    for text in texts:
+        m = _VEHICLE.search(str(text or ""))
+        if m:
+            return f"ה{m.group(1)}" + (f" ה{m.group(2)}" if m.group(2) else "")
+    return ""
+
+
 HANDLERS = {"place_fact": place_fact, "person_mark": person_mark, "activity_explain": activity_explain,
             "camera_fact": camera_fact, "tag_only": tag_only, "alert_feedback": alert_feedback,
-            "preference": preference, "command": command}
+            "preference": preference, "command": command, "watch_request": watch_request}
 
 
 # ---------------------------------------------------------------------------------------------------------------------
