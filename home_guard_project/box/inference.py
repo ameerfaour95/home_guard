@@ -2628,6 +2628,27 @@ def send_arrival_line(arrival: Dict[str, Any], box_settings: Dict[str, Any], env
         log.warning("arrival line not sent: %s", exc)
 
 
+def _watch_event(camera: str, ts: float, summary: str, job: Any, frames: Sequence[Any], alert_id: str, lang: str,
+                 assistant: Any = None, sent: bool = False) -> None:
+    """An event for the owner's open "tell me when ..." watches (watches.on_event, 2026-10-11 courier): its picture,
+    its summary, and the chat note so "send the video" after the photo means this alert. Never raises."""
+    try:
+        from . import watches  # noqa: PLC0415
+
+        store = watches.current()
+        if store is None or store.judge is None or not any(r.get("change") == watches.EVENT for r in store.active()):
+            return
+        image = b""
+        if not sent:
+            snapshot = job.snapshot if job is not None and job.snapshot is not None else (frames[-1] if frames else None)
+            image = frame_to_jpeg_bytes(snapshot) if snapshot is not None else b""
+        note = getattr(assistant, "note_line", None)
+        watches.on_event(camera, camera_display(camera, lang), ts, summary, image, sent,
+                         alert_id, note)
+    except Exception as exc:  # noqa: BLE001 - the alert pipeline goes on
+        log.warning("[%s] watch check not run: %s", camera, exc)
+
+
 def _event_story(event: Any, alert_id: str, alert_ts: float, lang: str, described: Sequence[str] = (),
                  not_people: Sequence[str] = ()) -> str:
     """The first lines of an UPDATE in an event's thread when the tracker gave the event its entities (stage 2a): who
@@ -3114,6 +3135,7 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                                                  f"{why} {reason} {summary}", shadow_only=True)
             if getattr(event, "arrival", None):
                 send_arrival_line(event.arrival, box_settings, env, lang, assistant)
+            _watch_event(camera_name, alert_ts, summary, job, frames, alert_id, lang, assistant, sent=False)
             if status is not None:
                 status.decision(camera_name, labels, summary, cmd, sent=False, held=event.reason, label=label)
             if job is not None:
@@ -3123,6 +3145,7 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                              "not_sent_reason": event.reason, "dispatch": {"sent": False, "reason": event.reason},
                              "case_memory": shadow_note.record() if shadow_note is not None else None}
             return
+        _watch_event(camera_name, alert_ts, summary, job, frames, alert_id, lang, assistant, sent=not muted)
         # Attach the most recent frame of the clip as the alert snapshot.
         image = b""
         try:

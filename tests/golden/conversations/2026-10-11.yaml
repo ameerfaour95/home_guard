@@ -45,7 +45,7 @@ cases:
       max_questions: 0
       must_not: ["אשת בעל הבית", "מעכשיו זו"]
       ideal: "הבנתי, סליחה. ברגע שהרכב הלבן יוצא מהכניסה הראשית אשלח לך תמונה."
-    notes: "Real turn: he corrected and got the same wrong answer again."
+    notes: "Real turn: he corrected and got the same wrong answer again. Right: a watch on the white car at the main entrance (the car is how he knows she left); a watch is one-shot and ends by itself after a day by design."
 
   - id: g12_03
     source: "2026-10-10 23:55:24"
@@ -151,3 +151,18 @@ cases:
       must_not: ["צודק, סליחה", "כבויה"]
       ideal: "הנה הפרגולה עכשיו: שני עובדים ליד הסולם."
     notes: "Real turn: read as a complaint only and answered 'צודק, סליחה.' with no picture (the big model returned nothing)."
+
+  - id: g12_09
+    source: "2026-10-11 13:00:06"
+    time: "13:00:06"
+    alerts:
+      - {id: ameer_v2_ch8_1791691268_alert, camera: ameer_v2_ch8, time: "07:01:08", label: normal, people: 1, summary: "אדם עומד ליד ערימת חבילות באזור התרנגולות."}
+    message: {text: "אם מגיע שליח לקחת את החבילות תעדכן אותי", reply_to: ameer_v2_ch8_1791691268_alert}
+    expect:
+      intent: watch_request
+      writes: [{type: watch}]
+      forbid_writes: [alias, tag, preference, place_fact, person_mark, activity]
+      max_questions: 0
+      must_not: ["רכב"]
+      ideal: "סגור. ברגע שאראה שליח באחת המצלמות אשלח לך תמונה."
+    notes: "Real turn (a reply to a camera-8 alert): v3 answered 'אעדכן אותך ואשלח תמונה אם יגיע רכב למצלמה 8' and set a car watch on camera 8. The courier's van stood at the main entrance at 13:00-13:04 and his men carried the boxes; every event was kept as normal and he heard nothing. Right: one watch on every camera (the courier can stop at any of them) with his words; a watch is one-shot and ends by itself after a day by design."

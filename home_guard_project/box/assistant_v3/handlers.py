@@ -605,8 +605,13 @@ def watch_request(t: Turn, act: Act) -> None:
     taken now."""
     from .. import watches  # noqa: PLC0415
 
-    camera = t.camera_of(act)
     store = getattr(t.ctx.services, "watches", None) or watches.current()
+    change = act.change or "leaves"
+    car = vehicle_words(act.subject, t.text) if change == "arrives" else \
+        vehicle_words(act.subject, t.text, *t.mem_owner_words())
+    if not car and store is not None:
+        return _event_watch(t, act, store)
+    camera = t.camera_of(act)
     if not camera:
         t.plan.notes.append(load("assistant_v3_note_watch_no_camera.prompt"))
         return
@@ -620,7 +625,6 @@ def watch_request(t: Turn, act: Act) -> None:
         t.plan.trace.append("watch: no picture")
         t.plan.notes.append(render("assistant_v3_note_watch_no_picture.prompt", camera=name))
         return
-    change = act.change or "leaves"
     if change == "leaves" and not seen["vehicles"]:
         t.plan.notes.append(render("assistant_v3_note_watch_no_vehicle.prompt", camera=name))
         return
@@ -637,7 +641,28 @@ def watch_request(t: Turn, act: Act) -> None:
     t.plan.notes.append(load("assistant_v3_note_watch_set.prompt"))
 
 
-_VEHICLE = re.compile(r"(?<![א-ת])[ה]?(רכב|אוטו|מכונית|טנדר|משאית|ג'יפ|ג׳יפ|אופנוע)(?![א-ת])(?:\s+[ה]?(לבן|לבנה|שחור|שחורה|"
+def _event_watch(t: Turn, act: Act, store: Any) -> None:
+    """"אם מגיע שליח לקחת את החבילות תעדכן אותי" (2026-10-11 13:00): no vehicle in his words, so not a car watch on
+    the camera of the alert he answered (it watched camera 8 for a car while the courier's van stood at the main
+    entrance). Every event the box records, at the camera he names or anywhere, is put to the judge with his words
+    (watches.on_event); the first match sends its picture."""
+    from ..watches import EVENT  # noqa: PLC0415
+
+    camera = _named_camera(t, t.text)
+    about = t.text.strip()
+    if act.subject and act.subject not in about:
+        about = f"{about} ({act.subject})"
+    until = parse_until(act.until_quote, t.now) if act.until_quote else None
+    row = store.add(t.ctx.chat_id, camera, t.name(camera) if camera else "", EVENT, act.subject or "", [],
+                    until, about=about)
+    _issue(t.ctx, "watch", DONE, camera, {"camera": camera or "house", "change": "event", "about": about[:120],
+                                          "until": clock(row["until"]), "watch_id": row["id"]})
+    where = f"ב{t.name(camera)}" if camera else ", בכל מצלמה שהיא (לא רק במצלמה של ההודעה)"
+    t.did(f"אשלח לך תמונה ברגע שאראה {act.subject or 'את מה שביקשת'}{' ' if camera else ''}{where}.")
+    t.plan.notes.append(load("assistant_v3_note_watch_set.prompt"))
+
+
+_VEHICLE = re.compile(r"(?<![א-ת])(?:[ובכלמש]{1,3})?[ה]?(רכב|אוטו|מכונית|טנדר|משאית|ג'יפ|ג׳יפ|אופנוע)(?![א-ת])(?:\s+[ה]?(לבן|לבנה|שחור|שחורה|"
                       r"כסוף|כסופה|אפור|אפורה|אדום|אדומה|כחול|כחולה|ירוק|ירוקה|צהוב|צהובה))?")
 
 

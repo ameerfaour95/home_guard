@@ -1,0 +1,9 @@
+A home camera box keeps a one-time request from the house owner. His request, in his words:
+"{{about}}"
+
+The box just recorded this at the camera "{{camera}}":
+"{{summary}}"
+
+Is this what he asked to be told about, or very likely part of it? A delivery person, a courier or a driver taking or bringing boxes or packages counts for a courier request even when the words differ. Something unrelated (people only working, walking past, a car that only parks) is not.
+
+Answer JSON only: {"match": true or false, "line": "one short Hebrew sentence saying what was seen, for the owner"}. When match is false, line is "".

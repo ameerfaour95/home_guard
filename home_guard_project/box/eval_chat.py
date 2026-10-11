@@ -840,8 +840,10 @@ def diff_writes(before: Dict[str, Any], after: Dict[str, Any], world: World) -> 
     for w in world.alias_writes:
         out.append({"type": "alias", "camera": w["camera"], "text": w["alias"]})
     for w in after.get("watches", [])[len(before.get("watches", [])):]:
-        out.append({"type": "watch", "camera": w.get("camera"), "text": w.get("subject"), "until": w.get("until"),
-                    "change": w.get("change")})
+        # "" is the whole house (an event watch); a watch ends when it fires once, else at its end
+        out.append({"type": "watch", "camera": w.get("camera") or "every camera", "text": w.get("subject"),
+                    "about": w.get("about") or "", "until": w.get("until"), "change": w.get("change"),
+                    "ends": "after one message, or at its until"})
     for w in world.option_writes[len(before["options"]):]:
         out.append({"type": "preference", "text": f"{w['key']}={w['value']}"})
     for w in world.camera_writes:

@@ -62,7 +62,7 @@ def build_assistant_v3(box_settings: Dict[str, Any], env: Dict[str, str], *args:
     try:
         from .. import watches  # noqa: PLC0415
 
-        watches.start(v2.services, deliverer)
+        watches.start(v2.services, deliverer, judge=watches.model_judge(understand) if understand is not None else None)
     except Exception as exc:  # noqa: BLE001 - the assistant runs without watches
         log.warning("Watches not started: %s", exc)
     return agent, deliverer

@@ -158,11 +158,113 @@ class WatchTurnTests(unittest.TestCase):
         self.assertTrue([w for w in out["writes"] if w["type"] == "alias"])
 
     def test_no_vehicle_now_sets_nothing(self):
-        understand = acts_for({self.MSG: {"emotion": "happy", "acts": [
-            act("watch_request", quote="ברגע שהיא יוצאת תן לי דיווח", camera="cam6", change="leaves")]}})
-        writer = FakeModel(lambda user, kw: "לא רואה רכב בכניסה הראשית עכשיו, אולי היא כבר יצאה.")
-        out = run({"time": "07:57:50", "message": {"text": self.MSG}}, understand, writer)
+        msg = "כשהרכב יוצא מהכניסה תגיד לי"
+        understand = acts_for({msg: {"emotion": "happy", "acts": [
+            act("watch_request", quote=msg, camera="cam6", change="leaves")]}})
+        writer = FakeModel(lambda user, kw: "לא רואה רכב בכניסה הראשית עכשיו, אולי הוא כבר יצא.")
+        out = run({"time": "07:57:50", "message": {"text": msg}}, understand, writer)
         self.assertEqual(self.watches(out), [])
+
+    def test_a_courier_is_an_event_watch_on_the_whole_house(self):
+        # 2026-10-11 13:00, answering a camera 8 alert: it watched camera 8 for a car; the courier's van stood at
+        # the main entrance and his men carried the boxes out, all kept as "normal", and he was never told.
+        msg = "אם מגיע שליח לקחת את החבילות תעדכן אותי"
+        understand = acts_for({msg: {"emotion": "neutral", "acts": [
+            act("watch_request", quote=msg, camera="cam8", event="E1", subject="שליח", change="arrives")]}})
+        writer = FakeModel(lambda user, kw: "סגור, אשלח לך תמונה ברגע שאראה שליח באחת המצלמות.")
+        alert = dict(ALERT, id="ameer_v2_ch8_1_alert", camera="ameer_v2_ch8")
+        out = run({"time": "13:00:06", "alerts": [alert],
+                   "message": {"text": msg, "reply_to": alert["id"]}}, understand, writer)
+        self.assertEqual(out["error"], "")
+        rows = self.watches(out)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual((rows[0]["camera"], rows[0]["change"]), ("every camera", "event"))
+        self.assertIn("אשלח לך תמונה ברגע שאראה שליח, בכל מצלמה שהיא", " ".join(c["user"] for c in writer.calls))
+
+
+class EventWatchTests(unittest.TestCase):
+    """"אם מגיע שליח לקחת את החבילות תעדכן אותי": each event the box records is put to the judge with his words."""
+
+    ABOUT = "אם מגיע שליח לקחת את החבילות תעדכן אותי (שליח)"
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.mkdtemp()
+        self.box = FakeBox([[]])
+        self.w = store(self.box, self.tmp)
+        self.asked: List[tuple] = []
+
+        def judge(about, camera, summary):
+            self.asked.append((about, camera, summary))
+            return "שליח סוחב ארגז ליד הטנדר" if "box" in summary else None
+
+        self.w.judge = judge
+        self.row = self.w.add("-1", "", "", wt.EVENT, "שליח", [], about=self.ABOUT)
+        self.notes: List[tuple] = []
+
+    def event(self, summary, camera="ameer_v2_ch6", dt=120.0, sent=False):
+        return self.w.on_event(camera, "כניסה ראשית", self.box.clock["now"] + dt, summary, b"jpeg", sent,
+                               "ameer_v2_ch6_1_alert", lambda *a: self.notes.append(a))
+
+    def test_the_first_matching_event_sends_its_picture_once(self):
+        self.assertEqual(self.event("Two men are working near ladders."), [])
+        self.assertEqual(self.box.sent, [])
+        self.assertEqual(self.event("A man carries a large cardboard box towards the van."), [self.row["id"]])
+        self.assertEqual(len(self.box.sent), 1)
+        chat, image, caption = self.box.sent[0]
+        self.assertTrue(caption.startswith("🔔 ביקשת שאעדכן: שליח סוחב ארגז"))
+        self.assertIn("כניסה ראשית · ", caption)
+        with open(image, "rb") as f:
+            self.assertEqual(f.read(), b"jpeg")
+        self.assertEqual(self.notes[0][0], "ameer_v2_ch6")
+        self.assertEqual(self.notes[0][3], "ameer_v2_ch6_1_alert")
+        self.assertEqual(self.w.active(), [])
+        self.event("Another box is carried out.")          # one-shot
+        self.assertEqual(len(self.box.sent), 1)
+        self.assertEqual(self.asked[0][0], self.ABOUT)
+
+    def test_an_event_from_before_the_ask_is_not_judged(self):
+        self.event("A man carries a box.", dt=-600)
+        self.assertEqual((self.asked, self.box.sent), ([], []))
+
+    def test_an_alert_already_sent_ends_the_watch_without_a_second_message(self):
+        self.assertEqual(self.event("A man carries a box out.", sent=True), [self.row["id"]])
+        self.assertEqual(self.box.sent, [])
+        self.assertEqual(self.w.active(), [])
+
+    def test_a_named_camera_watches_only_that_camera(self):
+        self.w.add("-2", "ameer_v2_ch8", "מצלמה 8", wt.EVENT, "", [], about="מישהו ליד החבילות")
+        self.w.on_event("ameer_v2_ch6", "כניסה ראשית", self.box.clock["now"] + 60, "A man carries a box.", b"j")
+        self.assertEqual([r["chat_id"] for r in self.w.active()], ["-2"])
+
+    def test_a_failed_send_keeps_the_watch(self):
+        self.box.send = lambda *a: False
+        self.w.send = self.box.send
+        self.event("A man carries a box.")
+        self.assertEqual(len(self.w.active()), 1)
+
+    def test_the_timer_never_checks_an_event_watch(self):
+        self.box.clock["now"] += wt.CHECK_SEC * 3
+        self.w.tick()
+        self.assertEqual(len(self.w.active()), 1)
+        self.assertEqual(self.box.sent, [])
+
+
+class JudgeTests(unittest.TestCase):
+    def judge(self, content, error=""):
+        class Msg:
+            pass
+
+        msg = Msg()
+        msg.content, msg.error = content, error
+        model = type("M", (), {"chat": lambda self, *a, **k: msg})()
+        return wt.model_judge(model)("שליח", "כניסה ראשית", "A man carries a box to a van.")
+
+    def test_answers(self):
+        self.assertEqual(self.judge('{"match": true, "line": "שליח לוקח ארגז"}'), "שליח לוקח ארגז")
+        self.assertIsNone(self.judge('{"match": false, "line": ""}'))
+        self.assertIsNone(self.judge("not json"))
+        self.assertIsNone(self.judge("", error="timeout"))
+        self.assertEqual(self.judge('{"match": true, "line": ""}'), "A man carries a box to a van.")
 
 
 class MemoryQuestionTests(unittest.TestCase):

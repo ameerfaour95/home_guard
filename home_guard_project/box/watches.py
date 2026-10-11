@@ -8,6 +8,11 @@ a camera name instead. A watch is that request, kept until it fires once or expi
   new picture by the box's own detector (no AI, no cost). A baseline vehicle that has no vehicle on it on
   ``MISSES_TO_FIRE`` checks in a row has left: one photo goes to the chat, "🚗 הרכב הלבן יצא מכניסה ראשית · 08:41".
 - ``arrives``: a vehicle where none of the baseline ones stands, on two checks in a row.
+- ``event``: anything else he wants to hear about ("אם מגיע שליח לקחת את החבילות תעדכן אותי", 2026-10-11 13:00: the
+  courier's van stopped at the main entrance and his men carried the boxes out, all kept in the journal as normal,
+  while a vehicle watch looked at camera 8). Every event the box records (``on_event``, called by the inference
+  pipeline) is put to the judge (one small model call, only while such a watch is open) with his words; the first
+  that matches sends its picture once. An event that was already sent to him as an alert ends the watch quietly.
 
 Presence is lenient (``PRESENT_CONF``) so absence is conservative: a car half in shadow still counts as there. The
 watch ends when it fires, or quietly at its end (he gave one, else ``DEFAULT_HOURS``). Stored in one JSON file; the
@@ -32,7 +37,7 @@ MISSES_TO_FIRE = 2
 DEFAULT_HOURS = 24.0
 PRESENT_CONF = 0.25
 VEHICLES = ("car", "truck", "bus", "motorcycle")
-LEAVES, ARRIVES = "leaves", "arrives"
+LEAVES, ARRIVES, EVENT = "leaves", "arrives", "event"
 _lock = threading.Lock()
 
 
@@ -98,6 +103,9 @@ class Watches:
         self.path, self.grab, self.detect, self.send, self.now = path, grab, detect, send, now
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
+        # judge(about, camera name, summary) -> the Hebrew line when the event is what he asked about, else None
+        self.judge: Optional[Callable[[str, str, str], Optional[str]]] = None
+        self._fired: set = set()
 
     # -- what the chat does -----------------------------------------------------------------------------------------
     def look(self, camera: str) -> Optional[Dict[str, Any]]:
@@ -112,10 +120,11 @@ class Watches:
         return {"image": shot["image"], "vehicles": vehicles(objects)}
 
     def add(self, chat_id: str, camera: str, name: str, change: str, subject: str, baseline: Sequence[Sequence[float]],
-            until: Optional[float] = None) -> Dict[str, Any]:
+            until: Optional[float] = None, about: str = "") -> Dict[str, Any]:
         now = float(self.now())
         row = {"id": uuid.uuid4().hex[:8], "chat_id": str(chat_id), "camera": camera, "name": name,
-               "change": change if change in (LEAVES, ARRIVES) else LEAVES, "subject": subject[:60],
+               "change": change if change in (LEAVES, ARRIVES, EVENT) else LEAVES, "subject": subject[:60],
+               "about": about[:300],
                "baseline": [list(map(float, b[:4])) for b in baseline], "created": now,
                "until": float(until) if until and until > now else now + DEFAULT_HOURS * 3600,
                "checked": now, "misses": 0, "seen_new": 0}
@@ -144,8 +153,8 @@ class Watches:
                 log.info("Watch %s ended without a change (%s at %s)", row.get("id"), row.get("change"), row.get("camera"))
                 changed = True
                 continue
-            if now - float(row.get("checked") or 0) < CHECK_SEC:
-                keep.append(row)
+            if row.get("change") == EVENT or now - float(row.get("checked") or 0) < CHECK_SEC:
+                keep.append(row)                # an event watch is checked by on_event, not on a timer
                 continue
             changed = True
             row["checked"] = now
@@ -185,6 +194,54 @@ class Watches:
         log.info("Watch %s fired (%s): %r -> %s", row.get("id"), row["change"], caption, "sent" if ok else "NOT sent")
         return ok                              # not sent: tried again on the next check
 
+    def on_event(self, camera: str, name: str, ts: float, summary: str, image: bytes = b"", sent: bool = False,
+                 ref: str = "", note: Optional[Callable[[str, float, str, str], None]] = None) -> List[str]:
+        """One event the box recorded at *camera* (shown as *name*): each open event watch on this camera (or on the
+        whole house) made before it is put to the judge; a match sends *image* with the judge's line, once, and ends
+        the watch. *sent*: the owner already got this event as an alert, so the watch ends without a second message.
+        *note(camera, ts, caption, ref)* puts the message in the chat. Returns the ids of the watches it ended."""
+        if self.judge is None or not str(summary or "").strip():
+            return []
+        rows = [r for r in self.active() if r.get("change") == EVENT and r.get("camera") in ("", camera)
+                and float(r.get("created") or 0) <= float(ts) + 5 and r.get("id") not in self._fired]
+        ended: List[str] = []
+        for row in rows:
+            line = self.judge(str(row.get("about") or row.get("subject") or ""), name, summary)
+            if not line:
+                continue
+            with _lock:
+                if row["id"] in self._fired:            # another event matched it a moment ago
+                    continue
+                self._fired.add(row["id"])
+            if sent:
+                log.info("Watch %s matched an alert already sent at %s; ended (%s)", row["id"], camera, summary[:120])
+            else:
+                caption = f"🔔 ביקשת שאעדכן: {line}\n{name} · {_hhmm(ts)}"
+                ok = bool(image) and bool(self.send(str(row["chat_id"]), self._shot(row["id"], image), caption))
+                log.info("Watch %s fired (event at %s): %r -> %s", row["id"], camera, caption,
+                         "sent" if ok else "NOT sent")
+                if not ok:
+                    self._fired.discard(row["id"])      # the next matching event tries again
+                    continue
+                if note is not None:
+                    try:
+                        note(camera, float(ts), caption, ref)
+                    except Exception as exc:  # noqa: BLE001 - the photo went out; the chat note is extra
+                        log.warning("Watch %s not noted in the chat: %s", row["id"], exc)
+            ended.append(row["id"])
+        if ended:
+            with _lock:
+                _write(self.path, [r for r in _read(self.path) if r.get("id") not in ended])
+        return ended
+
+    def _shot(self, watch_id: str, image: bytes) -> str:
+        folder = os.path.join(os.path.dirname(self.path) or ".", "watch_shots")
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, f"{watch_id}.jpg")
+        with open(path, "wb") as f:
+            f.write(image)
+        return path
+
     # -- the thread ---------------------------------------------------------------------------------------------------
     def start(self) -> None:
         if self._thread is not None:
@@ -215,7 +272,59 @@ def current() -> Optional[Watches]:
     return _current
 
 
-def start(services: Any, deliverer: Any, path: Optional[str] = None) -> Optional[Watches]:
+MATCH_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["match", "line"],
+                "properties": {"match": {"type": "boolean"}, "line": {"type": "string"}}}
+
+
+def model_judge(model: Any) -> Callable[[str, str, str], Optional[str]]:
+    """The judge of an event watch on a chat model (the v3 understanding model): the Hebrew line on a match, None on
+    no match or any failure (a failed call never fires a watch)."""
+    from ..prompts import render  # noqa: PLC0415
+
+    def judge(about: str, camera: str, summary: str) -> Optional[str]:
+        msg = model.chat([{"role": "user", "content": render("watch_match.prompt", about=about, camera=camera,
+                                                             summary=summary)}],
+                         None, json_schema=MATCH_SCHEMA, max_tokens=150)
+        if getattr(msg, "error", ""):
+            log.warning("Watch judge failed: %s", msg.error)
+            return None
+        text = str(getattr(msg, "content", "") or "").strip()
+        try:
+            out = json.loads(text[text.find("{"):text.rfind("}") + 1])
+        except ValueError:
+            log.warning("Watch judge answered no JSON: %r", text[:200])
+            return None
+        if not isinstance(out, dict) or out.get("match") is not True:
+            return None
+        return str(out.get("line") or "").strip() or summary
+
+    return judge
+
+
+def on_event(camera: str, name: str, ts: float, summary: str, image: bytes = b"", sent: bool = False, ref: str = "",
+             note: Optional[Callable[[str, float, str, str], None]] = None) -> None:
+    """The inference pipeline's hook: off its thread (the judge takes a second or two), and nothing at all when no
+    event watch is open. Never raises."""
+    store = _current
+    if store is None or store.judge is None:
+        return
+    try:
+        if not any(r.get("change") == EVENT for r in store.active()):
+            return
+    except Exception:  # noqa: BLE001
+        return
+
+    def run() -> None:
+        try:
+            store.on_event(camera, name, ts, summary, image, sent, ref, note)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Watch event check failed: %s", exc)
+
+    threading.Thread(target=run, name="watch-event", daemon=True).start()
+
+
+def start(services: Any, deliverer: Any, path: Optional[str] = None,
+          judge: Optional[Callable[[str, str, str], Optional[str]]] = None) -> Optional[Watches]:
     """The box's watches on the assistant's services (grab_photo, detect) and Telegram deliverer; None without them."""
     global _current
     if services is None or deliverer is None or services.grab_photo is None or services.detect is None:
@@ -227,6 +336,7 @@ def start(services: Any, deliverer: Any, path: Optional[str] = None) -> Optional
         return bool(got.get("ok")) if isinstance(got, dict) else bool(got)
 
     _current = Watches(path or default_path(), services.grab_photo, services.detect, send, now=services.now)
+    _current.judge = judge
     services.watches = _current
     _current.start()
     log.info("Watches on (%d active)", len(_current.active()))
