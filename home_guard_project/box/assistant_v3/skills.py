@@ -69,6 +69,7 @@ class Toolbox:
     def __init__(self, ctx: ToolContext, called: List[str], resolve_camera: Callable[[str], str]) -> None:
         self.ctx, self.called, self.resolve_camera = ctx, called, resolve_camera
         self.evidence: List[str] = []
+        self._looked: Dict[str, Dict[str, Any]] = {}
 
     def run(self, name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         try:
@@ -84,12 +85,17 @@ class Toolbox:
         cam = str(args.get("camera") or "").strip()
         camera = self.resolve_camera(cam) if cam and cam.casefold() not in ("house", "all", "כל הבית", "הכל") else ""
         if camera:
+            if camera in self._looked:
+                # 2026-10-11 11:06 "מה עם אזור התרנגולות": the prefetch and the writer both looked, two photos of
+                # camera 8. One look per camera per turn; the second gets the first's answer.
+                return self._looked[camera]
             self.called.append("check_camera")
             with internal(self.ctx):
                 out = TOOLS["check_camera"](self.ctx, {"camera": camera})
             self.evidence.append(_look_line(self.ctx, out))
-            return _brief(out, ("camera", "description", "people", "detector", "whose_ground", "note", "error",
-                                "description_error", "handle", "status", "reason"))
+            self._looked[camera] = _brief(out, ("camera", "description", "people", "detector", "whose_ground", "note",
+                                                "error", "description_error", "handle", "status", "reason"))
+            return self._looked[camera]
         self.called.append("look_around")
         with internal(self.ctx):
             out = TOOLS["look_around"](self.ctx, {})

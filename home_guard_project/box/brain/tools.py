@@ -604,6 +604,7 @@ def check_camera(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
 
 
 LOOK_AROUND_PHOTOS = 2
+LOOK_AROUND_WORKERS = 5      # cameras looked at together (grab + detector + vision call each)
 
 
 def _note_people(ctx: ToolContext, handle: str, people: Any) -> None:
@@ -702,21 +703,34 @@ def look_around(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
     if not cams:
         return _err("every camera is off")
     rows: List[Dict[str, Any]] = []
-    for cam in cams:
-        name = display(ctx.snapshot, cam, ctx.lang)
+
+    def one(cam: str) -> Tuple[Any, Dict[str, Any], Any]:
+        """The picture and its grounded look of one camera (no chat state is touched here: it runs on a thread)."""
         shot = ctx.services.grab_photo(cam) if ctx.services.grab_photo else {"error": "no live view"}
         if not isinstance(shot, dict) or shot.get("error") or not isinstance(shot.get("image"), str):
+            return None, {}, None
+        if ctx.services.vision is None:
+            return shot, {}, None
+        try:
+            look, facts = _grounded_look(ctx, cam, shot["image"], _full_of(shot.get("full")))
+            return shot, look or {}, facts
+        except Exception as exc:  # noqa: BLE001 - one camera's failure must not end the look
+            log.warning("look_around: vision failed on %s: %s", cam, exc)
+            return shot, {}, None
+
+    # 2026-10-11 11:03 "מה קורה בחוץ" took 58 s: five cameras one after another (grab, detector, vision). The cameras
+    # are looked at together; the chat state is written below, in camera order.
+    from concurrent.futures import ThreadPoolExecutor  # noqa: PLC0415
+
+    from .. import usage_ledger  # noqa: PLC0415
+
+    with ThreadPoolExecutor(max_workers=min(LOOK_AROUND_WORKERS, len(cams)), thread_name_prefix="look") as pool:
+        looks = list(pool.map(lambda cam: usage_ledger.carry(one)(cam), cams))
+    for cam, (shot, look, facts) in zip(cams, looks):
+        name = display(ctx.snapshot, cam, ctx.lang)
+        if shot is None:
             rows.append({"camera": name, "error": "no picture from this camera now"})
             continue
-        look: Dict[str, Any] = {}
-        facts = None
-        if ctx.services.vision is not None:
-            try:
-                look, facts = _grounded_look(ctx, cam, shot["image"], _full_of(shot.get("full")))
-                look = look or {}
-            except Exception as exc:  # noqa: BLE001 - one camera's failure must not end the look
-                log.warning("look_around: vision failed on %s: %s", cam, exc)
-                look = {}
         if not (isinstance(look, dict) and look.get("ok")):
             rows.append({"camera": name, "error": "the picture could not be described"})
             continue

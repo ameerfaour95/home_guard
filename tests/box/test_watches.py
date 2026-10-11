@@ -259,3 +259,54 @@ class ArrivalLineNotedTests(unittest.TestCase):
         self.assertEqual(noted[0][0], "-5")
         self.assertEqual((noted[0][1]["camera"], noted[0][1]["alert_id"]), ("ameer_v2_ch3", "arrival_ameer_v2_ch3_1"))
         self.assertEqual(fed[0][0][:2], ("box", "message"))
+
+
+class LookSpeedTests(unittest.TestCase):
+    def test_one_look_per_camera_per_turn(self):
+        from types import SimpleNamespace
+        from unittest import mock
+
+        from home_guard_project.box.assistant_v3 import skills
+
+        calls: List[str] = []
+
+        def check_camera(ctx, args):
+            calls.append(args["camera"])
+            return {"ok": True, "camera": args["camera"], "description": "שקט", "people": 0}
+
+        ctx = SimpleNamespace(text="מה עם אזור התרנגולות", snapshot=None, lang="he")
+        box = skills.Toolbox(ctx, [], lambda words: "ameer_v2_ch8")
+        with mock.patch.dict(skills.TOOLS, {"check_camera": check_camera}),                 mock.patch.object(skills, "_look_line", lambda c, out: "line"):
+            first = box.run("look_now", {"camera": "מצלמה 8"})
+            second = box.run("look_now", {"camera": "8"})
+        self.assertEqual(calls, ["ameer_v2_ch8"])           # one photo, not two
+        self.assertEqual(first, second)
+
+    def test_the_cameras_are_looked_at_together(self):
+        import threading
+        import time as _time
+
+        from home_guard_project.box.eval_chat import World
+
+        seen: List[str] = []
+        lock = threading.Lock()
+        original = World._grab_photo
+
+        def slow(self, camera):
+            with lock:
+                seen.append(threading.current_thread().name)
+            _time.sleep(0.3)
+            return original(self, camera)
+
+        World._grab_photo = slow
+        try:
+            understand = acts_for({"מה קורה בחוץ": {"emotion": "neutral", "acts": [act("question_live", quote="מה קורה בחוץ",
+                                                                                  camera="house")]}})
+            writer = FakeModel(lambda user, kw: "שקט בחוץ.")
+            started = _time.monotonic()
+            run({"time": "11:03:54", "message": {"text": "מה קורה בחוץ"}}, understand, writer)
+            took = _time.monotonic() - started
+        finally:
+            World._grab_photo = original
+        self.assertGreaterEqual(len(seen), 3)
+        self.assertLess(took, 0.3 * len(seen) - 0.2)          # not one after another
