@@ -77,7 +77,8 @@ class SubStreamThread:
         self.last_store_ts = 0.0
         self.keep_seconds = float(cfg.CLIP_SECONDS) + float(cfg.POST_ROLL_SEC) + 2.0
         self._jpeg_params = [int(cv2.IMWRITE_JPEG_QUALITY), self._BUF_JPEG_QUALITY]
-        self._open_capture()
+        # The camera is opened on the reader's own thread: one that does not answer (a recorder still booting after
+        # a power cut) must not hold up the box's start; the owner's assistant starts after the readers (2026-10-11).
         self.thread = threading.Thread(target=self._reader, daemon=True)
         self.thread.start()
 
@@ -113,6 +114,7 @@ class SubStreamThread:
 
     def _reader(self) -> None:
         store_size = self.cfg.STORE_SIZE
+        self._open_capture()
         while self.running:
             with self.lock:
                 cap = self.capture
@@ -237,7 +239,8 @@ class MainStreamThread:
         self.keep_seconds = float(cfg.CLIP_SECONDS) + float(cfg.POST_ROLL_SEC) + 2.0
         self._jpeg_params = [int(cv2.IMWRITE_JPEG_QUALITY), int(cfg.MAIN_JPEG_QUALITY)]
         self._frame_shape: Optional[Tuple[int, int]] = None
-        self._open_capture()
+        # The camera is opened on the reader's own thread: one that does not answer (a recorder still booting after
+        # a power cut) must not hold up the box's start; the owner's assistant starts after the readers (2026-10-11).
         self.thread = threading.Thread(target=self._reader, daemon=True)
         self.thread.start()
 
@@ -272,6 +275,7 @@ class MainStreamThread:
         self._open_capture()
 
     def _reader(self) -> None:
+        self._open_capture()
         while self.running:
             with self.lock:
                 cap = self.capture

@@ -339,6 +339,10 @@ class SharedReadersTest(unittest.TestCase):
         cfg.ROI_ZONES = {"cam": [(0., 0.), (.5, 0.), (.5, 1.), (0., 1.)]}
         with mock.patch("cv2.VideoCapture") as capture, mock.patch.object(streams.threading, "Thread"):
             subs, mains = inf._camera_streams(cfg)
+            self.assertEqual(capture.call_count, 0)          # each reader connects on its own thread (stopped here)
+            for name in cfg.CAMERAS:
+                subs[name].sub_cap._open_capture()
+                mains[name]._open_capture()
             self.assertEqual(capture.call_count, 4)
             self.assertEqual([c.args[0] for c in capture.call_args_list],
                              ["synthetic-sub", "synthetic-main", "synthetic-yard-sub", "synthetic-yard-main"])
@@ -368,8 +372,10 @@ class SharedReadersTest(unittest.TestCase):
         cfg = config.Config()
         cfg.CAMERAS, cfg.CAMERAS_MAIN = {"cam": "synthetic-sub"}, {"cam": "synthetic-main"}
         cfg.MAIN_STREAM_ENABLED = False
-        with mock.patch("cv2.VideoCapture") as capture, mock.patch.object(streams.threading, "Thread"):
-            _, mains = inf._camera_streams(cfg)
+        with mock.patch("cv2.VideoCapture") as capture, mock.patch.object(streams.threading, "Thread") as thread:
+            subs, mains = inf._camera_streams(cfg)
+            subs["cam"].sub_cap._open_capture()           # what its reader thread does first
+        thread.assert_called_once()                       # one reader: the sub-stream's
         capture.assert_called_once()
         self.assertIsNone(mains["cam"])
 
