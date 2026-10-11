@@ -214,6 +214,26 @@ class SubStreamThread:
 # Threaded RTSP capture â€” main-stream (JPEG-compressed buffer for VLM crops)
 # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
+def _open_main(src: str, cfg: Config) -> "cv2.VideoCapture":
+    """The main stream, decoded on the graphics chip when there is one (OpenCV falls back to software by itself),
+    with the open/read timeouts given AT open, where FFmpeg honours them.
+
+    2026-10-11: five 2592x1520 main streams decoded in software held the N150 at 100% CPU; the starved readers
+    lost data and the Eye's crops carried smeared ghosts of the person ("a man kicks a person lying on the
+    ground" - one man walking past a trailer)."""
+    params = []
+    for name, value in (("CAP_PROP_HW_ACCELERATION", getattr(cv2, "VIDEO_ACCELERATION_ANY", None)),
+                        ("CAP_PROP_OPEN_TIMEOUT_MSEC", int(cfg.OPEN_TIMEOUT_MSEC)),
+                        ("CAP_PROP_READ_TIMEOUT_MSEC", int(cfg.READ_TIMEOUT_MSEC))):
+        prop = getattr(cv2, name, None)
+        if prop is not None and value is not None:
+            params += [prop, value]
+    try:
+        return cv2.VideoCapture(src, cv2.CAP_FFMPEG, params)
+    except Exception:  # noqa: BLE001 - an OpenCV without open parameters: as before
+        return cv2.VideoCapture(src, cv2.CAP_FFMPEG)
+
+
 class MainStreamThread:
     """
     Read main-stream RTSP continuously, store JPEG-compressed frames in a
@@ -253,16 +273,8 @@ class MainStreamThread:
                     self.capture.release()
                 except Exception:
                     pass
-            cap = cv2.VideoCapture(self.src, cv2.CAP_FFMPEG)
+            cap = _open_main(self.src, self.cfg)
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 2)
-            try:
-                cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, int(self.cfg.OPEN_TIMEOUT_MSEC))
-            except Exception:
-                pass
-            try:
-                cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, int(self.cfg.READ_TIMEOUT_MSEC))
-            except Exception:
-                pass
             self.capture = cap
             self.last_frame_ts = time.time()
 
@@ -283,10 +295,12 @@ class MainStreamThread:
                 self._reconnect()
                 continue
 
-            ret, frame = cap.read()
+            # Every frame is decoded (grab), only the stored ones (store_fps of ~20) are converted to pictures
+            # (retrieve): 61% -> 42% of a core per 2592x1520 stream, 20% with the Intel chip decoding (11.10).
+            ret = cap.grab()
             now = time.time()
 
-            if not ret or frame is None:
+            if not ret:
                 if now - self.last_frame_ts > float(self.cfg.FREEZE_RECONNECT_AFTER_SEC):
                     self._reconnect()
                 else:
@@ -297,6 +311,9 @@ class MainStreamThread:
             self.reconnect_backoff = float(self.cfg.RECONNECT_BACKOFF_START)
 
             if (now - self.last_store_ts) < self.store_interval:
+                continue
+            ret, frame = cap.retrieve()
+            if not ret or frame is None:
                 continue
             self.last_store_ts = now
             frame = _masked_or_none(self.mask, frame, self._mask_state)

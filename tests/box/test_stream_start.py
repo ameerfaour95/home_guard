@@ -61,5 +61,59 @@ class StreamStartTest(unittest.TestCase):
                     r.release()
 
 
+class _Counting:
+    """A main stream that always has a frame: counts decodes (grab) and conversions (retrieve)."""
+
+    def __init__(self, src, api=None, params=()) -> None:
+        self.params, self.grabs, self.retrieves = list(params), 0, 0
+
+    def set(self, *_a) -> bool:
+        return True
+
+    def isOpened(self) -> bool:
+        return True
+
+    def grab(self) -> bool:
+        self.grabs += 1
+        time.sleep(0.002)
+        return True
+
+    def retrieve(self):
+        import numpy as np
+        self.retrieves += 1
+        return True, np.zeros((8, 8, 3), np.uint8)
+
+    def release(self) -> None:
+        pass
+
+
+class MainStreamLoadTest(unittest.TestCase):
+    """11.10: five 2592x1520 main streams decoded and converted in full held the box at 100% CPU, and the Eye's
+    crops came out smeared (ghost people). Every frame is decoded, only the stored ones are converted, on the
+    graphics chip when there is one."""
+
+    def test_only_stored_frames_are_converted_and_the_chip_is_asked_for(self) -> None:
+        cfg = config.Config()
+        cfg.MAIN_STORE_FPS = 5.0
+        made = []
+
+        def capture(*a):
+            made.append(_Counting(*a))
+            return made[-1]
+
+        with mock.patch.object(streams.cv2, "VideoCapture", capture):
+            reader = streams.MainStreamThread(cfg, "rtsp://10.0.0.9/main", name="ch3")
+            time.sleep(0.6)
+            reader.release()
+        cap = made[0]
+        self.assertGreater(cap.grabs, 50)
+        self.assertLessEqual(cap.retrieves, 5)                 # ~5 a second, not every decoded frame
+        self.assertGreaterEqual(cap.retrieves, 2)
+        self.assertEqual(len(reader.buf), cap.retrieves)
+        pairs = dict(zip(cap.params[::2], cap.params[1::2]))
+        self.assertEqual(pairs.get(streams.cv2.CAP_PROP_HW_ACCELERATION), streams.cv2.VIDEO_ACCELERATION_ANY)
+        self.assertEqual(pairs.get(streams.cv2.CAP_PROP_OPEN_TIMEOUT_MSEC), int(cfg.OPEN_TIMEOUT_MSEC))
+
+
 if __name__ == "__main__":
     unittest.main()
