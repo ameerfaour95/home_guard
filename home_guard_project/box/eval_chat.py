@@ -47,6 +47,7 @@ CHAT = "-5326761586"
 OWNER = {"user_id": 1, "name": "Hello_24"}
 JPEG = (b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\xff\xdb\x00C\x00" + bytes(range(64))
         + b"\xff\xd9")
+MP4 = b"\x00\x00\x00\x18ftypmp42"
 # $ per million tokens (input, output), OpenRouter list prices.
 PRICES = {"openai/gpt-4o": (2.5, 10.0), "openai/gpt-4o-mini": (0.15, 0.6), "openai/gpt-4.1": (2.0, 8.0),
           "openai/gpt-4.1-mini": (0.4, 1.6), "anthropic/claude-sonnet-4.5": (3.0, 15.0),
@@ -687,11 +688,23 @@ class World:
                 for i, j in enumerate(journal):
                     begin = ts_of(case, j["time"])
                     save_keyframe(os.path.dirname(path), f"j{i}", JPEG)      # each event's picture, as on the box
+                    alert_ids = []
+                    if j.get("clip"):                       # the event's alert clip kept on the box (not in the chat)
+                        alert_id = f"{j['camera']}_{int(begin)}_alert"
+                        with open(os.path.join(self.root, "clips", f"{alert_id}.mp4"), "wb") as clip:
+                            clip.write(MP4)
+                        with open(os.path.join(self.root, "meta", f"{alert_id}.meta.json"), "w", encoding="utf-8") as m:
+                            json.dump({"camera_name": j["camera"], "clip_path": f"clips/{alert_id}.mp4",
+                                       "clip_start_ts": begin - 2, "clip_end_ts": begin + 8, "trigger_ts": begin,
+                                       "kind": "alert", "mode": "inference",
+                                       "alert": {"summary": j["summary"], "label": j.get("label", "normal"),
+                                                 "alert_command": "[none]", "people": int(j.get("people") or 1)}}, m)
+                        alert_ids.append(alert_id)
                     f.write(json.dumps({"event_id": f"j{i}", "camera": j["camera"], "start": begin,
                                         "keyframe": keyframe_path(os.path.dirname(path), f"j{i}"),
                                         "end": ts_of(case, j.get("end") or j["time"]), "labels": [j.get("label", "normal")],
                                         "level": j.get("label", "normal"), "people_max": int(j.get("people") or 1),
-                                        "reported": bool(j.get("reported")), "owner_known": [], "alert_ids": [],
+                                        "reported": bool(j.get("reported")), "owner_known": [], "alert_ids": alert_ids,
                                         "outcome": "left", "observations": [{"ts": begin, "label": j.get("label", "normal"),
                                                                              "summary": j["summary"]}],
                                         "caption": j["summary"] + ("" if j.get("reported") else

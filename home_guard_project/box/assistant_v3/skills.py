@@ -166,7 +166,11 @@ class Toolbox:
         with internal(self.ctx):
             out = TOOLS["record_clip"](self.ctx, {"camera": camera, "seconds": 10})
         if out.get("ok"):
-            self.evidence.append(f"נשלחו 10 שניות חיות מ{camera}")
+            from ..brain.registry import display  # noqa: PLC0415
+
+            # the camera's name, as the reply says it: 12.10 12:34 "ameer_v2_ch3" here made the critic call the
+            # reply's "פרגולה" made up, and the rewrite said no video existed
+            self.evidence.append(f"נשלחו 10 שניות חיות מ{display(self.ctx.snapshot, camera, self.ctx.lang)}")
         return _brief(out, ("ok", "status", "reason", "error", "bounds"))
 
 

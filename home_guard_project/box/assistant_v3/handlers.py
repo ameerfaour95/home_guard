@@ -28,6 +28,7 @@ log = logging.getLogger("box.assistant_v3.handlers")
 
 RECENT_EVENT_SEC = 3 * 3600.0
 PHOTO_FRESH_SEC = 15 * 60.0
+MAX_PAST_VIDEOS = 2
 
 
 @dataclass
@@ -557,10 +558,9 @@ def send_photo(t: Turn, act: Act) -> None:
         t.did("לא הצלחתי לקבל תמונה מהמצלמות כרגע.")
 
 
-def send_past_photo(t: Turn, camera: str) -> None:
-    """A picture of a moment that has passed, from the box's recordings (past_photo.py): the event with people at
-    the time he gives (else the times the assistant just cited, else the newest), a still of its clip, with the
-    camera's name and the time it shows."""
+def _past_events(t: Turn, camera: str) -> Tuple[List[Tuple[Dict[str, Any], float]], List[float], str]:
+    """The journal events he asks to see (past_photo.pick_events), the moments he named, and where (for the "none
+    found" line)."""
     from ..brain.tools import _memory  # noqa: PLC0415
 
     memory = _memory(t.ctx)
@@ -580,9 +580,21 @@ def send_past_photo(t: Turn, camera: str) -> None:
     if camera:
         records = [r for r in records if t.camera_now(str(r.get("camera") or "")) == camera]
     at_times = past_photo.moments(t.text, t.mem_owner_words(), replies[-1] if replies else "", t.now)
-    where = t.name(camera) if camera else "המצלמות"
+    return past_photo.pick_events(records, at_times, t.now), at_times, (t.name(camera) if camera else "המצלמות")
+
+
+def _none_found(t: Turn, at_times: List[float], where: str) -> None:
+    asked = ", ".join(clock(a) for a in at_times)
+    t.did(f"לא מצאתי הקלטה עם אנשים ב{where}" + (f" סביב {asked}" if asked else "") + ".")
+
+
+def send_past_photo(t: Turn, camera: str) -> None:
+    """A picture of a moment that has passed, from the box's recordings (past_photo.py): the event with people at
+    the time he gives (else the times the assistant just cited, else the newest), a still of its clip, with the
+    camera's name and the time it shows."""
+    picked, at_times, where = _past_events(t, camera)
     sent = []
-    for record, at in past_photo.pick_events(records, at_times, t.now):
+    for record, at in picked:
         path, shown = past_photo.still_of(record, at, t.ctx.services.roots(), t.ctx.services.work_dir)
         if not path:
             continue
@@ -602,8 +614,36 @@ def send_past_photo(t: Turn, camera: str) -> None:
         t.did(f"נשלחו תמונות מההקלטות של הקופסה (לא חיות): {', '.join(sent)}.")
         t.plan.notes.append(load("assistant_v3_note_past_photo_sent.prompt"))
     else:
-        asked = ", ".join(clock(a) for a in at_times)
-        t.did(f"לא מצאתי הקלטה עם אנשים ב{where}" + (f" סביב {asked}" if asked else "") + ".")
+        _none_found(t, at_times, where)
+
+
+def send_past_video(t: Turn, camera: str) -> None:
+    """"תביא לי סרטון של מישהו שהיה פה בפרגולה" (2026-10-12 12:33): the recorded video of that event (its alert clip
+    nearest the moment), never 10 live seconds of an empty place."""
+    picked, at_times, where = _past_events(t, camera)
+    sent = []
+    for record, at in picked[:MAX_PAST_VIDEOS]:
+        cam = t.camera_now(str(record.get("camera") or ""))
+        ids = sorted([a for a in record.get("alert_ids") or [] if a], key=lambda a: abs(past_photo._alert_ts(a) - at))
+        for alert_id in ids:
+            seen = past_photo.observation_at(record, at)
+            handle = t.state.add_handle("event", alert_id, cam, past_photo._alert_ts(alert_id) or at,
+                                        str(seen.get("summary") or record.get("caption") or "")[:200])
+            t.called.append("send_media")
+            with internal(t.ctx):
+                out = TOOLS["send_media"](t.ctx, {"handle": handle})
+            if out.get("ok") and out.get("status", DONE) == DONE:
+                when = past_photo._alert_ts(alert_id) or at
+                sent.append(f"{t.name(cam)} {clock(when)}")
+                t.plan.evidence.append(f"סרטון מההקלטה (לא חי) מ{t.name(cam)} בשעה {clock(when)}, מתוך האירוע "
+                                       f"{clock(float(record.get('start') or when))}–{clock(float(record.get('end') or when))}: "
+                                       f"{seen.get('summary') or record.get('caption') or ''}")
+                break
+    if sent:
+        t.did(f"נשלחו סרטונים מההקלטות של הקופסה (לא חיים): {', '.join(sent)}.")
+        t.plan.notes.append(load("assistant_v3_note_past_photo_sent.prompt"))
+    else:
+        _none_found(t, at_times, where)
 
 
 def pause(t: Turn, camera: Optional[str], until: float) -> bool:
@@ -646,6 +686,9 @@ def send_video(t: Turn, act: Act) -> None:
             t.did(f"נשלח הסרטון של ההתראה מ-{hhmm(entry.get('ts'))} ב{t.name(t.camera_now(str(entry.get('camera') or '')))}.")
         return
     camera = act.camera if act.camera and act.camera != "house" else (t.last_photo_camera() or "")
+    if past_photo.asks_past(t.text):
+        send_past_video(t, _named_camera(t, t.text) or camera or t.camera_of(act))   # a recording, not live seconds
+        return
     if camera:
         out = t.box.run("record_clip", {"camera": camera})
         if any(r.tool == "record_clip" and r.status == DONE for r in t.ctx.receipts):

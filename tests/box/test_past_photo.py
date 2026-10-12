@@ -76,6 +76,30 @@ class PastPhotoTurnTests(unittest.TestCase):
         self.assertEqual(out["photo_cameras"], [PERGOLA])
 
 
+class PastVideoTurnTests(unittest.TestCase):
+    """12.10 12:33 "תביא לי סרטון של מישהו שהיה פה בפרגולה": 10 live seconds of the empty pergola, then (the critic
+    reading "ameer_v2_ch3" in the evidence and "פרגולה" in the reply) "there is no recorded video"."""
+
+    MSG = "תביא לי סרטון של מישהו שהיה פה בפרגולה"
+
+    def test_a_video_of_someone_who_was_here_is_the_recorded_clip(self):
+        journal = [dict(j, clip=True) for j in JOURNAL]
+        out, prompt = turn(self.MSG, [act("command", quote=self.MSG, command="send_video", camera=PERGOLA)],
+                           journal=journal, time="12:33:58", writer_text="הנה הסרטון מהפרגולה מ־10:35.")
+        self.assertEqual(out["error"], "")
+        self.assertEqual(out["photo_cameras"], [])
+        self.assertNotIn("live", " ".join(out["videos"]))           # not 10 live seconds
+        self.assertEqual(out["videos"], [f"{PERGOLA}_{int(at('10:35')) + 46}_alert.mp4"])   # the newest visit with people
+        self.assertIn("לא חי", prompt)
+
+    def test_a_live_video_ask_is_still_live(self):
+        msg = "תביא לי סרטון מהפרגולה עכשיו"
+        out, _ = turn(msg, [act("command", quote=msg, command="send_video", camera=PERGOLA)],
+                      journal=[dict(j, clip=True) for j in JOURNAL], time="12:33:58")
+        self.assertEqual(len(out["videos"]), 1)
+        self.assertIn("live", out["videos"][0])
+
+
 class PastPhotoUnitTests(unittest.TestCase):
     NOW = at("11:44")
 
