@@ -18,6 +18,7 @@ from ..brain.registry import current_camera
 from ..brain.tools import TOOLS, ToolContext, _issue, quoted_from, retag_words
 from .acts import Act, Understanding
 from .context import Cameras, hhmm
+from . import past_photo
 from .memory_view import MemoryView
 from ...prompts import load, render
 from .skills import Toolbox, internal
@@ -501,8 +502,16 @@ def photo_request(t: Turn) -> None:
     """"תן לי תמונה" / "נוווו תן לי פאקינג תמונהה" always gets a picture (2026-10-11 10:11-10:14: four asks, the first
     three read as a complaint or answered "no live picture from the main camera"). A message that asks for a picture
     and has no send_photo / send_video act gets one, at the camera he names now or named in his last messages."""
-    if not _PHOTO_ASK.search(t.text) or any(a.act == "command" and a.command in ("send_photo", "send_video")
-                                            for a in t.und.acts):
+    if any(a.act == "command" and a.command in ("send_photo", "send_video") for a in t.und.acts):
+        return
+    if not _PHOTO_ASK.search(t.text):
+        # "לא של עכשיו יא מטומטם אני מתכוון שהם היו" (2026-10-12 11:44): no picture word, but it corrects the
+        # picture he just asked for: the past one is sent
+        earlier = t.mem_owner_words()[:1]
+        if not (past_photo.asks_past(t.text) and earlier and _PHOTO_ASK.search(earlier[0])):
+            return
+        t.und.acts.append(Act(act="command", command="send_photo", quote=t.text[:120]))
+        t.plan.trace.append("photo asked again (past): send_photo added")
         return
     if t.und.has("question_live") and not t.und.has("complaint"):
         return                                   # "יש תמונה מהכניסה?" as a live question: prefetch looks already
@@ -527,7 +536,11 @@ def send_photo(t: Turn, act: Act) -> None:
     owner = t.mem_owner_words()[:2]
     camera = act.camera if act.camera and act.camera != "house" else ""
     # what he names now, else what was just talked about (an alert or the box's line: the topic), else his last words
-    camera = _named_camera(t, t.text) or camera or t.camera_of(act) or _named_camera(t, *owner)
+    others = [a.camera for a in t.und.acts if a.camera and a.camera != "house"]
+    camera = _named_camera(t, t.text) or camera or (others[0] if others else "") or t.camera_of(act) or         _named_camera(t, *owner)
+    if past_photo.asks_past(t.text):
+        send_past_photo(t, camera)                # "תמונה שהם היו שם ב-10:24": the recording, never a live picture
+        return
     if camera and camera not in enabled:
         t.did(f"{t.name(camera)} כבויה, אז שלחתי מהמצלמות שפועלות.")
         camera = ""
@@ -542,6 +555,55 @@ def send_photo(t: Turn, act: Act) -> None:
         t.plan.notes.append(load("assistant_v3_note_photo_sent.prompt"))
     else:
         t.did("לא הצלחתי לקבל תמונה מהמצלמות כרגע.")
+
+
+def send_past_photo(t: Turn, camera: str) -> None:
+    """A picture of a moment that has passed, from the box's recordings (past_photo.py): the event with people at
+    the time he gives (else the times the assistant just cited, else the newest), a still of its clip, with the
+    camera's name and the time it shows."""
+    from ..brain.tools import _memory  # noqa: PLC0415
+
+    memory = _memory(t.ctx)
+    records: List[Dict[str, Any]] = []
+    if memory is not None:
+        try:
+            records = list(memory.records())
+            book = getattr(t.ctx.services, "events", None)
+            if book is not None:
+                records += [memory.live_record(s) for s in book.recent(t.now - 86400.0, "") if not s.get("closed")]
+        except Exception as exc:  # noqa: BLE001
+            log.warning("v3: event memory not read for a past photo: %s", exc)
+    from .context import last_replies  # noqa: PLC0415
+
+    replies = last_replies(t.state, 1)
+    camera = camera or _named_camera(t, replies[-1] if replies else "")    # "בשעות האלה" after "נראו בפרגולה ..."
+    if camera:
+        records = [r for r in records if t.camera_now(str(r.get("camera") or "")) == camera]
+    at_times = past_photo.moments(t.text, t.mem_owner_words(), replies[-1] if replies else "", t.now)
+    where = t.name(camera) if camera else "המצלמות"
+    sent = []
+    for record, at in past_photo.pick_events(records, at_times, t.now):
+        path, shown = past_photo.still_of(record, at, t.ctx.services.roots(), t.ctx.services.work_dir)
+        if not path:
+            continue
+        cam = t.camera_now(str(record.get("camera") or ""))
+        handle = t.state.add_handle("photo", path, cam, shown)
+        seen = past_photo.observation_at(record, shown)
+        t.state.note_observation(handle, str(seen.get("summary") or record.get("caption") or "")[:300])
+        t.called.append("send_media")
+        with internal(t.ctx):
+            out = TOOLS["send_media"](t.ctx, {"handle": handle})
+        if out.get("ok") and out.get("status", DONE) == DONE:
+            sent.append(f"{t.name(cam)} {clock(shown)}")
+            t.plan.evidence.append(f"תמונה מההקלטה (לא חיה) מ{t.name(cam)} בשעה {clock(shown)}, מתוך האירוע "
+                                   f"{clock(float(record.get('start') or shown))}–{clock(float(record.get('end') or shown))}: "
+                                   f"{seen.get('summary') or record.get('caption') or ''}")
+    if sent:
+        t.did(f"נשלחו תמונות מההקלטות של הקופסה (לא חיות): {', '.join(sent)}.")
+        t.plan.notes.append(load("assistant_v3_note_past_photo_sent.prompt"))
+    else:
+        asked = ", ".join(clock(a) for a in at_times)
+        t.did(f"לא מצאתי הקלטה עם אנשים ב{where}" + (f" סביב {asked}" if asked else "") + ".")
 
 
 def pause(t: Turn, camera: Optional[str], until: float) -> bool:

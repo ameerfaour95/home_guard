@@ -2607,7 +2607,11 @@ def arrival_text(arrival: Dict[str, Any], lang: str) -> str:
 
     camera = in_place(camera_display(str(arrival.get("camera") or ""), lang), lang)
     when = datetime.fromtimestamp(float(arrival.get("at") or time.time())).strftime("%H:%M")
-    return t("arrived_line", lang, who=str(arrival.get("who") or ""), camera=camera, time=when)
+    who = str(arrival.get("who") or "")
+    if camera and camera in who:
+        # his own words already name the place ("העובדים של הפרגולה"): not "העובדים של הפרגולה של הפרגולה" (12.10)
+        return t("arrived_line_bare", lang, who=who, time=when)
+    return t("arrived_line", lang, who=who, camera=camera, time=when)
 
 
 def send_arrival_line(arrival: Dict[str, Any], box_settings: Dict[str, Any], env: Dict[str, str], lang: str,

@@ -200,11 +200,16 @@ def sanitize(text: str, cameras: Sequence[str], lang: str) -> str:
     return re.sub(r"[ \t]{2,}", " ", out).strip()
 
 
+CRITIC_EVIDENCE_CHARS = 8000
+
+
 def critic_messages(system: str, owner_text: str, acts: List[Dict[str, Any]], last: Sequence[str], evidence: str,
                     draft: str) -> List[Dict[str, Any]]:
     user = ("OWNER'S MESSAGE: " + owner_text + "\nWHAT IT MEANS (acts): " + str(acts)[:600]
             + "\nASSISTANT'S LAST REPLIES (oldest first):\n" + "\n".join(f"- {x[:200]}" for x in last[-3:])
-            + "\nEVIDENCE / DONE THIS TURN:\n" + (evidence[:1500] or "(none)")
+            # all of it: 2026-10-12 11:43 a 1500-character cut dropped the pergola's 10:35-10:43 event, and the
+            # critic "corrected" the right "seen until 10:43" into a wrong "until 10:24"
+            + "\nEVIDENCE / DONE THIS TURN:\n" + (evidence[:CRITIC_EVIDENCE_CHARS] or "(none)")
             + "\n\nDRAFT REPLY: " + draft)
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 

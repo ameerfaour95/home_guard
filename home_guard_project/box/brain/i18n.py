@@ -266,6 +266,7 @@ TEMPLATES: Dict[str, Dict[str, str]] = {
                         "ar": "🧠 يبقى: {who} {where}، {when}."},
     "arrived_line": {"en": "{who} at {camera} arrived ({time})", "he": "{who} של ה{camera} הגיעו ({time})",
                      "ar": "{who} في {camera} وصلوا ({time})"},
+    "arrived_line_bare": {"en": "{who} arrived ({time})", "he": "{who} הגיעו ({time})", "ar": "{who} وصلوا ({time})"},
     "memory_list": {"en": "What I remember now:\n{rows}", "he": "מה שאני זוכר עכשיו:\n{rows}",
                     "ar": "ما أتذكره الآن:\n{rows}"},
     "memory_list_none": {"en": "I don't remember anyone or anything special right now.",

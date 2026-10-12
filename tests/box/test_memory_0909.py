@@ -445,6 +445,9 @@ class LeadReviewTest(Base):
         with patch("home_guard_project.box.camera_names._load", lambda aliases: aliases or names):
             line = arrival_text({"who": "העובדים", "camera": PERGOLA, "at": NOW}, "he")
         self.assertEqual(line, "העובדים של הפרגולה הגיעו (09:22)")
+        with patch("home_guard_project.box.camera_names._load", lambda aliases: aliases or names):
+            line = arrival_text({"who": "העובדים של הפרגולה", "camera": PERGOLA, "at": NOW}, "he")
+        self.assertEqual(line, "העובדים של הפרגולה הגיעו (09:22)")      # 12.10: was "...של הפרגולה של הפרגולה"
         snap = Registry().snapshot()
         self.assertEqual(km.who_where("עובדים אצלי על הפרגולה", PERGOLA, snap, "he"), "עובדים אצלי על הפרגולה")
         self.assertEqual(km.who_where("העובדים", PERGOLA, snap, "he"), "העובדים בפרגולה")

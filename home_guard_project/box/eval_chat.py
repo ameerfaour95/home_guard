@@ -679,14 +679,16 @@ class World:
         # The box's event journal (event_memory archive): what the cameras saw, sent or kept ("reported": false).
         journal = case.get("journal") or []
         if journal:
-            from .event_memory import memory_for  # noqa: PLC0415
+            from .event_memory import keyframe_path, memory_for, save_keyframe  # noqa: PLC0415
 
             path = memory_for(self.events.directory).path
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "a", encoding="utf-8") as f:
                 for i, j in enumerate(journal):
                     begin = ts_of(case, j["time"])
+                    save_keyframe(os.path.dirname(path), f"j{i}", JPEG)      # each event's picture, as on the box
                     f.write(json.dumps({"event_id": f"j{i}", "camera": j["camera"], "start": begin,
+                                        "keyframe": keyframe_path(os.path.dirname(path), f"j{i}"),
                                         "end": ts_of(case, j.get("end") or j["time"]), "labels": [j.get("label", "normal")],
                                         "level": j.get("label", "normal"), "people_max": int(j.get("people") or 1),
                                         "reported": bool(j.get("reported")), "owner_known": [], "alert_ids": [],
