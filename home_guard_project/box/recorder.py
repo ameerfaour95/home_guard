@@ -41,8 +41,9 @@ OFFSET_TTL_SEC = 3600.0
 CLIP_FPS = 5.0
 CLIP_WIDTH = 1280
 CONFIRM_SEC = (30.0, 60.0)      # an empty look is checked again this much earlier
+RECHECK_SEC = 4.0               # ... and while narrowing, this much earlier
 LAG_SEC = (90.0, 180.0)        # how far behind now the recording can be played back
-READ_FRAMES = 30                # a look reads this many frames and keeps two, a second apart (25 fps)
+READ_FRAMES = 16                # a look reads this many frames and keeps two, a second apart (25 fps)
 
 
 def replay_url(live_url: str, start: float, end: float) -> Optional[str]:
@@ -280,14 +281,19 @@ class Recorder:
             step = (there - gone) / (WORKERS + 1)
             probes = [gone + step * (i + 1) for i in range(WORKERS)]
             results = list(pool.map(at, probes))
+            # an empty look is looked at again a little earlier (12.10: one missed look made 12:56 "12:58:56")
+            empty = [ts for ts, b in zip(probes, results) if b is not None and not _present(b, place)]
+            again = dict(zip(empty, pool.map(at, [ts - RECHECK_SEC for ts in empty])))
             new_gone, new_there = gone, there
             for ts, boxes in zip(probes, results):
                 if boxes is None:
                     continue
                 if _present(boxes, place):
                     new_there = min(new_there, ts)
-                else:
-                    new_gone = max(new_gone, ts) if ts < new_there else new_gone
+                elif again.get(ts) is not None and _present(again[ts], place):
+                    new_there = min(new_there, ts - RECHECK_SEC)
+                elif ts < new_there:
+                    new_gone = max(new_gone, ts)
             if (new_gone, new_there) == (gone, there):
                 break                                    # no frame in the gap: as close as the recording allows
             gone, there = new_gone, new_there

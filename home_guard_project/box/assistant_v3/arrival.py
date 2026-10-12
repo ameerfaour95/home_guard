@@ -33,7 +33,7 @@ _NOTIFY = re.compile(r"(?<![א-ת])(?:תודיע|תעדכן|תגיד לי|תכת
 _PAST = re.compile(r"(?<![א-ת])ש?(?:הגיע|הגיעה|הגיעו|נכנס|נכנסה|חנה|חנתה|היה|הייתה|היתה)(?![א-ת])"
                    r"|\b(?:arrived|came|got here)\b", re.IGNORECASE)
 CLIP_BEFORE_SEC = 5.0
-CLIP_SEC = 30.0
+CLIP_SEC = 20.0
 
 
 def asks_arrival(text: str, vehicle: str) -> bool:
