@@ -131,7 +131,9 @@ def run_scenario(spec):
     if not sub:
         job.snapshot = noise(1, w, h, seed=99)[0]
     detector = mock.Mock(side_effect=detector_for(spec["boxes"]))
-    frames, clip = inf._prepare_alert(job, cfg(spec["sample"]), detector, sub_cap, main_cap, {})
+    # the synthetic main and sub streams are unrelated noise; the main-vs-sub check has its own tests (test_frame_check)
+    with mock.patch.object(inf, "_main_damaged", return_value=False):
+        frames, clip = inf._prepare_alert(job, cfg(spec["sample"]), detector, sub_cap, main_cap, {})
     crop = None
     if job.crop is not None:
         c = job.crop

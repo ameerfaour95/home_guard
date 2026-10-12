@@ -1824,6 +1824,7 @@ class AlertJob:
     # The clip the model input was cut from: {"start", "end", "frames", "size": [w, h]} (the main stream for a crop,
     # the sub stream for whole frames). Only read by the alert describer (describer.py) to place the tracker's boxes.
     input_clock: Optional[Dict[str, Any]] = None
+    input_check: Optional[Dict[str, Any]] = None     # main stream vs sub stream (frame_check.py), in the meta
 
 
 def _camera_streams(cfg: Any) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -1896,6 +1897,9 @@ def _prepare_alert(job: AlertJob, cfg: Any, detector: Any, sub_cap: Any, main_ca
                 job.crop_fps = main[3]
                 if job.crop is None:
                     reason = "no_trigger_class_detection_or_usable_crop"
+                elif _main_damaged(job, main, sub_frames, start, end):
+                    # a ghost or a grey field in the main stream reads as a second person, a knife, a covered lens
+                    job.crop, reason = None, "main_frames_damaged"
             except Exception:
                 log.exception("[%s] crop failed; using the whole sub-stream window", job.camera)
                 reason = "crop_error"
@@ -1903,17 +1907,40 @@ def _prepare_alert(job: AlertJob, cfg: Any, detector: Any, sub_cap: Any, main_ca
     if job.crop is not None:
         job.input_clock = _clock_of(main[0], main[1], main[2])
         job.input_meta = {"vlm_input": model_input.VLM_INPUT_CROP}
+        if job.input_check:
+            job.input_meta["main_check"] = job.input_check
         job.model_input = model_input.render_model_input(
             main[0], {"vlm_input": model_input.VLM_INPUT_CROP, "fps": job.crop_fps, "crops": job.crop.crops,
                       "crop_size": (job.crop.width, job.crop.height)}, model_input.config_from(cfg, max_side))
     else:
         job.input_clock = _clock_of(sub_frames, start, end)
         job.input_meta = {"vlm_input": model_input.VLM_INPUT_WHOLE, "vlm_fallback_reason": reason}
+        if job.input_check:
+            job.input_meta["main_check"] = job.input_check
         log.warning("[%s] VLM whole_frame_fallback: %s", job.camera, reason)
         job.model_input = model_input.render_model_input(
             sub_frames, {"vlm_input": model_input.VLM_INPUT_WHOLE, "fps": sub_fps},
             model_input.config_from(cfg, max_side))
     return job.model_input.frames, clip
+
+
+def _main_damaged(job: AlertJob, main: Any, sub_frames: Sequence[Any], start: float, end: float) -> bool:
+    """True when the main-stream frames of the crop disagree with the sub stream at the same moments (frame_check.py:
+    pieces of the main stream lost on the way). Never raises: a failed check keeps the crop."""
+    try:
+        from . import frame_check  # noqa: PLC0415
+
+        values = frame_check.scores(main[0], main[1], main[2], job.crop.crops, sub_frames, start, end)
+        bad = frame_check.damaged(values)
+        job.input_check = {"main_vs_sub_max": round(max(values), 3) if values else None,
+                           "main_vs_sub_odd": sum(v >= frame_check.FRAME_ODD for v in values), "damaged": bad}
+        if bad:
+            log.warning("[%s] main-stream frames damaged (max %.3f, %d odd of %d): the Eye gets the sub stream",
+                        job.camera, max(values), job.input_check["main_vs_sub_odd"], len(values))
+        return bad
+    except Exception as exc:  # noqa: BLE001
+        log.warning("[%s] main-stream check failed: %s", job.camera, exc)
+        return False
 
 
 def _clock_of(frames: Sequence[Any], start: Any, end: Any) -> Optional[Dict[str, Any]]:
