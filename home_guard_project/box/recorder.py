@@ -10,8 +10,8 @@ needs no login, says by how much).
 
 - ``arrival``: when the vehicles standing at a camera now came: the box's own detector (no AI, no cost) on single
   frames of the recording, stepping back 1, 2, 5, 10 ... minutes until the vehicle's place is empty, then narrowing
-  that gap to ``ARRIVAL_PRECISION_SEC``. Each look reads two frames a second apart (a decode-smeared frame can hide a
-  car), and any of the two showing a vehicle on the place counts as there.
+  that gap to ``ARRIVAL_PRECISION_SEC``. Each look reads one frame; an empty look is looked at again a little
+  earlier (a missed detection or a decode-smeared frame can hide a car: 12.10 one miss made 12:56 "14:05").
 - ``clip``: a few seconds of the recording around a moment, masked to the camera's watch zone like every picture the
   box keeps (fail closed), at ``CLIP_FPS`` and ``CLIP_WIDTH``.
 
@@ -43,7 +43,7 @@ CLIP_WIDTH = 1280
 CONFIRM_SEC = (30.0, 60.0)      # an empty look is checked again this much earlier
 RECHECK_SEC = 4.0               # ... and while narrowing, this much earlier
 LAG_SEC = (90.0, 180.0)        # how far behind now the recording can be played back
-READ_FRAMES = 16                # a look reads this many frames and keeps two, a second apart (25 fps)
+READ_FRAMES = 12                # a look reads this many frames and keeps the last (past the first decode errors)
 
 
 def replay_url(live_url: str, start: float, end: float) -> Optional[str]:
@@ -168,7 +168,7 @@ class Recorder:
 
     # -- looks ----------------------------------------------------------------------------------------------------
     def frames(self, camera: str, ts: float) -> List[Any]:
-        """Two masked frames of *camera* about a second apart from *ts* (box clock); [] when there are none."""
+        """A masked frame of *camera* at *ts* (box clock), in a list; [] when there is none."""
         live = self._live(camera)
         url = replay_url(live or "", ts + self.offset(camera), ts + self.offset(camera) + 10) if live else None
         if not url:
@@ -183,7 +183,7 @@ class Recorder:
                 got, frame = cap.read()
                 if not got:
                     break
-                if i in (4, READ_FRAMES - 1):
+                if i == READ_FRAMES - 1:           # one clean frame (a look that misses is looked at again)
                     kept.append(mask.apply(frame) if mask is not None else frame)
         except Exception as exc:  # noqa: BLE001
             log.info("Recorder playback of %s at %s failed: %s", camera, ts, exc)

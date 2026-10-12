@@ -99,7 +99,7 @@ class SearchTests(unittest.TestCase):
 
 
 class FramesTests(unittest.TestCase):
-    def test_two_frames_a_second_apart_at_the_recorders_time(self):
+    def test_a_frame_at_the_recorders_time(self):
         opened = []
 
         class Cap:
@@ -116,7 +116,7 @@ class FramesTests(unittest.TestCase):
         r = rc.Recorder("x", tempfile.mkdtemp(), post=lambda host: ONVIF, open_capture=open_capture,
                         now=lambda: 1791802789.0, url_of=lambda c: LIVE)
         r._mask = lambda camera: (None, True)
-        self.assertEqual(len(r.frames(PERGOLA, 1791799000.0)), 2)
+        self.assertEqual(len(r.frames(PERGOLA, 1791799000.0)), 1)
         self.assertIn("/c3/b1791799302/", opened[0])                 # box time + 302 s
 
     def test_a_zone_that_cannot_be_read_gives_no_picture(self):
