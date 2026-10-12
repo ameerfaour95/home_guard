@@ -65,6 +65,14 @@ def build_assistant_v3(box_settings: Dict[str, Any], env: Dict[str, str], *args:
         watches.start(v2.services, deliverer, judge=watches.model_judge(understand) if understand is not None else None)
     except Exception as exc:  # noqa: BLE001 - the assistant runs without watches
         log.warning("Watches not started: %s", exc)
+    try:
+        from ..brain.registry import CAMERAS_PATH  # noqa: PLC0415
+        from ..recorder import Recorder  # noqa: PLC0415
+
+        # the house recorder's playback: "when did the truck come" (assistant_v3/arrival.py)
+        v2.services.recorder = Recorder(CAMERAS_PATH, v2.services.work_dir, now=v2.services.now)
+    except Exception as exc:  # noqa: BLE001 - the assistant runs without the recording
+        log.warning("Recorder playback off: %s", exc)
     return agent, deliverer
 
 

@@ -28,6 +28,7 @@ from ..brain.memory import ChatState
 from ..brain.receipts import DONE, REQUESTED, Receipt
 from ..brain.registry import current_camera, resolve_camera
 from ..brain.tools import Services, ToolContext, known_rows
+from . import arrival
 from . import context as cx
 from . import handlers as hd
 from . import prompts
@@ -143,6 +144,11 @@ class AssistantV3(OwnerAgentV2):
 
         merge_pause_resume(und)
         hd.photo_request(turn)
+        try:
+            arrival.answer(turn)       # "when did the truck come": the recorder's recording, not a watch
+        except Exception as exc:  # noqa: BLE001
+            log.warning("v3 arrival failed: %s", exc, exc_info=True)
+            trace.append(f"arrival failed: {exc}")
         # ---- ACT ----
         for act in und.acts:
             fn = hd.HANDLERS.get(act.act)

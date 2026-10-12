@@ -489,6 +489,36 @@ class FakeDeliverer:
         return None
 
 
+class FakeRecorder:
+    """The house recorder: ``case["recorder"] = {camera: {"arrived": "12:56:05", "before": "12:55:50"} | {"since":
+    "09:00"} | {"error": "no_playback"}}``; a camera not in it has no recording."""
+
+    def __init__(self, world: "World") -> None:
+        self.world = world
+        self.case = world.case.get("recorder") or {}
+
+    def available(self, camera: str) -> bool:
+        return camera in self.case
+
+    def arrival(self, camera: str, detect: Any, now: Optional[float] = None) -> Dict[str, Any]:
+        entry = self.case.get(camera) or {}
+        if entry.get("error"):
+            return {"ok": False, "error": entry["error"]}
+        rows = []
+        if entry.get("arrived"):
+            rows.append({"box": [0.1, 0.4, 0.3, 0.6], "arrived": ts_of(self.world.case, entry["arrived"]),
+                         "before": ts_of(self.world.case, entry.get("before") or entry["arrived"])})
+        if entry.get("since"):
+            rows.append({"box": [0.6, 0.4, 0.8, 0.6], "since_before": ts_of(self.world.case, entry["since"])})
+        return {"ok": True, "vehicles": rows, "looks": 12}
+
+    def clip(self, camera: str, start: float, seconds: float) -> Dict[str, Any]:
+        path = os.path.join(self.world.root, ".live", f"{camera}_{int(start)}_rec.mp4")
+        with open(path, "wb") as f:
+            f.write(MP4)
+        return {"ok": True, "path": path, "start": start, "end": start + seconds}
+
+
 DEFAULT_LIVE = "A quiet yard and driveway; no people, no moving vehicles."
 
 
@@ -565,6 +595,7 @@ class World:
 
             # Watches ("tell me when the car leaves"): the case's live "vehicles" count stands for the detector.
             self.services.detect = self._detect
+            self.services.recorder = FakeRecorder(self) if case.get("recorder") is not None else None
             self.services.watches = watches.Watches(os.path.join(self.root, ".watches.json"), self._grab_photo,
                                                self._detect, lambda chat, image, caption: True,
                                                now=lambda: self.clock["now"])

@@ -98,6 +98,7 @@ class Services:
     story_model: Any = None    # the model that writes the day's story (box.yaml day_story_model; day_story.py)
     cases: Any = None          # case_memory.CaseStore: the long-term precedents those memories also write (case_chat)
     watches: Any = None        # watches.Watches: "tell me when the car leaves" (v3), checked by its own thread
+    recorder: Any = None       # recorder.Recorder: the house recorder's playback ("when did the truck come", v3)
 
 
 @dataclass
@@ -934,7 +935,7 @@ def send_media(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
             return _result(_issue(ctx, "send_media", DONE if sent.get("ok") else FAILED, handle,
                                   {"kind": "photo", "camera": camera, "message_id": sent.get("message_id")},
                                   "" if sent.get("ok") else "telegram"))
-        bounds = ""
+        bounds = str(entry.get("bounds") or "")     # a recorder clip: "מהמקליט 12:55–12:56"
     else:
         record, bad = _record_for(ctx, handle)
         if bad:
