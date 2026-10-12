@@ -40,6 +40,8 @@ WORKERS = 3                     # parallel playbacks: the recorder serves a few 
 OFFSET_TTL_SEC = 3600.0
 CLIP_FPS = 5.0
 CLIP_WIDTH = 1280
+CONFIRM_SEC = (30.0, 60.0)      # an empty look is checked again this much earlier
+LAG_SEC = (90.0, 180.0)        # how far behind now the recording can be played back
 READ_FRAMES = 30                # a look reads this many frames and keeps two, a second apart (25 fps)
 
 
@@ -226,23 +228,32 @@ class Recorder:
         now = float(self.now() if now is None else now)
         if not self.available(camera):
             return {"ok": False, "error": "no_recorder"}
-        latest = now - 20.0                            # the recorder writes a little behind the live picture
         looks = [0]
 
         def at(ts: float) -> Optional[List[List[float]]]:
             looks[0] += 1
             return self.vehicles_at(camera, ts, detect)
 
-        current = at(latest)
+        # the recorder plays a moment back only about a minute after it (12.10: 30 s refused, 60 s played)
+        latest, current = now - LAG_SEC[0], None
+        for lag in LAG_SEC:
+            latest = now - lag
+            current = at(latest)
+            if current is not None:
+                break
         if current is None:
             return {"ok": False, "error": "no_playback"}
         if not current:
-            return {"ok": True, "vehicles": [], "looks": looks[0]}
+            return {"ok": True, "vehicles": [], "looks": looks[0], "latest": latest}
+        places: List[List[float]] = []
+        for box in current:                              # "car" and "truck" on one pickup: one place
+            if not _present(places, box):
+                places.append(box)
         out = []
         with cf.ThreadPoolExecutor(max_workers=WORKERS) as pool:
-            for place in current[:limit]:
+            for place in places[:limit]:
                 out.append(self._arrival_of(place, latest, pool, at))
-        return {"ok": True, "vehicles": out, "looks": looks[0]}
+        return {"ok": True, "vehicles": out, "looks": looks[0], "latest": latest}
 
     def _arrival_of(self, place: Sequence[float], latest: float, pool: cf.ThreadPoolExecutor,
                     at: Callable[[float], Optional[List[List[float]]]]) -> Dict[str, Any]:
@@ -255,9 +266,14 @@ class Recorder:
                 continue                                 # no frame: neither there nor gone
             if _present(boxes, place):
                 there = ts
-            else:
-                gone = ts
-                break
+                continue
+            # one empty look is not gone (12.10: the pickup "arrived 14:05" on one missed look): two more agree
+            again = list(pool.map(at, [ts - c for c in CONFIRM_SEC]))
+            if any(b is not None and _present(b, place) for b in again):
+                there = ts - max(c for c, b in zip(CONFIRM_SEC, again) if b is not None and _present(b, place))
+                continue
+            gone = ts
+            break
         if gone is None:
             return {"box": list(place), "since_before": there}
         while there - gone > ARRIVAL_PRECISION_SEC:

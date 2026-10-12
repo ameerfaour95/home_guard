@@ -81,7 +81,8 @@ def answer(t: Any) -> bool:
         return True
     rows: List[Dict[str, Any]] = list(found.get("vehicles") or [])
     if not rows:
-        t.plan.evidence.append(f"בהקלטה של המקליט אין עכשיו רכב ב{name}.")
+        t.plan.evidence.append(f"בהקלטה של המקליט אין רכב ב{name} ב-{clock(found.get('latest') or t.now)} "
+                               f"(ההקלטה זמינה רק כדקה וחצי אחרי הזמן).")
         return True
     lone = len(rows) == 1
     for row in sorted(rows, key=lambda r: -float(r.get("arrived") or 0)):

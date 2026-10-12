@@ -69,6 +69,24 @@ class SearchTests(unittest.TestCase):
         self.assertLessEqual(row["arrived"] - row["before"], rc.ARRIVAL_PRECISION_SEC)
         self.assertLess(out["looks"], 40)
 
+    def test_one_missed_look_is_not_a_departure(self):
+        """12.10 on the box: the pickup "arrived 14:05:23" because one look at 14:05:12 missed it (it never moved);
+        and the detector's "car" and "truck" on the same pickup were two vehicles."""
+        missed = at("13:39") + 20 - 90 - 600
+        inner = self.r.vehicles_at
+
+        def flaky(camera, ts, detect):
+            if abs(ts - missed) < 1:
+                return []
+            boxes = inner(camera, ts, detect)
+            return boxes + [list(TRUCK)] if boxes and TRUCK in boxes else boxes
+
+        self.r.vehicles_at = flaky
+        out = self.r.arrival(PERGOLA, lambda p: [], now=at("13:39") + 20)
+        (row,) = out["vehicles"]
+        self.assertLessEqual(row["before"], self.arrived)
+        self.assertGreaterEqual(row["arrived"], self.arrived)
+
     def test_a_vehicle_there_all_along(self):
         self.arrived = at("00:00")
         (row,) = self.r.arrival(PERGOLA, lambda p: [], now=at("13:39") + 20)["vehicles"]
