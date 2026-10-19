@@ -1,4 +1,4 @@
-"""Two system notices to the owner over Telegram: the box was down, and the AI is not available.
+"""Three system notices to the owner over Telegram: the box was down, the AI is not available, no camera picture.
 
 2026-10-10 the box ran with no vision AI from 00:25 to 09:05 (the OpenRouter credit ran out: every Eye call got 402),
 was stopped 09:06-12:33, and a power cut hit at 09:23. Nobody knew. The owner then approved exactly these owner
@@ -20,11 +20,25 @@ messages (and no others; his rule: never a message type he did not agree to):
 
        ✅ ה-AI חזר לעבוד. לא היה זמין 00:25–09:05.
 
-Both are fixed texts (no model is asked to write or translate them), Hebrew on a Hebrew box and English otherwise,
+3. No picture from any camera (approved 2026-10-19, after the recorder came back from a power cut on a new address and
+   the box saw nothing for a day and a half without telling anyone), once per outage: every watched camera without a
+   picture for CAMERAS_OUTAGE_SEC::
+
+       ⚠️ אין תמונה מאף מצלמה מ-06:59. הקופסה פועלת, אבל בלי תמונה לא נשלחות התרעות. כדאי לבדוק שמכשיר ההקלטה דלוק
+       ומחובר לרשת.
+
+   and ONE line when a camera sends a picture again (the clause only when recorder_finder.py moved the address)::
+
+       ✅ המצלמות חזרו לעבוד. לא הייתה תמונה 06:59–10:45 (מכשיר ההקלטה קיבל כתובת חדשה ברשת והקופסה מצאה אותו לבד).
+
+   An outage that began before the box was down for DOWN_GAP_SEC or more is not carried over: the box-down notice
+   tells that part.
+
+All are fixed texts (no model is asked to write or translate them), Hebrew on a Hebrew box and English otherwise,
 sent as a normal (not silent) message with no buttons. box.yaml ``system_notices: on | off`` (default on). A send
 never blocks or stops inference: one background thread sends them in order, retrying while the network is not up yet
 (the boot after a power cut), and logs what happened. Each decision is logged in one ASCII line ("Box-down notice:",
-"AI-down notice:", "AI-back notice:"), which the runner's log filter keeps (it keeps every line with our time stamp).
+"AI-down notice:", "AI-back notice:", "Cameras-down notice:", "Cameras-back notice:"), which the runner's log filter keeps (it keeps every line with our time stamp).
 
 Files: ALIVE_NAME and STATE_NAME in the box state folder (paths.state_dir), OWNER_STOP_NAME next to the runner's
 flags in the logs folder (written by control.stop). All are written through a synced temp file (2026-10-10 09:23 the
@@ -51,6 +65,8 @@ ALIVE_EVERY_SEC = 60.0          # how often a running inference writes its alive
 DOWN_GAP_SEC = 600.0            # a shorter gap (a restart, a deploy) is not news
 AI_OUTAGE_SEC = 600.0           # since the first failed Eye call of the streak
 AI_OUTAGE_FAILS = 3             # failed Eye calls in a row
+CAMERAS_OFFLINE_SEC = 60.0      # a camera with no picture this long is offline (as ai_status.offline)
+CAMERAS_OUTAGE_SEC = 600.0      # every camera offline this long: tell the owner
 # The owner's stop is written up to ALIVE_EVERY_SEC after the last alive time; the runner needs a couple of seconds
 # to end the program, so an alive time may also land just after the stop.
 STOP_SLACK_SEC = 30.0
@@ -62,6 +78,7 @@ STATE_NAME = "system_notices.json"
 OWNER_STOP_NAME = "owner_stop.json"
 
 BOX_DOWN, AI_DOWN, AI_BACK = "box_down", "ai_down", "ai_back"
+CAMERAS_DOWN, CAMERAS_BACK = "cameras_down", "cameras_back"
 
 # The causes of a failed Eye call, from its error text. Mirrors brain/models._NO_ACCESS, split in two: money first.
 _CREDIT = re.compile(r"\b402\b|payment required|insufficient_quota|no credits|more credits|"
@@ -167,6 +184,27 @@ def ai_back_text(since: float, until: float, kept: int, lang: str) -> str:
         return head + "."
     saved = "1 event was saved" if kept == 1 else f"{kept} events were saved"
     return f"{head}, and {saved} without a check in that time."
+
+
+def cameras_down_text(since: float, now: float, lang: str) -> str:
+    """No picture from any camera since *since* (told at *now*)."""
+    when = _when(since, lang, _with_date(since, now))
+    if _he(lang):
+        return (f"⚠️ אין תמונה מאף מצלמה מ-{when}. הקופסה פועלת, אבל בלי תמונה לא נשלחות התרעות. "
+                "כדאי לבדוק שמכשיר ההקלטה דלוק ומחובר לרשת.")
+    return (f"⚠️ No camera has sent a picture since {when}. The box is running, but without pictures no alerts are "
+            "sent. Please check that the recorder is on and connected to the network.")
+
+
+def cameras_back_text(since: float, until: float, moved: bool, lang: str) -> str:
+    """The one line when a camera sends a picture again; *moved*: the box found the recorder at a new address."""
+    dated = _with_date(since, until)
+    a, b = _when(since, lang, dated), _when(until, lang, dated)
+    if _he(lang):
+        return (f"✅ המצלמות חזרו לעבוד. לא הייתה תמונה {a}–{b}"
+                + (" (מכשיר ההקלטה קיבל כתובת חדשה ברשת והקופסה מצאה אותו לבד)" if moved else "") + ".")
+    return (f"✅ The cameras are working again. There was no picture {a}–{b}"
+            + (" (the recorder got a new network address and the box found it by itself)" if moved else "") + ".")
 
 
 # ----------------------------------------------------------------------------
@@ -278,7 +316,8 @@ class SystemNotices:
         self.clock, self.boot = clock, boot
         self._lock = threading.Lock()
         self._alive_written = 0.0
-        self._eye = self._load_eye()
+        self._eye = self._load("eye")
+        self._cams = self._load("cameras")
 
     # -- the box was down --------------------------------------------------------------------------
     def box_started(self, now: Optional[float] = None) -> Dict[str, Any]:
@@ -302,6 +341,9 @@ class SystemNotices:
                 self._hand_on(BOX_DOWN, down_text(alive, now, lang, power_cut=decision["power_cut"]))
                 outcome = "sent"
             log.info("Box-down notice: gap %s (%s) -> %s", gap, facts, outcome)
+        if (alive is None or now - alive >= DOWN_GAP_SEC) and self._cams and not self._cams.get("announced"):
+            self._cams = {}             # the box was down: the box-down notice covers that time
+            self._save()
         self.alive(now, force=True)
         return decision
 
@@ -386,6 +428,64 @@ class SystemNotices:
         self._eye = {}
         self._save_eye()
 
+    # -- no picture from any camera ----------------------------------------------------------------
+    def cameras(self, now: float, last_frames: Mapping[str, float], started: float) -> None:
+        """From the guard loop: each watched camera's last picture time (0: none yet since *started*). Never raises."""
+        try:
+            with self._lock:
+                self._cameras(now, last_frames, started)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Camera outage not checked: %s", exc)
+
+    def _cameras(self, now: float, last_frames: Mapping[str, float], started: float) -> None:
+        if not last_frames:
+            return
+        picture = max(float(ts or 0.0) for ts in last_frames.values())
+        latest = max(picture, float(started))   # a camera that sent nothing yet had since the start to do so
+        cams = self._cams
+        if picture and now - picture < CAMERAS_OFFLINE_SEC:          # a camera is sending pictures
+            if not cams.get("since"):
+                return
+            since = _number(cams.get("since")) or now
+            dated = _with_date(since, now)
+            span = f"{_when(since, 'en', dated)}-{_when(now, 'en', dated)}"
+            moved = bool(cams.get("moved"))
+            if cams.get("told"):
+                self._hand_on(CAMERAS_BACK, cameras_back_text(since, now, moved, self._lang()))
+                log.info("Cameras-back notice: no picture %s (recorder moved: %s) -> sent", span,
+                         "yes" if moved else "no")
+            else:
+                log.info("Camera outage over: no picture %s, never announced -> nothing to send", span)
+            self._cams = {}
+            self._save()
+            return
+        if now - latest < CAMERAS_OFFLINE_SEC:          # just started: too early to tell
+            return
+        if not cams.get("since"):
+            cams["since"] = latest
+            log.info("Camera outage: no picture from any of %d camera(s) since %s", len(last_frames),
+                     _when(latest, "en", _with_date(latest, now)))
+            self._save()
+        since = _number(cams.get("since")) or latest
+        if cams.get("announced") or now - since < CAMERAS_OUTAGE_SEC:
+            return
+        when = _when(since, "en", _with_date(since, now))
+        cams["announced"] = now         # once per outage, also when switched off ...
+        cams["told"] = self.on          # ... and the back line only after a sent notice
+        self._save()
+        if not self.on:
+            log.info("Cameras-down notice: no picture since %s -> not sent (system_notices off)", when)
+            return
+        self._hand_on(CAMERAS_DOWN, cameras_down_text(since, now, self._lang()))
+        log.info("Cameras-down notice: no picture from %d camera(s) since %s -> sent", len(last_frames), when)
+
+    def recorder_moved(self, old: str, new: str, count: int) -> None:
+        """recorder_finder.py pointed the cameras at a new address (the restart follows): kept for the back line."""
+        with self._lock:
+            self._cams["moved"] = True
+            self._save()
+        log.info("Camera outage: recorder moved %s -> %s (%d URL(s)); noted for the back line", old, new, count)
+
     # -- helpers ----------------------------------------------------------------------------------
     def _lang(self) -> str:
         try:
@@ -399,15 +499,19 @@ class SystemNotices:
         except Exception as exc:  # noqa: BLE001
             log.warning("System notice (%s) not handed on: %s", kind, exc)
 
-    def _load_eye(self) -> Dict[str, Any]:
-        eye = (_read_json(os.path.join(self.state_dir, STATE_NAME)) or {}).get("eye")
-        return dict(eye) if isinstance(eye, dict) else {}
+    def _load(self, key: str) -> Dict[str, Any]:
+        value = (_read_json(os.path.join(self.state_dir, STATE_NAME)) or {}).get(key)
+        return dict(value) if isinstance(value, dict) else {}
 
     def _save_eye(self) -> None:
+        self._save()
+
+    def _save(self) -> None:
+        """Both outages in one file (an older file holds only "eye")."""
         try:
-            _write_json(os.path.join(self.state_dir, STATE_NAME), {"eye": self._eye})
+            _write_json(os.path.join(self.state_dir, STATE_NAME), {"eye": self._eye, "cameras": self._cams})
         except Exception as exc:  # noqa: BLE001
-            log.warning("AI outage state not saved: %s", exc)
+            log.warning("System notice state not saved: %s", exc)
 
 
 # ----------------------------------------------------------------------------

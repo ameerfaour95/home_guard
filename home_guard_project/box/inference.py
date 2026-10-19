@@ -397,6 +397,36 @@ def notices_tick(now: float) -> None:
             log.debug("System notices tick failed: %s", exc)
 
 
+def start_recorder_finder(box_settings: Mapping[str, Any], cameras: Mapping[str, str], started: float) -> Any:
+    """Look for a recorder that came back on a new address (recorder_finder.py). Never raises: None runs as before."""
+    try:
+        from . import recorder_finder  # noqa: PLC0415
+
+        moved = NOTICES.recorder_moved if NOTICES is not None else None
+        return recorder_finder.start(box_settings, cameras, started, moved=moved)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Recorder search not started (%s)", exc)
+        return None
+
+
+def cameras_tick(finder: Any, streams: Mapping[str, Any], now: float, started: float) -> None:
+    """The guard loop's beat for the cameras' pictures: the no-picture notice and the moved-recorder search."""
+    if NOTICES is None and finder is None:
+        return
+    try:
+        last_frames = {name: float(stream.last_ts or 0.0) for name, stream in streams.items()}
+    except Exception as exc:  # noqa: BLE001
+        log.debug("Camera picture times not read: %s", exc)
+        return
+    if NOTICES is not None:
+        NOTICES.cameras(now, last_frames, started)
+    if finder is not None:
+        try:
+            finder.check(now, last_frames)
+        except Exception as exc:  # noqa: BLE001 - the search must never stop the alerts
+            log.warning("Recorder search not checked: %s", exc)
+
+
 def note_eye(backend: Any, answered: bool, failure: str = "", rescue: Optional[Mapping[str, Any]] = None) -> None:
     """Tell the system notices how an Eye call ended: answered, or failed after the fallback and the 768 rescue
     (*failure* and the rescue's error say why). NullBackend (no model at all) is not an Eye call."""
@@ -3614,11 +3644,16 @@ def run() -> int:
 
     log.info("Watching %d camera(s): %s", len(cameras), ", ".join(cameras))
     started = time.time()   # no camera counts as offline before it had a minute to deliver its first picture
+    finder = start_recorder_finder(box_settings, cameras, started)
+    last_cameras_tick = 0.0
     last_tick = 0.0          # the event book closes idle events about once a second
     try:
         while True:
             now_ts = time.time()
             notices_tick(now_ts)
+            if now_ts - last_cameras_tick >= 5.0:
+                last_cameras_tick = now_ts
+                cameras_tick(finder, streams, now_ts, started)
             settings_changed = bool(live.check(now_ts))
             if settings.quiet_log or quiet is not None:
                 quiet_on = settings.quiet_log and not in_alert_window(

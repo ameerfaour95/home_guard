@@ -277,6 +277,113 @@ class AiDownTest(NoticeCase):
         notices.eye(True, now=at(10, 9, 5))
 
 
+CAMS = ("ameer_v2_ch2", "ameer_v2_ch3", "ameer_v2_ch5")
+
+
+class CamerasDownTest(NoticeCase):
+    """2026-10-19: power back 06:58, the recorder on a new address, no picture from any camera until 10:45."""
+
+    def frames(self, ts=0.0, **some):
+        return {**{name: ts for name in CAMS}, **some}
+
+    def test_ten_minutes_with_no_picture_is_sent_once(self):
+        notices = self.notices()
+        started = at(18, 6, 59)
+        notices.cameras(at(18, 7, 8, 59), self.frames(), started)
+        self.assertEqual(self.sent, [])
+        with self.assertLogs("box.system_notices", "INFO") as logs:
+            notices.cameras(at(18, 7, 9), self.frames(), started)
+        self.assertEqual(self.sent, [(sn.CAMERAS_DOWN, "⚠️ אין תמונה מאף מצלמה מ-06:59. הקופסה פועלת, אבל בלי תמונה "
+                                                       "לא נשלחות התרעות. כדאי לבדוק שמכשיר ההקלטה דלוק ומחובר לרשת.")])
+        self.assertIn("INFO:box.system_notices:Cameras-down notice: no picture from 3 camera(s) since 06:59 -> sent",
+                      logs.output)
+        notices.cameras(at(18, 12, 0), self.frames(), started)
+        self.assertEqual(len(self.sent), 1)
+
+    def test_the_outage_counts_from_the_last_picture(self):
+        notices = self.notices()
+        notices.cameras(at(19, 9, 0), self.frames(at(19, 8, 55)), at(19, 8, 0))
+        notices.cameras(at(19, 9, 5), self.frames(at(19, 8, 55)), at(19, 8, 0))
+        self.assertEqual(self.sent[0][0], sn.CAMERAS_DOWN)
+        self.assertIn("מ-08:55", self.sent[0][1])
+
+    def test_one_camera_sending_is_no_outage(self):
+        notices = self.notices()
+        for minute in range(0, 60, 5):
+            notices.cameras(at(19, 9, minute), self.frames(ameer_v2_ch3=at(19, 9, minute)), at(19, 8, 0))
+        self.assertEqual(self.sent, [])
+
+    def test_the_back_line_after_a_restart_names_the_moved_recorder(self):
+        notices = self.notices()
+        started = at(18, 6, 59)
+        notices.cameras(at(18, 7, 10), self.frames(), started)
+        notices.recorder_moved("192.168.68.106", "192.168.68.108", 6)
+        again = self.notices()                                         # the finder's restart
+        self.now[0] = at(19, 10, 45)
+        self.alive_at(at(19, 10, 44, 30))
+        again.box_started()
+        again.cameras(at(19, 10, 45), self.frames(), at(19, 10, 45))   # nothing yet: the outage is still on
+        self.assertEqual(len(self.sent), 1)
+        with self.assertLogs("box.system_notices", "INFO") as logs:
+            again.cameras(at(19, 10, 46), self.frames(ameer_v2_ch2=at(19, 10, 46)), at(19, 10, 45))
+        self.assertEqual(self.sent[1], (sn.CAMERAS_BACK, "✅ המצלמות חזרו לעבוד. לא הייתה תמונה 18.10 06:59–19.10 10:46 "
+                                                         "(מכשיר ההקלטה קיבל כתובת חדשה ברשת והקופסה מצאה אותו לבד)."))
+        self.assertIn("INFO:box.system_notices:Cameras-back notice: no picture Oct 18 06:59-Oct 19 10:46 "
+                      "(recorder moved: yes) -> sent", logs.output)
+        self.notices().cameras(at(19, 10, 47), self.frames(at(19, 10, 47)), at(19, 10, 45))
+        self.assertEqual(len(self.sent), 2)
+
+    def test_a_short_outage_fixed_by_the_finder_sends_nothing(self):
+        notices = self.notices()
+        notices.cameras(at(19, 10, 43), self.frames(), at(19, 10, 41))
+        notices.recorder_moved("192.168.68.106", "192.168.68.108", 6)
+        again = self.notices()
+        with self.assertLogs("box.system_notices", "INFO") as logs:
+            again.cameras(at(19, 10, 46), self.frames(at(19, 10, 46)), at(19, 10, 45))
+        self.assertEqual(self.sent, [])
+        self.assertTrue(any("never announced -> nothing to send" in line for line in logs.output), logs.output)
+
+    def test_an_unannounced_outage_is_not_carried_over_a_box_down(self):
+        notices = self.notices()
+        notices.cameras(at(16, 14, 33), self.frames(), at(16, 14, 30))
+        self.alive_at(at(16, 14, 34))
+        self.now[0] = at(18, 6, 59)
+        again = self.notices()
+        again.box_started()                                            # the box-down notice tells this part
+        again.cameras(at(18, 7, 0), self.frames(), at(18, 6, 59))
+        again.cameras(at(18, 7, 9), self.frames(), at(18, 6, 59))
+        self.assertEqual([kind for kind, _ in self.sent], [sn.BOX_DOWN, sn.CAMERAS_DOWN])
+        self.assertIn("מ-06:59", self.sent[1][1])
+
+    def test_english_texts(self):
+        self.assertEqual(sn.cameras_down_text(at(19, 6, 59), at(19, 7, 9), "en"),
+                         "⚠️ No camera has sent a picture since 06:59. The box is running, but without pictures no "
+                         "alerts are sent. Please check that the recorder is on and connected to the network.")
+        self.assertEqual(sn.cameras_back_text(at(19, 6, 59), at(19, 10, 46), False, "en"),
+                         "✅ The cameras are working again. There was no picture 06:59–10:46.")
+
+    def test_system_notices_off_sends_neither(self):
+        notices = self.notices(on=False)
+        notices.cameras(at(19, 7, 0), self.frames(), at(19, 6, 0))
+        notices.cameras(at(19, 8, 0), self.frames(at(19, 8, 0)), at(19, 6, 0))
+        self.assertEqual(self.sent, [])
+
+    def test_the_ai_outage_state_survives_beside_it(self):
+        notices = self.notices()
+        for minute in (25, 31, 36):
+            notices.eye(False, ERR_402, now=at(10, 0, minute))
+        notices.cameras(at(10, 0, 40), self.frames(), at(10, 0, 0))
+        again = self.notices()
+        again.eye(True, now=at(10, 9, 5))
+        self.assertEqual([kind for kind, _ in self.sent], [sn.AI_DOWN, sn.CAMERAS_DOWN, sn.AI_BACK])
+
+    def test_a_failing_send_never_raises(self):
+        notices = sn.SystemNotices(self.state, self.logs, mock.Mock(side_effect=OSError("no network")), lambda: "he",
+                                   clock=lambda: self.now[0], boot=lambda: None)
+        notices.cameras(at(19, 7, 0), self.frames(), at(19, 6, 0))
+        notices.cameras(at(19, 8, 0), self.frames(at(19, 8, 0)), at(19, 6, 0))
+
+
 class SwitchTest(unittest.TestCase):
     def test_default_on_and_off_spellings(self):
         self.assertTrue(sn.enabled({}))
@@ -362,6 +469,13 @@ class GuardLoopWiringTest(GuardCase):
         self.notices.tick.assert_called_once_with(123.0)
         self.notices.tick.side_effect = RuntimeError("boom")
         inf.notices_tick(124.0)                                          # never stops the loop
+
+    def test_the_cameras_beat_reads_each_cameras_last_picture(self):
+        finder = mock.Mock()
+        streams = {"a": mock.Mock(last_ts=100.0), "b": mock.Mock(last_ts=0.0)}
+        inf.cameras_tick(finder, streams, 200.0, 50.0)
+        self.notices.cameras.assert_called_once_with(200.0, {"a": 100.0, "b": 0.0}, 50.0)
+        finder.check.assert_called_once_with(200.0, {"a": 100.0, "b": 0.0})
 
 
 class TenTenNightReplayTest(NoticeCase):
