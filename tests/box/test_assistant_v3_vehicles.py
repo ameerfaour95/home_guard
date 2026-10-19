@@ -80,6 +80,7 @@ class VehicleTurns(unittest.TestCase):
         reply = self.say(SAID, plates)
         self.assertEqual(reply.text, "רשמתי: הרכב ••••875 = הרכב של החשמלאי מנסור.")
         self.assertEqual(self.writer.calls, [])                       # code wrote it, not the writer
+        self.assertEqual(self.world.vision_calls, [])                 # the plate reader read it, never a VLM
         self.assertEqual(plates.asked, [("media", VIDEO, "ameer_v2_ch3")])
         cars = self.store().all()
         self.assertEqual([(c["plate"], c["label"], c["camera"]) for c in cars],

@@ -79,19 +79,23 @@ def in_alert_window(hour: int, start_hour: int, end_hour: int) -> bool:
 
 
 def parse_vlm_json(raw: str) -> Optional[Dict[str, Any]]:
-    """Parse the VLM's JSON object. Tolerates leading/trailing text."""
+    """Parse the VLM's JSON object. Tolerates leading/trailing text. A plate-like number in it is blanked: plates are
+    read by the plate reader only, never by a VLM (owner rule 2026-10-19, plates.scrub)."""
     if not raw:
         return None
     try:
-        return json.loads(raw)
+        parsed = json.loads(raw)
     except ValueError:
         start, end = raw.find("{"), raw.rfind("}")
-        if 0 <= start < end:
-            try:
-                return json.loads(raw[start:end + 1])
-            except ValueError:
-                return None
-        return None
+        if not 0 <= start < end:
+            return None
+        try:
+            parsed = json.loads(raw[start:end + 1])
+        except ValueError:
+            return None
+    from .plates import scrub  # noqa: PLC0415
+
+    return scrub(parsed)
 
 
 def apply_policy_override(parsed: Dict[str, Any], in_window: bool, person: bool, vehicle: bool) -> Dict[str, Any]:
@@ -354,6 +358,9 @@ def owner_guard(text: str, camera: str, lang: str) -> str:
     ids that have family names) replaced by its display name. Ids used as keys never pass through here."""
     if not text:
         return text
+    from .plates import scrub  # noqa: PLC0415 - no plate a VLM wrote reaches the owner (plates.py)
+
+    text = scrub(text)
     try:
         from .camera_names import _load, replace_ids  # noqa: PLC0415
 

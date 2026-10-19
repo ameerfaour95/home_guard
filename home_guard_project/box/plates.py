@@ -31,6 +31,7 @@ Models: plate detector ``yolo-v9-t-384-license-plate-end2end`` (16 ms on the lap
 from __future__ import annotations
 
 import logging
+import re
 import threading
 from collections import Counter
 from dataclasses import dataclass
@@ -131,6 +132,37 @@ def match(digits: Any, owner_vehicles: Iterable[Mapping[str, Any]]) -> Optional[
     best = min(d for d, _ in near)
     winners = [v for d, v in near if d == best]
     return winners[0] if len(winners) == 1 else None
+
+
+# ----------------------------------------------------------------------------
+# Plates come from this reader only, never from a vision-language model
+# ----------------------------------------------------------------------------
+# Owner rule (2026-10-19): a plate is read by the plate-recognition tool here (detector + OCR, digits only) and kept
+# as a number (a string of 7-8 digits); no VLM reads or guesses one - not the Eye, not the assistant's looks, not the
+# describer. So a plate-like number in any VLM answer is blanked (:func:`scrub`, at inference.parse_vlm_json and
+# inference.owner_guard), and a vision question about a plate is not asked (:func:`asks_plate`, brain/vision.py).
+SCRUBBED = "••-•••-••"
+_PLATE_LIKE = re.compile(r"(?<![\d:/])(?:\d{2,3}[-‐–.\s]\d{2,3}[-‐–.\s]\d{2,3}|\d{7,8})(?![\d:/])")
+_PLATE_QUESTION = re.compile(
+    r"licen[cs]e\s*plate|number\s*plate|plate\s*(?:number|no\b)|registration\s*(?:number|plate)|car(?:'s)?\s*number|"
+    r"(?:read|what(?:'s| is))\s+(?:the\s+)?plate|לוחית|לוחיות|נומרטור|מספר\s+(?:ה|של\s+ה)?(?:רכב|אוטו|מכונית|טנדר|משאית)|"
+    r"(?:רכב|אוטו|מכונית|טנדר|משאית)\S*\s+(?:\S+\s+)?מספר", re.IGNORECASE)
+
+
+def scrub(value: Any) -> Any:
+    """*value* (a VLM answer: text, or a dict / list of them) with every plate-like number blanked."""
+    if isinstance(value, str):
+        return _PLATE_LIKE.sub(lambda m: SCRUBBED if valid_plate(digits_only(m.group(0))) else m.group(0), value)
+    if isinstance(value, dict):
+        return {k: scrub(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [scrub(v) for v in value]
+    return value
+
+
+def asks_plate(question: Any) -> bool:
+    """A question that asks a picture for a licence plate / a car's number (that is the plate reader's job)."""
+    return bool(_PLATE_QUESTION.search(str(question or "")))
 
 
 # ----------------------------------------------------------------------------

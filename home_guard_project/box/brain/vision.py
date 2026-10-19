@@ -25,6 +25,11 @@ from typing import Any, Callable, Dict, List, Optional
 
 from ...prompts import load, render
 from ..inference import LABEL_RULES, LABELS, label_of, parse_vlm_json
+from ..plates import asks_plate
+
+# Owner rule 2026-10-19: a plate is read by the plate reader (plates.py, car_plates.py), never by a vision model; a
+# question about one is not sent (parse_vlm_json also blanks any plate-like number in an answer).
+PLATE_NOT_BY_VISION = "plates are read by the plate reader, not by the vision model"
 
 log = logging.getLogger("box.brain.vision")
 
@@ -84,6 +89,8 @@ class Vision:
         """*facts*: what code already knows about the picture (grounded_look.facts_text), given to the model."""
         if not images:
             return {"ok": False, "refused": False, "error": "no_pictures"}
+        if asks_plate(question):
+            return {"ok": False, "refused": False, "error": PLATE_NOT_BY_VISION}
         try:
             raw = self._complete(look_prompt(camera, guard, question, what, facts), list(images),
                                  look_schema(guard, grounded=bool(facts)))
@@ -126,6 +133,8 @@ class Vision:
         """One question about numbered frames: ``{"ok", "answer", "frame" (1-based, 0 for none), "seen"}``."""
         if not images:
             return {"ok": False, "refused": False, "error": "no_pictures"}
+        if asks_plate(question):
+            return {"ok": False, "refused": False, "error": PLATE_NOT_BY_VISION}
         try:
             raw = self._complete(ask_prompt(camera, question, len(images), language), list(images), ask_schema())
         except VisionRefused:

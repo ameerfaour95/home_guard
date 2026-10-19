@@ -389,5 +389,67 @@ class InferenceHookTests(Tmp):
         self.assertEqual(named[0], lines[0])
 
 
+class PlatesNeverFromVlmTests(Tmp):
+    """Owner rule 2026-10-19: a plate is read by the plate-recognition tool (plates.PlateReader: detector + OCR,
+    digits only) and kept as a number; no VLM reads or guesses one - not the Eye, not the assistant's looks."""
+
+    def test_a_plate_like_number_in_a_vlm_answer_is_blanked_times_and_dates_stay(self) -> None:
+        text = "White car, plate 16-098-75 (also 1609875), at 12:20 on 15/10/2026; call 0501234567"
+        out = pl.scrub(text)
+        self.assertNotIn("16-098-75", out)
+        self.assertNotIn("1609875", out)
+        for kept in ("12:20", "15/10/2026", "0501234567"):
+            self.assertIn(kept, out)
+        self.assertEqual(pl.scrub({"a": ["רכב 56-542-30"]}), {"a": ["רכב " + pl.SCRUBBED]})
+
+    def test_the_eye_and_the_assistants_vision_answers_are_scrubbed_at_the_parser(self) -> None:
+        from home_guard_project.box import inference as inf
+
+        parsed = inf.parse_vlm_json('noise {"summary": "A white Subaru 16-098-75 parks", "label": "normal"} end')
+        self.assertEqual(parsed["summary"], f"A white Subaru {pl.SCRUBBED} parks")
+        self.assertNotIn("1609875", inf.owner_guard("רכב 1609875 בחניה", "ameer_v2_ch3", "he"))
+
+    def test_the_vision_model_is_never_asked_for_a_plate(self) -> None:
+        from home_guard_project.box.brain.vision import PLATE_NOT_BY_VISION, Vision
+
+        def complete(prompt, images, schema):
+            raise AssertionError("the vision model was asked about a plate")
+
+        vision = Vision(complete, "x")
+        for question in ("what is the licence plate?", "מה מספר הרכב?", "תקרא את הלוחית", "read the plate"):
+            self.assertEqual(vision.ask("ameer_v2_ch3", [b"jpg"], question)["error"], PLATE_NOT_BY_VISION)
+            self.assertEqual(vision.look("ameer_v2_ch3", [b"jpg"], False, question)["error"], PLATE_NOT_BY_VISION)
+        self.assertFalse(pl.asks_plate("what is in his hand, a plate?"))
+        self.assertFalse(pl.asks_plate("מה הוא מחזיק ביד?"))
+
+    def test_no_vlm_prompt_asks_for_a_plate(self) -> None:
+        from home_guard_project import prompts
+
+        vlm = [n for n in prompts.names() if n.startswith(("eye_", "brain_vision", "describer_", "brain_look"))]
+        self.assertGreater(len(vlm), 20)
+        for name in vlm:
+            self.assertFalse(pl.asks_plate(prompts.load(name)), name)
+
+    def test_a_plate_is_stored_as_digits_only(self) -> None:
+        store = kv.store_in(self.dir)
+        rec = store.add("56-542-30", "הרכב של החשמלאי", now=1.0)
+        with open(store.path, encoding="utf-8") as f:
+            saved = json.load(f)[0]["plate"]
+        self.assertEqual(saved, "5654230")
+        self.assertTrue(isinstance(saved, str) and saved.isdigit())
+        self.assertEqual(rec["plate"], saved)
+
+    def test_service_plates_come_from_the_plate_reader(self) -> None:
+        reader = Reader("1609875")
+        svc = cp.PlateService(cp.PlateSettings(True, ("c",), "CPU", 5), reader=reader, start=False)
+        good = textured(300, 500, 6)
+        job = cp.Job("a", "c", 1.0, shots=[cp.Shot("k", [pl.VehicleCrop(good.copy(), (10, 10, 490, 290))] * 3,
+                                                   [(0, 0, 500, 300)] * 3, [None] * 3, (MAIN_W, MAIN_H))])
+        out = svc.run_once(job)
+        self.assertEqual(len(reader.crops), 3)                 # the reader saw the crops ...
+        self.assertEqual(out["vehicles"]["k"]["plate"], "1609875")   # ... and its digits are the plate
+        self.assertIsInstance(out["vehicles"]["k"]["plate"], str)
+
+
 if __name__ == "__main__":
     unittest.main()
