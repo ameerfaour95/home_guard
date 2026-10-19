@@ -533,41 +533,108 @@ def _plate_result(job: Any, alert_id: str, wait: float = 0.0) -> Optional[Dict[s
         return None
 
 
+def _vehicle_names(job: Any, alert_id: str, wait: float = 0.0) -> Dict[str, Dict[str, Any]]:
+    """Per tracker key, the cars of this alert the owner named: by a plate read in this clip, else by a plate read
+    earlier on the spot it stands on, day or night (stayed_vehicles.py: "stayed since HH:MM"). ``{"label",
+    "vehicle_id", "by": "plate" | "stayed", "since", "left"}``. Naming only. Never raises."""
+    names: Dict[str, Dict[str, Any]] = {}
+    if PLATES is None or job is None:
+        return names
+    try:
+        from .car_plates import plates_found  # noqa: PLC0415
+
+        for key, v in plates_found(_plate_result(job, alert_id, wait)).items():
+            if v.get("label"):
+                names[key] = {"label": str(v["label"]), "vehicle_id": str(v.get("vehicle_id") or ""), "by": "plate"}
+        stayed = getattr(job, "_stayed_names", None)
+        if stayed is None and getattr(PLATES, "stayed", None) is not None:
+            # once per alert: a car that left its spot is named once and ends the identity there
+            stayed = PLATES.stayed.names_for(job.camera, (job.track_boxes or {}).get("tracks") or [], job.ts)
+            job._stayed_names = stayed
+        for key, v in (stayed or {}).items():
+            names.setdefault(key, dict(v, by="stayed"))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("cars of %s not named: %s", alert_id, exc)
+    return names
+
+
 def _plates_to_event(job: Any, alert_id: str, wait: float = 0.0) -> None:
-    """The alert's plates (masked) on its clip meta, and on its event's vehicles with the owner's name for a car he
-    named (events.EventBook.note_vehicles), when they are read by now (*wait*). Never raises."""
-    result = _plate_result(job, alert_id, wait)
-    if not result:
+    """The alert's plates (masked) and stayed names on its clip meta, and on its event's vehicles the owner's name for
+    a car he named (events.EventBook.note_vehicles), as far as known by now (*wait*). Never raises."""
+    if PLATES is None or job is None:
         return
     try:
         from .car_plates import entity_fields, meta_record  # noqa: PLC0415
 
-        job.input_meta["plates"] = meta_record(result)
+        result = _plate_result(job, alert_id, wait)
+        names = _vehicle_names(job, alert_id)
         fields = entity_fields(result)
+        if result:
+            job.input_meta["plates"] = meta_record(result)
+        stayed = {k: v for k, v in names.items() if v.get("by") == "stayed"}
+        if stayed:
+            job.input_meta["stayed"] = {k: {"vehicle_id": v["vehicle_id"], "since": v["since"], "left": v["left"]}
+                                        for k, v in stayed.items()}
+            for key, v in stayed.items():
+                fields.setdefault(key, {"vehicle_id": v["vehicle_id"], "vehicle_label": v["label"],
+                                        "named_by": f"stayed since {v['since']}"})
         if fields and EVENTS is not None and hasattr(EVENTS, "note_vehicles"):
             EVENTS.note_vehicles(alert_id, fields)
     except Exception as exc:  # noqa: BLE001
         log.warning("plates of %s not kept: %s", alert_id, exc)
 
 
+def _car_lines(job: Any, alert_id: str, tracks: Sequence[Any], mapped: Mapping[str, str],
+               wait: float = 0.0) -> Dict[str, str]:
+    """CAR id (as the describer numbers them) -> the owner's name for that car, for the cars of this alert he named."""
+    names = _vehicle_names(job, alert_id, wait)
+    if not names:
+        return {}
+    if PLATES is not None and "plates" not in job.input_meta and _plate_result(job, alert_id):
+        _plates_to_event(job, alert_id)          # read after the decision: the event gets it now
+    from . import describer as ds  # noqa: PLC0415
+
+    ids = ds.assign_ids([t for t in tracks if t.get("kind") == "vehicle"
+                         or (t.get("kind") == "person" and t.get("shown", True))], mapped)
+    return {ids[k]: v["label"] for k, v in names.items() if k in ids and v.get("label")}
+
+
 def _named_vehicles(job: Any, alert_id: str, tracks: Sequence[Any], mapped: Mapping[str, str],
                     entities: List[Dict[str, Any]], drawn: Sequence[str]) -> List[Dict[str, Any]]:
     """The describer's lines with a car the owner named called by his name (car_plates.name_entities). Never raises."""
-    result = _plate_result(job, alert_id, PLATE_WAIT_SEC)
-    if not result:
-        return entities
-    if "plates" not in job.input_meta:
-        _plates_to_event(job, alert_id)          # read after the decision: the event gets it now
     try:
-        from . import car_plates, describer as ds  # noqa: PLC0415
+        from . import car_plates  # noqa: PLC0415
 
-        ids = ds.assign_ids([t for t in tracks if t.get("kind") == "vehicle"
-                             or (t.get("kind") == "person" and t.get("shown", True))], mapped)
-        names = car_plates.named_ids(result, ids)
+        names = _car_lines(job, alert_id, tracks, mapped, PLATE_WAIT_SEC)
         return car_plates.name_entities(entities, names, drawn) if names else entities
     except Exception as exc:  # noqa: BLE001
         log.warning("cars not named in %s: %s", alert_id, exc)
         return entities
+
+
+def _car_entities(job: Any, alert_id: str) -> List[Dict[str, Any]]:
+    """The named cars of an alert as message lines ``{"id": "CAR1", "appearance": his words, "action": ""}``, for the
+    texts the describer does not write (day activity). [] without any. Never raises."""
+    if PLATES is None or job is None:
+        return []
+    try:
+        mapped: Dict[str, str] = {}
+        if EVENTS is not None:
+            from . import clip_tracks  # noqa: PLC0415
+
+            mapped = clip_tracks.entity_ids(EVENTS.session_of_alert(alert_id))
+        names = _car_lines(job, alert_id, (job.track_boxes or {}).get("tracks") or [], mapped)
+        return [{"id": car, "appearance": label, "action": ""} for car, label in sorted(names.items())]
+    except Exception as exc:  # noqa: BLE001
+        log.warning("cars of %s not listed: %s", alert_id, exc)
+        return []
+
+
+def _stayed_look(camera: str, ts: float, detections: Sequence[Any]) -> None:
+    """Every detector look keeps a named parked car's identity on its spot alive, or ends it (stayed_vehicles.py)."""
+    stayed = getattr(PLATES, "stayed", None) if PLATES is not None else None
+    if stayed is not None:
+        stayed.look(camera, ts, detections)
 
 
 def start_reid(box_settings: Mapping[str, Any], trackers: Any = None) -> Any:
@@ -2877,10 +2944,14 @@ def _day_activity_look(camera: str, alert_ts: float, label: str, people: int, su
             from .describer import compose  # noqa: PLC0415
 
             why = store.why_line(people, (where or {}).get("on") == "mine")
-            text = f"{compose('activity', shown, _clock_hhmm(alert_ts), scene, [], why, lang)}\n{store.question()}"
+            cars = _car_entities(job, alert_id)          # a car he named: "CAR1 · הרכב של החשמלאי מנסור"
+            text = f"{compose('activity', shown, _clock_hhmm(alert_ts), scene, cars, why, lang)}\n{store.question()}"
             markup = json.dumps(store.buttons(step.thread["id"]))
         else:
             text = store.update_text(step, camera, alert_ts, scene, people)
+            from .describer import entity_line  # noqa: PLC0415
+
+            text = "\n".join([text] + [entity_line(c["id"], c["appearance"], "") for c in _car_entities(job, alert_id)])
             reply_to = (step.thread.get("messages") or [None])[0]
         text = owner_guard(text, camera, lang)
         snapshot = job.snapshot if job is not None and job.snapshot is not None else (frames[-1] if frames else None)
@@ -4069,8 +4140,9 @@ def run() -> int:
                         from .scene_map import detections_from_result  # noqa: PLC0415
 
                         height, width = frame.shape[:2]
-                        trackers.update(name, seen_ts,
-                                        detections_from_result(tracked[0], width, height) if tracked else [])
+                        looked = detections_from_result(tracked[0], width, height) if tracked else []
+                        trackers.update(name, seen_ts, looked)
+                        _stayed_look(name, seen_ts, looked)
                     except Exception as exc:  # noqa: BLE001 - the tracker only adds facts; it must never stop the alerts
                         # Loud once per camera, then quiet: a broken tracker must not flood the log every look.
                         (log.debug if name in tracker_failed else log.warning)("[%s] tracker not updated: %s", name, exc)

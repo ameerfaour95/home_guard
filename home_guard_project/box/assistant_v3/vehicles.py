@@ -218,7 +218,7 @@ def plates_in(t: Any) -> Tuple[List[Dict[str, Any]], str, Dict[str, Any], bool]:
             digits = str(v.get("plate") or "")
             if plates.valid_plate(digits) and not any(plates.levenshtein(digits, s["plate"]) <= 1 for s in seen):
                 seen.append({"plate": digits, "source": str(entry.get("ref") or ""), "vehicle": key,
-                             "kind": str(entry.get("kind") or ""),
+                             "kind": str(entry.get("kind") or ""), "box": v.get("box"),
                              "camera": t.camera_now(str(entry.get("camera") or "")),
                              "observation": str(entry.get("observation") or entry.get("summary") or "")})
     return seen, camera, first, svc is not None
@@ -290,7 +290,8 @@ def bind(t: Any) -> bool:
         return True
     if len(found) == 1:
         f = found[0]
-        _save(t, store, f["plate"], label, colour_of(text, f["observation"]), f["camera"] or camera, f["source"])
+        rec = _save(t, store, f["plate"], label, colour_of(text, f["observation"]), f["camera"] or camera, f["source"])
+        _stays(rec, f["camera"] or camera, f.get("box"), f["plate"], t.now)
         if entry.get("kind") == "event":
             t.outcome(entry, f"בעל הבית: {label}")
         return True
@@ -311,7 +312,23 @@ def _dashed(digits: str) -> str:
     return f"{digits[:2]}-{digits[2:5]}-{digits[5:]}" if len(digits) == 7 else f"{digits[:3]}-{digits[3:5]}-{digits[5:]}"
 
 
-def _save(t: Any, store: Any, plate: str, label: str, colour: str, camera: str, source: str) -> None:
+def _stays(rec: Optional[Dict[str, Any]], camera: str, box: Any, plate: str, now: float) -> None:
+    """The car he just named, read in that picture on *box*: it keeps its name on that spot from now (stayed)."""
+    if not rec or not camera or not isinstance(box, (list, tuple)) or len(box) != 4:
+        return
+    from .. import car_plates  # noqa: PLC0415
+
+    svc = car_plates.service()
+    stayed = getattr(svc, "stayed", None) if svc is not None else None
+    if stayed is not None:
+        try:
+            stayed.plate_read(camera, box, plate, rec, now)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("v3: the named car's spot not kept: %s", exc)
+
+
+def _save(t: Any, store: Any, plate: str, label: str, colour: str, camera: str,
+          source: str) -> Optional[Dict[str, Any]]:
     by = str((t.ctx.speaker or {}).get("name") or "owner")
     try:
         rec = store.add(plate, label, colour, camera, by=by, source=source, now=t.now)
@@ -320,7 +337,7 @@ def _save(t: Any, store: Any, plate: str, label: str, colour: str, camera: str, 
                "error")
         t.plan.final = "לא הצלחתי לשמור את הרכב, נסה שוב בעוד רגע."
         log.warning("v3: known vehicle not saved: %s", exc)
-        return
+        return None
     replaced = rec.get("replaced") or {}
     _issue(t.ctx, "known_vehicle", DONE, camera or "house",
            {"vehicle_id": rec["id"], "plate": plates.mask(plate), "label": rec["label"],
@@ -335,3 +352,4 @@ def _save(t: Any, store: Any, plate: str, label: str, colour: str, camera: str, 
     else:
         t.plan.final = f"רשמתי: {line}."
     t.did(t.plan.final)
+    return rec
