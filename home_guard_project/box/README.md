@@ -539,6 +539,15 @@ With `on`, an alert about to go out is checked against the situations the owner 
 
 The owner names a car in Telegram ("זה הרכב של החשמלאי מנסור, תזכור את המספר שלו", answering an alert or right after a live photo or video, or typing "המספר 16-098-75 זה של החשמלאי"). The assistant binds the plate the box read in that picture to his words and answers in one line, "רשמתי: הרכב הלבן ••••875 = הרכב של החשמלאי מנסור.", with Undo. When no plate could be read, it says so and asks him to type it. It never claims to remember a number it does not have. Later alerts on `plate_cameras`, by day, read every vehicle the tracker followed in the clip (parked ones too) from the main stream at native pixels, off the detection loop. A plate within one digit of a named car calls it by his words in the alert ("CAR1 · הרכב של החשמלאי מנסור: חונה בשביל הכניסה.") and on the event's vehicle. The Eye's prompt does not change. Plates are readable only at 50 px or more: by day on ch3 and ch6 (`docs/plates_design.md`). Needs `fast-alpr[onnx]` (in pyproject); without it nothing is read and the log says so once. The named cars are in `<state>/events/known_vehicles.json`, with the full plate. Plates read in the last 3 days are in `<state>/events/plates/reads.jsonl`, also with the full plate, so a name given later can still be bound. Both stay on the box. The clip meta (`plates`), receipts, logs and the assistant see only the masked plate. To list or add a car by hand: `PYTHONIOENCODING=utf-8 python -m home_guard_project.box.known_vehicles list | add <plate> "<words>" --description לבן --camera <camera>`.
 
+**It stayed.** A plate read that matches a named car also gives that car's parking spot its name: `<state>/events/plates/stayed.json` holds the camera, the box and the label, and keeps the plate on the box only. Every detector look keeps it alive, IR included. A later alert at that camera, day or night, with a vehicle on the spot (IoU ≥ 0.6) names it in the alert and day-activity lines. Its meta says `stayed` with `since` HH:MM. The name ends in three cases:
+- The spot stays empty for `stayed_empty_min` minutes (default 15) and at least 30 looks.
+- A car that started on the spot leaves it. That car is still named once.
+- Another plate is read on the spot.
+
+After a restart, a name not seen for 30 minutes is dropped. This only names a car. It never changes an alert's level.
+
+    stayed_empty_min: 15
+
 ## Troubleshooting
 
 | Problem | What to do |

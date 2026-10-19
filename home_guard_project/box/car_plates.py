@@ -110,6 +110,7 @@ class Shot:
     boxes: List[Tuple[float, float, float, float]] = field(default_factory=list)
     subs: List[Optional[np.ndarray]] = field(default_factory=list)
     frame_size: Optional[Tuple[int, int]] = None
+    box: Optional[Tuple[float, float, float, float]] = None   # where it stood, normalised (stayed_vehicles.py)
 
 
 @dataclass
@@ -120,6 +121,7 @@ class Job:
     kind: str = "alert"                        # alert | media
     shots: List[Shot] = field(default_factory=list)
     media: str = ""                            # media: the file to read
+    boxes: Optional[List[Tuple[float, ...]]] = None   # media: the vehicles the live look's detector already found
     done: threading.Event = field(default_factory=threading.Event)
     result: Optional[Dict[str, Any]] = None
 
@@ -190,7 +192,9 @@ def alert_job(alert_id: str, camera: str, ts: float, main: Any, sub_clip: Sequen
     for _, t in vehicles[:max(0, max_vehicles)]:
         placed = [(i, b) for i, b in ((i, _box_at(t["boxes"], times[i])) for i in range(len(frames))) if b is not None]
         placed = [(i, b) for i, b in placed if (b[2] - b[0]) * w >= plates.MIN_PLATE_WIDTH]
-        shot = Shot(track_key(dict(t)), frame_size=(w, h))
+        from .stayed_vehicles import median_box  # noqa: PLC0415
+
+        shot = Shot(track_key(dict(t)), frame_size=(w, h), box=median_box([b for _, b in placed]))
         for i, b in _spread(placed, cut_frames):
             cut = plates.vehicle_crops([frames[i]], b, max_frames=1)
             if not cut:
@@ -305,6 +309,7 @@ def media_shots(frames: Sequence[np.ndarray], detect: Callable[[np.ndarray], Lis
                 g = {"last": box, "shot": Shot(f"v{len(groups) + 1}", frame_size=(w, h))}
                 groups.append(g)
             g["last"] = box
+            g["shot"].box = tuple(float(v) for v in box)
             for margin in margins:
                 cut = plates.vehicle_crops([f], box, margin=margin, max_frames=1)
                 if cut:
@@ -340,8 +345,9 @@ class PlateService:
 
     def __init__(self, settings: PlateSettings, reader: Any = None, detector: Optional[Callable[[], Any]] = None,
                  store: Any = None, reads_path: str = "", now: Callable[[], float] = time.time,
-                 start: bool = True) -> None:
+                 start: bool = True, stayed: Any = None) -> None:
         self.settings = settings
+        self.stayed = stayed            # stayed_vehicles.StayedVehicles: a named car keeps its name on its spot
         self.reader = reader if reader is not None else plates.PlateReader(device=settings.device)
         self._detector_factory = detector
         self._detect: Optional[Callable[[np.ndarray], List[Tuple[float, ...]]]] = None
@@ -389,14 +395,17 @@ class PlateService:
             return None
         return self._logged(key)
 
-    def read_media(self, path: str, camera: str, wait: float = JOB_SECONDS) -> Optional[Dict[str, Any]]:
-        """Read the cars in a live look the owner is talking about (first in the queue), waiting up to *wait* s."""
+    def read_media(self, path: str, camera: str, wait: float = JOB_SECONDS,
+                   boxes: Optional[Sequence[Sequence[float]]] = None) -> Optional[Dict[str, Any]]:
+        """Read the cars in a live look (first in the queue), waiting up to *wait* s. *boxes*: the vehicles the look's
+        own detector found (normalised), so the worker need not look for them again."""
         if not self.settings.enabled:
             return {"key": path, "skipped": "plates off"}
         done = self.result(path)
         if done is not None and not done.get("skipped"):
             return done
-        job = Job(path, camera, self._now(), kind="media", media=path)
+        job = Job(path, camera, self._now(), kind="media", media=path,
+                  boxes=[tuple(float(v) for v in b[:4]) for b in boxes or () if len(b) >= 4] or None)
         self.submit(job, first=True)
         return job.result if job.done.wait(wait) else None
 
@@ -410,7 +419,7 @@ class PlateService:
             else:
                 shots = job.shots
                 if job.kind == "media":
-                    detect = self._detector()
+                    detect = (lambda _frame, b=list(job.boxes): b) if job.boxes else self._detector()
                     if detect is None:
                         out["skipped"] = "no vehicle detector"
                         shots = []
@@ -422,10 +431,14 @@ class PlateService:
                         break
                     plate, agree, counts = read_shot(self.reader, shot, self.settings.frames)
                     v: Dict[str, Any] = {"plate": plate or "", "reads": agree, **counts}
-                    if plate and self.store is not None:
-                        known = self.store.match(plate)
-                        if known:
-                            v.update(vehicle_id=str(known.get("id") or ""), label=str(known.get("label") or ""))
+                    if shot.box is not None:
+                        v["box"] = [round(float(x), 4) for x in shot.box]
+                    known = self.store.match(plate) if plate and self.store is not None else None
+                    if known:
+                        v.update(vehicle_id=str(known.get("id") or ""), label=str(known.get("label") or ""))
+                    if plate and shot.box is not None and self.stayed is not None:
+                        self.stayed.plate_read(job.camera, shot.box, plate, known,
+                                               job.ts if job.kind == "alert" else self._now())
                     out["vehicles"][shot.key] = v
         except Exception as exc:  # noqa: BLE001 - a plate never stops anything
             log.warning("plates: %s failed: %s", job.key, exc)
@@ -443,7 +456,17 @@ class PlateService:
                 self._detector_factory = None
         return self._detect
 
+    def warm(self) -> None:
+        """Load the reader (and the live-look detector) before the first question needs them (2026-10-19: the
+        first read after a start took several seconds to load)."""
+        try:
+            self.reader.available()
+            self._detector()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("plates: warm-up failed: %s", exc)
+
     def _run(self) -> None:
+        self.warm()
         while True:
             with self._lock:
                 while not self._queue:
@@ -610,10 +633,13 @@ def service(box_settings: Optional[Mapping[str, Any]] = None, events_dir: str = 
                 from . import paths  # noqa: PLC0415
 
                 events_dir = os.path.join(paths.state_dir(), "events")
+            from . import stayed_vehicles  # noqa: PLC0415
             from .known_vehicles import store_in  # noqa: PLC0415
 
+            stayed = stayed_vehicles.store_in(events_dir, stayed_vehicles.empty_sec_of(box_settings))
             _SERVICE = PlateService(settings, detector=detector or default_detector(box_settings),
-                                    store=store_in(events_dir), reads_path=os.path.join(events_dir, READS_NAME))
+                                    store=store_in(events_dir), reads_path=os.path.join(events_dir, READS_NAME),
+                                    stayed=stayed)
             log.info("plates: on for alerts at %s, by day; live looks on request; device %s",
                      ", ".join(settings.cameras) or "no camera", settings.device)
         return _SERVICE

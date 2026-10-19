@@ -26,7 +26,7 @@ import os
 import threading
 import time
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 from . import plates
 
@@ -151,10 +151,21 @@ def owner_mask(plate: Any) -> str:
     return (text if "*" in text else plates.mask(plates.digits_only(text))).replace("*", "•")
 
 
-def masked_line(record: Dict[str, Any]) -> str:
+COLOURS = frozenset("לבן שחור כסוף אפור אדום כחול ירוק צהוב חום כתום זהב".split())
+
+
+def car_words(record: Mapping[str, Any]) -> str:
+    """The car as a sentence names it: "הרכב הלבן" for a bare colour, "הרכב (טסלה לבנה)" for anything longer
+    (2026-10-19: "טסלה לבנה" read "הרכב הטסלה לבנה")."""
+    d = " ".join(str(record.get("description") or "").split())
+    if not d:
+        return "הרכב"
+    return f"הרכב ה{d}" if d in COLOURS else f"הרכב ({d})"
+
+
+def masked_line(record: Mapping[str, Any]) -> str:
     """"הרכב הלבן ••••875 = הרכב של החשמלאי מנסור" - what the owner and the models may read of a record."""
-    what = "הרכב" + (f" ה{record['description']}" if record.get("description") else "")
-    return f"{what} {owner_mask(record.get('plate'))} = {record.get('label') or ''}".strip()
+    return f"{car_words(record)} {owner_mask(record.get('plate'))} = {record.get('label') or ''}".strip()
 
 
 def store_in(directory: str) -> KnownVehicles:
