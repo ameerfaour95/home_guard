@@ -110,6 +110,17 @@ class AssistantV3(OwnerAgentV2):
         except Exception:  # noqa: BLE001
             settings = {}
         lang = state.language_for(speaker, text, default=str(settings.get("owner_language") or "he"))
+        day_receipt = _day_activity_words(text, alert, who)
+        if day_receipt:
+            # "תפסיק לעדכן על העובדים" / "תעדכן אותי על העובדים": today's activity threads (day_activity.py), as the
+            # buttons under their message do. Code only: no model call, the short receipt is the answer.
+            try:
+                state.add_turn(speaker, text, day_receipt, [], [], now)
+                self.memory.save(chat_id, state)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("v3: the conversation was not saved: %s", exc)
+            log.info("v3 turn %s: day activity follow from his words -> %r", chat_id, day_receipt)
+            return AgentReply(text=day_receipt, lang=lang, tier="v3", answer=day_receipt)
         snapshot = self.registry.snapshot()
         ctx = ToolContext(turn_id=f"{chat_id}:{int(now * 1000)}", chat_id=chat_id, speaker=who, text=text, lang=lang,
                           mode=getattr(snapshot, "mode", "guard"), snapshot=snapshot, state=state,
@@ -577,6 +588,21 @@ class AssistantV3(OwnerAgentV2):
                 self.memory.save(chat_id, state)
         except Exception as exc:  # noqa: BLE001
             log.warning("v3 summary not folded: %s", exc)
+
+
+def _day_activity_words(text: str, alert: Optional[Dict[str, Any]], who: Dict[str, Any]) -> str:
+    """The receipt when his words start or stop today's day activity updates (day_activity.DayActivity.owner_words),
+    else "". Never raises."""
+    try:
+        from .. import day_activity  # noqa: PLC0415
+
+        store = day_activity.current()
+        if store is None:
+            return ""
+        return store.owner_words(text, alert, by=str(who.get("name") or "owner")) or ""
+    except Exception as exc:  # noqa: BLE001 - the turn goes on as usual
+        log.warning("v3: day activity words not read: %s", exc)
+        return ""
 
 
 def merge_pause_resume(und: Understanding) -> None:

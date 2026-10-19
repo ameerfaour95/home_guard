@@ -1,0 +1,14 @@
+A home camera box groups what people do around the house by day into activities, so the owner hears about each activity once and then only when it changes.
+
+Activities seen today:
+{{threads}}
+
+New observation at the camera "{{camera}}" at {{clock}} ({{people}} people in view):
+"{{summary}}"
+
+Is the new observation part of one of today's activities, or a totally different thing?
+- The same activity: the same crew or group, the same kind of work or visit, also when they moved to another camera or came back after a break. Workers working (carrying tools or materials, a ladder, a hose, their own car or van) are the same activity as the workers already seen today unless something clearly says otherwise.
+- A different thing: a delivery or courier, a visitor at the door, a different group, a different kind of activity.
+
+Answer JSON only: {"same": "the id of that activity, or \"\" when it is a different thing", "name": "", "plural": false}.
+When it is a different thing, "name" is a short Hebrew name for the new activity, 2 to 5 words, like "העובדים בפרגולה" or "אדם ליד הרכב הלבן" (never a camera id), and "plural" is true when it is about more than one person. When it is the same activity, "name" is "" and "plural" is false.

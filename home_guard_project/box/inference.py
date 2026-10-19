@@ -2689,6 +2689,196 @@ def send_arrival_line(arrival: Dict[str, Any], box_settings: Dict[str, Any], env
         log.warning("arrival line not sent: %s", exc)
 
 
+# ---------- day activity threads (day_activity.py; owner, 2026-10-19) ----------
+# By day an ordinary activity on our ground is one neutral message with "keep updating you?", then only its changes
+# (they left, came back, clearly more people) when he said yes. Night and suspicious / escalation are untouched.
+DAY_ACTIVITY: Any = None
+DAY_TICK_SEC = 15.0
+_day_ticked = 0.0
+
+
+def start_day_activity(box_settings: Mapping[str, Any], env: Mapping[str, str], book: Any) -> Any:
+    """Start the day activity store (box.yaml ``day_activity``, default on) on the event *book* (its "kept, not
+    sent" normals are what it reads; no book, no store). Never raises: without it a daytime normal is kept in the
+    event and not sent, as before."""
+    global DAY_ACTIVITY
+    if book is None:
+        DAY_ACTIVITY = None
+        return None
+    try:
+        from . import day_activity  # noqa: PLC0415
+
+        lang = owner_language()
+        # Next to the book's folder (the registry): state/events -> state/day_activity.json.
+        path = os.path.join(os.path.dirname(book.directory), "day_activity.json")
+        DAY_ACTIVITY = day_activity.build(box_settings, env, names=lambda c: camera_display(c, lang), lang=lang,
+                                          path=path)
+    except Exception as exc:  # noqa: BLE001
+        DAY_ACTIVITY = None
+        log.warning("Day activity threads not started: %s", exc)
+    return DAY_ACTIVITY
+
+
+def day_activity_out_of_scope(label: str, event: Any, where: Optional[Mapping[str, Any]], people: int,
+                              alert_on: Sequence[str], alert_ts: float, store: Any) -> str:
+    """Why this alert is not a day activity ("" = it is): daylight, the Eye's "normal" kept quiet by the event book,
+    someone in view at a camera that alerts on people, and not on the neighbour's or public ground."""
+    ground = where or {}
+    if store is None:
+        return "day activity off"
+    if event is None or event.notify:
+        return "no event, or already sent"
+    if label != "normal":
+        return f"label {label}"
+    if ground.get("off_our_ground") or ground.get("on") in ("neighbour", "public"):
+        return "not our ground"
+    if "person" not in alert_on or people <= 0:
+        return "no person to tell about"
+    if store.is_dark(alert_ts):
+        return "dark"
+    return ""
+
+
+def _day_scene(summary: str, summary_owner: str, camera: str, shown: str, lang: str,
+               box_settings: Dict[str, Any], env: Dict[str, str]) -> str:
+    """What happens, in the owner's language, the way the alerts write it (the translator when the box uses it)."""
+    told = owner_summary(summary, summary_owner, lang)
+    if summary != DETECTED_ONLY and messenger.uses_translator(box_settings, lang):
+        got = messenger.messenger_for(box_settings, env).to_owner(
+            {"summary": owner_guard(summary, camera, lang), "why": "", "summary_owner": summary_owner}, lang,
+            keep=(shown,))
+        told = str(got.get("summary") or told)
+    return told
+
+
+def _day_activity_look(camera: str, alert_ts: float, label: str, people: int, summary: str, summary_owner: str,
+                       event: Any, where: Optional[Mapping[str, Any]], alert_on: Sequence[str], job: Any,
+                       frames: Sequence[Any], alert_id: str, lang: str, box_settings: Dict[str, Any],
+                       env: Dict[str, str], assistant: Any = None) -> Optional[Dict[str, Any]]:
+    """A daytime normal the event book kept quiet: which of today's activities it is, and its message when the owner
+    gets one (day_activity.DayActivity.look). The record for the clip's meta, or None out of scope. Never raises."""
+    store = DAY_ACTIVITY
+    if day_activity_out_of_scope(label, event, where, people, alert_on, alert_ts, store):
+        return None
+    try:
+        from . import day_activity  # noqa: PLC0415
+
+        known = EVENTS.known_covers(camera, alert_ts, people) if EVENTS is not None else None
+        step = store.look(camera, alert_ts, people, summary, alert_id, known.text if known is not None else "")
+        out = step.record()
+        if not step.sends:
+            return out
+        shown = camera_display(camera, lang)
+        scene = _day_scene(summary, summary_owner, camera, shown, lang, box_settings, env)
+        markup, reply_to = None, None
+        if step.action == day_activity.ASK:
+            from .describer import compose  # noqa: PLC0415
+
+            why = store.why_line(people, (where or {}).get("on") == "mine")
+            text = f"{compose('activity', shown, _clock_hhmm(alert_ts), scene, [], why, lang)}\n{store.question()}"
+            markup = json.dumps(store.buttons(step.thread["id"]))
+        else:
+            text = store.update_text(step, camera, alert_ts, scene, people)
+            reply_to = (step.thread.get("messages") or [None])[0]
+        text = owner_guard(text, camera, lang)
+        snapshot = job.snapshot if job is not None and job.snapshot is not None else (frames[-1] if frames else None)
+        image = frame_to_jpeg_bytes(snapshot) if snapshot is not None else b""
+        ref = {"alert_id": alert_id, "camera": camera, "summary": summary, "label": "normal", "ts": alert_ts,
+               "day_thread": step.thread["id"]}
+        sent = _send_day_line(text, box_settings, env, image=image, markup=markup, reply_to=reply_to,
+                              assistant=assistant, ref=ref)
+        if sent is not None:
+            store.sent(step.thread["id"], step.action, people, alert_ts, *sent)
+        log.info("[%s] day activity %s: %s -> %s", camera, step.action, text.replace("\n", " / "),
+                 "sent" if sent is not None else "NOT sent")
+        out.update(sent=sent is not None, text=text)
+        return out
+    except Exception as exc:  # noqa: BLE001 - the alert stays kept in the event
+        log.warning("[%s] day activity not handled: %s", camera, exc)
+        return None
+
+
+def _clock_hhmm(ts: float) -> str:
+    return datetime.fromtimestamp(float(ts)).strftime("%H:%M")
+
+
+def _send_day_line(text: str, box_settings: Dict[str, Any], env: Dict[str, str], image: bytes = b"",
+                   markup: Optional[str] = None, reply_to: Optional[Dict[str, Any]] = None, assistant: Any = None,
+                   ref: Optional[Dict[str, Any]] = None) -> Optional[Tuple[str, int]]:
+    """Send one day activity message without a sound (with the photo when there is one). Each delivered message is
+    filed with the assistant (a reply to it is about that clip and that activity) and noted in its chat. Returns
+    the first ``(chat_id, message_id)``, or None when nothing was delivered."""
+    from . import telegram_notify  # noqa: PLC0415
+
+    cfg = telegram_notify.load_telegram_config(box_settings, env)
+    extra = {"reply_to": reply_to} if reply_to else {}
+    res = (telegram_notify.send_photo(cfg, image, text, silent=True, reply_markup=markup, **extra) if image else
+           telegram_notify.send_message(cfg, text, silent=True, reply_markup=markup, **extra))
+    if not (isinstance(res, dict) and res.get("sent")):
+        return None
+    first = _first_message(res)
+    if assistant is not None and ref:
+        try:
+            index = getattr(assistant, "index", None)
+            for row in res.get("results") or []:
+                if index is not None and row.get("ok") and row.get("message_id") is not None:
+                    index.remember(row["chat_id"], row["message_id"], dict(ref))
+            assistant.note_line(str(ref.get("camera") or ""), float(ref.get("ts") or time.time()), text,
+                                str(ref.get("alert_id") or ""))
+        except Exception as exc:  # noqa: BLE001 - the message is out; the chat note only adds
+            log.warning("day activity message not filed with the assistant: %s", exc)
+    return first if first is not None else ("", 0)
+
+
+def day_activity_seen(camera: str, ts: float, result: Any) -> None:
+    """A detector look (*result*) with people keeps today's activity at *camera* present (it has not left)."""
+    if DAY_ACTIVITY is None or result is None:
+        return
+    try:
+        people = count_people(result)
+        if people:
+            DAY_ACTIVITY.seen(camera, ts, people)
+    except Exception as exc:  # noqa: BLE001 - only the "they left" line depends on it
+        log.debug("[%s] day activity look not recorded: %s", camera, exc)
+
+
+def day_activity_tick(now: float, box_settings: Dict[str, Any], env: Dict[str, str], assistant: Any = None) -> None:
+    """About every DAY_TICK_SEC from the guard loop: activities nobody was seen at for a while have left; the
+    "they left" lines (only for those the owner follows) go out on their own thread. Never raises."""
+    global _day_ticked
+    store = DAY_ACTIVITY
+    if store is None or now - _day_ticked < DAY_TICK_SEC:
+        return
+    _day_ticked = now
+    try:
+        notices = store.tick(now)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Day activity tick failed: %s", exc)
+        return
+    if not notices:
+        return
+
+    def send() -> None:
+        from . import day_activity  # noqa: PLC0415
+
+        for notice in notices:
+            thread = notice["thread"]
+            camera = str(thread.get("last_camera") or "")
+            try:
+                text = owner_guard(notice["text"], camera, owner_language())
+                ref = {"alert_id": str(thread.get("first_alert_id") or ""), "camera": camera, "summary": text,
+                       "label": "normal", "ts": now, "day_thread": thread["id"]}
+                sent = _send_day_line(text, box_settings, env, reply_to=notice.get("reply_to"), assistant=assistant,
+                                      ref=ref)
+                if sent is not None:
+                    store.sent(thread["id"], day_activity.LEFT, 0, now, *sent)
+                log.info("[%s] day activity left: %s -> %s", camera, text, "sent" if sent is not None else "NOT sent")
+            except Exception as exc:  # noqa: BLE001
+                log.warning("[%s] day activity left line not sent: %s", camera, exc)
+
+    threading.Thread(target=send, name="day-activity-left", daemon=True).start()
+
+
 def _watch_event(camera: str, ts: float, summary: str, job: Any, frames: Sequence[Any], alert_id: str, lang: str,
                  assistant: Any = None, sent: bool = False) -> None:
     """An event for the owner's open "tell me when ..." watches (watches.on_event, 2026-10-11 courier): its picture,
@@ -3200,6 +3390,10 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
             if getattr(event, "arrival", None):
                 send_arrival_line(event.arrival, box_settings, env, lang, assistant)
             _watch_event(camera_name, alert_ts, summary, job, frames, alert_id, lang, assistant, sent=False)
+            # By day an ordinary activity is one neutral message, then only its changes (day_activity.py).
+            day = _day_activity_look(camera_name, alert_ts, label, people or _detector_people(job), summary,
+                                     summary_owner, event, where, alert_on, job, frames, alert_id, lang,
+                                     box_settings, env, assistant)
             if status is not None:
                 status.decision(camera_name, labels, summary, cmd, sent=False, held=event.reason, label=label)
             if job is not None:
@@ -3208,6 +3402,8 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                              "people": people, "sent": False, "event": event.record(),
                              "not_sent_reason": event.reason, "dispatch": {"sent": False, "reason": event.reason},
                              "case_memory": shadow_note.record() if shadow_note is not None else None}
+                if day is not None:
+                    job.alert["day_activity"] = day
             return
         _watch_event(camera_name, alert_ts, summary, job, frames, alert_id, lang, assistant, sent=not muted)
         # Attach the most recent frame of the clip as the alert snapshot.
@@ -3526,6 +3722,7 @@ def run() -> int:
         return serve_without_cameras(box_settings, env, camera_names())
     KNOWN_CAMERAS = tuple(cameras)
     book = start_events(box_settings)
+    start_day_activity(box_settings, env, book)
     start_baseline(box_settings, KNOWN_CAMERAS)
     # Every alert is saved as a clip (the seconds around it) in the production folder,
     # and the owner can answer it in Telegram. Neither may stop the alerts themselves.
@@ -3705,6 +3902,7 @@ def run() -> int:
                         log.debug("ReID prune failed: %s", exc)
                 if BASELINE_BUILD is not None:
                     BASELINE_BUILD.tick(now_ts)          # the nightly rebuild (~03:30), in its own short thread
+            day_activity_tick(now_ts, box_settings, env, assistant)   # "they left" (day_activity.py), every 15 s
             due_worker = _start_due_alerts(pending, now_ts, cam_cfg, model, streams, main_caps, predict_args,
                                            backend, box_settings, env, settings, assistant, status,
                                            PRODUCTION_LIVE_DIR, LIVE_DIR, trackers=trackers)
@@ -3804,6 +4002,8 @@ def run() -> int:
                                       vehicles=len(boxes) if moved else 0)
                     except Exception as exc:  # noqa: BLE001 - events must never stop the alerts
                         log.debug("[%s] event activity not recorded: %s", name, exc)
+                if DAY_ACTIVITY is not None:
+                    day_activity_seen(name, seen_ts, results[0] if results else None)
                 if quiet_on:
                     try:
                         result = results[0] if results else None

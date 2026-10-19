@@ -1058,6 +1058,9 @@ class TelegramInbox:
         if code.startswith(("tag:", "tu:")):          # tagging: before the v1/v2 split, both agents share it
             self._on_tag_button(query, message, chat_id, code)
             return
+        if code.startswith("da:"):                    # "keep updating you about this today?" (day_activity.py)
+            self._on_day_button(query, message, chat_id, code)
+            return
         self._cancel_tag(chat_id, (query.get("from") or {}).get("id"))   # any other tap ends an "Other…" wait
         if getattr(self.agent, "version", 1) == 2 and code.startswith(("cl:", "u:", "hs:", "kn:")):
             self._answer_callback(query)   # only stops the button's spinner: a failure here must not lose the tap
@@ -1105,6 +1108,30 @@ class TelegramInbox:
             save_feedback(self.feedback_dir, alert, feedback, "", _who(query.get("from") or {}), chat_id, self._now(),
                           training_dir=self.training_dir, archive_dir=self.archive_dir)
         self._say(chat_id, answer, reply_to=message.get("message_id"))   # a visible line in the chat
+
+    # -- a day activity's question ----------------------------------------------------
+    def _on_day_button(self, query: Dict[str, Any], message: Dict[str, Any], chat_id: str, code: str) -> None:
+        """🔔 / 🔕 under a day activity message (``da:y:<thread>`` / ``da:n:<thread>``): follow its changes today, or
+        only the log. The chosen button gets a ✓ and the other stays (tapping it changes his mind); the short receipt
+        is said only when the answer changed."""
+        from . import day_activity  # noqa: PLC0415
+
+        parts = code.split(":")
+        store = day_activity.current()
+        if len(parts) != 3 or parts[1] not in ("y", "n") or not parts[2] or store is None:
+            self._answer_callback(query)
+            log.warning("Ignoring day activity callback %r (%s)", code, "no store" if store is None else "malformed")
+            return
+        who = _who(query.get("from") or {})
+        got = store.set_follow(parts[2], parts[1] == "y", who["name"] or "owner")
+        if not got.get("found"):
+            self._answer_callback(query, str(got.get("receipt") or ""))
+            return
+        self._answer_callback(query)
+        self._note("owner", "button", _button_text(message, code, code), who["name"])
+        self._edit_buttons(chat_id, message.get("message_id"), store.buttons(parts[2], parts[1] == "y"))
+        if got.get("changed"):
+            self._say(chat_id, str(got["receipt"]), reply_to=message.get("message_id"))
 
     # -- tagging an alert ------------------------------------------------------------
     def _language(self) -> str:
