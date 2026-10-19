@@ -10,7 +10,8 @@ Is the new observation part of one of today's activities, or a totally different
 - The same activity: the same crew or group, the same kind of work or visit, also when they moved to another camera or came back after a break. Workers working (carrying tools or materials, a ladder, a hose, their own car or van) are the same activity as the workers already seen today unless something clearly says otherwise.
 - A different thing: a delivery or courier, a visitor at the door, a different group, a different kind of activity.
 
-Answer JSON only: {"same": "the id of that activity, or \"\" when it is a different thing", "name": "...", "plural": true or false}.
+Answer JSON only: {"same": "the id of that activity, or \"\" when it is a different thing", "name": "...", "plural": true or false, "feminine": true or false}.
 
 "name" is a short Hebrew name for the activity this observation belongs to (for the same activity: its best name now, with what this observation adds; it may stay its current name), 1 to 4 words. It says WHO they are by their role or what they do, the way a homeowner would say it: "העובדים", "העובדים בפרגולה", "השליח", "הגנן", "בני הבית", "אורח בכניסה". Someone carrying tools, a ladder, a hose, cables or building materials, or working on the house, is a worker ("העובד" / "העובדים"); a group of workers is "העובדים" even when only one is in view now. A place may be added only as the camera's name ("בפרגולה"). Never position or posture words ("ליד הקיר", "ליד הרכב", "עומד", "הולך"), never clothes or looks ("עם כובע", "בבגדים כהים"), never a camera id. When nothing says who it is, "אדם ב<the camera's name>" (or "אנשים ב..." for more than one).
 "plural" is true when the name is about more than one person (a crew is plural even when one is in view).
+"feminine" is true when the name is about one woman or girl ("אישה בכניסה", "השליחה"); the Hebrew lines are written in the name's gender ("אישה בכניסה יצאה"). Write "אישה", never "אשה".

@@ -115,6 +115,7 @@ class Thread:
     last_camera: str = ""
     present: bool = True
     plural: bool = False
+    feminine: bool = False        # one woman or girl ("אישה בכניסה"): יצאה / חזרה / נראתה
     first_alert_id: str = ""
     messages: List[Dict[str, Any]] = field(default_factory=list)   # {chat_id, message_id, ts, kind}
     follow: Optional[bool] = None
@@ -286,7 +287,7 @@ class DayActivity:
             thread, how = self._near(camera, ts), "present"
             briefs = self._briefs(ts) if thread is None and self.threads else ""
             today_here = next((t for t in reversed(self.threads) if camera in t.cameras), None)
-        name, plural = "", people > 1
+        name, plural, feminine = "", people > 1, False
         rename: Optional[Dict[str, Any]] = None
         if thread is None:
             answer = self._ask_model(self.judge, briefs or "(none yet today)", self.names(camera), _clock(ts),
@@ -301,8 +302,9 @@ class DayActivity:
                 if answer is not None:
                     name = str(answer.get("name") or "").strip()
                     plural = bool(answer.get("plural")) if "plural" in answer else plural
+                    feminine = answer.get("feminine") is True
                 if thread is not None and name:
-                    rename = {"name": name, "plural": plural, "by": "rename-model"}
+                    rename = {"name": name, "plural": plural, "feminine": feminine, "by": "rename-model"}
         elif self._grows(thread, camera, people) and not self._rename_locked(thread, ts):
             # The thread now has 2+ people or another camera: what it is may be clearer ("גבר ליד הקיר" -> "העובדים").
             with self._lock:
@@ -310,11 +312,12 @@ class DayActivity:
                 where = ", ".join(self.names(c) for c in dict.fromkeys(thread.cameras + [camera]))
             got = self._ask_model(self.namer, notes, where, max(people, thread.people_max))
             if got is not None and str(got.get("name") or "").strip():
-                rename = {"name": str(got["name"]).strip(), "plural": got.get("plural") is True, "by": "rename-model"}
+                rename = {"name": str(got["name"]).strip(), "plural": got.get("plural") is True,
+                          "feminine": got.get("feminine") is True, "by": "rename-model"}
         with self._lock:
             if thread is None:
                 return self._new(camera, ts, people, summary, alert_id, known_text, name, plural, how="model"
-                                 if name else "new")
+                                 if name else "new", feminine=feminine)
             return self._join(thread, camera, ts, people, summary, alert_id, known_text, how, rename)
 
     @staticmethod
@@ -337,15 +340,15 @@ class DayActivity:
             rename = {"name": self._fallback_name(t.cameras[0], 2), "plural": True, "by": "rename-rules"}
         if rename is None:
             return
-        name = str(rename["name"])[:60]
+        name = spelled(str(rename["name"]))[:60]
         if name == t.name_he:
-            t.plural = bool(rename.get("plural"))
+            t.plural, t.feminine = bool(rename.get("plural")), rename.get("feminine") is True
             return
         if self._rename_locked(t, ts):
             log.info("day activity %s: not renamed to %r (he read a line with %r lately)", t.id, name, t.name_he)
             return
         log.info("day activity %s: renamed %r -> %r (%s)", t.id, t.name_he, name, rename.get("by"))
-        t.name_he, t.plural = name, bool(rename.get("plural"))
+        t.name_he, t.plural, t.feminine = name, bool(rename.get("plural")), rename.get("feminine") is True
         t.names = (t.names + [{"name": name, "at": float(ts), "by": str(rename.get("by") or "")}])[-10:]
 
     def _near(self, camera: str, ts: float) -> Optional[Thread]:
@@ -397,10 +400,10 @@ class DayActivity:
         return _t("people_at" if people > 1 else "one_person", self.lang, place=place)
 
     def _new(self, camera: str, ts: float, people: int, summary: str, alert_id: str, known_text: str, name: str,
-             plural: bool, how: str) -> Step:
+             plural: bool, how: str, feminine: bool = False) -> Step:
         t = Thread(id=uuid.uuid4().hex[:8], day=self.day, started=float(ts), last_seen=float(ts),
-                   name_he=(name or self._fallback_name(camera, people))[:60], cameras=[camera], last_camera=camera,
-                   plural=bool(plural), first_alert_id=alert_id, people_max=people, summary=str(summary or "")[:400],
+                   name_he=spelled(name or self._fallback_name(camera, people))[:60], cameras=[camera],
+                   last_camera=camera, plural=bool(plural), feminine=bool(feminine), first_alert_id=alert_id, people_max=people, summary=str(summary or "")[:400],
                    events=[alert_id] if alert_id else [], matched_by=how,
                    notes=[self._note(camera, ts, people, summary)])
         t.names = [{"name": t.name_he, "at": float(ts), "by": "model" if name else "rules"}]
@@ -491,25 +494,27 @@ class DayActivity:
 
     # ---------- the owner's texts ----------
     def _verb(self, t: Thread, kind: str) -> str:
+        """The Hebrew verb in the name's gender and number: יצא / יצאה / יצאו, חזר / חזרה / חזרו, נראה / נראתה /
+        נראו (2026-10-19 15:13 live: "אשה בכניסה יצא")."""
         if not str(self.lang).startswith("he"):
             return ""
-        return {"left": "יצאו" if t.plural else "יצא", "back": "חזרו" if t.plural else "חזר"}[kind]
+        return _VERBS[kind][form_of(t.name_he, t.plural, t.feminine)]
 
     def left_text(self, t: Thread, now: float) -> str:
-        return _t("left", self.lang, name=t.name_he, verb=self._verb(t, "left"), camera=self.names(t.last_camera),
-                  clock=_clock(now), last=_clock(t.last_seen), seen="נראו" if t.plural else "נראה")
+        return _t("left", self.lang, name=spelled(t.name_he), verb=self._verb(t, "left"),
+                  camera=self.names(t.last_camera), clock=_clock(now), last=_clock(t.last_seen), seen=self._verb(t, "seen"))
 
     def update_text(self, step: Step, camera: str, ts: float, scene: str, people: int) -> str:
         """The text of a came_back / more_people update: the line, then "מה קורה:"."""
         t = self.find(step.thread["id"]) or Thread(**step.thread)
         if step.action == CAME_BACK:
-            head = _t("back", self.lang, name=t.name_he, verb=self._verb(t, "back"), camera=self.names(camera),
-                      clock=_clock(ts))
+            head = _t("back", self.lang, name=spelled(t.name_he), verb=self._verb(t, "back"),
+                      camera=self.names(camera), clock=_clock(ts))
         else:
             from .alert_texts import more_people  # noqa: PLC0415
 
-            head = _t("more", self.lang, name=t.name_he, more=more_people(max(1, people - t.people_told), self.lang),
-                      camera=self.names(camera), clock=_clock(ts))
+            head = _t("more", self.lang, name=spelled(t.name_he),
+                      more=more_people(max(1, people - t.people_told), self.lang), camera=self.names(camera), clock=_clock(ts))
         scene = " ".join(str(scene or "").split())
         return f"{head}\n{_t('scene', self.lang, text=scene)}" if scene else head
 
@@ -561,6 +566,37 @@ class DayActivity:
         return receipt or None
 
 
+_VERBS = {"left": {"m": "יצא", "f": "יצאה", "pl": "יצאו"}, "back": {"m": "חזר", "f": "חזרה", "pl": "חזרו"},
+          "seen": {"m": "נראה", "f": "נראתה", "pl": "נראו"}}
+# The name's first word decides when it is one of these (the model's flags only otherwise): "אדם יצאה" is never right.
+_FEMININE = {"אישה", "אשה", "בחורה", "ילדה", "נערה", "שליחה", "עובדת", "אורחת", "שכנה", "גננת", "מטפלת", "סבתא",
+             "אמא", "בת", "בעלת", "גברת"}
+_MASCULINE = {"אדם", "גבר", "איש", "בחור", "ילד", "נער", "שליח", "עובד", "אורח", "שכן", "גנן", "מטפל", "סבא",
+              "אבא", "בן", "בעל", "טכנאי", "חשמלאי", "אינסטלטור", "נהג", "שומר", "דוור"}
+_PLURAL = {"אנשים", "עובדים", "פועלים", "אורחים", "ילדים", "שכנים", "בני", "גננים", "טכנאים", "בעלי"}
+
+
+def form_of(name: str, plural: bool = False, feminine: bool = False) -> str:
+    """"pl", "f" or "m" for *name* ("העובדים בפרגולה" pl, "אישה בכניסה" f, "השליח" m)."""
+    words = str(name or "").split()
+    first = words[0] if words else ""
+    for word in (first, first[1:] if first[:1] == "ה" and len(first) > 3 else ""):
+        if word in _PLURAL or word == "זוג":
+            return "pl"
+        if word in _FEMININE:
+            return "f"
+        if word in _MASCULINE:
+            return "m"
+    if plural:
+        return "pl"
+    return "f" if feminine else "m"
+
+
+def spelled(name: str) -> str:
+    """The owner's spelling: "אישה", not "אשה"."""
+    return re.sub(r"(?<![\w\u0590-\u05FF])(ה?)אשה(?![\w\u0590-\u05FF])", r"\1אישה", str(name or ""))
+
+
 _STOP = re.compile(r"(תפסיק|תפסיקו|הפסק|די|אל|לא צריך|בלי)\s+(ל|את ה|עם ה)?(עדכן|לעדכן|תעדכן|עדכונים|העדכונים|"
                    r"להודיע|תודיע|הודעות|ההודעות)")
 _START = re.compile(r"(תמשיך|תמשיכו|כן)\s+(ל|את ה)?(עדכן|לעדכן|תעדכן|עדכונים|להודיע)|תעדכן אותי על|תעדכן על")
@@ -596,8 +632,9 @@ def _stems(text: str) -> Set[str]:
 
 
 # ---------- the model ----------
-JUDGE_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["same", "name", "plural"],
-                "properties": {"same": {"type": "string"}, "name": {"type": "string"}, "plural": {"type": "boolean"}}}
+JUDGE_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["same", "name", "plural", "feminine"],
+                "properties": {"same": {"type": "string"}, "name": {"type": "string"}, "plural": {"type": "boolean"},
+                               "feminine": {"type": "boolean"}}}
 
 
 def model_judge(model: Any) -> Callable[..., Optional[Dict[str, Any]]]:
@@ -622,13 +659,14 @@ def model_judge(model: Any) -> Callable[..., Optional[Dict[str, Any]]]:
         if not isinstance(out, dict):
             return None
         return {"same": str(out.get("same") or "").strip(), "name": str(out.get("name") or "").strip()[:60],
-                "plural": out.get("plural") is True}
+                "plural": out.get("plural") is True, "feminine": out.get("feminine") is True}
 
     return judge
 
 
-NAME_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["name", "plural"],
-               "properties": {"name": {"type": "string"}, "plural": {"type": "boolean"}}}
+NAME_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["name", "plural", "feminine"],
+               "properties": {"name": {"type": "string"}, "plural": {"type": "boolean"},
+                              "feminine": {"type": "boolean"}}}
 
 
 def model_namer(model: Any) -> Callable[..., Optional[Dict[str, Any]]]:
@@ -651,7 +689,8 @@ def model_namer(model: Any) -> Callable[..., Optional[Dict[str, Any]]]:
             return None
         if not isinstance(out, dict):
             return None
-        return {"name": str(out.get("name") or "").strip()[:60], "plural": out.get("plural") is True}
+        return {"name": str(out.get("name") or "").strip()[:60], "plural": out.get("plural") is True,
+                "feminine": out.get("feminine") is True}
 
     return namer
 

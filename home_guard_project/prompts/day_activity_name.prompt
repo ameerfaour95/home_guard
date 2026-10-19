@@ -5,7 +5,8 @@ What the cameras saw of this activity (time, camera, people in view, what happen
 
 Cameras: {{cameras}}. Most people seen at once: {{people}}.
 
-Answer JSON only: {"name": "...", "plural": true or false}.
+Answer JSON only: {"name": "...", "plural": true or false, "feminine": true or false}.
 
 "name" is 1 to 4 words. It says WHO they are by their role or what they do, the way a homeowner would say it: "העובדים", "העובדים בפרגולה", "השליח", "הגנן", "בני הבית", "אורח בכניסה". Someone carrying tools, a ladder, a hose, cables or building materials, or working on the house, is a worker ("העובד" / "העובדים"); a group of workers is "העובדים". A place may be added only as a camera's name ("בפרגולה"). Never position or posture words ("ליד הקיר", "ליד הרכב", "עומד", "הולך"), never clothes or looks ("עם כובע", "בבגדים כהים"), never a camera id. When nothing says who it is, "אדם ב<the camera's name>" (or "אנשים ב..." for more than one).
 "plural" is true when the name is about more than one person (a crew is plural even when one is in view).
+"feminine" is true when the name is about one woman or girl ("אישה בכניסה", "השליחה"); the Hebrew lines are written in the name's gender ("אישה בכניסה יצאה"). Write "אישה", never "אשה".

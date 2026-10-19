@@ -556,9 +556,62 @@ class NameTest(Base):
                 return SimpleNamespace(error="", content='{"name": "העובדים בפרגולה", "plural": true}')
 
         out = da.model_namer(Model())("10:54 הפרגולה (1): a man carries a ladder", "הפרגולה", 2)
-        self.assertEqual(out, {"name": "העובדים בפרגולה", "plural": True})
+        self.assertEqual(out, {"name": "העובדים בפרגולה", "plural": True, "feminine": False})
         self.assertIn("a man carries a ladder", seen[0])
         self.assertIn("Most people seen at once: 2", seen[0])
+
+
+class GenderTest(Base):
+    """2026-10-19 15:13 live: "⚪ אשה בכניסה יצא ... (נראה לאחרונה ...)". The lines agree with the name."""
+
+    def left_line(self, answer: Dict[str, Any]) -> str:
+        s = self.store(Judge(answer))
+        first = s.look(ENTRANCE, DAY, 1, "A woman gets out of a white car", "a1")
+        s.sent(first.thread["id"], da.ASK, 1, DAY, "-5", 100)
+        s.set_follow(first.thread["id"], True)
+        (notice,) = s.tick(DAY + mins(21))
+        return notice["text"]
+
+    def test_a_woman_left(self) -> None:
+        self.assertEqual(self.left_line({"same": "", "name": "אשה בכניסה", "plural": False, "feminine": True}),
+                         "⚪ אישה בכניסה יצאה · כניסה ראשית · 11:15 (נראתה לאחרונה ב-10:54)")
+
+    def test_the_name_decides_even_without_the_models_flag(self) -> None:
+        self.assertIn("אישה בכניסה יצאה", self.left_line({"same": "", "name": "אישה בכניסה", "plural": False}))
+        self.assertIn("אדם בכניסה יצא ·", self.left_line({"same": "", "name": "אדם בכניסה", "plural": False,
+                                                          "feminine": True}))
+        self.assertIn("העובדים יצאו", self.left_line({"same": "", "name": "העובדים", "plural": False}))
+        self.assertIn("השליחה יצאה", self.left_line({"same": "", "name": "השליחה", "plural": False}))
+
+    def test_came_back_in_the_feminine(self) -> None:
+        s = self.store(Judge({"same": "", "name": "אישה בכניסה", "plural": False, "feminine": True}))
+        first = s.look(ENTRANCE, DAY, 1, "a woman", "a1")
+        s.sent(first.thread["id"], da.ASK, 1, DAY, "-5", 100)
+        s.set_follow(first.thread["id"], True)
+        s.tick(DAY + mins(21))
+        back = s.look(ENTRANCE, DAY + mins(40), 1, "a woman", "a2")
+        self.assertTrue(s.update_text(back, ENTRANCE, DAY + mins(40), "", 1).startswith("⚪ אישה בכניסה חזרה ·"))
+
+    def test_forms_and_spelling(self) -> None:
+        cases = {"אשה בכניסה": "f", "האישה": "f", "בחורה עם עגלה": "f", "ילדה": "f", "העובדים בפרגולה": "pl",
+                 "בני הבית": "pl", "אנשים בפרגולה": "pl", "זוג בכניסה": "pl", "השליח": "m", "גבר": "m",
+                 "אורחת": "f", "משהו": "m"}
+        for name, form in cases.items():
+            self.assertEqual(da.form_of(name), form, name)
+        self.assertEqual(da.form_of("מישהי", feminine=True), "f")
+        self.assertEqual(da.form_of("צוות", plural=True), "pl")
+        self.assertEqual(da.spelled("אשה בכניסה"), "אישה בכניסה")
+        self.assertEqual(da.spelled("האשה של השכן"), "האישה של השכן")
+        self.assertEqual(da.spelled("נאשה"), "נאשה")
+
+    def test_a_stored_thread_named_before_the_fix_reads_right(self) -> None:
+        s = self.store()
+        first = s.look(ENTRANCE, DAY, 1, "a woman", "a1")
+        t = s.find(first.thread["id"])
+        t.name_he = "אשה בכניסה"                                    # as the box stored it at 14:52
+        t.messages.append({"chat_id": "-5", "message_id": 1, "ts": DAY, "kind": da.ASK})
+        t.follow = True
+        self.assertIn("אישה בכניסה יצאה", s.tick(DAY + mins(21))[0]["text"])
 
 
 class ModelJudgeTest(unittest.TestCase):
@@ -571,7 +624,7 @@ class ModelJudgeTest(unittest.TestCase):
                 return SimpleNamespace(error="", content='{"same": "ab12cd34", "name": "", "plural": false}')
 
         out = da.model_judge(Model())("- ab12cd34: \"העובדים\"", "הפרגולה", "11:30", 2, "a worker")
-        self.assertEqual(out, {"same": "ab12cd34", "name": "", "plural": False})
+        self.assertEqual(out, {"same": "ab12cd34", "name": "", "plural": False, "feminine": False})
         self.assertIn('"הפרגולה" at 11:30 (2 people in view)', seen[0])
 
     def test_a_failure_is_none(self) -> None:
