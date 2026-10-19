@@ -51,9 +51,9 @@ class Base(unittest.TestCase):
         self.path = os.path.join(tmp.name, "day_activity.json")
         self.clock = [DAY]
 
-    def store(self, judge: Any = None, dark: Any = None) -> da.DayActivity:
-        return da.DayActivity(self.path, neighbours=RING, judge=judge, names=lambda c: NAMES.get(c, c), lang="he",
-                              is_dark=dark or (lambda ts: False), now=lambda: self.clock[0])
+    def store(self, judge: Any = None, dark: Any = None, namer: Any = None) -> da.DayActivity:
+        return da.DayActivity(self.path, neighbours=RING, judge=judge, namer=namer, names=lambda c: NAMES.get(c, c),
+                              lang="he", is_dark=dark or (lambda ts: False), now=lambda: self.clock[0])
 
     def asked(self, store: da.DayActivity, step: da.Step, ts: float, people: int = 1) -> None:
         """The question reached him (inference calls ``sent`` after a delivery)."""
@@ -468,6 +468,97 @@ class InferenceTest(Base):
         target()
         self.assertTrue(self.sent[-1]["text"].startswith("⚪ אדם בפרגולה יצא · הפרגולה · 11:15"))
         self.assertEqual(self.s.threads[0].left_told_at, DAY + mins(21))
+
+
+class Namer:
+    def __init__(self, *answers: Optional[Dict[str, Any]]) -> None:
+        self.answers = list(answers)
+        self.calls: List[Dict[str, Any]] = []
+
+    def __call__(self, notes: str, cameras: str, people: int) -> Optional[Dict[str, Any]]:
+        self.calls.append({"notes": notes, "cameras": cameras, "people": people})
+        return self.answers.pop(0) if self.answers else None
+
+
+class NameTest(Base):
+    """Owner follow-up 2026-10-19: a crew reads "העובדים", not "גבר ליד הקיר"; a better name once the thread grows,
+    never right after he read a "left" / "came back" line with the old one."""
+
+    def test_a_second_camera_renames_by_the_model_with_the_history(self) -> None:
+        namer = Namer({"name": "העובדים", "plural": True})
+        s = self.store(Judge({"same": "", "name": "גבר ליד הקיר", "plural": False}), namer=namer)
+        first = s.look(ENTRANCE, DAY, 1, "A man in a cap stops near the wall", "a1")
+        step = s.look(PERGOLA, DAY + mins(2), 1, "A man carries a ladder", "a2")
+        self.assertEqual((step.thread["name_he"], step.thread["plural"]), ("העובדים", True))
+        self.assertEqual([n["name"] for n in step.thread["names"]], ["גבר ליד הקיר", "העובדים"])
+        self.assertEqual(step.thread["names"][-1]["by"], "rename-model")
+        (call,) = namer.calls
+        self.assertIn("near the wall", call["notes"])
+        self.assertIn("carries a ladder", call["notes"])
+        self.assertEqual(call["cameras"], "כניסה ראשית, הפרגולה")
+        self.assertEqual(s.find(first.thread["id"]).name_he, "העובדים")
+
+    def test_the_namer_is_asked_only_when_the_thread_grows(self) -> None:
+        namer = Namer({"name": "העובדים", "plural": True})
+        s = self.store(namer=namer)
+        s.look(PERGOLA, DAY, 1, "a man", "a1")
+        s.look(PERGOLA, DAY + mins(1), 1, "a man", "a2")              # same camera, one person: no call
+        self.assertEqual(namer.calls, [])
+        s.look(PERGOLA, DAY + mins(2), 3, "three men", "a3")         # 2+ people: one call
+        s.look(PERGOLA, DAY + mins(3), 3, "three men", "a4")         # already 2+: none
+        self.assertEqual(len(namer.calls), 1)
+
+    def test_a_same_answer_of_the_matcher_may_rename(self) -> None:
+        s = self.store(Judge({"same": "", "name": "גבר ליד הקיר", "plural": False}))
+        first = s.look(ENTRANCE, DAY, 1, "a man near the wall", "a1")
+        s.judge = Judge({"same": first.thread["id"], "name": "העובדים", "plural": True})
+        step = s.look(BACK, DAY + mins(40), 1, "a worker carries planks", "a2")
+        self.assertEqual((step.thread["id"], step.thread["name_he"]), (first.thread["id"], "העובדים"))
+
+    def test_no_rename_within_30_minutes_of_a_left_or_came_back_line(self) -> None:
+        namer = Namer({"name": "העובדים", "plural": True}, {"name": "העובדים", "plural": True})
+        s = self.store(namer=namer)
+        first = s.look(PERGOLA, DAY, 1, "a man", "a1")
+        tid = first.thread["id"]
+        s.sent(tid, da.ASK, 1, DAY, "-5", 100)
+        s.set_follow(tid, True)
+        s.tick(DAY + mins(21))
+        s.sent(tid, da.LEFT, 0, DAY + mins(21), "-5", 101)
+        back = s.look(PERGOLA, DAY + mins(30), 1, "a man", "a2")
+        s.sent(tid, back.action, 1, DAY + mins(30), "-5", 102)
+        step = s.look(ENTRANCE, DAY + mins(35), 2, "two workers", "a3")   # grows, but he just read "חזר"
+        self.assertEqual(step.thread["name_he"], "אדם בפרגולה")
+        self.assertEqual(namer.calls, [])
+        s.judge = Judge({"same": tid, "name": "העובדים", "plural": True})      # 45 min after the line: renamed
+        step = s.look(BACK, DAY + mins(75), 2, "two workers carry planks", "a4")
+        self.assertEqual((step.thread["id"], step.thread["name_he"]), (tid, "העובדים"))
+
+    def test_the_rules_say_people_at_the_camera_once_two_are_seen(self) -> None:
+        s = self.store()
+        first = s.look(PERGOLA, DAY, 1, "a man", "a1")
+        self.assertEqual(first.thread["name_he"], "אדם בפרגולה")
+        step = s.look(PERGOLA, DAY + mins(2), 2, "two men", "a2")
+        self.assertEqual((step.thread["name_he"], step.thread["plural"]), ("אנשים בפרגולה", True))
+        self.assertEqual(step.thread["names"][-1]["by"], "rename-rules")
+
+    def test_a_model_name_is_not_replaced_by_the_rules(self) -> None:
+        s = self.store(Judge({"same": "", "name": "השליח", "plural": False}))
+        s.look(PERGOLA, DAY, 1, "a courier", "a1")
+        step = s.look(PERGOLA, DAY + mins(2), 2, "a courier and a man", "a2")
+        self.assertEqual(step.thread["name_he"], "השליח")
+
+    def test_the_namer_prompt_and_answer(self) -> None:
+        seen: List[str] = []
+
+        class Model:
+            def chat(self, messages: Any, tools: Any, json_schema: Any = None, max_tokens: int = 0) -> Any:
+                seen.append(messages[0]["content"])
+                return SimpleNamespace(error="", content='{"name": "העובדים בפרגולה", "plural": true}')
+
+        out = da.model_namer(Model())("10:54 הפרגולה (1): a man carries a ladder", "הפרגולה", 2)
+        self.assertEqual(out, {"name": "העובדים בפרגולה", "plural": True})
+        self.assertIn("a man carries a ladder", seen[0])
+        self.assertIn("Most people seen at once: 2", seen[0])
 
 
 class ModelJudgeTest(unittest.TestCase):

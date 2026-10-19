@@ -50,6 +50,8 @@ MODEL_CALLS_PER_DAY = 40       # then the rules alone (each call is a fraction o
 MODEL_TIMEOUT_SEC = 12.0
 SAVE_EVERY_SEC = 60.0          # detector looks only move last_seen; written at most this often
 KEEP_EVENTS = 60               # alert ids kept per thread
+RENAME_QUIET_SEC = 30 * 60.0   # no new name within this long after he read a "left" / "came back" line with the old one
+KEEP_NOTES = 6                 # the latest observations kept per thread, for a better name later
 OWNER_WORDS_MAX = 8            # "תפסיק לעדכן על העובדים" is short; a longer message goes to the assistant as usual
 
 ASK, CAME_BACK, MORE, LEFT, QUIET = "ask", "came_back", "more_people", "left", "quiet"
@@ -127,6 +129,9 @@ class Thread:
     summary: str = ""             # the latest observation (English, the Eye's)
     events: List[str] = field(default_factory=list)
     matched_by: str = ""          # how its latest event joined: new | present | model | fallback
+    # 2026-10-19 names: the name says WHO by role ("העובדים בפרגולה"), and may get better once the thread grows.
+    names: List[Dict[str, Any]] = field(default_factory=list)      # {name, at, by: rules | model | rename-*}
+    notes: List[str] = field(default_factory=list)                 # "11:25 הפרגולה (1): <the Eye's summary>"
 
     def first_message(self) -> Optional[Dict[str, Any]]:
         return self.messages[0] if self.messages else None
@@ -159,16 +164,19 @@ def neighbours_of(raw: Any) -> Dict[str, Set[str]]:
 
 class DayActivity:
     """Today's activity threads. *judge(threads_text, camera_name, clock, people, summary)* -> ``{"same": id | "",
-    "name": str, "plural": bool}`` or None (the cheap text model; None = rules only). *names(camera)* -> the name the
+    "name": str, "plural": bool}`` or None (the cheap text model; None = rules only); *namer(notes_text, cameras,
+    people)* -> ``{"name", "plural"}`` or None renames a thread that grew (2+ people, another camera). *names(camera)* -> the name the
     owner reads (never an id). *is_dark(ts)* -> True at night."""
 
     def __init__(self, path: str, neighbours: Any = None, judge: Optional[Callable[..., Optional[Dict[str, Any]]]] = None,
+                 namer: Optional[Callable[..., Optional[Dict[str, Any]]]] = None,
                  names: Optional[Callable[[str], str]] = None, lang: str = "he",
                  is_dark: Callable[[float], bool] = _dark, now: Callable[[], float] = time.time,
                  present_sec: float = PRESENT_SEC, left_sec: float = LEFT_SEC) -> None:
         self.path = path
         self.neighbours = neighbours_of(neighbours or {})
         self.judge = judge
+        self.namer = namer
         self.names = names or (lambda c: c)
         self.lang = lang
         self.is_dark = is_dark
@@ -279,8 +287,10 @@ class DayActivity:
             briefs = self._briefs(ts) if thread is None and self.threads else ""
             today_here = next((t for t in reversed(self.threads) if camera in t.cameras), None)
         name, plural = "", people > 1
+        rename: Optional[Dict[str, Any]] = None
         if thread is None:
-            answer = self._ask_model(briefs, camera, ts, people, summary)
+            answer = self._ask_model(self.judge, briefs or "(none yet today)", self.names(camera), _clock(ts),
+                                     people, str(summary or "")[:400])
             with self._lock:
                 if answer is not None and answer.get("same"):
                     thread, how = self.find(str(answer["same"])), "model"
@@ -291,11 +301,52 @@ class DayActivity:
                 if answer is not None:
                     name = str(answer.get("name") or "").strip()
                     plural = bool(answer.get("plural")) if "plural" in answer else plural
+                if thread is not None and name:
+                    rename = {"name": name, "plural": plural, "by": "rename-model"}
+        elif self._grows(thread, camera, people) and not self._rename_locked(thread, ts):
+            # The thread now has 2+ people or another camera: what it is may be clearer ("גבר ליד הקיר" -> "העובדים").
+            with self._lock:
+                notes = "\n".join(thread.notes + [self._note(camera, ts, people, summary)])
+                where = ", ".join(self.names(c) for c in dict.fromkeys(thread.cameras + [camera]))
+            got = self._ask_model(self.namer, notes, where, max(people, thread.people_max))
+            if got is not None and str(got.get("name") or "").strip():
+                rename = {"name": str(got["name"]).strip(), "plural": got.get("plural") is True, "by": "rename-model"}
         with self._lock:
             if thread is None:
                 return self._new(camera, ts, people, summary, alert_id, known_text, name, plural, how="model"
                                  if name else "new")
-            return self._join(thread, camera, ts, people, summary, alert_id, known_text, how)
+            return self._join(thread, camera, ts, people, summary, alert_id, known_text, how, rename)
+
+    @staticmethod
+    def _grows(t: Thread, camera: str, people: int) -> bool:
+        return (people >= 2 and t.people_max < 2) or camera not in t.cameras
+
+    def _rename_locked(self, t: Thread, ts: float) -> bool:
+        """He read a "left" / "came back" line with the thread's name in the last RENAME_QUIET_SEC: keep it."""
+        return any(m.get("kind") in (LEFT, CAME_BACK) and 0 <= ts - float(m.get("ts") or 0) < RENAME_QUIET_SEC
+                   for m in t.messages)
+
+    def _note(self, camera: str, ts: float, people: int, summary: str) -> str:
+        text = " ".join(str(summary or "").split())[:200]
+        return f"{_clock(ts)} {self.names(camera)} ({people}): {text}"
+
+    def _rename(self, t: Thread, rename: Optional[Dict[str, Any]], ts: float) -> None:
+        """A better name for *t*: the model's (*rename*), else the rules' "אנשים ב<camera>" once a rules-named
+        thread has 2+ people. Never within RENAME_QUIET_SEC of a "left" / "came back" line he read."""
+        if rename is None and t.people_max >= 2 and not t.plural and (t.names or [{}])[-1].get("by") == "rules":
+            rename = {"name": self._fallback_name(t.cameras[0], 2), "plural": True, "by": "rename-rules"}
+        if rename is None:
+            return
+        name = str(rename["name"])[:60]
+        if name == t.name_he:
+            t.plural = bool(rename.get("plural"))
+            return
+        if self._rename_locked(t, ts):
+            log.info("day activity %s: not renamed to %r (he read a line with %r lately)", t.id, name, t.name_he)
+            return
+        log.info("day activity %s: renamed %r -> %r (%s)", t.id, t.name_he, name, rename.get("by"))
+        t.name_he, t.plural = name, bool(rename.get("plural"))
+        t.names = (t.names + [{"name": name, "at": float(ts), "by": str(rename.get("by") or "")}])[-10:]
 
     def _near(self, camera: str, ts: float) -> Optional[Thread]:
         around = {camera} | self.neighbours.get(camera, set())
@@ -312,8 +363,8 @@ class DayActivity:
                         f"{state}; up to {t.people_max} people; latest: {t.summary[:200]})")
         return "\n".join(rows)
 
-    def _ask_model(self, briefs: str, camera: str, ts: float, people: int, summary: str) -> Optional[Dict[str, Any]]:
-        if self.judge is None:
+    def _ask_model(self, fn: Optional[Callable[..., Optional[Dict[str, Any]]]], *args: Any) -> Optional[Dict[str, Any]]:
+        if fn is None:
             return None
         with self._lock:
             if self.model_calls >= MODEL_CALLS_PER_DAY:
@@ -325,8 +376,7 @@ class DayActivity:
 
         def call() -> None:
             try:
-                got["answer"] = self.judge(briefs or "(none yet today)", self.names(camera), _clock(ts), people,
-                                           str(summary or "")[:400])
+                got["answer"] = fn(*args)
             except Exception as exc:  # noqa: BLE001 - the rules decide
                 got["error"] = str(exc)
 
@@ -351,7 +401,9 @@ class DayActivity:
         t = Thread(id=uuid.uuid4().hex[:8], day=self.day, started=float(ts), last_seen=float(ts),
                    name_he=(name or self._fallback_name(camera, people))[:60], cameras=[camera], last_camera=camera,
                    plural=bool(plural), first_alert_id=alert_id, people_max=people, summary=str(summary or "")[:400],
-                   events=[alert_id] if alert_id else [], matched_by=how)
+                   events=[alert_id] if alert_id else [], matched_by=how,
+                   notes=[self._note(camera, ts, people, summary)])
+        t.names = [{"name": t.name_he, "at": float(ts), "by": "model" if name else "rules"}]
         self.threads.append(t)
         self._dirty = True
         if known_text:
@@ -365,7 +417,7 @@ class DayActivity:
         return Step(ASK, asdict(t), "a new activity today: one message, and the question", new=True)
 
     def _join(self, t: Thread, camera: str, ts: float, people: int, summary: str, alert_id: str, known_text: str,
-              how: str) -> Step:
+              how: str, rename: Optional[Dict[str, Any]] = None) -> Step:
         was_present = t.present
         t.present, t.matched_by = True, how
         t.last_seen, t.last_camera = max(t.last_seen, float(ts)), camera
@@ -373,6 +425,8 @@ class DayActivity:
             t.cameras.append(camera)
         t.people_max = max(t.people_max, people)
         t.summary = str(summary or "")[:400] or t.summary
+        t.notes = (t.notes + [self._note(camera, ts, people, summary)])[-KEEP_NOTES:]
+        self._rename(t, rename, ts)
         if alert_id and alert_id not in t.events:
             t.events = (t.events + [alert_id])[-KEEP_EVENTS:]
         if known_text and not t.known:
@@ -573,6 +627,35 @@ def model_judge(model: Any) -> Callable[..., Optional[Dict[str, Any]]]:
     return judge
 
 
+NAME_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["name", "plural"],
+               "properties": {"name": {"type": "string"}, "plural": {"type": "boolean"}}}
+
+
+def model_namer(model: Any) -> Callable[..., Optional[Dict[str, Any]]]:
+    """A name for a thread that grew, on the same chat model: ``{"name", "plural"}``, or None on any failure (the
+    name stays)."""
+    from ..prompts import render  # noqa: PLC0415
+
+    def namer(notes: str, cameras: str, people: int) -> Optional[Dict[str, Any]]:
+        msg = model.chat([{"role": "user", "content": render("day_activity_name.prompt", notes=notes,
+                                                             cameras=cameras, people=people)}],
+                         None, json_schema=NAME_SCHEMA, max_tokens=80)
+        if getattr(msg, "error", ""):
+            log.warning("day activity namer failed: %s", msg.error)
+            return None
+        text = str(getattr(msg, "content", "") or "").strip()
+        try:
+            out = json.loads(text[text.find("{"):text.rfind("}") + 1])
+        except ValueError:
+            log.warning("day activity namer answered no JSON: %r", text[:200])
+            return None
+        if not isinstance(out, dict):
+            return None
+        return {"name": str(out.get("name") or "").strip()[:60], "plural": out.get("plural") is True}
+
+    return namer
+
+
 # ---------- the box's one store ----------
 _current: Optional[DayActivity] = None
 
@@ -616,7 +699,7 @@ def build(box_settings: Mapping[str, Any], env: Mapping[str, str], names: Callab
         log.info("Day activity threads off (day_activity: off)")
         set_current(None)
         return None
-    judge = None
+    judge = namer = None
     spec = str((box_settings or {}).get("day_activity_model") or (box_settings or {}).get("v3_understand_model")
                or "qwen/qwen3.7-flash").strip()
     if spec.lower() != "off":
@@ -625,10 +708,11 @@ def build(box_settings: Mapping[str, Any], env: Mapping[str, str], names: Callab
 
             model = make_v3_model(spec, dict(env or {}), usage_agent="day_activity", temperature=0.0)
             judge = model_judge(model) if model is not None else None
+            namer = model_namer(model) if model is not None else None
         except Exception as exc:  # noqa: BLE001 - the rules alone
             log.warning("Day activity model not made (%s); the rules decide", exc)
     store = DayActivity(path or default_path(), neighbours=(box_settings or {}).get("camera_neighbours") or {},
-                        judge=judge, names=names, lang=lang,
+                        judge=judge, namer=namer, names=names, lang=lang,
                         present_sec=minutes_of(box_settings, "day_activity_present_min", PRESENT_SEC),
                         left_sec=minutes_of(box_settings, "day_activity_left_min", LEFT_SEC))
     set_current(store)
