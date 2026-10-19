@@ -377,6 +377,14 @@ TEMPLATES: Dict[str, Dict[str, str]] = {
                           "ar": "حفظت: {camera} - {role}."},
     "camera_role_cleared": {"en": "{camera} has no role saved now.", "he": "ל{camera} אין עכשיו תפקיד שמור.",
                             "ar": "لا يوجد دور محفوظ لـ{camera} الآن."},
+    # -- a car named by its plate (known_vehicle; assistant_v3/vehicles.py, known_vehicles.py) ----------------------
+    "known_vehicle_saved": {"en": "Saved: {car} = {label}.", "he": "רשמתי: {car} = {label}.",
+                            "ar": "حفظت: {car} = {label}."},
+    "known_vehicle_removed": {"en": "Forgotten: {car} = {label}.", "he": "מחקתי: {car} = {label}.",
+                              "ar": "حذفت: {car} = {label}."},
+    "known_vehicle_restored": {"en": "Back to: {car} = {old}.", "he": "החזרתי: {car} = {old}.",
+                               "ar": "أعدت: {car} = {old}."},
+    "what_known_vehicle": {"en": "saving the car", "he": "שמירת הרכב", "ar": "حفظ السيارة"},
     "what_camera_fact": {"en": "saving what you taught about the camera", "he": "שמירת מה שלימדת על המצלמה",
                          "ar": "حفظ ما علمتني عن الكاميرا"},
     # -- "which video are you talking about?" (the event being discussed, answered in code) ----------------------

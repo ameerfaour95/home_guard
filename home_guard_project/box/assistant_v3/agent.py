@@ -29,6 +29,7 @@ from ..brain.receipts import DONE, REQUESTED, Receipt
 from ..brain.registry import current_camera, resolve_camera
 from ..brain.tools import Services, ToolContext, known_rows
 from . import arrival
+from . import vehicles
 from . import context as cx
 from . import handlers as hd
 from . import prompts
@@ -160,6 +161,11 @@ class AssistantV3(OwnerAgentV2):
         except Exception as exc:  # noqa: BLE001
             log.warning("v3 arrival failed: %s", exc, exc_info=True)
             trace.append(f"arrival failed: {exc}")
+        try:
+            vehicles.bind(turn)        # "זה הרכב של X, תזכור את המספר שלו": the plate, in code (vehicles.py)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("v3 car naming failed: %s", exc, exc_info=True)
+            trace.append(f"car naming failed: {exc}")
         # ---- ACT ----
         for act in und.acts:
             fn = hd.HANDLERS.get(act.act)
@@ -173,7 +179,7 @@ class AssistantV3(OwnerAgentV2):
             except Exception as exc:  # noqa: BLE001 - one handler's bug never ends the turn
                 log.warning("v3 handler %s failed: %s", act.act, exc, exc_info=True)
                 trace.append(f"handler {act.act} failed: {exc}")
-        if und.has("question_history", "command") and not (alert or threaded):
+        if und.has("question_history", "command") and not (alert or threaded) and turn.plan.final is None:
             story = self._day_story(ctx, text, snapshot, now, usage)
             if story:
                 turn.plan.final = story
@@ -356,7 +362,7 @@ class AssistantV3(OwnerAgentV2):
         cameras_in_play = [c for c in [turn.camera_of(a) for a in und.acts] if c]
         relevant = mem.relevant(turn.text, cameras_in_play, limit=3) if not und.has("question_memory") else \
             mem.relevant(turn.text, [], limit=6, include_types=("person_mark", "activity_rule", "place_fact",
-                                                                  "camera_fact"))
+                                                                  "camera_fact", "vehicle"))
         if und.has("question_memory"):
             # 2026-10-11 "מה המספר של הרכב של הבעלים": the records that share his words first, then the rest; what
             # is not there is said plainly ("not saved"), never answered from a clip.
@@ -667,5 +673,6 @@ def _backing(receipts: Sequence[Any], plan: hd.Plan) -> List[str]:
     tools = {r.tool for r in receipts if getattr(r, "status", "") in (DONE, REQUESTED)}
     if "retag_clip" in tools and not tools & {"mark_known", "camera_fact", "activity"}:
         return ["record_verdict"]                     # "עדכנתי את התיוג" is backed by the tag's receipt
-    memory = bool(tools & {"mark_known", "camera_fact", "activity"}) or any(d.startswith("מעכשיו:") for d in plan.done)
+    memory = bool(tools & {"mark_known", "camera_fact", "activity", "known_vehicle"}) or any(
+        d.startswith("מעכשיו:") for d in plan.done)
     return ["mark_known", "camera_fact", "house_expect"] if memory else []

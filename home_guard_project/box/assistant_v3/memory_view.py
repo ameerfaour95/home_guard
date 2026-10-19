@@ -13,6 +13,7 @@ camera_fact     timeless               never (routines: "מדי פעם אני י
 person_mark     daily window + end     one question with buttons, only when the owner gave no hour
 activity_rule   inherits a mark        no, when a live mark covers the camera; else "today" said plainly
 preference      timeless               never
+vehicle         timeless               never (known_vehicles.py; the plate read or typed, shown masked)
 ==============  =====================  ==================================================================
 
 Retrieval is structured first (camera / event scope and validity at the time), then by shared words, at most three
@@ -43,7 +44,7 @@ MAX_PREFS = 12
 @dataclass
 class Record:
     id: str
-    type: str                  # place_fact | camera_fact | person_mark | activity_rule | preference
+    type: str                  # place_fact | camera_fact | person_mark | activity_rule | preference | vehicle
     text: str                  # the owner's words / the subject
     cameras: List[str] = field(default_factory=list)   # [] = the whole house
     daily: str = ""            # "07:00-18:00"
@@ -60,7 +61,7 @@ class Record:
             day = "" if same_day else km.day_text(self.until, lang) + " "
             when += f" · עד {day}{dt.datetime.fromtimestamp(self.until).strftime('%H:%M')}"
         kind = {"place_fact": "מקום", "camera_fact": "עובדה", "person_mark": "אנשים מוכרים",
-                "activity_rule": "פעולה מוסברת", "preference": "העדפה"}.get(self.type, self.type)
+                "activity_rule": "פעולה מוסברת", "preference": "העדפה", "vehicle": "רכב מוכר"}.get(self.type, self.type)
         return f"{self.id} [{kind}] {self.text} · {where}{when}"
 
 
@@ -113,13 +114,23 @@ class MemoryView:
             kind = "place_fact" if f.get("kind") == "place" else "camera_fact"
             out.append(Record(f"F{i + 1}", kind, str(f.get("text") or ""), [cam] if cam else [], "", 0.0,
                               {"fact_id": str(f.get("id") or "")}))
+        try:
+            from ..known_vehicles import for_services, masked_line  # noqa: PLC0415
+
+            store = for_services(self.services)
+            cars = store.all() if store is not None else []
+        except Exception:  # noqa: BLE001
+            cars = []
+        for i, car in enumerate(cars):           # the plate masked: the writer never sees a full number
+            out.append(Record(f"V{i + 1}", "vehicle", masked_line(car), [], "", 0.0, {"vehicle_id": car.get("id")}))
         for key, value in sorted((self.state.prefs or {}).items()):
             if key.startswith(PREF_PREFIX) and isinstance(value, str):
                 out.append(Record(f"P{key[len(PREF_PREFIX):]}", "preference", value))
         return out
 
     def relevant(self, text: str, cameras: Sequence[str], limit: int = 3,
-                 include_types: Sequence[str] = ("person_mark", "activity_rule", "place_fact", "camera_fact")) -> List[Record]:
+                 include_types: Sequence[str] = ("person_mark", "activity_rule", "place_fact", "camera_fact",
+                                                 "vehicle")) -> List[Record]:
         """At most *limit* records that touch THIS message: same camera (or the whole house when a camera is in
         play) and/or shared words, ranked by both. Preferences are not here (they are always applied)."""
         mine = words(text)

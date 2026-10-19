@@ -384,6 +384,12 @@ def activity_explain(t: Turn, act: Act) -> None:
 def camera_fact(t: Turn, act: Act) -> None:
     camera = "" if act.camera == "house" else t.camera_of(act, use_event=bool(t.alert))
     words = act.quote or act.subject
+    from .vehicles import asks_number  # noqa: PLC0415
+
+    if asks_number(f"{words} {t.text}"):
+        # 2026-10-15: "תזכור את המספר שלו" saved as a sentence, and "אני אזכור" with no number read (vehicles.py)
+        t.plan.trace.append("camera_fact: a car's number is not a camera fact")
+        return
     fact = t.mem.save_camera_fact(t.ctx, camera, words)
     if fact is None:
         return

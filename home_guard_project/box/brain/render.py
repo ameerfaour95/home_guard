@@ -118,6 +118,14 @@ def _receipt_line(receipt: Receipt, lang: str, retention_days: float, snapshot: 
         else:
             key = "camera_fact_removed" if d.get("removed") else "camera_fact_saved"
         return t(key, lang, camera=where, fact=str(d.get("fact") or ""))
+    if receipt.tool == "known_vehicle":        # a car named by its plate (assistant_v3/vehicles.py); masked plate
+        from ..known_vehicles import owner_mask  # noqa: PLC0415
+
+        what = " ".join(x for x in ("הרכב" if lang == "he" else "the car", owner_mask(d.get("plate"))) if x)
+        if d.get("undo_of"):
+            key = "known_vehicle_restored" if d.get("restored_label") else "known_vehicle_removed"
+            return t(key, lang, car=what, label=str(d.get("label") or ""), old=str(d.get("restored_label") or ""))
+        return t("known_vehicle_saved", lang, car=what, label=str(d.get("label") or ""))
     if receipt.tool == "retag_clip":           # a TAG of one clip (🏷️), never a memory (brain/tools.file_tag)
         from .known_memory import tag_line  # noqa: PLC0415
 

@@ -50,7 +50,7 @@ log = logging.getLogger("box.brain.agent")
 
 FAST, BIG = "fast", "big"
 UNDOABLE = ("pause_alerts", "set_camera_active", "change_setting", "set_alert_types", "set_sensitivity", "set_alias",
-            "house_state", "house_expect", "house_cancel", "camera_fact")
+            "house_state", "house_expect", "house_cancel", "camera_fact", "known_vehicle")
 
 
 def _finite(value: Any) -> float:
@@ -1694,6 +1694,20 @@ class OwnerAgentV2:
                 house.undo(ctx, r, now)
             except house.ChangedSince:
                 raise _ChangedSince() from None
+        elif r.tool == "known_vehicle":         # a car named by its plate (assistant_v3/vehicles.py)
+            from ..known_vehicles import for_services  # noqa: PLC0415
+
+            store = for_services(self.services)
+            if store is None:
+                raise ValueError("the known cars are not available")
+            vehicle_id = str(d.get("vehicle_id") or "")
+            if store.remove(vehicle_id, now=now) is None:
+                raise _ChangedSince()
+            base = {"undo_of": "known_vehicle", "plate": str(d.get("plate") or ""), "label": str(d.get("label") or ""),
+                    "vehicle_id": vehicle_id}
+            back = store.restore(str(d.get("replaced_id") or "")) if d.get("replaced_id") else None
+            _issue(ctx, "known_vehicle", DONE, r.target, dict(base, removed=True,
+                                                              restored_label=str((back or {}).get("label") or "")))
         elif r.tool == "camera_fact":
             from .tools import profiles_for  # noqa: PLC0415
 
