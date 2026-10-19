@@ -1,6 +1,17 @@
 # Licence plates: benchmark on the owner's clips and integration design
 
-Status: design only. Nothing here is wired into live inference, and nothing changed on the box.
+Status: the benchmark below dates from 2026-10-09. On 2026-10-19 a smaller part of the design was built
+(`box/car_plates.py`, `box/known_vehicles.py`, `box/assistant_v3/vehicles.py`; README "Car plates"). Its
+differences from §5–6:
+
+- **How cars get names.** A car gets the owner's own words for it, bound to the plate the box read in the picture
+  he was answering, or to a plate he types. There is no "my car" registration step.
+- **Which vehicles are read.** Every vehicle the tracker followed in an alert clip is read, parked ones included.
+  The owner's case was a parked car.
+- **What the alert says.** A match names the car inside the existing alert lines. No arrival or departure message
+  is sent, and the house state does not change.
+- **What is kept.** The full plates read in the last 3 days stay on the box in `reads.jsonl`, so a name the owner
+  gives later can still be bound.
 Benchmark date: 2026-10-09. Data: `home_guard_data/checks/lpr_bench_2026-10-09/`.
 Tools: `home_guard_project/analysis/plates_bench/`. Code: `home_guard_project/box/plates.py`.
 

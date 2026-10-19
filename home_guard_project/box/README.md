@@ -530,6 +530,15 @@ Two layers, in code only (never in the vision model's prompt). The house memory 
 
 With `on`, an alert about to go out is checked against the situations the owner explained before ("the neighbour leaves through the gate on weekday mornings"), kept in `production_multi/.registry/cases.jsonl`. A case the owner confirmed may lower the delivery one step: `quiet` is sent without a sound with a line saying why ("Normal (per your explanation from 5.10): ..."); `digest` is sent the same way for now, because the box has no daily digest yet. A case in shadow, a suspicious scene that matches, or a "similar but different" match still alerts, with one context line. Escalation and calls never reach memory, and neither do the risk signs listed in `case_memory/INTEGRATION.md`. Any failure means the alert goes out as before. Each alert's meta records `delivery_level`, `case_memory` and `case_signature`. The case buttons aren't sent yet (they're recorded as `case_buttons`). Read at start; restart after changing it.
 
+### Car plates: the cars the owner named (box.yaml)
+
+    plates: on                             # the default; off: no plate is read anywhere
+    plate_cameras: [ameer_v2_ch3, ameer_v2_ch6]   # alerts read plates only here (default: none)
+    plate_device: GPU                      # GPU (the iGPU, OpenVINO's CPU next, then onnxruntime) | CPU
+    plate_frames: 5                        # best frames read per vehicle
+
+The owner names a car in Telegram ("זה הרכב של החשמלאי מנסור, תזכור את המספר שלו", answering an alert or right after a live photo or video, or typing "המספר 16-098-75 זה של החשמלאי"). The assistant binds the plate the box read in that picture to his words and answers in one line, "רשמתי: הרכב הלבן ••••875 = הרכב של החשמלאי מנסור.", with Undo. When no plate could be read, it says so and asks him to type it. It never claims to remember a number it does not have. Later alerts on `plate_cameras`, by day, read every vehicle the tracker followed in the clip (parked ones too) from the main stream at native pixels, off the detection loop. A plate within one digit of a named car calls it by his words in the alert ("CAR1 · הרכב של החשמלאי מנסור: חונה בשביל הכניסה.") and on the event's vehicle. The Eye's prompt does not change. Plates are readable only at 50 px or more: by day on ch3 and ch6 (`docs/plates_design.md`). Needs `fast-alpr[onnx]` (in pyproject); without it nothing is read and the log says so once. The named cars are in `<state>/events/known_vehicles.json`, with the full plate. Plates read in the last 3 days are in `<state>/events/plates/reads.jsonl`, also with the full plate, so a name given later can still be bound. Both stay on the box. The clip meta (`plates`), receipts, logs and the assistant see only the masked plate. To list or add a car by hand: `PYTHONIOENCODING=utf-8 python -m home_guard_project.box.known_vehicles list | add <plate> "<words>" --description לבן --camera <camera>`.
+
 ## Troubleshooting
 
 | Problem | What to do |

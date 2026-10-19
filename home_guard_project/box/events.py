@@ -810,6 +810,27 @@ class EventBook:
                     got.append(entity_id)
         return got
 
+    def note_vehicles(self, alert_id: str, plates: Dict[str, Dict[str, Any]]) -> List[str]:
+        """The plates read for this alert's vehicles (car_plates.entity_fields, by tracker key; masked only) on the
+        event's CAR entities; a car the owner named by its plate gets his words as ``owner_label`` (unless he gave the
+        entity other words). Parked vehicles are no entities: nothing to keep. Returns the ids changed."""
+        got: List[str] = []
+        with self._lock:
+            sid = self._by_alert.get(alert_id)
+            s = next((x for x in self._open.values() if x.id == sid), None)
+            if s is None:
+                return got
+            for e in s.entities:
+                hit = next((plates[k] for k in e.get("tracks", ()) if k in plates), None)
+                if e.get("kind") != "vehicle" or not hit:
+                    continue
+                e.update({k: v for k, v in hit.items() if k != "vehicle_label"})
+                label = str(hit.get("vehicle_label") or "")
+                if label and (not e.get("owner_label") or e.get("owner_label") == e.get("vehicle_named")):
+                    e["owner_label"] = e["vehicle_named"] = label[:80]
+                got.append(e["id"])
+        return got
+
     # ---------- reading ----------
     def session_of_alert(self, alert_id: str) -> Optional[Dict[str, Any]]:
         with self._lock:

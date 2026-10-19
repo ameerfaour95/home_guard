@@ -184,6 +184,11 @@ BASELINE_BUILD: Any = None       # baseline.NightlyBuild, ticked by the guard lo
 # The same-day appearance memory (reid.Reid, stage 3.2), started by run() (start_reid). None - tests, tools, box.yaml
 # reid: off, no model files - changes nothing: entities are judged by geometry alone.
 REID: Any = None
+# Car plates (car_plates.PlateService), started by run() (start_plates). None - tests, tools, box.yaml plates: off -
+# reads nothing: alerts read plates only on box.yaml plate_cameras, by day, off the detection loop.
+PLATES: Any = None
+PLATE_WAIT_SEC = 3.0             # the alert text waits at most this long for a plate still being read (inside the
+                                 # video hold; the decision itself never waits: the read is ~0.5 s, the Eye ~10 s)
 EVENTS_TICK_SEC = 1.0
 VLM_MAX_TOKENS = 1500           # one Eye / second-look answer is ~100-400 tokens; caps the credit OpenRouter reserves
 VERIFY_TIMEOUT_SEC = 15.0        # the second look before a red waits at most this long, then the red goes out
@@ -471,6 +476,91 @@ def start_events(box_settings: Mapping[str, Any]) -> Any:
     except Exception as exc:  # noqa: BLE001 - the memory only adds; the alerts go on without it
         log.warning("Event memory not started (%s); events are kept in events.jsonl only", exc)
     return EVENTS
+
+
+def start_plates(box_settings: Mapping[str, Any]) -> Any:
+    """Start the plate worker (car_plates.py) beside the event book. Never raises: without it nothing is read."""
+    global PLATES
+    try:
+        from . import car_plates  # noqa: PLC0415
+
+        PLATES = car_plates.service(box_settings, os.path.join(paths.state_dir(), "events"))
+    except Exception as exc:  # noqa: BLE001
+        PLATES = None
+        log.warning("Plates not started (%s)", exc)
+    return PLATES
+
+
+def _plates_wanted(job: Any) -> bool:
+    """This alert's vehicles are read: plates on, its camera listed, and not dark."""
+    if PLATES is None or not PLATES.settings.wants(job.camera):
+        return False
+    from .car_plates import is_day  # noqa: PLC0415
+
+    return is_day(job.ts)
+
+
+def _queue_plates(job: Any, clip: Sequence[Any]) -> None:
+    """Cut the alert's vehicles from its main-stream window (copies) and hand them to the plate worker; the window is
+    let go either way. On the detection loop, after the tracker's boxes are taken. Never raises."""
+    window, job.plate_window = job.plate_window, None
+    if window is None or PLATES is None:
+        return
+    try:
+        from .car_plates import alert_job  # noqa: PLC0415
+
+        plate_job = alert_job(job.stem, job.camera, job.ts, window, clip, (job.track_boxes or {}).get("tracks") or [])
+        if plate_job is not None:
+            PLATES.submit(plate_job)
+    except Exception as exc:  # noqa: BLE001 - a plate never stops an alert
+        log.warning("[%s] plates not queued: %s", job.camera, exc)
+
+
+def _plate_result(job: Any, alert_id: str, wait: float = 0.0) -> Optional[Dict[str, Any]]:
+    if PLATES is None or job is None or not _plates_wanted(job):
+        return None
+    try:
+        return PLATES.result(alert_id, wait=wait)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("plates of %s not read: %s", alert_id, exc)
+        return None
+
+
+def _plates_to_event(job: Any, alert_id: str, wait: float = 0.0) -> None:
+    """The alert's plates (masked) on its clip meta, and on its event's vehicles with the owner's name for a car he
+    named (events.EventBook.note_vehicles), when they are read by now (*wait*). Never raises."""
+    result = _plate_result(job, alert_id, wait)
+    if not result:
+        return
+    try:
+        from .car_plates import entity_fields, meta_record  # noqa: PLC0415
+
+        job.input_meta["plates"] = meta_record(result)
+        fields = entity_fields(result)
+        if fields and EVENTS is not None and hasattr(EVENTS, "note_vehicles"):
+            EVENTS.note_vehicles(alert_id, fields)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("plates of %s not kept: %s", alert_id, exc)
+
+
+def _named_vehicles(job: Any, alert_id: str, tracks: Sequence[Any], mapped: Mapping[str, str],
+                    entities: List[Dict[str, Any]], drawn: Sequence[str]) -> List[Dict[str, Any]]:
+    """The describer's lines with a car the owner named called by his name (car_plates.name_entities). Never raises."""
+    result = _plate_result(job, alert_id, PLATE_WAIT_SEC)
+    if not result:
+        return entities
+    if "plates" not in job.input_meta:
+        _plates_to_event(job, alert_id)          # read after the decision: the event gets it now
+    try:
+        from . import car_plates, describer as ds  # noqa: PLC0415
+
+        ids = ds.assign_ids([t for t in tracks if t.get("kind") == "vehicle"
+                             or (t.get("kind") == "person" and t.get("shown", True))], mapped)
+        names = car_plates.named_ids(result, ids)
+        return car_plates.name_entities(entities, names, drawn) if names else entities
+    except Exception as exc:  # noqa: BLE001
+        log.warning("cars not named in %s: %s", alert_id, exc)
+        return entities
 
 
 def start_reid(box_settings: Mapping[str, Any], trackers: Any = None) -> Any:
@@ -1855,6 +1945,8 @@ class AlertJob:
     # the sub stream for whole frames). Only read by the alert describer (describer.py) to place the tracker's boxes.
     input_clock: Optional[Dict[str, Any]] = None
     input_check: Optional[Dict[str, Any]] = None     # main stream vs sub stream (frame_check.py), in the meta
+    # The main-stream window ``(frames, start, end)`` until its vehicles are cut for the plate worker (_queue_plates).
+    plate_window: Any = None
 
 
 def _camera_streams(cfg: Any) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -1896,6 +1988,8 @@ def _prepare_alert(job: AlertJob, cfg: Any, detector: Any, sub_cap: Any, main_ca
         log.exception("[%s] main-stream window unavailable; using whole sub frames", job.camera)
         main, reason = None, "main_stream_read_error"
     job.clip_fps = sub_fps
+    if main is not None and len(main[0]) >= 1 and _plates_wanted(job):
+        job.plate_window = main                 # cut by _queue_plates (its own damage check per vehicle)
     if len(sub_frames) < 2:
         reason = reason or "too_few_sub_frames"
         # A reconnect may leave an empty ring. Preserve the triggering picture
@@ -2103,6 +2197,7 @@ def _start_due_alerts(pending: List[AlertJob], now: float, cfg: Any, detector: A
                                       max_side=getattr(settings, "vlm_max_side", 0))
         _attach_tracker(job, trackers, now)   # after _prepare_alert, which sets the job's input_meta afresh
         _attach_track_boxes(job, trackers, clip, getattr(settings, "tracker_person_conf", None))
+        _queue_plates(job, clip)
         pending.remove(job)
         thread = threading.Thread(target=usage_ledger.bound(_worker, camera=job.camera, alert_id=job.stem),
                                   args=(backend, box_settings, env, settings, job.camera, frames,
@@ -3010,6 +3105,7 @@ def _describe_alert(job: AlertJob, frames: List[Any], box_settings: Dict[str, An
             reason = told.get("reason") or owner_why
         else:
             reason = ""
+        told["entities"] = _named_vehicles(job, alert_id, tracks, mapped, told["entities"], list(record.get("ids") or {}))
         clock_text = datetime.fromtimestamp(alert_ts).strftime("%H:%M")
         base = ds.compose(label, shown_camera, clock_text, told.get("scene", ""), told["entities"], reason, lang)
         lines = list(top)
@@ -3359,6 +3455,8 @@ def _worker(backend, box_settings, env, settings: AlertSettings,
                                                    usual if usual.get("raise") and label == "normal" else None,
                                                    ai_failed=ai_failed,
                                                    detector_people=_detector_people(job) if ai_failed else 0)
+        if not muted:
+            _plates_to_event(job, alert_id)
         if label == "suspicious" and event is not None and event.notify:
             event = _explained_suspicious(event, camera_name, alert_ts, f"{why} {reason} {summary}", decision)
         if label == "suspicious" and event is not None and event.notify:
@@ -3723,6 +3821,7 @@ def run() -> int:
     KNOWN_CAMERAS = tuple(cameras)
     book = start_events(box_settings)
     start_day_activity(box_settings, env, book)
+    start_plates(box_settings)
     start_baseline(box_settings, KNOWN_CAMERAS)
     # Every alert is saved as a clip (the seconds around it) in the production folder,
     # and the owner can answer it in Telegram. Neither may stop the alerts themselves.
