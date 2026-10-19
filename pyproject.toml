@@ -37,6 +37,11 @@ dependencies = [
     "langchain-openai>=1.1.9",
     "langchain>=1.4.3",
     "anthropic>=1.11.0",
+    # Licence plates (box/plates.py, car_plates.py): fast-alpr's plate detector + OCR. Optional at run time: without
+    # it plate reading is off. The ONNX models run on OpenVINO (pinned above), onnxruntime is only the CPU fallback.
+    "fast-alpr[onnx]==0.4.0",
+    "fast-plate-ocr==1.1.0",
+    "open-image-models==0.6.0",
 ]
 
 [tool.uv]
