@@ -225,6 +225,69 @@ def plates_in(t: Any) -> Tuple[List[Dict[str, Any]], str, Dict[str, Any], bool]:
 
 
 # ---------------------------------------------------------------------------------------------------------------
+# A live look: which of the cars in it are ones he named (2026-10-19 15:53 "מה יש בחוץ")
+# ---------------------------------------------------------------------------------------------------------------
+LOOK_BUDGET_SEC = 3.0           # plate reads a live look may add to the answer, in all
+
+
+def _vehicle_boxes(entry: Dict[str, Any]) -> List[List[float]]:
+    return [list(o["box"]) for o in entry.get("objects") or () if isinstance(o, dict)
+            and (o.get("kind") == "vehicle" or o.get("label") in ("car", "truck", "bus", "motorcycle"))
+            and isinstance(o.get("box"), (list, tuple)) and len(o["box"]) == 4]
+
+
+def known_cars(ctx: Any, handles: List[str], now: float, budget: float = LOOK_BUDGET_SEC) -> List[Tuple[str, str]]:
+    """``[(camera, "הרכב שלך (טסלה לבנה)")]`` for the cars he named that are in these live photos: by the plate
+    reader on the photo's main-stream frame (plate cameras, by day, within *budget* s in all), else by a spot a plate
+    confirmed earlier (stayed_vehicles.py, any hour). Plates only from the reader; an unknown plate names nothing."""
+    import time as _time  # noqa: PLC0415
+
+    from .. import car_plates  # noqa: PLC0415
+
+    svc = car_plates.service()
+    if svc is None:
+        return []
+    store = kv.for_services(ctx.services)
+    stayed = getattr(svc, "stayed", None)
+    deadline = _time.monotonic() + budget
+    out: List[Tuple[str, str]] = []
+    for handle in handles:
+        entry = ctx.state.resolve(handle)
+        if not isinstance(entry, dict) or entry.get("kind") != "photo":
+            continue
+        camera = str(entry.get("camera") or "")
+        boxes = _vehicle_boxes(entry)
+        if entry.get("objects") is not None and not boxes:
+            continue                                   # the look's detector saw no vehicle here
+        names: List[str] = []
+        left = deadline - _time.monotonic()
+        if svc.settings.wants(camera) and car_plates.is_day(now) and left > 0.2:
+            try:
+                result = svc.read_media(str(entry.get("ref") or ""), camera, wait=left, boxes=boxes or None)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("v3: live look plates not read: %s", exc)
+                result = None
+            for v in ((result or {}).get("vehicles") or {}).values():
+                rec = store.get(str(v.get("vehicle_id"))) if store is not None and v.get("vehicle_id") else None
+                if rec and rec.get("label") and not rec.get("removed_at"):
+                    names.append(_known_words(rec))
+        if stayed is not None:
+            for box in boxes:
+                spot = stayed.at(camera, box)
+                rec = store.get(str(spot.get("vehicle_id"))) if spot and store is not None else None
+                words = _known_words(rec) if rec else (str(spot.get("label")) if spot else "")
+                if words and words not in names:
+                    names.append(words)
+        out += [(camera, n) for n in names]
+    return out
+
+
+def _known_words(rec: Dict[str, Any]) -> str:
+    d = " ".join(str(rec.get("description") or "").split())
+    return f"{rec.get('label')} ({d})" if d else str(rec.get("label") or "")
+
+
+# ---------------------------------------------------------------------------------------------------------------
 # The turn
 # ---------------------------------------------------------------------------------------------------------------
 def _pending(t: Any) -> Dict[str, Any]:

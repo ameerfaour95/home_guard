@@ -189,6 +189,8 @@ class AssistantV3(OwnerAgentV2):
             hd.prefetch(turn)
         except Exception as exc:  # noqa: BLE001
             log.warning("v3 prefetch failed: %s", exc)
+        if box.known_cars:
+            turn.plan.notes.append(load("assistant_v3_note_known_cars.prompt"))   # name them (vehicles.known_cars)
         turn.plan.evidence.extend(box.evidence)
 
         # ---- WRITE + SUPERVISE ----

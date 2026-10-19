@@ -70,6 +70,7 @@ class Toolbox:
         self.ctx, self.called, self.resolve_camera = ctx, called, resolve_camera
         self.evidence: List[str] = []
         self._looked: Dict[str, Dict[str, Any]] = {}
+        self.known_cars: List[Tuple[str, str]] = []     # (camera, his words) seen in this turn's live looks
 
     def run(self, name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         try:
@@ -95,6 +96,7 @@ class Toolbox:
             self.evidence.append(_look_line(self.ctx, out))
             self._looked[camera] = _brief(out, ("camera", "description", "people", "detector", "whose_ground", "note",
                                                 "error", "description_error", "handle", "status", "reason"))
+            self._named_cars(self._looked[camera], [str(out.get("handle") or "")])
             return self._looked[camera]
         self.called.append("look_around")
         with internal(self.ctx):
@@ -103,7 +105,31 @@ class Toolbox:
             self.evidence.append(_row_line(row))
         if not out.get("ok"):
             self.evidence.append(str(out.get("error") or "no picture"))
-        return _brief(out, ("cameras", "error", "note"))
+        brief = _brief(out, ("cameras", "error", "note"))
+        self._named_cars(brief, [str(row.get("handle") or "") for row in out.get("cameras") or [] if row.get("handle")])
+        return brief
+
+    def _named_cars(self, out: Dict[str, Any], handles: List[str]) -> None:
+        """The cars he named in these live photos (vehicles.known_cars: the plate reader, or a spot a plate
+        confirmed): an evidence line per camera, and on the tool's result for the writer. Never raises."""
+        try:
+            from ..brain.registry import display  # noqa: PLC0415
+            from ...prompts import load  # noqa: PLC0415
+            from .vehicles import known_cars  # noqa: PLC0415
+
+            found = known_cars(self.ctx, [h for h in handles if h], float(self.ctx.services.now()))
+            if not found:
+                return
+            self.known_cars += [f for f in found if f not in self.known_cars]
+            by_camera: Dict[str, List[str]] = {}
+            for camera, words in found:
+                by_camera.setdefault(display(self.ctx.snapshot, camera, self.ctx.lang), []).append(words)
+            for name, cars in by_camera.items():
+                self.evidence.append(f"רכבים מוכרים ב{name} (קורא לוחיות הרישוי של הקופסה): {', '.join(cars)}")
+            out["known_cars"] = by_camera
+            out["known_cars_note"] = load("assistant_v3_note_known_cars.prompt")
+        except Exception as exc:  # noqa: BLE001 - the look stands without it
+            log.warning("v3: named cars not checked: %s", exc)
 
     def _look_again(self, args: Dict[str, Any]) -> Dict[str, Any]:
         handle = str(args.get("handle") or "").strip().upper()

@@ -121,6 +121,7 @@ class Job:
     kind: str = "alert"                        # alert | media
     shots: List[Shot] = field(default_factory=list)
     media: str = ""                            # media: the file to read
+    boxes: Optional[List[Tuple[float, ...]]] = None   # media: the vehicles the live look's detector already found
     done: threading.Event = field(default_factory=threading.Event)
     result: Optional[Dict[str, Any]] = None
 
@@ -394,14 +395,17 @@ class PlateService:
             return None
         return self._logged(key)
 
-    def read_media(self, path: str, camera: str, wait: float = JOB_SECONDS) -> Optional[Dict[str, Any]]:
-        """Read the cars in a live look the owner is talking about (first in the queue), waiting up to *wait* s."""
+    def read_media(self, path: str, camera: str, wait: float = JOB_SECONDS,
+                   boxes: Optional[Sequence[Sequence[float]]] = None) -> Optional[Dict[str, Any]]:
+        """Read the cars in a live look (first in the queue), waiting up to *wait* s. *boxes*: the vehicles the look's
+        own detector found (normalised), so the worker need not look for them again."""
         if not self.settings.enabled:
             return {"key": path, "skipped": "plates off"}
         done = self.result(path)
         if done is not None and not done.get("skipped"):
             return done
-        job = Job(path, camera, self._now(), kind="media", media=path)
+        job = Job(path, camera, self._now(), kind="media", media=path,
+                  boxes=[tuple(float(v) for v in b[:4]) for b in boxes or () if len(b) >= 4] or None)
         self.submit(job, first=True)
         return job.result if job.done.wait(wait) else None
 
@@ -415,7 +419,7 @@ class PlateService:
             else:
                 shots = job.shots
                 if job.kind == "media":
-                    detect = self._detector()
+                    detect = (lambda _frame, b=list(job.boxes): b) if job.boxes else self._detector()
                     if detect is None:
                         out["skipped"] = "no vehicle detector"
                         shots = []
@@ -452,7 +456,17 @@ class PlateService:
                 self._detector_factory = None
         return self._detect
 
+    def warm(self) -> None:
+        """Load the reader (and the live-look detector) before the first question needs them (2026-10-19: the
+        first read after a start took several seconds to load)."""
+        try:
+            self.reader.available()
+            self._detector()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("plates: warm-up failed: %s", exc)
+
     def _run(self) -> None:
+        self.warm()
         while True:
             with self._lock:
                 while not self._queue:
