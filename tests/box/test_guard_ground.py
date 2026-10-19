@@ -44,8 +44,14 @@ class GroundGuardTest(GuardCase):
         self.assertEqual(job.alert["ground"]["on"], "neighbour")
         self.assertEqual(job.input_meta["ground"]["off_our_ground"], True)
 
-    def test_trying_the_neighbours_car_door_is_sent(self):
-        self.work_with(Backend(answer("suspicious", people=1, why="tries the car door handle")), STAYS_THERE)
+    def test_trying_the_neighbours_car_door_is_not_sent(self):
+        # Owner 2026-10-19: the neighbour at his own pickup on ch2 is not ours (only an escalation there is).
+        job = self.work_with(Backend(answer("suspicious", people=1, why="tries the car door handle")), STAYS_THERE)
+        self.assertEqual(self.assistant.sent, [])
+        self.assertIn("not ours", job.alert["not_sent_reason"])
+
+    def test_an_escalation_on_the_neighbours_ground_is_sent(self):
+        self.work_with(Backend(answer("escalation", people=1, why="breaks the car window")), STAYS_THERE)
         self.assertEqual(len(self.assistant.sent), 1)
 
     def test_coming_in_from_the_neighbours_side_is_a_message_even_when_normal(self):

@@ -3,8 +3,9 @@
 Owner, 2026-10-08 (scene map stage 2c): the box knows from the owner's map which part of the picture is ours and
 which is the neighbour's or the street. So:
 
-- A person whose whole visit stays on the neighbour's or public ground is not a message, unless the label is
-  suspicious for something they DO (a hand on a car door, climbing, looking in) or an escalation.
+- A person whose whole visit stays on the neighbour's or public ground is not a message, unless the label is an
+  escalation. (Until 2026-10-19 a suspicious for something they DID there was sent too; the owner: the neighbour
+  opening his own pickup is not ours.)
 - A person who crosses a boundary line inward (the neighbour's side -> ours), or walks into an area of ours from
   the neighbour's or the street, is worth a message even when the Eye said normal: "נכנס מהצד של השכן אל השטח שלנו".
 

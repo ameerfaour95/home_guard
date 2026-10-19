@@ -25,9 +25,11 @@ class GroundDecisionTest(unittest.TestCase):
         self.assertFalse(d.notify)
         self.assertIn("not ours", d.reason)
 
-    def test_an_action_on_the_neighbours_ground_is_sent(self):
-        d = self.book.decide(CAM, T0, "suspicious", 1, "tries the car door", ground=dict(OFF, action=True))
-        self.assertTrue(d.notify)
+    def test_an_action_on_the_neighbours_ground_is_not_sent_either(self):
+        # Owner 2026-10-19: 10-14 09:36 and 10-15 16:44 the neighbour at his own pickup on ch2 went out as suspicious.
+        d = self.book.decide(CAM, T0, "suspicious", 1, "opens the pickup's door", ground=dict(OFF, action=True))
+        self.assertFalse(d.notify)
+        self.assertIn("not ours", d.reason)
 
     def test_an_escalation_is_sent_wherever_it_is(self):
         self.assertTrue(self.book.decide(CAM, T0, "escalation", 1, ground=OFF).notify)

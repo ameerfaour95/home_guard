@@ -18,9 +18,9 @@ https://claude.ai/artifact/9Fh6q2W5XbndKSkNgVJa4M (section 3).
     while the head-count stays within what was known (plus KNOWN_EXTRA_PEOPLE); never an escalation.
   - What is usual here (optional ``baseline``, baseline.py, task 2.9): a "normal" the camera's history calls rare is
     one quiet message per event with box.yaml ``baseline_alerts: on``. It only raises; nothing else changes.
-  - Whose ground (optional ``ground``, ``ground.Ground.record()`` plus ``action``; scene map stage 2c): everyone
-    stayed on the neighbour's or public ground -> not sent, unless an escalation or a suspicious for something
-    done there (``action``); someone came onto our ground from the neighbour's side or the street (``entered``)
+  - Whose ground (optional ``ground``, ``ground.Ground.record()``; scene map stage 2c): everyone stayed on the
+    neighbour's or public ground -> not sent, unless an escalation (owner 2026-10-19: not even a suspicious for
+    something done there, such as opening the neighbour's pickup); someone came onto our ground from the neighbour's side or the street (``entered``)
     -> at least a suspicious, even when the Eye said normal.
 - **Known** (``mark_known``) is written only from the owner's own words, through the assistant, with a receipt.
   It covers the camera until ``until`` and the session it was said in.
@@ -591,9 +591,10 @@ class EventBook:
                 return make(False, reason, known_text)
 
             where = ground if isinstance(ground, dict) else {}
-            if where.get("off_our_ground") and label != "escalation" and not (label == "suspicious"
-                                                                               and where.get("action")):
-                return no(f"{label} on the {where.get('on')} ground, nothing done there: not ours")
+            if where.get("off_our_ground") and label != "escalation":
+                # Owner 2026-10-15/19: what happens wholly on the neighbour's or the street's ground is theirs, even a
+                # hand on their own car's door; only an escalation there, or someone coming onto ours, is a message.
+                return no(f"{label} on the {where.get('on')} ground: not ours")
             entered = bool(where.get("entered")) and label == "normal"
             if entered:
                 label, lvl = "suspicious", LEVELS["suspicious"]     # came onto our ground: worth a message
