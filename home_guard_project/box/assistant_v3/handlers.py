@@ -790,6 +790,10 @@ def send_video(t: Turn, act: Act) -> None:
     if not live and past_photo.asks_past(t.text):
         send_past_video(t, camera or t.camera_of(act))   # a recording, not live seconds
         return
+    photo_handle, photo = t.last_photo(LIVE_PHOTO_SEC)
+    if photo and not camera:
+        # "או מביא סרטון למה תמונה?" right after a live photo (golden g09_14): the same place, live
+        camera, live = t.camera_now(str(photo.get("camera") or "")), True
     if not live and not named:
         handle, entry = _discussed_event(t, act)
         if handle:
@@ -827,7 +831,8 @@ def _discussed_event(t: Turn, act: Act) -> Tuple[str, Dict[str, Any]]:
     return "", {}
 
 
-FIND_HOURS = 48.0       # "the video of ..." is looked for in the journal of the last two days
+LIVE_PHOTO_SEC = 5 * 60.0    # a video asked minutes after a live photo is of that place, now
+FIND_HOURS = 48.0      # "the video of ..." is looked for in the journal of the last two days
 FIND_MAX = 60           # clips put to the model, newest first
 FIND_EARLIER_SEC = 15 * 60.0
 _LIVE_NOW = re.compile(r"(?<![א-ת])(?:עכשיו|כרגע|לייב|בזמן אמת|(?:סרטון|וידאו)\s+(?:חי|חיה))(?![א-ת])"
