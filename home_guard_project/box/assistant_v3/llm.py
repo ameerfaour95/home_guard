@@ -39,6 +39,11 @@ PRICES: Dict[str, tuple] = {
 }
 _NEEDS_BREAKPOINT = ("anthropic/", "qwen/")
 _NO_TEMPERATURE = ("anthropic/claude-haiku-5", "anthropic/claude-sonnet-5", "openai/gpt-6", "openai/o")
+# Endpoints that refuse "reasoning off" (400 "Reasoning is mandatory for this endpoint and cannot be disabled"): the
+# least effort they take. 2026-10-20 the escalation model (claude-sonnet-5.5) failed every call this way, so every
+# angry repair was answered by the small writer again.
+_REASONING_FLOOR = {"anthropic/claude-sonnet-5": "low", "anthropic/claude-opus-5": "low"}
+_MANDATORY = "reasoning is mandatory"
 
 
 def usd(model: str, prompt: int, completion: int, cached: int = 0) -> float:
@@ -63,10 +68,21 @@ class V3Chat:
              tool_choice: Optional[str] = None, json_schema: Optional[Dict[str, Any]] = None,
              max_tokens: int = 600, reasoning: Optional[str] = None, cache: bool = True) -> ModelMessage:
         try:
-            return self._chat(messages, tools, tool_choice, json_schema, max_tokens, reasoning, cache)
+            try:
+                return self._chat(messages, tools, tool_choice, json_schema, max_tokens, reasoning, cache)
+            except Exception as exc:  # noqa: BLE001
+                if _MANDATORY not in str(exc).lower() or (reasoning or self.reasoning) not in ("", "none", None):
+                    raise
+                log.warning("%s refuses reasoning off; asking again with low effort", self.model_name)
+                return self._chat(messages, tools, tool_choice, json_schema, max(max_tokens, 2000), "low", cache)
         except Exception as exc:  # noqa: BLE001 - never into the Telegram loop
             log.warning("%s failed: %s", self.model_name, exc)
             return ModelMessage(error=f"{type(exc).__name__}: {exc}"[:300])
+
+    def _effort(self, reasoning: Optional[str]) -> str:
+        effort = str(reasoning or self.reasoning or "")
+        floor = next((v for k, v in _REASONING_FLOOR.items() if self.model_name.startswith(k)), "")
+        return floor if floor and effort in ("", "none") else effort
 
     def _chat(self, messages, tools, tool_choice, json_schema, max_tokens, reasoning, cache) -> ModelMessage:
         msgs = [_public(m) for m in messages]
@@ -75,6 +91,8 @@ class V3Chat:
             if isinstance(text, str) and len(text) > 1500:     # below the provider's minimum it is ignored anyway
                 msgs[0] = {"role": "system", "content": [{"type": "text", "text": text,
                                                            "cache_control": {"type": "ephemeral"}}]}
+        if self._effort(reasoning) != str(reasoning or self.reasoning or ""):
+            max_tokens = max(max_tokens, 2000)      # its thinking counts against max_tokens; the answer needs room
         kwargs: Dict[str, Any] = {"model": self.model_name, "messages": msgs, "max_tokens": max_tokens,
                                   "timeout": self.timeout}
         if self.temperature is not None:
@@ -85,7 +103,7 @@ class V3Chat:
         if json_schema is not None:
             kwargs["response_format"] = {"type": "json_schema",
                                          "json_schema": {"name": "out", "strict": True, "schema": json_schema}}
-        effort = reasoning or self.reasoning
+        effort = self._effort(reasoning)
         extra: Dict[str, Any] = {"usage": {"include": True}}
         if effort:
             extra["reasoning"] = {"effort": effort, "exclude": True}

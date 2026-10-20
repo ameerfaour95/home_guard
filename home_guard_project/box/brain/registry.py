@@ -181,7 +181,9 @@ def mentioned_cameras(snapshot: HouseSnapshot, text: str) -> List[Tuple[str, str
             key = normalize(word)
             if not key:
                 continue
-            for m in re.finditer(rf"(?<!\w)[ושהבלמכ]{{0,2}}({re.escape(key)})(?!\w)", norm):
+            # each later word may take its own "ה" ("כניסה הראשית" / "הכניסה הראשית" for "כניסה ראשית", 2026-10-20)
+            body = r"\s+ה?".join(re.escape(w) for w in key.split())
+            for m in re.finditer(rf"(?<!\w)[ושהבלמכ]{{0,2}}({body})(?!\w)", norm):
                 found.append((m.start(1), m.end(1), word, cam.name))
     for m in _CAMERA_NUMBER_IN_TEXT.finditer(norm):
         res = resolve_camera(snapshot, m.group(2))

@@ -35,6 +35,11 @@ JARGON = re.compile(r"התרעה צפויה|כהתרעה (?:אמיתית|שגו�
 EMPATHY = re.compile(r"אני מבין את התסכול|אני מבין אותך|מבין את הכעס|אני מצטער לשמוע|מתנצל על אי הנוחות")
 ONLY_ACK = re.compile(r"^\s*(?:הבנתי|אני מבין|מבין)(?: אותך)?[.!]?\s*$")
 _TIME = re.compile(r"(?<!\d)([01]?\d|2[0-3]):([0-5]\d)(?!\d)")
+# "בדקתי שוב את המספר ... והוא תואם לרכב שלך" (2026-10-20 08:55, the camera's clock read as the plate): a plate is
+# the plate reader's only; a claim of reading or matching one needs the reader's line in the evidence.
+PLATE_CLAIM = re.compile(r"(?:בדקתי|קראתי|רואה|ראיתי|זיהיתי|לפי)\s+(?:שוב\s+)?(?:את\s+)?ה?(?:מספר|לוחית)"
+                         r"|ה?(?:מספר|לוחית)\S*(?:\s+\S+){0,6}?\s+(?:תואם|תואמת|מתאים|מתאימה|זהה)")
+PLATE_READ = re.compile(r"קורא הלוחיות[^\n]*•")     # the reader's line with a plate it read (handlers.plate_evidence)
 _SENT = re.compile(r"[^.!?\n]+[.!?]?")
 
 
@@ -124,6 +129,8 @@ def code_checks(reply: str, *, lang: str, last_replies: Sequence[str], allowed_t
         bad = [b for b in bad if b not in ("save", "known")]     # talking ABOUT memory is not claiming a save
     if bad:
         failed.append(Check("unbacked_claim", ",".join(bad)))
+    if PLATE_CLAIM.search(text) and not PLATE_READ.search(evidence_text or ""):
+        failed.append(Check("plate_claim", PLATE_CLAIM.search(text).group(0)[:40]))
     q = questions(text)
     if q > 1 or (q == 1 and not may_ask and not _rhetorical(text)):
         failed.append(Check("question", f"{q} question(s)"))

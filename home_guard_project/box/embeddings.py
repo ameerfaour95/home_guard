@@ -35,6 +35,8 @@ from . import providers, usage_ledger
 log = logging.getLogger("box.embeddings")
 
 EMBED_MODEL = "text-embedding-3-small"
+OPENROUTER_EMBED_MODEL = "openai/" + EMBED_MODEL
+OPENROUTER_EMBEDDINGS_URL = "https://openrouter.ai/api/v1/embeddings"
 EMBED_DIMENSIONS = 256          # shortened vectors: plenty for one-sentence summaries, small on disk
 MAX_CACHE = 5000                # bounded; the live alert corpus only spans the retention window
 
@@ -63,8 +65,9 @@ class Embedder:
     """
 
     def __init__(self, api_key: str, cache_path: str, model: str = EMBED_MODEL,
-                 dimensions: int = EMBED_DIMENSIONS, timeout: float = 20.0) -> None:
+                 dimensions: int = EMBED_DIMENSIONS, timeout: float = 20.0, url: str = "") -> None:
         self._api_key = api_key
+        self._url = url
         self._cache_path = cache_path
         self._model = model
         self._dim = dimensions
@@ -99,7 +102,7 @@ class Embedder:
         import httpx  # noqa: PLC0415
 
         payload = {"model": self._model, "input": texts, "dimensions": self._dim}
-        url = providers.openai_url("/embeddings")
+        url = self._url or providers.openai_url("/embeddings")
         started = time.monotonic()
         try:
             try:
@@ -153,7 +156,15 @@ class Embedder:
 def make_embedder(env: Optional[Dict[str, str]] = None, cache_path: str = "") -> Optional[Embedder]:
     """An :class:`Embedder` when a key and a cache path are available, else ``None``."""
     env = dict(os.environ if env is None else env)
+    if not cache_path:
+        return None
+    # OpenRouter first: the same model (identical vectors, so the cache stays valid), on the key every box has. The
+    # box's own OpenAI account went "billing_not_active" and every search fell back to keywords, which never match
+    # Hebrew questions to English summaries (2026-10-20: "the video of the child who fell").
+    router = str(env.get("OPENROUTER_API_KEY") or "").strip()
+    if router:
+        return Embedder(router, cache_path, model=OPENROUTER_EMBED_MODEL, url=OPENROUTER_EMBEDDINGS_URL)
     key = env.get("OPENAI_API_KEY", "")
-    if not key or not cache_path:
+    if not key:
         return None
     return Embedder(key, cache_path)

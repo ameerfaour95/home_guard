@@ -72,6 +72,27 @@ class MakeEmbedderTest(unittest.TestCase):
         emb = make_embedder({"OPENAI_API_KEY": "key"}, os.path.join(tempfile.mkdtemp(), "c.json"))
         self.assertIsInstance(emb, Embedder)
 
+    def test_openrouter_first_with_the_same_model(self) -> None:
+        # 2026-10-20: the box's OpenAI account was "billing_not_active"; every search fell back to keywords.
+        emb = make_embedder({"OPENAI_API_KEY": "sk", "OPENROUTER_API_KEY": "or"}, os.path.join(tempfile.mkdtemp(), "c.json"))
+        seen = {}
+
+        class Resp:
+            def raise_for_status(self) -> None:
+                pass
+
+            def json(self) -> dict:
+                return {"data": [{"embedding": [0.1, 0.2]}]}
+
+        def post(url, json=None, headers=None, **kw):
+            seen.update(url=url, model=json["model"], auth=headers["Authorization"])
+            return Resp()
+
+        with mock.patch("httpx.post", post):
+            self.assertEqual(emb.embed_one("שלום"), [0.1, 0.2])
+        self.assertEqual(seen, {"url": "https://openrouter.ai/api/v1/embeddings",
+                                "model": "openai/text-embedding-3-small", "auth": "Bearer or"})
+
 
 if __name__ == "__main__":
     unittest.main()

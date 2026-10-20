@@ -28,6 +28,23 @@ def _hour(now: float, hour: int, minute: int, part: str) -> float:
     return km._at(now, hour % 24, minute)
 
 
+_HOURS_WORDS = {"שעה": 1.0, "חצי שעה": 0.5, "שעה וחצי": 1.5, "שעתיים": 2.0, "שלוש שעות": 3.0, "ארבע שעות": 4.0,
+                "חמש שעות": 5.0, "שש שעות": 6.0}
+_DURATION = re.compile(r"(?<![א-ת\d])(?:עוד|בערך|כ-?|ל-?)?\s*(" + "|".join(sorted(_HOURS_WORDS, key=len, reverse=True))
+                       + r"|(\d{1,2})\s*שעות)(?![א-ת])")
+_MORNING = re.compile(r"(?<![א-ת])עד (?:ה)?בוקר(?![א-ת])")
+
+
+def _duration(text: str, now: float) -> Optional[float]:
+    """"שעה בערך" / "עוד שעתיים" / "3 שעות": *now* plus that long (2026-10-19 22:43: "שעה בערך" was no time, and
+    "עד מתי הם פה היום?" came back three times). A clock hour ("ב-3") is not a duration."""
+    m = _DURATION.search(text)
+    if not m:
+        return None
+    hours = float(m.group(2)) if m.group(2) else _HOURS_WORDS[m.group(1)]
+    return now + hours * 3600.0 if 0 < hours <= 12 else None
+
+
 def parse_until(words: str, now: float) -> Optional[float]:
     text = str(words or "")
     if not text.strip():
@@ -39,6 +56,11 @@ def parse_until(words: str, now: float) -> Optional[float]:
         if m and m.group(3) == "בלילה" and int(m.group(1)) == 12:
             return _hour(now, 12, 0, "בלילה")
         return found
+    found = _duration(text, now)
+    if found is not None:
+        return found
+    if _MORNING.search(text):
+        return km._at(now, 7)                        # the next 07:00
     m = _AT_NUM.search(text)
     if m:
         return _hour(now, int(m.group(1)), int(m.group(2) or 0), m.group(3) or "")

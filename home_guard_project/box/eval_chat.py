@@ -708,6 +708,13 @@ class World:
         store = profiles_for(self.services)
         for fct in memory.get("facts") or []:
             store.add_fact(fct.get("camera") or "", fct["text"], by="Hello_24", now=start)
+        if memory.get("vehicles"):
+            from .known_vehicles import store_in  # noqa: PLC0415
+
+            cars = store_in(self.events.directory)
+            for car in memory["vehicles"]:          # the cars he named by their plate (known_vehicles.json)
+                cars.add(car["plate"], car["label"], car.get("description", ""), car.get("camera", ""), by="Hello_24",
+                         now=start)
         # The box's event journal (event_memory archive): what the cameras saw, sent or kept ("reported": false).
         journal = case.get("journal") or []
         if journal:
@@ -739,7 +746,8 @@ class World:
                                         "outcome": "left", "observations": [{"ts": begin, "label": j.get("label", "normal"),
                                                                              "summary": j["summary"]}],
                                         "caption": j["summary"] + ("" if j.get("reported") else
-                                                                   " Not sent to the owner.")},
+                                                                   " Not sent to the owner."),
+                                        **({"entities": j["entities"]} if j.get("entities") else {})},
                                        ensure_ascii=False) + "\n")
         for pause in memory.get("pauses") or []:
             from .feedback import Feedback  # noqa: PLC0415

@@ -575,7 +575,7 @@ class OwnerAssistant:
             if self.feed is not None:
                 self.feed.add("box", "message", text, camera=camera, alert_id=ref)
             agent = getattr(self.inbox, "agent", None)
-            if getattr(agent, "version", 1) != 2:
+            if not is_brain(agent):
                 return
             item = {"alert_id": ref, "camera": camera, "ts": ts, "label": "normal", "summary": text}
             for chat_id in self.cfg.chat_ids:
@@ -676,7 +676,7 @@ class OwnerAssistant:
         question knows the clip. On its own thread: a turn in progress must not hold up the detector. Never raises."""
         try:
             agent = getattr(self.inbox, "agent", None)
-            if getattr(agent, "version", 1) != 2 or not isinstance(alert, dict) or not isinstance(res, dict):
+            if not is_brain(agent) or not isinstance(alert, dict) or not isinstance(res, dict):
                 return
             chats = [str(r.get("chat_id")) for r in res.get("results") or [] if isinstance(r, dict) and r.get("ok")]
 
@@ -795,7 +795,7 @@ def start(
     def cameras() -> List[str]:
         """The cameras whose ids an answer must never show: the box's list, and the brain's when it has one."""
         try:
-            return names + list(agent.registry.snapshot().names) if getattr(agent, "version", 1) == 2 else names
+            return names + list(agent.registry.snapshot().names) if is_brain(agent) else names
         except Exception:  # noqa: BLE001
             return names
 
@@ -825,6 +825,17 @@ def is_tag_answer(text: str, replied: Any, request: Dict[str, Any]) -> bool:
     if replied is not None and str(replied) in prompts:
         return True
     return not not_a_judgement(text)
+
+
+def is_brain(agent: Any) -> bool:
+    """The brain's assistant (v2, and v3 built on it), not v1. Everything the brain needs from the inbox - alerts and
+    box lines noted into the chat, threaded replies with their buttons and after-reply actions, Undo / memory taps,
+    the tag hooks - is gated on this. Until 2026-10-20 the gates read ``version == 2``, so v3 (live since 10-10) got
+    none of it: no alert in its history, no buttons, no after-reply actions."""
+    try:
+        return int(getattr(agent, "version", 1) or 1) >= 2
+    except (TypeError, ValueError):
+        return False
 
 
 def agent_version(box_settings: Dict[str, Any]) -> int:
@@ -1062,7 +1073,7 @@ class TelegramInbox:
             self._on_day_button(query, message, chat_id, code)
             return
         self._cancel_tag(chat_id, (query.get("from") or {}).get("id"))   # any other tap ends an "Other…" wait
-        if getattr(self.agent, "version", 1) == 2 and code.startswith(("cl:", "u:", "hs:", "kn:")):
+        if is_brain(self.agent) and code.startswith(("cl:", "u:", "hs:", "kn:")):
             self._answer_callback(query)   # only stops the button's spinner: a failure here must not lose the tap
             who = _who(query.get("from") or {})
             if code.startswith("kn:"):            # Cancel / All week under "these are my workers" (Memory Keeper)
@@ -1426,7 +1437,7 @@ class TelegramInbox:
             # fact in it is a MEMORY, which the assistant asks about (agent.note_tag) and saves only once answered.
             from .brain.known_memory import tag_label, tag_line  # noqa: PLC0415
 
-            label_for = getattr(self.agent, "tag_label_for", None) if getattr(self.agent, "version", 1) == 2 else None
+            label_for = getattr(self.agent, "tag_label_for", None) if is_brain(self.agent) else None
             label = label_for(alert, words) if callable(label_for) else tag_label(words)
             feedback = Feedback(verdict=verdict_for(label, str(alert.get("label") or "")), owner_label=label,
                                 owner_text=words, tagged_by=who["name"] or str(user_id or ""),
@@ -1438,7 +1449,7 @@ class TelegramInbox:
             for alert_message in self._alert_messages(chat_id, alert_id):
                 self._receipt(chat_id, alert_message, label, alert_id, lang)
             ask = None
-            hook = getattr(self.agent, "note_tag", None) if getattr(self.agent, "version", 1) == 2 else None
+            hook = getattr(self.agent, "note_tag", None) if is_brain(self.agent) else None
             if callable(hook):
                 try:
                     ask = hook(chat_id, alert, words, who, label=label)
@@ -1484,7 +1495,7 @@ class TelegramInbox:
         replied = (message.get("reply_to_message") or {}).get("message_id")
         alert = self.index.lookup(chat_id, replied) if replied is not None else None
         threaded = alert is not None
-        v2 = getattr(self.agent, "version", 1) == 2
+        v2 = is_brain(self.agent)
         # A message that replies to nothing is bound to the newest alert only when it may be a judgement of it: a
         # question, a complaint or a command never is (2026-10-07: "על איזה סרטון אתה מדבר", "יא מטומטם" and
         # "די עם ההודעה" were each filed as a verdict on the newest alert).

@@ -9,7 +9,7 @@ import datetime as dt
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .. import activity_memory as am
 from ..brain import known_memory as km
@@ -57,6 +57,9 @@ class Turn:
     called: List[str]
     box: Toolbox
     plan: Plan = field(default_factory=Plan)
+    # (his request, numbered clip lines) -> (he described what he wants to see, the line's number or -1): the cheap
+    # model that finds "the video of the child who fell" in the journal (agent._find_clip). None: not searched.
+    find_clip: Optional[Callable[[str, List[str]], Tuple[bool, int]]] = None
 
     @property
     def state(self) -> Any:
@@ -190,9 +193,20 @@ def _shared(a: str, b: str) -> bool:
     return bool(words(a) & words(b))
 
 
+_PAST_PRESENCE = re.compile(r"(?<![א-ת])(?:היה|היו|הייתה|היתה)\s+(?:פה|כאן)(?![א-ת])|ביומיים האחרונים|בימים האחרונים|"
+                            r"בשבוע האחרון|(?<![א-ת])אתמול(?![א-ת])")
+_NOW_WORDS = re.compile(r"(?<![א-ת])(?:היום|עכשיו|כרגע|עד|מחר)(?![א-ת])")
+
+
 def person_mark(t: Turn, act: Act, until_words: str = "") -> None:
     who = act.subject or act.quote
     if not who:
+        return
+    if not act.repaired and _PAST_PRESENCE.search(t.text) and not _NOW_WORDS.search(t.text):
+        # "מנסור החשמלאי היה פה ביומיים האחרונים" (2026-10-20 10:54) is about the past: a mark (no alert on them
+        # from now) with "עד איזו שעה הם עובדים?" was the wrong answer. It is a question of when he was here.
+        t.und.acts.append(Act(act="question_history", quote=t.text[:120], subject=who, camera="house"))
+        t.plan.trace.append("past presence: a history question, not a mark")
         return
     if act.routine:
         return camera_fact(t, act)
@@ -244,18 +258,19 @@ def person_mark(t: Turn, act: Act, until_words: str = "") -> None:
         until = km.until_said_today(t.state, who, t.now)
     if until is None:
         where = f"ב{t.name(camera)}" if camera else "בכל הבית"
-        quiet = act.repaired or t.und.emotion == "angry" or t.und.has("activity_explain")
+        quiet = act.repaired or t.und.emotion == "angry" or t.und.has("activity_explain") or _asked_until(t)
         if quiet:
             # He is complaining or this repairs an earlier miss: no question now; kept for today, said as "today".
             end = dt.datetime.fromtimestamp(t.now).replace(hour=23, minute=59, second=0).timestamp()
             if t.mem.mark_people(t.ctx, who, camera, end, replaces=[]) is not None:
                 t.outcome(entry, f"בעל הבית: אלה {who} → נסגרה כרגילה")
-                t.did(f"סימנתי את {who} {where} להיום, כדי שלא תגיע עליהם התראה.")
+                t.did(f"סימנתי את {who} {where} להיום, כדי שלא תגיע עליהם התראה{BREAK_IN_STILL}.")
             return
         # The owner's own way (2026-10-09): "אה, הם של הפרגולה? עד איזו שעה הם עובדים?" - nothing saved with a
         # time he did not say; the tapped or typed hour completes it in code.
         choices = km.likely_hours(t.now) + ["אחר…"]
-        question = "עד איזו שעה הם עובדים?" if crew else "עד מתי הם פה היום?"
+        us = re.search(r"(?<![א-ת])(?:אנחנו|אני|אנו|שלנו)(?![א-ת])", f"{who} {act.quote}")
+        question = "עד איזו שעה הם עובדים?" if crew else "עד מתי אתם פה היום?" if us else "עד מתי הם פה היום?"
         t.plan.ask = {"question": question, "choices": choices, "kind": "v3_mark",
                       "args": {"who": who, "camera": camera, "house": house_wide, "handle": handle,
                                "quote": act.quote[:200], "crew": crew}}
@@ -289,7 +304,7 @@ def person_mark(t: Turn, act: Act, until_words: str = "") -> None:
         return
     where = f"ב{t.name(camera)}" if camera else "בכל הבית"
     when = _when_text(saved, t.now)
-    line = f"{who} {where} {when}: לא תגיע עליהם התראה בשעות האלה."
+    line = f"{who} {where} {when}: לא תגיע עליהם התראה בשעות האלה{BREAK_IN_STILL}."
     if daily_from and not daily_old:
         line += f" (הנחה: עבודה של כמה ימים, כל יום {daily_from}–{daily_to}.)"
         t.plan.notes.append("יש כפתורים לתיקון (רק היום / שבוע); אל תשאל על זה ואל תציע במילים.")
@@ -298,6 +313,25 @@ def person_mark(t: Turn, act: Act, until_words: str = "") -> None:
         line += f" זה מחליף את הסימון הקודם (עד {olds})."
     t.did(line)
     t.outcome(entry, f"בעל הבית: אלה {who} → נסגרה כרגילה")
+
+
+ASKED_UNTIL_SEC = 10 * 60.0
+
+
+def _asked_until(t: Turn) -> bool:
+    """The "until when?" question went out in the last minutes (2026-10-19 22:43-22:44: asked three times while he
+    answered "אנחנו" and "שעה בערך"): it is never asked again; the mark is kept for today."""
+    for turn in reversed([x for x in t.state.turns[-4:] if isinstance(x, dict) and x.get("kind") != "alert"]):
+        if t.now - float(turn.get("ts") or 0) > ASKED_UNTIL_SEC:
+            break
+        if re.search(r"עד מתי (?:הם|אתם) פה|עד איזו שעה הם עובדים", str(turn.get("reply") or "")):
+            return True
+    return False
+
+
+# A mark never quiets a red (events.py: an escalation goes out under any mark). 2026-10-20 10:37 the reply promised
+# "מי שעובד על האלומיניום לא יקבל התראה" and at 12:16 the same worker at the door was a 🔴: the receipt says it.
+BREAK_IN_STILL = " (חוץ מהתראה אדומה, כמו ניסיון פריצה, שתגיע תמיד)"
 
 
 def _when_text(mark: Dict[str, Any], now: float) -> str:
@@ -505,10 +539,31 @@ _PHOTO_ASK = re.compile(r"(?<![א-ת])(?:תמונה+|תמונות|תצלם|צל�
                         re.IGNORECASE)
 
 
+PHOTO_COMPLAINT_SEC = 10 * 60.0
+_VIDEO_ASK = re.compile(r"סרטון|סירטון|וידאו|וידיאו|קליפ|\bvideo\b", re.IGNORECASE)
+
+
+def complains_about_photo(text: str) -> bool:
+    """"שוב פעם אתה מביא לי תמונה חיה" / "מה קשר תמונה עכשיו": a complaint ABOUT a photo, not a request for one
+    ("למה אתה לא שולח תמונה" still asks for one)."""
+    return bool(_PHOTO_ASK.search(text or "") and re.search(
+        r"(?<![א-ת])(?:שוב|עוד פעם|מה קשר|מה הקשר|במקום|לא ביקשתי|ממשיך)(?![א-ת])", text or ""))
+
+
 def photo_request(t: Turn) -> None:
     """"תן לי תמונה" / "נוווו תן לי פאקינג תמונהה" always gets a picture (2026-10-11 10:11-10:14: four asks, the first
     three read as a complaint or answered "no live picture from the main camera"). A message that asks for a picture
     and has no send_photo / send_video act gets one, at the camera he names now or named in his last messages."""
+    if complains_about_photo(t.text) and t.last_photo(PHOTO_COMPLAINT_SEC)[0]:
+        # "שוב פעם אתה מביא לי תמונה חיה" / "מה קשר תמונה עכשיו" right after a photo (2026-10-20 08:59-09:01): a
+        # complaint ABOUT the photo; each was read as "send a photo" and got one more. When he asked for a video
+        # minutes ago, that is what he still wants.
+        t.und.acts = [a for a in t.und.acts if not (a.act == "command" and a.command == "send_photo")]
+        earlier = [w for w in t.mem_owner_words()[:3] if _VIDEO_ASK.search(w)]
+        if earlier and not any(a.act == "command" and a.command == "send_video" for a in t.und.acts):
+            t.und.acts.append(Act(act="command", command="send_video", quote=t.text[:120]))
+        t.plan.trace.append("a complaint about the photo: no photo" + (", the video he asked for" if earlier else ""))
+        return
     if any(a.act == "command" and a.command in ("send_photo", "send_video") for a in t.und.acts):
         return
     if not _PHOTO_ASK.search(t.text):
@@ -536,6 +591,33 @@ def _named_camera(t: Turn, *texts: str) -> str:
     return ""
 
 
+LAST_NAMED_SEC = 10 * 60.0
+
+
+def _last_named_camera(t: Turn) -> str:
+    """The camera his previous message named, when it was minutes ago."""
+    turns = [x for x in t.state.turns[-4:] if isinstance(x, dict) and x.get("kind") != "alert"
+             and str(x.get("text") or "").strip()]
+    if not turns or t.now - float(turns[-1].get("ts") or 0) > LAST_NAMED_SEC:
+        return ""
+    # what the understanding resolved then ("כניסה הראשית" is no alias, but it was read as the main entrance)
+    understood = [str(a.get("camera") or "") for a in (turns[-1].get("v3") or {}).get("acts") or []
+                  if isinstance(a, dict)]
+    understood = [t.camera_now(c) for c in understood if c and c != "house"]
+    return understood[0] if understood else _named_camera(t, str(turns[-1].get("text") or ""))
+
+
+def _cameras_by_interest(t: Turn, cams: List[str]) -> List[str]:
+    """Every camera, the ones the last reply talked about first: a turn has room for three pictures, and "תשלח
+    תמונה" right after "בכניסה הראשית עומדת מכונית ..." sent cameras 2, 3 and 5 and not the main entrance."""
+    from ..brain.registry import mentioned_cameras  # noqa: PLC0415
+    from .context import last_replies  # noqa: PLC0415
+
+    replies = last_replies(t.state, 1)
+    named = [t.camera_now(c) for _, c in mentioned_cameras(t.snapshot, replies[-1] if replies else "")]
+    return sorted(cams, key=lambda c: (c not in named, named.index(c) if c in named else 0))
+
+
 def send_photo(t: Turn, act: Act) -> None:
     """A live picture: of the camera he names (in this message or his last two), else the one being discussed, else
     of every camera that is on. A camera that is off is said, and the others are shown instead."""
@@ -544,14 +626,17 @@ def send_photo(t: Turn, act: Act) -> None:
     camera = act.camera if act.camera and act.camera != "house" else ""
     # what he names now, else what was just talked about (an alert or the box's line: the topic), else his last words
     others = [a.camera for a in t.und.acts if a.camera and a.camera != "house"]
-    camera = _named_camera(t, t.text) or camera or (others[0] if others else "") or t.camera_of(act) or         _named_camera(t, *owner)
+    # 2026-10-20 13:14-13:15: "מה עם כניסה הראשית" then "תראה לי תמונה" got camera 8 (the topic the last of five
+    # looks left behind): the camera he named in his last message, minutes ago, comes before the topic
+    camera = _named_camera(t, t.text) or camera or (others[0] if others else "") or _last_named_camera(t) or \
+        t.camera_of(act) or _named_camera(t, *owner)
     if past_photo.asks_past(t.text):
         send_past_photo(t, camera)                # "תמונה שהם היו שם ב-10:24": the recording, never a live picture
         return
     if camera and camera not in enabled:
         t.did(f"{t.name(camera)} כבויה, אז שלחתי מהמצלמות שפועלות.")
         camera = ""
-    cams = [camera] if camera else [c.name for c in t.snapshot.cameras if c.enabled]
+    cams = [camera] if camera else _cameras_by_interest(t, [c.name for c in t.snapshot.cameras if c.enabled])
     sent = []
     for cam in cams:
         t.box.run("look_now", {"camera": cam})
@@ -684,17 +769,34 @@ def resume(t: Turn, camera: Optional[str]) -> bool:
 
 
 def send_video(t: Turn, act: Act) -> None:
-    entry = t.state.resolve(act.event) if act.event else None
+    """The video he asks for (2026-10-20 08:53-09:02: "the video of the child who fell" got last night's clip, then
+    10 live seconds, then live photos, eight times, while the journal held the 08:23 clip):
+
+    1. his words describe what he wants to see -> that clip, found in the journal of the last two days (find_clip);
+       none shows it -> he is told, and nothing else is sent in its place;
+    2. a reply to an alert -> its clip; a time he names -> the recording of then;
+    3. a bare "show me the video" -> the event being talked about (the newest alert once it arrived), never an older
+       one the understanding still pointed at;
+    4. "now" / a camera with no event -> 10 live seconds."""
+    live = bool(_LIVE_NOW.search(t.text)) and not complains_about_photo(t.text)   # "שוב תמונה חיה" asks no live
+    if not live and find_described_clip(t, act) is not None:
+        return
+    reply = t.state.resolve(t.ctx.alert_handle) if t.ctx.alert_handle else None
+    if not live and isinstance(reply, dict) and reply.get("kind") == "event":
+        _send_event_clip(t, t.ctx.alert_handle, reply)
+        return
+    named = _named_camera(t, t.text)
+    camera = named or (act.camera if act.camera and act.camera != "house" else "")
+    if not live and past_photo.asks_past(t.text):
+        send_past_video(t, camera or t.camera_of(act))   # a recording, not live seconds
+        return
+    if not live and not named:
+        handle, entry = _discussed_event(t, act)
+        if handle:
+            _send_event_clip(t, handle, entry)
+            return
+    camera = camera or t.last_photo_camera() or ""
     photo_handle, photo = t.last_photo()
-    if isinstance(entry, dict) and entry.get("kind") == "event":
-        out = t.box.run("send_clip", {"handle": act.event})
-        if out.get("ok"):
-            t.did(f"נשלח הסרטון של ההתראה מ-{hhmm(entry.get('ts'))} ב{t.name(t.camera_now(str(entry.get('camera') or '')))}.")
-        return
-    camera = act.camera if act.camera and act.camera != "house" else (t.last_photo_camera() or "")
-    if past_photo.asks_past(t.text):
-        send_past_video(t, _named_camera(t, t.text) or camera or t.camera_of(act))   # a recording, not live seconds
-        return
     if camera:
         out = t.box.run("record_clip", {"camera": camera})
         if any(r.tool == "record_clip" and r.status == DONE for r in t.ctx.receipts):
@@ -705,9 +807,121 @@ def send_video(t: Turn, act: Act) -> None:
         return
     handle, entry = t.event_of(act)
     if handle:
-        out = t.box.run("send_clip", {"handle": handle})
-        if out.get("ok"):
-            t.did(f"נשלח הסרטון של ההתראה מ-{hhmm(entry.get('ts'))} ב{t.name(t.camera_now(str(entry.get('camera') or '')))}.")
+        _send_event_clip(t, handle, entry)
+
+
+def _send_event_clip(t: Turn, handle: str, entry: Dict[str, Any]) -> None:
+    out = t.box.run("send_clip", {"handle": handle})
+    if out.get("ok"):
+        t.did(f"נשלח הסרטון של ההתראה מ-{hhmm(entry.get('ts'))} ב{t.name(t.camera_now(str(entry.get('camera') or '')))}.")
+
+
+def _discussed_event(t: Turn, act: Act) -> Tuple[str, Dict[str, Any]]:
+    """The event a bare "show me the video" is about: the topic (the newest alert sets it when it arrives, a turn
+    about an event refreshes it), else the one the understanding named if it is recent."""
+    for handle in (t.state.topic_event(t.now) or "", act.event or ""):
+        entry = t.state.resolve(handle) if handle else None
+        if isinstance(entry, dict) and entry.get("kind") == "event" and \
+                0 <= t.now - float(entry.get("ts") or 0) <= RECENT_EVENT_SEC:
+            return handle, entry
+    return "", {}
+
+
+FIND_HOURS = 48.0       # "the video of ..." is looked for in the journal of the last two days
+FIND_MAX = 60           # clips put to the model, newest first
+FIND_EARLIER_SEC = 15 * 60.0
+_LIVE_NOW = re.compile(r"(?<![א-ת])(?:עכשיו|כרגע|לייב|בזמן אמת|(?:סרטון|וידאו)\s+(?:חי|חיה))(?![א-ת])"
+                       r"|\b(?:live|now)\b", re.IGNORECASE)
+
+
+def clip_candidates(t: Turn, camera: str = "", hours: float = FIND_HOURS) -> List[Dict[str, Any]]:
+    """The recorded alert clips of the last *hours* (at *camera*, else every camera), newest first: one row per clip
+    with what the Eye said it shows. The journal (event memory) and the sessions still open."""
+    from ..brain.tools import _memory  # noqa: PLC0415
+
+    memory = _memory(t.ctx)
+    if memory is None:
+        return []
+    since = t.now - hours * 3600.0
+    try:
+        rows = [r for r in memory.records() if float(r.get("end") or r.get("start") or 0) >= since]
+        book = getattr(t.ctx.services, "events", None)
+        if book is not None:
+            rows += [memory.live_record(s) for s in book.recent(since, "") if not s.get("closed")]
+    except Exception as exc:  # noqa: BLE001
+        log.warning("v3: the journal was not read for a clip: %s", exc)
+        return []
+    out: Dict[str, Dict[str, Any]] = {}
+    for r in rows:
+        cam = t.camera_now(str(r.get("camera") or ""))
+        ids = [a for a in r.get("alert_ids") or [] if a]
+        if not ids or (camera and cam != camera):
+            continue
+        for o in r.get("observations") or []:
+            said = " ".join(str((o or {}).get("summary") or "").split())
+            ts = float((o or {}).get("ts") or 0)
+            if not said or ts < since:
+                continue
+            alert_id = min(ids, key=lambda a: abs(past_photo._alert_ts(a) - ts))
+            row = out.get(alert_id)
+            if row is None:
+                out[alert_id] = {"alert_id": alert_id, "camera": cam, "ts": past_photo._alert_ts(alert_id) or ts,
+                                 "summary": said}
+            elif said not in row["summary"] and len(row["summary"]) < 300:
+                row["summary"] += " / " + said
+    return sorted(out.values(), key=lambda c: -float(c["ts"]))[:FIND_MAX]
+
+
+def _day_word(ts: float, now: float) -> str:
+    days = (dt.datetime.fromtimestamp(now).date() - dt.datetime.fromtimestamp(ts).date()).days
+    return "" if days <= 0 else " אתמול" if days == 1 else f" ב-{dt.datetime.fromtimestamp(ts):%d.%m}"
+
+
+def find_described_clip(t: Turn, act: Act) -> Optional[bool]:
+    """"תראה לי את הסרטון של הילד שנפל": the clip that shows what he describes, sent. None when his words describe
+    nothing (or nothing can be searched): the caller goes on. True: sent. False: described but not found (or no
+    longer on the box) - said so, and nothing else is sent in its place."""
+    if t.find_clip is None:
+        return None
+    camera = _named_camera(t, t.text) or (act.camera if act.camera and act.camera != "house" else "")
+    rows = clip_candidates(t, camera)
+    at = past_photo.clock_times(t.text, t.now)
+    if at:
+        near = [c for c in rows if any(abs(float(c["ts"]) - a) <= past_photo.NEAR_SEC for a in at)]
+        rows = near or rows
+    if not rows:
+        return None
+    earlier = [str(x.get("text") or "") for x in t.state.turns[-6:] if isinstance(x, dict) and x.get("kind") != "alert"
+               and str(x.get("text") or "").strip() and 0 <= t.now - float(x.get("ts") or 0) <= FIND_EARLIER_SEC]
+    request = f"עכשיו: {t.text}" + "".join(f"\nקודם: {w}" for w in reversed(earlier[-2:]))
+    lines = [f"[{i}] {clock(float(c['ts']))}{_day_word(float(c['ts']), t.now)} · {t.name(c['camera'])}: "
+             f"{cx_clip(c['summary'], 260)}" for i, c in enumerate(rows)]
+    try:
+        described, index = t.find_clip(request, lines)
+    except Exception as exc:  # noqa: BLE001 - the old path answers
+        log.warning("v3: clip search failed: %s", exc)
+        return None
+    if not described:
+        return None
+    where = f" ב{t.name(camera)}" if camera else ""
+    if not 0 <= index < len(rows):
+        t.did(f"חיפשתי ביומן של היומיים האחרונים{where} ולא מצאתי סרטון שמראה את זה; לא שלחתי שום סרטון אחר.")
+        t.plan.trace.append("clip search: not found")
+        return False
+    c = rows[index]
+    when = f"{clock(float(c['ts']))}{_day_word(float(c['ts']), t.now)}"
+    handle = t.state.add_handle("event", c["alert_id"], c["camera"], float(c["ts"]), c["summary"][:200])
+    t.called.append("send_media")
+    with internal(t.ctx):
+        out = TOOLS["send_media"](t.ctx, {"handle": handle})
+    t.plan.trace.append(f"clip search: [{index}] {c['alert_id']} -> {out.get('ok')}")
+    if out.get("ok") and out.get("status", DONE) == DONE:
+        t.state.set_topic_event(handle, t.now)
+        t.did(f"נשלח הסרטון מ{t.name(c['camera'])} מ-{when}.")
+        t.plan.evidence.append(f"הסרטון ששלחתי ({t.name(c['camera'])}, {when}) מראה: {c['summary'][:300]}")
+        return True
+    t.did(f"מצאתי את האירוע מ{t.name(c['camera'])} מ-{when}, אבל הסרטון שלו כבר לא שמור בקופסה.")
+    return False
 
 
 def watch_request(t: Turn, act: Act) -> None:
@@ -873,8 +1087,102 @@ def prefetch(t: Turn) -> None:
                 t.plan.evidence.append(f"תמונה ששלחת ב-{hhmm(e.get('ts'))} מ{t.name(t.camera_now(str(e.get('camera') or '')))}: "
                                        f"{e.get('observation') or 'בלי תיאור'}")
             t.plan.notes.append("הסבר עכשיו מה רואים בתמונות האלה, מצלמה מצלמה, במשפט או שניים.")
+    plate_evidence(t)
+    known_car_history(t)
     for act in t.und.acts:
         if act.look_again:
             handle, entry = t.event_of(act)
             if handle:
                 t.box.run("look_again", {"handle": handle, "question": act.quote or t.text})
+
+
+CAR_HISTORY_DAYS = 7.0
+
+
+def known_car_history(t: Turn) -> None:
+    """"מה עם מנסור, הגיע היום?" / "האם מנסור החשמלאי היה פה בשבוע האחרון?" (2026-10-20 10:37-10:55): Mansour's car is
+    known by its plate, but the answer came from the alert texts ("no identification of Mansour"), five times. When a
+    history question names someone whose car he named, the plate reader's sightings of that car in the journal of
+    the last week are the evidence: when and where it was read, or that it was not read at all."""
+    if not t.und.has("question_history"):
+        return
+    from .. import known_vehicles as kv  # noqa: PLC0415
+
+    store = kv.for_services(t.ctx.services)
+    try:
+        cars = store.all() if store is not None else []
+    except Exception as exc:  # noqa: BLE001
+        log.warning("v3: known cars not read: %s", exc)
+        return
+    asked = " ".join([t.text] + [a.subject for a in t.und.acts if a.subject])
+    from .memory_view import words as content_words  # noqa: PLC0415
+
+    said = content_words(asked)
+    hits = [c for c in cars if not c.get("removed_at") and
+            ({w for w in content_words(str(c.get("label") or ""))} & said) - {"רכב", "שלך", "שלי", "שלנו"}]
+    if not hits:
+        return
+    from ..brain.tools import _memory  # noqa: PLC0415
+
+    memory = _memory(t.ctx)
+    since = t.now - CAR_HISTORY_DAYS * 86400.0
+    rows: List[Dict[str, Any]] = []
+    if memory is not None:
+        try:
+            rows = [r for r in memory.records() if float(r.get("end") or r.get("start") or 0) >= since]
+            book = getattr(t.ctx.services, "events", None)
+            if book is not None:
+                rows += [memory.live_record(s) for s in book.recent(since, "") if not s.get("closed")]
+        except Exception as exc:  # noqa: BLE001
+            log.warning("v3: journal not read for a known car: %s", exc)
+    from .. import car_plates  # noqa: PLC0415
+
+    svc = car_plates.service()
+    plate_cams = list(getattr(getattr(svc, "settings", None), "cameras", ()) or ())
+    where = ", ".join(t.name(t.camera_now(c)) for c in plate_cams) or "המצלמות של הלוחיות"
+    for car in hits:
+        seen = sorted({(float(r.get("start") or 0), t.camera_now(str(r.get("camera") or "")))
+                       for r in rows for e in (r.get("entities") or []) if isinstance(e, dict)
+                       and e.get("kind") == "vehicle" and (e.get("vehicle_id") == car.get("id") or
+                                                           (car.get("label") and e.get("owner_label") == car["label"]))})
+        name = f"{kv.car_words(car)} {kv.owner_mask(car.get('plate'))} ({car.get('label')})"
+        if seen:
+            when = ", ".join(f"{clock(ts)}{_day_word(ts, t.now) or ' היום'} ב{t.name(cam)}" for ts, cam in seen[-6:])
+            t.plan.evidence.append(f"קורא הלוחיות של הקופסה זיהה את {name} בשבוע האחרון: {when}.")
+        else:
+            t.plan.evidence.append(f"קורא הלוחיות של הקופסה לא זיהה את {name} בשבוע האחרון (הקורא עובד רק ביום ורק "
+                                   f"ב{where}). אולי הגיע ברכב אחר או חנה במקום שהקורא לא רואה.")
+    t.plan.notes.append("ענה מהשורה של קורא הלוחיות: מתי ואיפה הרכב שלו זוהה, או שלא זוהה. אל תכתוב מספר מלא.")
+
+
+_PLATE_TALK = re.compile(r"(?<![א-ת])(?:ה|את ה|ב)?(?:מספר|מס['׳]|לוחית|לוחיות)(?![א-ת])|\bplate\b", re.IGNORECASE)
+
+
+def plate_evidence(t: Turn) -> None:
+    """"זה הרכב שלי, אתה לא רואה את המספר?" (2026-10-20 08:54): the writer looked at the clip, read the camera's
+    clock in its corner as the plate and said it "matches your car". A plate is the plate reader's only (owner rule
+    2026-10-19): when he talks about a car's number, what the reader read on the event being discussed is the
+    evidence, and the supervisor refuses any other plate claim (supervisor.PLATE_CLAIM)."""
+    if not _PLATE_TALK.search(t.text):
+        return
+    handle, entry = t.event_of(next((a for a in t.und.acts if a.event), None))
+    book = getattr(t.ctx.services, "events", None)
+    if not entry or book is None:
+        return
+    try:
+        session = book.session_of_alert(str(entry.get("ref") or ""))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("v3: plates of the event not read: %s", exc)
+        return
+    cars = [e for e in (session or {}).get("entities") or [] if isinstance(e, dict) and e.get("kind") == "vehicle"]
+    from ..known_vehicles import owner_mask  # noqa: PLC0415
+
+    read = [f"{owner_mask(e['plate_masked'])}" + (f" = {e['owner_label']}" if e.get("owner_label") else " (לא רכב שהוא שמר)")
+            for e in cars if e.get("plate_masked")]
+    where = f"באירוע של {hhmm(entry.get('ts'))} ב{t.name(t.camera_now(str(entry.get('camera') or '')))}"
+    if read:
+        t.plan.evidence.append(f"קורא הלוחיות של הקופסה קרא {where}: {', '.join(read)}")
+    else:
+        t.plan.evidence.append(f"קורא הלוחיות של הקופסה לא קרא מספר רכב {where}; מספר לא נקרא מתמונה.")
+    t.plan.notes.append("מספר רכב: רק מה שקורא הלוחיות קרא (למעלה, בראיות). אל תקרא מספר מתמונה או מסרטון ואל תגיד "
+                        "שבדקת מספר בעצמך.")

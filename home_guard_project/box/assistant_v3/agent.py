@@ -72,6 +72,7 @@ FIX_TEXT = {
     "internal_state": "אל תדווח מה לא עשית או מה לא נשמר; תגיד רק מה רלוונטי לו.",
     "meta": "כתבת הערות לעצמך; כתוב רק את ההודעה עצמה.",
     "jargon": "בלי ז'רגון ('התרעה צפויה', 'תיוג'); מילים פשוטות.",
+    "plate_claim": "כתבת שקראת או בדקת מספר רכב; מספר רכב רק מקורא הלוחיות, ואין לך קריאה כזאת. תגיד שהמספר לא נקרא.",
 }
 REPAIR_ISSUES = ("unwanted_question", "ignored_memory", "irrelevant", "wrong_fact")
 REPAIR_SEC = 20 * 60.0
@@ -152,9 +153,11 @@ class AssistantV3(OwnerAgentV2):
         if und is None:
             und = self._understand(text, ctx, cams, mem, now, usage, trace)
             self._repair_earlier(und, ctx, cams, mem, now, usage, trace)
-        turn = hd.Turn(ctx=ctx, mem=mem, cams=cams, text=text, now=now, alert=alert, und=und, called=called, box=box)
+        turn = hd.Turn(ctx=ctx, mem=mem, cams=cams, text=text, now=now, alert=alert, und=und, called=called, box=box,
+                       find_clip=lambda request, lines: self._find_clip(request, lines, usage, trace))
 
         merge_pause_resume(und)
+        media_request(und, text)
         hd.photo_request(turn)
         try:
             arrival.answer(turn)       # "when did the truck come": the recorder's recording, not a watch
@@ -529,6 +532,27 @@ class AssistantV3(OwnerAgentV2):
             return sanitize(note, list(turn.cams.ids), turn.ctx.lang)
         return ""
 
+    def _find_clip(self, request: str, lines: List[str], usage: Dict[str, List[int]],
+                   trace: List[str]) -> Tuple[bool, int]:
+        """(he described what he wants to see, the number of the clip that shows it or -1), by the cheap model over
+        the journal's clip lines (handlers.find_described_clip). The journal's words are English and his Hebrew, so
+        no keyword search finds "הילד שנפל" (2026-10-20, embeddings out of credit)."""
+        msg = self.understander.chat([{"role": "system", "content": load("assistant_v3_find_clip.system_prompt")},
+                                      {"role": "user", "content": request + "\n\nהסרטונים:\n" + "\n".join(lines)}],
+                                     None, json_schema=FIND_CLIP_SCHEMA, max_tokens=60)
+        spent = usage.setdefault("find_clip", [0, 0])
+        spent[0] += int(msg.usage[0] or 0)
+        spent[1] += int(msg.usage[1] or 0)
+        got = parse_json(msg.content) or {}
+        if msg.error or "described" not in got:
+            trace.append(f"clip search: no answer ({msg.error or 'no JSON'})")
+            raise RuntimeError("no answer")
+        try:
+            index = int(got.get("index", -1))
+        except (TypeError, ValueError):
+            index = -1
+        return bool(got.get("described")), index
+
     def _escalate(self, turn: hd.Turn, trace: List[str]) -> bool:
         """The bigger model, by code only: an angry complaint right after another complaint (the repair failed), at
         most ESCALATIONS_PER_DAY a day."""
@@ -611,6 +635,44 @@ def _day_activity_words(text: str, alert: Optional[Dict[str, Any]], who: Dict[st
     except Exception as exc:  # noqa: BLE001 - the turn goes on as usual
         log.warning("v3: day activity words not read: %s", exc)
         return ""
+
+
+FIND_CLIP_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["described", "index"],
+                    "properties": {"described": {"type": "boolean"}, "index": {"type": "integer"}}}
+_VIDEO_WORD = re.compile(r"סרטון|סירטון|סרטונים|וידאו|וידיאו|קליפ|הקלטה|\bvideo\b|\bclip\b", re.IGNORECASE)
+_NO_VIDEO = re.compile(r"(?<![א-ת])(?:לא צריך|לא רוצה|בלי|אל תשלח|די עם|מספיק עם|תפסיק)(?:\s+\S+){0,2}\s+"
+                       r"ה?(?:סרטון|סרטונים|וידאו)")
+_PHOTO_TOO = re.compile(r"(?<![א-ת])(?:ו?גם|ו)(?:\s+\S+){0,2}\s+(?:תמונה|תמונות)(?![א-ת])")
+
+
+def media_request(und: Understanding, text: str) -> None:
+    """What he asks to be SENT, fixed in code (2026-10-20 08:57-09:02):
+
+    - a complaint that carries a video request ("לא הבאת לי סרטון של נפילת הילד", "מבקש את הסרטון") gets the
+      video act it implies - it was answered with an apology and nothing sent, six times;
+    - a message that asks for a video is never answered with a live photo: "הרי הבאת לי תמונה ... למה אתה לא
+      מביא לי את הסרטון" was read as send_photo four times. A photo act stays only when he asks for a photo too
+      ("וגם תמונה")."""
+    wants_video = bool(_VIDEO_WORD.search(text or "")) and not _NO_VIDEO.search(text or "")
+    if not wants_video:
+        return
+    commands = [a for a in und.acts if a.act == "command" and a.command in ("send_photo", "send_video")]
+    if not _PHOTO_TOO.search(text or ""):
+        for a in commands:
+            if a.command == "send_photo":
+                a.command = "send_video"
+    video = [a for a in und.acts if a.act == "command" and a.command == "send_video"]
+    for extra in video[1:]:
+        und.acts.remove(extra)
+    if video:
+        return
+    asked = next((a for a in und.acts if a.act == "complaint" and a.command == "send_video"), None)
+    request = re.search(r"(?<![א-ת])(?:מבקש|ביקשתי|תביא|הבא|תשלח|שלח|תראה|הראה|אפשר)(?![א-ת])", text or "")
+    if asked is not None or request or (und.has("complaint") and re.search(
+            r"(?<![א-ת])(?:הבאת|שלחת|אין|לא)(?![א-ת])", text or "")):
+        src = asked or next((a for a in und.acts if a.act in ("complaint", "command")), None) or Act(act="command")
+        und.acts.append(Act(act="command", command="send_video", quote=(text or "")[:120], subject=src.subject,
+                            camera=src.camera, event=src.event))
 
 
 def merge_pause_resume(und: Understanding) -> None:

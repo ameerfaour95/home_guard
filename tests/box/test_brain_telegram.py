@@ -5,6 +5,7 @@ import json
 import os
 import tempfile
 import unittest
+from types import SimpleNamespace
 
 from home_guard_project.box.brain.agent import AgentReply
 from home_guard_project.box.feedback import AlertIndex, MuteState
@@ -341,6 +342,53 @@ class StartupTest(unittest.TestCase):
             self.assertEqual(inference.run(), 0)
         wait.assert_called_once()
         self.assertEqual(list(wait.call_args.args[2]), ["yard"])
+
+
+class InboxV3Test(InboxV2Test):
+    """2026-10-20: v3 (version = 3) went live 10-10 while every inbox gate read ``version == 2``: its replies went out
+    without buttons or after-reply actions, replies to an alert were not threaded, Undo taps were dropped and no
+    alert reached its history ("show me the video" sent an old clip)."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.agent.version = 3
+
+    def test_v3_gets_the_brain_paths(self) -> None:
+        from home_guard_project.box.telegram_agent import is_brain
+
+        self.assertTrue(is_brain(self.agent))
+        self.assertFalse(is_brain(SimpleNamespace(version=1)))
+        self.assertFalse(is_brain(None))
+        self.index.remember("-5", 50, {"alert_id": "a1", "ts": NOW - 4000})
+        self.inbox.handle_update(self.message("what is he holding", reply_to=50))
+        self.assertEqual(self.agent.calls[0], ("handle", "what is he holding", "a1", True))
+        self.assertIn("after", self.agent.order)                  # after-reply actions run
+        self.inbox.handle_update({"update_id": 9, "callback_query": {
+            "id": "cb", "data": "u:123", "from": {"id": 7, "first_name": "A"},
+            "message": {"message_id": 99, "chat": {"id": -5}}}})
+        self.assertIn(("undo", "123"), self.agent.calls)
+
+    def test_a_delivered_alert_and_a_box_line_go_into_the_v3_history(self) -> None:
+        from unittest.mock import patch
+        from home_guard_project.box.telegram_agent import OwnerAssistant
+
+        noted = []
+        agent = SimpleNamespace(version=3, note_alert=lambda chat_id, alert: noted.append((chat_id, alert["alert_id"])))
+        assistant = OwnerAssistant(CFG, None, None, SimpleNamespace(agent=agent))
+        sent = {"sent": True, "results": [{"chat_id": "-5", "ok": True}]}
+
+        class Now:
+            def __init__(self, target, **kw):
+                self.target = target
+
+            def start(self):
+                self.target()
+
+        with patch("home_guard_project.box.telegram_agent.send_alert", return_value=sent), \
+                patch("home_guard_project.box.telegram_agent.threading.Thread", Now):
+            assistant.send_alert({"alert_id": "a1", "camera": "gate"}, "text")
+        assistant.note_line("gate", NOW, "העובדים הגיעו", "line1")
+        self.assertEqual(noted, [("-5", "a1"), ("-5", "line1")])
 
 
 if __name__ == "__main__":
